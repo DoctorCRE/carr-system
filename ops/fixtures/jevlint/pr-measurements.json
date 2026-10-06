@@ -1,0 +1,137 @@
+{
+  "schema": "carr-jevlint-pr-measurements/v1",
+  "config_sha256": "e99be170d844a2209732305aae7ec0ecd029ced2265dcd93ec6a21e430ae090d",
+  "count_source": "Difference in canonical site_usage reservations for jevlint_review before/after each serialized run; conservative attempts, not an independently reconciled vendor bill.",
+  "samples": [
+    {
+      "schema": "carr-jevlint-review/v1",
+      "advisory": true,
+      "base": "0d4cdef8af71b2eeb158ecfb646d10c1f72faae8",
+      "head": "10e3ded519cd45184a291af638c00751a8cb40c9",
+      "pr": "jbookout/carr-system/1462",
+      "files": [
+        "lib/dot_relay.py",
+        "tools/test-dot-relay.py"
+      ],
+      "shim": {
+        "requests": 26,
+        "answered": 26,
+        "paid_attempts": 26,
+        "retry_cache_hits": 0,
+        "refused": 0,
+        "errors": 0
+      },
+      "exit_code": 1,
+      "report": {
+        "scannedFiles": 1,
+        "codeUnits": 29,
+        "evaluations": 52,
+        "cache": {
+          "hits": 0,
+          "misses": 26,
+          "writes": 26
+        },
+        "findings": [
+          {
+            "ruleId": "wrapper-without-value",
+            "description": "Fail a project-local helper whose complete implementation only calls another helper with the same caller-supplied arguments and returns its result, adding no policy, validation, transformation or error translation. Calling a canonical validator through a new alias is still forwarding. A function that directly implements a data lookup or validation is implementation, not forwarding, even if short.",
+            "severity": "warning",
+            "status": "fail",
+            "path": "lib/dot_relay.py",
+            "language": "python",
+            "kind": "function",
+            "name": "allowed",
+            "startLine": 160,
+            "endLine": 161,
+            "startColumn": 0,
+            "endColumn": 70,
+            "snippet": "def allowed(command, cwd, repo, scratch_roots=()):\n    return command_spec(command, cwd, repo, scratch_roots) is not None"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "carr-jevlint-review/v1",
+      "advisory": true,
+      "base": "fcb4e0197a086f2378f63f650b00eb294becf26e",
+      "head": "4a4c9ccf0e52e18c5f98d4367c6292966ae4f00f",
+      "pr": "jbookout/carr-system/1466",
+      "files": [
+        "lib/dot_relay.py",
+        "tools/test-dot-relay.py"
+      ],
+      "shim": {
+        "requests": 1,
+        "answered": 1,
+        "paid_attempts": 1,
+        "retry_cache_hits": 0,
+        "refused": 0,
+        "errors": 0
+      },
+      "exit_code": 1,
+      "report": {
+        "scannedFiles": 1,
+        "codeUnits": 29,
+        "evaluations": 52,
+        "cache": {
+          "hits": 25,
+          "misses": 1,
+          "writes": 1
+        },
+        "findings": [
+          {
+            "ruleId": "wrapper-without-value",
+            "description": "Fail a project-local helper whose complete implementation only calls another helper with the same caller-supplied arguments and returns its result, adding no policy, validation, transformation or error translation. Calling a canonical validator through a new alias is still forwarding. A function that directly implements a data lookup or validation is implementation, not forwarding, even if short.",
+            "severity": "warning",
+            "status": "fail",
+            "path": "lib/dot_relay.py",
+            "language": "python",
+            "kind": "function",
+            "name": "allowed",
+            "startLine": 160,
+            "endLine": 161,
+            "startColumn": 0,
+            "endColumn": 70,
+            "snippet": "def allowed(command, cwd, repo, scratch_roots=()):\n    return command_spec(command, cwd, repo, scratch_roots) is not None"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "carr-jevlint-review/v1",
+      "advisory": true,
+      "base": "0c8d6f85ed6c590bc40f4549300667184ce32d96",
+      "head": "eee8fef7225e2b8475358e92b142535fe29550f4",
+      "pr": "jbookout/carr-system/1494",
+      "files": [
+        "ops/githooks/path-hygiene-check.py",
+        "ops/path-index-hygiene-selftest.py"
+      ],
+      "shim": {
+        "requests": 3,
+        "answered": 3,
+        "paid_attempts": 3,
+        "retry_cache_hits": 0,
+        "refused": 0,
+        "errors": 0
+      },
+      "exit_code": 0,
+      "report": {
+        "scannedFiles": 1,
+        "codeUnits": 3,
+        "evaluations": 6,
+        "cache": {
+          "hits": 0,
+          "misses": 3,
+          "writes": 3
+        },
+        "findings": []
+      }
+    }
+  ],
+  "interpretation": "1462 cold cache; 1466 reuses 25 requests from preceding similar PR; 1494 cold requests. Samples are not a whole-repo projection.",
+  "limitations": [
+    "Historical caller-global counter differences are not independently bound to these runs and may include concurrent reservations or previous-day pruning. They are not reliable run cost evidence.",
+    "Samples retain the former two-rule config_sha256 and recorded outputs unchanged; no current one-rule paid measurement has been taken."
+  ]
+}

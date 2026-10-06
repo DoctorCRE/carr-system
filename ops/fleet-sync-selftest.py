@@ -34,6 +34,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 import tempfile
 
 # The one scrubber (ops/git_env.py), not a local copy. GIT_DIR is exported by
@@ -273,6 +274,25 @@ def test_dirty_tree_refuses():
         assert "uncommitted local work" in open(os.path.join(b, "f.txt")).read(), \
             "LOCAL WORK WAS DESTROYED — the one thing this job must never do"
     print("PASS  dirty tree refuses, names the file, destroys nothing")
+
+
+def test_existing_board_agent_is_rebound_after_main_sync():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        home = os.path.join(tmp, "home")
+        agents = os.path.join(home, "Library", "LaunchAgents")
+        os.makedirs(agents)
+        plist = os.path.join(agents, "local.carr-progress-board.plist")
+        Path(plist).write_text("installed plist must remain untouched by this stub")
+        stub = os.path.join(b, "ops", "config-as-code.py")
+        Path(stub).write_text(STUB.replace("sys.exit(0)", "print('installer command=' + ' '.join(sys.argv[1:]))\nsys.exit(0)"))
+        result = run_sync(b, {"HOME": home})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "installer command=install --apply" in result.stdout, result.stdout
+        assert "installer command=install-progress-board --apply" in result.stdout, result.stdout
+        assert behind(b) == 0, "board migration follows canonical main synchronization"
+        assert Path(plist).read_text() == "installed plist must remain untouched by this stub"
+    print("PASS  existing board agent migrates after canonical main sync")
 
 
 def test_clean_tree_fast_forwards():
@@ -714,6 +734,7 @@ def main():
         return 1
     test_dirty_tree_refuses()
     test_clean_tree_fast_forwards()
+    test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()
     test_non_fleet_xpc_identity_stays_external()
     test_direct_handoff_injection_fails_closed()
@@ -744,7 +765,7 @@ def main():
     test_exact_tree_refuses_rename_old_path_resurrection()
     test_exact_tree_accepts_canonical_rename()
     test_exact_tree_accepts_canonical_new_file_patch()
-    print("32/32 fleet-sync cases passed")
+    print("fleet-sync cases passed")
     return 0
 
 

@@ -104,6 +104,31 @@ def refuses(cur: psycopg.Cursor[Any], query: str, params: tuple[Any, ...], label
     fail(f"{label} unexpectedly succeeded")
 
 
+def reader_rows(cur: psycopg.Cursor[Any], query: str,
+                params: tuple[Any, ...] = ()) -> list[tuple[Any, ...]]:
+    """Execute a successful read through the same role used by the Worker."""
+    cur.execute("set local role carr_reader")
+    try:
+        return cur.execute(query, params).fetchall()
+    finally:
+        cur.execute("reset role")
+
+
+def reader_refuses(cur: psycopg.Cursor[Any], query: str,
+                   params: tuple[Any, ...], label: str) -> None:
+    """Require carr_reader denial without leaving the transaction aborted."""
+    cur.execute("savepoint guidance_gate_reader_refusal")
+    cur.execute("set local role carr_reader")
+    try:
+        cur.execute(query, params)
+    except psycopg.Error:
+        cur.execute("rollback to savepoint guidance_gate_reader_refusal")
+        return
+    cur.execute("reset role")
+    cur.execute("rollback to savepoint guidance_gate_reader_refusal")
+    fail(f"{label} unexpectedly succeeded as carr_reader")
+
+
 def authority_one(cur: psycopg.Cursor[Any], query: str,
                   params: tuple[Any, ...] = (), actor: str = "joe") -> Any:
     """Exercise an authority function with the session_user it authenticates.
@@ -385,6 +410,38 @@ def main() -> int:
                     elif not one(cur, "select has_table_privilege('carr_reader',%s,'select')",
                                  (f"ops.{surface}",)):
                         fail(f"carr_reader cannot read delivery surface ops.{surface}")
+
+                standing_proc = "ops.standing_guidance(text,text,text,text)"
+                function_row = cur.execute(
+                    """select p.prosecdef,pg_get_userbyid(p.proowner),coalesce(p.proconfig,'{}'::text[])
+                         from pg_proc p where p.oid=%s::regprocedure""",
+                    (standing_proc,)).fetchone()
+                if function_row is None:
+                    fail("standing_guidance catalog row is missing")
+                function_security, function_owner, function_config = function_row
+                if not function_security:
+                    fail("standing_guidance is not SECURITY DEFINER")
+                if function_owner != one(cur, "select current_user"):
+                    fail(f"standing_guidance owner {function_owner} is not the migration owner")
+                normalized_config = {
+                    str(entry).replace(" ", "") for entry in function_config
+                }
+                if "search_path=pg_catalog,ops,public,pg_temp" not in normalized_config:
+                    fail(f"standing_guidance search_path is not pinned: {function_config}")
+                if one(cur, "select has_function_privilege('public',%s::regprocedure,'execute')",
+                       (standing_proc,)):
+                    fail("PUBLIC can execute standing_guidance")
+                if not one(cur, "select has_function_privilege('carr_writer',%s::regprocedure,'execute')",
+                           (standing_proc,)):
+                    fail("carr_writer cannot execute standing_guidance")
+                if one(cur, "select has_table_privilege('carr_reader','public.rule','select')"):
+                    fail("carr_reader has direct public.rule SELECT")
+                if one(cur, "select has_table_privilege('carr_reader','public.actor','select')"):
+                    fail("carr_reader has direct public.actor SELECT")
+                reader_refuses(cur, "select statement from public.rule limit 1", (),
+                               "direct public.rule statement read")
+                reader_refuses(cur, "select display_name from public.actor limit 1", (),
+                               "direct public.actor display_name read")
                 for materialization_view in (
                     "ops.v_guidance_materialized_current",
                     "ops.v_guidance_materialized_situation_mapping_current",
@@ -699,7 +756,10 @@ def main() -> int:
                         doctrine_revision, doctrine_revision, concept_section[0], concept_section[1],
                         concept_section[0], concept_section[0], concept_section[1])).fetchone()
                     fail(f"approved doctrine revision did not reach the situation bridge: {diagnostics}")
-                cur.execute("select * from ops.standing_guidance('joe',null,null,null)").fetchall()
+                standing_rows = reader_rows(
+                    cur, "select * from ops.standing_guidance('joe',null,null,null)")
+                if not standing_rows:
+                    fail("active standing_guidance returned no rows through carr_reader")
 
                 # Populate every remaining typed delivery projection so the
                 # deactivation assertion proves a transition from visible to

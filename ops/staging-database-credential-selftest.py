@@ -229,6 +229,41 @@ def main() -> int:
     check("writer and reader profiles use separate files and keys",
           credential.profile("writer").key != credential.profile("reader").key
           and credential.profile("writer").paths.final != credential.profile("reader").paths.final)
+    # THE SEAT ROLE NAME IS CLUSTER-WIDE AND SAYS NOTHING ABOUT ENVIRONMENT, so
+    # the key and the filename are what keep a staging DSN out of a production
+    # Worker. Both must name staging, and this module must offer NO production
+    # counterpart to reach for: the production credential is Joe's own act.
+    staging_seat = credential.profile("gate_zero_producer")
+    check("the Gate Zero seat credential names staging in both its key and its file",
+          staging_seat.role_name == "carr_gate_zero_producer"
+          and "STAGING" in staging_seat.key
+          and staging_seat.paths.final.name.startswith("staging-")
+          and staging_seat.key != credential.profile("writer").key
+          and staging_seat.paths.final != credential.profile("writer").paths.final)
+    foundation_seat = credential.profile("foundation_assurance_oracle")
+    check("the Foundation assurance seat credential is a fourth isolated staging profile",
+          foundation_seat.role_name == "carr_foundation_assurance_oracle"
+          and foundation_seat.bundle_role == "carr_foundation_assurance_oracle"
+          and "STAGING" in foundation_seat.key
+          and foundation_seat.paths.final.name.startswith("staging-")
+          and foundation_seat.key not in {
+              credential.profile("writer").key,
+              credential.profile("reader").key,
+              staging_seat.key,
+          }
+          and len({
+              profile.paths.final for profile in (
+                  credential.profile("writer"), credential.profile("reader"),
+                  staging_seat, foundation_seat)
+          }) == 4)
+    for absent in ("production_gate_zero_producer", "production", "gate_zero"):
+        try:
+            credential.profile(absent)
+        except credential.CredentialRefusal:
+            pass
+        else:
+            raise AssertionError(f"a credential profile exists for {absent!r}")
+    check("this module offers no production credential profile to reach for", True)
     print(f"PASS: staging database credential self-test ({checked} checks)")
     return 0
 

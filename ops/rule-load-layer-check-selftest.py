@@ -39,7 +39,8 @@ def expect(label: str, errors: list[str], fragment: str | None) -> None:
 
 def good() -> dict:
     return {
-        "active_rule_ids": {"shared": ["aaaaaaaa", "bbbbbbbb", "cccccccc"], "joe": ["dddddddd"]},
+        "active_rule_ids": {"shared": ["aaaaaaaa", "bbbbbbbb", "cccccccc"],
+                            "joe": ["dddddddd"], "dell": []},
         "rule_controls": {
             "aaaaaaaa": {"enforcement_class": "judgment_ambient"},
             "bbbbbbbb": {"enforcement_class": "deny_gate"},
@@ -123,6 +124,14 @@ expect("an unknown layer name is refused",
        mutate(lambda d: d["rule_load_layers"]["cccccccc"].update(load_layer="someday")),
        "unknown load layer")
 
+expect("an unknown personal scope is refused",
+       mutate(lambda d: d["active_rule_ids"].update(other=[])),
+       "unknown scope")
+
+expect("one rule cannot belong to two scopes",
+       mutate(lambda d: d["active_rule_ids"]["dell"].append("aaaaaaaa")),
+       "appears in both")
+
 expect("a tag for a rule that is not active is refused",
        mutate(lambda d: d["rule_load_layers"].__setitem__(
            "eeeeeeee", {"load_layer": "layer0", "packs": [], "why": "x"})),
@@ -149,4 +158,4 @@ if FAILURES:
     for line in FAILURES:
         print(f"  {line}", file=sys.stderr)
     raise SystemExit(1)
-print("rule-load-layer-check-selftest: 18 cases passed")
+print("rule-load-layer-check-selftest: 20 cases passed")

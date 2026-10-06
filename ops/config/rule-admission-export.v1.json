@@ -1,0 +1,844 @@
+{
+  "exported_at": "2026-09-23T12:44:33Z",
+  "rule_count": 209,
+  "rules": {
+    "015183f5": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "0156e9fa": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "018ce972": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "0c1bac27": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "0e22e34a": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "0f38532e": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "1021fa84": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "113b3833": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "11b2b73b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "14181e60": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "152ceb65": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "173119a8": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "179be4b8": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "17ffd587": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "185013c6": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "19304882": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "1b8e7f43": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "1c21263c": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "1c42d80c": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "1d50a3bb": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "1f3a7372": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "1f750181": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "1fcaa63a": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "1fddcffb": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "204391be": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
+    "20d106f1": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "2271e684": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "236ca227": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "23ea0607": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "24e10ee8": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "25fab860": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "25fcddee": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "27277539": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "2a3ff869": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "2b66211d": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "2b889e80": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "2ca2add2": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "2e362970": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "2e8b4840": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "308ef1de": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "30a189fb": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "347a9ca6": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "3578d799": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "388cc81e": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "38b15dc6": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "3a9dbafd": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "3b0cd546": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "3d185f2b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "3fa17fa0": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4039b9b5": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "412d37d3": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "424ba0cc": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "4399df76": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "43e2ef76": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4402973a": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "466a545a": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "48083552": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "49533583": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "49c627cc": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "4a53ff82": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4a9188f3": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4c21d86b": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4dd44fd7": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4e104d4c": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4f7c348f": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4fae20f4": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "51d9f05f": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "5409731b": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "54e2bcb9": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "557838a5": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "5697071b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "57d13061": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "57d83b75": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "58b44ccb": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "58cef3a1": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "590b11e1": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "596f7549": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "5be2f462": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "5cd8d0f6": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "5d44d3f3": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "5e896ed6": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "5e89c211": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "5f8c661d": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "614c1209": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "6172e7d5": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "61c64d91": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "6330bec8": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "6437ae15": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "647f843d": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "67580c28": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "6901cc3b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "6a4e6283": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "6cfb67f5": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "6ec7312d": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "70e372f0": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "7105955b": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "725dff46": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "72e06bdf": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "73381d78": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "737a68d6": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
+    "740bb505": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "767f9b41": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "76a1ae2b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "76a53dfe": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "7b4ba3aa": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "7e4ca905": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "7e9739f2": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "80def9d2": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "81709f57": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "83b9a362": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "847f9995": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "86647daf": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "88e9b5eb": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "893aeec5": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "8aefcdce": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "8c1e6057": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "8c812bed": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "8cddc6ad": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "9293d609": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "9310827b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "94806da2": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "9530fb1c": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "95e76c1f": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "9730f565": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "97326357": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "9873a0d2": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "98e74e7c": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "99e951b9": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "9b081605": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "9d80fd2d": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "9e3fb6d0": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "9f15f21a": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "9ff56260": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "a2e78f48": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
+    "a3f6c7f9": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "a6e6ab4e": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "a7784a18": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
+    "a8c55a47": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "a8f159ad": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "a9ecd5b4": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "ab814a26": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "af7de070": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "b01edd26": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "b1521526": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "b3ea627f": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "b42e217e": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "b42f11a0": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "b587f6c2": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "b7ec8f3b": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
+    "ba5730c5": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "bbffc139": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "bc4145f6": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "bc9188b4": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "bd4a6d22": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "bddb0e7b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "c0b38d80": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "c1547ed1": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "c1db316c": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "c20dc3d5": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "c315befa": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "c4a284b2": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "c53beeaa": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "c66dc739": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "c6f69dee": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "c864b8cb": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "c8ebeb5b": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "ca841807": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "cd84d22a": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "ce12c11e": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "cf1c13a6": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "cff429f5": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "d26d63b0": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "d3774a28": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "d5dcfe26": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "d7c69aa6": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "d7e6de46": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "d7f74c93": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "d8c9b1f0": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "d9874334": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "d9ce2b08": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "dcf98880": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "def3e84e": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "defee176": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "df55c398": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "df8f1da0": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "e313a3ca": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "e4d965d9": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "e65efc68": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "e6e0b0e7": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "e8868cbe": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "eaa31ac5": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "ede4c735": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "eeb3d106": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "efbdfb1a": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "f04a05aa": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "f0f9156e": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "f2d58a30": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "f47a8fe9": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "f5bac101": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "f5beac20": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "f5d97b4a": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "f92dfab2": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "fa217e48": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "faae6748": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "faf1b643": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "fb110a39": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "fb2b263d": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "fc21a431": {
+      "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "fc4d7753": {
+      "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    }
+  },
+  "schema_version": 1,
+  "source": "production"
+}

@@ -1,0 +1,22 @@
+# v3: prompt cue: a request for an independent/adversarial review or a Codex review delivers 2b66211d
+
+Goal: recall. Decision: kept.
+
+Gate: KEEP 
+
+```
+== train: v1 -> v3
+  false_per_event       1.2337 ->    1.2218  delta -0.0119  [-0.0238, -0.0019]
+  recall_micro          0.3342 ->    0.3618  delta +0.0276  [+0.0131, +0.0456]
+  false_rules         623.0000 ->  617.0000  delta -6.0000  [-12.0000, -1.0000]
+  sn_false_rules       79.0000 ->   79.0000  delta +0.0000  [+0.0000, +0.0000]
+  tokens_per_event    567.9129 ->  569.6649  delta +1.7520  [-1.7349, +5.2490]
+  precision             0.2270 ->    0.2392  delta +0.0122  [+0.0055, +0.0202]
+== test: v1 -> v3
+  false_per_event       1.2271 ->    1.2191  delta -0.0080  [-0.0204, +0.0000]
+  recall_micro          0.4432 ->    0.4649  delta +0.0216  [+0.0049, +0.0461]
+  false_rules         308.0000 ->  306.0000  delta -2.0000  [-5.0000, +0.0000]
+  sn_false_rules       44.0000 ->   44.0000  delta +0.0000  [+0.0000, +0.0000]
+  tokens_per_event    518.2500 ->  521.5717  delta +3.3217  [-0.2542, +8.7583]
+  precision             0.2770 ->    0.2850  delta +0.0081  [+0.0016, +0.0173]
+```

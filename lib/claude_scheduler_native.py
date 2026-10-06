@@ -23,15 +23,36 @@ def discover_snapshot(home: Path) -> Path:
 
 
 def system_timezone(localtime_path: Path = Path("/etc/localtime")) -> str:
-    """Resolve the IANA zone used by Claude's host-local cron scheduler."""
+    """Resolve the IANA zone used by Claude's host-local cron scheduler.
+
+    /etc/localtime resolves through a directory literally named "zoneinfo" on
+    macOS 26 and earlier. macOS 27 (confirmed on the Studio, BuildVersion
+    26A425, found while restoring the six scheduled-task routines after the
+    2026-09-23 stoppage) resolves it through "zoneinfo.default" instead:
+    /usr/share/zoneinfo.default/America/Chicago. A literal "/zoneinfo/"
+    substring match refuses every macOS 27 host, which would have made this
+    routine's own standing check unable to observe anything running there.
+    Accept any path component named "zoneinfo" or "zoneinfo.<anything>". Scan
+    from the END of the path, not the start: an ancestor directory that
+    happens to be named e.g. "zoneinfo.bak" earlier in the path (fixture:
+    /home/zoneinfo.bak/usr/share/zoneinfo/America/Chicago) must not steal the
+    match from the real zoneinfo directory that actually owns the tz name.
+    (Flagged in review; the failure was already closed downstream because
+    read_native_task compares the result against expected_timezone, but the
+    case is worth removing outright rather than relying on that catch.)
+    """
     try:
         resolved = str(localtime_path.resolve(strict=True))
     except OSError as exc:
         raise CutoverRefusal("Claude scheduler host timezone is unavailable") from exc
-    marker = "/zoneinfo/"
-    if marker not in resolved:
+    parts = resolved.split("/")
+    zone_index = next(
+        (i for i in range(len(parts) - 1, -1, -1) if parts[i] == "zoneinfo" or parts[i].startswith("zoneinfo.")),
+        None,
+    )
+    if zone_index is None or zone_index == len(parts) - 1:
         raise CutoverRefusal("Claude scheduler host timezone is not an IANA zone")
-    zone = resolved.split(marker, 1)[1]
+    zone = "/".join(parts[zone_index + 1:])
     if not zone:
         raise CutoverRefusal("Claude scheduler host timezone is empty")
     return zone

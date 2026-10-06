@@ -48,6 +48,7 @@ import glob
 import json
 import os
 import plistlib
+import re
 
 import subprocess
 import sys
@@ -79,7 +80,7 @@ WRAPPER_EXEMPT = {
     # run row from the wrapper can ask it.
     #
     # THE MISSING SIGNAL IS NO LONGER MISSING (2026-08-14). bin/probe-keepalive.py
-    # asks the question every 10 minutes and records the answer, so these three
+    # asks the question every 10 minutes and records the answer, so these servers
     # are exempt from the WRAPPER while being fully observed — which is a
     # different state from the one this list described when it was written, and
     # worth spelling out so nobody "fixes" the exemption by wrapping them.
@@ -88,6 +89,9 @@ WRAPPER_EXEMPT = {
                  "per restart",
     "doc-engine": "KeepAlive server — probed by bin/probe-keepalive.py (TCP "
                   "connect to 127.0.0.1:4680); same wrapper reason as call-mode",
+    "canary-ingest-sink": "KeepAlive server — probed by bin/probe-keepalive.py "
+                          "(TCP connect to 127.0.0.1:4684) on its installation "
+                          "machine; the wrapper would record one row per restart",
     "quill-dictate": "KeepAlive server — probed by bin/probe-keepalive.py, "
                      "process liveness only (no port to knock on); same wrapper "
                      "reason as call-mode",
@@ -117,6 +121,11 @@ INSTALL_EXEMPT = {
                                      "installed until its shadow/canary evidence and "
                                      "the required cutover approval exist; legacy "
                                      "schedules remain active in the meantime",
+    "com.carr.cutover-watch": "NOT YET INSTALLED — built in worktree cutover-watch "
+                              "(2026-08-27); the orchestrating session installs it "
+                              "after this branch merges to main. Remove this entry "
+                              "once that install has happened, or this line goes "
+                              "stale in the direction that hides a real gap.",
 }
 
 DRIFT: list[str] = []
@@ -198,6 +207,28 @@ def wrapper_service(pl: dict[str, Any]) -> str:
     return ""
 
 
+
+def disabled_labels():
+    """Labels launchd itself reports as disabled, in either vocabulary.
+
+    macOS 26 prints `"label" => disabled`; older releases print `=> true`.
+    lib/launchd_scheduler_native.py learned this the same week; the two readers
+    stay in step because both accept both spellings and neither guesses.
+    """
+    try:
+        out = subprocess.run(["/bin/launchctl", "print-disabled", f"gui/{os.getuid()}"],
+                             capture_output=True, text=True, check=False)
+    except OSError:
+        return set()
+    if out.returncode != 0:
+        return set()
+    found = set()
+    for line in out.stdout.splitlines():
+        m = re.match(r'\s*"?([A-Za-z0-9._-]+)"?\s*=>\s*([A-Za-z]+)\b', line)
+        if m and m.group(2).lower() in ("true", "disabled"):
+            found.add(m.group(1))
+    return found
+
 def main() -> int:
     quiet = "--quiet" in sys.argv
 
@@ -244,7 +275,22 @@ def main() -> int:
 
     # ── installed vs loaded ──────────────────────────────────────────────────
     if live is not None:
+        disabled = disabled_labels()
         for lbl in sorted(set(inst) - live):
+            # A RETIRED SCHEDULE IS NOT DRIFT. Once a legacy agent is switched
+            # off — disabled in launchd's registry and unloaded — its plist
+            # stays on disk on purpose, so the retirement is auditable and
+            # reversible. Read as drift it would tell every future run to
+            # bootstrap the very job the cutover just retired, and each
+            # retirement would leave a permanent false alarm behind it.
+            # Measured 2026-08-28 on the first real retirement,
+            # com.carr.calendar-eventkit.
+            if lbl in disabled:
+                if not quiet:
+                    print(f"\n  n/a  {lbl}: retired on purpose — disabled in launchd's "
+                          f"registry and unloaded; the plist is kept so the switch-off "
+                          f"stays auditable and reversible")
+                continue
             drift(f"INSTALLED, NOT LOADED    {lbl} — launchctl bootstrap "
                   f"gui/$UID {INSTALLED}/{lbl}.plist")
         for lbl in sorted(live - set(inst)):

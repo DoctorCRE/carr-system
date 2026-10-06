@@ -1,0 +1,126 @@
+{
+  "schema": "carr-release-pipeline.v1",
+  "_comment": "Read by ops/release-pipeline.py. `enabled` is the kill switch committed to the repo; ~/.config/carr/release-pipeline.off is the local override that stops this machine without a commit. Either one stops every lane before any command runs.",
+  "enabled": true,
+  "local_off_file": "~/.config/carr/release-pipeline.off",
+  "credential_dir": "~/.config/carr",
+  "merge_event_file": "out/merge-events.jsonl",
+  "state_dir": "out/release-pipeline",
+  "worker": {
+    "enabled": true,
+    "github_repo": "jbookout/carr-system",
+    "release_paths": [
+      "mcp-server/",
+      "migrations/",
+      "dealroom/",
+      "ops/config/doctorcre-artifact.v1.json"
+    ],
+    "non_release_globs": [
+      "mcp-server/test/**",
+      "mcp-server/**/*.md",
+      "migrations/README.md",
+      "**/*.test.mjs",
+      "**/*.test.js"
+    ],
+    "live_release_url": "https://api.doctorcre.com/release",
+    "staging_candidate_operation_id": "b8d7f586-8c95-4f56-8547-3b4ca8056014",
+    "performance_budget_ref": "ops/performance-budget-gate.py",
+    "performance_budget_ms": 1000,
+    "recovery_strategy": "forward_fix",
+    "rollback_plan_ref": "runbooks/rollback-worker.md",
+    "post_release_smoke": true,
+    "_post_release_smoke": "After the live readback, ops/release-smoke.py proves the live system works (read-only journeys, baseline before the release, one retry); a regression marks the release FAILED, rolls this lane back and files a loop. false turns the stage off for this lane. Required: a missing value blocks the lane.",
+    "ci_workflow_name": "CI",
+    "ci_required_job": "ops/ci.sh --strict",
+    "canary_workflow_name": "main canary",
+    "test_evidence_label": "ops-ci-strict",
+    "security_evidence_label": "ci-secret-class",
+    "review_required_after": "2026-09-25T00:00:00Z",
+    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch always needs its own approving comment: that is the verifier the database binds.",
+    "review_markers": [
+      "independent review: pass",
+      "approve"
+    ],
+    "default_verifier": "claude-review-agent",
+    "forbidden_verifiers": [
+      "carr_jobs",
+      "joe",
+      "dell",
+      "release-pipeline",
+      "local-machine",
+      "jbookout"
+    ],
+    "required_db_env_names": [
+      "NEON_API_KEY",
+      "CARR_DB_JOBS_URL",
+      "CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL"
+    ],
+    "required_token_env_names": [
+      "CARR_MCP_PROBE_TOKEN"
+    ],
+    "block_markers": [
+      "independent review: block",
+      "independent review: fail",
+      "review: blocked",
+      "block"
+    ],
+    "review_author_associations": [
+      "OWNER",
+      "MEMBER",
+      "COLLABORATOR"
+    ],
+    "review_logins": [],
+    "canary_lookback": 50,
+    "_review_evidence": "Public repositories: only a comment from an OWNER/MEMBER/COLLABORATOR (or a login in review_logins) carries a verdict; the LATEST verdict decides and must be an APPROVE carrying `Reviewed-SHA: <exact PR head SHA>`. Every session posts as the OWNER account, so the verifier identity comes from the merge event (or default_verifier), never from comment text or authorship.",
+    "canary_ignored_globs": [
+      "corpus/**",
+      "audits/**",
+      "video/**",
+      "out/**",
+      "**/*.md"
+    ],
+    "_canary_ignored_globs": "Mirror of .github/workflows/main-canary.yml paths-ignore: only a commit whose every changed path matches these may be walked past without its own canary verdict."
+  },
+  "app": {
+    "enabled": true,
+    "github_repo": "jbookout/doctorcre-app",
+    "repo_path": "~/doctorcre-app",
+    "non_release_globs": [
+      "**/*.md",
+      "test/**",
+      "reports/**"
+    ],
+    "live_release_url": "https://app.doctorcre.com/app-release",
+    "review_markers": [
+      "independent review: pass",
+      "approve"
+    ],
+    "block_markers": [
+      "independent review: block",
+      "independent review: fail",
+      "review: blocked",
+      "block"
+    ],
+    "review_author_associations": [
+      "OWNER",
+      "MEMBER",
+      "COLLABORATOR"
+    ],
+    "review_logins": [],
+    "review_required_after": "2026-09-25T00:00:00Z",
+    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch always needs its own approving comment: that is the verifier the database binds.",
+    "default_verifier": "claude-review-agent",
+    "forbidden_verifiers": [
+      "carr_jobs",
+      "joe",
+      "dell",
+      "release-pipeline",
+      "local-machine",
+      "jbookout"
+    ],
+    "required_checks": [
+      "test"
+    ],
+    "post_release_smoke": true
+  }
+}

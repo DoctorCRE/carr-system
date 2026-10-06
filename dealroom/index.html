@@ -10,6 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/doc-panel.css">
   <link rel="manifest" href="manifest.webmanifest">
 </head>
 <body>
@@ -31,7 +32,7 @@
     <div class="top-actions">
       <span class="sync" id="syncStatus" role="status">Checking connection…</span>
       <span class="capture" id="captureStatus" hidden>Capture inactive</span>
-      <button type="button" class="call-mode-button" id="callModeButton" aria-haspopup="dialog" aria-label="Open Call Mode"><span aria-hidden="true">✦</span> Call Mode</button>
+      <button type="button" class="call-mode-button" id="callsButton" aria-haspopup="dialog" aria-label="Calls — not part of this release" title="Calls are not part of this release"><span aria-hidden="true">✦</span> Calls</button>
       <span class="avatar" id="selfAvatar" aria-label="Signed-in partner">?</span>
       <button type="button" class="icon-button color-assist-toggle" id="colorAssistButton" aria-label="Turn on color-blind-friendly view" aria-pressed="false" title="Color-blind-friendly view"><span aria-hidden="true">◐</span><span class="assist-label">Color assist</span></button>
       <button type="button" class="icon-button" id="themeButton" aria-label="Toggle dark theme" title="Toggle dark theme">☾</button>
@@ -72,6 +73,7 @@
             <button type="button" class="filter" data-filter="delta">Changed since review</button>
             <button type="button" class="filter" data-filter="parked">Parked</button>
           </div>
+          <button type="button" class="receipts-jump" id="receiptsJump" aria-label="Go to recent changes" hidden>Recent changes<span class="receipts-count" id="receiptsCount">0</span></button>
           <label class="search-wrap">
             <span class="sr-only">Search work records</span>
             <input id="search" type="search" autocomplete="off" placeholder="Search work records…">
@@ -98,6 +100,18 @@
         </table>
         <div class="empty" id="emptyState" hidden></div>
       </div>
+    </section>
+
+    <section class="receipts" id="receiptsPanel" aria-labelledby="receiptsTitle" hidden>
+      <header class="receipts-head">
+        <div>
+          <p class="eyebrow">Change receipts</p>
+          <h2 id="receiptsTitle" tabindex="-1">Recent changes</h2>
+        </div>
+        <p class="receipts-note">The newest 25 changes this session has seen, kept in this page only. Each deal’s Change history holds the full record.</p>
+      </header>
+      <p class="receipts-live" id="receiptsLive" role="status" aria-live="polite"></p>
+      <ol class="receipt-list" id="receiptsList" aria-label="Recent Deal Room changes"></ol>
     </section>
   </main>
 
@@ -131,40 +145,25 @@
     <article id="dealDetail"></article>
   </dialog>
 
-  <dialog id="callModeDialog" class="dialog call-mode-dialog" aria-labelledby="callModeTitle">
+  <!--
+    Calls are inactive in this release, and this is the whole of the Calls
+    entrypoint: a control that says so. There is no start, no stop, no recorder
+    address and no local bridge on this page, so nothing here can begin or join
+    a recording — deliberately, not by omission.
+  -->
+  <dialog id="callsDialog" class="dialog call-mode-dialog" aria-labelledby="callsTitle" aria-describedby="callsDetail">
     <article>
       <header>
-        <div><p class="eyebrow">Quill local recorder</p><h2 id="callModeTitle">Call Mode</h2></div>
-        <button type="button" class="icon-button" id="callModeClose" aria-label="Close Call Mode">×</button>
+        <div><p class="eyebrow">Not in this release</p><h2 id="callsTitle">Calls</h2></div>
+        <button type="button" class="icon-button" id="callsClose" aria-label="Close">×</button>
       </header>
-      <div class="call-mode-stage" id="callModeStage">
-        <div class="recording-orb" aria-hidden="true">●</div>
-        <p class="call-mode-state" id="callModeState">Ready to record</p>
-        <time class="call-mode-timer" id="callModeTimer" aria-live="polite">Ready</time>
-        <p class="call-mode-detail" id="callModeDetail">Start a weekly deal call or another conversation. Quill keeps the local and other-side tracks separate.</p>
-        <p class="call-mode-speakers" id="callModeSpeakers" hidden></p>
+      <div class="call-mode-stage">
+        <div class="recording-orb" aria-hidden="true">✦</div>
+        <p class="call-mode-state" id="callsState">Inactive</p>
+        <p class="call-mode-detail" id="callsDetail">Recording a call is not part of this release. This workspace cannot start a recording or stop one, and nothing on this page reaches a recorder.</p>
+        <p class="call-mode-speakers">Calls that were already recorded are untouched. Their saved summaries, actions and updates still live with the work record they belong to, and still reach this board through the ordinary change feed. If a recording is running somewhere else, its status still appears beside the connection badge above.</p>
       </div>
-      <div class="call-mode-actions">
-        <label class="call-mode-consent" id="callModeConsentRow">
-          <input type="checkbox" id="callModeConsent">
-          <span>I have told everyone on this call that it will be recorded.</span>
-        </label>
-        <div class="call-mode-starts" id="callModeStarts">
-          <button type="button" class="primary" data-call-mode-start="weekly_deal_call">Start weekly deal call</button>
-          <button type="button" class="secondary" data-call-mode-start="other_call">Start another call</button>
-        </div>
-        <button type="button" class="danger" id="callModeStop" hidden>Stop and process</button>
-      </div>
-      <p class="call-mode-permission" id="callModePermission" hidden></p>
-      <section class="post-call" id="postCallPanel" aria-labelledby="postCallTitle" hidden>
-        <header class="post-call-heading">
-          <div><p class="eyebrow">Weekly call follow-through</p><h3 id="postCallTitle">Post-call report</h3></div>
-          <button type="button" class="text-button post-call-refresh" id="postCallRefresh">Refresh</button>
-        </header>
-        <div class="post-call-status" id="postCallStatus" role="status" aria-live="polite"></div>
-        <div class="post-call-report" id="postCallReport"></div>
-      </section>
-      <footer class="call-mode-footer"><a href="http://127.0.0.1:4682/" target="_blank" rel="noopener" id="callModeStandalone">Open standalone local controller</a></footer>
+      <footer class="call-mode-footer"><span>Recording is not available in this release. Nothing in this workspace turns it on.</span></footer>
     </article>
   </dialog>
 

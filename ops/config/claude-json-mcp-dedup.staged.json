@@ -1,0 +1,26 @@
+{
+  "_status": "FINDING + STAGED FIX, NOT APPLIED. Nothing in this file changes any live machine config -- see _apply_by_hand below.",
+  "_work_request": "WR-000019",
+  "_slice": "s11",
+  "_finding": [
+    "The CARR MCP Worker's `initialize` RPC (mcp-server/src/mcp.js) serves a ~200-word instructions block once per MCP server registration. This session's own tool list carries it TWICE, byte-identical, from the same backend (https://api.doctorcre.com/mcp), under two prefixes: mcp__carr__* (from the LOCAL ~/.claude.json config) and mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__* (a claude.ai ACCOUNT-level connector, not a local file -- nothing on this Mac defines it).",
+    "~/.claude.json's only mcpServers entry, read (not written) to confirm this: {\"carr\": {\"type\": \"http\", \"url\": \"https://api.doctorcre.com/mcp\"}}. Every per-project mcpServers array checked was empty.",
+    "Measured cost: ~1,916 bytes (~547 tokens) per registration (ops/boot-budget-check.py measures and budgets exactly one instance); this session pays it twice, ~1,095 tokens total."
+  ],
+  "_why_not_fixed_server_side": [
+    "MCP's `initialize` is a per-connection handshake with no field meaning 'this is a second registration of a server you already introduced to this human this session.' The server DOES know the actor at initialize time (ctx.props), so it could cache 'has this actor already received the full block very recently' and serve a one-line pointer on a repeat -- but that cannot distinguish a genuine second registration (this case) from a genuinely NEW, independent session the same human opens moments later (a second terminal, a second device, a retried connection). Suppressing the full block on that legitimately-new session would silently withhold the one instruction that matters most: 'call standing-context FIRST.' A missed onboarding is worse than a duplicated one, and there is no safe threshold to tune this on -- so it stays a client-config fix, not a server heuristic."
+  ],
+  "_staged_fix": {
+    "keep": "the claude.ai account-level connector (mcp__b36e17b6-...__*)",
+    "remove": "the LOCAL ~/.claude.json mcpServers.carr entry, since the claude.ai connector already supplies the identical tool surface whenever both are present in a session",
+    "apply_by_hand": "open ~/.claude.json, find the top-level \"mcpServers\" key, and delete that whole key (and its \"carr\" entry). Nothing else in the file changes. This repo does not and will not write to that path.",
+    "before": { "mcpServers": { "carr": { "type": "http", "url": "https://api.doctorcre.com/mcp" } } },
+    "after_removing_mcpServers_key": "the mcpServers key is absent entirely -- do not replace it with {}, just delete it"
+  },
+  "_alternative_joes_choice": "If Joe would rather keep the LOCAL entry (useful with no claude.ai account reachable) and drop the OTHER side instead: disconnect the 'CARR Record Layer' connector from claude.ai's own Settings -> Connectors page in a browser. That is a cloud account setting with no local file to diff. Apply exactly ONE of the two fixes, never both (that leaves no working connector).",
+  "_out_of_scope_for_this_slice": [
+    "No server-side dedup heuristic (see _why_not_fixed_server_side).",
+    "No write to ~/.claude.json (live machine config).",
+    "No change to ops/config-as-code.py's tracked surface to also cover mcpServers -- that file currently owns only ~/.claude/settings.json's hooks block; taking on a second machine-config surface is a separate decision from this slice's boot-diet scope."
+  ]
+}

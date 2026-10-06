@@ -118,6 +118,10 @@ def _scan_claims(nm):
         claims.setdefault(num, {}).setdefault(
             row.get("name") or f"reserved-by-{row.get('owner', '?')}", set()
         ).add("reservation")
+    nm.merge(claims, {
+        number: {f"burned:{reason}"}
+        for number, reason in nm.PERMANENTLY_BURNED_MIGRATION_SLOTS.items()
+    }, "permanent-burn-register")
     return claims, warnings
 
 

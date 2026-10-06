@@ -94,6 +94,12 @@ HOME_DIR="$CANON/.claude/worktrees"     # the convention already in use here
 PY="$CANON/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 
+# The venv-drift override's non-inheritable half. It is armed ONLY by an
+# explicit --allow-venv-drift on this invocation's command line, so no exported
+# environment variable can arm it for the automatic bootstrap (see
+# drift_override_allowed below).
+ALLOW_VENV_DRIFT=0
+
 # NEVER NAME A VARIABLE `path` IN ZSH. It is tied to the PATH array, so a scalar
 # assignment silently destroys the command search path — the first cut of this
 # script did exactly that and died on "command not found: mkdir" three lines
@@ -111,6 +117,9 @@ usage() {
   print -r -- "       run.sh worktree --plumb [path]           link .venv/out/node_modules into a"
   print -r -- "                                                worktree THIS script did not create"
   print -r -- "                                                (default: the worktree at \$PWD)"
+  print -r -- "       run.sh worktree --install [--dry-run] [path]"
+  print -r -- "                                                build this worktree its OWN runtime,"
+  print -r -- "                                                frozen: npm ci + requirements.lock"
   exit 2
 }
 
@@ -122,6 +131,329 @@ link() {                                # link <target> <linkname>
   fi
   ln -sfn "$target" "$name"
   print -r -- "  ok  $(basename "$name") -> $target"
+}
+
+# runtime_matches_lock <worker-dir> <node_modules-dir>
+#
+# A canonical checkout can be cleanly *present* yet many commits behind the
+# worktree consuming its shared npm cache. Directory existence therefore proves
+# nothing. npm writes node_modules/.package-lock.json from the exact resolution
+# it installed; compare that installed resolution with the consuming
+# worktree's lock before linking. Platform-inapplicable optional packages are
+# legitimately absent, but every required package must be present and every
+# installed entry must be byte-for-byte the lock entry the worktree expects.
+runtime_matches_lock() {
+  "$PY" - "$1/package-lock.json" "$2/.package-lock.json" <<'PYEOF'
+import json, sys
+try:
+    expected = json.load(open(sys.argv[1]))["packages"]
+    installed = json.load(open(sys.argv[2]))["packages"]
+except Exception:
+    raise SystemExit(1)
+expected.pop("", None)
+if any(key not in expected or installed[key] != expected[key] for key in installed):
+    raise SystemExit(1)
+if any(key not in installed and not row.get("optional")
+       for key, row in expected.items()):
+    raise SystemExit(1)
+PYEOF
+}
+
+# link_node_runtime <worktree> — one shared decision for create-time plumbing
+# and SessionStart --plumb. A stale shared cache is worse than no cache: the
+# latter prints a missing-dependency error, while the former runs an arbitrary
+# older dependency graph and can make unrelated current tests fail. On a
+# mismatch, remove only this script's untracked symlink and leave the worktree
+# dependency-empty; ordinary STORE calls still boot zero-install, and code work
+# can run `npm --prefix mcp-server ci` locally from its own lock.
+link_node_runtime() {
+  local wt="$1"
+  local runtime="$CANON/mcp-server/node_modules"
+  local name="$wt/mcp-server/node_modules"
+  [ -d "$runtime" ] || return 0
+  if runtime_matches_lock "$wt/mcp-server" "$runtime"; then
+    link "$runtime" "$name"
+    return 0
+  fi
+  if [ -L "$name" ] && ! git -C "$wt" ls-files --error-unmatch \
+       "mcp-server/node_modules" >/dev/null 2>&1; then
+    rm "$name"
+  fi
+  print -r -- "  !! shared node_modules does not match this worktree's package-lock.json — left unlinked"
+  print -r -- "     run npm --prefix mcp-server ci in the worktree when local Node tooling is needed"
+}
+
+# venv_matches_lock <worktree> <venv>
+#
+# THE SAME TRUST BOUNDARY AS runtime_matches_lock, ON THE OTHER RUNTIME. PR #834
+# closed it for npm and stopped there, which left the larger of the two surfaces
+# open: every worktree links the canonical .venv, and NOTHING compared what is
+# installed in that venv with the requirements.lock the consuming worktree
+# actually tracks. Both drift directions are recorded costs.
+#
+#   MISSING or WRONG VERSION — the shared venv is behind the worktree's lock, so
+#   the worktree's code imports a package that is not there (or is there at the
+#   wrong version). That is the stale-shared-cache failure #834 named, and it
+#   reads as a code bug rather than a checkout artifact.
+#
+#   EXTRA — the venv holds a distribution the lock does not pin, so code can
+#   import something no lockfile declares. It passes here and fails in CI, on
+#   Dell's machine, and in the Worker. That is the phantom dependency, and
+#   requirements.txt's own comments record it happening twice (2026-08-13's four
+#   undeclared packages, and pymupdf found later by importing it).
+#
+# Symmetric with the npm rule on purpose: every required entry present at the
+# exact pinned version, and no installed distribution outside the lock. Lock
+# entries whose environment marker does not apply here are legitimately absent,
+# exactly as npm omits a platform-inapplicable optional package. The installer
+# bootstrap (pip/setuptools/wheel) is not a project dependency and is never in a
+# `pip freeze` lock, so it is not judged as an extra.
+#
+# FAIL CLOSED WHEN THERE IS NO LOCK. This used to `return 0` — "nothing to
+# compare against, so trust it" — which is the one direction a trust boundary
+# must never fail. A worktree with no requirements.lock and a venv full of
+# unknown packages is exactly the phantom-dependency case this exists to catch,
+# and it was the case that got waved through. Cross-family review, blocker 1.
+venv_matches_lock() {
+  local lockfile="$1/requirements.lock"
+  [ -r "$lockfile" ] || return 1            # cannot prove it: do not expose it
+  [ -x "$2/bin/python" ] || return 1        # a venv with no interpreter is not usable
+  "$2/bin/python" - "$lockfile" <<'PYEOF'
+import re, sys
+from importlib import metadata
+
+# Never a project dependency, never emitted by `pip freeze`.
+BOOTSTRAP = {"pip", "setuptools", "wheel", "distribute", "pkg-resources"}
+
+
+def norm(name):
+    return re.sub(r"[-_.]+", "-", name.split("[")[0]).strip().lower()
+
+
+required = {}
+try:
+    lines = open(sys.argv[1]).read().splitlines()
+except OSError:
+    raise SystemExit(1)
+for raw in lines:
+    line = raw.split("#", 1)[0].strip()
+    if not line or "==" not in line:
+        continue
+    spec, _, marker = line.partition(";")
+    if "==" not in spec:
+        continue
+    name, version = spec.split("==", 1)
+    marker = marker.strip()
+    if marker:
+        # Cannot evaluate the marker -> treat the entry as inapplicable rather
+        # than as a mismatch. Same failure direction as npm's optional packages:
+        # what this cannot prove, it does not use to refuse.
+        try:
+            from packaging.markers import Marker
+            if not Marker(marker).evaluate():
+                continue
+        except Exception:
+            continue
+    required[norm(name)] = version.strip()
+
+installed = {}
+for dist in metadata.distributions():
+    name = dist.metadata["Name"] or ""
+    if name:
+        installed[norm(name)] = dist.version
+
+if any(installed.get(key) != version for key, version in required.items()):
+    raise SystemExit(1)
+if any(key not in required and key not in BOOTSTRAP for key in installed):
+    raise SystemExit(1)
+PYEOF
+}
+
+# venv_guard_record <verdict> <worktree> <venv> <kind> — the DURABLE record.
+#
+# Announcing an exception on stdout is not a record. The boot hook captures
+# --plumb's stdout and prints it once into one session's transcript; nothing
+# survives to say that a drifted runtime was blessed on this machine, when, or
+# against which lock. Cross-family review, blocker 2. Only the outcomes that
+# matter are written — an override taken, or a runtime refused — so this stays a
+# ledger of exceptions rather than a log of every SessionStart on 40 worktrees.
+#
+# IT RETURNS FAILURE WHEN IT DID NOT RECORD, and the caller is expected to care.
+# The first cut returned success when out/ was absent, hid the recorder behind
+# `|| true`, and swallowed write errors — so an unwritable ledger produced a
+# silent "recorded" claim and the override proceeded anyway. An audit control
+# that fails open is not an audit control. Cross-family review round 2, blocker
+# 2. The row is written AND READ BACK before this reports success.
+venv_guard_record() {
+  local log="$CANON/out/worktree-venv-guard.jsonl"
+  [ -d "$CANON/out" ] || return 1
+  "$PY" - "$log" "$1" "$2" "$3" "$4" <<'PYEOF'
+import hashlib, json, os, subprocess, sys, time
+
+log, verdict, wt, venv, kind = sys.argv[1:6]
+
+def sha256_file(path):
+    try:
+        with open(path, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return None
+
+# VENV IDENTITY, not just its path: interpreter version plus a digest over the
+# exact installed distribution set, so a later reader can tell whether the thing
+# that was blessed is the thing that is there now.
+identity = None
+python = os.path.join(venv, "bin", "python")
+if os.access(python, os.X_OK):
+    probe = ("import sys, hashlib\n"
+             "from importlib import metadata\n"
+             "d = sorted((x.metadata['Name'] or '') + '==' + x.version\n"
+             "           for x in metadata.distributions())\n"
+             "print(sys.version.split()[0] + ':' +\n"
+             "      hashlib.sha256('\\n'.join(d).encode()).hexdigest())\n")
+    try:
+        out = subprocess.run([python, "-c", probe], capture_output=True,
+                             text=True, timeout=30)
+        identity = out.stdout.strip() or None
+    except Exception:
+        identity = None
+
+row = {
+    "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    "verdict": verdict,
+    "kind": kind,
+    "worktree": os.path.realpath(wt),
+    "venv": os.path.realpath(venv),
+    "venv_identity": identity,
+    "requirements_lock_sha256": sha256_file(os.path.join(wt, "requirements.lock")),
+}
+line = json.dumps(row, sort_keys=True)
+try:
+    with open(log, "a") as fh:
+        fh.write(line + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+except OSError as exc:
+    print(f"venv_guard_record: could not write {log}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+# READ IT BACK. A write that reported success and left nothing on disk is the
+# failure this whole record exists to make impossible, so the claim "recorded"
+# is only made after the row is found again.
+try:
+    with open(log) as fh:
+        written = [ln.rstrip("\n") for ln in fh]
+except OSError as exc:
+    print(f"venv_guard_record: could not read back {log}: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+if not written or written[-1] != line:
+    print(f"venv_guard_record: row not found after write in {log}", file=sys.stderr)
+    raise SystemExit(1)
+PYEOF
+}
+
+# drift_override_allowed — TWO independent keys, and one of them cannot be
+# inherited.
+#
+# The old test was `[ -n "$CARR_WORKTREE_VENV_DRIFT_OK" ]`, which said yes to
+# `0`, to `false`, and to an empty-but-set-elsewhere value; and because the boot
+# hook runs this script as a child process, an exported variable silently armed
+# EVERY automatic bootstrap on the machine from then on. Cross-family review,
+# blocker 2. Now the environment variable must be exactly `1`, AND the caller
+# must pass --allow-venv-drift on the command line of that one invocation. The
+# boot hook never passes it, so automatic bootstrap cannot take the override no
+# matter what is exported into the session.
+drift_override_allowed() {
+  [ "$ALLOW_VENV_DRIFT" = "1" ] && [ "${CARR_WORKTREE_VENV_DRIFT_OK:-}" = "1" ]
+}
+
+# link_python_runtime <worktree> — the .venv half of the plumbing decision, and
+# the exact shape link_node_runtime already has, so the two runtimes are judged
+# by one rule rather than two (rule a8c55a47).
+#
+# IT JUDGES THE RUNTIME THAT WILL ACTUALLY BE USED. The first cut always
+# validated $CANON/.venv and then called link(), which REFUSES to replace a real
+# directory ("exists and is NOT a symlink — left alone"). So a worktree carrying
+# its own .venv — the exact thing `--install` builds — had a runtime that was
+# never checked against anything, and the check that did run was against a venv
+# the worktree would not use. Cross-family review, blocker 1. The local venv now
+# wins the choice and is the one validated.
+#
+# THE FAILURE DIRECTION IS DIFFERENT FROM npm's, AND IT IS STATED RATHER THAN
+# ASSUMED. A worktree with no node_modules still boots: ordinary STORE calls run
+# zero-install. A worktree with no .venv runs almost nothing in this repo — ten
+# plus scripts hard-code ./.venv/bin, ops/ci.sh included. So refusing the link
+# is the right call (a venv that does not match the lock makes every local test
+# result a lie about what CI will do) but it must never be a silent brick: the
+# refusal names the exact frozen install that fixes it, and the override links
+# anyway while SAYING SO and writing a durable record.
+link_python_runtime() {
+  local wt="$1"
+  local name="$wt/.venv"
+  local target kind
+
+  # A REAL directory here is this worktree's own runtime and outranks the shared
+  # one — link() would not replace it anyway, so it is what the worktree runs.
+  if [ -e "$name" ] && [ ! -L "$name" ]; then
+    target="$name"; kind="worktree-local"
+  elif [ -d "$CANON/.venv" ]; then
+    target="$CANON/.venv"; kind="shared"
+  else
+    return 0                                  # no Python runtime to expose
+  fi
+
+  if venv_matches_lock "$wt" "$target"; then
+    if [ "$kind" = "shared" ]; then
+      link "$CANON/.venv" "$name"
+    else
+      print -r -- "  ok  .venv (worktree-local) matches this worktree's requirements.lock"
+    fi
+    return 0
+  fi
+
+  # A worktree-local venv is somebody's work: it is never deleted here, only
+  # refused and recorded. A shared symlink this script made is dropped, as
+  # before — a wrong runtime is worse than an absent one.
+  # RECORD FIRST, VERIFY, THEN ACT. The override is not "announce and proceed";
+  # the durable record is its PRECONDITION. If the ledger cannot be written and
+  # read back, the override is DENIED and this falls through to the ordinary
+  # refusal — an exception nobody can audit is not an exception this grants.
+  if [ "$kind" = "shared" ] && drift_override_allowed; then
+    if venv_guard_record "override_used" "$wt" "$target" "$kind"; then
+      print -r -- "  !! shared .venv does not match this worktree's requirements.lock"
+      print -r -- "     LINKED ANYWAY — CARR_WORKTREE_VENV_DRIFT_OK=1 and --allow-venv-drift were both given"
+      print -r -- "     recorded in out/worktree-venv-guard.jsonl; local results may not match CI"
+      link "$CANON/.venv" "$name"
+      return 0
+    fi
+    print -r -- "  !! override DENIED — the durable record could not be written to"
+    print -r -- "     $CANON/out/worktree-venv-guard.jsonl"
+    print -r -- "     An override that cannot be audited is not granted; refusing the runtime instead."
+  fi
+
+  if [ "$kind" = "shared" ] && [ -L "$name" ] \
+     && ! git -C "$wt" ls-files --error-unmatch ".venv" >/dev/null 2>&1; then
+    rm "$name"
+  fi
+  # DELIBERATELY NOT GATED on the recorder, and this is the opposite case from
+  # the override above: refusing is the SAFE direction, so a ledger that cannot
+  # be written must not turn a refusal into an acceptance. The override needs
+  # the record because it grants an exception; a refusal grants nothing.
+  venv_guard_record "refused" "$wt" "$target" "$kind" || true
+  if [ -r "$wt/requirements.lock" ]; then
+    print -r -- "  !! $kind .venv does not match this worktree's requirements.lock — not trusted"
+  else
+    print -r -- "  !! this worktree has no readable requirements.lock — a runtime that cannot be"
+    print -r -- "     proven against a lock is not trusted (fail closed)"
+  fi
+  print -r -- "     build this worktree's own frozen runtime:  ./run.sh worktree --install ${wt:t}"
+  print -r -- "     recorded in out/worktree-venv-guard.jsonl"
+  if [ "$kind" = "worktree-local" ]; then
+    print -r -- "     NOTE: the worktree-local .venv is left in place — it is yours to replace, not this script's"
+  else
+    print -r -- "     or re-run with --allow-venv-drift AND CARR_WORKTREE_VENV_DRIFT_OK=1 to link it anyway"
+  fi
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -311,6 +643,17 @@ case "$1" in
     # an automated path doing the same job must be the same code). The boot
     # hook (hooks/worktree-self-plumb.py) calls this with an explicit path;
     # a human runs it bare from inside the worktree and gets the default below.
+    #
+    # --allow-venv-drift is the non-inheritable half of the venv-drift override
+    # (see drift_override_allowed). It is deliberately a command-line flag: the
+    # boot hook builds its own argv and never passes it, so no exported variable
+    # can arm the override for automatic bootstrap.
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --allow-venv-drift) ALLOW_VENV_DRIFT=1; shift ;;
+        *) break ;;
+      esac
+    done
     if [ $# -ge 1 ]; then
       target="$1"
       case "$target" in
@@ -345,10 +688,155 @@ case "$1" in
       print -r -- "  ./run.sh worktree --list   shows the ones that are"
       exit 2
     fi
-    link "$CANON/.venv" "$wt/.venv"
+    # PROPAGATE THE REFUSAL. link_python_runtime returning nonzero means the
+    # Python runtime was NOT trusted; exiting 0 anyway told every caller the
+    # plumbing had succeeded, which is the refusal-swallowing this boundary
+    # cannot afford. out/ and node_modules are still plumbed — they are
+    # independent and useful — but the exit status is the guard's.
+    link_python_runtime "$wt"; plumb_rc=$?
     link "$CANON/out"   "$wt/out"
-    [ -d "$CANON/mcp-server/node_modules" ] && link "$CANON/mcp-server/node_modules" "$wt/mcp-server/node_modules"
-    exit 0
+    link_node_runtime "$wt"
+    exit $plumb_rc
+    ;;
+  --install)
+    shift
+    # THE ONE FROZEN DOOR. link_python_runtime and link_node_runtime both refuse a
+    # shared runtime that does not match this worktree's lock, and a refusal that
+    # names no command is just a broken worktree with a nicer message. This is
+    # that command, and it is deliberately the ONLY install path this script
+    # offers: it runs `npm ci` and `pip install -r requirements.lock` and has no
+    # spelling that resolves dependencies freshly. `npm install` re-resolves and
+    # rewrites the lock; `pip install -r requirements.txt` installs the loose
+    # human-facing declaration (`>=` ranges) instead of the pinned output. Both
+    # produce a worktree whose local results are not the results CI will get,
+    # which is the whole failure this slice exists to close.
+    #
+    # --dry-run prints the exact commands without running them. That is not a
+    # convenience: the install itself needs the network, so the dry run is what
+    # a selftest can assert on offline, and what it asserts is precisely the
+    # property that matters — that the commands are the frozen spellings.
+    dry=0
+    case "${1:-}" in
+      --dry-run) dry=1; shift ;;
+    esac
+    if [ $# -ge 1 ]; then
+      target="$1"
+      case "$target" in
+        */*|'~'*) wt="${target:A}" ;;
+        *)        wt="$HOME_DIR/$target" ;;
+      esac
+    else
+      wt="$(git rev-parse --show-toplevel 2>/dev/null)"
+      if [ -z "$wt" ]; then
+        print -r -- "not inside a git worktree — pass a path: run.sh worktree --install <path>"
+        exit 2
+      fi
+      wt="${wt:A}"
+    fi
+    [ -d "$wt" ] || { print -r -- "no worktree at $wt"; exit 1; }
+    # Same two guards --plumb and --remove use, same reasons. The canonical tree
+    # holds the REAL .venv and node_modules that every worktree links; installing
+    # into it from here would rewrite the shared runtime out from under every
+    # other session on this machine.
+    if [ "${wt:A}" = "${CANON:A}" ]; then
+      print -r -- "refusing to install into the canonical tree: $CANON (every worktree links its runtime)"
+      exit 2
+    fi
+    if ! git -C "$CANON" worktree list --porcelain | awk '/^worktree /{print $2}' \
+         | grep -qx -e "${wt:A}" -e "$wt"; then
+      print -r -- "not a registered worktree of this repo: $wt"
+      print -r -- "  ./run.sh worktree --list   shows the ones that are"
+      exit 2
+    fi
+
+    # A LINKED RUNTIME IS NOT THIS WORKTREE'S TO OVERWRITE. .venv and
+    # mcp-server/node_modules arrive here as symlinks into $CANON; installing
+    # over one writes into the shared tree. Drop this script's own untracked
+    # symlink first — the same untracked-is-the-test rule drop_plumbing uses, so
+    # a TRACKED .venv (somebody's work) is never touched.
+    unlink_plumbing() {   # unlink_plumbing <rel>
+      if [ -L "$wt/$1" ] && ! git -C "$wt" ls-files --error-unmatch "$1" >/dev/null 2>&1; then
+        if [ "$dry" = "1" ]; then
+          print -r -- "  would drop shared symlink $1"
+        else
+          rm "$wt/$1"
+          print -r -- "  dropped shared symlink $1"
+        fi
+      fi
+    }
+
+    base_py="$CANON/.venv/bin/python"
+    [ -x "$base_py" ] || base_py="python3"
+    rc=0
+
+    # ONE ARGV, PRINTED AND EXECUTED. These arrays are the single definition of
+    # each install command: --dry-run prints them and a real run executes the
+    # SAME array. They were previously two independent texts — a print statement
+    # and a separate invocation — so a selftest asserting on --dry-run output
+    # proved nothing about what actually ran, and swapping the executed
+    # requirement from .lock to .txt would have left that selftest green.
+    # Cross-family review, blocker 3.
+    #
+    # --clear makes the venv FRESH. Without it, `python -m venv` over an
+    # existing directory reuses whatever is already installed there, so a
+    # "frozen install" could inherit packages no lockfile mentions — the very
+    # phantom dependency this slice exists to refuse.
+    typeset -a venv_cmd pip_cmd npm_cmd
+    venv_cmd=("$base_py" -m venv --clear "$wt/.venv")
+    pip_cmd=("$wt/.venv/bin/python" -m pip install --disable-pip-version-check
+             --no-input -r "$wt/requirements.lock")
+    npm_cmd=(npm --prefix "$wt/mcp-server" ci)
+
+    if [ -r "$wt/requirements.lock" ]; then
+      print -r -- "  python: ${(j: :)venv_cmd}"
+      print -r -- "  python: ${(j: :)pip_cmd}"
+      unlink_plumbing .venv
+      if [ "$dry" = "0" ]; then
+        if "${venv_cmd[@]}" && "${pip_cmd[@]}"; then
+          # VERIFY BEFORE EXPOSING. An install that exits 0 is not proof the
+          # runtime matches the lock; this asks the same question the bootstrap
+          # guard asks, against the venv that was just built.
+          if venv_matches_lock "$wt" "$wt/.venv"; then
+            print -r -- "  ok  .venv installed frozen from requirements.lock and verified against it"
+          else
+            print -r -- "  !! .venv was installed but does NOT match requirements.lock — not trusted"
+            venv_guard_record "post_install_mismatch" "$wt" "$wt/.venv" "worktree-local"
+            rc=1
+          fi
+        else
+          print -r -- "  !! frozen python install FAILED"
+          rc=1
+        fi
+      fi
+    else
+      # A MISSING LOCK IS A REFUSAL, NOT A NO-OP. Reporting "nothing to install"
+      # and exiting 0 left any existing local .venv in place, unvalidated, and
+      # blessed by a successful exit — the same fail-open the guard itself was
+      # fixed to close. Cross-family review round 2, blocker 1.
+      print -r -- "  !! python: this worktree has no readable requirements.lock"
+      print -r -- "     There is no frozen runtime to install and nothing to validate an existing"
+      print -r -- "     .venv against, so this is a refusal rather than a no-op."
+      venv_guard_record "install_refused_no_lock" "$wt" "$wt/.venv" "worktree-local" || true
+      rc=1
+    fi
+
+    if [ -r "$wt/mcp-server/package-lock.json" ]; then
+      print -r -- "  npm: ${(j: :)npm_cmd}"
+      unlink_plumbing mcp-server/node_modules
+      if [ "$dry" = "0" ]; then
+        if "${npm_cmd[@]}"; then
+          print -r -- "  ok  node_modules installed frozen from package-lock.json"
+        else
+          print -r -- "  !! frozen npm install FAILED"
+          rc=1
+        fi
+      fi
+    else
+      print -r -- "  npm: no mcp-server/package-lock.json in this worktree — nothing to install"
+    fi
+
+    [ "$dry" = "1" ] && print -r -- "dry run — nothing was installed"
+    exit $rc
     ;;
   --sweep)
     shift
@@ -569,7 +1057,7 @@ else
   print -r -- "branched $name from $base"
 fi
 
-link "$CANON/.venv" "$wt/.venv"
+link_python_runtime "$wt"; create_py_rc=$?
 link "$CANON/out"   "$wt/out"
 # The THIRD gitignored dependency, and it hides the same way the first two did.
 # `npm test` in a fresh worktree dies on ERR_MODULE_NOT_FOUND for
@@ -579,7 +1067,7 @@ link "$CANON/out"   "$wt/out"
 # 1 fail on a test that had nothing to do with the change. Linked, not
 # installed, because a per-worktree npm install would drift from the canonical
 # lockfile — the same reasoning as .venv.
-[ -d "$CANON/mcp-server/node_modules" ] && link "$CANON/mcp-server/node_modules" "$wt/mcp-server/node_modules"
+link_node_runtime "$wt"
 
 print -r -- ""
 print -r -- "worktree ready — your own tree, nobody else's files in it:"
@@ -592,3 +1080,15 @@ print -r -- "  ./run.sh worktree --remove $name"
 print -r -- ""
 print -r -- "Keep the nightly chain in $CANON — it publishes to the vault, so running"
 print -r -- "it here would ship this branch's output as if it were live."
+
+# THE CREATE PATH CARRIES THE GUARD'S VERDICT TOO. A worktree whose Python
+# runtime was refused is a worktree that cannot run this repo's tooling, and
+# saying "worktree ready" with exit 0 hid exactly that. The tree is still
+# created and still useful — the message above stands — but the exit status
+# tells the truth about the runtime. Cross-family review round 2, blocker 1.
+if [ "$create_py_rc" -ne 0 ]; then
+  print -r -- ""
+  print -r -- "  !! but its Python runtime was REFUSED (see above) — build one with:"
+  print -r -- "     ./run.sh worktree --install $name"
+fi
+exit $create_py_rc

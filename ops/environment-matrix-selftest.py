@@ -120,7 +120,16 @@ def main() -> int:
     check("4b. every route the Worker serves is named in the matrix",
           served_prod <= declared_prod,
           "served but undeclared: " + ", ".join(sorted(served_prod - declared_prod)))
-    check("4c. staging declares no domain, and wrangler gives it none",
+    product_domains = envs["production"].get("product_domains", [])
+    product_hosts = {item.get("hostname") for item in product_domains if isinstance(item, dict)}
+    check("4c. the DoctorCRE app host belongs to the independent product Worker",
+          product_domains == [{
+              "hostname": "app.doctorcre.com",
+              "worker": "doctorcre-app",
+              "repository": "jbookout/doctorcre-app",
+          }] and not (product_hosts & served_prod),
+          "app.doctorcre.com must be declared for doctorcre-app and absent from carr-mcp routes")
+    check("4d. staging declares no domain, and wrangler gives it none",
           not envs["staging"]["domains"] and not stg_cfg.get("routes"))
 
     # ── 5 ────────────────────────────────────────────────────────────────────

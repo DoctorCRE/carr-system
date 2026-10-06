@@ -14,17 +14,17 @@ new person.
 
 - **42** name-identical lead/client pairs sit on **different** parties.
 - **0** parties hold more than one role. Not a coincidence — it is the mechanism.
-- Dr. Erik Petersen is party `909881e7…` as lead L-201 and party `60346cc2…` as client
-  C-126. Dr. Randolph Brown likewise. Same humans, two identity rows each.
-- Derrick Richardson is `V-MSC-005` **and** `L-102`, on two parties. One person in 665
+- Dr. Marcus Whitfield is party `909881e7…` as lead L-201 and party `60346cc2…` as client
+  C-126. Dr. Daniel Osei likewise. Same humans, two identity rows each.
+- Owen Feld is `V-MSC-005` **and** `L-102`, on two parties. One person in 665
   wears two roles, and the model cannot express it.
 
 Three symptoms already logged separately are this one bug:
 
 | Symptom | Actually |
 |---|---|
-| Duplicate parties (Beasley, Weiler, Petersen, Zimmern, Hughes, Tyrer) | What conversion *does* |
-| `find Zimmern` returns `deals: []` while a deal exists | Deal hangs off the client party; search found the lead party |
+| Duplicate parties (Castillo, Sorbara, Whitfield, Halvorsen, Ferris, Okafor) | What conversion *does* |
+| `find Halvorsen` returns `deals: []` while a deal exists | Deal hangs off the client party; search found the lead party |
 | Capture coverage ~5% | Touches split across parties that do not know about each other |
 
 Joe's framing was that records get "boxed in by L-163". The ref is the symptom; identity
@@ -56,7 +56,7 @@ active client`, …). Two axes beat that on three counts:
    is "aligned" while his lead stage is "outreach active". Two axes can.
 3. **Cannot drift.** The vendor Y is derived from the vendor record existing, so marking
    someone a vendor *is* creating their vendor record. A typed flag would be one more field
-   able to disagree with reality — exactly the Tubbs fault (0045), where `drip_campaign`
+   able to disagree with reality — exactly the Whitley fault (0045), where `drip_campaign`
    said one thing while three other fields said another.
 
 **Past client implies prospect — by DEFAULT, not automatically.** Joe: *"if a deal ended
@@ -106,8 +106,8 @@ Order matters, and each step is verifiable before the next.
    requires this in the SAME migration as the dedup, because both touch the party layer
    and doing them apart means a second window where they disagree.
 4. **Merge the 42 pairs — LAST, and one at a time.** `confirm-merge` is human-gated by
-   design. This system merged the wrong Beasley once (an import welded Jenna Beasley to
-   Jeff Beasley DMD; corrected within the hour, Jeff now L-158). Never match on name:
+   design. This system merged the wrong Castillo once (an import welded Jenna Castillo to
+   Jeff Castillo, DMD; corrected within the hour, Jeff now L-158). Never match on name:
    0044's guard had to learn that even a name comparison needs parentheticals stripped
    before it means anything.
 
@@ -138,16 +138,16 @@ Three facts, all held properly elsewhere, frozen into a string that cannot updat
 because they are already tagged as a vendor in the database and they already have a unique
 id 'P-#'."*
 
-**Proven the same afternoon.** Chris Kelly was recorded as `V-CPA-006` and is a financial
+**Proven the same afternoon.** Chris Kellan was recorded as `V-CPA-006` and is a financial
 advisor. Adding the category took one row — the ref-table design working as intended — and
 his ref still reads CPA. **227 vendor refs encode a category that can now change beneath
 them.**
 
 `L-` and `C-` fail the same way, and Joe found that first: *"whats the point of having an L
-tag once you've progressed to a client?"* `L-201` asserts "Petersen is a lead"; `C-126`
-asserts "Petersen is a client". Both are the SAME relationship at different stages, which is
+tag once you've progressed to a client?"* `L-201` asserts "Whitfield is a lead"; `C-126`
+asserts "Whitfield is a client". Both are the SAME relationship at different stages, which is
 why the ten merges each produced one person holding two refs. `V-` survives a merge with a
-lead because vendor genuinely IS a separate relationship — Derrick Richardson is a vendor and
+lead because vendor genuinely IS a separate relationship — Owen Feld is a vendor and
 a lead simultaneously. Lead and client can never coexist.
 
 That asymmetry is the tell: `lead` and `client` are two tables for one journey, and the
@@ -159,9 +159,9 @@ duplicate parties were the symptom.
 breaking an ID:
 
 ```
-P-0603 · Justin Dansby        · Vendor  · Financial Advisor · Established
-P-0425 · Dr. Erik Petersen    · Client
-P-0355 · Derrick Richardson   · Vendor + Lead · Supply
+P-0603 · Justin Danforth        · Vendor  · Financial Advisor · Established
+P-0425 · Dr. Marcus Whitfield    · Client
+P-0355 · Owen Feld   · Vendor + Lead · Supply
 ```
 
 - **journey stage** (lead / prospect / client / past_client) — an attribute of the person
@@ -188,7 +188,7 @@ Bigger than any single migration done on 2026-08-02, and it should not be improv
 
 1. **Enrichment first.** Thursday's routine gathers email and cell, which is the second
    signal the 32 remaining name-only pairs need. Merging on a name alone is how the wrong
-   Beasley got merged.
+   Castillo got merged.
 2. **Then the remaining merges**, one at a time through `confirm-merge`.
 3. **Then collapse `lead` + `client`** into one relationship record carrying a stage.
 4. **Then retire the refs**, with the alias table landing in the same migration.

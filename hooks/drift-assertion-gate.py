@@ -50,6 +50,26 @@ hook that blocks the same reply forever is a session that cannot end. The first
 block hands over the matching rulings; if the same claim comes back, the session
 has read them and the call is now its own.
 
+THE IDENTITY OF "THE SAME CLAIM" IS THE RULINGS, NOT THE WORDING (2026-08-23).
+It used to be a sha256 of the exact prose, and that failed live during the
+gates-audit council's own sitting: the chair sent a reply, was held here, read
+the rulings, sent a narrower reply — and was held a SECOND time, because one
+word had changed ("regression") and a text hash cannot tell a restatement from a
+new finding. It then had to compose a third reply engineered not to match the
+detector, which is a gate teaching evasion rather than reading. The identity is
+now the SET OF RULINGS the claim matched, through hooks/stop_latch.py: those are
+what the block hands over, so a session that has been handed them once has been
+handed them. Different rulings are a different finding and still block. This is
+Joe's 2026-08-15 ruling in its Stop form — remember what was already said rather
+than widening or narrowing the matcher.
+
+THIS GATE KEEPS ITS REOPEN. Joe's 2026-08-23 Stop-gate rationing cut eleven
+reopeners to three, and this is one of them, with the other two being core
+conduct and completion-evidence. It earns it on the record the docstring opens
+with: this is the most frequent failure class the system has, most of it caught
+by Joe rather than by a session, and the next message after this block is the
+RESULT OF WORK — rulings read — rather than a restatement.
+
 IT IS SILENT WHEN NO RULING MATCHES — drift-claim-gate's own rule, inherited
 deliberately: "a drift claim with no matching ruling is probably a real finding."
 Most reports of breakage are true. A gate that fires on all of them is one
@@ -59,7 +79,6 @@ FAILS OPEN ON EVERYTHING ELSE. No transcript, no decision log, an unreadable
 file, an internal error: none may strand a turn.
 """
 
-import hashlib
 import importlib.util
 import json
 import os
@@ -67,11 +86,25 @@ import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-try:                                    # telemetry only — never load-bearing
+# Telemetry routing first (PR #554): the meter decides which stream this
+# process's log line belongs in, and a missing meter must not change a verdict.
+try:
     import hook_meter
-    LOG = hook_meter.guard_log_path(REPO)
-except Exception:                       # a missing meter must not change a verdict
-    LOG = os.path.join(REPO, "out", "hook-guard.log")
+    _GUARD_LOG = hook_meter.guard_log_path(REPO)
+except Exception:
+    _GUARD_LOG = os.path.join(REPO, "out", "hook-guard.log")
+
+# The latch ledger moved into hooks/stop_latch.py, which reads its directory
+# from the environment AT IMPORT. This gate's own long-standing override has to
+# be honoured before that import or every fixture would write into the real
+# out/stop-latch — and out/ is a symlink back to the canonical checkout from
+# every worktree on this Mac, so a fixture run would silence the live gate.
+# CARR_STOP_LATCH_STATE still wins if a caller sets it explicitly.
+if os.environ.get("CARR_DRIFT_ASSERTION_STATE") and not os.environ.get("CARR_STOP_LATCH_STATE"):
+    os.environ["CARR_STOP_LATCH_STATE"] = os.environ["CARR_DRIFT_ASSERTION_STATE"]
+
+from stop_latch import claim_identity, latched, record_fire  # noqa: E402
+LOG = _GUARD_LOG
 STATE = os.environ.get("CARR_DRIFT_ASSERTION_STATE") or os.path.join(
     REPO, "out", "drift-assertion")
 
@@ -130,29 +163,35 @@ def final_assistant_text(path):
     return text
 
 
-def already_raised(claim_text):
-    """True if this exact claim was flagged once already — then stand down.
+def already_raised(session, hits):
+    """True if THIS SET OF RULINGS has already been put in front of the session.
 
-    Keyed on the claim's own text so a session that revises genuinely gets a
-    fresh judgement, while one that re-sends the same words is not held twice.
+    The identity is the rulings, not the sentence that surfaced them — see the
+    docstring. Keying on prose let one changed word re-open a finding the
+    session had already read and acted on, twice in one sitting.
+
+    Marks it raised as it reads, so the caller speaks once and the next reply
+    carrying the same rulings passes. Fails open through stop_latch: if the
+    ledger cannot be read or written, this returns False and the gate speaks,
+    which is the safe direction for a check whose whole value is speaking.
     """
-    digest = hashlib.sha256(claim_text.encode("utf-8", "replace")).hexdigest()[:20]
-    marker = os.path.join(STATE, f"{digest}.seen")
-    if os.path.exists(marker):
+    identity = claim_identity("drift-assertion-gate", "governed-drift-claim",
+                              [line for _, line in hits])
+    if latched(session, identity):
         return True
-    try:
-        os.makedirs(STATE, exist_ok=True)
-        with open(marker, "w") as fh:
-            fh.write("1")
-    except Exception:
-        pass                                # cannot record it: speak once, allow next
+    record_fire(session, identity)
     return False
 
 
 def main():
     try:
         payload = json.load(sys.stdin)
-    except Exception:
+    except Exception as exc:
+        # Logged, never silent (2026-09-24). This exit was bare, and when
+        # run-record-gate handed this gate a drained stdin it allowed every
+        # Stop with no trace; drift-claim-gate's ALLOW(parse-error) line is how
+        # the same fault was found there.
+        log(f"ALLOW(parse-error) {exc}")
         sys.exit(0)
     try:
         if (payload.get("hook_event_name") or "Stop") != "Stop":
@@ -174,7 +213,7 @@ def main():
         hits = module.search_decisions(module.salient_tokens(prose))
         if not hits:
             sys.exit(0)                     # no ruling: probably a real finding
-        if already_raised(prose):
+        if already_raised(payload.get("session_id"), hits):
             sys.exit(0)                     # said once; the call is the session's
 
         body = "\n".join(f"  · [{tag}] {line[:300]}" for tag, line in hits)
@@ -195,7 +234,8 @@ def main():
             "you are calling broken, the state was CHOSEN and the finding is either "
             "nothing or a stale prompt to correct instead. If none apply, say so "
             "and send it — a drift claim with no governing ruling is usually real. "
-            "This will not stop you twice on the same words.",
+            "This will not stop you twice over the same rulings, however you word "
+            "the reply, so answer the rulings rather than rewriting around them.",
             file=sys.stderr)
         sys.exit(2)
     except Exception as exc:

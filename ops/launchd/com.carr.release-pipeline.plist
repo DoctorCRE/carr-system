@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  doctrine: scripted-release-pipeline
+
+  com.carr.release-pipeline: release what merged to main, by script.
+
+  Decisions 17ef11fa and b729859d (2026-09-24): release is script-triggered.
+  Every minute this ticks ops/release-pipeline.py, which compares each
+  lane's origin/main with the last SHA it released (out/release-pipeline/
+  state.json) and, when the batch touches release paths, runs the same
+  sanctioned command sequence the manual Worker release ran on 2026-09-23 and
+  2026-09-24, from a detached worktree at the exact SHA, with stdin closed.
+  The DoctorCRE app lane runs the credential-free scripts/prepare-release.mjs
+  and then scripts/release-production.mjs (deploy credential only) the same way.
+
+  A LAUNCH AGENT, NOT A MODEL SESSION (PROP-010's ruling; see
+  com.carr.calendar-eventkit.plist). Production credentials are read by the
+  release scripts from the files they already read; no session ever holds
+  them. A failure stops the lane, records the step and its log, and enqueues
+  a repo-write Model Room diagnosis session that can only fix forward by PR.
+
+  RISK: RED — it deploys production. Stop it without a commit by creating
+  ~/.config/carr/release-pipeline.off, or set "enabled": false in
+  ops/config/release-pipeline.v1.json. A second tick while one is running is
+  a no-op (flock).
+
+  INSTALLING IT IS A DELIBERATE HUMAN ACT, and there is no installer script on
+  purpose: a bin/install-*.sh is an external-admin ingress that would need a
+  SCAC registry successor, and turning on autonomous production release should
+  be a conscious step anyway. From the canonical checkout, after reading the
+  dry run (ops/release-pipeline.py with its dry-run flag):
+    sed "s|{{REPO}}|$PWD|g" ops/launchd/com.carr.release-pipeline.plist \
+      > ~/Library/LaunchAgents/com.carr.release-pipeline.plist
+    plutil -lint ~/Library/LaunchAgents/com.carr.release-pipeline.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.carr.release-pipeline.plist
+  Once installed, ops/config-as-code.py check holds the installed body to this
+  file like every other CARR LaunchAgent.
+
+  RunAtLoad is false on purpose: installing the job must never itself start
+  a production release.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.carr.release-pipeline</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>--heartbeat-interval</string>
+    <string>3600</string>
+    <string>release-pipeline</string>
+    <string>launchd.run</string>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/ops/release-pipeline.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{REPO}}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/opt/node@22/bin:/usr/local/opt/node@22/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- carr-launchd-interval-seconds: 60 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Minute</key><integer>1</integer></dict>
+    <dict><key>Minute</key><integer>2</integer></dict>
+    <dict><key>Minute</key><integer>3</integer></dict>
+    <dict><key>Minute</key><integer>4</integer></dict>
+    <dict><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Minute</key><integer>6</integer></dict>
+    <dict><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Minute</key><integer>8</integer></dict>
+    <dict><key>Minute</key><integer>9</integer></dict>
+    <dict><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Minute</key><integer>11</integer></dict>
+    <dict><key>Minute</key><integer>12</integer></dict>
+    <dict><key>Minute</key><integer>13</integer></dict>
+    <dict><key>Minute</key><integer>14</integer></dict>
+    <dict><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Minute</key><integer>16</integer></dict>
+    <dict><key>Minute</key><integer>17</integer></dict>
+    <dict><key>Minute</key><integer>18</integer></dict>
+    <dict><key>Minute</key><integer>19</integer></dict>
+    <dict><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Minute</key><integer>21</integer></dict>
+    <dict><key>Minute</key><integer>22</integer></dict>
+    <dict><key>Minute</key><integer>23</integer></dict>
+    <dict><key>Minute</key><integer>24</integer></dict>
+    <dict><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Minute</key><integer>26</integer></dict>
+    <dict><key>Minute</key><integer>27</integer></dict>
+    <dict><key>Minute</key><integer>28</integer></dict>
+    <dict><key>Minute</key><integer>29</integer></dict>
+    <dict><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Minute</key><integer>31</integer></dict>
+    <dict><key>Minute</key><integer>32</integer></dict>
+    <dict><key>Minute</key><integer>33</integer></dict>
+    <dict><key>Minute</key><integer>34</integer></dict>
+    <dict><key>Minute</key><integer>35</integer></dict>
+    <dict><key>Minute</key><integer>36</integer></dict>
+    <dict><key>Minute</key><integer>37</integer></dict>
+    <dict><key>Minute</key><integer>38</integer></dict>
+    <dict><key>Minute</key><integer>39</integer></dict>
+    <dict><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Minute</key><integer>41</integer></dict>
+    <dict><key>Minute</key><integer>42</integer></dict>
+    <dict><key>Minute</key><integer>43</integer></dict>
+    <dict><key>Minute</key><integer>44</integer></dict>
+    <dict><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Minute</key><integer>46</integer></dict>
+    <dict><key>Minute</key><integer>47</integer></dict>
+    <dict><key>Minute</key><integer>48</integer></dict>
+    <dict><key>Minute</key><integer>49</integer></dict>
+    <dict><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Minute</key><integer>51</integer></dict>
+    <dict><key>Minute</key><integer>52</integer></dict>
+    <dict><key>Minute</key><integer>53</integer></dict>
+    <dict><key>Minute</key><integer>54</integer></dict>
+    <dict><key>Minute</key><integer>55</integer></dict>
+    <dict><key>Minute</key><integer>56</integer></dict>
+    <dict><key>Minute</key><integer>57</integer></dict>
+    <dict><key>Minute</key><integer>58</integer></dict>
+    <dict><key>Minute</key><integer>59</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>{{REPO}}/out/release-pipeline.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{REPO}}/out/release-pipeline.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

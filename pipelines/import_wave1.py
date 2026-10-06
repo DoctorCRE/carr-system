@@ -6,7 +6,7 @@ Neon BRANCH; the real run happens at freeze against production.
 
 Rules enforced here (addendum/A-series + standing data rules):
   * provenance on every record (record_source), source_row preserved on deals
-  * NO auto-merge (Garabadian): parties reuse ONLY on exact-email match
+  * NO auto-merge (Hovanian): parties reuse ONLY on exact-email match
     within this import; everything fuzzier lands in the dup-candidate report
   * the placeholder phone 205-643-6555 is never stored as a contact
   * unknown vocab (stages, phases, deal types) is INSERTED and REPORTED,

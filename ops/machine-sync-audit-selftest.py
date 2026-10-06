@@ -14,12 +14,19 @@ failure of 2026-08-19 wearing a different hat.
 import importlib.util
 import json
 import os
+import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AUDIT = os.path.join(REPO, "ops", "machine-sync-audit.py")
+# The repository's one fixture scrubber removes every Git location/config
+# override that could redirect a throwaway commit into the invoking checkout.
+from git_env import fixture_env  # noqa: E402
+
 # (label, passed, detail)
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -70,17 +77,60 @@ def main():
     py = os.path.join(REPO, ".venv", "bin", "python")
     py = py if os.path.exists(py) else sys.executable
 
-    # SNAPSHOT BEFORE, so the read-only check below compares like with like.
-    # See the comment on that check for what the single after-only reading cost.
-    def tracked_status():
+    # Run the exact audit bytes from an isolated tracked fixture. The gates pool
+    # deliberately runs selftests concurrently, so a status snapshot of REPO
+    # would also observe another test's temporary mutation and misattribute it
+    # to this audit.
+    git_fixture_env = fixture_env()
+
+    def tracked_status(repo):
         out = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
-                             capture_output=True, text=True, cwd=REPO).stdout
-        return [ln for ln in out.splitlines() if "machine-sync-audit" not in ln]
+                             capture_output=True, text=True, cwd=repo, check=True,
+                             env=git_fixture_env).stdout
+        return out.splitlines()
 
-    before = tracked_status()
+    def exercise_isolated_audit():
+        with tempfile.TemporaryDirectory() as fixture_dir:
+            fixture_repo = pathlib.Path(fixture_dir)
+            fixture_ops = fixture_repo / "ops"
+            fixture_ops.mkdir()
+            fixture_audit = fixture_ops / "machine-sync-audit.py"
+            shutil.copy2(AUDIT, fixture_audit)
+            fixture_sentinel = fixture_repo / "requirements.txt"
+            fixture_sentinel.write_text("fixture remains unchanged\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=fixture_repo, check=True,
+                           env=git_fixture_env)
+            subprocess.run(["git", "add", "ops/machine-sync-audit.py", "requirements.txt"],
+                           cwd=fixture_repo, check=True, env=git_fixture_env)
+            subprocess.run(
+                ["git", "-c", "user.name=fixture", "-c", "user.email=fixture@invalid",
+                 "commit", "-q", "-m", "fixture"],
+                cwd=fixture_repo, check=True, env=git_fixture_env,
+            )
+            before = tracked_status(fixture_repo)
+            result = subprocess.run(
+                [py, fixture_audit, "--json"], capture_output=True, text=True,
+                cwd=fixture_repo, timeout=300, env=git_fixture_env,
+            )
+            after = tracked_status(fixture_repo)
+            changed = sorted(set(after) - set(before)) + sorted(set(before) - set(after))
 
-    p = subprocess.run([py, AUDIT, "--json"], capture_output=True, text=True,
-                       cwd=REPO, timeout=300)
+            # Keep the detector itself honest: the same isolated snapshot must
+            # notice a subprocess that writes one of its tracked files.
+            mutator = fixture_repo / "mutator.py"
+            mutator.write_text(
+                "from pathlib import Path\nPath('requirements.txt').write_text('mutated\\n')\n",
+                encoding="utf-8",
+            )
+            before_mutation = tracked_status(fixture_repo)
+            subprocess.run([py, mutator], cwd=fixture_repo, check=True,
+                           env=git_fixture_env)
+            after_mutation = tracked_status(fixture_repo)
+            detected = sorted(set(after_mutation) - set(before_mutation)) + sorted(
+                set(before_mutation) - set(after_mutation))
+            return result, changed, detected
+
+    p, changed, detected = exercise_isolated_audit()
     check("the audit exits 0 without --strict", p.returncode == 0, f"rc={p.returncode}")
     try:
         data = json.loads(p.stdout)
@@ -113,10 +163,10 @@ def main():
     # The diff is the claim. Comparing the two snapshots proves the audit is
     # read-only whatever else is in flight, and it still catches the real
     # regression: an audit that writes a tracked file shows up as a new line.
-    after = tracked_status()
-    changed = sorted(set(after) - set(before)) + sorted(set(before) - set(after))
     check("the audit changes nothing on the machine", not changed,
           f"the audit altered: {changed[:3]}")
+    check("the read-only detector catches a tracked mutation",
+          detected == [" M requirements.txt"], f"observed {detected}")
 
     failed = sum(1 for _, ok, _ in RESULTS if not ok)
     print(f"\nmachine-sync-audit-selftest: {len(RESULTS) - failed}/{len(RESULTS)} passed")

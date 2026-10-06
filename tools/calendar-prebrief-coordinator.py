@@ -24,6 +24,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlsplit
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.machine_prerequisites import openssl_executable  # noqa: E402
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -171,7 +173,7 @@ def verify_envelope(value: Mapping[str, Any], public_key: Path, contract: Mappin
         else:
             os.write(write_fd, signature)
         os.close(write_fd)
-        verified = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public_key), "-rawin", "-in", input_path, "-sigfile", signature_path], input=input_data, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=tuple(item for item in (read_fd, payload_fd, signature_fd) if item >= 0), check=False)
+        verified = subprocess.run([openssl_executable(), "pkeyutl", "-verify", "-pubin", "-inkey", str(public_key), "-rawin", "-in", input_path, "-sigfile", signature_path], input=input_data, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=tuple(item for item in (read_fd, payload_fd, signature_fd) if item >= 0), check=False)
     finally:
         try: os.close(read_fd)
         except OSError: pass
@@ -186,7 +188,19 @@ def verify_envelope(value: Mapping[str, Any], public_key: Path, contract: Mappin
     return raw, {"collector_key_fingerprint": fingerprint, "signature_sha256": hashlib.sha256(signature).hexdigest(), "collector_version": version}
 
 
-def _snapshot_from_raw(payload: Mapping[str, Any], sponsor: str, resolve) -> dict[str, Any]:
+def attendee_key(email: str) -> str:
+    """Opaque, stable id for an attendee the record does not know (never the address)."""
+    return hashlib.sha256(("attendee\0" + email.strip().lower()).encode("utf-8")).hexdigest()
+
+
+def _snapshot_from_raw(payload: Mapping[str, Any], sponsor: str, resolve, unknown: set[str] | None = None) -> dict[str, Any]:
+    """Build the DB-bound snapshot; unresolved outside attendees go to ``unknown``.
+
+    ``resolve`` returns a ref, None for an address no party row carries
+    (skipped and counted, migration 0735), or raises for any known identity
+    that is not exactly one live party with exactly one live ref (ambiguous,
+    tombstoned or ref-less), which still refuses the snapshot.
+    """
     if set(payload) != {"version", "window", "observed_calendars", "events"} or payload.get("version") != 1 or not isinstance(payload.get("events"), list):
         raise Refusal("collector payload has an unsupported shape")
     if not isinstance(payload.get("window"), dict) or set(payload["window"]) != {"starts_at", "ends_at"} or not isinstance(payload.get("observed_calendars"), list):
@@ -205,6 +219,11 @@ def _snapshot_from_raw(payload: Mapping[str, Any], sponsor: str, resolve) -> dic
                 raise Refusal("collector attendee address is malformed")
             if not email.lower().endswith("@carr.us"):
                 ref = resolve(email)
+                if ref is None:
+                    if unknown is None:
+                        raise Refusal("resolver found no contact and no unknown-attendee sink was given")
+                    unknown.add(attendee_key(email))
+                    continue
                 if not isinstance(ref, str) or not REF.fullmatch(ref):
                     raise Refusal("resolver returned an invalid canonical ref")
                 refs.add(ref)
@@ -317,7 +336,8 @@ def child_execute(*, sponsor: str, mode: str, claim: Mapping[str, Any], profile:
     raw, evidence = verify_envelope(_capture(contract), public_key, contract)
     def resolve(email: str) -> str:
         return _call(resolver_dsn, f"carr_calendar_prebrief_resolver_{sponsor}", "select ops.resolve_calendar_prebrief_email_ref(%s)", (email,))
-    snapshot = _snapshot_from_raw(raw, sponsor, resolve)
+    unknown: set[str] = set()
+    snapshot = _snapshot_from_raw(raw, sponsor, resolve, unknown)
     bridge_spec = importlib.util.spec_from_file_location("calendar_prebrief_ingest", Path(__file__).with_name("calendar-prebrief-ingest.py"))
     assert bridge_spec and bridge_spec.loader
     bridge = importlib.util.module_from_spec(bridge_spec)
@@ -334,7 +354,26 @@ def child_execute(*, sponsor: str, mode: str, claim: Mapping[str, Any], profile:
         receipt = _call(ingest_dsn, ingest_identity, "select (ops.ingest_calendar_prebrief_projection(%s,%s,%s,%s)).id", (claim["job_id"], claim["lease"], observed, events))
     else:
         receipt = _call(ingest_dsn, ingest_identity, "select (ops.ingest_calendar_prebrief_canary_projection(%s,%s,%s,%s,%s)).id", (claim["job_id"], claim["lease"], contract["destination"], observed, events))
-    return {"sponsor": sponsor, "mode": mode, "attestation_id": str(attestation), "receipt_id": str(receipt)}
+    return {"sponsor": sponsor, "mode": mode, "attestation_id": str(attestation), "receipt_id": str(receipt),
+            "unknown_attendees": unknown_report(unknown)}
+
+
+UNKNOWN_KEYS_CAP = 64
+
+
+def unknown_report(keys: set[str]) -> dict[str, Any]:
+    """Count plus pseudonymous ids of skipped attendees (confirmable by anyone
+    holding the address, never reversible without it); bounded so stdout stays small."""
+    ordered = sorted(keys)
+    return {"count": len(ordered), "attendee_keys": ordered[:UNKNOWN_KEYS_CAP]}
+
+
+def _valid_unknown_report(value: Any) -> bool:
+    return (isinstance(value, dict) and set(value) == {"count", "attendee_keys"}
+            and type(value["count"]) is int and value["count"] >= 0
+            and isinstance(value["attendee_keys"], list)
+            and len(value["attendee_keys"]) == min(value["count"], UNKNOWN_KEYS_CAP)
+            and all(isinstance(k, str) and HEX64.fullmatch(k) for k in value["attendee_keys"]))
 
 
 def parent_execute(*, sponsor: str, mode: str, claim_command: str, child_profile: Path, public_key: Path, environ: Mapping[str, str], include_claim: bool = False, after_claim: Callable[[dict[str, str]], None] | None = None) -> dict[str, Any]:
@@ -379,7 +418,9 @@ def parent_execute(*, sponsor: str, mode: str, claim_command: str, child_profile
         result = json.loads(child.stdout)
     except json.JSONDecodeError as exc:
         raise Refusal("sponsor child returned malformed result") from exc
-    if not isinstance(result, dict) or set(result) != {"sponsor", "mode", "attestation_id", "receipt_id"}:
+    if (not isinstance(result, dict)
+            or set(result) != {"sponsor", "mode", "attestation_id", "receipt_id", "unknown_attendees"}
+            or not _valid_unknown_report(result["unknown_attendees"])):
         raise Refusal("sponsor child returned malformed result")
     return {"claim": claim, "result": result} if include_claim else result
 

@@ -25,7 +25,7 @@ router file today and this importer runs both of them:
      file's, verbatim.
   2. The promotion dedupe gate (pipelines/lead-promote.py). Exact email match,
      lowercased, against every registry, roster and deal email — "name alone
-     misses the spelling drift this vault is full of (Brielmayer/Breilmayer,
+     misses the spelling drift this vault is full of (Kleinmeyer/Kleinmayer,
      Lindsay/Lindsey, Connor/Conner)".
 
 ONE DELIBERATE SOFTENING, ruled by the Wave 3 design: the radar suppressor DROPS
@@ -47,10 +47,10 @@ source semantics verbatim):
       failing quietly, which is the one failure this order cannot ship.
 
  (ii) The contact rule reads first = cn[0] and last = cn[-1] of the registry
-      name. That is exact for "Doron Bresler" and wrong for the shapes this data
+      name. That is exact for "Dorian Brenner" and wrong for the shapes this data
       actually holds: "Lawrence and Lawrence" yields first == last == "lawrence",
-      matching all 16 router rows containing that surname; "Lisa Blady (Gameday
-      Men's Health)" yields last = "health"; "Sara Randall-MacDonnell, ARNP"
+      matching all 16 router rows containing that surname; "Lisa Bexley (Gameday
+      Men's Health)" yields last = "health"; "Sara Holt-Mackenzie, ARNP"
       yields last = "arnp". Three guards, each the original's own intent applied
       at the other end of the string: parentheticals are stripped before parsing,
       trailing credentials are dropped exactly as leading honorifics already are,

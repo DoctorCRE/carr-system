@@ -25,6 +25,7 @@ import json
 import os
 import re
 import sys
+from datetime import date, datetime
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 INTERNAL = ("@carr.us",)
@@ -37,12 +38,13 @@ PERSONAL_HINTS = ("birthday", "haircut", "back to school", "church", "fountain",
                   "anniversary", "pto", "out of office")
 
 
-ATTENDEES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                         "out", "calendar-attendees.json")
+ATTENDEES = os.path.join(os.environ.get("CARR_CALENDAR_OUTPUT_ROOT", os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "out")),
+    "calendar-attendees.json")
 
 
 def load_local_attendees():
-    """title|YYYY-MM-DD -> [emails], exported from the LOCAL calendar store.
+    """Read the capture's atomically published local-store snapshot.
 
     THE INGEST FEED CANNOT SUPPLY THIS. Microsoft strips ATTENDEE from the published
     feed, so 50 of the 52 untriaged rows carry no addresses at all — only the two
@@ -60,16 +62,38 @@ def load_local_attendees():
 def emails_in(event, local=None):
     """Every address the event mentions, deduplicated, lowercased.
 
-    Reads the payload text AND the local-store export, joined on title+date. The
-    join is title+date rather than uid because the feed's uid and the local store's
-    identifier are different namespaces; title+date is what actually lands.
+    V2 joins title and the aware start instant so same-title meetings stay
+    separate. All-day feed dates retain embedded addresses but cannot join a
+    timed snapshot instant. Legacy title/day snapshots remain readable during
+    the upgrade.
+    Feed UIDs and EventKit identifiers occupy different namespaces.
     """
     blob = " ".join(str(event.get(k) or "") for k in
                     ("description", "organizer", "summary", "location"))
     extra = []
     if local:
-        key = f"{(event.get('summary') or '').strip()}|{(event.get('starts_at') or '')[:10]}"
-        extra = local.get(key, [])
+        title = (event.get("summary") or "").strip()
+        start = event.get("starts_at") or ""
+        if local.get("schema") == "calendar-events/v2":
+            if not isinstance(local.get("events"), list):
+                raise ValueError("invalid calendar event snapshot")
+            if start:
+                if event.get("all_day") is True and re.fullmatch(r"\d{4}-\d{2}-\d{2}", start):
+                    # DATE values have no instant; do not invent a timezone or
+                    # borrow attendees from a same-title timed meeting.
+                    date.fromisoformat(start)
+                else:
+                    instant = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                    if instant.tzinfo is None:
+                        raise ValueError("calendar ingest start must have a timezone")
+                    for row in local["events"]:
+                        captured = datetime.fromisoformat(row["start_at"].replace("Z", "+00:00"))
+                        if captured.tzinfo is None:
+                            raise ValueError("calendar snapshot start must have a timezone")
+                        if row["title"].strip() == title and captured == instant:
+                            extra.extend(row["emails"])
+        else:
+            extra = local.get(f"{title}|{start[:10]}", [])
     out = []
     for e in EMAIL_RE.findall(blob) + list(extra):
         e = e.lower().strip(".")

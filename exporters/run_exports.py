@@ -3,7 +3,7 @@
 Draft by default; CARR_EXPORT_LIVE=1 activates vault paths (cutover only).
 """
 import argparse, os, sys
-from .common import run_export
+from .common import EXPORT_HOME, LIVE, run_export, wait_for_provider
 from .targets import TARGETS
 
 def select(only):
@@ -68,12 +68,51 @@ def main():
         targets = {k: v for k, v in targets.items() if k not in dropped}
         if not targets:
             sys.exit(0)
+    # ONE WAIT FOR A CONDITION ALL SIX SHARE. keep_generation() reads each
+    # target's PREVIOUS copy out of OneDrive, and on this Mac those copies are
+    # cloud-only, so every target needs the File Provider to be up. Waiting per
+    # target spends six sequential 23.5s budgets on one shared outage and
+    # reports six tracebacks for a single cause; waiting here spends one budget
+    # and reports its observations. An exhausted budget does NOT abort the sweep: each
+    # target still runs and records its own receipt, so a provider that never
+    # wakes produces the same honest per-target failures it does today rather
+    # than a new way for the step to die before it starts.
+    if LIVE:
+        result = wait_for_provider(EXPORT_HOME / rel for rel, _fn in targets.values())
+        if result.cold:
+            names = ", ".join(sorted(path.name for path, _e in result.cold))
+            print(f"[provider] giving up the wait; {len(result.cold)} file(s) still "
+                  f"unreadable ({names}). {result.diagnostic()}. Each target will "
+                  f"now try and report for itself.", file=sys.stderr)
+
     # NOT `all(...)`: it short-circuits, so ONE failing target silently cancels every
     # target after it in dict order. That is exactly what bit on 2026-08-02 — an
     # unbootstrapped decision-history target aborted the whole nightly export sweep and
     # five generated files went stale, while the chain reported only the first failure.
     # Run every target, then fail if any did.
-    results = [run_export(k, rel, fn, bootstrap=a.bootstrap) for k, (rel, fn) in targets.items()]
+    #
+    # AND NOT A BARE COMPREHENSION EITHER, which is how the SAME outcome came back
+    # through a different door on 2026-08-25 through 08-27 (loop #535). run_export
+    # returns False on a failure it HANDLES, but keep_generation() re-raises OSError
+    # once its EDEADLK retry budget is spent — by design, since silently skipping the
+    # dated copy would discard the rollback guarantee. That exception escaped the
+    # comprehension and killed every remaining target. `curriculum` is the first key
+    # in TARGETS and its OneDrive file locks intermittently around the 02:05 window,
+    # so one transiently unreadable file took down all six exports for three nights
+    # and left five receipts stale.
+    #
+    # Catching per target is what makes the comment above TRUE rather than merely
+    # intended: an unhandled error becomes this target's failure, and the sweep goes
+    # on to the next one. Bare `except Exception` is deliberate — the contract here is
+    # blast radius, not diagnosis, and narrowing it to OSError would let the next
+    # unexpected exception type re-open the exact hole this closes.
+    results = []
+    for k, (rel, fn) in targets.items():
+        try:
+            results.append(run_export(k, rel, fn, bootstrap=a.bootstrap))
+        except Exception as e:
+            print(f"[{k}] FAILED (unhandled {type(e).__name__}): {e}", file=sys.stderr)
+            results.append(False)
     failed = [k for k, r in zip(targets, results) if not r]
     if failed:
         print(f"\n{len(failed)} of {len(results)} target(s) FAILED: {', '.join(failed)}")

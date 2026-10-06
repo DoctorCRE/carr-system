@@ -394,8 +394,29 @@ def main():
     # prohibits a nameless handoff — a constraint by construction, like
     # 937252fb before it, so no manifest row, only this total following the
     # store.
+    # constraint 76 -> 75, procedure 78 -> 79 on 2026-08-27 (WR-000019 slice
+    # S4), when rule fb110a39 was reassigned from deny_gate to surfacing:
+    # hooks/delegation-gate.py stopped denying anything (see
+    # ops/config/rule-enforcement-map.json's note on this rule), so it no
+    # longer binds as a governed refusal the compiler must type "constraint"
+    # (enforcement_class in {deny_gate, schema, stop_gate}) — it is a session
+    # rail that surfaces a reminder, exactly the shape the compiler types
+    # "procedure" for any enforcement_class == "surfacing" rule, the same
+    # transition 3fa422b7 made on 2026-08-23.
+    # constraint 75 -> 73, procedure 79 -> 73, doctrine 13 -> 12, rubric
+    # 37 -> 36, preference 12 -> 11 on 2026-08-27 (WR-000019 rule-retirement
+    # batch, 11 ids retired): e065aa82 (deny_gate) and 937252fb (stop_gate)
+    # each drop one constraint; 14e0408b, 3fa422b7, 581cb3fe, 634a2d94,
+    # 75c2e4c9, and dff58fef (all surfacing) each drop one procedure;
+    # d367188d (doctrine), 8117b414 (rubric), and 006a7eaa (preference) --
+    # the three retired judgment_ambient ids -- each drop one of their
+    # manifest-declared type. No rule was reclassified; every dropped count
+    # is a whole rule leaving the active set, not a type change.
+    # procedure 77 -> 78 on 2026-09-29: rule ede4b241 (cloud model choice) is a
+    # judgment_ambient rule and owes a manifest row (procedure); one whole rule
+    # ENTERING the active set, nothing reclassified.
     reviewed_counts = {
-        "constraint": 76, "procedure": 78, "doctrine": 13, "rubric": 37,
+        "constraint": 70, "procedure": 78, "doctrine": 12, "rubric": 35,
         "preference": 12, "precedent": 3, "example": 0,
     }
     split_compile_pass = (
@@ -433,7 +454,7 @@ def main():
         "source_manifest_provenance": {
             "path": "audits/guidance-migration-manifest.v1.tsv", "sha256": "a" * 64,
             "manifest": "carr-guidance-migration", "schema_version": "1.0.0",
-            "source_classification": "judgment_ambient", "entry_count": 93,
+            "source_classification": "judgment_ambient", "entry_count": 94,
         },
         "base_inventory": {
             "path": "ops/config/rule-enforcement-map.json", "sha256": "b" * 64,
@@ -462,7 +483,22 @@ def main():
         # manifest entry_count above moves with the TSV that feeds it.
         # 217 -> 218 on 2026-08-23 with rule 3fa422b7, one compiled item.
         # 218 -> 219 on 2026-08-24 with rule 6cfb67f5, one compiled item.
-        and len(activation_manifest["entries"]) == 219
+        # 219 -> 208 on 2026-08-27 (WR-000019 rule-retirement batch): 11
+        # rules left the active set (no splits among them), one compiled
+        # item fewer each. Manifest entry_count above moves 93 -> 90 in the
+        # same change (3 of the 11 retired ids -- 006a7eaa, 8117b414,
+        # d367188d -- were judgment_ambient rows in the TSV; the other 8
+        # were built classes with no manifest row to begin with).
+        # 90 -> 91 and 208 -> 209 on 2026-09-03 (WR-000048 activation unblock):
+        # rule 1fcaa63a, the heavy-build-protocol rule taught 2026-09-01, was
+        # added to the enforcement map as judgment_ambient, so it owes a
+        # manifest row (procedure) and compiles to one more guidance item.
+        # procedure 73 -> 74. Nothing was reclassified; this is one whole rule
+        # ENTERING the active set, the mirror of the 2026-08-27 retirement batch.
+        # Current map tracks the live active rule set; retired rows leave the manifest.
+        # Historical 209 -> 211 on 2026-09-05: the isolated-delivery and create-missing-
+        # verbs rules are both session rails, so each compiles as one procedure.
+        and len(activation_manifest["entries"]) == len(reviewed_registry["items"])
         and registry.activation_manifest_bytes(activation_manifest).endswith(b"\n")
         and len(registry.activation_manifest_sha256(activation_manifest)) == 64
         and registry.activation_manifest_sha256(activation_manifest)

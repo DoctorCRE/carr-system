@@ -124,7 +124,9 @@ used to say they were "ordinary files you write directly", which contradicted li
 same file. Line 143 was right.
 
 What you DO write by hand is the saved intake itself: `DNA/Clients/prospects/<name>-intake.md`.
-That one is not generated and is not blocked. Everything that belongs on the record — identity
+That one is not generated and is not blocked. **When a file for this name is already on disk, open
+it and merge new material into what is there.** Re-running intake on the same person is ordinary;
+replacing the file wholesale must not discard what the earlier pass captured. Everything that belongs on the record — identity
 fields, the search brief, findings, next actions — goes through the verbs and renders into the
 dossier on its own.
 

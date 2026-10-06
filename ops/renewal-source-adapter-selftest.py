@@ -12,6 +12,10 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.machine_prerequisites import openssl_executable  # noqa: E402
+
+OPENSSL = openssl_executable()
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +53,7 @@ def signed(rows: list[dict[str, object]], *, key: str, fingerprint: str) -> dict
         payload_file.seek(0)
         payload_fd = payload_file.fileno()
         proc = subprocess.run(
-            ["openssl", "pkeyutl", "-sign", "-inkey", key, "-rawin", "-in", f"/dev/fd/{payload_fd}"],
+            [OPENSSL, "pkeyutl", "-sign", "-inkey", key, "-rawin", "-in", f"/dev/fd/{payload_fd}"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             pass_fds=(payload_fd,),
@@ -86,12 +90,26 @@ def refuses(value: object, profile: object) -> bool:
 
 
 def main() -> int:
+    # EXIT 78 IS "NOT CONFIGURED HERE", NOT A FAILURE — the same narrow guard
+    # ops/calendar-prebrief-collector-selftest.py installed (66144bf0). Apple
+    # ships LibreSSL, which has no Ed25519, and a bare CalledProcessError read
+    # as a red gate no local fix could clear. Minting a throwaway key IS the
+    # question: on any machine with OpenSSL 3 every assertion still runs.
+    with tempfile.TemporaryDirectory() as probe_dir:
+        probe = subprocess.run(
+            [OPENSSL, "genpkey", "-algorithm", "ED25519",
+             "-out", str(Path(probe_dir) / "probe.pem")],
+            capture_output=True, text=True)
+        if probe.returncode != 0:
+            print("NOT CONFIGURED: openssl here cannot mint an Ed25519 key "
+                  "(LibreSSL); this proof needs OpenSSL 3")
+            return 78
     with tempfile.TemporaryDirectory() as raw_tmp:
         tmp = Path(raw_tmp)
         private, public = tmp / "private.pem", tmp / "public.pem"
-        subprocess.run(["openssl", "genpkey", "-algorithm", "Ed25519", "-out", str(private)], check=True,
+        subprocess.run([OPENSSL, "genpkey", "-algorithm", "Ed25519", "-out", str(private)], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["openssl", "pkey", "-in", str(private), "-pubout", "-out", str(public)], check=True,
+        subprocess.run([OPENSSL, "pkey", "-in", str(private), "-pubout", "-out", str(public)], check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         fingerprint = hashlib.sha256(public.read_bytes()).hexdigest()
         profile = adapter.SourceProfile("fixture-provider", fingerprint, public, "postgresql://carr_renewal_source_attestor:fixture@db.example/carr")  # ci-secret-scan: allow -- inert fixture

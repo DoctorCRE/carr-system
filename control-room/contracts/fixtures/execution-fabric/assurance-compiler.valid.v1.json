@@ -1,0 +1,323 @@
+{
+  "schema_version": "assurance-compiler-input.v1",
+  "work_request": {
+    "id": "wr:assurance-kernel",
+    "state_version": 3,
+    "canonical_record_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "accepted_plan_revision": {
+    "id": "plan:assurance-kernel",
+    "revision": 2,
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "engineering_slice_plan": {
+    "schema_version": "engineering-slice-plan.v1",
+    "work_request": {
+      "id": "wr:assurance-kernel",
+      "state_version": 3,
+      "canonical_record_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "accepted_plan_revision": {
+      "id": "plan:assurance-kernel",
+      "revision": 2,
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "plan_digest": "sha256:306ebac5ef16d805847ac5da80500c7f3c139859b8709c96aa34c1f75c15c449",
+    "slices": [
+      {
+        "slice_ref": "slice:contracts",
+        "ordinal": 1,
+        "objective": "Freeze assurance contracts",
+        "definition_of_done": "Schemas are exact and versioned",
+        "dependency_refs": [],
+        "declared_resource_refs": [
+          "resource:assurance-contracts"
+        ],
+        "declared_component_refs": [
+          "component:execution-fabric"
+        ],
+        "declared_plan_step_refs": [
+          "step:phase1-a1"
+        ],
+        "baseline_evidence_refs": [],
+        "planned_checks": [
+          {
+            "check_ref": "check:contracts",
+            "failure_condition": "schema accepts an unknown field",
+            "evidence_requirement": "metadata_only_sufficient"
+          }
+        ],
+        "scope_boundary": "new assurance contract files",
+        "forbidden_change_refs": [
+          "forbidden:migrations"
+        ],
+        "concurrency_posture": "parallel_safe",
+        "manual_qa_required": false,
+        "risk_class": "R1",
+        "release_requirement": "required"
+      },
+      {
+        "slice_ref": "slice:compiler",
+        "ordinal": 2,
+        "objective": "Compile one assurance slice",
+        "definition_of_done": "Compiler emits deterministic non-authorizing manifest or exact refusal",
+        "dependency_refs": [
+          "slice:contracts"
+        ],
+        "declared_resource_refs": [
+          "resource:assurance-compiler"
+        ],
+        "declared_component_refs": [
+          "component:execution-fabric"
+        ],
+        "declared_plan_step_refs": [
+          "step:phase1-a1"
+        ],
+        "baseline_evidence_refs": [],
+        "planned_checks": [
+          {
+            "check_ref": "check:compiler",
+            "failure_condition": "invalid input compiles or refusal loses its causal object",
+            "evidence_requirement": "redacted_evidence_required"
+          }
+        ],
+        "scope_boundary": "pure compiler and focused tests",
+        "forbidden_change_refs": [
+          "forbidden:runtime"
+        ],
+        "concurrency_posture": "serial_after_dependencies",
+        "manual_qa_required": false,
+        "risk_class": "R1",
+        "release_requirement": "required"
+      }
+    ]
+  },
+  "assurance_slice": {
+    "schema_version": "assurance-slice-contract.v1",
+    "contract_digest": "sha256:7a33ccfc64cb18feec9a3b62ba2bdee26610cdfbd0cff1f6f615f24d47691ea0",
+    "ownership_contract_digest": "sha256:1bcd2f0969e5c05b9d46092acc2a8324fb35b47d250a4d6c6e9ef206704a27bf",
+    "work_request": {
+      "id": "wr:assurance-kernel",
+      "state_version": 3,
+      "canonical_record_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "accepted_plan_revision": {
+      "id": "plan:assurance-kernel",
+      "revision": 2,
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "engineering_slice_plan_digest": "sha256:306ebac5ef16d805847ac5da80500c7f3c139859b8709c96aa34c1f75c15c449",
+    "slice_ref": "slice:compiler",
+    "outcome": "One deterministic immutable baseline manifest",
+    "risk": {
+      "risk_class": "R1",
+      "summary": "Repository-only additive contracts and pure code"
+    },
+    "path_claims": [
+      {
+        "path": "tools/room-bridge/assurance_slice_compiler.py",
+        "mode": "file",
+        "operation": "write"
+      },
+      {
+        "path": "tools/test-assurance-slice-compiler.py",
+        "mode": "file",
+        "operation": "write"
+      }
+    ],
+    "forbidden_paths": [
+      {
+        "path": "migrations",
+        "mode": "tree"
+      }
+    ],
+    "dependencies": [
+      {
+        "slice_ref": "slice:contracts",
+        "required_state": "independently_verified"
+      }
+    ],
+    "required_tests": [
+      {
+        "check_ref": "check:compiler",
+        "argv": [
+          "python3",
+          "-m",
+          "pytest",
+          "-q",
+          "tools/test-assurance-slice-compiler.py"
+        ],
+        "cwd": ".",
+        "causal_failure": {
+          "code": "REQUIRED_CHECK_FAILED",
+          "object": "check:compiler",
+          "expected": "invalid input compiles or refusal loses its causal object"
+        },
+        "evidence_fields": [
+          "argv",
+          "commit_sha",
+          "environment",
+          "exit_code",
+          "finished_at",
+          "output_digest",
+          "started_at",
+          "tree_sha"
+        ],
+        "planned_check_digest": "sha256:9c24ba42a8800e13dca584e204200d1680014b57e401ec0959245d6851268327",
+        "runner": "python_pytest",
+        "test_artifact": {
+          "path": "tools/test-assurance-slice-compiler.py",
+          "digest": "sha256:dc8951bd37e2c26e6771ef801e3ae0793096782b032b967754954e82d59636c2"
+        },
+        "environment": {
+          "environment_ref": "environment:repository-python-lock",
+          "runtime": "python3",
+          "version_source": {
+            "path": ".python-version",
+            "digest": "sha256:a876e0b10411037a012498b9fe18d9bc1df32ed8b722a13564dc944ddcfd9135"
+          },
+          "dependency_lock": {
+            "path": "requirements.lock",
+            "digest": "sha256:ffcced64628e7dbd16488972d7de0f4ab18d5e900046cb6f75017a7479f1a5d9"
+          }
+        },
+        "check_profile_ref": "check-profile:assurance-compiler-v1",
+        "environment_gate": {
+          "argv": [
+            "python3",
+            "-c",
+            "import pytest"
+          ],
+          "must_pass_before_test": true,
+          "causal_failure": {
+            "code": "TEST_ENVIRONMENT_NOT_MATERIALIZED",
+            "object": "environment:repository-python-lock",
+            "expected": "pytest importable from requirements.lock"
+          }
+        }
+      }
+    ],
+    "evidence_requirements": [
+      {
+        "evidence_ref": "evidence:test-receipt",
+        "artifact_kind": "artifact:test-receipt",
+        "required_fields": [
+          "argv",
+          "commit_sha",
+          "environment",
+          "output",
+          "timestamps",
+          "toolchain",
+          "tree_sha"
+        ]
+      }
+    ],
+    "reviewer_policy": {
+      "minimum_independent_reviewers": 1,
+      "executor_actor_ref": "actor:builder",
+      "executor_session_ref": "session:a1a",
+      "owner_acceptance_is_review": false,
+      "distinct_actor_and_session": true
+    },
+    "observable_output": {
+      "description": "Manifest hash and exact refusal facts",
+      "evidence_ref": "evidence:manifest"
+    },
+    "rollback": {
+      "strategy": "Revert the additive repository commit",
+      "argv": [
+        "git",
+        "revert",
+        "--no-edit",
+        "COMMIT_SHA"
+      ],
+      "cwd": "tools",
+      "observable_success": "Owned files are absent and prior tests remain green"
+    },
+    "release_class": "repository_only",
+    "unfinished_work": [
+      "Hooks and persistence are separate serial consumers"
+    ],
+    "repository_binding": {
+      "repository_id": "repo:jbookout-carr-system",
+      "commit_sha": "6682368c93100e540aaadf55c8d017fe120127bf",
+      "tree_sha": "e18bec584e2fb93aa8986fe1d8f235c9cc8c4997"
+    },
+    "rule_snapshot_binding": {
+      "snapshot_ref": "rules:phase1-a1",
+      "snapshot_digest": "sha256:7c25910b97315d7aba445db9161d8cdad69ce7bbabb965616834afc8e26a7eed"
+    },
+    "lease_binding": {
+      "lease_id": "lease:a1a",
+      "fencing_generation": 7,
+      "holder_session_id": "session:a1a",
+      "holder_host_id": "host:codex"
+    },
+    "executor_identity": {
+      "actor_ref": "actor:builder",
+      "session_ref": "session:a1a",
+      "host_ref": "host:codex"
+    }
+  },
+  "repository": {
+    "repository_id": "repo:jbookout-carr-system",
+    "commit_sha": "6682368c93100e540aaadf55c8d017fe120127bf",
+    "tree_sha": "e18bec584e2fb93aa8986fe1d8f235c9cc8c4997"
+  },
+  "applicable_rules": {
+    "schema_version": "applicable-rule-snapshot.v1",
+    "snapshot_ref": "rules:phase1-a1",
+    "snapshot_digest": "sha256:7c25910b97315d7aba445db9161d8cdad69ce7bbabb965616834afc8e26a7eed",
+    "rules": [
+      {
+        "rule_ref": "rule:explicit-stage",
+        "revision": 1,
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      {
+        "rule_ref": "rule:independent-review",
+        "revision": 2,
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ]
+  },
+  "coordination_snapshot": {
+    "schema_version": "assurance-coordination-snapshot.v1",
+    "snapshot_digest": "sha256:dc2b9bb4979d2f4b1369a27fa3ec261768287571665c595420046db9de9a856f",
+    "as_of": "2026-08-30T15:00:00Z",
+    "valid_until": "2026-08-30T16:00:00Z",
+    "manifest_phase": "baseline",
+    "requesting_session_id": "session:a1a",
+    "requesting_host_id": "host:codex",
+    "leases": [
+      {
+        "lease_id": "lease:a1a",
+        "state": "active",
+        "holder_session_id": "session:a1a",
+        "holder_host_id": "host:codex",
+        "expires_at": "2026-08-30T16:00:00Z",
+        "fencing_generation": 7,
+        "claims": [
+          {
+            "path": "tools/room-bridge/assurance_slice_compiler.py",
+            "mode": "file",
+            "operation": "write"
+          },
+          {
+            "path": "tools/test-assurance-slice-compiler.py",
+            "mode": "file",
+            "operation": "write"
+          }
+        ]
+      }
+    ],
+    "dependencies": [
+      {
+        "slice_ref": "slice:contracts",
+        "state": "independently_verified",
+        "evidence_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ]
+  },
+  "declared_evaluation_time": "2026-08-30T15:00:01Z"
+}

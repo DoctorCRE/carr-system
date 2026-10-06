@@ -7,6 +7,8 @@ import { PHASES } from './client.js';
 
 const LEASE_TTL_MS = 3000;
 const IDEM_TTL_MS = 60 * 60 * 1000;
+/** The cells patch-deal-field bases on; mirrors the record layer's DEAL_ROOM_FIELDS. */
+const BASED_FIELDS = ['phase', 'owner', 'attention', 'next_date', 'operating_state'];
 
 /**
  * @param {Object} [opts]
@@ -31,20 +33,22 @@ export async function createFixtureClient(opts = {}) {
   // Demonstrate that Salesforce-shaped records are not automatically active
   // transactions. These are fixture-only examples; production is never
   // changed from a surname match.
-  for (const name of ['Collin Myrick', 'Drew Knight', 'Terence Cooper']) {
-    const deal = [...deals.values()].find((item) => item.name === name);
+  // Picked by seed id, not by name: the seed is synthetic (WR-000049) and the
+  // names it carries are placeholders.
+  for (const id of ['d09', 'd19', 'd29']) {
+    const deal = deals.get(id);
     if (deal) Object.assign(deal, { operating_state:'parked', parking_reason:'other',
       parking_note:'Reason not yet classified', parked_at:'2026-08-10T12:00:00Z', parked_by:'joe' });
   }
   // Keep the local demo representative of the production information model:
   // one national-account portfolio, many market deals, no duplicate deal rows.
-  const fixtureAccountId = 'acct-musicologie';
+  const fixtureAccountId = 'acct-cadence-studio';
   let fixtureAccountOwner = 'dell';
   [...deals.values()].slice(0, 5).forEach((d, index) => Object.assign(d, {
     workspace_kind: 'national_account',
     account_client_id: fixtureAccountId,
     account_client_ref: 'C-161',
-    account_name: 'Musicologie',
+    account_name: 'Cadence Studio',
     account_owner: fixtureAccountOwner,
     client_ref: `C-${131 + index}`,
     client_name: d.name,
@@ -147,6 +151,24 @@ export async function createFixtureClient(opts = {}) {
     return e;
   }
 
+  /**
+   * The latest committed event for each editable cell of one deal, as the board
+   * read returns it. Built from the same event log the conflict check consults,
+   * so what a caller sends back as base_event_id is what this client will compare.
+   */
+  function fieldBaseFor(dealId) {
+    const base = {};
+    for (const e of events) {
+      if (e.subject_type !== 'deal' || e.subject_id !== dealId || !e.field) continue;
+      // Only the cells patch-deal-field takes a base for — the record layer's own
+      // DEAL_ROOM_FIELDS. A base for anything else would be meaningless, because
+      // no other field is written through that verb.
+      if (!BASED_FIELDS.includes(e.field)) continue;
+      base[e.field] = { id: e.id, recorded_at: e.recorded_at };
+    }
+    return base;
+  }
+
   function cursorOf(list) {
     if (!list.length) return '0';
     return list[list.length - 1].id;
@@ -238,7 +260,10 @@ export async function createFixtureClient(opts = {}) {
       new_value: value ?? null,
     });
     pushHistory(deal, actor, `${field} ${old ?? '(empty)'} to ${value ?? '(empty)'}`, e.recorded_at);
-    return { status: 'ok', event: e };
+    // The committed event's own identity, named the same way the live answer
+    // names it, so the board advances a cell's base identically in both modes
+    // instead of waiting for the fixture's own changes feed to catch up.
+    return { status: 'ok', event: e, event_id: e.id, event_recorded_at: e.recorded_at };
   }
 
   const client = {
@@ -250,9 +275,12 @@ export async function createFixtureClient(opts = {}) {
       const activeNational = national.filter((d) => d.operating_state === 'active');
       return {
         actor: selfActor,
-        deals: [...deals.values()].map((d) => ({ ...d })),
+        // field_base, the same shape the live read returns: the latest committed
+        // event for each editable cell, from the same pass as the values, so a
+        // first edit has a base here too. A cell with no history has no entry.
+        deals: [...deals.values()].map((d) => ({ ...d, field_base: fieldBaseFor(d.id) })),
         accounts: [{ account_client_id: fixtureAccountId, account_client_ref: 'C-161',
-          account_name: 'Musicologie', account_owner: fixtureAccountOwner, open_deals: activeNational.length,
+          account_name: 'Cadence Studio', account_owner: fixtureAccountOwner, open_deals: activeNational.length,
           attention_deals: activeNational.filter((d) => d.attention).length,
           overdue_deals: 0, stale_deals: 2,
           parked_deals: national.length - activeNational.length, last_review_at: lastCallAt }],
@@ -442,7 +470,7 @@ export async function createFixtureClient(opts = {}) {
           client_name: client || n,
           workspace_kind: lane === 'national' ? 'national_account' : 'team',
           account_client_id: lane === 'national' ? fixtureAccountId : null,
-          account_name: lane === 'national' ? 'Musicologie' : null,
+          account_name: lane === 'national' ? 'Cadence Studio' : null,
         };
         deals.set(id, d);
         const e = pushEvent({
@@ -621,8 +649,8 @@ export async function createFixtureClient(opts = {}) {
      */
     async simulatePartnerCall() {
       const steps = [];
-      const cottis = getDealOrThrow('d05');
-      const petersen = getDealOrThrow('d20');
+      const calloway = getDealOrThrow('d05');
+      const whitfield = getDealOrThrow('d20');
 
       // partner joins
       steps.push({
@@ -638,7 +666,7 @@ export async function createFixtureClient(opts = {}) {
         },
       });
 
-      // partner holds Cottis next_step
+      // partner holds Calloway next_step
       steps.push({
         at: 1500,
         run: () => {
@@ -652,11 +680,11 @@ export async function createFixtureClient(opts = {}) {
         },
       });
 
-      // partner writes Cottis next step (live write, not confirm)
+      // partner writes Calloway next step (live write, not confirm)
       steps.push({
         at: 3300,
         run: () => {
-          const old = cottis.next_step;
+          const old = calloway.next_step;
           if (old && old.trim()) {
             ensureThread('d05').unshift({
               id: `n-${noteSeq++}`,
@@ -666,16 +694,16 @@ export async function createFixtureClient(opts = {}) {
               recorded_at: nowIso(),
             });
           }
-          cottis.next_step = 'Signed! Commencement Oct 1';
-          cottis.next_date = '2026-10-01';
-          cottis.last_touch = nowIso().slice(0, 10);
+          calloway.next_step = 'Signed! Commencement Oct 1';
+          calloway.next_date = '2026-10-01';
+          calloway.last_touch = nowIso().slice(0, 10);
           pushEvent({
             actor: partnerActor,
             verb: 'set-next-step',
             subject_id: 'd05',
             field: 'next_step',
             old_value: old,
-            new_value: cottis.next_step,
+            new_value: calloway.next_step,
           });
           pushEvent({
             actor: partnerActor,
@@ -690,11 +718,11 @@ export async function createFixtureClient(opts = {}) {
         },
       });
 
-      // partner presence on Petersen
+      // partner presence on Whitfield
       steps.push({
         at: 5000,
         run: () => {
-          void petersen;
+          void whitfield;
           const expires = new Date(Date.now() + 8000).toISOString();
           leases.set(`${partnerActor}|d20|next_step`, {
             actor: partnerActor,
@@ -712,14 +740,14 @@ export async function createFixtureClient(opts = {}) {
           pendingConfirms = [
             {
               id: `p-${confirmSeq++}`,
-              label: 'Cottis → phase Closed?',
+              label: 'Calloway → phase Closed?',
               deal_id: 'd05',
               verb: 'patch-deal-field',
               args: { deal: 'd05', field: 'phase', value: 'Closed' },
             },
             {
               id: `p-${confirmSeq++}`,
-              label: 'Tubbs → next step "drop the rate push"?',
+              label: 'Whitley → next step "drop the rate push"?',
               deal_id: 'd23',
               verb: 'set-next-step',
               args: { deal: 'd23', text: 'drop the rate push' },

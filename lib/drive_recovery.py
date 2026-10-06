@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_RECOVERY_VAULT = Path(
-    "/Users/booko/Library/CloudStorage/"
-    "GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI"
+DEFAULT_RECOVERY_VAULT = (
+    Path.home() / "Library" / "CloudStorage"
+    / "GoogleDrive-joe.bookout.carr.us@gmail.com" / "My Drive" / "CARR AI"
 )
 
 

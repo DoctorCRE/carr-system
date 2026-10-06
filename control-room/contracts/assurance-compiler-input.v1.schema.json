@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "carr-assurance-compiler-input-v1",
+  "contract": "carr-assurance-compiler-input",
+  "version": "1.0.0",
+  "x-carr-foundation-revision": "1.1.0",
+  "status": "phase1_contract_foundation_not_deployed",
+  "description": "Read-only input for compiling exactly one canonical Work Request and Engineering Slice. The declared evaluation time proves only internal window consistency; live currentness remains an external gate. Lease, dependency, and rule arrays are set-like and canonicalized by content.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "work_request",
+    "accepted_plan_revision",
+    "engineering_slice_plan",
+    "assurance_slice",
+    "repository",
+    "applicable_rules",
+    "coordination_snapshot",
+    "declared_evaluation_time"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "assurance-compiler-input.v1"
+    },
+    "work_request": {
+      "$ref": "assurance-slice-contract.v1.schema.json#/$defs/WorkBinding"
+    },
+    "accepted_plan_revision": {
+      "$ref": "assurance-slice-contract.v1.schema.json#/$defs/PlanBinding"
+    },
+    "engineering_slice_plan": {
+      "$ref": "engineering-slice-plan.v1.schema.json"
+    },
+    "assurance_slice": {
+      "$ref": "assurance-slice-contract.v1.schema.json"
+    },
+    "repository": {
+      "$ref": "assurance-slice-contract.v1.schema.json#/$defs/Repository"
+    },
+    "applicable_rules": {
+      "$ref": "#/$defs/Rules"
+    },
+    "coordination_snapshot": {
+      "$ref": "#/$defs/Coordination"
+    },
+    "declared_evaluation_time": {
+      "$ref": "#/$defs/Timestamp"
+    }
+  },
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{2,127}$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:[1-9]\\d{3})-(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12]\\d|3[01])|(?:[1-9]\\d{3})-(?:04|06|09|11)-(?:0[1-9]|[12]\\d|30)|(?:[1-9]\\d{3})-02-(?:0[1-9]|1\\d|2[0-8])|(?:(?:[1-9]\\d(?:0[48]|[2468][048]|[13579][26])|(?:[2468][048]|[3579][26])00)-02-29))T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\dZ$"
+    },
+    "Rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_ref",
+        "revision",
+        "digest"
+      ],
+      "properties": {
+        "rule_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "snapshot_ref",
+        "snapshot_digest",
+        "rules"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "applicable-rule-snapshot.v1"
+        },
+        "snapshot_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "snapshot_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "rules": {
+          "type": "array",
+          "uniqueItems": true,
+          "x-carr-set": true,
+          "items": {
+            "$ref": "#/$defs/Rule"
+          }
+        }
+      }
+    },
+    "Lease": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lease_id",
+        "state",
+        "holder_session_id",
+        "holder_host_id",
+        "expires_at",
+        "fencing_generation",
+        "claims"
+      ],
+      "properties": {
+        "lease_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "state": {
+          "enum": [
+            "active",
+            "released"
+          ]
+        },
+        "holder_session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "holder_host_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "fencing_generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "claims": {
+          "type": "array",
+          "uniqueItems": true,
+          "x-carr-set": true,
+          "items": {
+            "$ref": "assurance-slice-contract.v1.schema.json#/$defs/PathClaim"
+          }
+        }
+      }
+    },
+    "Dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slice_ref",
+        "state",
+        "evidence_digest"
+      ],
+      "properties": {
+        "slice_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "completed",
+            "independently_verified"
+          ]
+        },
+        "evidence_digest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Coordination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "snapshot_digest",
+        "as_of",
+        "valid_until",
+        "manifest_phase",
+        "requesting_session_id",
+        "requesting_host_id",
+        "leases",
+        "dependencies"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "assurance-coordination-snapshot.v1"
+        },
+        "snapshot_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "as_of": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "manifest_phase": {
+          "const": "baseline"
+        },
+        "requesting_session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "requesting_host_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "leases": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "x-carr-set": true,
+          "items": {
+            "$ref": "#/$defs/Lease"
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "uniqueItems": true,
+          "x-carr-set": true,
+          "items": {
+            "$ref": "#/$defs/Dependency"
+          }
+        }
+      }
+    }
+  }
+}

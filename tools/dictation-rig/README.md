@@ -30,9 +30,25 @@ page. It does not contain another recorder.
 
 Install or refresh the companion with `bin/install-call-mode.sh`. The installer
 loads `com.carr.call-mode` as a user LaunchAgent and verifies its state endpoint.
-The first connection from `dealroom.doctorcre.com` may trigger Chrome's Local
-Network Access prompt. Allowing it gives that Deal Room origin access to the
-loopback companion; every other web origin is refused by the companion.
+The Deal Room is opened at `app.doctorcre.com` (and still answers at
+`dealroom.doctorcre.com`); the companion admits exactly those two web origins.
+The first connection from either may trigger Chrome's Local Network Access
+prompt. Allowing it gives that Deal Room origin access to the loopback
+companion; every other web origin is refused by the companion.
+
+**Accessibility permission, one-time, and it must go on the REAL interpreter.**
+Call Mode clicks Quill's Start/Stop menu item via `osascript`/System Events, so
+the agent needs Accessibility access. A LaunchAgent loaded from
+`~/Library/LaunchAgents` gets its Accessibility responsibility attributed to
+`ProgramArguments[0]`, and that cannot be `/usr/bin/python3`: that path is the
+Command Line Tools shim, and macOS will not let a human usefully grant it
+Accessibility (the click fails with `osascript is not allowed assistive access
+(-25211)` even with python3, Python.app and osascript all enabled). The tracked
+plist therefore names the real interpreter directly,
+`/Library/Developer/CommandLineTools/usr/bin/python3` (verified live on the Mac
+Studio 2026-09-23). Grant **that** path Accessibility under System Settings >
+Privacy & Security > Accessibility. A machine without the Command Line Tools
+fails visibly at load rather than silently.
 
 **Risk color: red, human initiated.** Starting a call fires the audible consent
 announcement and begins client-visible recording, so it only happens after Joe
@@ -47,8 +63,13 @@ audio. This is channel attribution, not biometric speaker recognition, and no
 third-party voiceprint is created or retained.
 
 The post-call extraction/report/draft layer is specified in
-`specs/post-call-workflow-2026-08-10.md`. Call Mode intentionally does not claim
-that unfinished layer is already running.
+`specs/post-call-workflow-2026-08-10.md`. For a weekly call the Deal Room
+supplies the exact, short-lived deal context index (`POST /api/call-context`)
+from the record layer's `get-call-context` verb; without it the local report
+waits in `awaiting_context`. The Deal Room sends it at start and again whenever
+it sees a weekly session still waiting, so a context that arrives after the
+transcript still produces the review pack. Nothing from the pack is written to
+the record, and no Outlook draft is created, until a partner approves that item.
 
 ## Phase B — quill-dictate (system-wide dictation to the active text box)
 
@@ -58,12 +79,18 @@ live-corrected 2026-08-07):
 
 - **HOLD the trigger key** = push-to-talk: speak while held, release, text
   lands at the cursor of whatever app has focus. The trigger is **right-cmd
-  (54)** on both keyboards. The Logitech receiver reports its immediate-right
-  Command as HID Right Control and its farther-right Control as HID Right GUI;
-  `bin/logitech-keymap.sh` + launchd `com.carr.logitech-keymap` swap those two
-  usages for vendor/product 046d:c52b only. The physical Command immediately
-  right of space is therefore Quill, while the farther-right Control remains
-  an ordinary Control key. The MacBook keyboard is untouched.
+  (54)** on both keyboards. On a Logitech keyboard whose receiver
+  (046d:c52b) reports its immediate-right Command as HID Right Control and
+  its farther-right Control as HID Right GUI, `bin/logitech-keymap.sh` +
+  launchd `com.carr.logitech-keymap` swap those two usages for that
+  vendor/product only, so the physical Command immediately right of space is
+  Quill and the farther-right Control remains an ordinary Control key. The
+  receiver's vendor/product ids cannot tell two different physical Logitech
+  keyboards apart, so a keyboard that already reports those keys correctly
+  (measured on Joe's Mac Studio, 2026-09-23) opts out per machine: if
+  `$HOME/.config/carr/logitech-keymap.off` exists, the script clears any
+  046d:c52b mapping instead of applying the swap. The MacBook keyboard is
+  always untouched.
 - **DOUBLE-TAP the trigger** = toggle conversation mode; inside it, **hold
   space** speaks, release disengages. A QUICK space tap types a normal space
   (replayed synthetically), so typing keeps working inside the mode; **Esc
@@ -133,11 +160,17 @@ blocked-but-listening server now reports as failed.
   by its `meta.json` offset onto one clock, merges by timestamp into a labeled
   `me`/`them` transcript. Quill's own Parakeet engine is disabled in config; the raw
   audio and the transcript both stay on this Mac.
-- `vocab-prompt.txt` — the whisper `--prompt` seed: CARR nouns, platforms, market
-  towns, and active client/prospect surnames. PURE PROMPT TEXT, no comments — the
-  whole file is fed to the model (~224-token budget). Refresh it from the live deal
-  board when the active book changes (source: the `deal-board` verb); a periodic
-  refresh job is a Phase B follow-up.
+- `vocab-prompt.txt` — the whisper `--prompt` seed: CARR nouns, platforms, and
+  market towns. PURE PROMPT TEXT, no comments — the whole file is fed to the
+  model (~224-token budget). Tracked; this repo is public (WR-000049,
+  2026-09-24), so it never carries a client roster.
+- `vocab-local.txt` — gitignored, same directory: active client/prospect
+  surnames, per-machine. Both `bin/transcribe_session.py`'s `load_prompt()`
+  and `Transcriber.swift`'s `vocabPrompt` load it, if present, and append it
+  to the tracked prompt, so dictation quality is unchanged; missing is not an
+  error (a fresh clone has none yet). Refresh it from the live deal board when
+  the active book changes (source: the `deal-board` verb); a periodic refresh
+  job is a Phase B follow-up.
 - Consent layer — see below. Non-negotiable tool behavior per Addendum 5.
 
 ## Build
@@ -184,6 +217,14 @@ the craft on top.
 ## No third-party voiceprints — structural
 
 Two-party attribution comes free from the channel split (mic = me, system = them).
+Within one channel, `bin/speaker_split.py` runs FluidAudio's on-device offline
+diarizer (built by `bin/build-quill.sh` as `fluidaudiocli`) so several voices get
+per-recording labels: "Other participant 1, 2…" on the system track, and on the
+mic the voice with the most talk time keeps the channel label while the rest
+become "In-room speaker 1, 2…". The labels mean nothing outside that recording.
+The diarizer's output carries voice embeddings, so it is written to the temp
+directory and deleted as soon as it is read. If the diarizer is missing or fails,
+each channel keeps its single label, as before.
 There is no speaker-enrollment feature for anyone but Joe/Dell (self-consented,
 Phase B if built at all), and no persistent voiceprint of any client or third
 party, ever.
@@ -200,9 +241,10 @@ In order, on his Mac:
 3. Model: download `ggml-large-v3-turbo.bin` into `~/.cache/whisper-cpp/models/`
    (~1.6 GB, from the whisper.cpp models repo — same full-model choice Joe
    ruled; `ggml-small.en.bin` works as the fallback slot).
-4. **Vocab prompt is per-partner**: regenerate `vocab-prompt.txt` from DELL'S
-   live book (deal-board verb), do not inherit Joe's client surnames. Same
-   file path, his names.
+4. **Vocab prompt is per-partner**: `vocab-prompt.txt` (tracked, generic
+   terms only) is shared as-is. Create his own `vocab-local.txt` (gitignored,
+   same directory) from DELL'S live book (deal-board verb) — do not inherit
+   Joe's client surnames; that file never syncs between machines.
 5. Build both: `bin/build-quill.sh`, then `bin/build-dictate.sh` (each carries
    the CPLUS_INCLUDE_PATH toolchain guard — never bare `swift build`).
 6. Deploy: `bin/install-config.sh` (meeting mode), `bin/install-consent.sh`

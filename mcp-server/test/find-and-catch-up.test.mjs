@@ -43,6 +43,7 @@ class FindCatchUpFake {
         ? [{ subject_id: "deal-uuid", display_name: this.deals[0].name }]
         : []) };
     if (sql.includes("from v_subject_timeline")) return { rows: this.timeline };
+    if (sql.includes("from tool_call t join activity a")) return { rows: [] };
 
     throw new Error(`unexpected query: ${sql}`);
   }

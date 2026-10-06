@@ -192,7 +192,7 @@ def record_failure(dsn: str, claim_value: Mapping[str, str], failure_class: str,
 
 
 def complete(dsn: str, claim_value: Mapping[str, str], result: Mapping[str, Any]) -> dict[str, Any]:
-    if set(result) != {"sponsor", "mode", "attestation_id", "receipt_id"} or result.get("sponsor") != "joe" or result.get("mode") != "live":
+    if set(result) != {"sponsor", "mode", "attestation_id", "receipt_id", "unknown_attendees"} or result.get("sponsor") != "joe" or result.get("mode") != "live":
         raise Refusal("Joe child returned malformed completion")
     value = _jobs_call(dsn, "select row_to_json(receipt) from ops.complete_calendar_prebrief_joe_live_job(%s,%s,%s::uuid,%s::uuid) receipt", (claim_value["job_id"], claim_value["lease"], result["attestation_id"], result["receipt_id"]))
     required = {"job_id", "attempt", "state", "attestation_id", "receipt_id", "allowlist_revision_id", "allowlist_digest", "scheduled_for"}
@@ -256,7 +256,37 @@ def run_tick(profile: Mapping[str, str], profile_path: Path) -> dict[str, Any]:
             profile["CARR_DB_JOBS_URL"], got["claim"], POST_CHILD_FAILURE_CLASS,
             "lease protection or completion failed after sponsor child execution", exc,
         )
-    return {"scheduled": int(scheduled is not None), "claimed": 1, "completion": receipt}
+    unknown = got["result"]["unknown_attendees"]
+    write_last_run(receipt, unknown)
+    return {"scheduled": int(scheduled is not None), "claimed": 1, "completion": receipt,
+            "unknown_attendees": unknown}
+
+
+LAST_RUN = REPO / "out" / "calendar-prebrief-joe-last-run.json"
+
+
+def write_last_run(receipt: Mapping[str, Any], unknown: Mapping[str, Any], path: Path | None = None) -> None:
+    """Addressless local summary of the latest completed run, read by health.
+
+    The skipped-attendee count and opaque keys (migration 0735) are not in the
+    database receipt; this is where the standing check finds them. Failure to
+    write is reported, never allowed to undo a completed, receipted run.
+    """
+    body = {"scheduled_for": receipt.get("scheduled_for"), "job_id": receipt.get("job_id"),
+            "receipt_id": receipt.get("receipt_id"), "unknown_attendees": dict(unknown)}
+    path = path or LAST_RUN
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name("." + path.name + ".tmp")
+        temporary.write_text(json.dumps(body, sort_keys=True, default=str) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        print("calendar prebrief Joe runtime: WARN last-run summary not written", file=sys.stderr)
+        # Never leave an older run's summary standing in for this one.
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def main() -> int:

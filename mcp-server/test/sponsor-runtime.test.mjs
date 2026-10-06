@@ -5,13 +5,21 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
-  actorFromProps,
+  authenticatedIdentity,
   agentActorForToken,
   authorizationClassForActor,
   ORGANIZATION_TENANT_ID,
   personalScopeForActor,
   propsForSlug,
 } from "../src/identity.js";
+
+// `actorFromProps` is module-private under amendment 8 (PR 1013). The exported
+// grant door is `authenticatedIdentity.connectionForGrant`; called without the
+// server's witness it returns exactly the same actor, unbranded, which is what
+// every case in this file is about.
+const actorFromProps = (props, bindings = null) =>
+  authenticatedIdentity.connectionForGrant(props, bindings);
+
 import { doctrineTools, generatedRuleCount } from "../src/doctrine.js";
 import { ToolError, auditIdentity } from "../src/tools.js";
 import { callTool } from "../src/mcp.js";
@@ -57,6 +65,20 @@ function mockClient() {
 function activeGuidanceClient() {
   const base = mockClient();
   return { query: async (sql, params = []) => {
+    if (sql.includes("with guidance_registry as")) {
+      return { rows: [{ state: "active", manifest_digest: "a".repeat(64),
+        standing_rules: [
+          { ...shared[0], guidance_type: "doctrine", is_constitution: true },
+          { ...shared[1], guidance_type: "constraint", is_constitution: false },
+          { ...joePersonal[0], guidance_type: "constraint", is_constitution: false },
+        ],
+        projection_summary: [
+          { guidance_type: "constraint", active_items: 2, projection_digest: "b".repeat(64) },
+          { guidance_type: "doctrine", active_items: 4, projection_digest: "c".repeat(64) },
+          { guidance_type: "rubric", active_items: 3, projection_digest: "d".repeat(64) },
+        ], mode: null, map_versions: 0, map_digest: null, tagged_rules: 0,
+        delivery_plan: [], pack_index: [] }] };
+    }
     if (sql.includes("from ops.v_guidance_registry_state")) {
       return { rows: [{ state: "active", manifest_digest: "a".repeat(64) }] };
     }
@@ -97,7 +119,7 @@ test("active typed registry slims boot to constitution plus applicable constrain
   const result = await standing(activeGuidanceClient(), actor("codex", "joe"), {
     workflow: "fixture-workflow", surface: "codex", tier: "shared",
   });
-  assert.equal(result.recite, `Rules loaded: ${SAMPLE_SHARED_RULE_COUNT} shared, 30 joe-personal`);
+  assert.equal(result.recite, `Rules loaded: 2 of ${SAMPLE_SHARED_RULE_COUNT} shared, 1 of 30 joe-personal`);
   assert.equal(result.shared_rules.length, 2);
   assert.equal(result.personal_rules.length, 1);
   assert.equal(result.guidance_registry.state, "active");

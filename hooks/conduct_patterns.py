@@ -110,6 +110,9 @@ CMD_WORDS = (r"git|npm|npx|pnpm|yarn|node|python3?|pip3?|brew|curl|psql|"
              r"chmod|mkdir|cd|ls|cat|make|docker|wrangler|launchctl|"
              r"\./run\.sh|run\.sh|bin/|\./bin/")
 BARE_FENCE_CMD = re.compile(r"```[ \t]*\n[ \t]*(?:\$\s*)?(?:" + CMD_WORDS + r")\b", re.I)
+# An inline `command` whose first word is one the session holds. A question
+# prompt carries commands this way far more often than in a fenced block.
+INLINE_CMD = re.compile(r"`((?:\$\s*)?(?:" + CMD_WORDS + r")[^`\n]*)`", re.I)
 HANDOFF_PROSE = [
     ("run_this",      re.compile(r"\b(run|execute) (this|these|the following|it)\b", re.I)),
     ("paste_this",    re.compile(r"\bpaste (this|these|it|the following)\b", re.I)),
@@ -151,3 +154,87 @@ PROTECTED = re.compile(
     r"|[$£€]\s?\d"
     r"|\b\d+\s?(usd|dollars?)\b"
     r"|\b(per|a)\s(month|year|seat|user)\b", re.I)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ATTEMPT-FIRST — a command may reach Joe only after the harness refused it.
+# Shared by conduct-stop-gate.py (prose, at Stop) and escalation-gate.py
+# (AskUserQuestion, before Joe sees it). Moved here from conduct-stop-gate.py
+# so the two moments read one copy.
+# ─────────────────────────────────────────────────────────────────────────────
+# A tool result carrying one of these is the harness refusing the session
+# permission, not the session declining to act. Matched on the result text the
+# harness itself writes, so a session cannot manufacture the exemption by
+# talking about being denied — it has to actually have been denied.
+CLASSIFIER_DENIAL = re.compile(
+    r"(denied by the Claude Code auto mode classifier"
+    r"|Blocked by classifier"
+    r"|permission[s]? (?:for this action )?(?:was|were) denied"
+    r"|blocked by the CARR unattended guard"
+    r"|PreToolUse:.*hook error)", re.I)
+
+def denied_commands(recs, start):
+    """Commands the harness refused this session permission to run, this turn.
+
+    THE DEADLOCK THIS ENDS (2026-08-22). This gate's command-handoff class says
+    run it, never hand it over. The auto-mode classifier independently refuses
+    some commands. When both fire on the same command the session has no legal
+    move: it cannot run it, and it cannot say so. Joe personally broke that tie
+    twice in one night — which is exactly the babysitting the autonomy rule
+    exists to stop, produced by two controls that were each individually right.
+
+    A denial is only a carve-out for the command it actually denied, so the
+    denied text is returned for matching rather than setting a blanket flag.
+    """
+    out = []
+    pending = {}
+    for rec in recs[start:]:
+        msg = rec.get("message") or rec
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use":
+                cmd = (block.get("input") or {}).get("command")
+                if isinstance(cmd, str) and cmd.strip():
+                    pending[block.get("id")] = cmd
+            elif block.get("type") == "tool_result":
+                body = block.get("content")
+                if isinstance(body, list):
+                    body = " ".join(b.get("text", "") for b in body if isinstance(b, dict))
+                if not isinstance(body, str) or not CLASSIFIER_DENIAL.search(body):
+                    continue
+                cmd = pending.get(block.get("tool_use_id"))
+                if cmd:
+                    out.append(cmd)
+    return out
+
+
+def handoff_was_denied(assistant, denied):
+    """A denial exempts only the exact command shown to the human.
+
+    Token overlap can excuse a different action (for example --apply after a
+    refused --dry-run). Prose without a command remains semantic review.
+    """
+    shown = re.findall(r"```(?:bash|sh|zsh|shell)?\n(.*?)```", assistant, re.S) + INLINE_CMD.findall(assistant)
+    normalize = lambda command: re.sub(r"^\./", "", command.strip())
+    commands = {normalize(line) for block in shown for line in block.splitlines() if line.strip()}
+    return bool(commands & {normalize(cmd) for cmd in denied if isinstance(cmd,str)})
+
+
+# A vocabulary cue only selects prose for review. It never proves a handoff,
+# an available capability, or a missing attempt, and cannot block execution.
+HANDOFF_REVIEW_CUE = re.compile(r"\b(?:install|trust|configure|deploy|migrate|authenticate|sign[ -]in|enable|grant)\b", re.I)
+HANDOFF_REVIEW_MESSAGE = (
+    "handoff_review: needs_review — possible prose handoff; exact action, "
+    "attempt and capability evidence is unavailable. Review who must act; "
+    "this advisory does not establish an unattempted permitted command.")
+
+
+def handoff_needs_review(text, human_last, denied=()):
+    """Select an unresolved prose action for a visible, nonblocking advisory."""
+    return bool(text.strip() and HANDOFF_REVIEW_CUE.search(text)
+                and not (human_last and HUMAN_WANTS_COMMAND.search(human_last))
+                and not (denied and handoff_was_denied(text, denied)))

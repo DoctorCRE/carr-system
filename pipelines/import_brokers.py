@@ -24,7 +24,7 @@ Two parties per row, at most:
   * a PERSON party (kind='person'), one per broker row, org-linked, email
     carried, phone/city/state left null (not in the source). Inserted
     directly (wave1's party() pattern: insert always, flag collisions for
-    HUMAN review, never auto-merge — Garabadian).
+    HUMAN review, never auto-merge — Hovanian).
 
 FIRM IS A DERIVED, UNVERIFIED FIELD. It was auto-derived from the email
 domain and never confirmed. Two of its VALUES are personal-email artifacts,

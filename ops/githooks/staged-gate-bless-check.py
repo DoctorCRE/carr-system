@@ -74,8 +74,9 @@ import os
 import subprocess
 import sys
 
-CONTRACTS = ("delegation-gate-hook.json", "codex-hooks.json",
-             "rule-enforcement-map.json", "model-floors.json")
+CONTRACTS = ("delegation-gate-hook.json", "hooks.json", "codex-hooks.json",
+             "rule-enforcement-map.json", "model-floors.json",
+             "session-context-lifecycle.v2.json")
 BASELINE = "ops/config/gate-baseline.json"
 
 

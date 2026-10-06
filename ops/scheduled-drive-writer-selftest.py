@@ -59,6 +59,10 @@ def run_learning(script_name: str, root: Path) -> tuple[subprocess.CompletedProc
     script = root / "bin" / script_name
     script.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / "bin" / script_name, script)
+    # Both learning scripts source bin/routine-credential-env.sh for the shared
+    # db.env sourceability guard, so the fixture bin/ must carry it too.
+    shutil.copy2(ROOT / "bin" / "routine-credential-env.sh",
+                 script.parent / "routine-credential-env.sh")
     fake_python(root / ".venv" / "bin" / "python")
     home = root / "home"
     db = home / ".config" / "carr" / "db.env"

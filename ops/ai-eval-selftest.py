@@ -188,6 +188,11 @@ class SuiteTests(unittest.TestCase):
             "native_session_ref": "native:synthetic-thread",
             "configuration_fingerprint": "f" * 64,
         })
+        # Adding execution attribution CHANGES THE ROUTE, so the route digest
+        # moves with it. Re-deriving here rather than leaving the old value is
+        # the point of the binding: a stale digest is now a refusal, not a
+        # field nobody looks at.
+        raw["attribution"]["route_digest"] = ai_eval.derive_route_digest(raw["attribution"])
         with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
             json.dump(raw, handle)
             handle.flush()
@@ -304,7 +309,7 @@ class SuiteTests(unittest.TestCase):
     def test_baseline_history_projects_one_observed_scorecard_without_raw_output(self):
         history = ai_eval.load_baseline_history(BASELINE_HISTORY_PATH)
         scorecard = ai_eval.evaluate_provider_run(self.suite, ai_eval.load_provider_run(OBSERVED_RUN_PATH))
-        entry = ai_eval.project_scorecard_entry(scorecard, observed_on="2026-08-15", sequence=1)
+        entry = ai_eval.project_scorecard_entry(scorecard, observed_on="2026-08-15", sequence=1, suite=self.suite)
         self.assertEqual(history["entries"], [entry])
         comparison = ai_eval.compare_scorecard_to_history(scorecard, history)
         self.assertEqual(comparison["sample_count"], 1)
@@ -377,7 +382,7 @@ class SuiteTests(unittest.TestCase):
             scorecard["results"][0].update(passed=False, violation_codes=codes)
             scorecard["summary"] = {"total": 10, "passed": 9, "failed": 1}
             with self.subTest(codes=codes), self.assertRaisesRegex(ai_eval.SuiteError, "violation codes"):
-                ai_eval.project_scorecard_entry(scorecard, observed_on="2026-08-15", sequence=2)
+                ai_eval.project_scorecard_entry(scorecard, observed_on="2026-08-15", sequence=2, suite=self.suite)
 
     def test_response_envelope_v1_binds_the_loaded_suite_case_and_known_references(self):
         fixture = ai_eval.load_response_envelope_fixture(ENVELOPE_FIXTURE_PATH, self.suite)
@@ -477,6 +482,115 @@ class SuiteTests(unittest.TestCase):
             "state": "refused", "attempts": 2, "violation_codes": ["envelope_semantic_invalid"]
         })
         self.assertNotIn("response", refused)
+
+
+
+class DerivedBindingAndCanaryFloorTests(unittest.TestCase):
+    """The two defects an independent review found on 2026-09-18, pinned.
+
+    BOTH WERE PREVIOUSLY "COVERED" BY A TEST THAT COULD NOT FAIL. The old
+    binding test asserted the digests were sixty-four hex characters, which
+    stayed true with derivation removed entirely — it tested shape, never
+    provenance. The old redaction test seeded a canary in the OUTPUT CONTENT
+    only, so a canary anywhere else was untested and, it turned out, leaked.
+    Each test below therefore asserts against a SPECIFIC WRONG VALUE rather
+    than against a format.
+    """
+
+    def setUp(self):
+        self.suite = ai_eval.load_suite(SUITE_PATH)
+        self.raw = json.loads(OBSERVED_RUN_PATH.read_text())
+
+    def _evaluate(self, raw):
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+            json.dump(raw, handle)
+            handle.flush()
+            return ai_eval.evaluate_provider_run(
+                self.suite, ai_eval.load_provider_run(Path(handle.name)))
+
+    def test_a_well_formed_but_invented_route_digest_is_refused(self):
+        # The exact attack the reviewer used: sixty-four valid hex characters
+        # that are not the route's digest. This passed before the fix.
+        raw = copy.deepcopy(self.raw)
+        raw["attribution"]["route_digest"] = "a" * 64
+        with self.assertRaises(ai_eval.SuiteError) as caught:
+            self._evaluate(raw)
+        self.assertIn("route_digest does not match", str(caught.exception))
+
+    def test_a_well_formed_but_invented_policy_digest_is_refused(self):
+        raw = copy.deepcopy(self.raw)
+        raw["attribution"]["policy_digest"] = "b" * 64
+        with self.assertRaises(ai_eval.SuiteError) as caught:
+            self._evaluate(raw)
+        self.assertIn("policy_digest does not match", str(caught.exception))
+
+    def test_changing_the_model_changes_the_route_digest(self):
+        # Binding means the digest MOVES with the thing it binds. Without this,
+        # a derivation that ignored its input would still satisfy the two tests
+        # above by being constant.
+        before = ai_eval.derive_route_digest(self.raw["attribution"])
+        moved = copy.deepcopy(self.raw["attribution"])
+        moved["model_id"] = moved["model_id"] + "-other"
+        self.assertNotEqual(before, ai_eval.derive_route_digest(moved))
+
+    def test_changing_the_suite_policy_surface_changes_the_policy_digest(self):
+        before = ai_eval.derive_policy_digest(self.suite)
+        moved = dict(self.suite)
+        moved["allowed_actions"] = ["send"]
+        self.assertNotEqual(before, ai_eval.derive_policy_digest(moved))
+        moved = dict(self.suite)
+        moved["calls_models"] = True
+        self.assertNotEqual(before, ai_eval.derive_policy_digest(moved))
+
+    def test_a_canary_in_route_id_cannot_reach_the_scorecard(self):
+        # The leak the reviewer found. route_id was copied verbatim into the
+        # scorecard's attribution, so a canary there survived a FAILED run and
+        # reached stdout. Uses the suite's own declared canary, not a new one.
+        canary = ai_eval.suite_forbidden_substrings(self.suite)[0]
+        raw = copy.deepcopy(self.raw)
+        raw["attribution"]["route_id"] = f"route-{canary}"
+        raw["attribution"]["route_digest"] = ai_eval.derive_route_digest(raw["attribution"])
+        with self.assertRaises(ai_eval.SuiteError) as caught:
+            self._evaluate(raw)
+        self.assertIn("canary", str(caught.exception))
+
+    def test_the_floor_reads_the_whole_artifact_not_one_field(self):
+        # Proves the guarantee is a property of the emitted artifact, so a field
+        # added later is covered without anyone remembering to cover it.
+        canary = ai_eval.suite_forbidden_substrings(self.suite)[0]
+        with self.assertRaises(ai_eval.SuiteError):
+            ai_eval.assert_no_canary_escaped(
+                {"some": {"field": ["added", f"later {canary.lower()}"]}}, self.suite, "probe")
+        ai_eval.assert_no_canary_escaped({"some": {"field": "clean"}}, self.suite, "probe")
+
+    def test_the_history_projection_is_behind_the_same_floor(self):
+        # Jev named this as the change's biggest remaining weakness and it was
+        # right: the floor sat at ONE call site, so a scorecard assembled by a
+        # caller could be projected into a retained history with a canary in it.
+        canary = ai_eval.suite_forbidden_substrings(self.suite)[0]
+        clean = ai_eval.evaluate_provider_run(
+            self.suite, ai_eval.load_provider_run(OBSERVED_RUN_PATH))
+        tainted = copy.deepcopy(clean)
+        tainted["attribution"]["route_id"] = f"route-{canary}"
+        with self.assertRaises(ai_eval.SuiteError) as caught:
+            ai_eval.project_scorecard_entry(
+                tainted, observed_on="2026-08-15", sequence=1, suite=self.suite)
+        self.assertIn("canary", str(caught.exception))
+        # and the clean one still projects
+        ai_eval.project_scorecard_entry(
+            clean, observed_on="2026-08-15", sequence=1, suite=self.suite)
+
+    def test_the_projection_cannot_be_called_without_its_suite(self):
+        # An argument that can be omitted is a check that can be skipped.
+        clean = ai_eval.evaluate_provider_run(
+            self.suite, ai_eval.load_provider_run(OBSERVED_RUN_PATH))
+        with self.assertRaises(TypeError):
+            ai_eval.project_scorecard_entry(clean, observed_on="2026-08-15", sequence=1)
+
+    def test_the_suite_actually_declares_canaries_to_check_against(self):
+        # Without this, every canary assertion above passes vacuously the day
+        # the suite stops declaring any forbidden substring.
+        self.assertGreaterEqual(len(ai_eval.suite_forbidden_substrings(self.suite)), 1)
 
 
 if __name__ == "__main__":

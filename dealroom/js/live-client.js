@@ -32,8 +32,22 @@ export function createLiveClient(opts = {}) {
       }),
     });
     if (!res.ok) {
+      // The status is the only thing that says whether this request was DECIDED
+      // or merely unanswered, and throwing it away made every failure look the
+      // same to a caller. A 401 or 403 is a decision taken before the verb ever
+      // ran: the change was not saved, and inviting a retry would be wrong. A
+      // 5xx, a proxy's 502, a gateway timeout is the path failing around a
+      // request that may well have been applied. Callers need to tell those apart.
+      //
+      // The BODY does not go into the message. A 500's body is a server stack
+      // written for whoever maintains the verb — it is not a statement about this
+      // deal, and this page prints `error.message` at partners. It travels on the
+      // error for the console and for a bug report, and no surface renders it.
       const body = await res.text().catch(() => '');
-      throw new Error(`live ${verb} -> ${res.status} ${body.slice(0, 200)}`);
+      const error = new Error(`live ${verb} -> HTTP ${res.status}`);
+      error.status = res.status;
+      error.body = body.slice(0, 500);
+      throw error;
     }
     const envelope = await res.json();
     if (envelope.error) throw new Error(`live ${verb} rpc error: ${envelope.error.message}`);
@@ -91,6 +105,11 @@ export function createLiveClient(opts = {}) {
     mode: /** @type {const} */ ('live'),
     get selfActor() { return selfActor; },
 
+    // Each deal carries `field_base` — the latest committed event id and time for
+    // every editable cell, read in the same statement as the values it belongs
+    // to. It passes through untouched: it is the record layer's own identity for
+    // an event, in the record layer's own field vocabulary, and translating or
+    // rebuilding it would be inventing one.
     async getBoard(options = {}) {
       const board = await rpc('deal-room-board', {
         workspace: options.workspace || 'all',
@@ -187,8 +206,15 @@ export function createLiveClient(opts = {}) {
           const v = e[side];
           if (v && typeof v === 'object' && e.field && e.field in v) e[side] = v[e.field];
         }
-        if (e.field === 'phase' && typeof e.new_value === 'string') {
-          e.new_value = PHASE_TO_UI[e.new_value] || e.new_value;
+        // BOTH sides, through the one table above. A change receipt states what
+        // the value WAS as well as what it became, and a prior phase left as a
+        // record-layer slug names a phase no surface has ever shown: the board
+        // says "Diligence", never "due_diligence" — and never "Due diligence"
+        // either, which is what a generic slug-humanizer would produce.
+        if (e.field === 'phase') {
+          for (const side of ['old_value', 'new_value']) {
+            if (typeof e[side] === 'string') e[side] = PHASE_TO_UI[e[side]] || e[side];
+          }
         }
       }
       return data;
@@ -202,6 +228,10 @@ export function createLiveClient(opts = {}) {
       if (args.field === 'phase' && UI_TO_PHASE[args.value]) {
         args = { ...args, value: UI_TO_PHASE[args.value] };
       }
+      // `event_id` / `event_recorded_at` ride through on the ok answer: the
+      // record's own identity for the event this write committed, which is what
+      // lets the board advance that cell's base without waiting a poll for the
+      // feed to say the same thing. Nothing is derived here.
       const res = await write('patch-deal-field', args);
       if (res?.ok === false && res.conflict) {
         const c = res.conflict;
@@ -242,6 +272,21 @@ export function createLiveClient(opts = {}) {
       });
       await write('set-lead', { deal: res.deal_id, new_lead: selfActor });
       return { status: 'ok', deal_id: res.deal_id };
+    },
+
+    // V5-F01's live capability read for capability-seams.js's recordHomeSeam.
+    // A pure read of the deployed current policy — no per-deal existence is
+    // required for the answer, so an absent or empty policy is still a real
+    // "deployed" answer, never a fabricated one. dealId travels through
+    // unused today; the read is a capability probe, not a deal lookup.
+    async getRecordHome(_dealId) {
+      return rpc('read-record-source-authority', { selector: { kind: 'current_policy' } });
+    },
+
+    // V5-A01's record-backed, exact-scope health projection. The server owns
+    // both the label and its evidence trace; the browser merely asks and shows.
+    async getHealth(scope) {
+      return rpc('read-assurance-health', { scope });
     },
 
     async startReview(args) { return write('start-deal-review', args); },

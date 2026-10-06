@@ -8,13 +8,13 @@
   "allowed_actions": [],
   "decision_id": "carr-ai-gateway-decision-v1",
   "evidence_bindings": [
-    {"path": "evals/ai/synthetic-observed-run.v1.json", "sha256": "fc7195d2207a067919d030162f05e1879f351f60fce1056e2ffa3ff8eefe586f"},
+    {"path": "evals/ai/synthetic-observed-run.v1.json", "sha256": "550456e743c185b3de9835f96971ade435111b844b79be9b2e1c1cdd60d915b7"},
     {"path": "evals/ai/model-boundary.v1.json", "sha256": "b11f90c24435dae528451e67c171f7ca190f2f230885d820ae9c2ae876bd9b34"}
   ],
   "provider_evidence": [
     {
       "source_path": "evals/ai/synthetic-observed-run.v1.json",
-      "source_digest": "fc7195d2207a067919d030162f05e1879f351f60fce1056e2ffa3ff8eefe586f",
+      "source_digest": "550456e743c185b3de9835f96971ade435111b844b79be9b2e1c1cdd60d915b7",
       "run_id": "synthetic-observed-run-001",
       "provider_id": "synthetic-provider-v1",
       "model_id": "synthetic-model-v1",

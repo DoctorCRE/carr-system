@@ -18,6 +18,8 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib import launchd_calendar  # noqa: E402
 WRAPPER = REPO / "bin" / "control-plane-tick.sh"
 PLIST = REPO / "ops" / "launchd" / "com.carr.control-plane-tick.plist"
 SERVICES = REPO / "ops" / "config" / "services.json"
@@ -42,8 +44,8 @@ def main() -> int:
     source = WRAPPER.read_text(encoding="utf-8")
     check("wrapper is noninteractive zsh", source.startswith("#!/bin/zsh"))
     check("wrapper invokes the ledger tick", "tools/control-plane.py\" tick" in source)
-    check("wrapper keeps unattended replacement work in shadow mode",
-          "tick --mode shadow" in source)
+    check("wrapper pins the acceptance-ladder auto tier, not a fixed mode",
+          "tick --mode auto" in source and "tick --mode shadow" not in source)
     check("wrapper forwards only the explicit jobs credential",
           'CARR_DB_JOBS_URL="$jobs_url"' in source and 'DATABASE_URL="$jobs_url"' not in source)
     check("wrapper starts its child with a scrubbed environment", "env -i" in source)
@@ -169,9 +171,9 @@ def main() -> int:
               "DATABASE_URL" not in child_env and
               "ambient-owner-must-not-pass" not in child_env.values() and
               "ambient-secret-must-not-pass" not in child_env.values(), repr(child_env))
-        check("worker invocation remains ledger tick in shadow mode",
+        check("worker invocation remains ledger tick in auto ladder mode",
               json.loads(args.read_text(encoding="utf-8")) ==
-              [str(root / "tools" / "control-plane.py"), "tick", "--mode", "shadow"] if args.exists() else False)
+              [str(root / "tools" / "control-plane.py"), "tick", "--mode", "auto"] if args.exists() else False)
 
     # Config content is data, never shell.  A command substitution must be
     # rejected without creating its marker, and duplicate/insecure files are
@@ -216,7 +218,7 @@ def main() -> int:
     check("plist invokes only the narrow wrapper",
           args == ["/bin/zsh", "{{REPO}}/bin/control-plane-tick.sh"], repr(args))
     check("plist wakes once per minute; the ledger owns actual recurrence",
-          plist.get("StartInterval") == 60)
+          "StartInterval" not in plist and launchd_calendar.cadence_seconds(plist) == 60)
     check("plist has no RunAtLoad side effect", "RunAtLoad" not in plist)
     check("plist does not carry a database credential", "CARR_DB_JOBS_URL" not in str(plist))
 

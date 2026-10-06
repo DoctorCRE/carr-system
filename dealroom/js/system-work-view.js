@@ -1,8 +1,6 @@
+import { escapeHtml as esc } from "./esc.js";
 const HUMAN_REF = /^WR-[0-9]{4,12}$/;
 
-const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
-  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-})[char]);
 
 const humanize = (value) => String(value || "").replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 

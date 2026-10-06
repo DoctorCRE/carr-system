@@ -3,22 +3,27 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import types
 import uuid
+from typing import Any, cast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("ops_record", ROOT / "tools" / "ops-record.py")
 assert spec is not None
-mod = importlib.util.module_from_spec(spec)
+mod: Any = importlib.util.module_from_spec(spec)
 assert spec.loader
 spec.loader.exec_module(mod)
 ops_source = (ROOT / "tools" / "ops-record.py").read_text()
+wrapper_source = (ROOT / "bin" / "deploy-worker.sh").read_text()
 assert 'args.action in ("approve", "staging-approve")' in ops_source
 assert "approved_by_actor = %s" not in ops_source
 assert "ops.approve_program5_release" in ops_source
@@ -37,6 +42,70 @@ def refuses(fn, contains: str) -> None:
         assert contains in str(exc), (contains, str(exc))
     else:
         raise AssertionError(f"expected refusal containing {contains!r}")
+
+
+class IdentityCursor:
+    def __init__(self, row):
+        self.row = row
+        self.sql = ""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *unused):
+        return False
+
+    def execute(self, sql, params=()):
+        self.sql = sql
+
+    def fetchone(self):
+        return self.row
+
+
+class IdentityConnection:
+    def __init__(self, row):
+        self.cursor_value = IdentityCursor(row)
+        self.closed = False
+
+    def cursor(self):
+        return self.cursor_value
+
+    def close(self):
+        self.closed = True
+
+
+saved_env = dict(os.environ)
+saved_loader = mod._load_db_env
+saved_psycopg = sys.modules.get("psycopg")
+try:
+    mod._load_db_env = lambda: None
+    for credential in mod.credential_names():
+        os.environ.pop(credential, None)
+    refuses(lambda: mod.dsn("forward_fix_verifier"), "no credential")
+    os.environ["CARR_DB_JOBS_URL"] = "postgresql://carr_jobs:fixture@example.invalid/carr"  # ci-secret-scan: allow
+    refuses(lambda: mod.dsn("forward_fix_verifier"), "no credential")
+    os.environ["CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL"] = "postgresql://carr_jobs:fixture@example.invalid/carr"  # ci-secret-scan: allow
+    refuses(lambda: mod.dsn("forward_fix_verifier"), "must authenticate")
+    verifier_dsn = "postgresql://carr_program5_forward_fix_verifier:fixture@example.invalid/carr"  # ci-secret-scan: allow
+    os.environ["CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL"] = verifier_dsn
+    assert mod.dsn("forward_fix_verifier") == verifier_dsn
+    good = IdentityConnection(("carr_program5_forward_fix_verifier",
+                               "carr_program5_forward_fix_verifier", True))
+    sys.modules["psycopg"] = cast(Any, types.SimpleNamespace(connect=lambda dsn, autocommit: good))
+    assert mod.connect("forward_fix_verifier") is good
+    assert "pg_has_role" in good.cursor_value.sql
+    wrong = IdentityConnection(("carr_jobs", "carr_jobs", False))
+    sys.modules["psycopg"] = cast(Any, types.SimpleNamespace(connect=lambda dsn, autocommit: wrong))
+    refuses(lambda: mod.connect("forward_fix_verifier"), "exact scoped identity")
+    assert wrong.closed
+finally:
+    os.environ.clear()
+    os.environ.update(saved_env)
+    mod._load_db_env = saved_loader
+    if saved_psycopg is None:
+        sys.modules.pop("psycopg", None)
+    else:
+        sys.modules["psycopg"] = saved_psycopg
 
 
 def wrapper_receipt_path(step: str, expected: str, *, refuse: bool = False) -> tuple[int, list[list[str]]]:
@@ -71,12 +140,14 @@ raise SystemExit(0)
         if step != "standalone":
             recovery = "RECOVERY_ATTEMPT_ID=22222222-2222-4222-8222-222222222222\nRECOVERY_PRIOR_RELEASE_KEY=prior\n"
         script = tmp / "run.sh"
+        deploy_tag = ("carr-staging-forward-fix-" + "a" * 32
+                      if step == "forward_fix" else "carr-staging-test")
         script.write_text("#!/bin/sh\nset -eu\n" + functions + "\n"
-            + f"PY={fake_py}\nREPO={tmp}\nWRANGLER={wrangler}\nDEPLOY_TAG=carr-staging-test\n"
+            + f"PY={fake_py}\nREPO={tmp}\nWRANGLER={wrangler}\nDEPLOY_TAG={deploy_tag}\n"
             + f"EXPECTED_PROGRAM6_ACTIONS={expected}\nTARGET_ENV=staging\n"
             + f"HEAD_SHA={'a' * 40}\nRELEASE_KEY=current\nSTAGING_RECEIPT_KEY=11111111-2222-4333-8444-555555555555\n"
             + f"RECOVERY_STEP={step}\nCARR_CORRELATION_ID=33333333-3333-4333-8333-333333333333\n"
-            + recovery + f"record_staging_receipt_file {receipt}\n", encoding="utf-8")
+            + recovery + f"RELEASE_MANIFEST={receipt}\nrecord_staging_receipt_file {receipt}\n", encoding="utf-8")
         script.chmod(0o755)
         env = {**os.environ, "CALL_LOG": str(log), "REFUSE": "1" if refuse else "0", "TMPDIR": str(tmp)}
         done = subprocess.run(["sh", str(script)], capture_output=True, text=True, env=env)
@@ -181,6 +252,42 @@ printf '%s\\n' "$((now + advance))" > "$CLOCK_FILE"
         return done.returncode, curls, sleeps, done.stderr
 
 
+def forward_claimed_not_serving_refuses() -> tuple[int, str, str]:
+    """Run the exact resume/claim block: a prior claim must never redeploy."""
+    deploy = wrapper_source
+    start = deploy.index("    # Resume before provider mutation.")
+    end = deploy.index("\n  else\n    \"$WRANGLER\" deploy", start)
+    resume_block = "\n".join(line[4:] for line in deploy[start:end].splitlines())
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        fake_bin = tmp / "bin"
+        fake_bin.mkdir()
+        fake_curl = fake_bin / "curl"
+        fake_curl.write_text("#!/bin/sh\nprintf '{}'\n", encoding="utf-8")
+        fake_curl.chmod(0o755)
+        deploy_log = tmp / "deploy.log"
+        fake_wrangler = tmp / "wrangler"
+        fake_wrangler.write_text("#!/bin/sh\nprintf 'called\\n' > \"$DEPLOY_LOG\"\n", encoding="utf-8")
+        fake_wrangler.chmod(0o755)
+        script = tmp / "run.sh"
+        script.write_text(
+            "#!/bin/sh\nset -eu\n"
+            "fail() { echo \"REFUSED: $1\" >&2; exit 64; }\n"
+            "record_staging_receipt_file() { return 1; }\n"
+            "verify_staging_receipt_file() { return 1; }\n"
+            "staging_attempt() { [ \"$1\" = claim ] || exit 64; "
+            "[ \"$3\" = mutation_allowed ] || exit 65; printf 'false\\n'; }\n"
+            "ATTEMPT_DEPLOY_CLAIMED=true\nRECOVERY_STEP=forward_fix\n"
+            "STAGING_TARGET_HOST=staging.example\nWRANGLER=" + shlex.quote(str(fake_wrangler)) + "\n"
+            + resume_block + "\n",
+            encoding="utf-8")
+        script.chmod(0o755)
+        done = subprocess.run(["sh", str(script)], capture_output=True, text=True,
+                              env={**os.environ, "PATH": f"{fake_bin}:/usr/bin:/bin",
+                                   "DEPLOY_LOG": str(deploy_log), "TMPDIR": str(tmp)})
+        return done.returncode, done.stderr, deploy_log.read_text() if deploy_log.exists() else ""
+
+
 sha = "a" * 40
 version_id = str(uuid.uuid4())
 tag = "carr-staging-" + "b" * 32
@@ -198,6 +305,7 @@ payload = {
     "schema": {
         "highest_applied_migration": "0202_staging_release_readback_receipt.sql",
         "applied_count": 202,
+        "ledger_sha256": "sha256:" + "7" * 64,
         "reason": None,
         "note": "untrusted prose that must not survive",
     },
@@ -218,6 +326,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "verb_count": 211,
         "schema_highest_migration": "0202_staging_release_readback_receipt.sql",
         "schema_applied_count": 202,
+        "schema_ledger_sha256": "sha256:" + "7" * 64,
         "doctrine_generation": 170,
         "program6_actions_enabled": True,
     }
@@ -291,15 +400,22 @@ with tempfile.TemporaryDirectory() as tmp:
     refuses(lambda: mod.staging_readback_projection(str(fifo), sha, tag, "enabled"), "regular single-link")
 
 
-for step in ("standalone", "current_before"):
+for step in ("standalone", "current_before", "forward_fix"):
     rc, calls = wrapper_receipt_path(step, "enabled")
     verify_calls = [call for call in calls if "staging-readback-verify" in call]
     deployment_calls = [call for call in calls if "deployment" in call]
-    assert rc == 0 and len(verify_calls) == 1 and len(deployment_calls) == 1, (step, rc, calls)
+    assert rc == 0 and len(verify_calls) == 1, (step, rc, calls)
+    if step != "forward_fix":
+        assert len(deployment_calls) == 1, (step, calls)
     assert verify_calls[0][verify_calls[0].index("--expected-program6-actions") + 1] == "enabled"
-    assert deployment_calls[0][deployment_calls[0].index("--expected-program6-actions") + 1] == "enabled"
+    if deployment_calls:
+        assert deployment_calls[0][deployment_calls[0].index("--expected-program6-actions") + 1] == "enabled"
     if step == "standalone":
         assert "--recovery-attempt-id" not in deployment_calls[0]
+    elif step == "forward_fix":
+        forward_calls = [call for call in calls if "staging-forward-fix" in call]
+        assert len(forward_calls) == 1 and "result" in forward_calls[0], calls
+        assert "--manifest" in forward_calls[0] and "--provider-versions-file" in forward_calls[0]
     else:
         assert deployment_calls[0][deployment_calls[0].index("--recovery-step") + 1] == step
         assert "--recovery-attempt-id" in deployment_calls[0]
@@ -337,6 +453,13 @@ class Cursor:
     def __init__(self):
         self.calls = []
         self._row = None
+        self.forward_tag: str | None = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *unused):
+        return False
 
     def execute(self, sql, params=()):
         compact = " ".join(sql.split())
@@ -359,7 +482,27 @@ class Cursor:
         elif "ops.record_staging_restore_only_result" in compact:
             self._row = ({"status": "succeeded",
                           "result_ref": "ops.staging-restore-only:" + "d" * 64,
+                "replayed": False},)
+        elif "ops.record_staging_forward_fix_rehearsal" in compact:
+            self._row = ({"result_ref": "ops.staging-forward-fix-readback:sha256:" + "d" * 64,
                           "replayed": False},)
+        elif "ops.read_staging_forward_fix_rehearsal_declaration" in compact:
+            # Number-base form: what tools/release-manifest.py actually emits.
+            exact_set = ["0315"]
+            # SIX BARE COLUMNS, exactly as the RETURNS TABLE function emits
+            # them (0315) — never a dict in column zero, which is the fake
+            # shape that hid the row[0] reader bug until 2026-08-26.
+            self._row = (
+                getattr(self, "forward_tag", tag),
+                "sha256:" + hashlib.sha256(
+                    # PostgreSQL to_jsonb::text rendering — the canonical form
+                    # ops.program5_migration_set_sha256 hashes.
+                    json.dumps(exact_set, separators=(", ", ": ")).encode()).hexdigest(),
+                1,
+                "0315_program5_forward_fix_rehearsal.sql",
+                315,
+                "sha256:" + "7" * 64,
+            )
 
     def fetchone(self):
         return self._row
@@ -408,7 +551,97 @@ assert result["status"] == "succeeded"
 assert "ops.record_staging_restore_only_result" in cur.calls[-1][0]
 
 
+class FakeForwardConnection:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *unused):
+        return False
+
+    def transaction(self):
+        return self
+
+    def cursor(self):
+        return self._cursor
+
+
+# Exercise the controller itself with no database or provider: it accepts a
+# verified bounded /release projection + independently captured versions list,
+# then derives the record values from those files and the candidate manifest.
+with tempfile.TemporaryDirectory() as tmp:
+    raw = Path(tmp)
+    forward_tag = "carr-staging-forward-fix-" + "a" * 32
+    forward_payload = json.loads(json.dumps(payload))
+    forward_payload["worker_version"]["tag"] = forward_tag
+    release_file = raw / "release.json"
+    release_file.write_text(json.dumps(forward_payload), encoding="utf-8")
+    versions_file = raw / "versions.json"
+    versions_file.write_text(json.dumps([{
+        "id": version_id, "annotations": {"workers/tag": forward_tag},
+    }]), encoding="utf-8")
+    manifest_file = raw / "manifest.json"
+    manifest_file.write_text(json.dumps({
+        "git_sha": sha,
+        "schema_highest_migration": forward_payload["schema"]["highest_applied_migration"],
+        "schema_applied_count": forward_payload["schema"]["applied_count"],
+        "schema_ledger_sha256": forward_payload["schema"]["ledger_sha256"],
+        # The REAL builder (tools/release-manifest.py migration_set()) emits
+        # number bases, never filenames — this fixture must match what a live
+        # manifest actually carries, or the validator drifts unseen, which is
+        # exactly what happened until 2026-08-26: the forward-fix readback
+        # refused every real manifest with "lacks its exact migration set".
+        "migration_set": ["0315"],
+        "program6_actions": {"enabled": True, "posture": "enabled"},
+    }), encoding="utf-8")
+    forward_cur = Cursor()
+    forward_cur.forward_tag = forward_tag
+    previous_connect = mod.connect
+    mod.connect = lambda role: FakeForwardConnection(forward_cur)
+    try:
+        forward_args = types.SimpleNamespace(
+            action="result", idempotency_key=str(uuid.uuid4()), git_sha=sha,
+            expected_provider_tag=forward_tag, expected_program6_actions="enabled",
+            staging_readback_file=str(release_file), provider_versions_file=str(versions_file),
+            manifest=str(manifest_file), field=None,
+        )
+        assert mod.cmd_staging_forward_fix(forward_args) == 0
+    finally:
+        mod.connect = previous_connect
+    assert any("ops.read_staging_forward_fix_rehearsal_declaration" in call[0] for call in forward_cur.calls)
+    assert "ops.record_staging_forward_fix_rehearsal" in forward_cur.calls[-1][0]
+
+# The recovery UUID remains exactly the origin/main five-group UUID grammar;
+# forward-fix does not weaken the rollback operator input parser.
+rollback_uuid_pattern = r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+assert rollback_uuid_pattern in wrapper_source
+assert re.fullmatch(rollback_uuid_pattern, "A1B2C3D4-1234-4ABC-8DEF-1234567890AB")
+for bad_uuid in ("A1B2C3D4-1234-4ABC-8DEF", "A1B2C3D4_1234_4ABC_8DEF_1234567890AB",
+                 "A1B2C3D4-1234-4ABC-8DEF-1234567890AB-extra"):
+    assert not re.fullmatch(rollback_uuid_pattern, bad_uuid)
+
+for name in ("0314_doctorcre_home_legacy_program_tenant.sql", "0001_x.sql"):
+    assert re.fullmatch(r"[0-9]{4}[a-z]?_[a-z0-9_.-]+\.sql", name)
+for invalid_name in ("0314-doctorcre.sql", "0314_name.txt", "0314_name.sql/evil"):
+    assert not re.fullmatch(r"[0-9]{4}[a-z]?_[a-z0-9_.-]+\.sql", invalid_name)
+
+
 migration = (ROOT / "migrations" / "0202_staging_release_readback_receipt.sql").read_text()
+forward_migration = (ROOT / "migrations" / "0315_program5_forward_fix_rehearsal.sql").read_text()
+result_table = forward_migration.split("create table ops.staging_forward_fix_rehearsal_result", 1)[1].split(");", 1)[0]
+assert "check (writer_session_user='carr_program5_forward_fix_verifier')" in result_table
+assert forward_migration.count("check (writer_session_user='carr_jobs')") == 2
+projection_function = forward_migration.split("create or replace function ops.read_staging_forward_fix_rehearsal_declaration", 1)[1]
+assert "security definer set search_path=ops,public,pg_temp" in projection_function
+assert "session_user<>'carr_program5_forward_fix_verifier'" in projection_function
+assert "pg_has_role(session_user,'carr_program5_forward_fix_verifiers','member')" in projection_function
+assert "grant execute on function ops.read_staging_forward_fix_rehearsal_declaration(uuid) to carr_program5_forward_fix_verifiers" in forward_migration
+assert "revoke all on function ops.read_staging_forward_fix_rehearsal_declaration(uuid) from public,carr_reader,carr_writer,carr_jobs,carr_authority" in forward_migration
+assert "add constraint recovery_bundle_writer_strategy check" in forward_migration
+assert "(recovery_strategy='rollback' and writer_session_user='carr_jobs')" in forward_migration
+assert "(recovery_strategy='forward_fix' and writer_session_user='carr_program5_forward_fix_verifier')" in forward_migration
 required = (
     "create table ops.staging_deployment_attempt",
     "create table ops.staging_deployment_claim",
@@ -497,7 +730,7 @@ for marker in (
     "--expected-provider-tag \"$DEPLOY_TAG\"",
     "--release-key \"$RELEASE_KEY\"",
     "--recovery-attempt-id",
-    "current_before|prior|current_after|restore_only",
+    "current_before|prior|current_after|forward_fix|restore_only",
     "staging-restore-only",
     "staging_attempt prepare",
     "staging_attempt claim",
@@ -523,6 +756,29 @@ resume_slice = wrapper[wrapper.index("staging_attempt()"):
 assert resume_slice.index("staging_attempt prepare") < resume_slice.index("staging_attempt claim")
 assert resume_slice.index("staging_attempt claim") < resume_slice.index('"$WRANGLER" deploy')
 assert resume_slice.index('"https://$STAGING_TARGET_HOST/release"') < resume_slice.index("staging_attempt claim")
+forward_resume = resume_slice[resume_slice.index('if [ "$RECOVERY_STEP" = "forward_fix" ]'):]
+assert 'staging_attempt claim' in forward_resume
+assert 'deployment already claimed but its exact tag is not serving; refusing redeploy' in forward_resume
+assert 'staging-forward-fix result' in wrapper
+assert '[ "$RECOVERY_STEP" != "forward_fix" ] || DEPLOY_CLAIM_FIELD="mutation_allowed"' in wrapper
+claimed_rc, claimed_stderr, claimed_deploy = forward_claimed_not_serving_refuses()
+assert claimed_rc == 64 and "already claimed" in claimed_stderr, claimed_stderr
+assert claimed_deploy == "", claimed_deploy
+
+# The forward-fix controller accepts only bounded files, independently binds
+# /release to the exact provider version listing, and derives its migration
+# boundary and Program 6 posture from the candidate manifest—not shell scalars.
+for marker in (
+    'def cmd_staging_forward_fix',
+    'staging_readback_projection(args.staging_readback_file',
+    'staging_provider_version(args.provider_versions_file',
+    'forward_fix_rehearsal_declaration',
+    'ops.read_staging_forward_fix_rehearsal_declaration',
+    'manifest_set_hash',
+    'forward-fix manifest does not match the immutable candidate migration boundary',
+    'forward-fix manifest Program 6 posture is not exact',
+):
+    assert marker in ops_source, marker
 
 snapshot = (ROOT / "bin" / "schema-snapshot.sh").read_text()
 assert "--from-disposable-local" in snapshot

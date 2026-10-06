@@ -42,6 +42,35 @@ TWO CHECKS, both on the turn's final assistant message:
      The actual boundary is held credentials and autonomous execution. Explicit
      corrections of that framing and quoted/historical rule text are exempt.
 
+THE AUDIENCE SPLIT (2026-08-23, Joe's Stop-gate rationing off the gates-audit
+council). That audit read one real shipped session's gate ledger and found this
+lint firing on EIGHT separate messages, several of them reading reporting prose
+as "multi-clause tasks for Joe" when nothing was being asked of him at all. Two
+changes, and NEITHER of them retires a rule — the rules are Joe's taught law and
+all five still bind.
+
+  1. THE MATCHER NARROWS on the two classes whose rules are by their own wording
+     about partner-directed text (38b15dc6 "instructions TO A PARTNER", c315befa
+     "a PARTNER-FACING question"). They used to accept ADDRESSED — a bare
+     (you|your|please) anywhere in the block — so any status report that
+     mentioned the reader and used two task verbs read as a two-clause
+     instruction. partner_directed() now asks whether a sentence actually ASKS:
+     an imperative, a modal ask, a second-person directive that reaches a task
+     verb, or a question. "You will need to approve it" is an ask; "you will see
+     it in the log" is not.
+
+  2. THE REGISTER SPLITS. A partner-directed message is carried immediately, as
+     before. Reporting prose gets ONE consolidated note per session; later
+     reporting findings are recorded in the ledger and not re-delivered. Every
+     finding is still made and still counted — the session is told once instead
+     of after every message.
+
+Joe's 2026-08-10 layered-enforcement ruling is the authority for both halves:
+blanket keyword gates lost there because they interrupt legitimate work and
+train sessions to bypass controls, and that decision names its own reopen
+condition — "measured false positives". Eight fires on one shipped session is
+that condition being met.
+
 NEVER LOOPS: stop_hook_active short-circuits, same as every Stop gate here.
 FAILS OPEN on any internal error, and if writing-lint cannot be imported the
 writing half is skipped rather than the session wedged. Audit rows share
@@ -57,6 +86,10 @@ import sys
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from stop_latch import claim_identity, latched, record_fire  # noqa: E402
+
 LOG = os.path.join(REPO, "out", "conduct-gate.jsonl")
 DEBUG = os.path.join(REPO, "out", "conduct-gate.log")
 
@@ -125,6 +158,93 @@ IMPERATIVE_ASK = re.compile(
 # (b) Or it is pointed at him in so many words.
 ADDRESSED = re.compile(r"\b(?:you|your|please)\b", re.I)
 ANY_ASK_VERB = re.compile(r"\b" + ASK_VERB + r"\b", re.I | re.X)
+
+# ── the audience filter (2026-08-23) ────────────────────────────────────────
+# WHAT WENT WRONG. The gates-audit council read one real shipped session's gate
+# ledger and found this lint firing on EIGHT separate messages, several of them
+# flagging ordinary reporting prose as "multi-clause tasks for Joe" when nothing
+# was being asked of him at all. The rules are not the problem — they are his
+# taught law, and the ones this narrows (38b15dc6 multi-clause instructions
+# TO A PARTNER, c315befa a PARTNER-FACING question) are by their own wording
+# about text addressed to him. A finding of those classes on prose addressed to
+# nobody is a false positive by the rule's own terms.
+#
+# WHERE THE MATCHER WAS TOO WIDE, precisely: `directed` was IMPERATIVE_ASK or
+# ADDRESSED, and ADDRESSED is a bare \b(you|your|please)\b anywhere in the
+# block. "You'll see the count in the log, and it checks and writes on every
+# run" contains "you" and two task verbs, so it read as a two-clause
+# instruction. Every message in a status report that mentions the reader at all
+# was one loose sentence away from a flag.
+#
+# THE PRECEDENT. Joe's 2026-08-10 layered-enforcement ruling settled that
+# BLANKET KEYWORD GATES LOSE, because they interrupt legitimate work and train
+# sessions to bypass controls, and it names its own reopen condition: "measured
+# false positives". This is that condition being met, so the boundary moves —
+# and it moves by narrowing the MATCHER, never by retiring the rule.
+#
+# WHAT COUNTS AS AN ASK. A second-person modal has to reach a task verb: "you
+# will need to approve it" is an ask, "you will see it in the log" is not. That
+# one distinction removed the whole reporting-prose class without weakening any
+# real shape.
+COURTESY = r"(?:please\s+|also\s+|then\s+|and\s+|now\s+|first\s+|next\s+|finally\s+)*"
+TASK_VERB_RX = (r"(?:open|edit|review|add|update|run|check|approve|send|call|"
+                r"create|read|verify|sign|confirm|use|make|upload|download|fill|"
+                r"look\s+at|take\s+a\s+look|glance\s+at|fill\s+(?:in|out))")
+
+# (a) The sentence OPENS with an instruction. Same [^\w-] leading run as
+# IMPERATIVE_ASK, and for the same measured reason: a CLI flag is not an
+# imperative ("--check is red" was the last false positive in a 201-message
+# sweep).
+IMPERATIVE_TASK = re.compile(rf"^[^\w-]*{COURTESY}{TASK_VERB_RX}\b", re.I | re.X)
+
+# (b) A courtesy or modal ask aimed at him.
+MODAL_ASK = re.compile(
+    rf"\b(?:can|could|would|will|should)\s+you\b|\bplease\s+{COURTESY}{TASK_VERB_RX}\b",
+    re.I | re.X)
+
+# (c) A second-person directive that actually reaches a task verb. Up to three
+# words of slack ("you will need to approve", "you should probably review the
+# draft"); more than that and the verb belongs to a different clause.
+SECOND_PERSON_TASK = re.compile(
+    rf"\byou(?:'ll|'re|\s+(?:will|can|could|should|must|may|need\s+to|have\s+to))?"
+    rf"\s+(?:\w+\s+){{0,3}}{TASK_VERB_RX}\b", re.I | re.X)
+
+# (d) A QUESTION. In chat there is exactly one reader, so a question mark in
+# assistant prose is a question to the partner — it does not have to name him.
+# The first version of this predicate required "you/your/Joe/Dell" or a
+# permission shape, and the fixtures caught it immediately: "Did the LOI arrive
+# from the landlord?" is as partner-facing as a sentence gets and matched none
+# of them.
+#
+# TWO EXCLUSIONS, both already precedented in this repo rather than invented
+# here. A blockquote is a DRAFT — client copy quoted for review — and
+# hooks/conduct-stop-gate.py exempts exactly that shape for exactly this reason
+# ("Would you like me to schedule the tour for Thursday?" inside a `>` block is
+# the draft speaking, not the session). Fenced code is already stripped upstream
+# by strip_fences().
+QUOTED_LINE = re.compile(r"^\s*>")
+
+
+def partner_directed(text):
+    """True when this text ASKS the partner something, rather than reporting.
+
+    Sentence-granular on purpose: one instruction inside a long report makes the
+    report partner-directed, while a report that merely mentions the reader does
+    not become an instruction. First-person narration kills the sentence outright
+    — "I will review the draft" asks nobody for anything — which is the same
+    SELF_NARRATION guard the file-link check has used since 2026-08-15.
+    """
+    for sentence in sentences(text):
+        s = sentence.strip()
+        if not s or SELF_NARRATION.search(s):
+            continue
+        if QUOTED_LINE.search(sentence):
+            continue
+        if IMPERATIVE_TASK.search(s) or MODAL_ASK.search(s) or SECOND_PERSON_TASK.search(s):
+            return True
+        if "?" in s:
+            return True
+    return False
 
 # First person kills the ask: "I opened x", "let me check y", "I will review z"
 # are the session narrating its OWN work and asking nobody for anything.
@@ -361,6 +481,12 @@ def unnamed_deal_question_findings(prose):
     for sentence in sentences(prose):
         if "?" not in sentence or not BARE_DEAL.search(sentence):
             continue
+        # Rule c315befa binds a PARTNER-FACING question. A rhetorical or
+        # self-directed one in a report ("is the lease the blocker here? no —
+        # the abatement is") is not one, and flagging it was part of the eight
+        # fires the 2026-08-23 gates audit measured on one shipped session.
+        if not partner_directed(sentence):
+            continue
         if not _has_deal_name(sentence):
             found.append(("unnamed-deal-question", sentence[:90],
                           "name the specific deal in this question (for example, "
@@ -381,8 +507,13 @@ def multi_clause_task_findings(prose):
         if not block.strip() or SELF_NARRATION.search(block):
             continue
         verb_count = len(TASK_VERB.findall(block))
-        directed = (IMPERATIVE_ASK.search(block.strip()) or ADDRESSED.search(block))
-        if not directed or verb_count < 2:
+        # THE AUDIENCE FILTER, 2026-08-23. This used to accept ADDRESSED — a
+        # bare (you|your|please) anywhere in the block — so any status report
+        # that mentioned the reader and used two task verbs read as a
+        # two-clause instruction to him. Rule 38b15dc6 binds "multi-clause
+        # instructions TO A PARTNER"; prose that instructs nobody is outside it
+        # by the rule's own words. See partner_directed().
+        if not partner_directed(block) or verb_count < 2:
             continue
         numbered = bool(NUMBERED_ITEM.search(block))
         marked = bool(ALL_REQUIRED.search(block))
@@ -491,9 +622,48 @@ def main():
         if not findings:
             sys.exit(0)
 
+        # ── THE AUDIENCE SPLIT (2026-08-23, Joe's Stop-gate rationing) ──────
+        # The 2026-08-23 gates audit measured this lint firing on EIGHT
+        # messages in one shipped session, several on reporting prose. The
+        # matcher narrowing above removes the misreadings; this removes the
+        # remaining per-message cost of the findings that are still true.
+        #
+        # A PARTNER-DIRECTED ASK is delivered immediately, before the next
+        # reply is written, exactly as before — that is the message where
+        # wording is doing work on Joe.
+        #
+        # REPORTING PROSE gets ONE consolidated note per session. The findings
+        # are all still recorded and the session is still told; it is told once
+        # rather than after every message. Joe's 2026-08-10 ruling is the
+        # authority for the shape as well as the narrowing: global friction and
+        # blanket keyword gates lost because they interrupt legitimate work and
+        # train sessions to route around controls, and a note that arrives on
+        # every turn is what being routed around looks like just before it
+        # happens.
+        session = payload.get("session_id")
+        directed = partner_directed(strip_fences(assistant))
+        register = "partner-ask" if directed else "report-summary"
+
+        if not directed:
+            once = claim_identity("chat-lint-gate", "session-summary", ["once"])
+            if latched(session, once):
+                # Recorded, not delivered. The ledger keeps every fire so the
+                # telemetry rollup can still count them; the session is not
+                # charged context for hearing the same standing note again.
+                audit({"ts": now(), "hook": "chat-lint-gate",
+                       "classes": sorted({f[0] for f in findings}),
+                       "session": session, "audience": "report",
+                       "register": "logged-only",
+                       "excerpt": findings[0][1][:200]})
+                dlog(f"LOG-ONLY(summary already delivered) {sorted({f[0] for f in findings})}")
+                sys.exit(0)
+            record_fire(session, once)
+
         audit({"ts": now(), "hook": "chat-lint-gate",
                "classes": sorted({f[0] for f in findings}),
-               "session": payload.get("session_id"),
+               "session": session,
+               "audience": "partner-ask" if directed else "report",
+               "register": register,
                "excerpt": findings[0][1][:200]})
         lines = [
             "CHAT LINT — your PREVIOUS reply broke writing rules that bind chat "
@@ -513,7 +683,15 @@ def main():
                      "are numbered and marked 'all required'. Agent access is "
                      "bounded by credentials and autonomous execution, not data "
                      "confidentiality. Code fences are exempt.")
-        carry("\n".join(lines), payload.get("session_id"))
+        if not directed:
+            lines.append("")
+            lines.append(
+                "AUDIENCE: this was a REPORT, not something asked of Joe, so this "
+                "note is the once-per-session consolidation rather than a "
+                "per-message flag. Later reporting-prose findings this session are "
+                "recorded in the ledger and not repeated here. A message that "
+                "actually asks him something is still flagged on the spot.")
+        carry("\n".join(lines), session)
         sys.exit(0)
 
     except SystemExit:

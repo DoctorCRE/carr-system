@@ -1,0 +1,14 @@
+{
+  "evals/jev-judgments/run_eval.py": "b7981bd931f1a1f134437fc3721225d1d4bb54a7a3622106432515c15e19f3cf",
+  "lib/headless_tasks.py": "5fc8137b9b81dc798f0292955f346ce2a3fe2f92922652a6075b40b8b29043f4",
+  "mcp-server/src/jev-needs-joe-advisory.js": "88c33134b5d740d037747b30dcf392d9fe5ddf0345176ba643ea91beb4d5427d",
+  "ops/jev_build_advisory.py": "8690bda833e21cafcf26929d1e56d4f5ed1bd2cf8199d2b0683f231c9eb67223",
+  "ops/jev_change_tolls.py": "26576e3336c4a42a215555ee1e20a917dd64b7ac1f352700b4a7bd8f07f99cce",
+  "ops/jev_done_checks.py": "639e31ba4f06a54cb04b97d6bf5e326c395490ffdb4028f7124b863dcb4d2759",
+  "ops/jev_handoff.py": "9d2a24e404ea4ee37e9027c77b2708ee4de5c09315fcf5024523bca55e91c2d2",
+  "ops/jev_notebook.py": "62384c03b1a93fba144b08792936780795c1f3baca1439766a3c3393864baf56",
+  "ops/jev_rule_select.py": "89fce70b4056a160b4dc9cd78a9123bf895fb1b91d000d69e308c5088dda7833",
+  "ops/jev_session_watch.py": "6a608d900634b7a142cc7ebb3c53d63bac66b0e14e31260c13f4b513f4ff2d7f",
+  "ops/slice-done-marker.py": "e0d79f8dabcd36e0ea492b5e96076c19d0009a380b7407d78c27ce5865472e87",
+  "ops/stale_claim_judge.py": "4764bb1d80e92d629062fbd9e8083e04384939b61ef78e08c20222f0cb822c3e"
+}

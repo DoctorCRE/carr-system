@@ -1,0 +1,10 @@
+{
+  "schema": "carr-judge-replay-comparison/v1",
+  "base_sha": "66ecfb8a",
+  "invocations": 7466,
+  "byte_identical": true,
+  "before_sha256": "1f8cb7959e0485d8fd0895a4150467844be569681fbd8287fd2740a0d02ab764",
+  "after_sha256": "1f8cb7959e0485d8fd0895a4150467844be569681fbd8287fd2740a0d02ab764",
+  "comparison": "ordered gate/event/fixture/verdict/reason TSV bytes; excludes timings and filesystem tracing",
+  "source_binding": "staged source; final replay after config relocation"
+}

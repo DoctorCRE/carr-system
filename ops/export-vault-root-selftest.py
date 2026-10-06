@@ -27,6 +27,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from git_env import fixture_env
+
 REPO = Path(__file__).resolve().parents[1]
 # The repo venv is what the nightly chain runs, so probe with it when it exists.
 # A GitHub runner has no .venv — it installs requirements into the interpreter
@@ -96,10 +98,14 @@ def main() -> int:
     skip = (".venv/", "out/", "node_modules/", ".claude/",
             ".worktrees/", ".codex-worktrees/", "_to_delete/", ".tmp")
     bad = []
-    for path in sorted(REPO.rglob("*.py")):
-        rel = path.relative_to(REPO).as_posix()
+    tracked = subprocess.run(
+        ["git", "-C", str(REPO), "ls-files", "-z", "--", "*.py"],
+        env=fixture_env(), capture_output=True, check=True,
+    ).stdout.decode().split("\0")
+    for rel in sorted(item for item in tracked if item):
         if rel.startswith(skip):
             continue
+        path = REPO / rel
         text = path.read_text(encoding="utf-8", errors="ignore")
         if "CARR_VAULT" not in text:
             continue

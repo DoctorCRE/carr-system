@@ -52,6 +52,22 @@ def authority_roles(cur) -> None:
     )
 
 
+def assert_wr122_route_is_fenced(cur) -> None:
+    """The abandoned 0535/0536 WR122 route remains history, never execution."""
+    expected = {
+        ("PLAN-954b03dd464d-v1", "sha256:954b03dd464dab9986bc705d01fdb197edd29b23ad10ca673da53ad0ac03c27d", "0535_ready_plan_amendment.sql"),
+        ("PLAN-954b03dd464d-v1", "sha256:954b03dd464dab9986bc705d01fdb197edd29b23ad10ca673da53ad0ac03c27d", "0536_ready_plan_amendment_scac_successor.sql"),
+    }
+    rows = set(cur.execute("""select plan_ref,plan_hash,unnest(migration_filenames)
+                              from ops.engineering_stale_contract_fence
+                             where work_request_ref='WR-000122'""").fetchall())
+    if rows != expected:
+        raise RuntimeError(f"WR122 stale route fence drifted: {rows!r}")
+    refusal(cur, "insert into public.schema_migrations(filename,sha256) values (%s,%s)",
+            ("0536_ready_plan_amendment_scac_successor.sql", "0" * 64),
+            "stale WR122 migration route")
+
+
 def fixture(cur, actor_id: uuid.UUID):
     token = uuid.uuid4().hex
     source_doc = one(cur, """insert into doctrine_document
@@ -124,6 +140,7 @@ def main() -> int:
     try:
         with rollback_only_connection(dsn) as conn, conn.cursor() as cur:
             authority_roles(cur)
+            assert_wr122_route_is_fenced(cur)
             joe_id = one(cur, "select id from actor where slug='joe' and active and kind='human'")[0]
             source_section, source_rev, origin_ref, runbook_ref = fixture(cur, joe_id)
             set_local_role(cur, "carr_writer")
@@ -248,6 +265,74 @@ def main() -> int:
             if historical_proposal[5:7] != ("ready", ready_version) or historical_acceptance[2:4] != ("ready", ready_version):
                 raise RuntimeError("historical replay did not preserve the original ready version")
             cur.execute("rollback to savepoint historical_replay")
+
+            # A plan accepted under a REQUIRED Work Shape must still take outcome
+            # feedback. Regression for incident INC-20260827-04: 0306's accept
+            # stamps the receipt's shape_fixed_surface_ref while its
+            # preserve-shape branch leaves the work request's field null, and
+            # the pre-0333 guards required the two to be equal — refusing every
+            # shape-governed closeout.
+            source_section2, source_rev2, origin_ref2, runbook_ref2 = fixture(cur, joe_id)
+            set_local_role(cur, "carr_writer")
+            request2_id, ref2, _, captured2_version, *_ = one(cur, """select * from ops.capture_sourced_work_request(
+              %s,%s,%s,%s,%s,%s,%s)""", (origin_ref2, "Shaped outcome feedback", "Observe one shaped result",
+              Jsonb([{"id": "OBSERVED", "text": "The stated outcome has an evidence reference"}]),
+              source_section2, source_rev2, uuid.uuid4()))
+            cur.execute("reset role")
+            triaged2 = as_authority(cur, "dell", "select * from ops.triage_sourced_work_request(%s,%s,'operational',%s)", (ref2, captured2_version, uuid.uuid4()))
+            set_local_role(cur, "carr_writer")
+            shaped = one(cur, """select * from ops.set_sourced_work_request_shape_disposition(
+              %s,%s,'required',null,'Shape analysis required by the fixture',%s,%s)""",
+              (ref2, triaged2[3], joe_id, uuid.uuid4()))
+            shaped_version = shaped[3]
+            cur.execute("""insert into ops.work_shape_revision
+              (work_request_id, work_request_version, version, trinity, hidden_assumption,
+               repo_searches, maintained_repos, archetypes, chosen_key, mind_changing_fact,
+               builder_brief, source_url, created_by_actor_id)
+              values (%s,%s,1,%s,%s,%s,%s,%s,%s,%s,%s,null,%s)""",
+              (request2_id, shaped_version,
+               Jsonb({"workflow_trigger": "fixture", "output_user": "fixture", "runtime": "fixture"}),
+               "The fixture assumes nothing hidden",
+               Jsonb(["search one", "search two"]),
+               Jsonb([{"url": f"https://github.com/example/repo-{n}", "maintenance_evidence": "active"} for n in range(5)]),
+               Jsonb([{"key": k, "label": k, "core_assumption": f"assumption {k}",
+                       "scores": {"trinity_fit": 3, "useful_v1_effort": 3, "extension_effort": 3}}
+                      for k in ("a", "b", "c")]),
+               "a", "A measured fact would change this choice",
+               Jsonb({"chosen_shape": "fixture", "repo_url": "https://github.com/example/repo-0",
+                      "trinity": {"workflow_trigger": "fixture", "output_user": "fixture", "runtime": "fixture"},
+                      "must_have_integrations": ["one"], "v1_non_goals": ["none"],
+                      "text": "fixture brief"}),
+               joe_id))
+            plan2 = one(cur, """select * from ops.propose_sourced_work_request_plan(
+              %s,%s,%s,%s,%s,%s,%s,%s,%s)""", (ref2, shaped_version, "Observe one shaped bounded result",
+              runbook_ref2, Jsonb([]), "safe:recovery:stop", "safe:observability:record",
+              Jsonb({"max_steps": 2, "max_duration_minutes": 15}), uuid.uuid4()))
+            cur.execute("reset role")
+            ready2 = as_authority(cur, "dell", "select * from ops.accept_sourced_work_request_plan(%s,%s,%s,%s)",
+              (ref2, shaped_version, plan2[2], uuid.uuid4()))
+            ready2_version, plan2_hash = ready2[3], plan2[2]
+            if ready2[2] != "ready":
+                raise RuntimeError(f"shape-required ready plan fixture failed: {ready2}")
+            shape_state = one(cur, "select shape_disposition, shape_fixed_surface_ref from ops.work_request where id=%s", (request2_id,))
+            if shape_state != ("required", None):
+                raise RuntimeError(f"preserve-shape acceptance did not keep the shape state: {shape_state}")
+            binding = cur.execute("""select sb.disposition, sb.fixed_surface_ref
+              from ops.sourced_work_request_plan_shape_binding_receipt sb
+              join ops.sourced_work_request_plan_acceptance_receipt ar on ar.id=sb.plan_acceptance_receipt_id
+             where ar.work_request_id=%s""", (request2_id,)).fetchone()
+            if binding != ("required", None):
+                raise RuntimeError(f"acceptance did not freeze the shape state in a binding receipt: {binding}")
+            set_local_role(cur, "carr_writer")
+            shaped_proposal = propose(cur, ref2, ready2_version, plan2_hash, uuid.uuid4(), summary="Shaped observed result")
+            cur.execute("reset role")
+            if shaped_proposal[5:7] != ("ready", ready2_version):
+                raise RuntimeError(f"shape-required outcome proposal was refused or misreported: {shaped_proposal}")
+            shaped_accepted = accept(cur, ref2, ready2_version, shaped_proposal[2], uuid.uuid4(), "dell")
+            if shaped_accepted[2:4] != ("ready", ready2_version):
+                raise RuntimeError(f"shape-required outcome acceptance failed: {shaped_accepted}")
+            if pending(cur, ref2) != []:
+                raise RuntimeError("accepted shape-required outcome feedback remained pending")
     except Exception as exc:
         return fail(str(exc))
     print("program6-outcome-feedback-gate: PASS")

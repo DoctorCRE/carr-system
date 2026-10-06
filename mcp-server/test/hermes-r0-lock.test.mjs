@@ -108,7 +108,7 @@ test("the hermes business-write set is a strict subset of capture", () => {
   // capture never lands in a persistent daemon's hands unreviewed. This is the
   // assertion that keeps the two honest in the other direction: hermes may
   // never hold a verb capture does not.
-  const runtimeOnly = new Set(["project-room-queue"]);
+  const runtimeOnly = new Set(["project-room-queue", "record-dispatch-link"]);
   for (const verb of PROFILES.hermes) {
     if (runtimeOnly.has(verb)) continue;
     assert.ok(PROFILES.capture.has(verb),
@@ -117,7 +117,9 @@ test("the hermes business-write set is a strict subset of capture", () => {
   assert.ok(PROFILES.hermes.size - runtimeOnly.size < PROFILES.capture.size,
     "strict subset: hermes deliberately excludes the investigation verbs");
   assert.equal(allowedIn("hermes", "project-room-queue", WRITE), true,
-    "the server-bound projector door is the only runtime-only write");
+    "the server-bound projector door is an allowed runtime write");
+  assert.equal(allowedIn("hermes", "record-dispatch-link", WRITE), true,
+    "the server-bound dispatch-link door is an allowed runtime write");
 });
 
 test("the investigation verbs stay out of the hermes set", () => {

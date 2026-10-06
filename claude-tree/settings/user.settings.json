@@ -347,11 +347,6 @@
           },
           {
             "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/stale-claim-gate.py",
-            "timeout": 20
-          },
-          {
-            "type": "command",
             "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/loose-work-gate.py"
           },
           {

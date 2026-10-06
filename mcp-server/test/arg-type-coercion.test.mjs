@@ -153,6 +153,7 @@ test("REGRESSION — teach through the choke point stores SHARED when personal i
 
   const out = await executeRegisteredTool(client, actor, "teach", {
     idempotency_key: "k1", statement: "a rule", human_quote: "teach it", personal: "false",
+    enforcement_home: "core",
   });
 
   // personal_to is params[4]; null means SHARED.
@@ -178,6 +179,7 @@ test("teach with a genuine personal:true still stores PERSONAL", async () => {
     inserts.length = 0;
     const out = await executeRegisteredTool(client, actor, "teach", {
       idempotency_key: "k2", statement: "a rule", human_quote: "teach it", personal: val,
+      enforcement_home: "core",
     });
     assert.equal(inserts[0][4], "actor-joe", `personal:${JSON.stringify(val)} must store personal_to`);
     assert.equal(out.scope_applied, "personal:joe");
@@ -196,6 +198,7 @@ test("teach with personal omitted defaults to SHARED", async () => {
   } };
   const out = await executeRegisteredTool(client, { id: "actor-joe", slug: "joe", human: true }, "teach", {
     idempotency_key: "k3", statement: "a rule", human_quote: "teach it",
+    enforcement_home: "core",
   });
   assert.equal(inserts[0][4], null);
   assert.equal(out.scope_applied, "shared");

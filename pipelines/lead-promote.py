@@ -135,7 +135,7 @@ print(f"[lead-promote] source: "
 # The lead-sweep workflow once created L-170 for a practice already a client at
 # Closing. Anything promoted has to be checked against every record we hold, by
 # BOTH name and email — name alone misses the spelling drift this vault is full of
-# (Brielmayer/Breilmayer, Lindsay/Lindsey, Connor/Conner).
+# (Kleinmeyer/Kleinmayer, Lindsay/Lindsey, Connor/Conner).
 def norm(x):
     return re.sub(r"[^a-z]", "", s(x).lower())
 

@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from types import ModuleType
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,7 +88,11 @@ GATES_BRANCH = "gates/enforcement-sync"
 # call this mechanical sync must not make on a human's behalf — see rule
 # 5e89c211, never spend a cognition token on a decision a predicate can make,
 # and the inverse of it: never let a predicate MAKE a decision that needed one.
-PENDING_PLANNED_CONTROL = "pending classification — see rule-enforceability audit 2026-08-14"
+def pending_planned_control(today: date | None = None) -> str:
+    """A placeholder whose grace window starts when this sync actually mints it."""
+    minted = (today or date.today()).isoformat()
+    return (f"pending classification — minted {minted}; "
+            "see rule-enforceability audit 2026-08-14")
 
 
 sys.path.insert(0, os.path.join(REPO, "ops"))
@@ -372,7 +377,7 @@ def pending_entry_line(rule_id: str, default_category: str) -> str:
     obj = {
         "category": default_category,
         "enforcement_class": "unbuilt",
-        "planned_control": PENDING_PLANNED_CONTROL,
+        "planned_control": pending_planned_control(),
     }
     return f'    "{rule_id}": {json.dumps(obj, ensure_ascii=False)}'
 

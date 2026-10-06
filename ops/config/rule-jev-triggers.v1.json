@@ -1,0 +1,3217 @@
+{
+ "counts": {
+  "residual": 3,
+  "rules": 106,
+  "triggered": 103
+ },
+ "generated_note": "Written only by ops/rule-trigger-compile.py: one Jev request per pack-layer rule, keyed to the rule's statement digest. ops/rule-jit-compile.py turns these into rows of ops/config/rule-jit-triggers.v1.json. Never hand-edit.",
+ "rules": {
+  "015183f5": {
+   "always_on_probability": 0.33,
+   "id": "015183f5",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.16,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "25d44a5c88c8209dc56ec807cffccc711357c5365c0cd0f73ffc3281c2925583",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "classification": 0.51,
+     "ordered questions": 0.63
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "018ce972": {
+   "always_on_probability": 0.15,
+   "id": "018ce972",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "changes subject": 0.74,
+    "cost tier": 0.73,
+    "next startup": 0.67,
+    "timing gym": 0.68
+   },
+   "no_cue_probability": 0.26,
+   "packs": [
+    "joe-development"
+   ],
+   "statement_sha256": "f05abaf268093f466858ac183740cef210097ae9a4556c9341c18a74bc5520cc",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "changes window": 0.52,
+     "cheapest-window": 0.76,
+     "cheapest-window timing": 0.76,
+     "cost next": 0.62,
+     "window math": 0.74
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "0c1bac27": {
+   "always_on_probability": 0.15,
+   "id": "0c1bac27",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "negative finding": 0.68
+   },
+   "no_cue_probability": 0.3,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "e479e58f99ba0d690f9c04c16b0f63621372d2f72cb36be9bbc40475e1b21573",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "analyze-dell": 0.68,
+     "analyze-dell framing": 0.68,
+     "complementarity": 0.56,
+     "complementarity ledger": 0.74,
+     "finding fit": 0.53,
+     "ledger": 0.61,
+     "partnership complementarity": 0.67
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "0f38532e": {
+   "always_on_probability": 0.2,
+   "id": "0f38532e",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.31,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "e493035f9798dffeaa9a531bf05775986b823fe4a9b416b4f5a641de0fc83e18",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "duplicated": 0.66,
+     "fact home": 0.5,
+     "single source": 0.55,
+     "source truth": 0.54
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "113b3833": {
+   "always_on_probability": 0.12,
+   "id": "113b3833",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "question practitioners": 0.66,
+    "run passes": 0.72
+   },
+   "no_cue_probability": 0.11,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "007285563e76e05bf4b8a99e35cc32ae17730270e30fb694fad890b6a40d9b5c",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "beyond standing": 0.59,
+     "lookup": 0.5,
+     "lookup beyond": 0.62,
+     "no-hit": 0.54,
+     "retrieval-as-code": 0.54,
+     "retrieve": 0.63,
+     "retrieve question": 0.65,
+     "run retrieve": 0.65,
+     "standing core": 0.52
+    },
+    "paths": {
+     "system/run.sh": 0.53
+    },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "11b2b73b": {
+   "always_on_probability": 0.06,
+   "id": "11b2b73b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "doctrine records": 0.63,
+    "industry content": 0.68,
+    "shares industry": 0.61,
+    "today design": 0.66
+   },
+   "no_cue_probability": 0.09,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "d0051aedeaaa816d0669094ba6f0ea3b6066e1f017be0f73b7bc19d757ba3440",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "ai's": 0.5,
+     "ai's output": 0.63,
+     "already cite": 0.54,
+     "another ai's": 0.67,
+     "content shares": 0.64,
+     "design content": 0.55,
+     "feeds doctrine": 0.6,
+     "repo": 0.59,
+     "shares feeds": 0.62,
+     "thread": 0.64,
+     "we already have this": 0.54
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "173119a8": {
+   "always_on_probability": 0.05,
+   "id": "173119a8",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "stale notes": 0.6
+   },
+   "no_cue_probability": 0.14,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "e3186f345a7781472d0f6773d9638a48fe87573ae3b2db92de48da7beeac9912",
+   "triggers": {
+    "commands": {
+     "git diff": 0.59
+    },
+    "keywords": {
+     "ahead behind": 0.56,
+     "anything uncommitted": 0.55,
+     "behind": 0.51,
+     "blocking": 0.69,
+     "diff": 0.53,
+     "dirty": 0.7,
+     "dirty tree": 0.75,
+     "git diff": 0.56,
+     "stale": 0.64,
+     "stale tree": 0.7,
+     "tree": 0.53,
+     "uncommitted": 0.56,
+     "uncommitted work": 0.64,
+     "work dirty": 0.62
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "179be4b8": {
+   "always_on_probability": 0.09,
+   "id": "179be4b8",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.18,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "77f2b5002a65b281737c46ba01ffd49c68979a4edea2d3c0babde49a56517368",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "agreed deliverable": 0.6,
+     "agreed result": 0.5,
+     "already-authorized": 0.53,
+     "already-authorized fixes": 0.61,
+     "backlog naming": 0.62,
+     "bd-15fb-4f5e-8849-ed63911469e0 substrate": 0.68,
+     "follow-ups": 0.56,
+     "prerequisite": 0.56,
+     "product task": 0.55
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "185013c6": {
+   "always_on_probability": 0.09,
+   "id": "185013c6",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.07,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "e703775a3aea5bfb3440094f034f4ce950e214c1906efdf1b13ed09ba4eba551",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "cost tier": 0.52,
+     "executor": 0.57,
+     "executor: <tier/model> per fit-map lane <n>": 0.84,
+     "fable-inline": 0.67,
+     "subagent": 0.86,
+     "workflow": 0.73
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "19304882": {
+   "always_on_probability": 0.25,
+   "id": "19304882",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "insurance reps": 0.75,
+    "joe's ruling": 0.6,
+    "watch-video skill": 0.69
+   },
+   "no_cue_probability": 0.27,
+   "packs": [
+    "joe-development"
+   ],
+   "statement_sha256": "541578abaf1e75401a8c2c6f2f8e4d6d62af787aefea91aac568986143559516",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "artifact skill": 0.52,
+     "calibration": 0.53,
+     "compression": 0.54,
+     "compression reps": 0.67,
+     "invites joe's": 0.54,
+     "joe's framing": 0.76,
+     "joe's strength-training": 0.5,
+     "ledger": 0.54,
+     "monthly review": 0.54,
+     "order-writing": 0.62,
+     "override": 0.72,
+     "strength-training kit": 0.51,
+     "timing": 0.53,
+     "timing call": 0.75
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "1c21263c": {
+   "always_on_probability": 0.11,
+   "id": "1c21263c",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.36,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "3eb68d4f69cbf1764d13a08e220dffeefc5153aead704bae67b44853734073ed",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "1f750181": {
+   "always_on_probability": 0.05,
+   "id": "1f750181",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.13,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "0c412356baeeedfbad62ba81c611f3e5717ef1f93c8a673ccbec9f25d034a703",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "assembled outside": 0.62,
+     "big mixed": 0.63,
+     "blocks same-category": 0.73,
+     "competing vendors": 0.7,
+     "competitors list": 0.72,
+     "deals md's": 0.52,
+     "decides otherwise": 0.6,
+     "invite": 0.51,
+     "lunch-and-learn": 0.62,
+     "vendor compatibility": 0.6
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "1fcaa63a": {
+   "always_on_probability": 0.06,
+   "id": "1fcaa63a",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.11,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "89c34619c725c82a8ac0dba6c727b7129ddd74bc9887f44543d97380bc508601",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "acceptance adversarial": 0.5,
+     "admission": 0.5,
+     "admission machinery": 0.68,
+     "admission typed": 0.57,
+     "adversarial cross-family": 0.52,
+     "build protocol": 0.76,
+     "heavy build": 0.8
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "204391be": {
+   "always_on_probability": 0.04,
+   "id": "204391be",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "teach verb": 0.83
+   },
+   "no_cue_probability": 0.16,
+   "packs": [
+    "engineering-git",
+    "governance-rules"
+   ],
+   "statement_sha256": "b960534b6aa8eceb2281e086a53479ae161a748742e20831e82f35ea7e1df28f",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "missing verb": 0.66,
+     "verb build": 0.59
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {
+     "list-verbs": 0.57
+    }
+   }
+  },
+  "20d106f1": {
+   "always_on_probability": 0.11,
+   "id": "20d106f1",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "today design": 0.63
+   },
+   "no_cue_probability": 0.21,
+   "packs": [
+    "joe-development"
+   ],
+   "statement_sha256": "99a78a202c74badeca4a31daf0cd7cae72be430e327d4350ab3ad307ab44aa8b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "calibration": 0.57,
+     "close-before-open": 0.66,
+     "close-before-open opens": 0.65,
+     "design thread": 0.5,
+     "ledger": 0.53,
+     "monthly review": 0.5,
+     "opens substantial": 0.56,
+     "prediction": 0.58,
+     "substantial new": 0.52
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "25fcddee": {
+   "always_on_probability": 0.06,
+   "id": "25fcddee",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "research pass": 0.67
+   },
+   "no_cue_probability": 0.33,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "a8e9df118489f0a0b3e27b1cfd7bebdd7ff76f58b70dee80f75653428e177ab9",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "ambiguities": 0.54,
+     "ambiguities show": 0.56,
+     "approach-changing": 0.59,
+     "approach-changing ambiguities": 0.68,
+     "attempt new": 0.61,
+     "cheap variants": 0.6,
+     "first attempt": 0.62,
+     "pass unfamiliar": 0.52,
+     "unfamiliar deliverables": 0.53,
+     "unknowns pass": 0.55
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "2b66211d": {
+   "always_on_probability": 0.07,
+   "id": "2b66211d",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "index context": 0.63
+   },
+   "no_cue_probability": 0.24,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "21f5241aa8db00e5159b7904751132668a49b5b576275688830f9beeb8437a24",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "checker inherits": 0.52,
+     "fan-out": 0.58,
+     "fan-out hygiene": 0.66,
+     "fresh context": 0.59,
+     "inherits maker's": 0.57,
+     "maker's conversation": 0.54
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "2ca2add2": {
+   "always_on_probability": 0.08,
+   "id": "2ca2add2",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "major decisions": 0.64
+   },
+   "no_cue_probability": 0.25,
+   "packs": [
+    "records-intake"
+   ],
+   "statement_sha256": "e04649879fb6d1860664e6f7f727c701b18ed53fe8d03f0639d063c6514d01fe",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "another trip": 0.51,
+     "appear client-facing": 0.57,
+     "apply client-facing": 0.61,
+     "available field": 0.55,
+     "capture": 0.59,
+     "capture rendering": 0.6,
+     "client-facing": 0.51,
+     "column costs": 0.57,
+     "rendering separate": 0.58,
+     "separate decisions": 0.51
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "2e362970": {
+   "always_on_probability": 0.05,
+   "id": "2e362970",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.45,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "03718bf3de2f2431d088d0985aaffd01c6affb59a2904b1a37309120e8de36df",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "adopting": 0.73,
+     "deep-dive": 0.61,
+     "deep-dive research": 0.67,
+     "get data out of outlook": 0.52,
+     "implementation starts": 0.57,
+     "new capability": 0.72,
+     "new implementation": 0.7,
+     "research pass": 0.69,
+     "starts deep-dive": 0.62,
+     "third-party": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "3578d799": {
+   "always_on_probability": 0.1,
+   "id": "3578d799",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.26,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "2e33319cb49e1c1fcdd6d2647e4632a931d2aa9ea07b5a0b4f4dfab28542b15d",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "absorbing outside": 0.57,
+     "data-pipeline": 0.5,
+     "data-pipeline words": 0.55,
+     "ingest": 0.76,
+     "machine data-pipeline": 0.52,
+     "name verbs": 0.56,
+     "rename": 0.55,
+     "system nouns": 0.51
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "3b0cd546": {
+   "always_on_probability": 0.13,
+   "id": "3b0cd546",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.18,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "01ce463c86aef79515a2626b076fa3277d09cc199f631c7af1f04a8e53512c93",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "banks competing": 0.55,
+     "block named": 0.51,
+     "broker patterson": 0.59,
+     "name-dropping": 0.62,
+     "named-rivalry": 0.66,
+     "patterson": 0.67
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "3d185f2b": {
+   "always_on_probability": 0.04,
+   "id": "3d185f2b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "product task": 0.67
+   },
+   "no_cue_probability": 0.24,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "923321e92b6f5984adb0709f9d6fb14a2e1a652b19654f34d937daf0b17b3a9c",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "afterward comments": 0.5,
+     "blind": 0.54,
+     "builds finish": 0.56,
+     "finished product": 0.5,
+     "gates process": 0.65,
+     "process system-design": 0.53,
+     "product gates": 0.52,
+     "reviews finished": 0.5,
+     "system builds": 0.62,
+     "system-design": 0.54,
+     "system-design builds": 0.67
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "3fa17fa0": {
+   "always_on_probability": 0.05,
+   "id": "3fa17fa0",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.11,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "b871e548f7d75fae684d3bee0caf8bb588d9ddcb717a9af5deca1b27b11f1d9b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "drafting re-engagement": 0.64,
+     "is this still true?": 0.65,
+     "notes older": 0.6,
+     "re-engagement": 0.53,
+     "re-engagement notes": 0.52,
+     "stale": 0.52,
+     "stale notes": 0.57
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "412d37d3": {
+   "always_on_probability": 0.21,
+   "id": "412d37d3",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.2,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "83dec0f5fcb30becde3d6b56089a62e7b8599b470dca281be31b14326c95978d",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "hipaa double-check": 0.54,
+     "hipaa spelled": 0.59,
+     "spelled hipaa": 0.57
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "424ba0cc": {
+   "always_on_probability": 0.06,
+   "id": "424ba0cc",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "inside category": 0.7,
+    "separate decisions": 0.72
+   },
+   "no_cue_probability": 0.19,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "f0fe3c86c9352776ef15f6a23e961b567661c0c71e6781b528e1d6e9c557c375",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "clients leave": 0.54,
+     "cold": 0.53,
+     "cold paused": 0.72,
+     "leave active": 0.54,
+     "not-top-of-mind": 0.67,
+     "not-top-of-mind category": 0.7,
+     "paused": 0.59,
+     "paused clients": 0.67,
+     "separate not-top-of-mind": 0.71
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "4399df76": {
+   "always_on_probability": 0.09,
+   "id": "4399df76",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "holding full": 0.72
+   },
+   "no_cue_probability": 0.35,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "ea51dc0ad0cc82dbaf8a29ea87251576d1b3e40ef1ec69ed0c53947c92ab954f",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "hardcoded": 0.53,
+     "holding most-common": 0.58,
+     "letter of intent": 0.52,
+     "loi": 0.51,
+     "loi term": 0.6,
+     "most-common case": 0.58,
+     "negotiable template": 0.57,
+     "per-deal-overridable": 0.71,
+     "placeholders": 0.53,
+     "placeholders holding": 0.56,
+     "template values": 0.61,
+     "values placeholders": 0.52
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "466a545a": {
+   "always_on_probability": 0.05,
+   "id": "466a545a",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "feeds link": 0.62,
+    "job description": 0.78
+   },
+   "no_cue_probability": 0.26,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "33c83c01ec85c370e29582eaece5a8eff27eb8116a697cd82846c4139924a5da",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "actual standard": 0.63,
+     "feeds": 0.62,
+     "feeds source": 0.76,
+     "mostly validates us": 0.84,
+     "property test": 0.72,
+     "source job": 0.5,
+     "study": 0.54,
+     "we already do this": 0.7
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "48083552": {
+   "always_on_probability": 0.09,
+   "id": "48083552",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "client vendor": 0.6
+   },
+   "no_cue_probability": 0.11,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "af98a658059a41138ae60b25da4ad641452b048d7e8c25167b0eb4f5f08fb8f6",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "already looked": 0.55,
+     "already tried": 0.66,
+     "approver": 0.52,
+     "client prospect": 0.54,
+     "constraint": 0.51,
+     "constraint map": 0.64,
+     "discovery": 0.6,
+     "discovery solving": 0.61,
+     "properties already looked at": 0.61,
+     "prospect": 0.53,
+     "prospect meeting": 0.66
+    },
+    "paths": {
+     "DNA/Clients/intake/intake-template.md": 0.73
+    },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "49533583": {
+   "always_on_probability": 0.06,
+   "id": "49533583",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "joe's ruling": 0.7
+   },
+   "no_cue_probability": 0.18,
+   "packs": [
+    "joe-comms"
+   ],
+   "statement_sha256": "7e1c5d733ac74bfd1b53bb66ffb7bdb56af1b707c232c36bedcecdf5bb110e28",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "apple calendar": 0.61,
+     "apple mail": 0.62,
+     "attendee": 0.55,
+     "attendees": 0.61,
+     "attendees mail": 0.56,
+     "gordon | dell | joe - call": 0.59,
+     "joe's meetings": 0.68,
+     "kyle | dell & joe": 0.59,
+     "meetings attendees": 0.59,
+     "participant": 0.5,
+     "reach calendar": 0.62,
+     "reaches joe's": 0.68
+    },
+    "paths": {
+     "DNA/Team/calendar-latest.ics": 0.74,
+     "local/fetch-calendar.sh": 0.67,
+     "out/calendar-archive/calendar-joe-*.ics": 0.73
+    },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "4a9188f3": {
+   "always_on_probability": 0.28,
+   "id": "4a9188f3",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.32,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "6b07ecbe26fe500155dba959e161a3408af224cae186324dde01cd7fab0b354d",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "answers question": 0.63,
+     "approach states": 0.53,
+     "asked come": 0.56,
+     "checkpoint": 0.62,
+     "corrects": 0.75,
+     "handoff": 0.62,
+     "states": 0.5,
+     "sweep": 0.68
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "51d9f05f": {
+   "always_on_probability": 0.39,
+   "id": "51d9f05f",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.26,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "872aa9c4f6487ae4146971b5b3e1927c71fb9cd2366e541fc7d683f99f24ad31",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "aggressive-sales assume": 0.54,
+     "assume they've": 0.59,
+     "carr": 0.58,
+     "consultative aggressive-sales": 0.53,
+     "educational consultative": 0.51,
+     "experts unfamiliar": 0.64,
+     "healthcare experts": 0.5,
+     "unfamiliar cre": 0.64
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "557838a5": {
+   "always_on_probability": 0.07,
+   "id": "557838a5",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "feeds link": 0.66,
+    "record layer": 0.76,
+    "vertical inside": 0.76
+   },
+   "no_cue_probability": 0.09,
+   "packs": [
+    "joe-comms"
+   ],
+   "statement_sha256": "30ed075982249b7ab58a69b59300ac859f9132afc83605cadf085ecf3c11ac48",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "link quoted": 0.59,
+     "post inside": 0.5,
+     "post quotes": 0.5,
+     "quoted layer": 0.58,
+     "quoted post": 0.58,
+     "x.com": 0.57
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "5697071b": {
+   "always_on_probability": 0.1,
+   "id": "5697071b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "vendor party": 0.66
+   },
+   "no_cue_probability": 0.19,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "9618ee17dec36a05f8c23871d7c8f66b70e09b61f073ce2db9c7019a2c303d6c",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "alabama exam": 0.52,
+     "dell's": 0.51,
+     "licensed party": 0.58,
+     "licensure grounds": 0.6,
+     "may joe advertise into alabama": 0.55
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "57d13061": {
+   "always_on_probability": 0.07,
+   "id": "57d13061",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.09,
+   "packs": [
+    "joe-comms"
+   ],
+   "statement_sha256": "f7d21cca09298015f9b72bb0f9c7a7d37682ba441535be504e3863dcab2efdd0",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "advanced analytics with  premium — upgrade to continue": 0.79,
+     "analytics impressions": 0.66,
+     "build first": 0.68,
+     "com retrieval": 0.69,
+     "creator analytics": 0.69,
+     "creator analytics and impressions dashboards": 0.63,
+     "impressions": 0.55,
+     "logged-in": 0.62,
+     "metrics": 0.5,
+     "relevant people": 0.57,
+     "retrieval single": 0.59,
+     "single links": 0.57,
+     "x.com": 0.71
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "5d44d3f3": {
+   "always_on_probability": 0.06,
+   "id": "5d44d3f3",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "gets tier": 0.71
+   },
+   "no_cue_probability": 0.14,
+   "packs": [
+    "records-intake"
+   ],
+   "statement_sha256": "53bd861e5b21c99ad9212063f6627083995854470a2dfcbf9a4f6765e2593f67",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "already system": 0.5,
+     "backfill": 0.75,
+     "c-112": 0.51,
+     "gets open-source": 0.63,
+     "harborline pelvic therapy (fka bayline pelvic floor)": 0.54,
+     "intake": 0.56,
+     "nppes": 0.5,
+     "open-source": 0.55,
+     "open-source verification": 0.71,
+     "stamp": 0.63,
+     "unverified": 0.59,
+     "verification backfill": 0.81,
+     "verification stamp": 0.71
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "5e896ed6": {
+   "always_on_probability": 0.06,
+   "id": "5e896ed6",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.17,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "25d759a54d9770c629236883698a6099d681811aaf596c3c7d03b36b90ecbc86",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "applicable learnings": 0.55,
+     "capture row": 0.71,
+     "doctrine file": 0.66,
+     "feeds": 0.56,
+     "feeds link": 0.71,
+     "file log": 0.51,
+     "honestly including": 0.55,
+     "including declined": 0.51,
+     "incorporates applicable": 0.57,
+     "merged": 0.56
+    },
+    "paths": {},
+    "tools": {
+     "WebFetch": 0.59
+    },
+    "verbs": {}
+   }
+  },
+  "5f8c661d": {
+   "always_on_probability": 0.05,
+   "id": "5f8c661d",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "vertical state": 0.6
+   },
+   "no_cue_probability": 0.26,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "515151ae2ef4b6537a9418ecd559a5d632adb2d7f38555fc25011bb48260c0e7",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "america veterinary-specific": 0.7,
+     "carry vertical": 0.56,
+     "decent": 0.51,
+     "fit outranks": 0.74,
+     "gets vet-vertical": 0.75,
+     "matching": 0.5,
+     "outranks": 0.56,
+     "relationship stage": 0.58,
+     "vertical": 0.51,
+     "vet-vertical": 0.79,
+     "veterinary": 0.53,
+     "veterinary-specific": 0.72
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "614c1209": {
+   "always_on_probability": 0.28,
+   "id": "614c1209",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.23,
+   "packs": [
+    "records-intake"
+   ],
+   "statement_sha256": "0c848c22502a69c0f26484054c8689466ca551efbcfc221e4b633e29a468f72b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "ask partner": 0.7,
+     "did you follow up with": 0.82,
+     "mark record": 0.74,
+     "record stale": 0.74,
+     "stale": 0.64
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "6172e7d5": {
+   "always_on_probability": 0.06,
+   "id": "6172e7d5",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "codex grok": 0.65,
+    "votes seat": 0.67
+   },
+   "no_cue_probability": 0.13,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "9a10dcd0d7ff001f80453db007b00b2bfbeee9fcdd938f26845fc1bc29c28c0d",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "default seat": 0.53,
+     "grok runs": 0.52,
+     "runs watch-video": 0.72,
+     "scratch directory": 0.54,
+     "seat video": 0.5,
+     "watch-video": 0.73,
+     "watch-video skill": 0.75
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "61c64d91": {
+   "always_on_probability": 0.1,
+   "id": "61c64d91",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "client gets": 0.77,
+    "delivery tier": 0.7,
+    "new implementation": 0.7
+   },
+   "no_cue_probability": 0.3,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "f8da70545a51a436032026ac03a857b425f735487601375ac806188599eb7403",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "asset gets": 0.52,
+     "creation retrofitted": 0.57,
+     "gets tier": 0.67,
+     "joe-only": 0.51,
+     "new asset": 0.55,
+     "tier creation": 0.56,
+     "twin readiness": 0.54
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "6437ae15": {
+   "always_on_probability": 0.08,
+   "id": "6437ae15",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.21,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "93d241636d73c1d637269343fa960bce57fa020afe65806f6a792498dcf48d2b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "article video": 0.53,
+     "arxiv": 0.51,
+     "full mine": 0.6,
+     "gold nuggets": 0.55,
+     "mined": 0.55,
+     "nuggets applicable": 0.57,
+     "provides article": 0.61,
+     "read full": 0.57,
+     "source read": 0.51
+    },
+    "paths": {},
+    "tools": {
+     "WebFetch": 0.6
+    },
+    "verbs": {}
+   }
+  },
+  "67580c28": {
+   "always_on_probability": 0.08,
+   "id": "67580c28",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "party deal": 0.6,
+    "ruling control": 0.62
+   },
+   "no_cue_probability": 0.35,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "5396ee817414f0af3f3aab39f28f69d039ff857c873e9d0f2149221e70792b83",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "artifact": 0.56,
+     "board": 0.59,
+     "board deal": 0.55,
+     "builds restyles": 0.83,
+     "carr": 0.57,
+     "carr surface": 0.71,
+     "cinematic": 0.56,
+     "command center": 0.63,
+     "control": 0.54,
+     "control room": 0.65,
+     "dashboard": 0.63,
+     "deal board": 0.56,
+     "deal room": 0.66,
+     "lead board": 0.52,
+     "moment builds": 0.69,
+     "register": 0.6,
+     "restyles": 0.83,
+     "restyles reviews": 0.76,
+     "reviews": 0.67,
+     "room command": 0.53,
+     "surface board": 0.55
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "6901cc3b": {
+   "always_on_probability": 0.2,
+   "id": "6901cc3b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.28,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "4b53d1a40b2766f2aba73e3cf8f94226cb37d230668f92c18ed8421938b818b4",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "accept lower": 0.63,
+     "adoption binary": 0.5,
+     "compromise": 0.6,
+     "good enough": 0.52,
+     "good enough to ship": 0.57,
+     "we already have": 0.67
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "6ec7312d": {
+   "always_on_probability": 0.04,
+   "id": "6ec7312d",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "notes fit": 0.61,
+    "output tiebreaker": 0.63,
+    "tier creation": 0.64
+   },
+   "no_cue_probability": 0.2,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "9f4f113c62b78782d3c161ec093d36f9c878bde7659c5d15d537ca3281202cbf",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "bad introduction": 0.53,
+     "blocks vertical": 0.58,
+     "burns": 0.54,
+     "burns clients": 0.58,
+     "competing vendors": 0.51,
+     "delivery tier": 0.69,
+     "delivery-weighted": 0.71,
+     "hard blocks": 0.61,
+     "relationship stage": 0.51,
+     "state fit": 0.55,
+     "tiebreaker": 0.54,
+     "tier": 0.54,
+     "vertical state": 0.53
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "70e372f0": {
+   "always_on_probability": 0.39,
+   "id": "70e372f0",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.27,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "d4dd289da3e3f8ed51e210844ab6f77006b1344a93ba99b963a20054fa904b52",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "abandoned": 0.63,
+     "abandoned flows": 0.68,
+     "asks corrects": 0.62,
+     "assessment": 0.54,
+     "calibration": 0.56,
+     "experience calibration": 0.6,
+     "friction": 0.62,
+     "style asks": 0.5,
+     "teach": 0.51
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "725dff46": {
+   "always_on_probability": 0.14,
+   "id": "725dff46",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "dell's learn": 0.65,
+    "research alone": 0.73,
+    "vendor stage": 0.61
+   },
+   "no_cue_probability": 0.26,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "bf83bb6c254b22748ec5431b7cf7d672836d50c9318c0198d4236648ab241913",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "alone": 0.53,
+     "alone dell's": 0.64,
+     "dell's alone": 0.73,
+     "our vendor network": 0.71,
+     "vendor network": 0.55
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "72e06bdf": {
+   "always_on_probability": 0.08,
+   "id": "72e06bdf",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "board deal": 0.67,
+    "lead no-conflict": 0.73
+   },
+   "no_cue_probability": 0.2,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "d70f42ea7f1bd8d78bd92b2e624f61941bdfe38ee9129484270a8faf15db8dc3",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "artifact lead": 0.52,
+     "board pre-qualify": 0.71,
+     "board withhold": 0.66,
+     "collision pure": 0.56,
+     "confirmed different-person": 0.59,
+     "date fill": 0.57,
+     "deduping": 0.6,
+     "deduping person's": 0.67,
+     "different-person": 0.52,
+     "leads board": 0.55,
+     "pre-qualify": 0.74,
+     "pre-qualify leads": 0.76
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "740bb505": {
+   "always_on_probability": 0.06,
+   "id": "740bb505",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.34,
+   "packs": [
+    "scheduled-automation"
+   ],
+   "statement_sha256": "96ebafef0845c1812d9d4c2bad5d24d9199f98b27903fd50331fe9afb4d5a35b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "crash overhead": 0.58,
+     "exclude dead": 0.6,
+     "include crash": 0.54,
+     "line predicted": 0.58,
+     "min line": 0.55,
+     "projecting long": 0.61,
+     "supervisor": 0.52,
+     "wall-clock": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "76a1ae2b": {
+   "always_on_probability": 0.05,
+   "id": "76a1ae2b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "alabama exam": 0.65
+   },
+   "no_cue_probability": 0.18,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "38331fbba6d1836bb6450c4e2ffd0c41ac530c990d14eee0f420d4657ec8a95b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "alabama": 0.59,
+     "alabama vet": 0.75,
+     "banker wastes": 0.51,
+     "banker's turf": 0.55,
+     "bofa vet": 0.51,
+     "carlos": 0.51,
+     "carlos navarro": 0.53,
+     "carve territory": 0.56,
+     "dahl": 0.59,
+     "florida": 0.55,
+     "navarro": 0.55,
+     "territory": 0.54,
+     "territory vertical": 0.7,
+     "vet client": 0.59
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "7b4ba3aa": {
+   "always_on_probability": 0.05,
+   "id": "7b4ba3aa",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.21,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "429c0fc736dfb9a6b07e3261c54b87cd13e4ca2272be656cd407a511e7c26a63",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "client justify": 0.55,
+     "client unproven": 0.6,
+     "exception": 0.54,
+     "fragile": 0.53,
+     "fragile high-stakes": 0.76,
+     "high-stakes client": 0.63,
+     "justify": 0.5,
+     "justify pairing": 0.72,
+     "option fits": 0.51,
+     "pairing": 0.54,
+     "pairing trusted": 0.65,
+     "stack": 0.57,
+     "unproven": 0.57
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "7e4ca905": {
+   "always_on_probability": 0.05,
+   "id": "7e4ca905",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "not-top-of-mind category": 0.64
+   },
+   "no_cue_probability": 0.22,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "0d9e5362f7a4375fa35d9530475276eeaff8f9cdd2931341a6c505ef5530aa1d",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "apart verticals": 0.59,
+     "category exception": 0.53,
+     "different vertical": 0.54,
+     "exception same-category": 0.59,
+     "far apart": 0.5,
+     "loophole same-category": 0.55,
+     "same-category": 0.63,
+     "un-introducible": 0.63
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "80def9d2": {
+   "always_on_probability": 0.48,
+   "id": "80def9d2",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "carr surface": 0.6
+   },
+   "no_cue_probability": 0.2,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "b7c6c1398693953bbf91c41058d34d324624fa01c796c5d1d60b17d8611d4ad6",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "changed offer": 0.53,
+     "choice handed": 0.54,
+     "human-facing surface": 0.54,
+     "undo": 0.56
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "81709f57": {
+   "always_on_probability": 0.06,
+   "id": "81709f57",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "seat video": 0.63
+   },
+   "no_cue_probability": 0.23,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "37bbf4951ef976312a80510108e92658be90b1fef6088e62798acc3b62258132",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "assigns distinct": 0.53,
+     "convened": 0.62,
+     "distinct lenses": 0.53,
+     "lenses redundant": 0.51,
+     "re-runs": 0.54,
+     "re-runs evidence": 0.63,
+     "red team": 0.58,
+     "redundant votes": 0.5,
+     "seat re-runs": 0.63,
+     "team convened": 0.63
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "83b9a362": {
+   "always_on_probability": 0.08,
+   "id": "83b9a362",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.18,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "595399fe5e5d9f1d3ea4b61217ca883894ebeda2ad2c047dfcb72c4ac56271b1",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "avoid gets": 0.64,
+     "caveat": 0.51,
+     "confirm this pairing logic": 0.74,
+     "suggest caveat": 0.7
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "86647daf": {
+   "always_on_probability": 0.1,
+   "id": "86647daf",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.32,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "198a581b2c62e03bf63dfa6352a32f534b816a231bea9ecd662cafc46fa6c4d7",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "action-required": 0.58,
+     "action-required adopt": 0.56,
+     "adopt replicate": 0.52,
+     "adopt something": 0.51,
+     "both-brains": 0.54,
+     "decision lesson": 0.5,
+     "lesson finishes": 0.62,
+     "moment substantive": 0.55,
+     "partner-only": 0.5,
+     "substantive build": 0.51
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "893aeec5": {
+   "always_on_probability": 0.05,
+   "id": "893aeec5",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "client vendor": 0.6,
+    "vendor stage": 0.64
+   },
+   "no_cue_probability": 0.15,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "a6f932989a98461fb6e87b52c6ca87477711fd27bb952e4613ac082b8f4c1692",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "benched": 0.56,
+     "benched vendor": 0.7,
+     "benched-vendor": 0.72,
+     "benched-vendor override": 0.78,
+     "client benched": 0.5,
+     "explicit": 0.53,
+     "explicit override": 0.73,
+     "joe's explicit": 0.67,
+     "log": 0.51,
+     "log reason": 0.69,
+     "override joe's": 0.64,
+     "reason": 0.53
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "8aefcdce": {
+   "always_on_probability": 0.25,
+   "id": "8aefcdce",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "knowing everything": 0.75
+   },
+   "no_cue_probability": 0.15,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "ae9487693d3b1a21d8067cadad5745b7cb5f5b4f271a45c3fd5ac1cb4ef77a1d",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "calendar teams": 0.59,
+     "claude": 0.57,
+     "claude everything": 0.53,
+     "copilot": 0.57,
+     "copilot microsoft-native": 0.61,
+     "microsoft-native": 0.54,
+     "outlook": 0.62,
+     "summaries": 0.58,
+     "teams": 0.54,
+     "triage": 0.64
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "8c812bed": {
+   "always_on_probability": 0.11,
+   "id": "8c812bed",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.17,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "a23eed392815a58c50e0ab360f4c6d0ba1d0b500c5989eada8737e03d015675e",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "accumulate": 0.52,
+     "accumulate silently": 0.64,
+     "actively working": 0.52,
+     "data-parity": 0.58,
+     "data-parity gate": 0.63,
+     "ledger data-parity": 0.55,
+     "parity": 0.51,
+     "publishes nothing": 0.58
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "9293d609": {
+   "always_on_probability": 0.07,
+   "id": "9293d609",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.38,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "95a11920a62ba5878223f9f581c7d7884015779db28dece6927072d4b2e0adca",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "accessibility floor": 0.5,
+     "builds reviews": 0.68,
+     "carr surface": 0.74,
+     "moment builds": 0.68,
+     "reviews carr": 0.66
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "9873a0d2": {
+   "always_on_probability": 0.06,
+   "id": "9873a0d2",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "ask partner": 0.71,
+    "fired twice": 0.79
+   },
+   "no_cue_probability": 0.16,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "c62367a7c72a7f534c98259198e3f4b77b8584dade9569efd1e006255495f179",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "ability drifts": 0.71,
+     "partner re-explains": 0.62,
+     "promotion watch": 0.6,
+     "re-explains": 0.58,
+     "re-explains twice": 0.71,
+     "twice across": 0.57
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "98e74e7c": {
+   "always_on_probability": 0.08,
+   "id": "98e74e7c",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "boundary case": 0.75
+   },
+   "no_cue_probability": 0.21,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "5a5f62919884d4691fd3bea8ebbb48b8551f884a409b0c5b49f9f136b1db2c10",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "cross-domain": 0.52,
+     "evaluate stated": 0.57,
+     "feeds": 0.58,
+     "feeds link": 0.72,
+     "lateral": 0.55,
+     "link source": 0.68,
+     "source evaluate": 0.54,
+     "stated use": 0.54,
+     "use case": 0.51
+    },
+    "paths": {},
+    "tools": {
+     "WebFetch": 0.61
+    },
+    "verbs": {}
+   }
+  },
+  "9d80fd2d": {
+   "always_on_probability": 0.19,
+   "id": "9d80fd2d",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "industry content": 0.75,
+    "outreach research": 0.61
+   },
+   "no_cue_probability": 0.4,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "0cc97a0d7c297ebd725c2d842e582a8ead41f550c6e156f3562988ab94eb08d5",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "action row": 0.66,
+     "aggressive": 0.5,
+     "aggressive persistent": 0.58,
+     "back-channeling": 0.65,
+     "cadence": 0.57,
+     "cadence message": 0.57,
+     "doctor cadence": 0.61,
+     "frequency content": 0.5,
+     "outreach frequency": 0.55
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "9e3fb6d0": {
+   "always_on_probability": 0.04,
+   "id": "9e3fb6d0",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "research pass": 0.62
+   },
+   "no_cue_probability": 0.18,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "d3736c10035d6c901a9a1f30eca8779aa966e5c9d3d8f994d2c2697d445250fa",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "analyze craft": 0.51,
+     "colleague competitor": 0.56,
+     "pass two": 0.51,
+     "run passes": 0.58,
+     "shares industry": 0.54
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "a2e78f48": {
+   "always_on_probability": 0.06,
+   "id": "a2e78f48",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "names known": 0.79
+   },
+   "no_cue_probability": 0.29,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "02cf08cb028b84cdfc42195054ed5b48b0475dc972ac953de4ed66e1103dbc31",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "autonomous repair": 0.57,
+     "briefing": 0.54,
+     "repair known": 0.52,
+     "was detected and a repair was made": 0.8
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "a3f6c7f9": {
+   "always_on_probability": 0.12,
+   "id": "a3f6c7f9",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.4,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "7337f07b7da3b28fcf697dc5f526f6b3f65c9d807991d5dd5d7003ef7b256915",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "a8c55a47": {
+   "always_on_probability": 0.09,
+   "id": "a8c55a47",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "heavy path": 0.75
+   },
+   "no_cue_probability": 0.14,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "89109921ec7bf336c33316bf5218c82fc21e2be75647bebf7876c2a706ea9cf8",
+   "triggers": {
+    "commands": {
+     "run.sh export": 0.67,
+     "run.sh health": 0.59
+    },
+    "keywords": {
+     "add comparison": 0.69,
+     "already performs": 0.56,
+     "automated path": 0.54,
+     "bare python3": 0.56,
+     "bin ops": 0.52,
+     "manual path": 0.53,
+     "path automated": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "a8f159ad": {
+   "always_on_probability": 0.08,
+   "id": "a8f159ad",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "structure works": 0.63,
+    "workstation surface": 0.69
+   },
+   "no_cue_probability": 0.34,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "fae25d0b2c77aac239e9e853b096ee5de8f7e56bc72a6c6394e7b3c313f198a8",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "artifact": 0.58,
+     "board": 0.68,
+     "builds reviews": 0.68,
+     "carr surface": 0.75,
+     "carries structure": 0.67,
+     "command center": 0.71,
+     "deal board": 0.68,
+     "deal room": 0.7,
+     "diagram": 0.5,
+     "lead board": 0.63,
+     "moment builds": 0.65,
+     "packet": 0.65,
+     "proposal": 0.59,
+     "reviews": 0.56,
+     "reviews carr": 0.58,
+     "structured surface": 0.66,
+     "surface carries": 0.59,
+     "svg": 0.58
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "b1521526": {
+   "always_on_probability": 0.15,
+   "id": "b1521526",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "agent hierarchy": 0.74
+   },
+   "no_cue_probability": 0.17,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "af5e252cc5cfcc5556309278bb0ce47f007e848fc96cc7bd047fcc16269b5879",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "conflict live": 0.52,
+     "dated file": 0.52,
+     "domain's source-of-truth": 0.55,
+     "flag": 0.52,
+     "hierarchy conflict": 0.56,
+     "newer dated": 0.53,
+     "source-of-truth file": 0.54,
+     "source-truth hierarchy": 0.54
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "b42f11a0": {
+   "always_on_probability": 0.09,
+   "id": "b42f11a0",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "grok build": 0.62
+   },
+   "no_cue_probability": 0.34,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "868e8d13d7c2e17f564f0c143f59eeca5dd40a265559848f630f6bce5de21075",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "adopt sizing": 0.6,
+     "advanced needs": 0.7,
+     "ambitious version": 0.6,
+     "architecture choice": 0.56,
+     "build trajectory": 0.63,
+     "miniature cms / two humans and forty files": 0.84,
+     "sizing": 0.66,
+     "smallest structure that works": 0.62,
+     "snapshot": 0.5,
+     "today design": 0.5,
+     "trajectory": 0.51,
+     "trajectory snapshot": 0.6,
+     "two humans": 0.67
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "b587f6c2": {
+   "always_on_probability": 0.04,
+   "id": "b587f6c2",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.12,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "282090786bc0b26353eed5e1b7b400318d7dc5d67c84a38e7474cfd005951226",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "fork": 0.77,
+     "mechanism class": 0.71,
+     "should we / which way": 0.82
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "b7ec8f3b": {
+   "always_on_probability": 0.29,
+   "id": "b7ec8f3b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "carr surface": 0.6,
+    "doc perfect": 0.6
+   },
+   "no_cue_probability": 0.17,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "417335372fccc2728e746d55b5f0535a4021f87b4c9b424855988c2e99ad6035",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "actual llm": 0.55,
+     "ask doc": 0.65,
+     "doc": 0.54,
+     "doctorcre": 0.54,
+     "doctorcre surface": 0.59,
+     "joe and dell": 0.54,
+     "nothing needs you": 0.55,
+     "one thing is broken, nothing is stuck": 0.54,
+     "surface grammar": 0.55,
+     "team book": 0.61
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "ba5730c5": {
+   "always_on_probability": 0.04,
+   "id": "ba5730c5",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "skill default": 0.79
+   },
+   "no_cue_probability": 0.22,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "bb4fd0939a2f633d41a43f9dd1a19602fdd491402ca55ace06e9e3815ef779d8",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "aligned partner": 0.59,
+     "already loyal": 0.69,
+     "check links": 0.74,
+     "complementary": 0.52,
+     "complementary territory": 0.63,
+     "conditional default": 0.51,
+     "loyal": 0.54,
+     "loyalties": 0.65,
+     "overlap": 0.54,
+     "shared-project": 0.61,
+     "suggesting": 0.52
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "bbffc139": {
+   "always_on_probability": 0.06,
+   "id": "bbffc139",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.14,
+   "packs": [
+    "joe-development"
+   ],
+   "statement_sha256": "dd60cd601382d047b2bd2e237e5b4eeda47ac65ebbed421779b4e58574503f2c",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {
+     "hooks/ledger-sweep.py": 0.57
+    },
+    "tools": {},
+    "verbs": {
+     "log-decision": 0.62
+    }
+   }
+  },
+  "bc4145f6": {
+   "always_on_probability": 0.14,
+   "id": "bc4145f6",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "complementarity ledger": 0.62
+   },
+   "no_cue_probability": 0.31,
+   "packs": [
+    "joe-development"
+   ],
+   "statement_sha256": "4264f1adb9c9e3038650455a4b7e17bb7d2cbf5713f8315130e73a65fed790c2",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "attached pattern": 0.62,
+     "because this pattern showed up twice this month": 0.79,
+     "best-in-class primary": 0.55,
+     "ledger": 0.53,
+     "monthly review": 0.76
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "bd4a6d22": {
+   "always_on_probability": 0.06,
+   "id": "bd4a6d22",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "change decision": 0.64,
+    "immediately check": 0.63
+   },
+   "no_cue_probability": 0.48,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "30bece458cd5201617704f3c910957ed31945d79b746fcd87847f4eb7d044777",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "change check": 0.51
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "bddb0e7b": {
+   "always_on_probability": 0.06,
+   "id": "bddb0e7b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "vendors xlsx": 0.7
+   },
+   "no_cue_probability": 0.22,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "45d851f15fc3db59116d554ffadce2503dee825ea1df97da4d2aaa77fc6ecef6",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "across category": 0.58,
+     "acting cross-category": 0.64,
+     "acting overlap": 0.62,
+     "competing vendors": 0.74,
+     "cpas attorneys": 0.52,
+     "defaults": 0.52,
+     "overlap": 0.65,
+     "pairing acting": 0.66,
+     "specific pairing": 0.77,
+     "vendor compatibility": 0.59
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "c1547ed1": {
+   "always_on_probability": 0.22,
+   "id": "c1547ed1",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "scaffold repo": 0.61,
+    "vertical state": 0.66,
+    "write test": 0.66
+   },
+   "no_cue_probability": 0.14,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "735cbf2c794641019058283b3714e483e6a36669229f95356131464180c6b0f9",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "converted-and-deleted": 0.58,
+     "derived outputs": 0.64,
+     "drive vault": 0.52,
+     "lives repo": 0.51,
+     "placement": 0.58,
+     "placement test": 0.72,
+     "sop": 0.52,
+     "state lives": 0.51
+    },
+    "paths": {
+     "Management/system-evolution-plan.md": 0.57
+    },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "c1db316c": {
+   "always_on_probability": 0.34,
+   "id": "c1db316c",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.48,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "22f1989adb771c268a1cfdeac5fbbf0e8abe644b56c1bd6f74ebdf201ff0f283",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "c20dc3d5": {
+   "always_on_probability": 0.12,
+   "id": "c20dc3d5",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "negative finding": 0.61,
+    "votes seat": 0.68
+   },
+   "no_cue_probability": 0.49,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "e0036776a081b588e8ecb9d660b88791b65c427f6c2f73c33158681446a6b9f3",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "act missing": 0.64,
+     "escalation": 0.5,
+     "evidence": 0.51,
+     "finding": 0.58,
+     "material": 0.71,
+     "named moment": 0.5,
+     "seat": 0.51,
+     "subagent": 0.68
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "c4a284b2": {
+   "always_on_probability": 0.06,
+   "id": "c4a284b2",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "already system": 0.68
+   },
+   "no_cue_probability": 0.31,
+   "packs": [
+    "source-study"
+   ],
+   "statement_sha256": "dfbfee1abfa161d1dbc344ebf18ddd62591d4768e926b2e3242bc20c17029cd7",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "already solved": 0.61,
+     "convention verify": 0.66,
+     "observed convention": 0.65,
+     "practitioners already": 0.58,
+     "question practitioners": 0.53,
+     "scale start": 0.52,
+     "solved scale": 0.59,
+     "start observed": 0.55
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "c66dc739": {
+   "always_on_probability": 0.13,
+   "id": "c66dc739",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "apple calendar": 0.69,
+    "attendees mail": 0.71,
+    "log capture": 0.7
+   },
+   "no_cue_probability": 0.12,
+   "packs": [
+    "joe-comms"
+   ],
+   "statement_sha256": "a322ab8ff5ce471aff424fff823809927d8ef43dcdc2b5ea742579076eadee31",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "app-password": 0.61,
+     "apple mail": 0.54,
+     "capture": 0.52,
+     "capture joe's": 0.52,
+     "gmail + google calendar pull": 0.51,
+     "gmail api": 0.55,
+     "joe's side": 0.51,
+     "local mail": 0.58,
+     "mail capture": 0.61,
+     "mail stores": 0.61,
+     "stores mac": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "c6f69dee": {
+   "always_on_probability": 0.28,
+   "id": "c6f69dee",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "job code": 0.69
+   },
+   "no_cue_probability": 0.36,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "b2228676894dee75c8298962126da848b42119fb4595a4a5c101f67f472a4d88",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "agent": 0.53,
+     "agent supersedes": 0.55,
+     "agent writes": 0.59,
+     "autobiographer": 0.62,
+     "delegate": 0.62,
+     "job description": 0.55,
+     "job title": 0.53,
+     "voice": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "c8ebeb5b": {
+   "always_on_probability": 0.05,
+   "id": "c8ebeb5b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "lead no-conflict": 0.69
+   },
+   "no_cue_probability": 0.14,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "233480060239eaada09569c26e1abc3661352ba0d444d96bc218883251067995",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "exiting": 0.71,
+     "lead next": 0.62,
+     "next startup": 0.67,
+     "owner selling": 0.68,
+     "platform lead": 0.68,
+     "sell-side": 0.61,
+     "selling platform": 0.62
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "ce12c11e": {
+   "always_on_probability": 0.17,
+   "id": "ce12c11e",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "staffing model": 0.76,
+    "system lead": 0.76
+   },
+   "no_cue_probability": 0.27,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "b9971d31c779a437c25f11ac9b0b36d2c8a0a6884c969b284b6f0b2f9e8f3be6",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "broker double": 0.53,
+     "buyer-only model": 0.63,
+     "conflict-of-interest": 0.59,
+     "conflict-of-interest framing": 0.62,
+     "double fee": 0.55,
+     "lead no-conflict": 0.64,
+     "no-conflict": 0.53,
+     "no-conflict tenant": 0.63,
+     "tenant buyer-only": 0.59
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "cf1c13a6": {
+   "always_on_probability": 0.05,
+   "id": "cf1c13a6",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "cpas attorneys": 0.61,
+    "no-conflict tenant": 0.71
+   },
+   "no_cue_probability": 0.31,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "857b9ddf5cdb218656d1457941bd337f0835ff42d96b13d7a3e3992da1687ab1",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "assume welcome": 0.62,
+     "carr attorneys": 0.53,
+     "competes carr": 0.62,
+     "counterparty self-perform": 0.77,
+     "framing counterparty": 0.57,
+     "no-conflict": 0.51,
+     "self-perform": 0.72
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "d26d63b0": {
+   "always_on_probability": 0.05,
+   "id": "d26d63b0",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "lead no-conflict": 0.69,
+    "party deal": 0.71,
+    "two-way contact": 0.71
+   },
+   "no_cue_probability": 0.16,
+   "packs": [
+    "records-intake"
+   ],
+   "statement_sha256": "8f0e3d35267ee93e3d4e98bf3c75c68e87833626e22a9b0c590e1bf7b2ce3b84",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "add-party": 0.74,
+     "contact enters": 0.71,
+     "deep": 0.5,
+     "enrichment": 0.54,
+     "enters system": 0.61,
+     "intake": 0.6,
+     "lead": 0.54,
+     "lead client": 0.57,
+     "met passing": 0.62,
+     "new client": 0.72,
+     "new contact": 0.67,
+     "new lead": 0.71,
+     "new vendor": 0.63,
+     "party met": 0.59,
+     "passing run": 0.56,
+     "run deep": 0.63,
+     "vendor party": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "d3774a28": {
+   "always_on_probability": 0.23,
+   "id": "d3774a28",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.46,
+   "packs": [
+    "joe-development"
+   ],
+   "statement_sha256": "0a395c6b39c74c83a8b99f607b32fefe4c0279caf58461b927d13473521804af",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "concept coherence": 0.55,
+     "diverge": 0.54,
+     "diverge surface": 0.69,
+     "file reality": 0.65,
+     "reality diverge": 0.61,
+     "surface": 0.57,
+     "surface explicitly": 0.66
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "d9ce2b08": {
+   "always_on_probability": 0.11,
+   "id": "d9ce2b08",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.27,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "a764023f6d0698dc57c9569b0eb3ff7620810696cc3706ae089ec6f238a7cbb8",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "actual gate": 0.59,
+     "all-source view": 0.5,
+     "already exist": 0.55,
+     "anything blocked": 0.66,
+     "blocked": 0.7,
+     "blocker": 0.68,
+     "gate": 0.5,
+     "i cannot do this": 0.6,
+     "parked": 0.69,
+     "refusal": 0.58,
+     "refusal written": 0.61
+    },
+    "paths": {
+     "lib/record_sources.py": 0.59
+    },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "def3e84e": {
+   "always_on_probability": 0.07,
+   "id": "def3e84e",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.12,
+   "packs": [
+    "scheduled-automation"
+   ],
+   "statement_sha256": "b47945bfce6eada03b1aaafb43cb83b5e32b1ee568a7db572df784c2caccf9a9",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "add-loop": 0.71,
+     "add-loop hand-editing": 0.63,
+     "artifact gets": 0.5,
+     "artifact tombstones": 0.61,
+     "cleanup omission": 0.56,
+     "overwritten": 0.66,
+     "superseded": 0.67,
+     "tombstone": 0.61,
+     "tombstones": 0.53
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {
+     "add-loop": 0.7
+    }
+   }
+  },
+  "defee176": {
+   "always_on_probability": 0.08,
+   "id": "defee176",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "column costs": 0.74,
+    "relationship stage": 0.64,
+    "two vendors": 0.62,
+    "vendor network": 0.71
+   },
+   "no_cue_probability": 0.11,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "84260aeb9ebdce7d654acab01e48c4ce5bee3022178762494312384b13964811",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "avoid": 0.68,
+     "avoid vendors": 0.7,
+     "block vendor": 0.52,
+     "stage column": 0.6,
+     "vendor stage": 0.54
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "df55c398": {
+   "always_on_probability": 0.06,
+   "id": "df55c398",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "boundary case": 0.68
+   },
+   "no_cue_probability": 0.09,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "3a2f7b10de1b1951e65245b00615b3416a7387c460060426ce17481922f9ba92",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "across disk": 0.73,
+     "age": 0.51,
+     "age private": 0.67,
+     "backup": 0.52,
+     "boundary widened": 0.66,
+     "brief": 0.53,
+     "carries data-class": 0.64,
+     "data-class": 0.59,
+     "data-class boundary": 0.73,
+     "delegated": 0.51,
+     "delegated sweep": 0.68,
+     "dumps": 0.53,
+     "look everywhere for": 0.75,
+     "private key": 0.55,
+     "scope re-states": 0.72,
+     "search the entire computer": 0.83,
+     "sweep carries": 0.55,
+     "widened": 0.67,
+     "widened scope": 0.77
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "e65efc68": {
+   "always_on_probability": 0.05,
+   "id": "e65efc68",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "human gate": 0.61
+   },
+   "no_cue_probability": 0.15,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "d50f35af368241c5364ee589f59ef8bd9a3e56293a4ee9ab18c87ea4a568bcd0",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "ci passed, every class green": 0.56,
+     "especially gate": 0.53,
+     "selftest": 0.63,
+     "write test": 0.5
+    },
+    "paths": {
+     "ops/ci.sh": 0.68
+    },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "e6e0b0e7": {
+   "always_on_probability": 0.08,
+   "id": "e6e0b0e7",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "not-top-of-mind category": 0.61
+   },
+   "no_cue_probability": 0.25,
+   "packs": [
+    "vendor-intros"
+   ],
+   "statement_sha256": "770ac81f3a8d11fc8929f3faa095226d8638829f5dfd89ca2289bf1bd74878c5",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "across different": 0.62,
+     "architect": 0.51,
+     "architect architect": 0.78,
+     "architect same-category": 0.74,
+     "block category": 0.62,
+     "category": 0.52,
+     "category veterinary-only": 0.7,
+     "co-invite": 0.7,
+     "co-invite event": 0.67,
+     "compete": 0.53,
+     "compete relationship": 0.66,
+     "competing vendors": 0.66,
+     "cpa": 0.53,
+     "same-category": 0.77,
+     "same-category pair": 0.82,
+     "supply rep": 0.57,
+     "verticals": 0.57,
+     "veterinary-only": 0.67,
+     "whitelisting": 0.71
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "ede4b241": {
+   "always_on_probability": 0.05,
+   "id": "ede4b241",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "staffing model": 0.72
+   },
+   "no_cue_probability": 0.19,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "1d64a4910ca6904e925ac5944bbb71ed11e79bb4a0e3c7151e89b7b2dee2af6d",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "batches": 0.5,
+     "cloud model": 0.52,
+     "cloud pick": 0.54,
+     "model choice": 0.54,
+     "pick model": 0.55,
+     "work's shape": 0.56
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "ede4c735": {
+   "always_on_probability": 0.06,
+   "id": "ede4c735",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "binds nobody": 0.62,
+    "run retrieve": 0.6
+   },
+   "no_cue_probability": 0.09,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "1c7d4dbc6726dc9043e84a9109122e6b780f447c91c7d9398462e784c0ca0118",
+   "triggers": {
+    "commands": {
+     "run.sh lint": 0.84
+    },
+    "keywords": {
+     "artifacts": 0.54,
+     "artifacts diagrams": 0.5,
+     "binds prospect-visible": 0.6,
+     "packet": 0.66,
+     "proposal": 0.63,
+     "prospect-visible": 0.61,
+     "prospect-visible surfaces": 0.69,
+     "run": 0.52,
+     "social": 0.58,
+     "surface": 0.56,
+     "surfaces": 0.52,
+     "writing-rules binds": 0.56
+    },
+    "paths": {
+     "DNA/writing-rules.md": 0.64
+    },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "eeb3d106": {
+   "always_on_probability": 0.06,
+   "id": "eeb3d106",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.25,
+   "packs": [
+    "surface-doctrine"
+   ],
+   "statement_sha256": "fab1b8ae8325cc57b5d501e9954b07c7d8328b06cf33a4357a48f2ec55f9b25b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "builds reviews": 0.76,
+     "carr workstation": 0.7,
+     "command center": 0.63,
+     "dashboard": 0.59,
+     "deal board": 0.62,
+     "deal room": 0.62,
+     "lead board": 0.61,
+     "moment builds": 0.68,
+     "reviews carr": 0.59,
+     "surface command": 0.56,
+     "workstation surface": 0.75
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "efbdfb1a": {
+   "always_on_probability": 0.06,
+   "id": "efbdfb1a",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.34,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "93c8735d307ebc49982eb346274ae0d8c57fa83fc2aa33812983d3efb61bb293",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "answer materially": 0.58,
+     "asks explicitly": 0.56,
+     "deliberate second": 0.58,
+     "second pass": 0.56
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "f0f9156e": {
+   "always_on_probability": 0.1,
+   "id": "f0f9156e",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.24,
+   "packs": [
+    "engineering-git"
+   ],
+   "statement_sha256": "d47ea8a227df2acf3e290462ef819e5d706ec19c0b8908f129c31969c1649778",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "actual consequence": 0.62,
+     "actual data": 0.52,
+     "architecture fork": 0.63,
+     "concern silent": 0.57,
+     "local-first": 0.64,
+     "optimize mobility": 0.51,
+     "presented concern": 0.59,
+     "privacy presented": 0.51,
+     "silent default": 0.59
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "f2d58a30": {
+   "always_on_probability": 0.1,
+   "id": "f2d58a30",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "deal room": 0.66,
+    "loi term": 0.69
+   },
+   "no_cue_probability": 0.24,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "891ebf8ee2345f8f8bb82fe474b714972bcc0bf6ae09fe75a425d555af085f38",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "client-facing": 0.56,
+     "client-facing recommendation": 0.72,
+     "council's empty-chair": 0.65,
+     "deal council's": 0.57,
+     "empty-chair": 0.61,
+     "empty-chair close": 0.68,
+     "honest limit": 0.71,
+     "letter of intent": 0.56,
+     "limit option": 0.56,
+     "loi": 0.62,
+     "names least": 0.51,
+     "recommendation": 0.53,
+     "recommendation names": 0.56,
+     "search packet": 0.7,
+     "what i deliberately did not recommend": 0.62
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "f5bac101": {
+   "always_on_probability": 0.17,
+   "id": "f5bac101",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.27,
+   "packs": [
+    "client-deal"
+   ],
+   "statement_sha256": "d0015e907ad3b85aaf8a30a949377cb180aef0d44214e70c769e5fe55b203188",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "early-stage": 0.53,
+     "early-stage prioritize": 0.57,
+     "low-impact areas": 0.57,
+     "pipeline polish": 0.51,
+     "polish low-impact": 0.59
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "f5beac20": {
+   "always_on_probability": 0.29,
+   "id": "f5beac20",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.42,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "f302dd49b3cb915d26883e15c499b7f9a9d16af844757c9c22baa4bd075c334f",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "apply including": 0.5,
+     "capture durable": 0.62,
+     "dismiss useful-but-not-today": 0.66,
+     "durable home": 0.64,
+     "expansion posture": 0.53,
+     "home propose": 0.51,
+     "useful-but-not-today": 0.65,
+     "useful-but-not-today knowledge": 0.69
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "faf1b643": {
+   "always_on_probability": 0.07,
+   "id": "faf1b643",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {
+    "new contact": 0.66,
+    "vendor party": 0.6
+   },
+   "no_cue_probability": 0.42,
+   "packs": [
+    "records-intake"
+   ],
+   "statement_sha256": "f36a35845ea7574ce3b48a68810b5925d00dcbe152aaf6e1d036a6c135234142",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "alone promote": 0.55,
+     "attempt alone": 0.56,
+     "countable events": 0.6,
+     "defined countable": 0.5,
+     "relationship levels": 0.6,
+     "two-way": 0.71,
+     "two-way contact": 0.74,
+     "vendor relationship": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "fb110a39": {
+   "always_on_probability": 0.34,
+   "id": "fb110a39",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.06,
+   "packs": [
+    "delegation-council"
+   ],
+   "statement_sha256": "b5b0b3b57c962093d60af775ff96732fa6068ffa4975e7eb221f8df5a48fe9ae",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "delegate": 0.78,
+     "scaffold code": 0.65,
+     "sweep": 0.73
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "fb2b263d": {
+   "always_on_probability": 0.1,
+   "id": "fb2b263d",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.18,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "da7ecf902a515233282af02b563c463502834e94c3b9197249e1d9f948b1082b",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "anything decided": 0.61,
+     "check index": 0.57,
+     "decided built": 0.56,
+     "grep": 0.63,
+     "immediately check": 0.58
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "fc21a431": {
+   "always_on_probability": 0.09,
+   "id": "fc21a431",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.25,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "f7d38b3f7dbe1b10e6b426b24bd8f9cfb7cc1ed67bf70652ac00a53331919be4",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "after any user correction": 0.54,
+     "bare that's": 0.89,
+     "that's not what i meant": 0.91
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "fc4d7753": {
+   "always_on_probability": 0.19,
+   "id": "fc4d7753",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.38,
+   "packs": [
+    "governance-rules"
+   ],
+   "statement_sha256": "edc69aef4cce3f414c92f1dc8b188e8305deaf421bf0935e7cdafc446cabc56e",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "added declined": 0.51,
+     "output tiebreaker": 0.5,
+     "smallest structure": 0.5
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  }
+ },
+ "schema": "rule-jev-triggers/v1",
+ "thresholds": {
+  "always_on_at": 0.7,
+  "near_miss_at": 0.6,
+  "no_cue_at": 0.7,
+  "surface_at": 0.5
+ }
+}

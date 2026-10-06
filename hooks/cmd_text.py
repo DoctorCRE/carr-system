@@ -29,6 +29,50 @@ skipped only from its opening line to a line that is EXACTLY the delimiter, and
 an unterminated or malformed heredoc strips nothing at all.
 """
 import re
+import shlex
+
+
+SHELL_BOUNDARIES = frozenset({';', '&&', '||', '|', '&', '|&'})
+SHELL_REDIRECTS = frozenset({'<', '>', '>>', '>|', '<>', '<&', '>&', '<<', '<<<', '&>', '&>>'})
+
+
+def shell_tokens(command):
+    """Preserve command boundaries; consume continuations and unquoted IO numbers."""
+    def normalize(match):
+        token = match.group()
+        if token == '\\\n':
+            return ''
+        if token.startswith('"'):
+            return token.replace('\\\n', '')
+        if token == '\n':
+            return ';'
+        if token.isdigit():
+            return ''
+        return token
+    command = re.sub(r"'[^']*'|\"(?:\\[\s\S]|[^\"\\])*\"|\\[\s\S]|\n|(?<!\S)\d+(?=[<>])", normalize, command)
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|<>')
+    lexer.whitespace_split = True
+    lexer.commenters = ''
+    return list(lexer)
+
+
+def shell_operands(tokens):
+    """Separate all redirects from command words, retaining file output targets."""
+    words, outputs = [], []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in SHELL_REDIRECTS:
+            if index + 1 >= len(tokens):
+                raise ValueError('missing redirection target')
+            target = tokens[index + 1]
+            if token in {'>', '>>', '>|', '<>', '&>', '&>>'} or (token == '>&' and not target.isdigit() and target != '-'):
+                outputs.append(target)
+            index += 2
+        else:
+            words.append(token)
+            index += 1
+    return words, outputs
 
 # A heredoc opener: <<EOF, <<-EOF, <<'EOF', <<"EOF".
 _HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
@@ -81,5 +125,14 @@ def strip_inert_text(cmd):
                     if lines[j].strip() == delim), None)
         if end is None:
             continue  # unterminated — scan the whole thing rather than guess
+        body = "\n".join(lines[start + 1:end])
+        if not m.group(1) and ("$(" in body or "`" in body):
+            continue  # unquoted heredocs execute substitutions
         out = "\n".join(lines[:start + 1] + lines[end:])
-    return _DASH_M_RE.sub("-m <message>", out)
+    def scrub(match):
+        argument = match.group(0)
+        quoted = argument.split(None, 1)[1]
+        if quoted.startswith('"') and ("$(" in quoted or "`" in quoted):
+            return argument
+        return "-m <message>"
+    return _DASH_M_RE.sub(scrub, out)

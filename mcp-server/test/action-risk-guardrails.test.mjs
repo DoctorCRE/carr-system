@@ -29,9 +29,11 @@ async function rejected(fn) {
 class SetLeadFake {
   constructor(version = 1) {
     this.version = version;
+    this.owner = "joe";
     this.handlerCalls = 0;
     this.participantWrites = 0;
     this.eventWrites = 0;
+    this.lastEvent = null;
     this.envelopeWrites = 0;
   }
 
@@ -40,8 +42,10 @@ class SetLeadFake {
     if (sql.startsWith("select request_hash, response")) return { rows: [] };
     if (sql.includes("from v_ref_index where subject_type='deal' and display_name ilike"))
       return { rows: [{ subject_id: DEAL_ID }] };
+    if (sql.includes("dealroom:field-lock")) return { rows: [{}] };
     if (sql === "select version from deal where id=$1 for update")
       return { rows: [{ version: this.version }] };
+    if (sql === "select owner from deal where id=$1") return { rows: [{ owner: this.owner }] };
     if (sql === "select created_at from deal where id=$1") return { rows: [{ created_at: "2026-08-15T00:00:00Z" }] };
     if (sql.includes("from event e join actor a")) return { rows: [] };
     if (sql === "select id from actor where slug=$1") return { rows: [{ id: `actor-${params[0]}` }] };
@@ -55,11 +59,14 @@ class SetLeadFake {
     }
     if (sql.startsWith("update deal set owner=")) {
       this.handlerCalls += 1;
+      this.owner = params[0];
       this.version += 1;
       return { rows: [] };
     }
     if (sql.startsWith("insert into event")) {
       this.eventWrites += 1;
+      this.lastEvent = { field: params[5], old: JSON.parse(params[6]),
+        next: JSON.parse(params[7]), recordedAfterLock: params[18] };
       return { rows: [] };
     }
     if (sql.startsWith("insert into tool_call")) {
@@ -96,6 +103,7 @@ class SharedSetLeadTransaction {
         if (sql.startsWith("select request_hash, response")) return { rows: [] };
         if (sql.includes("from v_ref_index where subject_type='deal' and display_name ilike"))
           return { rows: [{ subject_id: DEAL_ID }] };
+        if (sql.includes("dealroom:field-lock")) return { rows: [{}] };
         if (sql === "select version from deal where id=$1 for update") {
           if (state.holder === null) {
             state.holder = label;
@@ -107,6 +115,7 @@ class SharedSetLeadTransaction {
           return { rows: [{ version: state.version }] };
         }
         if (sql === "select created_at from deal where id=$1") return { rows: [{ created_at: "2026-08-15T00:00:00Z" }] };
+        if (sql === "select owner from deal where id=$1") return { rows: [{ owner: "joe" }] };
         if (sql.includes("from event e join actor a")) return { rows: [] };
         if (sql === "select id from actor where slug=$1") return { rows: [{ id: `actor-${params[0]}` }] };
         if (sql.startsWith("update deal_participant set to_at=now()")) {
@@ -189,12 +198,21 @@ test("freeform nested business data may use reserved-like names without widening
 
 test("set-lead is a human-only optimistic-concurrency mutation", async () => {
   const tool = TOOLS["set-lead"];
-  assert.equal(tool.humanOnly, true);
+  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): dead since
+  // executeRegisteredTool stopped reading it 2026-08-26 (decision dc57f62d);
+  // this slice drops the stale declaration from tools.js. The behavioral
+  // proof that a machine actor is admitted now lives in the assertion below.
+  assert.equal(tool.humanOnly, undefined);
   assert.ok(tool.inputSchema.required.includes("base_version"));
   assert.ok(Object.hasOwn(tool.inputSchema.properties, "base_version"));
 
-  const nonhuman = await rejected(() => executeRegisteredTool(new SetLeadFake(), AGENT, "set-lead", payload()));
-  assert.equal(nonhuman.error, "human_only");
+  // INVERTED (Joe's ruling 2026-08-26, decision dc57f62d): set-lead admits a
+  // machine actor now. The optimistic-concurrency checks below are NOT
+  // authority checks and must keep firing for every actor.
+  let nonhuman;
+  try { await executeRegisteredTool(new SetLeadFake(), AGENT, "set-lead", payload()); }
+  catch (error) { nonhuman = error.payload; }
+  assert.notEqual(nonhuman?.error, "human_only");
 
   const missing = await rejected(() => executeRegisteredTool(new SetLeadFake(), JOE, "set-lead", payload({ base_version: undefined })));
   assert.equal(missing.error, "missing_required");
@@ -231,6 +249,9 @@ test("a sequential stale proposal remains refused after the lock race", async ()
   const db = new SetLeadFake(1);
   const first = await executeRegisteredTool(db, JOE, "set-lead", payload({ idempotency_key: "sequential-one" }));
   assert.deepEqual(first, { ok: true, new_lead: "dell" });
+  assert.deepEqual([db.lastEvent.field, db.lastEvent.old.owner,
+    db.lastEvent.next.owner, db.lastEvent.recordedAfterLock],
+  ["owner", "joe", "dell", true]);
   const stale = await rejected(() => executeRegisteredTool(db, JOE, "set-lead", payload({ idempotency_key: "sequential-two" })));
   assert.equal(stale.error, "version_conflict");
 });

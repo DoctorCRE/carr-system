@@ -13,12 +13,12 @@ WHY THIS EXISTS (built 2026-07-27, after the 7/25 sweep intake)
         silently, taking every lease-event datapoint with them.
 
   #101  The same write allocated L-164 … L-200 on top of three LIVE rows:
-        L-164 First Call DPC (Hot – Startup, ETL signed, Salesforce deal open),
-        L-165 Amanda Troupe / Troupe Vision of Florida PLLC,
-        L-166 Coast Performance Medicine LLC.
+        L-164 Bayview DPC (Hot – Startup, ETL signed, Salesforce deal open),
+        L-165 Amanda Trask / Trask Vision of Florida PLLC,
+        L-166 Shoreline Performance Medicine LLC.
         Its Intake Log line reads "0 dedup collisions vs registry" — true, and
         irrelevant: it deduped on name, and allocated from the INTAKE LOG's
-        last-recorded ID (L-163, the 7/13 Renalus line) instead of the Registry
+        last-recorded ID (L-163, the 7/13 Nephrova line) instead of the Registry
         sheet's real max (L-166). The 7/14 and 7/16 adds were never ledgered, so
         the ledger was three IDs stale and the writer trusted it.
 

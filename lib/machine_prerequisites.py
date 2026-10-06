@@ -50,6 +50,21 @@ def find_executable(
     return None
 
 
+def openssl_executable(
+    *, candidates: Sequence[str] = OPENSSL_CANDIDATES,
+    which: Callable[[str], str | None] = shutil.which,
+) -> str:
+    """The OpenSSL every Ed25519 signer and verifier must run.
+
+    macOS puts /usr/bin ahead of Homebrew on PATH, and /usr/bin/openssl is
+    Apple's LibreSSL, which has no Ed25519 raw signing or verification. A bare
+    "openssl" therefore verified nothing on the Mac Studio (2026-09-23) while
+    hosted Linux CI, whose openssl is OpenSSL 3, stayed green. Homebrew's
+    OpenSSL 3 is preferred by absolute path; PATH is the last resort.
+    """
+    return find_executable(candidates, which=which) or "openssl"
+
+
 def probe_postgres_client(
     *, candidates: Sequence[str] = PSQL_CANDIDATES,
     which: Callable[[str], str | None] = shutil.which,

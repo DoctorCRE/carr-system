@@ -139,13 +139,79 @@ _WRITE_BEFORE_CTX = re.compile(
 _DISABLE_CMDS = ("chmod", "rm", "unlink", "chflags")
 _COPY_CMDS = ("cp", "mv", "rsync", "install", "ln")
 
+# ── the interpreter door (loop #484, opened 2026-08-21) ──────────────────────
+# WHAT WAS OPEN, and it was found by doing rather than by a check: a session
+# rewrote hooks/guard-unattended.py with
+#
+#     python3 - <<'PY'
+#     path = "<gate>"
+#     open(path, "w").write(...)
+#     PY
+#
+# and the write landed with no denial, no prompt and no announcement. Clause 2
+# below required the gate path to sit INSIDE the open() call as a literal, so a
+# path held in a variable — the natural way to write a heredoc — walked past it,
+# and so did node, ruby and perl, which clause 2 never knew about.
+#
+# WHY THIS IS NOT ANOTHER SHAPE IN THE LIST. Chasing shapes is how this hole got
+# here: the next session finds `ruby -e`, a Node one-liner, or an interpreter
+# nobody thought of. The pairing that matters is TARGET plus INTENT, wherever
+# each appears in the command text — the path does not have to be inside the
+# write call, or even a literal in the same statement. So this clause asks three
+# ordered questions and nothing about the shape of the write:
+#
+#   1. is this an interpreter running INLINE code (a -c/-e flag, an in-place
+#      flag, or a heredoc)? Running a gate as a SCRIPT is not — that is how
+#      `python3 hooks/gate-integrity.py --bless x` stays silent, and it must,
+#      because re-blessing is the repair this system asks sessions to perform.
+#   2. does the command text name a non-exempt enforcement path anywhere?
+#   3. does it carry a write intent anywhere — a write/truncate/unlink/rename/
+#      chmod verb, an in-place flag, or a file mode literal?
+#
+# THE RESIDUAL, NAMED RATHER THAN IMPLIED: a read-only one-liner that happens to
+# use one of these words still announces, and code that assembles the path from
+# pieces at runtime still does not. The first is cheap — announce-and-allow
+# costs one message — and the second is the same residual guard-unattended.py
+# already names, backstopped by gate-integrity.py, which does not care how the
+# bytes changed.
+_INLINE_CODE = re.compile(
+    r"\b(?:python[\d.]*|node|nodejs|ruby|perl|php|deno|bun|osascript)\b"
+    r"(?:\s+-\w+)*\s+-(?:c|e|E|pi?e?|ne?)\b"          # -c / -e / -pe / -pi
+    r"|\b(?:python[\d.]*|node|nodejs|ruby|perl|php|deno|bun)\b[^|;&\n]*<<"
+    r"|\b(?:perl|ruby)\b(?:\s+-\w+)*\s+-\w*i\w*\b",   # perl -pi / ruby -i
+)
+
+_WRITE_INTENT = re.compile(
+    r"write|truncate|unlink|\bremove\b|\brename\b|\breplace\b|\bchmod\b"
+    r"|symlink|shutil|copyfile|\bdump\b|\bputs\b"
+    r"|,\s*[\"']{1}[wax][btx+]*[\"']{1}"                  # a WRITE file-mode literal
+    r"|\s-\w*i\w*\s",                                   # an in-place flag
+    re.IGNORECASE,
+)
+
+
+def _inline_interpreter_write(cmd, hits):
+    """The gate path an inline interpreter invocation writes, else None."""
+    if not _INLINE_CODE.search(cmd):
+        return None
+    if not _WRITE_INTENT.search(cmd):
+        return None
+    for _, path in hits:
+        if EXEMPT.search(path):
+            continue
+        return path
+    return None
+
+
 
 def enforcement_write(cmd):
     """The matched enforcement path when `cmd` writes to / disables one, else None.
 
     BEST-EFFORT, and said plainly rather than implied: it catches the ordinary
     shapes — `>`/`>>`, tee, `sed -i`, truncate, cp/mv/rsync/ln destinations,
-    chmod/rm/chflags targets, and inline python open(...,'w'). It does not chase
+    chmod/rm/chflags targets, inline python open(...,'w'), and — since loop
+    #484 — any interpreter running inline code that names a gate path and a
+    write intent, however the two are spelled. It does not chase
     adversarial obfuscation, for the same reason the render door does not: a
     session determined to obfuscate has already decided to defeat the control,
     and gate-integrity.py is the backstop that does not care how the bytes
@@ -189,22 +255,39 @@ def enforcement_write(cmd):
                 for p in clause_hits:
                     if tail.endswith(p):
                         return p
-        return None
+        # 4. an interpreter running inline code that names a gate and a write
+        return _inline_interpreter_write(cmd, hits)
     except Exception:
         return None                                    # fail open, like the rest
 
 
 def announcement(path, how):
-    """The message both doors print. One wording, so the two cannot drift."""
+    """The message both doors print. One wording, so the two cannot drift.
+
+    WR-000019 slice S3 (2026-08-27): gate-edit-gate.py and settings-change-
+    gate.py stopped asking for an in-session sign-off on this file the same
+    day canonical-edit-gate.py and git-writer-gate.py retired. The property
+    that matters — an edit to hooks/, ops/config/, or settings lands only
+    through review — is now guaranteed server-side: the PR-only ruleset on
+    main plus required CI mean a canonical-tree edit cannot reach main any
+    other way, and CODEOWNERS auto-requests Joe on any PR touching hooks/ or
+    ops/config/. This message stopped being an approval request and became a
+    nudge toward that route.
+    """
     name = os.path.basename(path)
     return (
         f"GATE CHANGE ANNOUNCED — {name} is enforcement, and {how} just changed it.\n\n"
         f"  file: {path}\n\n"
-        "The action was ALLOWED. Say in one line what changed in this file and "
-        "whether it makes the gate STRONGER or WEAKER — weaker is allowed, hiding "
-        "that it is weaker is not. Then re-bless the baseline in the same pass "
-        "(`python3 hooks/gate-integrity.py --bless`), or the next SessionStart "
-        "reports it UNBLESSED and the check goes chronically red for a benign "
-        "reason, which is the failure mode that hid a real five-gate wipe on "
-        "2026-08-08."
+        "The action was ALLOWED — this file no longer asks for an in-session "
+        "sign-off. Land it the way every canonical-tree edit lands now: "
+        "`./run.sh worktree <name>`, commit and push from there, and open a PR. "
+        "CODEOWNERS auto-requests Joe on hooks/ and ops/config/, and the PR-only "
+        "ruleset with required CI is what actually keeps main honest — say in "
+        "the PR description what changed and whether it makes the gate STRONGER "
+        "or WEAKER (weaker is allowed; hiding that it is weaker is not). "
+        "Re-bless the baseline in the SAME commit "
+        "(`python3 hooks/gate-integrity.py --bless <name>`), or the next "
+        "SessionStart reports it UNBLESSED and the check goes chronically red "
+        "for a benign reason, which is the failure mode that hid a real "
+        "five-gate wipe on 2026-08-08."
     )

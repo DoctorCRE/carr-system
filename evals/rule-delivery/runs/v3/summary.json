@@ -1,0 +1,8 @@
+{
+ "description": "prompt cue: a request for an independent/adversarial review or a Codex review delivers 2b66211d",
+ "label": "v3",
+ "target": "code",
+ "goal": "recall",
+ "decision": "kept",
+ "gate": "KEEP "
+}

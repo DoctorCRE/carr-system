@@ -336,7 +336,7 @@ def find_deal_folder(plan: dict) -> str | None:
 
     His convention is one folder per deal under Active Deals, named the way he
     thinks of the deal, which is not always the client party name (C-112's folder
-    is 'Gulf Coast Pelvic Health'; the party row says 'Gulf Coast Pelvic Floor').
+    is 'Harborline Pelvic Health'; the party row says 'Harborline Pelvic Therapy').
     Matching by shared words beats matching by string equality, and a miss
     returns None so the caller reports it instead of creating a second folder
     beside the real one.

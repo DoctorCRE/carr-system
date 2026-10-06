@@ -16,12 +16,70 @@ import assert from "node:assert/strict";
 import {
   slugForEmail,
   agentSlugForClient,
+  verifiedAgentSlugForClient,
   propsForSlug,
-  actorFromProps,
+  authenticatedIdentity,
   isKnownActor,
   isKnownPartner,
   agentActorForToken,
+  continuityActorForTokenMaps,
 } from "../src/identity.js";
+// The whole namespace, so the removed surfaces can be asserted absent by name.
+import * as identityModule from "../src/identity.js";
+
+// `actorFromProps` is module-private under amendment 8 (PR 1013). The exported
+// grant door is `authenticatedIdentity.connectionForGrant`; called without the
+// server's witness it returns exactly the same actor, unbranded, which is what
+// every case in this file is about.
+const actorFromProps = (props, bindings = null) =>
+  authenticatedIdentity.connectionForGrant(props, bindings);
+
+
+/**
+ * THE FIELDS AN ACTOR CARRIES.
+ *
+ * Under amendment 8 (2026-09-13) an actor carries NOTHING that marks it as
+ * authenticated: the brand is membership of a module-private WeakSet in
+ * identity.js, so it is object identity and not a property. The second
+ * correction's enumerable Symbol stamp is gone — a property that survives the
+ * server's spread survived a forger's spread too — and this helper is now a
+ * plain own-entries copy kept for the deep comparisons below.
+ */
+const fieldsOf = actor => (actor === null ? null : Object.fromEntries(Object.entries(actor)));
+
+
+test("continuity bearer maps derive one exact surface and sponsor", () => {
+  const codex = continuityActorForTokenMaps(
+    "Bearer codex-secret",
+    JSON.stringify({ joe: "codex-secret" }),
+    JSON.stringify({ joe: "claude-secret" }),
+  );
+  assert.deepEqual(fieldsOf(codex), {
+    slug: "codex", display: "Codex", human: false, agent: true,
+    via: "codex-continuity-token", client_id: null,
+    sponsoring_human_slug: "joe", human_slug: "joe", sponsor_required: false,
+    native_agent_verified: true, continuity_surface: "codex",
+  });
+
+  const claude = continuityActorForTokenMaps(
+    "Bearer claude-secret",
+    JSON.stringify({ joe: "codex-secret" }),
+    JSON.stringify({ dell: "claude-secret" }),
+  );
+  assert.equal(claude.slug, "claude");
+  assert.equal(claude.sponsoring_human_slug, "dell");
+  assert.equal(claude.continuity_surface, "claude");
+});
+
+test("continuity bearer maps refuse shared, cross-map duplicate, and malformed credentials", () => {
+  assert.equal(continuityActorForTokenMaps(
+    "Bearer joe-local", '{"joe":"codex-secret"}', '{"joe":"claude-secret"}'), null);
+  assert.equal(continuityActorForTokenMaps(
+    "Bearer repeated", '{"joe":"repeated"}', '{"joe":"repeated"}'), null);
+  assert.equal(continuityActorForTokenMaps(
+    "Bearer secret", '{"mallory":"secret"}', '{}'), null);
+  assert.equal(continuityActorForTokenMaps("Bearer secret", '[]', '{}'), null);
+});
 
 // ---------- slugForEmail: unchanged behavior, regression-guarded ----------
 
@@ -73,6 +131,14 @@ test("agentSlugForClient: missing/unusual input degrades to null, never throws",
   assert.equal(agentSlugForClient(null), null);
   assert.equal(agentSlugForClient(""), null);
   assert.equal(agentSlugForClient(42), null);
+});
+
+test("self-declared client_name is attribution only; exact server client-id binding is authority", () => {
+  const bindings = JSON.stringify({ "client-codex-verified": "codex" });
+  assert.equal(verifiedAgentSlugForClient("client-codex-verified", "codex", bindings), "codex");
+  assert.equal(verifiedAgentSlugForClient("attacker-dynamic-client", "codex", bindings), null);
+  assert.equal(verifiedAgentSlugForClient("client-codex-verified", "claude", bindings), null);
+  assert.equal(verifiedAgentSlugForClient("client-codex-verified", "codex", "not-json"), null);
 });
 
 // ---------- isKnownActor / propsForSlug: codex/grok are now real actors ----------
@@ -193,7 +259,7 @@ const AGENT_TOKENS = JSON.stringify({ grok: "grok-secret-fixture", codex: "codex
 
 test("agent token resolves to the tool's own actor, never a human", () => {
   const actor = agentActorForToken("Bearer grok-secret-fixture", AGENT_TOKENS);
-  assert.deepEqual(actor, {
+  assert.deepEqual(fieldsOf(actor), {
     slug: "grok", display: "Agent (grok)", human: false, agent: true,
     via: "agent-token", client_id: null, sponsoring_human_slug: null,
     human_slug: null, sponsor_required: false,
@@ -254,10 +320,10 @@ const LOCAL_TOKENS = JSON.stringify({ "joe-local": "local-secret-fixture" });
 
 test("local token resolves to joe-local, human:false, sponsored to joe", () => {
   const actor = agentActorForToken("Bearer local-secret-fixture", LOCAL_TOKENS, "local-token");
-  assert.deepEqual(actor, {
+  assert.deepEqual(fieldsOf(actor), {
     slug: "joe-local", display: "Agent (joe-local)", human: false, agent: true,
     via: "local-token", client_id: null, sponsoring_human_slug: "joe",
-    human_slug: "joe", sponsor_required: false,
+    human_slug: "joe", sponsor_required: false, native_agent_verified: true,
   });
   // A local token remains non-human and is not one of the approved native
   // Codex/Claude authority-bearing runtime identities.
@@ -289,10 +355,10 @@ const DELL_LOCAL_TOKENS = JSON.stringify({ "dell-local": "dell-local-secret-fixt
 
 test("dell-local resolves to Dell's personal scope, human:false", () => {
   const actor = agentActorForToken("Bearer dell-local-secret-fixture", DELL_LOCAL_TOKENS, "local-token");
-  assert.deepEqual(actor, {
+  assert.deepEqual(fieldsOf(actor), {
     slug: "dell-local", display: "Agent (dell-local)", human: false, agent: true,
     via: "local-token", client_id: null, sponsoring_human_slug: "dell",
-    human_slug: "dell", sponsor_required: false,
+    human_slug: "dell", sponsor_required: false, native_agent_verified: true,
   });
   assert.equal(actor.human, false);
 });
@@ -323,4 +389,267 @@ test("local token is per-slug like every other agent token: a stray key does not
   const mixed = JSON.stringify({ "joe-local": "local-secret-fixture", grok: "grok-secret-fixture" });
   assert.equal(agentActorForToken("Bearer grok-secret-fixture", mixed, "local-token").sponsoring_human_slug, null);
   assert.equal(agentActorForToken("Bearer local-secret-fixture", mixed, "local-token").sponsoring_human_slug, "joe");
+});
+
+// ---------------------------------------------------------------------------
+// THE AUTHENTICATION BRAND (2026-09-12, PR 1013; amendment 8, 2026-09-13).
+//
+// The brand is MEMBERSHIP OF A MODULE-PRIVATE WeakSet, so there is nothing on an
+// actor to look at. What is observable from out here is the only thing that ever
+// mattered: whether a receipt identity can be derived for it, which the dispatch
+// path's own door answers.
+// ---------------------------------------------------------------------------
+
+const A_CORRELATION_ID = "00000000-0000-4000-8000-000000000000";
+const REVIEW_SECRET = "review-secret-fixture";
+const CONTINUITY_TOKENS = JSON.stringify({ joe: "codex-secret" });
+const GRANT_WITNESS = "oauth-client-secret-fixture";
+
+/**
+ * A SECOND BOOT OF THIS MODULE, WITH THE SERVER'S CREDENTIALS IN PLACE.
+ *
+ * Amendment 8's fourth correction (PR 1013) deleted `sealServerReviewTokens`:
+ * there is no function that installs a credential map, because a one-shot
+ * installer settles which caller is FIRST and never which caller is the SERVER,
+ * and the reviewer's probe simply arrived first — twice. identity.js reads its
+ * credentials ONCE, at module initialisation, out of the environment the server
+ * process was started with, which in the deployed Worker is what wrangler
+ * populates this Worker's secrets into.
+ *
+ * So the only way a suite can be the server is to write the fixture secrets into
+ * its own environment and boot the module. The statically imported instance at
+ * the top of this file was evaluated before any of this ran and holds no
+ * credentials at all — which is itself worth knowing, and the last test below
+ * asserts it: an unprovisioned boot of this file authenticates nobody.
+ */
+process.env.REVIEW_TOKENS = JSON.stringify({ "codex-reviewer": REVIEW_SECRET });
+process.env.AGENT_TOKENS = AGENT_TOKENS;
+process.env.CODEX_CONTINUITY_TOKENS = CONTINUITY_TOKENS;
+process.env.GOOGLE_CLIENT_SECRET = GRANT_WITNESS;
+const booted = await import("../src/identity.js?server-credentials-in-the-environment");
+const REQUIRED_REVIEW_ACTORS = [
+  "codex-benchmark-author",
+  "codex-benchmark-reviewer",
+  "codex-fa-assurance",
+  "codex-fa-coverage",
+  "codex-fa-execution",
+  "codex-fa-foundation",
+  "codex-fa-minimum",
+  "codex-fa-phi",
+  "codex-fa-prompt",
+  "codex-fa-secrets",
+  "codex-fa-source",
+  "codex-reviewer",
+  "grok-reviewer",
+];
+const partialReviewTokens = process.env.REVIEW_TOKENS;
+process.env.REVIEW_TOKENS = JSON.stringify(Object.fromEntries(
+  REQUIRED_REVIEW_ACTORS.map((slug, index) => [slug, `review-secret-${index}`])));
+const fullyStaffed = await import("../src/identity.js?fully-staffed-review-credentials");
+process.env.REVIEW_TOKENS = JSON.stringify(Object.fromEntries(
+  REQUIRED_REVIEW_ACTORS.map((slug, index) => [slug,
+    index < 2 ? "duplicated-review-secret" : `review-secret-${index}`])));
+const duplicatedSeat = await import("../src/identity.js?duplicated-review-credential");
+process.env.REVIEW_TOKENS = partialReviewTokens;
+
+/**
+ * WHAT A BEARER ESTABLISHES, asked the way a route asks.
+ *
+ * THERE IS NO LONGER A WAY TO ASK IT WITH AN ACTOR (amendment 9, fifth round):
+ * `dispatchFor(actor)` was an exported factory returning a callable that ENTERED
+ * A CONTEXT, and a probe composed it with the equally public review door.
+ *
+ * AND SINCE THE SIXTH ROUND THERE IS NO WAY TO ASK IT WITH CODE EITHER. The one
+ * entry left standing took a CONTINUATION — `(header, correlationId, run)` — and
+ * ran it inside the context, so a probe holding the configured bearer ran its
+ * own code as `review_agent` without composing anything. The entry now takes the
+ * NAME of one of the server's own entries, resolved in a frozen map identity.js
+ * holds itself, and refuses a function in that slot rather than running it.
+ *
+ * So this helper asks what a bearer plus a NAME establishes. The named entry is
+ * the Gate Zero gate, which answers its own refusal object in a process with no
+ * stores — enough to tell "served" from "not served", which is all these cases
+ * ask. What the identity INSIDE that context is, is asserted end to end in
+ * gate-zero-producer.v5.test.mjs, against the receipt the producer mints.
+ */
+const GATE_ZERO_ENTRY = "seam:gate-zero-read-only-outcome-producer";
+const servedForBearer = bearer => booted.serveAuthenticatedCall(
+  bearer, A_CORRELATION_ID, GATE_ZERO_ENTRY);
+
+test("the one request entry serves the server's own bearer, and nobody else, and runs no caller code",
+  async () => {
+    // THE SERVER'S BEARER: served, and what runs inside the context is the
+    // server's own entry — the name resolves to code this repository ships.
+    const served = await servedForBearer(`Bearer ${REVIEW_SECRET}`);
+    assert.notEqual(served, null, "the server's own bearer was not served");
+    assert.equal(typeof served, "object");
+
+    // EVERY OTHER BEARER: not served at all.
+    for (const bearer of ["Bearer a-bearer-the-caller-chose", "Bearer wrong", "", null,
+      `Bearer ${REVIEW_SECRET} `, `bearer ${REVIEW_SECRET}x`])
+      assert.equal(await servedForBearer(bearer), null, String(bearer));
+
+    // AND A NAME THE SERVER DOES NOT HOLD RUNS NOTHING, whatever the bearer is —
+    // which is the whole difference between a name and a callback. A function is
+    // a name the server does not hold, and it is refused rather than called.
+    let ran = 0;
+    const probe = () => { ran += 1; return "served"; };
+    for (const entryName of ["seam:something-else", "", null, undefined, 7,
+      "SEAM:GATE-ZERO-READ-ONLY-OUTCOME-PRODUCER", "toString", "constructor",
+      "__proto__", probe])
+      assert.equal(await booted.serveAuthenticatedCall(`Bearer ${REVIEW_SECRET}`,
+        A_CORRELATION_ID, entryName), null, String(entryName));
+    assert.equal(ran, 0, "the configured bearer ran caller code inside the context");
+
+    // AND A CORRELATION THE SERVER DID NOT WRITE IS STILL SERVED, with the
+    // context CLEARED: the request is answered and it obtains no identity. The
+    // gate answers its refusal either way, so what proves the clearing is the
+    // producer's own receipt, which is asserted in the producer suite.
+    for (const correlationId of [null, "", "not-a-correlation-id", "0000"])
+      assert.notEqual(await booted.serveAuthenticatedCall(`Bearer ${REVIEW_SECRET}`,
+        correlationId, GATE_ZERO_ENTRY), null, String(correlationId));
+  });
+
+test("the router door serves a review-council request and enters no context", async () => {
+  // WHAT IT TAKES IS THE REQUEST, not an actor and not a callback. index.js has
+  // to serve the council's whole MCP session, and the actor it runs as must be
+  // one identity.js minted, because the brand is object identity — so the match
+  // and the dispatch are one act inside that file.
+  //
+  // A FUNCTION IN ANY SLOT IS A REFUSAL. That is the case the sixth review round
+  // asked for on this door too: an exported door that accepted a callable would
+  // be the same finding one name over.
+  let ran = 0;
+  const probe = () => { ran += 1; return "served"; };
+  for (const shape of [probe, null, undefined, 7, "Bearer x", {}, { headers: {} }])
+    assert.equal(await booted.serveReviewRequest(shape, shape, shape), null,
+      String(shape));
+  assert.equal(ran, 0, "the router door ran a caller's function");
+
+  // AND A REQUEST WHOSE BEARER THE SERVER DOES NOT HOLD IS NOT THIS DOOR'S:
+  // null is "not a review-council request", and index.js tries the next door.
+  const request = header => ({ headers: { get: name =>
+    (name === "authorization" ? header : null) } });
+  assert.equal(await booted.serveReviewRequest(
+    request("Bearer a-bearer-the-caller-chose"), {}, {}), null);
+  assert.equal(await booted.serveReviewRequest(request(null), {}, {}), null);
+
+  // THE SERVER'S OWN BEARER REACHES THE DISPATCH, which is proved by what comes
+  // back: mcp.js's own method refusal for a GET, rather than null. It obtains no
+  // receipt identity, because this door enters no context at all.
+  const dispatched = await booted.serveReviewRequest(
+    { ...request(`Bearer ${REVIEW_SECRET}`), method: "GET", url: "https://x/mcp" },
+    { CORRELATION_ID: A_CORRELATION_ID }, {});
+  assert.notEqual(dispatched, null, "the server's own bearer was not dispatched");
+  assert.equal(dispatched.status, 405);
+  assert.equal(dispatched.headers.get("x-carr-review-token-coverage"), "1/13");
+  assert.equal(dispatched.headers.get("x-carr-review-token-coverage-complete"), "false");
+  assert.equal(dispatched.headers.get("x-carr-review-token-duplicates"), "");
+  assert.equal(dispatched.headers.get("x-carr-review-token-missing"),
+    REQUIRED_REVIEW_ACTORS.filter(slug => slug !== "codex-reviewer").join(","));
+  assert.equal(booted.authenticatedIdentity.receiptIdentity(), null);
+});
+
+test("review-token coverage readback requires thirteen distinct reachable actors", async () => {
+  const request = bearer => new Request("https://x/mcp", {
+    method: "GET", headers: { authorization: `Bearer ${bearer}` },
+  });
+  const full = await fullyStaffed.serveReviewRequest(request("review-secret-3"), {}, {});
+  assert.equal(full.headers.get("x-carr-review-token-coverage"), "13/13");
+  assert.equal(full.headers.get("x-carr-review-token-coverage-complete"), "true");
+  assert.equal(full.headers.get("x-carr-review-token-missing"), "");
+  assert.equal(full.headers.get("x-carr-review-token-duplicates"), "");
+
+  const duplicated = await duplicatedSeat.serveReviewRequest(
+    request("review-secret-3"), {}, {});
+  assert.equal(duplicated.headers.get("x-carr-review-token-coverage"), "11/13");
+  assert.equal(duplicated.headers.get("x-carr-review-token-coverage-complete"), "false");
+  assert.equal(duplicated.headers.get("x-carr-review-token-missing"),
+    "codex-benchmark-author,codex-benchmark-reviewer");
+  assert.equal(duplicated.headers.get("x-carr-review-token-duplicates"),
+    "codex-benchmark-author,codex-benchmark-reviewer");
+});
+
+test("a credential map the CALLER supplies authenticates an actor but establishes nothing", () => {
+  // THE LEGACY DOORS, CLOSED WITHOUT AN EXCEPTION. They still TAKE a map,
+  // because index.js has always called them that way and the map is the
+  // server's own; what a match no longer buys is a context, because no export
+  // turns an actor into one.
+  const callersMap = JSON.stringify({ grok: "a-secret-the-caller-chose" });
+  const callersActor = booted.agentActorForToken("Bearer a-secret-the-caller-chose", callersMap);
+  assert.notEqual(callersActor, null, "the door stopped returning its actor");
+  assert.equal(callersActor.slug, "grok");
+
+  // AND THE GRANT DOOR IS THE SAME STORY WITH A WITNESS INSTEAD OF A MAP.
+  const callersGrant = booted.authenticatedIdentity.connectionForGrant(
+    propsForSlug("joe", { via: "oauth-google" }), null, "a-witness-the-caller-chose");
+  assert.notEqual(callersGrant, null);
+
+  // WHAT NONE OF THEM CAN DO IS REACH AN IDENTITY, and that is asserted of the
+  // whole export surface rather than of these two doors: there is no exported
+  // callable that takes an actor and answers a receipt identity, so an actor —
+  // however obtained, branded or not — is not a capability.
+  for (const [name, value] of Object.entries(booted))
+    if (typeof value === "function")
+      assert.equal(/dispatch|enter|runIn|contextFor/i.test(name), false,
+        `${name} reads like a context entry on the export surface`);
+  assert.equal(booted.authenticatedIdentity.receiptIdentity(), null,
+    "an identity is readable outside a served request");
+});
+
+test("a refused credential authenticates nothing", () => {
+  assert.equal(booted.agentActorForToken("Bearer wrong", AGENT_TOKENS), null);
+  // NON-VACUOUS: the bearer the server's environment does hold still works.
+  assert.notEqual(booted.agentActorForToken("Bearer grok-secret-fixture", AGENT_TOKENS), null);
+});
+
+test("a boot with no credentials in its environment authenticates nobody", async () => {
+  // THE INSTANCE STATICALLY IMPORTED AT THE TOP OF THIS FILE, which was
+  // evaluated before the fixture secrets were written into the environment. It
+  // is the same source; what it lacks is the server's credentials, and that is
+  // the whole of what authenticating means now.
+  assert.equal(await identityModule.serveAuthenticatedCall(`Bearer ${REVIEW_SECRET}`,
+    A_CORRELATION_ID, GATE_ZERO_ENTRY), null);
+  const unbranded = agentActorForToken("Bearer grok-secret-fixture", AGENT_TOKENS);
+  assert.notEqual(unbranded, null, "the door stopped returning its actor");
+  assert.equal(authenticatedIdentity.receiptIdentity(), null);
+});
+
+test("identity.js exports no context entry, no brander and no dispatcher factory", () => {
+  // The removed surfaces, by name, so nothing quietly goes back to one. The last
+  // three are amendment 9's: the review door that minted a branded actor, the
+  // dispatcher factory that returned a callable entering a context, and the
+  // build-context reader whose value was the evaluator's own session relabelled.
+  for (const gone of ["reviewActorForToken", "dispatchFor", "dispatchAuthenticatedCall",
+    "authenticatedCallReceiptIdentity", "runInAuthenticatedCall", "authenticatedCallIdentity",
+    "actorFromProps", "sealServerReviewTokens", "buildContext", "committerIdentity",
+    "enterAuthenticatedCall", "serveReviewRequestAuthenticated"]) {
+    assert.equal(Object.hasOwn(identityModule, gone), false, `${gone} is still exported`);
+    assert.equal(Object.hasOwn(authenticatedIdentity, gone), false,
+      `${gone} is still on the authenticated-identity surface`);
+  }
+  assert.ok(Object.isFrozen(authenticatedIdentity));
+  // AND THE SURFACE IS EXACTLY THREE READERS. A member added here is a member
+  // added in a diff somebody reviews.
+  assert.deepEqual(Object.keys(authenticatedIdentity).sort(),
+    ["connectionForGrant", "partnerIdentity", "receiptIdentity"]);
+});
+
+test("a partner slug maps to the class this system derives for it, and nothing else does", () => {
+  // WHAT THIS REPLACED. Until amendment 9 this was a COMMITTER table — Gmail and
+  // GitHub-noreply addresses mapped to partner slugs — because the Gate Zero
+  // producer took its subject maker from HEAD's committer line. The maker is the
+  // release-candidate record now, an authenticated authority write, so a git
+  // address is an input to nothing and the table that turned one into a partner
+  // is deleted rather than left standing unused.
+  const partner = authenticatedIdentity.partnerIdentity;
+  for (const slug of ["joe", "JOE", "  joe  "])
+    assert.deepEqual(partner(slug), { actor_id: "joe", authority_class: "verified_partner" }, slug);
+  assert.deepEqual(partner("dell"), { actor_id: "dell", authority_class: "verified_partner" });
+  // A MACHINE SEAT IS NOT A PARTNER, and neither is anything that merely looks
+  // like a slug: what comes back is an attribution this system registers, or
+  // nothing at all.
+  for (const slug of ["codex-reviewer", "codex", "grok", "carr-release-bot",
+    "someone-else", "", null, undefined, 7, { toString: () => "joe" }])
+    assert.equal(partner(slug), null, String(slug));
 });

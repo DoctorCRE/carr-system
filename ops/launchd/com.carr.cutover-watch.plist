@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- doctrine: carr-clean-end-state-control-plane-roadmap -->
+  <key>Label</key><string>com.carr.cutover-watch</string>
+
+  <!-- SESSION-SCHEDULED WAKEUPS ONLY FIRE WHILE A CLAUDE CONVERSATION IS ALIVE
+       AND IDLE. The control plane worked all day 2026-08-27 while nothing
+       reported it; Joe had to ask twice. Rule 1f3a7372: an unattended run
+       logs its findings to the record before it ends. Rule 847f9995: no
+       unattended path may depend on an interactive credential. This agent
+       closes that gap without a live session: launchd wakes
+       bin/cutover-watch.sh on a fixed schedule, it loads only the narrow
+       jobs-ledger credential (bin/routine-credential-env.sh — never db.env,
+       never an authority DSN), and it compares the current control-plane
+       cutover state — completed jobs whose receipts are not yet accepted,
+       jobs newly dead-lettered, and the acceptance table — against what it
+       last reported.
+
+       A quiet wake (nothing changed) stays silent and exits 0. A real change
+       writes ONE loop update to open loop #532 through the same run.sh call
+       path every other bin/ script uses to reach a verb, and notifies Joe
+       locally the same way bin/cc-version-sentinel.sh does.
+
+       IT NEVER ACCEPTS, PROMOTES, DISABLES, OR DISPATCHES ANYTHING.
+       Acceptance is a directed authority act and stays in an attended
+       session; this agent only observes and reports. See
+       bin/cutover-watch.sh and tools/cutover-watch.py for the full design. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>cutover-watch</string>
+    <string>launchd.run</string>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/cutover-watch.sh</string>
+  </array>
+
+  <!-- Every 30 minutes. The control plane's own jobs land on the scale of
+       minutes to hours, and the whole point is not needing a live session
+       watching in between. -->
+  <!-- carr-launchd-interval-seconds: 1800 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Minute</key><integer>30</integer></dict>
+  </array>
+
+  <!-- Catch a change that landed while the Mac was asleep or shut, rather
+       than waiting for the next half-hour boundary. -->
+  <key>RunAtLoad</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+
+  <key>StandardOutPath</key><string>{{REPO}}/out/cutover-watch.out</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/cutover-watch.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>

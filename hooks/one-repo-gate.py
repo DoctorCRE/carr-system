@@ -44,6 +44,11 @@ WHAT IT DELIBERATELY ALLOWS, each for a reason that cost something to learn:
      other controls or by nothing, and this gate has no business there. The vault
      specifically belongs to record-home-gate.py.
   D. EVERY NON-CODE EXTENSION. Markdown has its own gate and its own rules.
+  E. THE OTHER TWO AUTHORIZED CODE HOMES. Decision 1ceee300 replaced the single
+     home with three on 2026-09-14 — carr-system, doctorcre-app and
+     software-factory — and a tree is one of them only if its ORIGIN REMOTE says
+     so. Everything else, including a clone NAMED doctorcre-app that points
+     somewhere else, and every other repo of Joe's own, is refused as before.
 
 KNOWN LIMIT, stated rather than discovered later: this covers Write, Edit and
 MultiEdit. A `python3 -c` heredoc from Bash writes the same file and is not seen
@@ -72,6 +77,32 @@ REPO = os.environ.get("CARR_ONE_REPO_ROOT") or os.path.abspath(
     os.path.join(os.path.dirname(__file__), ".."))
 
 CODE_EXTENSIONS = (".py", ".js", ".mjs", ".ts", ".sql", ".sh")
+
+# THE AUTHORIZED CODE HOMES, and there are three of them since 2026-09-14.
+# Decision 1ceee300-7627-426f-b729-ab339d6984fc superseded the single-code-home
+# rule after Gate Zero; AGENTS.md "Authorized code homes and repository
+# boundaries" is the projection of it, and STORE doctrine
+# doctorcre-v5-astra-integration-review section
+# 3bb51d3e-2661-4ea2-a585-053540545b5d is the contract itself.
+#
+# WHY LEAVING THIS AT ONE COST SOMETHING. Until this list existed the gate
+# refused every NEW .ts/.py/.sql file inside a doctorcre-app or software-factory
+# clone, so slice V5-UX-S01 authored its files in a scratch directory on
+# 2026-09-16 and copied them in with digest verification. That is the gate
+# teaching a session to route around it, which its own docstring names as the
+# failure mode to avoid — and the workaround defeats the gate for every write,
+# not just the authorized ones.
+#
+# IDENTITY IS THE ORIGIN REMOTE, never the directory name: a clone sits wherever
+# somebody put it and is called whatever they called it. The HOST is part of the
+# identity too, so the same owner and repo served from a different host is not
+# this repo and is refused.
+AUTHORIZED_REMOTES = {
+    ("github.com", "jbookout/carr-system"),
+    ("github.com", "jbookout/doctorcre-app"),
+    ("github.com", "jbookout/software-factory"),
+}
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:                                    # telemetry only — never load-bearing
     import hook_meter
@@ -92,8 +123,11 @@ ESCAPE_VAR = "CARR_ALLOW_FOREIGN_REPO"
 DENY = (
     "BLOCKED by the CARR one-repo gate: {path}\n"
     "That is a NEW {ext} file inside {tree}, which is a git working tree and is "
-    "not carr-system. The code lives in ONE repo — jbookout/carr-system, "
-    "~/carr-system locally — and nowhere else.\n"
+    "not one of CARR's authorized code homes. Code lives in three repos and "
+    "nowhere else (decision 1ceee300, AGENTS.md): jbookout/carr-system "
+    "(~/carr-system locally), jbookout/doctorcre-app and "
+    "jbookout/software-factory. A tree is one of those only if its origin "
+    "remote says so.\n"
     "If you cannot reach that repo, STOP and say so rather than improvising a "
     "home: work filed into another repo is not preserved, it is stranded "
     "somewhere nobody reads. That is not hypothetical — an entire system audit "
@@ -154,6 +188,66 @@ def git_common_dir(start):
         current = parent
 
 
+def origin_identity(gitdir):
+    """(host, "owner/repo") for the tree's `origin` remote, or None.
+
+    Reads <gitdir>/config directly rather than shelling out to git, for the same
+    two reasons git_common_dir walks the tree by hand: a PreToolUse hook must
+    stay fast, and an inherited GIT_DIR — set in the environment of every git
+    hook — would otherwise make the answer depend on who invoked the session
+    instead of on where the file is going.
+
+    Hand-parsed rather than handed to configparser: git indents its keys with a
+    tab, and configparser reads an indented line as a continuation of the
+    previous value, so the url would come back attached to whatever preceded it.
+
+    Both spellings of one remote normalise to one identity: the scp-like form
+    (user, then host, then a colon, then owner and repo) and the full URL form
+    carrying a scheme. A remote that is a plain local path has no identity and
+    is treated as none.
+    """
+    try:
+        with open(os.path.join(gitdir, "config")) as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return None
+
+    url, in_origin = None, False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_origin = (stripped.replace('"', "").replace(" ", "").lower()
+                         == "[remoteorigin]")
+            continue
+        if in_origin and stripped.lower().startswith("url"):
+            _, _, value = stripped.partition("=")
+            url = value.strip()
+            break
+    if not url:
+        return None
+
+    rest = url
+    if "://" in rest:                        # a scheme, then host, then path
+        rest = rest.split("://", 1)[1]
+        if "@" in rest.split("/", 1)[0]:
+            rest = rest.split("@", 1)[1]
+        host, _, path = rest.partition("/")
+    elif ":" in rest:                        # scp-like: the host precedes ':'
+        hostpart, _, path = rest.partition(":")
+        host = hostpart.split("@", 1)[-1]
+    else:
+        return None                          # a local path — no remote identity
+
+    host = host.split(":", 1)[0].lower()     # drop any port
+    parts = [seg for seg in path.strip("/").split("/") if seg]
+    if len(parts) < 2:
+        return None
+    owner, repo = parts[-2], parts[-1]
+    if repo.endswith(".git"):
+        repo = repo[:-4]
+    return (host, f"{owner}/{repo}".lower())
+
+
 def check(tool_input, cwd):
     """The refusal reason, or None to allow."""
     raw = tool_input.get("file_path") or tool_input.get("filePath") or ""
@@ -176,6 +270,11 @@ def check(tool_input, cwd):
     home = git_common_dir(REPO) or os.path.realpath(os.path.join(REPO, ".git"))
     if tree == home:
         return None                      # the repo, worktrees included (A)
+
+    identity = origin_identity(tree)
+    if identity and identity in AUTHORIZED_REMOTES:
+        log(f"ALLOW(authorized-home {identity[1]}) {path}")
+        return None                      # a sibling code home (E)
 
     if os.environ.get(ESCAPE_VAR) == "1":
         log(f"ALLOW(escape-hatch) {path}")

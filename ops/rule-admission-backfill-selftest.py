@@ -49,7 +49,7 @@ def main() -> int:
           and cognition["binding_moment"]=="before a cognition workflow is registered or dispatched")
     check("cognition-token rule carries installed manifest and database fixtures",
           cognition["fixture_refs"]==["ops/control-plane-db-gate.py", "ops/control-plane-selftest.py"]
-          and len(point)==1 and point[0]["control_key"]=="cognition_token_admission"
+          and len(point)==1 and point[0]["control_key"]=="control-plane-workflow-manifest"
           and point[0]["enforcement_class"]=="deny_gate")
     check("cognition-token admission contract matches actual typed dispatcher boundary",
           cognition["input_contract"]["required"]==[

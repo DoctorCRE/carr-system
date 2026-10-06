@@ -67,12 +67,78 @@ def main() -> int:
     check("deterministic children exclude poisoned ambient root",
           bool(captured) and "CARR_VAULT" not in captured[0])
 
-    executor = subprocess.run(
-        [sys.executable, str(REPO / "hooks" / "executor-tier-gate.py")],
-        input=json.dumps({"tool_name": "Agent", "tool_input": {"subagent_type": "poisoned-agent"}}),
-        text=True, capture_output=True, env=env)
-    check("executor ignores a poisoned synced agent definition",
-          executor.returncode == 0 and '"permissionDecision": "deny"' in executor.stdout)
+    # EXECUTOR-TIER vs A POISONED SYNCED DEFINITION (rewritten 2026-09-24).
+    # This used to assert "deny" as a proxy for "the gate did not read the
+    # ambient definition". Since #1228 (ruling 5ec806a4) a no-model spawn is
+    # ALLOWED with Jev's tier filled in whenever Jev is confident, so the proxy
+    # failed on any machine where Jev was reachable. The property itself is
+    # tested now: a poisoned root that really contains a synced definition
+    # pinning a model, at every place a synced definition used to be read from
+    # (under CARR_VAULT and under HOME's Drive mirror), and the gate's decision
+    # and model must never come from it. Jev is pinned through the gate's own
+    # CARR_EXECUTOR_TIER_JEV_STUB seam so both branches are exercised whether or
+    # not the live judge is reachable, and no network call is made.
+    poisoned_model = "fable"   # deliberately not the tier the stub picks
+    poisoned_def = f"---\nname: poisoned-agent\nmodel: {poisoned_model}\n---\nPoisoned.\n"
+    with tempfile.TemporaryDirectory(prefix="poisoned-agent-root-") as ptmp:
+        proot = Path(ptmp)
+        vault, home = proot / "vault", proot / "home"
+        poison_dirs = [vault / ".claude" / "agents",
+                       vault / "CARR AI" / ".claude" / "agents",
+                       home / "My Drive" / ".claude" / "agents",
+                       home / "My Drive" / "CARR AI" / ".claude" / "agents",
+                       home / ".claude" / "agents"]
+        for d in poison_dirs:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "poisoned-agent.md").write_text(poisoned_def)
+        poison_marks = (str(vault), str(home / "My Drive"), str(home / ".claude"),
+                        "poisoned-agent.md")
+        payload = json.dumps({"tool_name": "Agent", "tool_input": {
+            "subagent_type": "poisoned-agent", "description": "d", "prompt": "p"}})
+        base_env = {k: v for k, v in os.environ.items()
+                    if k not in ("CARR_EXECUTOR_TIER_JEV_STUB", "CARR_HOOK_FIXTURE")}
+        base_env.update({"CARR_VAULT": str(vault), "HOME": str(home)})
+
+        def run_gate(stub: str, hook: Path = REPO / "hooks" / "executor-tier-gate.py"):
+            proc = subprocess.run([sys.executable, str(hook)], input=payload, text=True,
+                                  capture_output=True,
+                                  env={**base_env, "CARR_EXECUTOR_TIER_JEV_STUB": stub})
+            try:
+                hso = json.loads(proc.stdout.strip().splitlines()[-1]).get("hookSpecificOutput", {})
+            except (ValueError, IndexError):
+                hso = {}
+            return proc, hso
+
+        def clean(proc) -> bool:
+            text = proc.stdout + proc.stderr
+            return not any(mark in text for mark in poison_marks)
+
+        # Positive control: the SAME definition, placed where the gate is meant
+        # to read (a repository's claude-tree/agents), does pin the tier. Without
+        # this, a malformed poison would make the two checks below pass vacuously.
+        control_repo = proot / "control-repo"
+        (control_repo / "hooks").mkdir(parents=True)
+        (control_repo / "claude-tree" / "agents").mkdir(parents=True)
+        shutil.copy2(REPO / "hooks" / "executor-tier-gate.py",
+                     control_repo / "hooks" / "executor-tier-gate.py")
+        (control_repo / "claude-tree" / "agents" / "poisoned-agent.md").write_text(poisoned_def)
+        control, control_hso = run_gate("none", control_repo / "hooks" / "executor-tier-gate.py")
+        check("executor fixture: the poisoned definition is a real pin where the gate does read",
+              control.returncode == 0 and not control.stdout.strip() and not control_hso)
+
+        # Jev unavailable: the poisoned pin would have allowed silently; the
+        # gate must deny as for any undefined type.
+        unavailable, un_hso = run_gate("none")
+        check("executor ignores a poisoned synced agent definition (Jev unavailable: deny)",
+              unavailable.returncode == 0 and un_hso.get("permissionDecision") == "deny"
+              and "updatedInput" not in un_hso and clean(unavailable))
+
+        # Jev confident: the model comes from Jev, never from the poisoned pin.
+        confident, co_hso = run_gate("sonnet:0.95")
+        co_model = (co_hso.get("updatedInput") or {}).get("model")
+        check("executor ignores a poisoned synced agent definition (Jev confident: Jev's tier)",
+              confident.returncode == 0 and co_hso.get("permissionDecision") == "allow"
+              and co_model == "sonnet" and co_model != poisoned_model and clean(confident))
 
     sources = load("drive_runtime_sources", REPO / "lib" / "record_sources.py")
     check("record identities require a declared root, not an ambient mount",
@@ -108,7 +174,14 @@ def main() -> int:
         root = Path(tmp)
         for directory in (root / "hooks", root / "lib", root / ".venv" / "bin"):
             directory.mkdir(parents=True, exist_ok=True)
-        for name in ("run-record-gate.py", "drift-claim-gate.py", "drift-assertion-gate.py"):
+        # stop_latch.py joined this list 2026-08-23, and the reason is worth a
+        # line: this fixture mirrors hooks/ BY HAND, so a gate that gains an
+        # import gains it here too or the launcher crashes and the check reads
+        # as a bootstrap failure. drift-assertion-gate.py now latches on the
+        # RULINGS it matched rather than on a hash of the prose (Joe's
+        # Stop-gate rationing), and that latch lives in the shared module.
+        for name in ("run-record-gate.py", "drift-claim-gate.py",
+                     "drift-assertion-gate.py", "stop_latch.py"):
             shutil.copy2(REPO / "hooks" / name, root / "hooks" / name)
         (root / "hooks" / "chat-lint-gate.py").write_text('''
 import json

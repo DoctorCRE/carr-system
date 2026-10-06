@@ -36,7 +36,11 @@
   <!-- Hourly. The desktop app can update mid-day and that runtime is the one
        executing Joe's sessions, so a daily check would leave him working on an
        unaudited runtime for most of a day. -->
-  <key>StartInterval</key><integer>3600</integer>
+  <!-- carr-launchd-interval-seconds: 3600 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>19</integer></dict>
+  </array>
 
   <!-- Catch an update that landed while the Mac was asleep or shut, rather than
        waiting for the next hour boundary. -->
@@ -45,5 +49,9 @@
 
   <key>StandardOutPath</key><string>{{REPO}}/out/cc-version-sentinel.out</string>
   <key>StandardErrorPath</key><string>{{REPO}}/out/cc-version-sentinel.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
 </dict>
 </plist>

@@ -33,13 +33,16 @@ check() {
   else print -r -- "  FAIL  $label  $detail"; fail=$((fail+1)); fi
 }
 
-# Extract just the tunables and the call() definition from the real script.
+# Extract the auth helper, tunables, and call() from the real script.
 # Sourcing the whole file would run its auth preflight and the entire suite.
+CURL_AUTH_SRC="$(awk '/^curl_auth\(\) \{/,/^}$/' "$SRC")"
 CALL_SRC="$(awk '/^CALL_ATTEMPTS=/,/^}$/' "$SRC")"
-if ! print -r -- "$CALL_SRC" | grep -q '^call() {'; then
-  print -r -- "  FAIL  could not extract call() from $SRC — did its shape change?"
+if ! print -r -- "$CURL_AUTH_SRC" | grep -q '^curl_auth() {' ||
+   ! print -r -- "$CALL_SRC" | grep -q '^call() {'; then
+  print -r -- "  FAIL  could not extract curl_auth() and call() from $SRC — did their shape change?"
   exit 1
 fi
+eval "$CURL_AUTH_SRC"
 eval "$CALL_SRC"
 
 API="https://example.invalid/mcp"

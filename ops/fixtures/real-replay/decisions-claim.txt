@@ -1,0 +1,1 @@
+2026-09-01 — nightly-sync was intentionally paused for a planned maintenance window and this is not a regression.

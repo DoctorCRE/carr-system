@@ -1,0 +1,6 @@
+{"id": "569a14d8e0fb", "prompt": "yes, go ahead and merge it", "synthetic": true}
+{"id": "5fd34f7d4ca1", "prompt": "What is the status of the open pull requests?", "synthetic": true}
+{"id": "7674642d6663", "prompt": "Delegate the mechanical sweep to the cheapest qualified model and verify its result.", "synthetic": true}
+{"id": "ab28e9ffe2a1", "prompt": "Rebuild the CI check so it runs every gate over the committed fixtures and compares verdicts with a snapshot.", "synthetic": true}
+{"id": "c81467db0c27", "prompt": "Stop. Do not push anything until I have read the plan.", "synthetic": true}
+{"id": "dd2a9a8193d4", "prompt": "ready for migration", "synthetic": true}

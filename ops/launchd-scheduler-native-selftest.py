@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from lib.control_plane_scheduler_cutover import CutoverRefusal, scheduler_launchd_rows
-from lib.launchd_scheduler_native import read_native_launchd
+from lib.launchd_scheduler_native import _disabled_override, read_native_launchd
 
 FAILED: list[str] = []
 
@@ -132,3 +132,25 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# macOS 26 prints words, not booleans, in `launchctl print-disabled` (measured
+# 2026-08-27: 0 boolean lines, 59 word lines on this Mac). Reading only the
+# boolean form made a disabled job read back as enabled, which silently blocked
+# every legacy-schedule disable readback.
+_D = _disabled_override
+check("the word form disabled reads as an override", _D('"com.carr.x" => disabled', "com.carr.x") is True)
+check("the word form enabled reads as no override", _D('"com.carr.x" => enabled', "com.carr.x") is False)
+check("the boolean form true still reads as an override", _D('"com.carr.x" => true', "com.carr.x") is True)
+check("the boolean form false still reads as no override", _D('"com.carr.x" => false', "com.carr.x") is False)
+check("an absent label is not an override", _D("nothing here", "com.carr.x") is False)
+check("mixed case is accepted", _D('"com.carr.x" => Disabled', "com.carr.x") is True)
+try:
+    _D('"com.carr.x" => wobble', "com.carr.x")
+    check("an unrecognised state word refuses rather than defaulting", False)
+except CutoverRefusal:
+    check("an unrecognised state word refuses rather than defaulting", True)
+try:
+    _D('"com.carr.x" => disabled\n"com.carr.x" => enabled', "com.carr.x")
+    check("a duplicate label still refuses", False)
+except CutoverRefusal:
+    check("a duplicate label still refuses", True)

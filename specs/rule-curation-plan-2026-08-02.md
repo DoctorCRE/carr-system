@@ -65,7 +65,7 @@ Column key. **Line** = the `ai-operating-notes.md` line the statement was lifted
 
 | id | gist | bucket | scope | dupes file line | conflict | disposition |
 |---|---|---|---|---|---|---|
-| `2e8b4840` | A lead record and a client record for the same person are not a duplicate; everyone starts as a lead | RULE | SHARED | none | none. Adjacent to active `4c21d86b` (survivorship, different object: duplicate *parties*, not lead/client *refs*) | **ACTIVATE** — the only substantively new rule in the backlog, and the only one with a real quote ("Tyrer is a client now duh. everyone starts as a lead") |
+| `2e8b4840` | A lead record and a client record for the same person are not a duplicate; everyone starts as a lead | RULE | SHARED | none | none. Adjacent to active `4c21d86b` (survivorship, different object: duplicate *parties*, not lead/client *refs*) | **ACTIVATE** — the only substantively new rule in the backlog, and the only one with a real quote ("Okafor is a client now duh. everyone starts as a lead") |
 | `305df62b` | *(statement is a zero-length string; `human_quote` empty; `scope {}`)* | — | — | none | — | **RETIRE** — data defect, not a rule. Verified: `select length(statement) … = 0`. Created 2026-08-01 14:51, an hour before the bulk import |
 
 ### 3b. Division of labor (line 6)

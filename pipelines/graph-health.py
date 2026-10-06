@@ -89,7 +89,7 @@ PLACEHOLDER = re.compile(r"\bTBD\b|\bunknown\b|last name|\benrich\b|^\(|linkedin
 SUFFIX = r"(?:jr|sr|ii|iii|dds|dmd|md|do|pa|np|cpa|esq|phd|rn|fnp|otr)"
 MULTINAME = re.compile(r"^([A-Z][a-z'’-]+ [A-Z][a-z'’-]+) ([A-Z][a-z'’-]+ [A-Z][a-z'’-]+)$")
 
-# A practice name is four capitalised words too ("Bay Area Oral Surgery"), so the
+# A practice name is four capitalised words too ("Seagate Oral Surgery"), so the
 # four-word shape alone is not evidence of two people. Any business/clinical word
 # means it is an entity, not a pair of humans.
 ORG_WORD = re.compile(
@@ -183,9 +183,9 @@ for nm, ids in sorted(_by.items()):
         add("HIGH", "Duplicate client record",
             f"“{nm.title()}” holds {len(ids)} client IDs: {', '.join(ids)} — merge to one")
 
-# Near-duplicate names the exact match cannot see. "Dr Jordan Rigsby" and "Jordan
-# Rigsby" were two records for one man and 4c was blind to both of them, so the
-# merge pass found a third Rigsby row the check had never reported.
+# Near-duplicate names the exact match cannot see. "Dr Jordan Ridley" and "Jordan
+# Ridley" were two records for one man and 4c was blind to both of them, so the
+# merge pass found a third Ridley row the check had never reported.
 _seen = [(s(c.get("Name")), s(c.get("Client ID"))) for c in clients
          if s(c.get("Name")) and not _tombstoned(c)]
 _DROP = {"dr", "mr", "mrs", "ms", "dds", "dmd", "md", "do", "jr", "sr", "ii", "iii",
@@ -324,8 +324,8 @@ def email_check(label, name, email, ident, company="", notes=""):
             f"{label} {ident}: “{name}” → {email} — reaches the front desk, fine to use, "
             f"but it is not a private line to the decision-maker")
         return
-    # Initials WITH a middle initial (mcg@ for Mike Garver, nak07d@ for Nathan
-    # Kupperman, msidpm@ for Mark Isenberg). Short local part, opens on the first
+    # Initials WITH a middle initial (mcg@ for Mike Galvin, nak07d@ for Nathan
+    # Kessling, msidpm@ for Mark Eisner). Short local part, opens on the first
     # name's initial, carries the surname's initial. Kept visible but not HIGH:
     # it is a plausible reading, not a proven one, so a human confirms before sending.
     run = re.match(r"[a-z]+", local).group(0)
@@ -334,7 +334,7 @@ def email_check(label, name, email, ident, company="", notes=""):
             f"{label} {ident}: “{name}” → {email} — reads as their initials. Confirm once, "
             f"then it is fine.")
         return
-    # Truncated surname (simmoag@ for Andrew Simmons, jdkinanniston@ for John Kasper).
+    # Truncated surname (hemmiag@ for Andrew Hemmings, jdkinmorrow@ for Jack Morrow).
     for p in parts:
         if len(p) >= 5 and local.startswith(p[:5]):
             add("MED", "Initials, verify before sending",

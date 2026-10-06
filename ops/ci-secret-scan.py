@@ -58,6 +58,7 @@ Usage:
     ops/ci-secret-scan.py --staged        # scan the index, new files included
     ops/ci-secret-scan.py --range A..B    # scan blobs introduced by a range
     ops/ci-secret-scan.py --list-patterns # what it looks for, and why
+    ops/ci-secret-scan.py --redact        # stdin -> stdout, every match masked
 """
 
 import json
@@ -238,7 +239,45 @@ def scan(source=None):
     return findings
 
 
+def redact(text):
+    """Mask every shaped credential in ARBITRARY TEXT, reusing this one list.
+
+    WHY IT LIVES HERE AND NOT WHERE IT IS CALLED. ops/ci.sh prints a failing
+    gate's captured child output — up to a whole log — so that output is a
+    second place a credential could be published, and CI logs outlive the run.
+    The obvious fix is a handful of regexes at the call site, and that is the
+    fix that rots: a second pattern set drifts from this one, and the drift is
+    invisible because both sides look fine on their own. A pattern added to
+    PATTERNS must protect every place this repository prints untrusted text, so
+    the redactor is the scanner's own function over the scanner's own list.
+
+    NO ALLOWLIST APPLIES HERE, deliberately. The inline marker and the path
+    allowlist exist so this repository can WRITE about credentials in its own
+    tracked files; neither has any meaning for a child process's stdout, which
+    is not a file anyone reviewed. Every match is masked, unconditionally.
+
+    The mask keeps the finding and drops the value: the pattern name and the
+    length, which is what a reader diagnosing a log actually needs, and exactly
+    what scan() already reports for the same reason.
+    """
+    for pname, rx, _why, _allowlistable in PATTERNS:
+        text = rx.sub(lambda m, n=pname: f"<redacted:{n}:{len(m.group(0))} chars>",
+                      text)
+    return text
+
+
 def main():
+    if "--redact" in sys.argv:
+        # A FILTER, not a gate: stdin to stdout, exit 0 on clean and on masked
+        # alike. The caller is printing a diagnosis it already decided to print;
+        # a nonzero here would turn "this log mentioned a token shape" into a
+        # second failure on top of the one being diagnosed. errors="replace"
+        # because a child's log is arbitrary bytes and a decode crash would
+        # suppress the diagnosis entirely — the one outcome worse than printing.
+        raw = sys.stdin.buffer.read()
+        sys.stdout.write(redact(raw.decode("utf-8", errors="replace")))
+        return 0
+
     if "--list-patterns" in sys.argv:
         print("ci-secret-scan patterns:\n")
         for pname, _rx, why, allowlistable in PATTERNS:

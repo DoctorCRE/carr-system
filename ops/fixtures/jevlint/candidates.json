@@ -1,0 +1,226 @@
+{
+  "languages": {
+    "python": {},
+    "javascript": {},
+    "typescript": {},
+    "tsx": {}
+  },
+  "rules": [
+    {
+      "id": "unnecessary-abstraction",
+      "description": "Fail abstractions that add indirection without providing meaningful reuse, encapsulation, substitution, domain meaning, or separation of responsibility. Examples include one-use abstractions that merely forward behavior, interfaces with a single implementation created without a clear boundary, and types that only delegate to another object. Small named helpers that improve readability, adapters, stable API boundaries, and abstractions isolating likely change pass.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "CARR contract validators, fixed-policy helpers, injected transport adapters and authenticated protocol interfaces provide an invariant or tested seam and pass."
+      ]
+    },
+    {
+      "id": "speculative-generalization",
+      "description": "Fail code that introduces configurability, extension points, generic machinery, abstraction layers, or multiple implementation paths without evidence that the flexibility is currently needed. Do not fail normal dependency boundaries, public library APIs, framework-required abstractions, or simple designs that naturally support multiple implementations without significant added complexity.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Current registered contracts and injected test transports pass. Do not infer an unused branch from lack of whole-repository call sites."
+      ]
+    },
+    {
+      "id": "wrapper-without-value",
+      "description": "Fail functions or methods whose only meaningful behavior is forwarding an operation to another function or object without adding domain meaning, validation, transformation, policy, error handling, instrumentation, or a useful abstraction boundary. Adapters, compatibility layers, dependency boundaries, framework hooks, and intentionally stable public APIs pass.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Fixed identifier=True or judge=True helpers, error translation, admission, attribution, instrumentation and used external/framework contracts pass. Renaming a project-local helper alone adds no domain invariant."
+      ]
+    },
+    {
+      "id": "function-name-behavior-mismatch",
+      "description": "Fail functions whose names substantially understate or misrepresent their observable behavior. Query-like names should not unexpectedly mutate state, simple getters should not perform significant unrelated work or I/O, and narrowly named operations should not perform unrelated side effects. Conventional lazy initialization, caching, instrumentation, and framework-required behavior pass when unsurprising in context.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Documented lazy initialization, cache population, admission logging, framework callbacks and async reads pass."
+      ]
+    },
+    {
+      "id": "coincidental-abstraction",
+      "description": "Fail shared abstractions that combine code which is currently structurally similar but represents different domain concepts that may evolve independently. Duplication is preferable when sharing would couple unrelated behavior. Do not fail abstractions built around a genuine shared concept, invariant, protocol, policy, or domain responsibility.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Shared command outcome classification and exact shape/digest validation express the same protocol invariant and pass."
+      ]
+    },
+    {
+      "id": "swallowed-errors",
+      "description": "Fail errors or exceptions that are caught, ignored, discarded, or converted into success without a clear reason. Handling may include recovery, logging with sufficient context, wrapping, propagation, fallback behavior, or an explicitly intentional best-effort operation. Empty catch blocks and discarded errors with no evident justification should fail.",
+      "severity": "error",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Explicit best-effort telemetry that cannot alter the operation outcome passes. A failed required check or unknown result must remain unavailable."
+      ]
+    },
+    {
+      "id": "invariant-helper",
+      "description": "Fail a project-local forwarding helper that claims domain validation but merely forwards identical arguments without fixing a policy or enforcing an invariant. A helper with a fixed identifier policy or judge-specific billing interpretation passes.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "exceptions": [
+        "Injected transport adapters and required public/framework interfaces pass."
+      ],
+      "minConfidence": 0,
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ]
+    },
+    {
+      "id": "causal-value-evidence",
+      "description": "Fail code that credits a model with a confirmed fix or quantified saving based only on coincident timestamps, matching token counts or a nearby commit. Evidence must bind the verdict to an action/change and a measurement baseline. An explicitly labeled unproven claim or proxy passes.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "exceptions": [
+        "Deterministic literal phrase handling is evaluated by regression tests. Code with no model-value claim passes."
+      ],
+      "minConfidence": 0,
+      "include": [
+        "tools/jev-value-report.py"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ]
+    }
+  ]
+}

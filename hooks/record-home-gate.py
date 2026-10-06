@@ -230,27 +230,56 @@ def generated_paths():
 
     # THE DOSSIER DIRECTORY IS NOT ALL GENERATED, and blanket-guarding it was a
     # defect in this file's first cut. DNA/Clients/prospects/ holds 23 generated
-    # dossiers AND 2 hand-authored files (AltaPointe-enterprise.md,
-    # Beasley-intake.md) with no GENERATED banner, and the client-intake agent
+    # dossiers AND 2 hand-authored files (a national-account enterprise file and
+    # an intake) with no GENERATED banner, and the client-intake agent
     # deliberately writes `<name>-intake.md` there by hand. A directory rule
     # blocks those too — over-blocking a partner's own writing surface is how a
     # gate gets switched off, and switched off it protects nothing.
     #
-    # targets.py enumerates the real ones in DOSSIER_FILES precisely because a
+    # The exporter enumerates the real ones in DOSSIER_FILES precisely because a
     # directory listing is the wrong source ("enumerated by the RECORD LAYER, not
     # by a directory listing"). Guard exactly that list, and it stays current
     # with the exporter for free: a new dossier lands in DOSSIER_FILES the moment
     # its client gets a notes_path.
+    #
+    # THE LIST IS READ FROM THE LOCAL ROSTER, not parsed out of targets.py
+    # (WR-000049): its keys are client names, so it left the public tree for the
+    # gitignored exporters/dossier-roster.local.json. The gate loads the SAME
+    # reader targets.py uses (exporters/dossier_roster.py, stdlib-only, loaded by
+    # path so the hook still needs no repo import), so the two cannot disagree.
+    # A missing roster is LOGGED, never silent: the dossier layer then guards
+    # nothing, and the vault .md deny-by-default (B) is what still holds.
     dossier_dir = (consts.get("DOSSIER_DIR") or "").rstrip("/")
     if dossier_dir:
-        for k in (dict_nodes.get("DOSSIER_FILES") or ast.Dict(keys=[], values=[])).keys:
-            name = as_str(k)
-            if name:
-                exact.add(f"{dossier_dir}/{name}")
+        for name in dossier_roster_names():
+            exact.add(f"{dossier_dir}/{name}")
 
     if not exact:
         raise ValueError("parsed no targets")
     return exact, dirs
+
+
+DOSSIER_ROSTER_PY = os.path.join(REPO, "exporters", "dossier_roster.py")
+
+
+def dossier_roster_names():
+    """Dossier filenames from the local roster, via exporters/dossier_roster.py.
+
+    Loaded by file path with importlib (no package import, no venv). An absent
+    roster yields no names and one log line per call; a malformed one raises,
+    which generated_paths()'s caller turns into the logged FALLBACK set.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("carr_dossier_roster", DOSSIER_ROSTER_PY)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load {DOSSIER_ROSTER_PY}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    names = sorted(mod.load_roster())
+    if not names:
+        log(f"DOSSIER-ROSTER absent — {mod.roster_status()}; the dossier layer guards no "
+            f"file, layer B (.md deny-by-default) still applies")
+    return names
 
 
 # Used only when the parse fails. Deliberately the ORIGINAL sixteen: a stale

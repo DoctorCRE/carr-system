@@ -311,11 +311,18 @@ def assert_writer_identity(cur: Any) -> None:
     row = cur.execute(
         "select session_user::text as session_user, current_user::text as current_user"
     ).fetchone()
+    # Migration 0352 (2026-08-27, Joe's order) granted the staging pair to
+    # carr_authority so Joe's own login runs the staging without a minted
+    # writer credential; the human authority login is therefore an accepted
+    # write identity alongside the routine writer role.
+    accepted_write_identities = {WRITER_ROLE, "carr_authority_joe"}
     if not isinstance(row, Mapping) or (
-        row.get("session_user") != WRITER_ROLE or row.get("current_user") != WRITER_ROLE
+        row.get("session_user") not in accepted_write_identities
+        or row.get("current_user") not in accepted_write_identities
+        or row.get("session_user") != row.get("current_user")
     ):
         raise ImportRefusal(
-            "writer connection identity refused: session_user and current_user must both be carr_writer"
+            "writer connection identity refused: session_user and current_user must both be carr_writer or carr_authority_joe"
         )
 
 

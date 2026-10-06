@@ -10,6 +10,7 @@ disabled within a day, and then it protects nothing.
 import json
 import os
 import subprocess
+import tempfile
 import sys
 
 # Script-relative, NOT expanduser("~/carr-system") — see the same fix in
@@ -70,18 +71,18 @@ CASES = [
     # were all in that gap; they pass only because the set is now parsed from
     # exporters/targets.py instead of retyped.
     ("A · client dossier (the worst case, list-guarded)", DENY, "Edit",
-     {"file_path": f"{VAULT}/DNA/Clients/prospects/LifeDentalGroup.md", "new_string": "deal update"}),
+     {"file_path": f"{VAULT}/DNA/Clients/prospects/LumoraDentalGroup.md", "new_string": "deal update"}),
     # NOT a blanket directory rule, and that distinction is load-bearing:
     # prospects/ holds 23 GENERATED dossiers alongside hand-authored files the
     # client-intake agent writes on purpose. Guarding the directory blocked those
     # too, and over-blocking a partner's own writing surface is how a gate ends up
     # switched off. The set is the exporter's own DOSSIER_FILES list.
     ("P0+ · intake file in prospects/ follows this machine's partner",
-     job_output("DNA/Clients/prospects/Beasley-intake.md"), "Write",
-     {"file_path": f"{VAULT}/DNA/Clients/prospects/Beasley-intake.md", "new_string": "x"}),
+     job_output("DNA/Clients/prospects/Castillo-intake.md"), "Write",
+     {"file_path": f"{VAULT}/DNA/Clients/prospects/Castillo-intake.md", "new_string": "x"}),
     ("P0+ · enterprise file in prospects/ follows this machine's partner",
-     job_output("DNA/Clients/prospects/AltaPointe-enterprise.md"), "Edit",
-     {"file_path": f"{VAULT}/DNA/Clients/prospects/AltaPointe-enterprise.md", "new_string": "x"}),
+     job_output("DNA/Clients/prospects/NationalAccount-enterprise.md"), "Edit",
+     {"file_path": f"{VAULT}/DNA/Clients/prospects/NationalAccount-enterprise.md", "new_string": "x"}),
     ("P0+ · a name not in DOSSIER_FILES is DENIED too (closed 2026-08-14)",
      job_output("DNA/Clients/prospects/BrandNewClient.md"), "Write",
      {"file_path": f"{VAULT}/DNA/Clients/prospects/BrandNewClient.md", "content": "x"}),
@@ -141,11 +142,41 @@ CASES = [
 ]
 
 
-def run(tool, ti):
+# THE DOSSIER ROSTER IS SYNTHETIC HERE (WR-000049). The real roster is a
+# gitignored per-machine file whose keys are client names; the gate reads it
+# through exporters/dossier_roster.py, which honours CARR_DOSSIER_ROSTER. Every
+# subprocess below points that variable at this temp file, so the list-guarded
+# case is hermetic: the same verdict on Joe's Mac, on Dell's, and on the runner.
+SYNTHETIC_DOSSIER = "LumoraDentalGroup.md"
+_ROSTER_DIR = tempfile.mkdtemp(prefix="record-home-roster-")
+SYNTHETIC_ROSTER = os.path.join(_ROSTER_DIR, "dossier-roster.local.json")
+with open(SYNTHETIC_ROSTER, "w", encoding="utf-8") as _fh:
+    json.dump({"dossiers": {SYNTHETIC_DOSSIER: "flat", "SampleClinic-Harbor.md": "chronological"}}, _fh)
+NO_ROSTER = os.path.join(_ROSTER_DIR, "absent.json")
+
+
+def run(tool, ti, roster=None):
+    env = dict(os.environ, CARR_DOSSIER_ROSTER=roster or SYNTHETIC_ROSTER,
+               CARR_HOOK_GUARD_LOG=os.path.join(_ROSTER_DIR, "guard.log"))
     p = subprocess.run([sys.executable, GATE],
                        input=json.dumps({"tool_name": tool, "tool_input": ti}),
-                       capture_output=True, text=True, timeout=20)
+                       capture_output=True, text=True, timeout=20, env=env)
     return p.returncode, (p.stderr or "").strip()
+
+
+def roster_layer_cases():
+    """The dossier layer (A) is list-guarded by the roster, not merely covered by
+    the .md deny-by-default (B). Proven by the MESSAGE: A names a GENERATED
+    render; with the roster absent the same path falls through to B."""
+    ti = {"file_path": f"{VAULT}/DNA/Clients/prospects/{SYNTHETIC_DOSSIER}", "new_string": "x"}
+    rc_in, err_in = run("Edit", ti)
+    rc_out, err_out = run("Edit", ti, roster=NO_ROSTER)
+    return [
+        ("roster · a rostered dossier is denied as a GENERATED render (layer A)",
+         rc_in == 2 and "is a GENERATED render" in err_in),
+        ("roster · with no roster file the dossier layer names nothing",
+         "is a GENERATED render" not in err_out),
+    ]
 
 
 def manifest_unit_cases():
@@ -259,7 +290,7 @@ def manifest_unit_cases():
          md_write_verdict("DNA/Network/briefs/x.md",
                           today=CUTOFF + timedelta(days=1)) is not None),
         ("unit · prospects prefix DENIED after cutoff",
-         md_write_verdict("DNA/Clients/prospects/Beasley-intake.md",
+         md_write_verdict("DNA/Clients/prospects/Castillo-intake.md",
                           today=CUTOFF + timedelta(days=1)) is not None),
         ("unit · deny message names the verbs",
          "log-decision" in (md_write_verdict("DNA/writing-rules.md") or "")),
@@ -271,7 +302,7 @@ def manifest_unit_cases():
 
 def main():
     failed = 0
-    for label, ok in manifest_unit_cases():
+    for label, ok in manifest_unit_cases() + roster_layer_cases():
         failed += 0 if ok else 1
         print(f"  {'ok  ' if ok else 'FAIL'}  {label}")
     for label, expected, tool, ti in CASES:

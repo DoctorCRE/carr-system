@@ -1,9 +1,12 @@
 {
-  "_note": "Canonical CARR-project PreToolUse wiring for the delegation gate. Keep this exact, versioned contract aligned with the project settings file; gate-integrity.py rejects matcher, command, or timeout drift.",
+  "_note": "Canonical CARR-project PreToolUse wiring for the delegation gate. Keep this exact, versioned contract aligned with the project settings file; gate-integrity.py rejects matcher, command, or timeout drift. PATH CONTRACT (2026-09-27): command runs the canonical ~/carr-system copy whenever ~/carr-system/hooks exists, so on a Mac no worktree or branch can swap in its own gate; only when that checkout is absent (a Claude Code cloud container, which clones the repo to $CLAUDE_PROJECT_DIR) does it run the project copy, and it allows the call if that copy is missing too. The gate only observes and never denies, so running the repository copy there is safe. canonical_only_commands is the exact older Mac-only form, still accepted for Mac-only projects such as the Drive vault whose live settings carry it. ops/cloud-hook-paths-selftest.py runs these commands in both layouts.",
   "version": 1,
   "event": "PreToolUse",
   "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
-  "command": "/usr/bin/env python3 \"${HOME}/carr-system/hooks/delegation-gate.py\"",
+  "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; [ -f \"$r/hooks/delegation-gate.py\" ] || exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
+  "canonical_only_commands": [
+    "/usr/bin/env python3 \"${HOME}/carr-system/hooks/delegation-gate.py\""
+  ],
   "timeout": 10,
   "known_read_sweep_tools": [
     "Bash",

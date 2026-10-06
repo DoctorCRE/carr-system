@@ -10,15 +10,18 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
 import uuid
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import psycopg
 from psycopg import sql
+from urllib.parse import urlparse
 
-from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
+from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role  # noqa: F401
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -69,7 +72,7 @@ REQUIRED_FUNCTIONS = [
 ]
 
 
-def fail(message: str) -> None:
+def fail(message: str) -> NoReturn:
     print(f"control-plane-db-gate FAILED: {message}", file=sys.stderr)
     raise SystemExit(1)
 
@@ -80,6 +83,535 @@ def fetchone_required(row: tuple[Any, ...] | None, context: str) -> tuple[Any, .
         fail(f"expected one row for {context}")
         raise AssertionError("fail exits")
     return row
+
+
+def _load_control_plane_cli() -> Any:
+    """Load tools/control-plane.py by path; its filename is not an identifier."""
+    import importlib.util
+    path = REPO / "tools" / "control-plane.py"
+    spec = importlib.util.spec_from_file_location("carr_control_plane_cli", path)
+    if spec is None or spec.loader is None:
+        fail("could not load tools/control-plane.py for its census reader")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _definition_fixture(cur: Any, key: str, *, canary: str = "null") -> None:
+    """Insert one enabled deterministic job definition as the owner."""
+    contract = ('\'{"entrypoint":"fixture"}\'' if canary == "null"
+                else f'\'{{"entrypoint":"fixture","canary":{{"enabled":{canary}}}}}\'')
+    cur.execute(f"""
+        insert into ops.job_definition
+          (key,version,enabled,risk,execution_kind,execution_contract,
+           recurrence,retry_policy,deduplication,completion_contract,legacy_schedule)
+        values (%s,1,true,'green','deterministic',{contract},
+                '{{"cron":"* * * * *","timezone":"UTC"}}',
+                '{{"max_attempts":2,"base_seconds":1,"cap_seconds":2,"timeout_seconds":30,"backoff":"exponential"}}',
+                '{{"key_template":"workflow-truth-fixture"}}',
+                '{{"predicate":"fixture","receipt_kind":"fixture"}}',
+                '{{"status":"enabled"}}')
+    """, (key,))
+
+
+def _accept(cur: Any, key: str, mode: str, ref: str) -> None:
+    cur.execute("""
+        insert into ops.workflow_acceptance
+          (workflow_key,workflow_version,mode,status,receipt_ref,accepted_by)
+        values (%s,1,%s,'accepted',%s,'db-gate-fixture')
+    """, (key, mode, ref))
+
+
+def _job_count(cur: Any, key: str) -> int:
+    cur.execute("select count(*) from ops.job where definition_key=%s", (key,))
+    return int(fetchone_required(cur.fetchone(), f"job count for {key}")[0])
+
+
+def _refused(cur: Any, savepoint: str, sql: str, args: tuple[Any, ...],
+             expected: str, context: str) -> None:
+    """Assert one enqueue is refused for its exact stated reason."""
+    cur.execute(sql_savepoint(savepoint))
+    try:
+        cur.execute(sql, args)
+        fail(f"{context} was admitted")
+    except psycopg.Error as exc:
+        if expected not in str(exc):
+            fail(f"{context} raised the wrong refusal: {exc}")
+        cur.execute(sql_rollback_to(savepoint))
+
+
+def sql_savepoint(name: str) -> Any:
+    return sql.SQL("savepoint {}").format(sql.Identifier(name))
+
+
+def sql_rollback_to(name: str) -> Any:
+    return sql.SQL("rollback to savepoint {}").format(sql.Identifier(name))
+
+
+def _disposable_ci_database(dsn: str) -> bool:
+    """The committing race may run ONLY on a dedicated disposable carr_ci database.
+
+    ops/control-plane-ledger-chaos.py points this same gate at an opt-in STAGING
+    database and its own contract is rollback-only, so a committing section must
+    refuse there rather than leave fixtures behind. This is the identical guard
+    ops/calendar-prebrief-projection-local-pg-gate.py uses for the same reason.
+    """
+    parsed = urlparse(dsn)
+    if parsed.scheme not in {"postgres", "postgresql"} or \
+            parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return False
+    with psycopg.connect(dsn) as probe, probe.cursor() as cur:
+        cur.execute("select current_database(),current_user,current_setting('data_directory'),"
+                    "(select rolsuper from pg_roles where rolname=current_user)")
+        database_name, role_name, data_directory, is_superuser = fetchone_required(
+            cur.fetchone(), "local cluster identity")
+    data_path = os.path.realpath(str(data_directory))
+    local_disposable = (os.path.isfile(os.path.join(data_path, "PG_VERSION"))
+                        and os.path.basename(os.path.dirname(data_path))
+                        .startswith("carr-local-pg-ci."))
+    hosted_disposable = (os.environ.get("GITHUB_ACTIONS") == "true"
+                         and os.environ.get("CI") == "true"
+                         and os.environ.get("GITHUB_REPOSITORY") == "jbookout/carr-system"
+                         and data_path == "/var/lib/postgresql/data")
+    return (database_name == "carr_ci" and role_name == "carr_ci" and is_superuser is True
+            and (local_disposable or hosted_disposable))
+
+
+def workflow_truth_race_gate(dsn: str) -> None:
+    """The distinct-identity exclusion under REAL concurrency, two connections.
+
+    One transaction cannot prove this: the loser has to observe the winner's
+    COMMITTED row, so the fixtures must commit. It therefore runs only on the
+    disposable CI database and cleans up after itself.
+    """
+    if not _disposable_ci_database(dsn):
+        print("control-plane-db-gate: two-connection duplicate_group race NOT RUN — it commits "
+              "fixtures and requires the dedicated disposable carr_ci database; the rolled-back "
+              "sequential exclusion above still ran")
+        return
+    group = f"db-gate-race-group-{uuid.uuid4()}"
+    twins = [f"db-gate-race-{side}-{uuid.uuid4()}" for side in ("a", "b")]
+    slot = "2026-08-15T12:11:00Z"
+    try:
+        with psycopg.connect(dsn, autocommit=True) as setup, setup.cursor() as cur:
+            grant_settable_runtime_roles(cur, "carr_jobs")
+            for key, kind in zip(twins, ("launchd", "claude-code")):
+                _definition_fixture(cur, key)
+                cur.execute("""insert into ops.legacy_schedule_surface_registry
+                     (workflow_key,workflow_version,surface_id,locator,scheduler_kind,duplicate_group)
+                   values (%s,1,%s,%s,%s,%s)""",
+                    (key, f"{key}.surface.v1", f"locator:{key}", kind, group))
+
+        barrier = threading.Barrier(2)
+        outcome: dict[str, tuple[str, str]] = {}
+
+        def racer(name: str, key: str) -> None:
+            try:
+                with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+                    set_local_role(cur, "carr_jobs")
+                    barrier.wait(timeout=60)
+                    # Shadow: the group exclusion is mode-independent, and shadow
+                    # needs no acceptance evidence, so this committing test leaves
+                    # no append-only row behind to clean up.
+                    cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'shadow')).id",
+                                (key, slot, '{"fixture":"race"}', f"race-{name}-{uuid.uuid4()}"))
+                    job = fetchone_required(cur.fetchone(), "concurrent enqueue result")[0]
+                    time.sleep(0.25)
+                    conn.commit()
+                    outcome[name] = ("committed", str(job))
+            except Exception as exc:  # noqa: BLE001 - the refusal IS the result
+                outcome[name] = ("refused", str(exc).strip().splitlines()[0])
+
+        threads = [threading.Thread(target=racer, args=(name, key))
+                   for name, key in zip(("A", "B"), twins)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=120)
+
+        with psycopg.connect(dsn, autocommit=True) as check, check.cursor() as cur:
+            cur.execute("""select count(*) from ops.job
+                            where definition_key=any(%s) and scheduled_for=%s
+                              and state<>'cancelled'""", (twins, slot))
+            executable = int(fetchone_required(cur.fetchone(), "race executable count")[0])
+        committed = sorted(n for n, (state, _) in outcome.items() if state == "committed")
+        refused = sorted(n for n, (state, _) in outcome.items() if state == "refused")
+        if executable != 1:
+            fail(f"two concurrent connections created {executable} executable jobs for one "
+                 f"canonical slot in one duplicate_group: {outcome}")
+        if len(committed) != 1 or len(refused) != 1:
+            fail(f"the concurrent duplicate_group race had no single deterministic loser: {outcome}")
+        if "duplicate_group" not in outcome[refused[0]][1]:
+            fail(f"the concurrent loser was not refused by the group exclusion: {outcome}")
+        print("control-plane-db-gate passed: two concurrent connections, two distinct registered "
+              "identities, one duplicate_group, one canonical slot -> exactly one executable job "
+              f"and one refused loser ({outcome[refused[0]][1][:80]})")
+    finally:
+        with psycopg.connect(dsn, autocommit=True) as cleanup, cleanup.cursor() as cur:
+            cur.execute("delete from ops.job where definition_key=any(%s)", (twins,))
+            cur.execute("delete from ops.legacy_schedule_surface_registry "
+                        "where duplicate_group=%s", (group,))
+            cur.execute("delete from ops.job_definition where key=any(%s)", (twins,))
+            # A COMMITTING test that leaks is worse than one that fails: every
+            # gate ordered after this one would inherit two phantom workflows.
+            cur.execute("select count(*) from ops.job_definition where key=any(%s)", (twins,))
+            leaked = int(fetchone_required(cur.fetchone(), "race fixture cleanup")[0])
+            if leaked:
+                fail(f"the two-connection race left {leaked} fixture definition(s) behind")
+
+
+def _accepted_outcome_actionability(cur: Any) -> None:
+    """Accepted outcome removes ACTIONABILITY and nothing else.
+
+    The Work Request fixture chain is built with ops/program6-outcome-feedback-gate.py's
+    own helpers rather than a second copy of it: one fixture shape, one place to
+    correct. Everything here stays inside the caller's rolled-back transaction.
+    """
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "carr_p6_outcome_gate", REPO / "ops/program6-outcome-feedback-gate.py")
+    if spec is None or spec.loader is None:
+        fail("could not load the Program 6 outcome fixture helpers")
+    p6 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(p6)
+    from psycopg.types.json import Jsonb
+
+    def refs():
+        return [row[0] for row in cur.execute(
+            "select ref from ops.current_sourced_work_requests('carr-internal')").fetchall()]
+
+    p6.authority_roles(cur)
+    joe_id = fetchone_required(cur.execute(
+        "select id from actor where slug='joe' and active and kind='human'").fetchone(),
+        "joe actor")[0]
+    source_section, source_rev, origin_ref, runbook_ref = p6.fixture(cur, joe_id)
+    set_local_role(cur, "carr_writer")
+    request_id, ref, _, captured_version, *_ = fetchone_required(cur.execute(
+        """select * from ops.capture_sourced_work_request(%s,%s,%s,%s,%s,%s,%s)""",
+        (origin_ref, "F09 queue actionability", "Observe one result",
+         Jsonb([{"id": "OBSERVED", "text": "The stated outcome has an evidence reference"}]),
+         source_section, source_rev, uuid.uuid4())).fetchone(), "captured work request")
+    cur.execute("reset role")
+    triaged_version = p6.as_authority(cur, "dell",
+        "select * from ops.triage_sourced_work_request(%s,%s,'operational',%s)",
+        (ref, captured_version, uuid.uuid4()))[3]
+    set_local_role(cur, "carr_writer")
+    plan = fetchone_required(cur.execute(
+        """select * from ops.propose_sourced_work_request_plan(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (ref, triaged_version, "Observe one bounded result", runbook_ref, Jsonb([]),
+         "safe:recovery:stop", "safe:observability:record",
+         Jsonb({"max_steps": 2, "max_duration_minutes": 15}), uuid.uuid4())).fetchone(), "plan")
+    cur.execute("reset role")
+    ready = p6.as_authority(cur, "dell",
+        "select * from ops.accept_sourced_work_request_plan(%s,%s,%s,%s)",
+        (ref, triaged_version, plan[2], uuid.uuid4()))
+    ready_version = ready[3]
+    if ref not in refs():
+        fail("a ready sourced Work Request with no accepted outcome was not actionable")
+    state_before = fetchone_required(cur.execute(
+        "select state,version from ops.work_request where id=%s", (request_id,)).fetchone(),
+        "work request state")
+    set_local_role(cur, "carr_writer")
+    proposal = p6.propose(cur, ref, ready_version, plan[2], uuid.uuid4())
+    cur.execute("reset role")
+    if ref not in refs():
+        fail("a PENDING outcome proposal removed actionability; the exclusion must bind to "
+             "the accepted receipt, not to feedback existing at all")
+    p6.accept(cur, ref, ready_version, proposal[2], uuid.uuid4(), "dell")
+    if ref in refs():
+        fail("an accepted outcome did not remove the Work Request from the actionable queue")
+    state_after = fetchone_required(cur.execute(
+        "select state,version from ops.work_request where id=%s", (request_id,)).fetchone(),
+        "work request state after acceptance")
+    if state_after != state_before or state_after[0] != "ready":
+        fail(f"the queue correction changed Work Request state: {state_before} -> {state_after}")
+    if cur.execute("select * from ops.work_request_card(%s,'carr-internal')",
+                   (ref,)).fetchone() is None:
+        fail("direct card lookup stopped returning a Work Request with an accepted outcome")
+
+
+def workflow_truth_gate(cur: Any) -> None:
+    """V5-F09: prove the projection agrees with the one admission path.
+
+    Everything below runs inside the caller's rolled-back transaction, so this
+    gate keeps working under ops/control-plane-ledger-chaos.py's opt-in staging
+    drill, which is explicitly rollback-only. No fixture is committed and no
+    native scheduler, provider or Work Request is touched.
+    """
+    from lib.control_plane_workflow_truth import workflow_truth  # noqa: E402
+
+    now = "2026-08-15T12:00:00+00:00"
+    slot = "2026-08-15T12:07:00Z"
+
+    # ---- 1. carr_jobs cannot reach ops.job except through ops.enqueue_job ---
+    cur.execute("""select has_table_privilege('carr_jobs','ops.job','insert'),
+                          has_function_privilege('carr_jobs',
+                            'ops.enqueue_job(text,integer,timestamptz,jsonb,text,text)'::regprocedure,
+                            'execute')""")
+    can_insert, can_enqueue = fetchone_required(cur.fetchone(), "jobs admission seam")
+    if can_insert or not can_enqueue:
+        fail("ops.enqueue_job is not the sole carr_jobs insertion seam into ops.job")
+
+    # ---- 2. enabled, no evidence: canary AND live refuse, zero rows ---------
+    # The existing ladder block above proves the refusal messages. This proves
+    # the OTHER half checkable_done asks for: the refusals leave no job behind,
+    # so an enabled definition with no accepted evidence has literally never run.
+    bare = f"db-gate-truth-bare-{uuid.uuid4()}"
+    _definition_fixture(cur, bare)
+    set_local_role(cur, "carr_jobs")
+    _refused(cur, "truth_bare_canary",
+             "select (ops.enqueue_job(%s,1,%s,%s,%s,'canary')).id",
+             (bare, slot, '{"fixture":"no-evidence"}', f"truth-bare-canary-{uuid.uuid4()}"),
+             "no accepted shadow acceptance evidence",
+             "canary enqueue for an enabled definition with no acceptance evidence")
+    _refused(cur, "truth_bare_live",
+             "select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+             (bare, slot, '{"fixture":"no-evidence"}', f"truth-bare-live-{uuid.uuid4()}"),
+             "no accepted canary acceptance evidence",
+             "live enqueue for an enabled definition with no acceptance evidence")
+    if _job_count(cur, bare) != 0:
+        fail("a refused canary/live enqueue still created a job row")
+
+    # SHADOW IS AN EVIDENCE RUN, NOT OPERATION. Enqueuing and even completing a
+    # shadow job must not unlock live: only an accepted acceptance row does.
+    cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'shadow')).id",
+                (bare, slot, '{"fixture":"shadow-run"}', f"truth-bare-shadow-{uuid.uuid4()}"))
+    if fetchone_required(cur.fetchone(), "shadow evidence run")[0] is None:
+        fail("a shadow evidence run was refused for an enabled definition")
+    _refused(cur, "truth_shadow_run_is_not_evidence",
+             "select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+             (bare, "2026-08-15T12:08:00Z", '{"fixture":"shadow-ran"}',
+              f"truth-bare-live2-{uuid.uuid4()}"),
+             "no accepted canary acceptance evidence",
+             "live enqueue after an unaccepted shadow RUN")
+
+    # ---- 3. an unregistered definition is refused outright -----------------
+    _refused(cur, "truth_unregistered",
+             "select (ops.enqueue_job(%s,1,%s,%s,%s,'shadow')).id",
+             (f"db-gate-truth-absent-{uuid.uuid4()}", slot, "{}",
+              f"truth-absent-{uuid.uuid4()}"),
+             "is not enabled",
+             "enqueue for a definition that was never admitted")
+    cur.execute("reset role")
+
+    # ---- 4. canonical same-slot delivery: ONE job, conflicting reuse refused -
+    # This is the SAME-WORKFLOW case. It is retry deduplication and nothing more.
+    same = f"db-gate-truth-same-{uuid.uuid4()}"
+    _definition_fixture(cur, same)
+    _accept(cur, same, "shadow", f"fixture:truth-same-shadow-{uuid.uuid4()}")
+    _accept(cur, same, "canary", f"fixture:truth-same-canary-{uuid.uuid4()}")
+    set_local_role(cur, "carr_jobs")
+    cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+                (same, slot, '{"fixture":"canonical"}', "truth-same-scheduler-a"))
+    first = fetchone_required(cur.fetchone(), "canonical same-slot enqueue")[0]
+    cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+                (same, slot, '{"fixture":"canonical"}', "truth-same-scheduler-b"))
+    if fetchone_required(cur.fetchone(), "second same-slot delivery")[0] != first:
+        fail("two deliveries of one canonical slot produced two jobs")
+    if _job_count(cur, same) != 1:
+        fail("the canonical same-slot dedup left more than one job row")
+    _refused(cur, "truth_conflicting_reuse",
+             "select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+             (same, slot, '{"fixture":"changed"}', "truth-same-scheduler-c"),
+             "duplicate delivery conflicts with the canonical scheduled job",
+             "a conflicting duplicate delivery for one canonical slot")
+    cur.execute("reset role")
+
+    # ---- 5. THE DISTINCT-IDENTITY DUPLICATE BOUNDARY -----------------------
+    # THE CORRECTION THIS GATE CARRIES, now ENFORCED by migration 0498.
+    #
+    # Case 4 above proved that ONE workflow identity cannot produce two jobs for
+    # one slot. That is the unique (definition_key,definition_version,
+    # scheduled_for) index doing retry deduplication, and it proves NOTHING
+    # about two DISTINCT registered identities sharing one duplicate_group:
+    # their definition_key values differ, so no unique index spans them.
+    #
+    # 0498 closed that separately, inside ops.enqueue_job itself: an advisory
+    # transaction lock on the exact duplicate_group and canonical slot, then a
+    # refusal when another identity in the group already holds an executable job
+    # for that slot. The two mechanisms stay separately named and separately
+    # tested, because conflating them is how the gap survived unnoticed.
+    group = f"db-gate-truth-group-{uuid.uuid4()}"
+    twins = []
+    for side in ("a", "b"):
+        key = f"db-gate-truth-twin-{side}-{uuid.uuid4()}"
+        _definition_fixture(cur, key)
+        _accept(cur, key, "shadow", f"fixture:truth-twin-{side}-shadow-{uuid.uuid4()}")
+        _accept(cur, key, "canary", f"fixture:truth-twin-{side}-canary-{uuid.uuid4()}")
+        cur.execute("""
+            insert into ops.legacy_schedule_surface_registry
+              (workflow_key,workflow_version,surface_id,locator,scheduler_kind,duplicate_group)
+            values (%s,1,%s,%s,%s,%s)
+        """, (key, f"{key}.surface.v1", f"locator:{key}",
+              "launchd" if side == "a" else "claude-code", group))
+        twins.append(key)
+
+    set_local_role(cur, "carr_jobs")
+    cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+                (twins[0], slot, '{"fixture":"duplicate-group"}',
+                 f"truth-twin-a-{uuid.uuid4()}"))
+    if fetchone_required(cur.fetchone(), "duplicate-group first identity enqueue")[0] is None:
+        fail("the first identity in a duplicate_group did not enqueue")
+    _refused(cur, "truth_distinct_identity_excluded",
+             "select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+             (twins[1], slot, '{"fixture":"duplicate-group"}',
+              f"truth-twin-b-{uuid.uuid4()}"),
+             "duplicate_group",
+             "a SECOND registered identity in one duplicate_group at one canonical slot")
+    # The exclusion is scoped to the slot, not to the group: the excluded
+    # identity must still be able to run at a different canonical slot.
+    cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+                (twins[1], "2026-08-15T12:09:00Z", '{"fixture":"duplicate-group"}',
+                 f"truth-twin-b-other-slot-{uuid.uuid4()}"))
+    if fetchone_required(cur.fetchone(), "excluded identity at another slot")[0] is None:
+        fail("the group exclusion leaked past its canonical slot")
+    cur.execute("reset role")
+    observed_jobs = sum(
+        int(fetchone_required(cur.execute(
+            "select count(*) from ops.job where definition_key=%s and scheduled_for=%s",
+            (key, slot)).fetchone(), f"slot job count for {key}")[0]) for key in twins)
+    cur.execute("""select count(*) from ops.legacy_schedule_surface_registry
+                    where duplicate_group=%s""", (group,))
+    group_members = int(fetchone_required(cur.fetchone(), "duplicate group membership")[0])
+    if group_members != 2:
+        fail("the distinct-identity duplicate_group fixture did not register two surfaces")
+    if observed_jobs != 1:
+        fail("two distinct registered workflow identities in one duplicate_group both "
+             f"reached an executable job for one canonical slot ({observed_jobs} jobs)")
+
+    # THE EXACT SEAM. Phase B must add the group-scoped exclusion INSIDE this
+    # function -- never a second queue, a trigger on ops.job, or a scheduler-side
+    # check -- so that every enqueue path keeps answering to one ladder.
+    cur.execute("select pg_get_functiondef("
+                "'ops.enqueue_job(text,integer,timestamptz,jsonb,text,text)'::regprocedure)")
+    enqueue_body = str(fetchone_required(cur.fetchone(), "enqueue definition")[0]).lower()
+    for retained in ("duplicate delivery conflicts with the canonical scheduled job",
+                     "no accepted shadow acceptance evidence",
+                     "no accepted canary acceptance evidence"):
+        if retained not in enqueue_body:
+            fail(f"ops.enqueue_job lost its existing guard: {retained}")
+    for required in ("legacy_schedule_surface_registry", "duplicate_group",
+                     "pg_advisory_xact_lock"):
+        if required not in enqueue_body:
+            fail(f"ops.enqueue_job lost its distinct-identity group exclusion: {required}")
+    # The exclusion must live in the ONE admission function, never in a second
+    # queue, a trigger on ops.job, or a scheduler-side check.
+    cur.execute("""select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid
+                    where c.relname='job' and not t.tgisinternal""")
+    if int(fetchone_required(cur.fetchone(), "ops.job trigger count")[0]) != 0:
+        fail("a trigger on ops.job appeared; the group exclusion belongs inside ops.enqueue_job")
+
+    # ---- 6. accepted outcome feedback: today's queue behaviour, pinned ------
+    # ops.current_sourced_work_requests (0245) selects state in
+    # ('captured','triaged','ready') with no accepted-outcome exclusion, so a
+    # ready request whose outcome was accepted still reads as actionable. The
+    # phase-B fix belongs in that function; this gate pins the CURRENT shape so
+    # the change is deliberate and card/history behaviour is not weakened here.
+    cur.execute("select to_regclass('ops.sourced_work_request_outcome_feedback_acceptance_receipt')")
+    if fetchone_required(cur.fetchone(), "outcome acceptance receipt")[0] is None:
+        fail("the accepted-outcome receipt relation the phase-B queue fix must read is missing")
+    cur.execute("select pg_get_functiondef('ops.current_sourced_work_requests(text)'::regprocedure)")
+    queue_body = " ".join(str(fetchone_required(
+        cur.fetchone(), "sourced work request queue")[0]).lower().split())
+    if "w.state in ('captured', 'triaged', 'ready')" not in queue_body:
+        fail("ops.current_sourced_work_requests no longer selects the three actionable states; "
+             "re-pin this assertion against its new shape")
+    # The exact relation name, not the bare word "outcome": this function already
+    # prints 'Record or review outcome evidence' as a human next action, and
+    # matching that string would make the held assertion fire on today's source.
+    if "sourced_work_request_outcome_feedback_acceptance_receipt" not in queue_body:
+        fail("ops.current_sourced_work_requests no longer excludes accepted outcome feedback")
+    # ACTIONABILITY ONLY. The correction may not reach Work Request state, and it
+    # must bind to the ACCEPTED receipt rather than to feedback existing at all.
+    if "update" in queue_body or "insert" in queue_body or "delete" in queue_body:
+        fail("the sourced work-request queue projection is no longer read-only")
+    _accepted_outcome_actionability(cur)
+
+    # ---- 7. the projection never claims an admission the database refuses ---
+    # One adapter, one truth: the census the CLI and Operations health render is
+    # replayed here against the rows this transaction actually created, and its
+    # admissible_modes are checked against what ops.enqueue_job really did.
+    cur.execute("""select key,version,enabled,execution_contract,legacy_disabled_at
+                     from ops.job_definition where key = any(%s)""",
+                ([bare, same] + twins,))
+    definitions = [{"key": key, "version": int(version), "enabled": bool(enabled),
+                    "execution_contract": contract,
+                    "legacy_disabled_at": None if disabled is None else disabled.isoformat()}
+                   for key, version, enabled, contract, disabled in cur.fetchall()]
+    cur.execute("""select workflow_key,workflow_version,mode,status
+                     from ops.workflow_acceptance where workflow_key = any(%s)""",
+                ([bare, same] + twins,))
+    acceptances = [{"workflow_key": key, "workflow_version": int(version),
+                    "mode": mode, "status": status}
+                   for key, version, mode, status in cur.fetchall()]
+    cur.execute("""select workflow_key,workflow_version,surface_id,locator,scheduler_kind,
+                          duplicate_group
+                     from ops.legacy_schedule_surface_registry where workflow_key = any(%s)""",
+                ([bare, same] + twins,))
+    surfaces = [{"workflow_key": key, "workflow_version": int(version),
+                 "surface_id": surface_id, "locator": locator, "scheduler_kind": kind,
+                 "duplicate_group": duplicate_group, "disable_receipt_ref": None,
+                 "observation": None}
+                for key, version, surface_id, locator, kind, duplicate_group in cur.fetchall()]
+    census = workflow_truth(
+        declarations=[{"key": row["key"], "version": row["version"],
+                       "enabled": row["enabled"],
+                       "legacy_schedule": {"provider": "launchd", "status": "enabled"}}
+                      for row in definitions],
+        definitions=definitions, acceptances=acceptances, surfaces=surfaces,
+        completion={}, observation_max_age_seconds=900, now=now)
+    projected = {row["workflow_key"]: row for row in census["rows"]}
+    if "live" in projected[bare]["admissible_modes"] or projected[bare]["operational"]:
+        fail("the projection claimed live admission the database refused")
+    if not projected[bare]["false_operational"]:
+        fail("the projection did not label an enabled definition without evidence false_operational")
+    if "live" not in projected[same]["admissible_modes"]:
+        fail("the projection refused a live admission the database granted")
+    if projected[same]["operational"]:
+        fail("the projection called a workflow operational with no completion evidence")
+    for key in twins:
+        exclusion = projected[key]["duplicate_exclusion"]
+        if exclusion["distinct_identity"] != "enforced_by_ops_enqueue_job_group_exclusion":
+            fail("the projection did not report the distinct-identity duplicate_group exclusion "
+                 "as enforced, though ops.enqueue_job now enforces it")
+        if exclusion["same_slot_idempotency"] == exclusion["distinct_identity"]:
+            fail("the projection conflated same-slot idempotency with distinct-identity exclusion")
+    if census["summary"]["distinct_identity_excluded_groups"] != [group]:
+        fail("the census summary did not name the excluded duplicate_group")
+
+    # ---- 8. the census CLI's real reads, against the real schema -----------
+    # The projection above was fed rows this gate assembled. That proves the
+    # adapter and proves nothing about the SQL `tools/control-plane.py census`
+    # actually runs, which would otherwise meet the schema for the first time in
+    # front of a partner. The reader is cursor-scoped precisely so it can be
+    # exercised here; its Completion Register refusal is savepoint-contained, so
+    # a tenant-less read cannot take this gate's fixtures down with it.
+    cli = _load_control_plane_cli()
+    registry = json.loads(SCHEDULER_REGISTRY_PATH.read_text(encoding="utf-8"))
+    manifest_config = json.loads(WORKFLOW_MANIFEST_PATH.read_text(encoding="utf-8"))
+    inputs = cli.workflow_census_inputs(cur, registry=registry)
+    read_keys = {row["key"] for row in inputs["definitions"]}
+    if not {bare, same}.issubset(read_keys) or not set(twins).issubset(read_keys):
+        fail("the census reader did not return the definitions this transaction created")
+    cur.execute("select 1")
+    if fetchone_required(cur.fetchone(), "transaction still usable after the census read")[0] != 1:
+        fail("the census reader left the caller's transaction aborted")
+    live = cli.workflow_census_projection(inputs, manifest=manifest_config, registry=registry)
+    if live["schema_version"] != census["schema_version"]:
+        fail("the census CLI and this gate disagree about the workflow-truth schema")
+    if len(live["rows"]) != len({(row["workflow_key"], row["workflow_version"])
+                                 for row in live["rows"]}):
+        fail("the census returned more than one row for a workflow identity")
+    expected_source = "unreadable" if inputs["completion"] == cli.UNREADABLE \
+        else "ops.completion_projection"
+    if live["completion_source"] != expected_source:
+        fail("the census misreported where its completion evidence came from")
+    if live["completion_source"] == "unreadable" and not live.get("completion_error"):
+        fail("an unreadable Completion Register was reported without saying why")
+    print("control-plane-db-gate passed: workflow truth agrees with ops.enqueue_job on every "
+          "fixture, the census CLI's own reads run against this schema "
+          f"(completion evidence: {live['completion_source']}), and both former phase-B "
+          "characterizations are now enforced")
 
 
 def main() -> int:
@@ -324,13 +856,21 @@ def main() -> int:
                 if fetchone_required(cur.fetchone(), f"PUBLIC collector read {relation}")[0]:
                     fail(f"PUBLIC can read collector projection {relation}")
 
-            # An expired or unstamped re-verification queue is not a current
-            # verified queue.  A model input must therefore refuse it instead
-            # of relabeling its provenance as verification.
+            # An expired, unstamped, or never-recorded re-verification queue
+            # is not a current verified queue.  A model input must therefore
+            # refuse it instead of relabeling its provenance as verification.
+            # 0387 added bands 1-4 (active vendors/leads/clients with a
+            # never-filled profile field -- no category/city/county/
+            # verticals/title/org/email/phone on file): those rows carry no
+            # record_flag at all, so 'not_recorded' is their honest,
+            # DISTINCT reason -- never 'expired'/'unstamped_volatile' (both
+            # of which claim a stale record_flag exists) and never silently
+            # folded into either. Keep this allowlist identical to
+            # lib.control_plane_collectors_records.REVERIFICATION_DUE_REASONS.
             cur.execute("""
                 select count(*) from public.v_control_plane_enrichment_queue
                  where current_verification_status='verified'
-                    or reverification_due not in ('expired','unstamped_volatile')
+                    or reverification_due not in ('expired','unstamped_volatile','not_recorded')
             """)
             if fetchone_required(cur.fetchone(), "enrichment truthfulness")[0] != 0:
                 fail("expired verification evidence is represented as current verified evidence")
@@ -782,6 +1322,16 @@ def main() -> int:
                         '{"predicate":"fixture","receipt_kind":"fixture"}',
                         '{"status":"enabled"}')
             """, (fenced_definition,))
+            # ops.enqueue_job (0332) gates canary behind an accepted shadow
+            # acceptance row.  carr_jobs/carr_writer hold SELECT only on
+            # ops.workflow_acceptance, so this evidence is seeded directly as
+            # the owner, before the role switch below -- exactly what a real
+            # cutover would have on file before this fixture's canary mode.
+            cur.execute("""
+                insert into ops.workflow_acceptance
+                  (workflow_key,workflow_version,mode,status,receipt_ref,accepted_by)
+                values (%s,1,'shadow','accepted','fixture:db-gate-fenced-shadow','db-gate-fixture')
+            """, (fenced_definition,))
             set_local_role(cur, "carr_jobs")
             cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'canary')).id",
                         (fenced_definition, "2026-08-15T11:59:00Z",
@@ -1024,6 +1574,18 @@ def main() -> int:
                 fail("successful job did not produce exactly one receipt")
             cur.execute("reset role")
 
+            # This fixture definition is about to enqueue canary and live
+            # (here, and again below for the canary-completion and mode-
+            # isolation fixtures).  Seed both acceptance tiers as the owner,
+            # exactly once, before any of that: carr_jobs/carr_writer hold
+            # SELECT only on ops.workflow_acceptance.
+            cur.execute("""
+                insert into ops.workflow_acceptance
+                  (workflow_key,workflow_version,mode,status,receipt_ref,accepted_by)
+                values (%s,1,'shadow','accepted','fixture:db-gate-definition-shadow','db-gate-fixture'),
+                       (%s,1,'canary','accepted','fixture:db-gate-definition-canary','db-gate-fixture')
+            """, (definition, definition))
+
             # Shadow, canary, and live replacements at one scheduled instant
             # are distinct ledger identities.  Per-mode scheduler idempotency
             # must not collapse the evidence required for cutover.
@@ -1194,6 +1756,101 @@ def main() -> int:
             if cur.fetchone() != ("timed_out","execution_timeout"):
                 fail("timeout attempt evidence was not preserved")
 
+            # ops.enqueue_job's mode ladder (migration 0332): canary needs an
+            # accepted shadow acceptance row and an enabled canary contract;
+            # live needs accepted canary, except a workflow whose contract
+            # explicitly disables canary, where accepted shadow alone
+            # suffices.  Two fixture definitions cover both contract shapes.
+            ladder_enabled_definition = f"db-gate-ladder-enabled-{uuid.uuid4()}"
+            cur.execute("""
+                insert into ops.job_definition
+                  (key,version,enabled,risk,execution_kind,execution_contract,
+                   recurrence,retry_policy,deduplication,completion_contract,
+                   legacy_schedule)
+                values (%s,1,true,'green','deterministic','{"entrypoint":"fixture"}',
+                        '{"cron":"* * * * *","timezone":"UTC"}',
+                        '{"max_attempts":2,"base_seconds":1,"cap_seconds":2,"timeout_seconds":30,"backoff":"exponential"}',
+                        '{"key_template":"ladder-enabled-fixture"}',
+                        '{"predicate":"fixture","receipt_kind":"fixture"}',
+                        '{"status":"enabled"}')
+            """, (ladder_enabled_definition,))
+            ladder_disabled_definition = f"db-gate-ladder-disabled-{uuid.uuid4()}"
+            cur.execute("""
+                insert into ops.job_definition
+                  (key,version,enabled,risk,execution_kind,execution_contract,
+                   recurrence,retry_policy,deduplication,completion_contract,
+                   legacy_schedule)
+                values (%s,1,true,'green','deterministic',
+                        '{"entrypoint":"fixture","canary":{"enabled":false,"reason":"db-gate fixture: no isolated destination"}}',
+                        '{"cron":"* * * * *","timezone":"UTC"}',
+                        '{"max_attempts":2,"base_seconds":1,"cap_seconds":2,"timeout_seconds":30,"backoff":"exponential"}',
+                        '{"key_template":"ladder-disabled-fixture"}',
+                        '{"predicate":"fixture","receipt_kind":"fixture"}',
+                        '{"status":"enabled"}')
+            """, (ladder_disabled_definition,))
+
+            set_local_role(cur, "carr_jobs")
+            cur.execute("savepoint ladder_canary_without_evidence_refusal")
+            try:
+                cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'canary')).id",
+                            (ladder_enabled_definition, "2026-08-15T12:03:00Z",
+                             '{"fixture":"ladder-canary-no-evidence"}',
+                             f"fixture-ladder-canary-no-evidence-{uuid.uuid4()}"))
+                fail("canary enqueue with no acceptance evidence was admitted")
+            except psycopg.Error as exc:
+                if "no accepted shadow acceptance evidence" not in str(exc):
+                    fail(f"canary refusal without evidence raised the wrong exception: {exc}")
+                cur.execute("rollback to savepoint ladder_canary_without_evidence_refusal")
+            cur.execute("reset role")
+
+            # As the owner: seed accepted shadow for the canary-enabled
+            # fixture only.  It must not yet be enough for live.
+            cur.execute("""
+                insert into ops.workflow_acceptance
+                  (workflow_key,workflow_version,mode,status,receipt_ref,accepted_by)
+                values (%s,1,'shadow','accepted','fixture:db-gate-ladder-enabled-shadow','db-gate-fixture')
+            """, (ladder_enabled_definition,))
+
+            set_local_role(cur, "carr_jobs")
+            cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'canary')).id",
+                        (ladder_enabled_definition, "2026-08-15T12:03:00Z",
+                         '{"fixture":"ladder-canary-with-shadow"}',
+                         f"fixture-ladder-canary-with-shadow-{uuid.uuid4()}"))
+            if fetchone_required(cur.fetchone(), "canary enqueue with accepted shadow")[0] is None:
+                fail("canary enqueue with accepted shadow evidence was refused")
+            cur.execute("savepoint ladder_live_without_canary_evidence_refusal")
+            try:
+                cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+                            (ladder_enabled_definition, "2026-08-15T12:03:00Z",
+                             '{"fixture":"ladder-live-shadow-only"}',
+                             f"fixture-ladder-live-shadow-only-{uuid.uuid4()}"))
+                fail("live enqueue with only accepted shadow, canary contractually enabled, was admitted")
+            except psycopg.Error as exc:
+                if "no accepted canary acceptance evidence" not in str(exc):
+                    fail(f"live refusal without canary evidence raised the wrong exception: {exc}")
+                cur.execute("rollback to savepoint ladder_live_without_canary_evidence_refusal")
+            cur.execute("reset role")
+
+            # As the owner: seed accepted shadow for the canary-disabled
+            # fixture.  Its contract's explicit canary.enabled=false makes
+            # this the highest evidence it can ever produce, so it alone
+            # must satisfy live.
+            cur.execute("""
+                insert into ops.workflow_acceptance
+                  (workflow_key,workflow_version,mode,status,receipt_ref,accepted_by)
+                values (%s,1,'shadow','accepted','fixture:db-gate-ladder-disabled-shadow','db-gate-fixture')
+            """, (ladder_disabled_definition,))
+
+            set_local_role(cur, "carr_jobs")
+            cur.execute("select (ops.enqueue_job(%s,1,%s,%s,%s,'live')).id",
+                        (ladder_disabled_definition, "2026-08-15T12:03:00Z",
+                         '{"fixture":"ladder-live-canary-disabled"}',
+                         f"fixture-ladder-live-canary-disabled-{uuid.uuid4()}"))
+            if fetchone_required(cur.fetchone(),
+                                 "live enqueue for a canary-disabled contract with accepted shadow")[0] is None:
+                fail("live enqueue was refused for a contract whose canary is disabled with accepted shadow evidence")
+            cur.execute("reset role")
+
             # Retirement remains shut until accepted shadow AND canary receipts.
             cur.execute("savepoint early_cutover")
             try:
@@ -1237,6 +1894,9 @@ def main() -> int:
             # requires an externally provisioned real authority-DSN probe;
             # this disposable owner gate does not perform one.
 
+            workflow_truth_gate(cur)
+
+    workflow_truth_race_gate(dsn)
     print("control-plane-db-gate passed: admission, leases, idempotency, receipts and owner cutover refusal exercised")
     return 0
 

@@ -1,3 +1,18 @@
+// NOT COLLECTED BY THE SUITE. ops/ci.sh's unit class globs
+// mcp-server/test/*.test.mjs, and this file's suffix is .js -- so nothing here
+// runs, and nothing that must run may be added here.
+//
+// WR-000113 wired the R03 notification mint into record-signal in
+// mcp-server/src/investigation.js. Its acceptance proofs therefore live in
+// mcp-server/test/notifications.test.mjs, which IS collected:
+//   R03-DEDUPE, R03-NO-PROGRESS-SPAM, R03-NO-SPONSOR,
+//   R03-SIGNAL-SURVIVES-MINT-FAILURE, R03-QUIET-HOURS, R03-STATUS-DISTINCT
+//   and R03-DEEP-LINK-RECHECKS all drive record-signal's own handler.
+// The grant and recipient halves live in mcp-server/test/r03-notifications-postgres.sql.
+//
+// This note is the whole of WR-000113's change to this file: adding a case here
+// would be adding a case that never runs.
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS } from "../src/tools.js";

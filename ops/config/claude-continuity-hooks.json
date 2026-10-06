@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(startup|compact|resume)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

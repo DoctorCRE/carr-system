@@ -23,11 +23,20 @@ import sys
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-EXTRACT = (
-    "/private/tmp/claude-501/-Users-booko-My-Drive-CARR-AI/"
-    "c2c4cf7b-2b79-4a47-8207-bf468ece4b79/scratchpad/mail-extract.json"
-)
-OUT = os.path.join(os.path.dirname(EXTRACT), "mail-matched.json")
+# Loop #129: the original path pointed at a session scratchpad under
+# /private/tmp/claude-501 that no longer exists. The extract now resolves in
+# order: --extract <path> argument, CARR_MAIL_EXTRACT env var, then the durable
+# repo location out/mail-extract.json.
+DEFAULT_EXTRACT = os.path.join(HERE, "..", "out", "mail-extract.json")
+
+
+def resolve_extract(argv):
+    if "--extract" in argv:
+        i = argv.index("--extract")
+        if i + 1 >= len(argv):
+            sys.exit("--extract requires a path")
+        return argv[i + 1]
+    return os.environ.get("CARR_MAIL_EXTRACT") or os.path.abspath(DEFAULT_EXTRACT)
 
 INTERNAL_DOMAIN = "carr.us"
 FREEMAIL = {"gmail.com", "icloud.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com"}
@@ -48,15 +57,21 @@ def domain_of(addr):
 
 
 def main():
-    if not os.path.exists(EXTRACT):
-        sys.exit(f"mail extract not found: {EXTRACT}")
+    argv = sys.argv[1:]
+    extract = resolve_extract(argv)
+    out = os.path.join(os.path.dirname(extract), "mail-matched.json")
+    if not os.path.exists(extract):
+        sys.exit(f"mail extract not found: {extract}")
 
     cal = load_calendar_matcher()
-    by_email, by_domain = cal.load_record_contacts()
-    if not by_email:
-        sys.exit("no record contacts loaded — check out/exports roster and registry")
+    # Shares the calendar matcher's loader, which reads the LIVE exports at the
+    # exporters' EXPORT_HOME and refuses an empty book (2026-09-27).
+    try:
+        by_email, by_domain = cal.load_record_contacts()
+    except cal.NoRecordContacts as exc:
+        sys.exit(f"no record contacts loaded — {exc}")
 
-    messages = json.load(open(EXTRACT))
+    messages = json.load(open(extract))
 
     # A message counts as CONTACT WITH a person when Joe sent it to them, or when
     # they sent it to Joe. Both directions are evidence the relationship is live;
@@ -137,12 +152,12 @@ def main():
         )[:25],
         "matched": matched,
     }
-    json.dump(payload, open(OUT, "w"), indent=1)
+    json.dump(payload, open(out, "w"), indent=1)
 
     # Console output carries NO client content — counts and the output path only.
     summary = {k: v for k, v in stats.items()}
     summary["records_with_mail"] = len(matched)
-    summary["output_file"] = OUT
+    summary["output_file"] = out
     summary["per_record_message_counts"] = sorted(
         ((len(v), k) for k, v in matched.items()), reverse=True
     )[:20]

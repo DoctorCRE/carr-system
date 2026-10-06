@@ -92,6 +92,7 @@ def diagnose(output: str) -> str:
     """Explain a non-PASS result. Returns one of:
 
       "pass"          the denial text is present; the hook fired.
+      "boot_gate"     rule boot held the probe; the guard was not reached.
       "self_refusal"  Codex declined to issue the command itself, so the hook
                       was never reached and the guard was never tested. The
                       probe needs re-pointing, not the guard.
@@ -105,6 +106,8 @@ def diagnose(output: str) -> str:
     if not output.strip():
         return "no_output"
     low = output.lower()
+    if "rule boot" in low and ("before any other tool" in low or "missing page" in low):
+        return "boot_gate"
     if any(marker in low for marker in _SELF_REFUSAL_MARKERS):
         return "self_refusal"
     return "hook_skipped"

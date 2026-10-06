@@ -24,7 +24,7 @@ and larger: a website column would be written by SESSIONS during research, and a
 list a session can append to is not a control — it is a session granting itself
 access and writing the permission slip afterwards.
 
-EMAIL DOMAINS avoid both. `kaydee@gulfcoastpelvichealth.com` names the practice's
+EMAIL DOMAINS avoid both. `frontdesk@example-practice.com` names the practice's
 own domain; the field is partner-entered at intake; and the standing doctrine
 that identity fields are never edited on research alone already governs it. The
 list maintains itself as the book grows, with no migration and no new surface.
@@ -73,7 +73,7 @@ FREEMAIL = {
     "windstream.net", "embarqmail.com", "roadrunner.com", "rr.com",
     # REGIONAL ISPs, added after the first real run. A Gulf Coast practice owner
     # on their local telco's mail service produced gulftel.com, knology.net and
-    # mcgilvraydmd.gccoxmail.com — an ISP, an ISP, and a Cox business-mail
+    # harlowdmd.gccoxmail.com — an ISP, an ISP, and a Cox business-mail
     # subdomain. Identical class error to Gmail: the domain belongs to the
     # provider, not the practice, and allowlisting it grants the provider's whole
     # estate on the strength of one doctor's address.
@@ -240,7 +240,7 @@ def collect():
             d = (d or "").strip().strip(".").lower()
             if not d or not HOST_OK.match(d):
                 continue
-            # SUFFIX match, not exact. mcgilvraydmd.gccoxmail.com is a Cox
+            # SUFFIX match, not exact. harlowdmd.gccoxmail.com is a Cox
             # subdomain and an exact-membership test sails straight past it.
             if d in FREEMAIL or any(d.endswith("." + f) for f in FREEMAIL):
                 continue

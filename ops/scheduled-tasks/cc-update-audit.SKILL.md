@@ -15,13 +15,13 @@ Run exactly this:
 
 ```
 SENTINEL=~/.claude/scheduled-tasks/cc-update-audit/last-audited-version.txt
-CLI=$(claude --version 2>/dev/null | awk '{print $1}')
-APP=$(ls -1 ~/Library/Application\ Support/Claude/claude-code/ 2>/dev/null | sort -V | tail -1)
-CUR="cli=${CLI:-none} app=${APP:-none}"
+CUR="$(cd ~/carr-system && ./bin/cc-version-string.sh)"
 LAST=$(cat "$SENTINEL" 2>/dev/null || echo "none")
 echo "current:      $CUR"
 echo "last_audited: $LAST"
 ```
+
+**If that command cannot run at all** (missing `~/carr-system`, the `cd` fails, the helper isn't there), do NOT treat that as "no change" — a broken gate must never silently skip the audit. Say so in one line and treat it as PROCEED: continue to Step 1 as if the strings differed.
 
 **If `current` equals `last_audited` exactly, STOP IMMEDIATELY.** Reply with one line: "No Claude Code update since $LAST. No audit needed." Do nothing else. Do not read files, do not spawn agents, do not call verbs. This is the normal outcome on most days and it must cost almost nothing.
 

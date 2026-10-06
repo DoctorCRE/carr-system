@@ -18,6 +18,14 @@ with tempfile.TemporaryDirectory() as raw:
     (root / "dealroom").mkdir()
     (root / "mcp-server" / "wrangler.toml").write_text("name = 'test'\n", encoding="utf-8")
     (root / "mcp-server" / "src" / "tools.js").write_text("export const TOOLS = {};\n", encoding="utf-8")
+    # COMMITTED, and load-bearing for the last case below. validate() reports
+    # `dirty or ignored` through ONE message carrying both words, so an ignored
+    # input that git also reports as untracked is indistinguishable from a dirty
+    # one: without this .gitignore the final case was caught by `status
+    # --porcelain` and the `ls-files --ignored` branch was never reached, which
+    # left it deletable with this test still green. With the path ignored,
+    # `status --porcelain` goes empty and only the ignored branch can refuse.
+    (root / ".gitignore").write_text("mcp-server/.dev.vars\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)

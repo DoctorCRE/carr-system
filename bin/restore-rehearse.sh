@@ -90,6 +90,17 @@ PROD_BRANCH="production"
 NEONCTL="$REPO/mcp-server/node_modules/.bin/neonctl"
 IDENTITY="${CARR_AGE_IDENTITY:-$HOME/.config/carr/age-key.txt}"
 RESTORE_DB="restore_rehearse"
+# Interpreter for the platform-metering-gate call in phase 0, the one place this
+# script uses "$PY". Prefer the repo venv, fall back to python3: the same
+# two-line idiom bin/deploy-worker.sh uses to invoke the same gate. Under
+# `set -u` an unassigned $PY aborts the run at that call before the gate is
+# consulted.
+PY="$REPO/.venv/bin/python"
+# Every psql below reaches its database through this: the connection URL goes
+# into PG* environment variables, never onto a command line where `ps` shows
+# the password (V5-F08 review G6).
+PGX="$REPO/tools/pg-env-exec.py"
+[ -x "$PY" ] || PY="$(command -v python3 || true)"
 
 # The tables whose absence means the restore is worthless rather than merely
 # odd. These are the record layer's spine: a dump that comes back without them
@@ -119,6 +130,10 @@ KEEP_BRANCH=0
 VERIFY_ONLY=0
 WANT_DATE=""
 WANT_DUMP=""
+BACKUP_RUN_ID=""
+BACKUP_REPOSITORY="jbookout/carr-system"
+COPYDIR=""
+COPY_ARCHIVE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --preflight)   PREFLIGHT_ONLY=1; shift ;;
@@ -148,6 +163,27 @@ while [ $# -gt 0 ]; do
                    WANT_DUMP="$2"; shift 2 ;;
     --identity)    [ $# -ge 2 ] || { echo "FAIL: --identity needs a path" >&2; exit 2; }
                    IDENTITY="$2"; shift 2 ;;
+    # --backup-run-id ADDED 2026-09-24 (V5-F08 item 4). Restore the copy the
+    # nightly CLOUD workflow run RUN produced, fetched from the store that holds
+    # it, and take every fact about it — the digest its producer recorded, when
+    # it was produced, the store's own digest — from the provider: the run's
+    # provider-authenticated "Backup artifact" Check and the artifact API
+    # (tools/restore-watermark.py fetch-copy). Nothing about the copy is typed
+    # in by whoever runs this. Only then does phase 5 write a typed
+    # restore-exercise-receipt.v1, and it re-reads the provider to verify it.
+    # Without it the exact watermark still gates; no receipt is written, because
+    # a local backups/ file has no independently recorded digest to hold it to.
+    #
+    # RUNBOOK NOTE (review H2): a run counts only while the
+    # .github/workflows/backup-nightly.yml at its commit is byte-identical to
+    # main's. EDITING backup-nightly.yml MAKES EVERY EARLIER RUN UNVERIFIABLE —
+    # verify-restore refuses them (fails closed). After such an edit merges,
+    # wait for (or dispatch from main) a fresh nightly run and rehearse against
+    # that run id. Only backup-nightly.yml may hold `checks: write`
+    # (tools/test_workflow_checks_write_grant.py fails CI otherwise).
+    --backup-run-id) [ $# -ge 2 ] || { echo "FAIL: --backup-run-id needs a workflow run id" >&2; exit 2; }
+                   case "$2" in (*[!0-9]*|'') echo "FAIL: --backup-run-id must be a number" >&2; exit 2 ;; esac
+                   BACKUP_RUN_ID="$2"; shift 2 ;;
     -h|--help)     sed -n '2,60p' "$0"; exit 0 ;;
     *)             echo "FAIL: unknown argument '$1'" >&2; exit 2 ;;
   esac
@@ -193,9 +229,12 @@ REHEARSE_SUMMARY=""
 REST_PCT=""
 REST_ROWS=""
 REST_TABLES=""
+EXERCISE_VERDICT=""
 
 BRANCH_ID=""
 WORKDIR=""
+VERIFY_PID=""
+VERIFY_FIFO=""
 cleanup() {
   # rc MUST be captured as the very first statement, before any other command —
   # even a bare `[ ]` test — runs and overwrites $?. This is the exit status the
@@ -206,12 +245,24 @@ cleanup() {
   # itself — can turn a passing rehearsal red or a failing one green.
   local rc=$?
 
+  # An armed verify-restore (review round-4 item 3) is stopped before anything
+  # it might still write into is removed; closing the handoff ends it too.
+  if [ -n "${VERIFY_FIFO:-}" ]; then exec 4>&-; fi
+  if [ -n "${VERIFY_PID:-}" ]; then
+    kill "$VERIFY_PID" 2>/dev/null
+    wait "$VERIFY_PID" 2>/dev/null
+  fi
+
   # Runs on every exit path, including a failure or a Ctrl-C. Plaintext first:
   # if only one of the two teardowns can happen, it must be the one holding
   # production data in the clear.
   if [ -n "$WORKDIR" ] && [ -d "$WORKDIR" ]; then
     rm -rf "$WORKDIR"
     say "  teardown: decrypted dump removed"
+  fi
+  if [ -n "$COPYDIR" ] && [ -d "$COPYDIR" ]; then
+    rm -rf "$COPYDIR"
+    say "  teardown: fetched encrypted copy removed"
   fi
   if [ -n "$BRANCH_ID" ]; then
     if [ "$KEEP_BRANCH" -eq 1 ]; then
@@ -306,6 +357,11 @@ record_rehearsal() {                      # record_rehearsal <exit-code>
   else
     detail="${DIE_REASON:-aborted during preflight, before a dump was selected}"
   fi
+  # Review K3: the restore-exercise verdict recorded is the one decided on the
+  # PIPED verify-restore output; the receipt file in out/ is only a copy.
+  # Review M2: the binary check guards against an accidental PATH shim only; an
+  # adversary running as the same OS user is out of scope.
+  [ -n "$EXERCISE_VERDICT" ] && detail="$detail; exercise=$EXERCISE_VERDICT (piped verify-restore verdict; receipt file is a copy; binary check stops PATH shims only, same-OS-user adversary out of scope)"
   # ops.run's detail column is one redacted line: no secrets, no client
   # content — and nothing here is either, only a filename, a byte count, a
   # percentage and a duration.
@@ -425,7 +481,20 @@ esac
 
 # Newest dump. `ls -t` matches how backup-dump.sh prunes, so "newest" means the
 # same thing in both scripts.
-if [ -n "$WANT_DUMP" ]; then
+if [ -n "$BACKUP_RUN_ID" ]; then
+  # The off-Mac copy the cloud workflow produced, fetched from the store with
+  # its producer's record (see --backup-run-id). Encrypted bytes only; the
+  # directory is a mktemp removed by the teardown trap.
+  [ -z "$WANT_DUMP$WANT_DATE" ] || die "--backup-run-id names the copy; do not combine it with --dump or --date"
+  COPYDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-restore-copy.XXXXXX")"
+  "$PY" "$REPO/tools/restore-watermark.py" fetch-copy --repository "$BACKUP_REPOSITORY" \
+      --run-id "$BACKUP_RUN_ID" --out-dir "$COPYDIR" > "$COPYDIR/fetched.json" \
+    || die "could not fetch the backup workflow run $BACKUP_RUN_ID copy and its producer record"
+  DUMP="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1]))["dump"])' "$COPYDIR/fetched.json")"
+  COPY_ARCHIVE="$COPYDIR/artifact.zip"
+  [ -f "$DUMP" ] && [ -f "$COPY_ARCHIVE" ] || die "fetch-copy reported no dump"
+  say "  ok    selected dump: $(basename "$DUMP") (--backup-run-id $BACKUP_RUN_ID, fetched from the artifact store)"
+elif [ -n "$WANT_DUMP" ]; then
   # An explicit path, which is how an OFF-MAC copy gets tested: the R2 object or
   # the GitHub artifact, downloaded anywhere. Named loudly in the output because
   # a rehearsal against a copy that would survive this Mac is a different and
@@ -610,8 +679,8 @@ PROD_COUNTS="$WORKDIR/prod-counts.txt"
 
 # default_transaction_read_only=on is the guard, not the comment above it. Any
 # write against production in this session fails at the server.
-if ! PGOPTIONS="-c default_transaction_read_only=on" \
-     psql "$PROD_URL" -v ON_ERROR_STOP=1 -At -c "$COUNT_SQL" > "$PROD_COUNTS" 2>"$WORKDIR/prod.err"; then
+if ! PGOPTIONS="-c default_transaction_read_only=on" PGURL_PROD="$PROD_URL" \
+     "$PY" "$PGX" PGURL_PROD psql -v ON_ERROR_STOP=1 -At -c "$COUNT_SQL" > "$PROD_COUNTS" 2>"$WORKDIR/prod.err"; then
   say "$(cat "$WORKDIR/prod.err")" >&2
   die "could not read production row counts"
 fi
@@ -621,6 +690,83 @@ PROD_ROWS=$(awk -F'|' '{s+=$2} END {print s+0}' "$PROD_COUNTS")
 say "  ok    $PROD_TABLES tables, $PROD_ROWS rows in production right now"
 
 # ── PHASE 2: the throwaway branch.
+# ── VERIFY-RESTORE, ARMED BEFORE THE BRANCH EXISTS (--backup-run-id only).
+# Review round 4, item 3 and M3: verify-restore performs the restore itself —
+# it creates $RESTORE_DB on the branch (CREATE DATABASE fails if the name
+# exists, so it is new by construction), decrypts and loads the artifact it
+# downloaded, reads the watermark back and receipts it. It is started HERE,
+# before phase 2, so that it reads production's flushed WAL position before the
+# branch exists and then waits its bounded settle interval (round-5 review: the
+# branch's parent_lsn is what the provider's storage has ingested, which trails
+# the flush point by ordinary lag); after the branch is created, its id and
+# admin DSN go to it over a private FIFO (never an argument), and it requires
+# the branch's parent_lsn at or after that head. The head, the parent point and
+# the gap are in the receipt.
+#
+# ERROR TAILS (round-5 review): a failed COPY makes psql print the offending
+# row. Every tail below that can hold psql output goes through
+# `restore-watermark.py redact-errors` (ERROR/FATAL lines only, values
+# replaced) before it reaches the terminal. Its stdout goes straight through tee into the evaluator:
+# THAT verdict is the authority (review K3); the tee's file is a copy.
+redact_tail() {
+  # redact_tail N FILE: the last N redacted error lines of FILE, on stderr.
+  "$PY" "$REPO/tools/restore-watermark.py" redact-errors < "$2" 2>/dev/null | tail -"$1" >&2
+}
+exercise_reason() {
+  # The evaluator's reason_id, or why there is none (verify-restore refused).
+  "$PY" -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["reason_id"])
+except Exception: print("verify_restore_refused")' "$WORKDIR/exercise-verdict.json" 2>/dev/null || print -r -- "verify_restore_refused"
+}
+arm_verify_restore() {
+  VERIFY_FIFO="$WORKDIR/verify.handoff"
+  mkfifo -m 600 "$VERIFY_FIFO" || die "could not create the verify-restore handoff"
+  mkdir -p "$COPYDIR/verify"
+  (
+    set -o pipefail
+    "$PY" "$REPO/tools/restore-watermark.py" verify-restore \
+      --repository "$BACKUP_REPOSITORY" --run-id "$BACKUP_RUN_ID" --identity "$IDENTITY" \
+      --target-kind disposable_branch --project-id "$PROJECT_ID" --database "$RESTORE_DB" \
+      --work-dir "$COPYDIR/verify" --armed-file "$WORKDIR/verify.armed" \
+      < "$VERIFY_FIFO" 2>"$WORKDIR/verify.err" \
+      | tee "$WORKDIR/receipt.verified.json" \
+      | node "$REPO/mcp-server/bin/recovery-matrix-evaluate.mjs" restore - > "$WORKDIR/exercise-verdict.json"
+  ) &
+  VERIFY_PID=$!
+  exec 4>"$VERIFY_FIFO"
+  local waited=0
+  # Liveness only: an unarmed verifier reads the head later, which can only
+  # make it refuse (fail closed), never pass a branch it should not. The
+  # timeout must exceed verify-restore's settle wait (30 s by default).
+  while [ ! -s "$WORKDIR/verify.armed" ] && [ "$waited" -lt "${VERIFY_ARM_TIMEOUT:-180}" ]; do
+    kill -0 "$VERIFY_PID" 2>/dev/null || break
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if [ ! -s "$WORKDIR/verify.armed" ]; then
+    redact_tail 5 "$WORKDIR/verify.err"
+    die "verify-restore did not arm (it reads production's head LSN before the branch exists)"
+  fi
+  say "  ok    verify-restore armed: production's head LSN read before the branch exists"
+}
+hand_over_to_verify_restore() {
+  # Returns verify-restore's pipeline status: 0 only on a passing piped verdict.
+  setopt localoptions localtraps
+  trap '' PIPE
+  { print -r -- "$BRANCH_ID"; print -r -- "$BRANCH_ADMIN_URL"; } >&4 2>/dev/null
+  exec 4>&-
+  VERIFY_FIFO=""
+  local rc=0
+  wait "$VERIFY_PID" || rc=$?
+  VERIFY_PID=""
+  EXERCISE_VERDICT="$(exercise_reason)"
+  return $rc
+}
+if [ -n "$BACKUP_RUN_ID" ]; then
+  step "phase 1b: arm verify-restore"
+  arm_verify_restore
+fi
+
 step "phase 2: throwaway branch"
 BRANCH_NAME="restore-rehearse-$(date -u +%Y%m%dT%H%M%SZ)"
 BRANCH_JSON="$("$NEONCTL" branches create --project-id "$PROJECT_ID" --name "$BRANCH_NAME" \
@@ -653,10 +799,27 @@ if [ "$BRANCH_HOST" = "$PROD_HOST" ]; then
 fi
 say "  ok    branch endpoint is a different host from production"
 
-if ! psql "$BRANCH_ADMIN_URL" -v ON_ERROR_STOP=1 -q -c "create database $RESTORE_DB" >/dev/null 2>"$WORKDIR/createdb.err"; then
+if [ -n "$BACKUP_RUN_ID" ]; then
+  # verify-restore creates $RESTORE_DB, installs the extensions and loads the
+  # artifact itself (see arm_verify_restore above); this script does not load.
+  RESTORE_START_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  RESTORE_START_EPOCH="$(date +%s)"
+  say "  handing the branch to verify-restore: it creates $RESTORE_DB, decrypts and loads the artifact, reads it back (the slow step) ..."
+  if ! hand_over_to_verify_restore; then
+    say "  --- verify-restore (last 10 lines, row data redacted) ---" >&2
+    redact_tail 10 "$WORKDIR/verify.err"
+    die "verify-restore did not restore and verify the artifact ($EXERCISE_VERDICT). THIS IS THE FINDING."
+  fi
+  say "  ok    verify-restore restored the artifact into $RESTORE_DB and the piped verdict passed: $EXERCISE_VERDICT"
+  RESTORE_URL="$("$NEONCTL" connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
+                 --role-name neondb_owner --database-name "$RESTORE_DB" 2>/dev/null)"
+  [ -n "$RESTORE_URL" ] || die "could not obtain the $RESTORE_DB connection string"
+elif ! PGURL_ADMIN="$BRANCH_ADMIN_URL" "$PY" "$PGX" PGURL_ADMIN \
+     psql -v ON_ERROR_STOP=1 -q -c "create database $RESTORE_DB" >/dev/null 2>"$WORKDIR/createdb.err"; then
   say "$(cat "$WORKDIR/createdb.err")" >&2
   die "could not create the $RESTORE_DB database on the branch"
 fi
+if [ -z "$BACKUP_RUN_ID" ]; then
 RESTORE_URL="$("$NEONCTL" connection-string "$BRANCH_ID" --project-id "$PROJECT_ID" \
                --role-name neondb_owner --database-name "$RESTORE_DB" 2>/dev/null)"
 [ -n "$RESTORE_URL" ] || die "could not obtain the $RESTORE_DB connection string"
@@ -672,7 +835,7 @@ say "  ok    empty database $RESTORE_DB created on the branch"
 # tree (0001 and 0135). Install them in the throwaway target before loading;
 # production is untouched and every application object still comes from the
 # encrypted artifact.
-if ! psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -q \
+if ! PGURL_RESTORE="$RESTORE_URL" "$PY" "$PGX" PGURL_RESTORE psql -v ON_ERROR_STOP=1 -q \
     -c "create extension if not exists pg_trgm; create extension if not exists pgcrypto;" \
     >/dev/null 2>"$WORKDIR/extensions.err"; then
   say "$(cat "$WORKDIR/extensions.err")" >&2
@@ -739,20 +902,24 @@ say "  note: stripping the pre-created public schema declaration and ownership/A
 set -o pipefail
 if ! age --decrypt -i "$IDENTITY" "$DUMP" 2>>"$WORKDIR/restore.err" \
      | sed -E "$RESTORE_FILTER" \
-     | psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -q >"$WORKDIR/restore.out" 2>>"$WORKDIR/restore.err"; then
+     | PGURL_RESTORE="$RESTORE_URL" "$PY" "$PGX" PGURL_RESTORE \
+         psql -v ON_ERROR_STOP=1 -v VERBOSITY=terse -v SHOW_CONTEXT=never -q \
+         >"$WORKDIR/restore.out" 2>>"$WORKDIR/restore.err"; then
   set +o pipefail
   say ""
-  say "  --- decrypt/restore output (last 40 lines) ---" >&2
-  tail -40 "$WORKDIR/restore.err" >&2
+  say "  --- decrypt/restore errors (last 40, row data redacted) ---" >&2
+  redact_tail 40 "$WORKDIR/restore.err"
   die "the dump did not decrypt and load. THIS IS THE FINDING — a backup that will not restore is not a backup."
 fi
 set +o pipefail
 say "  ok    dump decrypted and loaded"
+fi  # the local-dump path; with --backup-run-id verify-restore loaded it above
 
 # ── PHASE 4: the assertion. This is the whole point; everything above is setup.
 step "phase 4: row counts, restored vs production"
 REST_COUNTS="$WORKDIR/restored-counts.txt"
-if ! psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -At -c "$COUNT_SQL" > "$REST_COUNTS" 2>"$WORKDIR/rest.err"; then
+if ! PGURL_RESTORE="$RESTORE_URL" "$PY" "$PGX" PGURL_RESTORE \
+     psql -v ON_ERROR_STOP=1 -At -c "$COUNT_SQL" > "$REST_COUNTS" 2>"$WORKDIR/rest.err"; then
   say "$(cat "$WORKDIR/rest.err")" >&2
   die "could not read row counts back out of the restored database"
 fi
@@ -887,6 +1054,71 @@ FAILS="$(sed -n 's/^AWKFAILS=//p' "$WORKDIR/compare.txt")"
 # everything in it) before record_rehearsal runs.
 REHEARSE_SUMMARY="$(sed -n 's/^REHEARSE_SUMMARY //p' "$WORKDIR/compare.txt")"
 parse_rehearse_summary
+
+# ── PHASE 5 (V5-F08 item 4): EXACT watermark and hash, against the ARTIFACT.
+# Phase 4 compares against live production, which moves after the dump, so it
+# can only ever be approximate. This compares the restored database against the
+# rows the artifact itself carries — read from its own COPY blocks by a second
+# streamed decrypt (plaintext never touches disk) — and requires equality,
+# table for table, of the row count AND a content digest over the rows in
+# pg_dump's own COPY text form (so a row that came back different, not just
+# missing, fails). Every public/ops base table is read, schema-qualified,
+# except extension-owned tables, whose rows CREATE EXTENSION makes rather than
+# the dump. The restored side is read through a read-only session whose DSN is
+# handed over in the environment, never on an argument list. Production is not
+# touched.
+step "phase 5: exact watermark vs the artifact itself"
+if [ -n "$COPY_ARCHIVE" ]; then
+  # The store holds the ZIP the producer uploaded; its recorded digest is of
+  # those bytes, so those are the bytes hashed here.
+  ARTIFACT_DIGEST="$("$PY" "$REPO/tools/restore-watermark.py" digest "$COPY_ARCHIVE")" \
+    || die "could not hash the fetched artifact"
+else
+  ARTIFACT_DIGEST="$("$PY" "$REPO/tools/restore-watermark.py" digest "$DUMP")" \
+    || die "could not hash the artifact that was restored"
+fi
+say "  ok    artifact sha256: ${ARTIFACT_DIGEST#sha256:}"
+set -o pipefail
+if ! age --decrypt -i "$IDENTITY" "$DUMP" 2>>"$WORKDIR/wm.err" \
+     | "$PY" "$REPO/tools/restore-watermark.py" count > "$WORKDIR/artifact-watermark.json" 2>>"$WORKDIR/wm.err"; then
+  set +o pipefail
+  tail -5 "$WORKDIR/wm.err" >&2
+  die "could not read the artifact's own watermark"
+fi
+set +o pipefail
+if ! RESTORE_DSN="$RESTORE_URL" "$PY" "$REPO/tools/restore-watermark.py" restored \
+       --artifact "$WORKDIR/artifact-watermark.json" > "$WORKDIR/restored-watermark.json" 2>"$WORKDIR/wm-rest.err"; then
+  tail -5 "$WORKDIR/wm-rest.err" >&2
+  die "could not read the restored watermark"
+fi
+RESTORE_FINISHED_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+"$PY" "$REPO/tools/restore-watermark.py" compare \
+    --artifact "$WORKDIR/artifact-watermark.json" --restored "$WORKDIR/restored-watermark.json"
+case $? in
+  0) say "  ok    restored database equals the artifact exactly, rows and content, table for table" ;;
+  1) say "  FAIL  restored database does not equal the artifact (see MISMATCH lines)" >&2
+     FAILS=$((FAILS + 1)) ;;
+  *) die "the exact watermark comparison could not be read" ;;
+esac
+if [ -n "$BACKUP_RUN_ID" ]; then
+  mkdir -p "$REPO/out"
+  RECEIPT_PATH="$REPO/out/restore-exercise-receipt.json"
+  # An earlier run's receipt must not stand in for this one's outcome.
+  rm -f "$RECEIPT_PATH"
+  if [ "$FAILS" -ne 0 ]; then
+    # Review G4: a rehearsal that failed phase 4 (the production comparison)
+    # or phase 5 keeps NO receipt copy, whatever verify-restore's verdict was.
+    say "  FAIL  no restore-exercise receipt copy: $FAILS assertion(s) failed" >&2
+  else
+    # Review K3: the verdict that counted was decided in phase 3 on the piped
+    # output and is recorded in this run's ops.run row; this is only a copy.
+    mv "$WORKDIR/receipt.verified.json" "$RECEIPT_PATH"
+    say "  ok    restore exercise: $EXERCISE_VERDICT (decided on the piped verify-restore output)"
+    say "        (copy of the bound receipt, not authority: $RECEIPT_PATH)"
+  fi
+else
+  say "  note  no --backup-run-id: exact watermark gated, no receipt written (a local file has no producer record)"
+fi
 
 say ""
 if [ "$FAILS" -eq 0 ]; then

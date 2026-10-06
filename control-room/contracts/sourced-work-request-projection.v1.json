@@ -11,8 +11,14 @@
   },
   "transport": "authenticated MCP-backed read, not implemented by this static prototype",
   "lifecycle": {
-    "canonical_from": ["captured", "triaged", "ready"],
-    "projection_state": "queued"
+    "canonical_from": ["captured", "triaged", "ready", "declined", "superseded"],
+    "projection_state": {
+      "captured": "queued",
+      "triaged": "queued",
+      "ready": "queued",
+      "declined": "declined",
+      "superseded": "declined"
+    }
   },
   "output": {
     "required_fields": [
@@ -28,6 +34,7 @@
       "outcome_feedback_history",
       "accepted_feedback_count",
       "shape",
+      "withdrawal",
       "state",
       "next_human_action",
       "actions"
@@ -42,12 +49,15 @@
       "triaged": {"label": "Prepare scope and acceptance", "effect": "none"},
       "ready": {"label": "Plan accepted", "effect": "none"},
       "ready_with_pending_feedback": {"label": "Review outcome feedback", "effect": "none"},
-      "ready_with_accepted_feedback": {"label": "Outcome feedback accepted", "effect": "none"}
+      "ready_with_accepted_feedback": {"label": "Outcome feedback accepted", "effect": "none"},
+      "declined": {"label": "Declined", "effect": "none"},
+      "superseded": {"label": "Superseded", "effect": "none"}
     },
     "triage": {
       "captured": null,
       "triaged": ["classification", "human_actor_slug", "triaged_at"],
-      "rule": "present only for canonical triaged rows; it is durable readback, never an action authority"
+      "withdrawn": null,
+      "rule": "present only for canonical triaged rows; it is durable readback, never an action authority. It stays null on a withdrawn row for a structural reason rather than a rendering choice: withdrawal is captured-only, and the canonical shape constraint requires the three triage columns to be null in both terminal states, so a withdrawn sourced request never held triage to report."
     },
     "plan": {"rule": "immutable plan hash, bounded scope summary, and persisted references only; never commands or caller-authored steps"},
     "pending_outcome_feedback": {
@@ -68,10 +78,18 @@
     },
     "accepted_feedback_count": "count of all human-accepted immutable outcome feedback receipts for this Work Request; it is not a completion count",
     "shape": {"rule": "durable derived shape disposition and fixed surface reference only; never caller-controlled"},
+    "withdrawal": {
+      "rule": "null unless the canonical row is declined or superseded; then it carries why the request was withdrawn, when it closed, and the request that replaced it. It exists because both terminals collapse onto one projection state, and the crosswalk's REASON SURVIVES COLLAPSE invariant obliges the projection to carry what distinguished them. It is durable readback of a closed record: it claims no completion, no success, no failure of the work, and offers no way to reopen or re-decide the request.",
+      "required_fields": ["exit_reason", "closed_at", "superseded_by_ref"],
+      "superseded_by_ref": "the successor's durable human Work Request reference, never a database UUID; null on a declined row, where the canonical receipt's own check constraint forbids a successor",
+      "captured_only": "a sourced request may be withdrawn from captured and no later state, so a withdrawal never strands a triage receipt, a shape disposition, a plan or an admission"
+    },
     "actions": []
   },
   "prohibitions": [
     "derive canonical state from a UI label",
+    "render a withdrawn request as queued, or offer a human any next action on one",
+    "drop a withdrawn request from the read rather than returning its record",
     "claim completion before confirmed_closed",
     "interpret accepted outcome feedback as success, displacement, execution, completion, or a state transition",
     "invent action controls",

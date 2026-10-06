@@ -71,7 +71,19 @@ OPEN_WINDOW = re.compile(
     rf"\b{_NUM}\s+(?:times|occurrences|instances|cases)\b[^.\n]{{0,40}}"
     rf"\b(?:since|so far|to date|and counting|and rising)\b"
     rf"|\bhas\s+(?:failed|happened|occurred|fired|been\s+caught)\s+{_NUM}\s+times\b"
-    rf"|\b{_NUM}\s+(?:occurrences|instances)\b"
+    # A TALLY, NOT A QUANTITY. This alternative carries no open-window
+    # marker, so on its own it fired on any use of "N instances" at all --
+    # including "three instances of the same model family reviewing one
+    # claim are CORRELATED", which is a structural statement about
+    # redundancy and can never go stale. Requiring a counting verb nearby
+    # keeps the running-total sense ("three instances were found") and
+    # drops the quantity sense. The four real 2026-08-15 sites are fixtures
+    # in the selftest, so a tightening that lets any of them through fails
+    # there rather than quietly shrinking the gate.
+    rf"|\b{_NUM}\s+(?:occurrences|instances)\b[^.\n]{{0,40}}"
+    rf"\b(?:found|recorded|logged|caught|seen|observed|reported|counted)\b"
+    rf"|\b(?:found|recorded|logged|caught|seen|observed|reported|counted)"
+    rf"[^.\n]{{0,40}}\b{_NUM}\s+(?:occurrences|instances)\b"
     rf"|\bcurrently\s+{_NUM}\s+\w+"
     rf"|\bnow\s+(?:at|stands at|reads)\s+{_NUM}\b",
     re.I)

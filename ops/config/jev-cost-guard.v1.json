@@ -1,0 +1,7 @@
+{
+  "price_usd_per_million_input_tokens": 0.042,
+  "price_source_url": "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
+  "daily_warning_usd": 0.50,
+  "judge_cache_ttl_seconds": 60,
+  "daily_paid_call_cap": 500
+}

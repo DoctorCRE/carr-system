@@ -1,0 +1,726 @@
+{
+ "version": 1,
+ "note": "Action signals per rule, derived from each rule's own statement (not from the production trigger table). mode exact: the rule's trigger IS the action, so the label is the signal alone. signal_implies_gold: every case carrying the signal is gold for that rule whatever its score; cases without it are reviewed as usual. Other review entries only force the case into the review set. A squash merge counts as a commit boundary for every rule whose trigger is a commit or merge boundary.",
+ "signals": [
+  {
+   "rule": "14181e60",
+   "mode": "review",
+   "tools": [
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$"
+   ],
+   "input_regex": "\\\"file_path\\\":\\s*\\\"[^\\\"]*\\.md\\\"",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "The moment a session is about to Write/Edit a .md file: route the content to the database unless the file is on the machine-required manifest.",
+   "why": "Write/Edit of a .md path is the stated binding moment; the manifest exception and the surface-registry clause need review. The condition needs a reader, so the signal only routes the case to adjudication; it does not force gold."
+  },
+  {
+   "rule": "14181e60",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "(?:>>?|\\btee\\s+(?:-a\\s+)?)\\s*[^\\s\\\"'|;&]*\\.md\\b",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A .md file created or modified through a shell redirect or tee.",
+   "why": "A shell write of a .md file is the same act the rule governs (the guard blocks .md create/modify). The condition needs a reader, so the signal only routes the case to adjudication; it does not force gold."
+  },
+  {
+   "rule": "185013c6",
+   "mode": "review",
+   "tools": [
+    "^(?:Agent|Task)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "At the moment a session spawns any subagent or workflow (or sizes a ~30+ minute item) it picks the cheapest executor and states an executor line.",
+   "why": "Spawning a subagent is the rule's own first trigger, so every Agent call binds; the 30-minute sizing clause can bind turns with no spawn."
+  },
+  {
+   "rule": "23ea0607",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "diff-salesforce-deals|salesforce-diff",
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "When a Salesforce diff CHANGED row proposes a phase move, never apply a backwards move from closed.",
+   "why": "A run of the Salesforce diff is necessary; whether it produced a backwards phase row needs review."
+  },
+  {
+   "rule": "23ea0607",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:update\\-deal|patch\\-deal\\-field)$"
+   ],
+   "input_regex": "phase",
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "Applying a Salesforce-proposed phase change through the deal update verbs.",
+   "why": "Writing a deal phase is where the hold applies; whether it came from the Salesforce diff and moves backwards needs review."
+  },
+  {
+   "rule": "24e10ee8",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "\\bgh\\s+pr\\s+merge\\b(?![^\\\"]*--disable-auto)",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A squash merge (gh pr merge that merges, including --auto) is a commit boundary.",
+   "why": "An act written into a commit message: a squash merge writes the commit message."
+  },
+  {
+   "rule": "24e10ee8",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "git\\s+(?:-C\\s+\\S+\\s+)?commit\\b",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "When a session writes an act into a commit message (or close-out, decision entry, partner report), the diff must carry that act.",
+   "why": "Commit messages state acts; each case needs review against its diff."
+  },
+  {
+   "rule": "24e10ee8",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:log\\-decision|close\\-loop|update\\-decision)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Same rule, for a decision entry or close-out written through a verb.",
+   "why": "Decision entries and loop close-outs are named writing moments; whether they claim an act needs review."
+  },
+  {
+   "rule": "2a3ff869",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:prepare\\-document)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Client and company documents default to Microsoft formats (docx/pptx/xlsx), not Google-native.",
+   "why": "Preparing a client/company document is the moment; the format chosen needs review."
+  },
+  {
+   "rule": "308ef1de",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "git\\s+(?:-C\\s+\\S+\\s+)?(?:checkout\\s+(?:-q\\s+)?(?:-[bB]\\s|--detach\\b|(?!--\\s|-- |\\.\\s|--theirs|--ours|-p\\b)[A-Za-z0-9_./-]+)|switch\\b)",
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "Before `git checkout -b` / `git checkout <branch>` in a shared checkout, claim the working tree or use a worktree.",
+   "why": "Branch creation or switching is the stated moment; whether the checkout is shared (not an isolated worktree) needs review."
+  },
+  {
+   "rule": "388cc81e",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:confirm\\-merge|merge\\-vendor\\-rows)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Cross-dataset identity match: a lone surname never merges; a second corroborating field is required, else flag 'possible match, confirm'.",
+   "why": "A merge call is where the threshold binds; matching done before any merge call can also bind."
+  },
+  {
+   "rule": "49533583",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "icalBuddy|EventKit|Calendar\\.app|Library/Calendars|calendar-archive|calendar-latest\\.ics|fetch-calendar",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Reading meetings/attendees from local calendar stores or the published feed.",
+   "why": "Local calendar reads are the moment the rule governs (and the published feed is never a participant list)."
+  },
+  {
+   "rule": "49533583",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:list_events|get_event|search_events|list_calendars|search_threads|get_thread|get_message)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "When reaching for the partner's meetings, attendees or mail: read the local Apple stores, never the Google connector.",
+   "why": "Connector calendar/mail reads are the act the rule forbids for the partner's data; whose data was sought needs review."
+  },
+  {
+   "rule": "4a53ff82",
+   "mode": "review",
+   "tools": [
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "The moment a session makes its FIRST write to tracked files in ~/carr-system: take an isolated worktree first.",
+   "why": "A file write is necessary; whether it is the first write to a tracked file in the canonical tree needs review."
+  },
+  {
+   "rule": "4a9188f3",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "\\bgh\\s+pr\\s+merge\\b(?![^\\\"]*--disable-auto)",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A squash merge (gh pr merge that merges, including --auto) is a commit boundary.",
+   "why": "Boundary sweep before a commit: a squash merge writes a commit to main."
+  },
+  {
+   "rule": "4a9188f3",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "git\\s+(?:-C\\s+\\S+\\s+)?commit\\b|wrangler\\s+(?:deploy|versions\\s+upload)|\\\"command\\\":\\s*\\\"(?:[^\\\"]*(?:&&|;|\\|\\|)\\s*)?(?:\\./)?(?:bin/(?:deploy[\\w-]*|migrate-prod\\.sh)|run\\.sh\\s+(?:deploy|release)\\b)",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Boundary sweep for untaught rulings before any commit or deploy (also before a handoff/checkpoint and on subject change).",
+   "why": "Commit and deploy are named detectable sweep moments; the rule's seven partner-speech triggers are not actions. The production-migration script is a deploy. A commit, deploy and squash merge are treated alike: the signal routes the case to adjudication (a dry run is not a deploy), it does not force gold."
+  },
+  {
+   "rule": "4a9188f3",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:claude-checkpoint|codex-checkpoint)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Boundary sweep before writing a checkpoint.",
+   "why": "Writing a checkpoint is a named sweep moment."
+  },
+  {
+   "rule": "4c21d86b",
+   "mode": "exact",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "run\\.sh\\s+call\\s+(?:confirm\\-merge)\\b",
+   "signal_implies_gold": true,
+   "other_triggers": false,
+   "trigger": "Same trigger as above, reached through the ./run.sh call door.",
+   "why": "Bash door to the same confirm-merge verb."
+  },
+  {
+   "rule": "4c21d86b",
+   "mode": "exact",
+   "tools": [
+    "^mcp__.+__(?:confirm\\-merge)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": false,
+   "trigger": "Any merge of a duplicate-party pair runs (confirm-merge): survivorship precedence and the pre-merge orphan sweep bind.",
+   "why": "The rule binds 'before any merge runs' and decides which row survives once the pair is confirmed; confirm-merge is that merge."
+  },
+  {
+   "rule": "4dd44fd7",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:prepare\\-document)$",
+    "^mcp__.+__(?:send_message|create_draft|update_draft|reply|forward)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Outbound documents: LOIs and letters go in Word; spreadsheets go as PDF.",
+   "why": "Preparing or sending an outbound document is the moment; which document type and format needs review."
+  },
+  {
+   "rule": "5409731b",
+   "mode": "review",
+   "tools": [
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$"
+   ],
+   "input_regex": "migrations?/[^\\\"]*\\.sql\\\"[\\s\\S]*(?:create|replace|drop|alter)\\s+(?:or\\s+replace\\s+)?(?:trigger|function)|(?:create|alter)\\s+(?:or\\s+replace\\s+)?trigger",
+   "signal_implies_gold": true,
+   "other_triggers": false,
+   "trigger": "When a migration adds or modifies a trigger or invoker-rights function: grant-check every table it reads, as the firing role.",
+   "why": "Writing trigger/function DDL in a migration is the stated moment."
+  },
+  {
+   "rule": "54e2bcb9",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:new\\-lead|new\\-client|new\\-vendor|add\\-party|create\\-national\\-account|update\\-party\\-contact|update\\-vendor|update\\-lead)$",
+    "^mcp__.+__(?:send_message|create_draft|update_draft|reply|forward)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A CARR agent's own phone/email in a client, lead, vendor or party contact field is a placeholder: treat as null, never import, send to, or count it.",
+   "why": "Writing contact fields or sending to a contact is where a placeholder could be imported or used; whether one is present needs review."
+  },
+  {
+   "rule": "57d13061",
+   "mode": "review",
+   "tools": [
+    "^WebFetch$",
+    "^WebSearch$",
+    "^mcp__(?:claude-in-chrome|Claude_Browser|Claude_Preview)__.+$",
+    "^Bash$",
+    "^(?:Agent|Task)$"
+   ],
+   "input_regex": "(?:\\bx|twitter)[.]com\\b|\\bsearch\\s+X\\b|\\bX\\s+(?:sweep|search|posts?|threads?)\\b",
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "For any X (the site)/X retrieval, Grok Build is the first move; Chrome only for logged-in surfaces; never WebFetch.",
+   "why": "A retrieval call or delegated brief aimed at X is the trigger; which route was used needs review."
+  },
+  {
+   "rule": "590b11e1",
+   "mode": "review",
+   "tools": [
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$"
+   ],
+   "input_regex": "\\\"file_path\\\":\\s*\\\"[^\\\"]*(?:health-check\\.py|ops/[^\\\"]*check[^\\\"]*)\\\"",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "When a session adds or edits a health row, alarm, meter or trend surface (touching tools/health-check.py or an ops/ check script).",
+   "why": "Editing those files is the rule's named detectable moment; whether a metric was added/edited needs review."
+  },
+  {
+   "rule": "647f843d",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "run\\.sh\\s+call\\s+(?:add\\-loop)\\b",
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "Same trigger through the ./run.sh call door.",
+   "why": "Bash door to add-loop."
+  },
+  {
+   "rule": "647f843d",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:add\\-loop)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "Before opening any open_loop: name a real outside blocker from the closed list, or do the work and file nothing.",
+   "why": "add-loop is the filing act; only kind open_loop is gated (team_loop, action_required, idea are not), so each call needs review."
+  },
+  {
+   "rule": "6cfb67f5",
+   "mode": "review",
+   "tools": [
+    "^(?:Agent|Task)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "When a session delegates any task to another seat, the dispatch names the specific model and effort level.",
+   "why": "An Agent spawn is a delegation, so every Agent call binds; delegation via a message to a running seat or an outside CLI can also bind."
+  },
+  {
+   "rule": "6cfb67f5",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "\\b(?:codex\\s+exec|codex\\s+-|grok\\s+(?:-p|--print|build|exec)|flash-run)\\b",
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Delegation to an outside-model CLI seat (codex/grok/flash-run).",
+   "why": "Dispatching work to an outside CLI seat is a delegation, the rule's trigger."
+  },
+  {
+   "rule": "7105955b",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:close\\-loop)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "When a loop row is closed for a bookkeeping reason (renumber, merge, split): use dropped and say superseded, not abandoned, in the first words.",
+   "why": "close-loop is necessary; whether the close is bookkeeping needs review."
+  },
+  {
+   "rule": "847f9995",
+   "mode": "review",
+   "tools": [
+    "^(?:Agent|Task)$"
+   ],
+   "input_regex": "launchd|\\.plist\\b|\\bplist\\b|\\bcron\\b|crontab|schedul",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Delegating the build or review of a scheduled job, launchd agent or automated chain.",
+   "why": "A brief that builds/fixes a scheduled job is the build moment, delegated."
+  },
+  {
+   "rule": "847f9995",
+   "mode": "review",
+   "tools": [
+    "^(?:mcp__scheduled-tasks__(?:create|update)_scheduled_task|CronCreate|RemoteTrigger)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "When any scheduled job, cron task, launchd agent or automated chain is built or reviewed: it must not depend on an interactive credential.",
+   "why": "Creating/updating a scheduled task is building one; whether it authenticates needs review."
+  },
+  {
+   "rule": "847f9995",
+   "mode": "review",
+   "tools": [
+    "^Bash$",
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$"
+   ],
+   "input_regex": "launchctl\\b|LaunchAgents|\\.plist\\b|crontab\\b",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Building or reviewing a launchd agent or cron job.",
+   "why": "Touching launchd/cron plists or loads is the scheduled-job build/review moment."
+  },
+  {
+   "rule": "8cddc6ad",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:update\\-party\\-contact|update\\-vendor|update\\-lead|update\\-deal|patch\\-deal\\-field|link\\-parties|add\\-party)$"
+   ],
+   "input_regex": "\\\"(?:name|org|org_id|org_name|company|category|slug|label)\\\"\\s*:",
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "Any name/label write on a shared-by-design row: count attachments first; if more than one, mint a new row and re-point instead of renaming.",
+   "why": "A name/label field write is necessary; whether the row is shared-by-design needs review."
+  },
+  {
+   "rule": "9b081605",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:send_message|create_draft|update_draft|reply|forward)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "Drafts for the partner's action are emailed from the AI Gmail to the partner's own work address; auto-send only to that one address.",
+   "why": "An email send/draft call is necessary; whether it is a handover draft and to whom needs review."
+  },
+  {
+   "rule": "9f15f21a",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:create\\-national\\-account|create\\-national\\-market\\-deal)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Modelling a franchise/multi-location brand: one national account, each franchisee its own sub-client and its own deal.",
+   "why": "Creating a national account or its market deals is the modelling act; deal attachment through other verbs can also bind."
+  },
+  {
+   "rule": "9ff56260",
+   "mode": "review",
+   "tools": [
+    "^Bash$",
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$",
+    "^(?:mcp__scheduled-tasks__(?:create|update)_scheduled_task|CronCreate|RemoteTrigger)$"
+   ],
+   "input_regex": "--identity\\b|_AGE_IDENTITY|AGE_IDENTITY|[.]age\\b|\\bid_(?:rsa|ed25519|ecdsa)\\b|[.]pem\\b|private[-_ ]?key",
+   "signal_implies_gold": true,
+   "other_triggers": false,
+   "trigger": "A command a session issues or stores never names a private key path.",
+   "why": "A command or stored task naming key material is exactly the act the rule forbids."
+  },
+  {
+   "rule": "a7784a18",
+   "mode": "review",
+   "tools": [
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$"
+   ],
+   "input_regex": "\\\"file_path\\\":\\s*\\\"[^\\\"]*\\.(?:js|mjs|cjs|ts|tsx|jsx|py|sh|sql|swift|go|rb|css|html)\\\"",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A session that changes code works in its own worktree and owns branch, checks, PR, merge, verification and cleanup.",
+   "why": "Editing a code file makes it a coding session; whether the shared checkout was used and delivery was owned needs review. The condition needs a reader, so the signal only routes the case to adjudication; it does not force gold."
+  },
+  {
+   "rule": "ab814a26",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "run\\.sh\\s+call\\s+(?:teach|amend\\-rule)\\b",
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Same trigger through the ./run.sh call door.",
+   "why": "Bash door to teach/amend-rule."
+  },
+  {
+   "rule": "ab814a26",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:teach|amend\\-rule)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "The moment any rule is taught or amended: classify it machine-enforceable or judgment and record the enforcement.",
+   "why": "teach/amend-rule is the teaching/amending act; the standing audit direction on violations is a separate non-action trigger."
+  },
+  {
+   "rule": "bbffc139",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "\\bgh\\s+pr\\s+merge\\b(?![^\\\"]*--disable-auto)",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A squash merge (gh pr merge that merges, including --auto) is a commit boundary.",
+   "why": "Ledger boundary sweep at a commit or merge to main: a squash merge is one."
+  },
+  {
+   "rule": "bc9188b4",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "\\bgh\\s+pr\\s+merge\\b(?![^\\\"]*--disable-auto)",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A squash merge (gh pr merge that merges, including --auto) is a commit boundary.",
+   "why": "Committing: a squash merge is a commit boundary; whether the run's own paths were committed by name needs a reader."
+  },
+  {
+   "rule": "bc9188b4",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "git\\s+(?:-C\\s+\\S+\\s+)?(?:checkout\\s+(?:-q\\s+)?(?:-[bB]\\s|--detach\\b|(?!--\\s|-- |\\.\\s|--theirs|--ours|-p\\b)[A-Za-z0-9_./-]+)|switch\\b)",
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Commit your own written paths by name before a run ends, and again before any git checkout / checkout -b; change branch by taking a worktree.",
+   "why": "The rule fires 'before any git checkout/git checkout -b' unconditionally; its end-of-run trigger is not visible as a tool call."
+  },
+  {
+   "rule": "bc9188b4",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "git\\s+(?:-C\\s+\\S+\\s+)?(?:commit\\b|add\\s+(?:-A|--all|\\.(?:\\s|$|\\\")))",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Committing: name each path, never `git add -A`/`-a`/`.`.",
+   "why": "A commit or bulk add is where the commit-by-named-path constraint binds."
+  },
+  {
+   "rule": "c0b38d80",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "\\bgh\\s+pr\\s+merge\\b(?![^\\\"]*--disable-auto)",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "A squash merge (gh pr merge that merges, including --auto) is a commit boundary.",
+   "why": "A commit touching a gate script: a squash merge commits the PR's diff to main."
+  },
+  {
+   "rule": "c0b38d80",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "git\\s+(?:-C\\s+\\S+\\s+)?commit\\b",
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "When a commit touches a gate script or the enforcement map, re-bless the gate baseline in the same commit.",
+   "why": "A commit is necessary; whether it touches a gate or the enforcement map needs review."
+  },
+  {
+   "rule": "c53beeaa",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "run\\.sh\\s+call\\s+(?:teach|amend\\-rule|add\\-loop|update\\-loop|close\\-loop|log\\-decision|update\\-decision|record\\-finding|new\\-client|record\\-defect|report\\-problem|amend\\-closed\\-loop)\\b",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Same trigger through the ./run.sh call door.",
+   "why": "Bash door to the same paragraph-field write verbs."
+  },
+  {
+   "rule": "c53beeaa",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:teach|amend\\-rule|add\\-loop|update\\-loop|close\\-loop|log\\-decision|update\\-decision|record\\-finding|new\\-client|record\\-defect|report\\-problem|amend\\-closed\\-loop)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "After any record write carrying long or multi-line text fields: re-read the row and assert no swallowed parameter tags or NULL fields.",
+   "why": "The rule binds after paragraph-field record writes (it lists these verbs 'and kin'); whether fields were long/multi-line needs review."
+  },
+  {
+   "rule": "c66dc739",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "HxStore|hxstore|Library/Mail\\b|Mail\\.app|Envelope Index",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Mail capture through the local mail stores.",
+   "why": "Local mail-store reads are the rule's mandated route."
+  },
+  {
+   "rule": "c66dc739",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:search_threads|get_thread|get_message|list_drafts|get_draft)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Mail capture on the partner's side reads local mail stores, never a Gmail API integration.",
+   "why": "Reading mail through the Gmail connector is the act the rule forbids for the partner's mail; whose mail was read needs review."
+  },
+  {
+   "rule": "ca841807",
+   "mode": "review",
+   "tools": [
+    "^(?:Write|Edit|MultiEdit|NotebookEdit)$"
+   ],
+   "input_regex": "\\\"file_path\\\":\\s*\\\"[^\\\"]*\\.md\\\"",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Findings, enrichment results, record updates (and handoffs, checkpoints, status/audit writeups) go into the database, never a markdown report.",
+   "why": "The violating act is writing a markdown file; whether its content is a record or genuine doctrine/narrative needs review."
+  },
+  {
+   "rule": "cff429f5",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:new\\-lead|new\\-client|new\\-vendor|add\\-party|create\\-national\\-account|update\\-party\\-contact|update\\-vendor|update\\-lead)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "When a vendor/client/lead/party is about to be created or updated with a wanted field blank: research it, do not ask the partner.",
+   "why": "Contact create/update is the stated moment; whether a wanted field was blank needs review."
+  },
+  {
+   "rule": "d26d63b0",
+   "mode": "review",
+   "tools": [
+    "^mcp__.+__(?:new\\-lead|new\\-client|new\\-vendor|add\\-party|create\\-national\\-account)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "When any new contact enters the system (lead, client, vendor, party): run a deep open-source research pass before asking the partner anything.",
+   "why": "Creating a contact record is the entry event; contacts can also enter through a partner's words, and compliance needs review."
+  },
+  {
+   "rule": "df55c398",
+   "mode": "review",
+   "tools": [
+    "^(?:Agent|Task)$",
+    "^SendMessage$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": false,
+   "other_triggers": false,
+   "trigger": "When a subagent brief is written (or a running seat's scope is widened) for a sweep across disk, it carries a data-class boundary.",
+   "why": "The rule binds at brief-writing time; only briefs that send a seat across disk (file hunts, 'look everywhere') qualify, so each needs review."
+  },
+  {
+   "rule": "f04a05aa",
+   "mode": "review",
+   "tools": [
+    "^(?:Agent|Task)$",
+    "^(?:mcp__scheduled-tasks__create_scheduled_task|CronCreate|RemoteTrigger)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "At creation of any scheduled task, trigger or subagent: done-condition, failure path, watched first run, run ledger.",
+   "why": "Creating a subagent or scheduled task is the rule's trigger; launchd/plist creation through Bash or Write can also bind without this signal."
+  },
+  {
+   "rule": "f5d97b4a",
+   "mode": "review",
+   "tools": [
+    "^mcp__(?:claude-in-chrome|Claude_Browser|Claude_Preview|cua-computer-use)__.+$",
+    "^WebFetch$"
+   ],
+   "input_regex": "costar",
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Driving CoStar: only the desktop app's Browser pane, never Chrome, one action at a time, no browser_batch, export via saved layouts.",
+   "why": "Any browser action on CoStar is the rule's trigger; compliance (which browser, batching) needs review."
+  },
+  {
+   "rule": "faae6748",
+   "mode": "review",
+   "tools": [
+    "^Artifact$"
+   ],
+   "input_regex": "\\\"action\\\":\\s*\\\"delete\\\"",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Deleting a published artifact.",
+   "why": "An artifact deletion is a deletion on a surface."
+  },
+  {
+   "rule": "faae6748",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "(?:^|[\\s;&|(\\\"])(?:rm|unlink|rmdir|trash)\\s|git\\s+rm\\b|find\\s[^\\\"]*-delete\\b",
+   "signal_implies_gold": false,
+   "other_triggers": true,
+   "trigger": "Never delete (or tell the partner to delete) a file: move candidate deletions into a _to_delete staging folder.",
+   "why": "A file deletion command is the act the rule replaces with staging; whether the target is a candidate deletion (not throwaway temp) needs review."
+  },
+  {
+   "rule": "fb110a39",
+   "mode": "review",
+   "tools": [
+    "^(?:Agent|Task)$"
+   ],
+   "input_regex": null,
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Before starting any task, name the executor; every subagent spawn picks the model that runs it, which is the rule's routing choice.",
+   "why": "A subagent spawn is a delegation whose model the rule governs (workforce, not the frontier model), so every Agent call binds; the second-mechanical-call tripwire can bind turns with no spawn."
+  },
+  {
+   "rule": "fb110a39",
+   "mode": "review",
+   "tools": [
+    "^Bash$"
+   ],
+   "input_regex": "\\b(?:codex\\s+exec|codex\\s+-|grok\\s+(?:-p|--print|build|exec)|flash-run)\\b",
+   "signal_implies_gold": true,
+   "other_triggers": true,
+   "trigger": "Delegation to an outside-model CLI seat is a routing choice the rule governs.",
+   "why": "Dispatching to an outside CLI seat is the rule's delegation lanes."
+  }
+ ]
+}

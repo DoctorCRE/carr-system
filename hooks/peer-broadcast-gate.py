@@ -49,6 +49,24 @@ would let a session spend an unlimited budget on anything named like a hex
 token, and #70 already showed what keying identity on spelling does. No
 transcript, or an unreadable one, means no exemption — the gate keeps its
 protection rather than guessing.
+
+SUBAGENTS SHARE THE PARENT'S SESSION_ID (2026-09-23, Joe's order after it
+refused him). A subagent's hook payload carries its parent's session_id, so its
+sends were charged to the PARENT's budget: a seal helper messaging "main" and
+its own nested helper filled the ledger, and the parent's single Joe-directed
+message to the Orchestrator was refused as the third name. Two holes, two
+proofs, no patterns:
+
+  - "main" is the harness address a subagent uses to reach ITS OWN parent. The
+    reply lands in the same session, so it is exempt: neither refused nor
+    charged.
+  - own_subagent() read only the payload's transcript, which is the PARENT's,
+    so a helper spawned by a subagent was never proven. The harness writes
+    <transcript without .jsonl>/subagents/agent-<id>.jsonl for EVERY agent
+    spawned anywhere in this session's tree, nested helpers included. That file
+    is ground truth like the spawn record is, and it now proves ownership too.
+    The id is used in a path, so only [A-Za-z0-9_-]+ may use it; any other
+    spelling ("/", "..") gets no exemption.
 """
 import json
 import os
@@ -56,7 +74,7 @@ import re
 import sys
 import time
 
-STATE = os.path.expanduser("~/.cache/carr/peer-broadcast-gate.json")
+STATE_DIR = os.path.expanduser("~/.cache/carr/peer-broadcast-gate")
 WINDOW_SECONDS = 1800   # 30 minutes: long enough to span one investigation
 MAX_NAMED_PEERS = 2     # the third distinct named peer is a broadcast
 
@@ -78,6 +96,10 @@ MAX_NAMED_PEERS = 2     # the third distinct named peer is a broadcast
 # ref-shaped characters is stripped, so a name that merely contains a bracket is
 # untouched. Reply addresses return before this is ever consulted.
 REF_SUFFIX = re.compile(r"\s*\[[0-9A-Za-z._:-]+\]\s*$")
+# An agent id is spliced into a path, so it may only be these characters.
+AGENT_ID = re.compile(r"[A-Za-z0-9_-]+")
+# The harness address a subagent uses to reach its own parent session.
+PARENT_ADDRESS = "main"
 
 
 def peer_identity(to: str) -> str:
@@ -103,6 +125,12 @@ def own_subagent(who: str, transcript_path: str) -> bool:
     """
     if not transcript_path:
         return False
+    # A nested helper's spawn is in its spawner's transcript, not this one; the
+    # harness's own per-agent file under this session's subagents/ proves it.
+    if AGENT_ID.fullmatch(who or ""):
+        base = transcript_path[:-6] if transcript_path.endswith(".jsonl") else transcript_path
+        if os.path.isfile(os.path.join(base, "subagents", f"agent-{who}.jsonl")):
+            return True
     try:
         with open(transcript_path, errors="ignore") as fh:
             for line in fh:
@@ -120,9 +148,33 @@ def own_subagent(who: str, transcript_path: str) -> bool:
     return False
 
 
-def load(now):
+def state_path(session):
+    """One state file PER SESSION, keyed by the harness session id.
+
+    WHY PER SESSION. The state used to be one shared file, so eleven parallel
+    sessions on this Mac spent ONE combined budget of two named peers: a
+    session's first targeted ask could be refused because three OTHER sessions
+    had messaged someone in the last half hour. The gate's whole rationale is
+    that the asker pays the cost of what it sends — but a shared ledger charges
+    a session for asks it never made, which is the exact inversion the
+    completion-integrity council called authority drift. Fan-out breadth is a
+    property of ONE session's behaviour; the window and budget stay as they
+    were.
+
+    An unknown or missing session id falls back to a single shared "unknown"
+    file rather than guessing: an unattributed caller keeps the old (stricter)
+    behaviour instead of minting a fresh budget per malformed payload.
+    """
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(session or "").strip())[:80]
+    if not safe:
+        safe = "unknown"
+    return os.path.join(STATE_DIR, f"{safe}.json")
+
+
+def load(now, session):
+    path = state_path(session)
     try:
-        with open(STATE) as fh:
+        with open(path) as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -143,12 +195,12 @@ def load(now):
     return fresh
 
 
-def save(data):
-    os.makedirs(os.path.dirname(STATE), exist_ok=True)
-    tmp = STATE + ".tmp"
+def save(data, session):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp = state_path(session) + ".tmp"
     with open(tmp, "w") as fh:
         json.dump(data, fh)
-    os.replace(tmp, STATE)
+    os.replace(tmp, state_path(session))
 
 
 def main():
@@ -174,11 +226,19 @@ def main():
     # Identity is the name; `x` and `x [d7e9b2]` are one peer. See REF_SUFFIX.
     who = peer_identity(to)
 
+    # A subagent reaching its own parent: same session, same context, nobody
+    # external pays. Exempt before the ledger is even read, so it is never charged.
+    if who == PARENT_ADDRESS:
+        return 0
+
+    # The budget belongs to THIS session, keyed off the harness payload — see
+    # state_path() for why a shared ledger was the wrong shape.
+    session = (payload.get("session_id") or payload.get("sessionId") or "")
     now = time.time()
-    seen = load(now)
+    seen = load(now, session)
     if who in seen:           # re-messaging the same peer is a thread, not fan-out
         seen[who] = now
-        save(seen)
+        save(seen, session)
         return 0
 
     # MESSAGING YOUR OWN SUBAGENT IS ORCHESTRATION, NOT BROADCAST — the asker
@@ -219,7 +279,7 @@ def main():
         return 2   # deny
 
     seen[who] = now
-    save(seen)
+    save(seen, session)
     return 0
 
 

@@ -23,7 +23,7 @@ The two ledgers hold nine entries between them. Six are deliberately not here:
                   the text lives on in the freeze zip and nowhere else.
   hunt-ledger H4  "Hunt #2 upgrade" — dated, author unstamped, no subject ref.
                   DROPPED TO FREEZE by the same ruling.
-  deals R2-R5     Nilesh Patel / Jon Shaw / Nate @ EOS / Trey @ Lazzarri,
+  deals R2-R5     Nikhil Shah / Jon Shepley / Nate @ EOS / Trey @ Lazenby,
                   "plugged into N deals". NOT IMPORTED, by Joe's STANDING RULING:
                   counts always derive from deal records, never import as notes.
                   deals.md's own two-way-ledger section already said this ("don't
@@ -31,7 +31,7 @@ The two ledgers hold nine entries between them. Six are deliberately not here:
                   it binding. Each became a backfill-check loop item instead —
                   find and record the underlying deals, and the count then derives
                   itself. Importing the number would have frozen a stale 2 where
-                  the deal records already show Jon Shaw in three.
+                  the deal records already show Jon Shepley in three.
 
 H2 WAS PARKED AND IS NOW IN, and it is the reason this is an importer at all.
 It was held back because its author is "the Monday brief" — the automation that
@@ -88,8 +88,8 @@ HUNT_H1_TEXT = (
     "(a) hospital physician liaisons — Ascension, Baptist, HCA Florida West, Santa Rosa "
     "Medical Center. Paid to know which doctors are moving, unhappy, or going independent. "
     "Zero of them in 284 rows. (b) practice-management / MSO firms — four exist and all four "
-    "are stalled with no touch date (V-MSC-017 Zane Dash, V-CPA-019 Steve Spear, "
-    "V-BRK-015 Julie Canfield-Buddin, T-022 Blake Hatcher). These firms learn about a new "
+    "are stalled with no touch date (V-MSC-017 Zane Dorsey, V-CPA-019 Steve Sparrow, "
+    "V-BRK-015 Julie Canfield-Byrd, T-022 Blake Hollis). These firms learn about a new "
     "independent practice before the landlord does. Why now: the Brown lead (L-165) exposed "
     "it — an interventional cardiologist filed his own LLC and the network had no one within "
     "reach of him, because we had hunted categories that serve buildings and never categories "
@@ -108,14 +108,14 @@ HUNT_H2_TEXT = (
     "Candidates proposed: 5 (listed in the brief). Deduped against all 284 vendors.xlsx rows + "
     "targets: no collisions. 1st Med Financial (vet lender) was dropped from the list to avoid "
     "confusion with the existing V-BRK-007 1st Med Transitions, a different firm. Live Oak Bank "
-    "was dropped — already in the sheet (V-BNK-011 Mike Stanton). "
+    "was dropped — already in the sheet (V-BNK-011 Mike Stratton). "
     "Verdicts: PENDING JOE — connect / pass on each."
 )
 
 R1_TEXT = (
-    "Standing reciprocity arrangement with Joe Ed Jackson (V-SUP-051, Benco Dental): CARR is "
+    "Standing reciprocity arrangement with Joe Earl Jenkins (V-SUP-051, Benco Dental): CARR is "
     "passing him the Provide 1% lender referral credit on this deal and on every deal he "
-    "brings. Repayment in kind for his giving us L-208 / C-155 (Dr. James Allen Tyrer). "
+    "brings. Repayment in kind for his giving us L-208 / C-155 (Dr. James Allen Okafor). "
     "Standing arrangement, Joe 2026-07-29. "
     "NOTE ON SCOPE: the referral RELATIONSHIP this repays is already carried by the intro "
     "graph (party_link V-SUP-051 -> C-155 and V-SUP-051 -> L-208, both live since ORDER 32). "
@@ -161,7 +161,7 @@ ENTRIES = [
         "source_file": "DNA/Network/deals.md",
         "author": "joe",           # "Standing arrangement, Joe 2026-07-29"
         "occurred_on": "2026-07-29",
-        "summary": "Standing reciprocity: Joe Ed Jackson gets the Provide 1% lender referral "
+        "summary": "Standing reciprocity: Joe Earl Jenkins gets the Provide 1% lender referral "
                    "credit on every deal he brings",
         "detail": R1_TEXT,
         "subjects": ["V-SUP-051"],

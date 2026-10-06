@@ -27,7 +27,7 @@ WRITE FINDINGS TO THE DATABASE, NOT TO MARKDOWN. This is a hard shared rule (Joe
 - A disagreement with the record → kind 'discrepancy' plus proposes_correction {field, current, proposed}. It is RECORDED ONLY. Never edit an identity field on research alone.
 
 HARD RULES:
-- NEVER edit an identity field on research alone. Propose with evidence; the owning partner applies it. This system once welded Jenna Beasley to Jeff Beasley DMD — two different people.
+- NEVER edit an identity field on research alone. Propose with evidence; the owning partner applies it. This system once welded Jenna Castillo to Jeff Castillo DMD — two different people.
 - A near-match on a similar name is CONTAMINATION, not confirmation. When two candidates are plausible, record both and pick neither.
 - PLACEHOLDER CONTACT DETAILS ARE NOT DATA. Any CARR agent's own contact info, a CARR office line, or a carr.us address sitting in a client contact field is a placeholder — treat it as NULL and record the field as genuinely unknown. Known values: the phone (205) 643-6555 and the email dell.mccraney@carr.us.
 - Title and company CHANGE over time. Record when each was verified; an old verification is unverified, not fact.

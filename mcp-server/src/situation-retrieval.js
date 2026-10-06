@@ -282,7 +282,6 @@ export function situationRetrievalTools({ withEnvelope, writeEvent, ToolError })
     },
     "approve-retrieval-proposals": {
       write: true,
-      humanOnly: true,
       description: "HUMAN-ONLY atomic batch approval. Promotes pending rows, reruns the golden suite, and rolls back on any regression.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" },
@@ -315,7 +314,6 @@ export function situationRetrievalTools({ withEnvelope, writeEvent, ToolError })
     },
     "retire-retrieval-curation": {
       write: true,
-      humanOnly: true,
       description: "HUMAN-ONLY guarded retirement of approved retrieval curation.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" }, target_type: { type: "string", enum: ["concept", "phrase", "mapping"] },

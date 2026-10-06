@@ -100,7 +100,32 @@ def main() -> int:
     else:
         refused = False
     check("unapproved provenance refuses", refused)
+    # A COLLECTOR FAILURE MUST NAME ITS REASON. Until 2026-08-28 the wrapper
+    # kept only the exception class, so a dead-lettered social-batch run
+    # recorded "read-only collector failed: CollectorUnavailable" and the real
+    # cause had to be re-derived by reading the collector by hand.
+    class _Exploding:
+        def collect(self, *, builder_key, workflow_key):
+            raise RuntimeError("social policy requires platforms and integer voice_version")
+
+    class _Leaky:
+        def collect(self, *, builder_key, workflow_key):
+            raise RuntimeError("failed reading postgresql://svc:hunter2@db.internal:5432/carr")  # ci-secret-scan: allow — synthetic fixture proving redaction; no real credential
+
+    def _capture(collector) -> str:
+        try:
+            build_input(manifest, one["execution"]["input_builder"], collector, workflow_key=one["key"])
+        except InputUnavailable as exc:
+            return str(exc)
+        return ""
+
+    detail = _capture(_Exploding())
+    check("a collector failure carries its own message",
+          "social policy requires platforms and integer voice_version" in detail)
+    check("a collector failure still names the exception class", "RuntimeError" in detail)
+    check("a credential in a collector message is redacted", "hunter2" not in _capture(_Leaky()))
     return 0
+
 
 
 if __name__ == "__main__":

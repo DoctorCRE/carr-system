@@ -53,3 +53,6 @@ mypy>=2.3; python_version >= "3.10"
 # macOS only by construction — EventKit does not exist elsewhere — and the marker
 # keeps Dell's install working rather than failing on a framework his machine has.
 pyobjc-framework-EventKit>=10.0; sys_platform == "darwin"
+
+# Preserve user TOML syntax while reconciling reserved Codex permission profiles.
+tomlkit>=0.13.3

@@ -69,6 +69,15 @@ class RoomFake {
     }
     if (sql.includes("from v_partner_room_turn")) {
       this.reads.push(params);
+      if (sql.includes("partner-room:latest-head")) {
+        const latest = this.rows.filter((r) => r.room_id === params[0]).at(-1);
+        return { rows: [{ seq: latest?.seq ?? null }] };
+      }
+      if (sql.includes("partner-room:latest-page")) {
+        const [room, before, mode, limit] = params;
+        return { rows: this.rows.filter((r) => r.room_id === room && (before === null || r.seq < before)
+          && (mode === "all" || r.kind === "turn")).sort((a, b) => b.seq - a.seq).slice(0, limit) };
+      }
       if (sql.includes("partner-room:queue")) {
         return { rows: this.rows.filter((r) => r.room_id === params[0] && r.kind === "receipt").sort((a, b) => b.seq - a.seq) };
       }
@@ -105,6 +114,20 @@ test("add-room-turn: a partner's turn lands verbatim, attributed to the verified
   assert.deepEqual([room, sponsor, seat, kind, body, originChannel, originActor],
     ["partner-line", "joe", "claude", "turn", "raw text, exactly as spoken", "mcp", "joe"]);
   assert.equal(typeof msgId, "string");
+});
+
+test("read-room-latest returns the newest window in conversation order without changing the poll cursor", async () => {
+  const rows = [1, 2, 3, 4].map((seq) => ({ seq, room_id: "model-room", kind: "turn", body: `turn ${seq}` }));
+  const db = new RoomFake({ rows });
+  const latest = await TOOLS["read-room-latest"].handler(db, joe, { room: "model-room", limit: 2 });
+  assert.deepEqual(latest.turns.map((row) => row.seq), [3, 4]);
+  assert.equal(latest.latest_seq, 4);
+  assert.equal(latest.before_seq, 3);
+  assert.equal(latest.more, true);
+  const older = await TOOLS["read-room-latest"].handler(db, joe, { room: "model-room", before_seq: 3, limit: 2 });
+  assert.deepEqual(older.turns.map((row) => row.seq), [1, 2]);
+  const poll = await TOOLS["read-room"].handler(db, joe, { room: "model-room", after_seq: 0, limit: 2 });
+  assert.deepEqual(poll.turns.map((row) => row.seq), [1, 2]);
 });
 
 test("add-room-turn: provenance is server-derived MCP identity, never a claimed human seat", async () => {
@@ -266,6 +289,58 @@ test("project-room-queue: a dedup row with rejected provenance is not healthy", 
     (err) => err.payload?.error === "queue_projection_provenance_rejected",
   );
   assert.equal(db.inserted.length, 0);
+});
+
+test("project-room-queue: replaying a durable event whose task moved state still dedups", async () => {
+  const dupMsg = "dddddddd-eeee-4fff-8000-111111111111";
+  const EVENT_READY = JSON.stringify({ queue_event: {
+    v: 1, board: "carr-build", event_id: 1302, event: "task.updated", task_id: "t_abc123",
+    card: { title: "x", target: "joe", effective_model: "sonnet", status: "ready",
+      priority: "p2", cap: "production", updated_at: "2026-09-01T04:08:19Z", source_seq: 1 },
+    summary: "task ready, created.", projected_at: "2026-09-01T04:08:19Z",
+  } });
+  const EVENT_BLOCKED = JSON.stringify({ queue_event: {
+    v: 1, board: "carr-build", event_id: 1302, event: "task.updated", task_id: "t_abc123",
+    card: { title: "x", target: "joe", effective_model: "sonnet", status: "blocked",
+      priority: "p2", cap: "production", updated_at: "2026-09-19T00:00:00Z", source_seq: 1 },
+    summary: "task is blocked.", projected_at: "2026-09-19T00:00:00Z",
+  } });
+
+  // 1. append event 1302's receipt.
+  const db = new RoomFake();
+  const first = await TOOLS["project-room-queue"].handler(db, hermes, {
+    idempotency_key: "k-project-5", body: EVENT_READY, msg_id: dupMsg,
+  });
+  assert.equal(first.ok, true);
+  assert.equal(db.inserted.length, 1);
+
+  // 2. mutate the task's durable row: receipt_for now renders a different body
+  // (status ready -> blocked) for the SAME event id, so the durable row on
+  // disk no longer equals what this cycle would recompute.
+  db.msgIdTaken = dupMsg;
+  db.rows.push({ msg_id: dupMsg, id: first.seq, room_id: "partner-line", sponsor: "joe",
+    seat: "hermes", kind: "receipt", body: EVENT_BLOCKED, at: "2026-09-01T04:08:19+00:00",
+    origin_channel: "mcp", origin_actor: "hermes-pilot" });
+
+  // 3. replay the same event id (same msg_id). Before the fix this threw
+  // queue_projection_provenance_rejected because observed.body (blocked) no
+  // longer matched the freshly recomputed body (ready).
+  const replay = await TOOLS["project-room-queue"].handler(db, hermes, {
+    idempotency_key: "k-project-6", body: EVENT_READY, msg_id: dupMsg,
+  });
+  assert.equal(replay.ok, true);
+  assert.equal(replay.deduplicated, true);
+  assert.equal(db.inserted.length, 1, "the replay must not append a second row");
+
+  // A fresh msg_id (no durable row yet) must still take the insert path —
+  // proving the dedup branch, not the guard, is what changed.
+  const freshMsg = "22222222-3333-4444-8555-666666666666";
+  const fresh = await TOOLS["project-room-queue"].handler(db, hermes, {
+    idempotency_key: "k-project-7", body: EVENT_BLOCKED, msg_id: freshMsg,
+  });
+  assert.equal(fresh.ok, true);
+  assert.equal(fresh.deduplicated, undefined);
+  assert.equal(db.inserted.length, 2);
 });
 
 // ── read-room ───────────────────────────────────────────────────────────────

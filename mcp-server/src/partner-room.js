@@ -25,6 +25,10 @@
 import { personalScopeForActor } from "./identity.js";
 
 export const DEFAULT_ROOM = "partner-line";
+// The room the Observatory panel reads and posts turns in: the one the local
+// room bridge polls (ops/launchd/com.carr.room-bridge.plist CARR_ROOM_BRIDGE_ROOM).
+// The queue projection stays in DEFAULT_ROOM under its fixed Hermes provenance.
+export const OBSERVATORY_ROOM = "model-room";
 const SLUG = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const UUID = /^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$/;
 export const ROOM_BODY_MAX = 20000;
@@ -70,6 +74,27 @@ export async function readRoomTurns(c, args = {}) {
   return { ok: true, room, turns,
     latest_seq: turns.length ? turns[turns.length - 1].seq : after,
     more: turns.length === limit };
+}
+
+/** A bounded newest-first window for a human opening the Observatory. The
+ * oldest-first poll contract above remains unchanged for every bridge desk. */
+export async function readRoomLatest(c, args = {}) {
+  const room = normalizeRoomName(args.room);
+  if (room === null) return { ok: false, error: "room_invalid" };
+  const { limit } = normalizeRoomPaging(args);
+  const before = Number.isSafeInteger(args.before_seq) && args.before_seq > 0 ? args.before_seq : null;
+  const mode = args.mode === "conversation" ? "conversation" : "all";
+  const [head, page] = await Promise.all([
+    c.query("select max(id) as seq from v_partner_room_turn where room_id=$1 /* partner-room:latest-head */", [room]),
+    c.query(`select id as seq, room_id, to_jsonb(at)#>>'{}' as at, sponsor, seat, kind, body, msg_id, origin_channel, origin_actor
+       from v_partner_room_turn
+      where room_id=$1 and ($2::bigint is null or id < $2)
+        and ($3::text = 'all' or kind = 'turn')
+      order by id desc limit $4 /* partner-room:latest-page */`, [room, before, mode, limit]),
+  ]);
+  const turns = [...page.rows].reverse();
+  return { ok: true, room, mode, turns, latest_seq: head.rows[0]?.seq ?? "0",
+    before_seq: turns.length ? turns[0].seq : null, more: page.rows.length === limit };
 }
 
 function exactKeys(value, keys) {
@@ -281,7 +306,7 @@ export function partnerRoomTools({ withEnvelope, ToolError }) {
                from partner_room_turn where msg_id=$1 /* partner-room:projection-dedup-proof */`, [msgId]);
           observed = prior.rows[0] || {};
         }
-        if (observed.body !== body || !queueProjectionReceiptFromTurn(observed))
+        if (!queueProjectionReceiptFromTurn(observed))
           throw new ToolError({ error: "queue_projection_provenance_rejected",
             hint: "the durable row does not satisfy the same provenance and body parser as read-room-queue" });
         return appended;
@@ -297,6 +322,20 @@ export function partnerRoomTools({ withEnvelope, ToolError }) {
       } },
       handler: async (c, _actor, args) => {
         const read = await readRoomTurns(c, args);
+        if (read.ok !== true) { const { ok: _ok, ...failure } = read; throw new ToolError(failure); }
+        return read;
+      },
+    },
+    "read-room-latest": {
+      description: "Open the newest Model Room window without walking its entire history. Returns turns in reading order, the room head, and a before_seq cursor for older pages. mode conversation returns spoken turns only; all includes machine receipts for live health. The bridge poll remains read-room.",
+      inputSchema: { type: "object", properties: {
+        room: { type: "string", description: "room name; default partner-line" },
+        before_seq: { type: "integer", description: "older turns have seq below this cursor" },
+        limit: { type: "integer", description: "max turns; default 50, cap 200" },
+        mode: { type: "string", enum: ["all", "conversation"] },
+      } },
+      handler: async (c, _actor, args) => {
+        const read = await readRoomLatest(c, args);
         if (read.ok !== true) { const { ok: _ok, ...failure } = read; throw new ToolError(failure); }
         return read;
       },

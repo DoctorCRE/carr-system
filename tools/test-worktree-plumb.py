@@ -37,6 +37,7 @@ Five cases:
 
 Run: .venv/bin/python tools/test-worktree-plumb.py   # exit 0 = all pass
 """
+import json
 import os
 import shutil
 import subprocess
@@ -100,7 +101,41 @@ class Scratch:
         os.makedirs(os.path.join(self.repo, "mcp-server"))
         with open(os.path.join(self.repo, "mcp-server", "index.js"), "w") as f:
             f.write("// scratch stand-in for tracked mcp-server source\n")
-        git(["add", "README.md", "mcp-server/index.js"], self.repo)
+        lock = {
+            "name": "fixture",
+            "version": "1.0.0",
+            "lockfileVersion": 3,
+            "requires": True,
+            "packages": {
+                "": {
+                    "name": "fixture",
+                    "version": "1.0.0",
+                    "dependencies": {"fixture-pkg": "1.0.0"},
+                },
+                "node_modules/fixture-pkg": {
+                    "version": "1.0.0",
+                    "resolved": "https://registry.example/fixture-pkg-1.0.0.tgz",
+                    "integrity": "sha512-fixture-1.0.0",
+                },
+            },
+        }
+        with open(os.path.join(self.repo, "mcp-server", "package.json"), "w") as f:
+            json.dump({
+                "name": "fixture",
+                "version": "1.0.0",
+                "dependencies": {"fixture-pkg": "1.0.0"},
+            }, f)
+        with open(os.path.join(self.repo, "mcp-server", "package-lock.json"), "w") as f:
+            json.dump(lock, f)
+        # A Python lockfile, because the .venv half of --plumb now FAILS CLOSED
+        # without one: a runtime that cannot be proven against a lock is not
+        # exposed. Deliberately pin-free — an empty requirement set is satisfied
+        # by the empty `--without-pip` venv built below, which keeps this fixture
+        # about PLUMBING rather than about package resolution.
+        with open(os.path.join(self.repo, "requirements.lock"), "w") as f:
+            f.write("# fixture lock: no pinned packages\n")
+        git(["add", "README.md", "mcp-server/index.js", "mcp-server/package.json",
+             "mcp-server/package-lock.json", "requirements.lock"], self.repo)
         git(["commit", "-q", "-m", "init"], self.repo)
         git(["remote", "add", "origin", self.origin], self.repo)
         git(["push", "-q", "-u", "origin", "main"], self.repo)
@@ -108,11 +143,24 @@ class Scratch:
         os.makedirs(os.path.join(self.repo, "bin"))
         os.symlink(WORKTREE_SH, os.path.join(self.repo, "bin", "worktree.sh"))
 
-        for rel in (".venv", "out", os.path.join("mcp-server", "node_modules")):
+        # The canonical .venv must be a REAL venv now: --plumb validates the
+        # interpreter's installed distribution set against requirements.lock
+        # before exposing it, so a directory with a marker file in it is no
+        # longer a runtime this script will link.
+        subprocess.run([sys.executable, "-m", "venv", "--without-pip",
+                        os.path.join(self.repo, ".venv")],
+                       check=True, capture_output=True)
+
+        for rel in ("out", os.path.join("mcp-server", "node_modules")):
             d = os.path.join(self.repo, rel)
             os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "marker.txt"), "w") as f:
                 f.write(rel + "\n")
+        installed_lock = dict(lock)
+        installed_lock["packages"] = dict(lock["packages"])
+        installed_lock["packages"].pop("")
+        with open(os.path.join(self.repo, "mcp-server", "node_modules", ".package-lock.json"), "w") as f:
+            json.dump(installed_lock, f)
 
     def worktree_sh(self, *args):
         return run(["zsh", os.path.join(self.repo, "bin", "worktree.sh"), *args], self.repo)
@@ -248,10 +296,16 @@ def test_plumb_leaves_tracked_real_dir_alone():
         git(["commit", "-q", "-m", "tracked real .venv"], wt)
 
         p = s.worktree_sh("--plumb", wt)
-        check("--plumb exits 0 even though one target is a real tracked dir",
-              p.returncode == 0, p.stdout + p.stderr)
-        check("--plumb reports .venv left alone",
-              "left alone" in p.stdout, p.stdout)
+        # A worktree-local .venv is the runtime --plumb JUDGES, rather than
+        # something it merely declines to overwrite. This one has no interpreter,
+        # so it cannot be proven against the lock — and --plumb must REPORT that
+        # by exiting nonzero. Expecting success here was itself a hole: a caller
+        # reading the exit status was told the plumbing had succeeded while the
+        # runtime in the tree was untrusted.
+        check("--plumb exits NONZERO when the worktree-local .venv is untrusted",
+              p.returncode != 0, f"rc={p.returncode}\n{p.stdout}{p.stderr}")
+        check("--plumb reports the worktree-local .venv left in place",
+              "left in place" in p.stdout, p.stdout)
         check(".venv is still a real directory, not a symlink",
               os.path.isdir(venv_dir) and not os.path.islink(venv_dir))
         check("the tracked file survives untouched",

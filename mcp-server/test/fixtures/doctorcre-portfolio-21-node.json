@@ -1,0 +1,747 @@
+{
+  "schema_version": "doctorcre-v5-portfolio-fixture.v1",
+  "fixture_status": "TEST_DATA_ONLY__NEVER_DOCTRINE__CANONICAL_SOURCE_IS_THE_RECORD_LAYER",
+  "canonical_source": {
+    "catalog_section": "5882b0cd-16f4-4896-b567-eb0fca6554f7@1",
+    "node_identity_pointer": "doctorcre-v5 r7 constitution #/master_plan/dependency_dag",
+    "node_identity_constitution_file_sha256": "sha256:403d8c7ae90c12415d2df26b13b0425003273e82f1d2f9d1cd7ecb72c03dcd64",
+    "node_ordinal_pointer": "out/v5-build-clearance/r08/v5-full-implementation-slice-catalog.reviewed.v4.json#/portfolio_milestones_21",
+    "node_ordinal_artifact_sha256": "sha256:79e467125a0b5300e51f1f779b8eed2406f17cf1b085a18df96b0ad6a399fa6f",
+    "child_program_pointer": "out/v5-build-clearance/r08/wr62-portfolio-hierarchy-bootstrap-preparation.v1.json#/accepted_design_identity/child_programs",
+    "generated_by": "mcp-server/test/fixtures generation from the two pointers above; no node was authored by hand"
+  },
+  "revision": {
+    "schema_version": "doctorcre-v5-portfolio-revision.v1",
+    "revision_version": 1,
+    "portfolio_ref": "WR-000062",
+    "source_digests": {
+      "design": "sha256:9bbdc2f5124fc3939c883e572f5c9077b347804b030f313e60756c28dfab07a6",
+      "constitution": "sha256:925f501cc155fd48f320ea7a7cf66cc5d4a90738838a93a3506010199c6ad505",
+      "requirements": "sha256:51e0a89442fda95e537738e8321f9301af8ef48cf79d5ddb979c63421e8990ec",
+      "integration": "sha256:efd15770da5db52b3d21c4e829db03fafa70b354e01b3c46ff5db15f57dfcdff"
+    },
+    "child_program_refs": [
+      "foundation-and-control-plane",
+      "assurance-fabric",
+      "product-journeys",
+      "rollout-and-retirement"
+    ],
+    "nodes": [
+      {
+        "node_ref": "step:portfolio-constitution-accepted",
+        "node_kind": "milestone",
+        "ordinal": 1,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:wr48-frontier-flowing-production-outcome",
+        "node_kind": "milestone",
+        "ordinal": 2,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:wr46-dissolution-outcome",
+        "node_kind": "milestone",
+        "ordinal": 3,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:wr40-repository-outcome",
+        "node_kind": "milestone",
+        "ordinal": 4,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:wr54-backup-recovery-outcome",
+        "node_kind": "milestone",
+        "ordinal": 5,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:scheduler-active-receipt",
+        "node_kind": "milestone",
+        "ordinal": 6,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:gate-zero-read-only-outcome",
+        "node_kind": "milestone",
+        "ordinal": 7,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:foundation-assurance-minimum-receipt",
+        "node_kind": "milestone",
+        "ordinal": 8,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:j1-kernel-production-outcome",
+        "node_kind": "milestone",
+        "ordinal": 9,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:j1-core-production-outcome",
+        "node_kind": "milestone",
+        "ordinal": 10,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:j1-pilot-and-dell-beta-outcome",
+        "node_kind": "milestone",
+        "ordinal": 11,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:representative-workflow-production-outcome",
+        "node_kind": "milestone",
+        "ordinal": 12,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:journey-two-production-outcome",
+        "node_kind": "milestone",
+        "ordinal": 13,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:journey-three-production-outcome",
+        "node_kind": "milestone",
+        "ordinal": 14,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:foundation-control-plane-child-outcome",
+        "node_kind": "milestone",
+        "ordinal": 15,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:assurance-fabric-child-outcome",
+        "node_kind": "milestone",
+        "ordinal": 16,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:successor-controls-outcome",
+        "node_kind": "milestone",
+        "ordinal": 17,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:rollout-readiness-child-outcome",
+        "node_kind": "milestone",
+        "ordinal": 18,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:final-pre-retirement-integration-adjudication",
+        "node_kind": "milestone",
+        "ordinal": 19,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:legacy-retirement-receipt",
+        "node_kind": "milestone",
+        "ordinal": 20,
+        "parent_ref": "WR-000062"
+      },
+      {
+        "node_ref": "step:final-portfolio-outcome-reconciliation",
+        "node_kind": "milestone",
+        "ordinal": 21,
+        "parent_ref": "WR-000062"
+      }
+    ],
+    "edges": [
+      {
+        "from_node_ref": "step:assurance-fabric-child-outcome",
+        "to_node_ref": "step:rollout-readiness-child-outcome"
+      },
+      {
+        "from_node_ref": "step:assurance-fabric-child-outcome",
+        "to_node_ref": "step:successor-controls-outcome"
+      },
+      {
+        "from_node_ref": "step:final-pre-retirement-integration-adjudication",
+        "to_node_ref": "step:legacy-retirement-receipt"
+      },
+      {
+        "from_node_ref": "step:foundation-assurance-minimum-receipt",
+        "to_node_ref": "step:foundation-control-plane-child-outcome"
+      },
+      {
+        "from_node_ref": "step:foundation-assurance-minimum-receipt",
+        "to_node_ref": "step:j1-kernel-production-outcome"
+      },
+      {
+        "from_node_ref": "step:foundation-control-plane-child-outcome",
+        "to_node_ref": "step:assurance-fabric-child-outcome"
+      },
+      {
+        "from_node_ref": "step:foundation-control-plane-child-outcome",
+        "to_node_ref": "step:rollout-readiness-child-outcome"
+      },
+      {
+        "from_node_ref": "step:foundation-control-plane-child-outcome",
+        "to_node_ref": "step:successor-controls-outcome"
+      },
+      {
+        "from_node_ref": "step:gate-zero-read-only-outcome",
+        "to_node_ref": "step:foundation-assurance-minimum-receipt"
+      },
+      {
+        "from_node_ref": "step:j1-core-production-outcome",
+        "to_node_ref": "step:j1-pilot-and-dell-beta-outcome"
+      },
+      {
+        "from_node_ref": "step:j1-core-production-outcome",
+        "to_node_ref": "step:journey-two-production-outcome"
+      },
+      {
+        "from_node_ref": "step:j1-kernel-production-outcome",
+        "to_node_ref": "step:j1-core-production-outcome"
+      },
+      {
+        "from_node_ref": "step:j1-pilot-and-dell-beta-outcome",
+        "to_node_ref": "step:rollout-readiness-child-outcome"
+      },
+      {
+        "from_node_ref": "step:journey-three-production-outcome",
+        "to_node_ref": "step:assurance-fabric-child-outcome"
+      },
+      {
+        "from_node_ref": "step:journey-three-production-outcome",
+        "to_node_ref": "step:representative-workflow-production-outcome"
+      },
+      {
+        "from_node_ref": "step:journey-three-production-outcome",
+        "to_node_ref": "step:rollout-readiness-child-outcome"
+      },
+      {
+        "from_node_ref": "step:journey-two-production-outcome",
+        "to_node_ref": "step:assurance-fabric-child-outcome"
+      },
+      {
+        "from_node_ref": "step:journey-two-production-outcome",
+        "to_node_ref": "step:journey-three-production-outcome"
+      },
+      {
+        "from_node_ref": "step:journey-two-production-outcome",
+        "to_node_ref": "step:rollout-readiness-child-outcome"
+      },
+      {
+        "from_node_ref": "step:legacy-retirement-receipt",
+        "to_node_ref": "step:final-portfolio-outcome-reconciliation"
+      },
+      {
+        "from_node_ref": "step:portfolio-constitution-accepted",
+        "to_node_ref": "step:scheduler-active-receipt"
+      },
+      {
+        "from_node_ref": "step:portfolio-constitution-accepted",
+        "to_node_ref": "step:wr40-repository-outcome"
+      },
+      {
+        "from_node_ref": "step:portfolio-constitution-accepted",
+        "to_node_ref": "step:wr48-frontier-flowing-production-outcome"
+      },
+      {
+        "from_node_ref": "step:portfolio-constitution-accepted",
+        "to_node_ref": "step:wr54-backup-recovery-outcome"
+      },
+      {
+        "from_node_ref": "step:representative-workflow-production-outcome",
+        "to_node_ref": "step:assurance-fabric-child-outcome"
+      },
+      {
+        "from_node_ref": "step:representative-workflow-production-outcome",
+        "to_node_ref": "step:foundation-control-plane-child-outcome"
+      },
+      {
+        "from_node_ref": "step:representative-workflow-production-outcome",
+        "to_node_ref": "step:rollout-readiness-child-outcome"
+      },
+      {
+        "from_node_ref": "step:rollout-readiness-child-outcome",
+        "to_node_ref": "step:final-pre-retirement-integration-adjudication"
+      },
+      {
+        "from_node_ref": "step:scheduler-active-receipt",
+        "to_node_ref": "step:gate-zero-read-only-outcome"
+      },
+      {
+        "from_node_ref": "step:successor-controls-outcome",
+        "to_node_ref": "step:rollout-readiness-child-outcome"
+      },
+      {
+        "from_node_ref": "step:wr40-repository-outcome",
+        "to_node_ref": "step:gate-zero-read-only-outcome"
+      },
+      {
+        "from_node_ref": "step:wr46-dissolution-outcome",
+        "to_node_ref": "step:gate-zero-read-only-outcome"
+      },
+      {
+        "from_node_ref": "step:wr48-frontier-flowing-production-outcome",
+        "to_node_ref": "step:wr46-dissolution-outcome"
+      },
+      {
+        "from_node_ref": "step:wr54-backup-recovery-outcome",
+        "to_node_ref": "step:gate-zero-read-only-outcome"
+      }
+    ]
+  },
+  "cross_layer": {
+    "purpose": "One shared payload proving JavaScript and PostgreSQL agree byte for byte. `node_metadata` fills the eight optional slots storage requires; `revision` above is unchanged and remains the pure graph contract. js_expected is the output of mcp-server/src/work-portfolio.js for this payload. work-portfolio.test.mjs re-derives it; ops/work-portfolio-local-pg-gate.py loads the same payload into PostgreSQL and asserts equality.",
+    "node_metadata": {
+      "step:portfolio-constitution-accepted": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-1",
+        "budget_ceiling": 5e-324,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-1",
+        "terminal_predicate": "milestone 1 is terminal when its own predicate holds"
+      },
+      "step:wr48-frontier-flowing-production-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-2",
+        "budget_ceiling": 1e-7,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-2",
+        "terminal_predicate": "milestone 2 is terminal when its own predicate holds"
+      },
+      "step:wr46-dissolution-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-3",
+        "budget_ceiling": 1.5e-7,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-3",
+        "terminal_predicate": "milestone 3 is terminal when its own predicate holds"
+      },
+      "step:wr40-repository-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-4",
+        "budget_ceiling": 0.000001,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-4",
+        "terminal_predicate": "milestone 4 is terminal when its own predicate holds"
+      },
+      "step:wr54-backup-recovery-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-5",
+        "budget_ceiling": 0.00001,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-5",
+        "terminal_predicate": "milestone 5 is terminal when its own predicate holds"
+      },
+      "step:scheduler-active-receipt": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-6",
+        "budget_ceiling": 0.0001,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-6",
+        "terminal_predicate": "milestone 6 is terminal when its own predicate holds"
+      },
+      "step:gate-zero-read-only-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-7",
+        "budget_ceiling": 0.5,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-7",
+        "terminal_predicate": "milestone 7 is terminal when its own predicate holds"
+      },
+      "step:foundation-assurance-minimum-receipt": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-8",
+        "budget_ceiling": 12.5,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-8",
+        "terminal_predicate": "milestone 8 is terminal when its own predicate holds"
+      },
+      "step:j1-kernel-production-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-9",
+        "budget_ceiling": 3.141592653589793,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-9",
+        "terminal_predicate": "milestone 9 is terminal when its own predicate holds"
+      },
+      "step:j1-core-production-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-10",
+        "budget_ceiling": 0,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-10",
+        "terminal_predicate": "milestone 10 is terminal when its own predicate holds"
+      },
+      "step:j1-pilot-and-dell-beta-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-11",
+        "budget_ceiling": 1,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-11",
+        "terminal_predicate": "milestone 11 is terminal when its own predicate holds"
+      },
+      "step:representative-workflow-production-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-12",
+        "budget_ceiling": 7,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-12",
+        "terminal_predicate": "milestone 12 is terminal when its own predicate holds"
+      },
+      "step:journey-two-production-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-13",
+        "budget_ceiling": 42.25,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-13",
+        "terminal_predicate": "milestone 13 is terminal when its own predicate holds"
+      },
+      "step:journey-three-production-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-14",
+        "budget_ceiling": 1000,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-14",
+        "terminal_predicate": "milestone 14 is terminal when its own predicate holds"
+      },
+      "step:foundation-control-plane-child-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-15",
+        "budget_ceiling": 123456.789,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-15",
+        "terminal_predicate": "milestone 15 is terminal when its own predicate holds"
+      },
+      "step:assurance-fabric-child-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-16",
+        "budget_ceiling": 999999.99,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-16",
+        "terminal_predicate": "milestone 16 is terminal when its own predicate holds"
+      },
+      "step:successor-controls-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-17",
+        "budget_ceiling": 100000,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-17",
+        "terminal_predicate": "milestone 17 is terminal when its own predicate holds"
+      },
+      "step:rollout-readiness-child-outcome": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-18",
+        "budget_ceiling": 1000000000,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-18",
+        "terminal_predicate": "milestone 18 is terminal when its own predicate holds"
+      },
+      "step:final-pre-retirement-integration-adjudication": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-19",
+        "budget_ceiling": 2500000000,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-19",
+        "terminal_predicate": "milestone 19 is terminal when its own predicate holds"
+      },
+      "step:legacy-retirement-receipt": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-20",
+        "budget_ceiling": 999999999999,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-20",
+        "terminal_predicate": "milestone 20 is terminal when its own predicate holds"
+      },
+      "step:final-portfolio-outcome-reconciliation": {
+        "authority_class": "synthetic_authority",
+        "effect_class": "synthetic_no_effect",
+        "data_class": "synthetic_record_layer",
+        "budget_identity": "synthetic:budget-21",
+        "budget_ceiling": 1000000000000,
+        "model_floor": {
+          "provider": "synthetic",
+          "model": "synthetic",
+          "version": "1",
+          "effort": "high"
+        },
+        "recovery_ref": "recovery:synthetic-21",
+        "terminal_predicate": "milestone 21 is terminal when its own predicate holds"
+      }
+    },
+    "node_child_refs": {
+      "step:portfolio-constitution-accepted": "foundation-and-control-plane",
+      "step:wr48-frontier-flowing-production-outcome": "assurance-fabric",
+      "step:wr46-dissolution-outcome": "product-journeys",
+      "step:wr40-repository-outcome": "rollout-and-retirement",
+      "step:wr54-backup-recovery-outcome": "foundation-and-control-plane",
+      "step:scheduler-active-receipt": "assurance-fabric",
+      "step:gate-zero-read-only-outcome": "product-journeys",
+      "step:foundation-assurance-minimum-receipt": "rollout-and-retirement",
+      "step:j1-kernel-production-outcome": "foundation-and-control-plane",
+      "step:j1-core-production-outcome": "assurance-fabric",
+      "step:j1-pilot-and-dell-beta-outcome": "product-journeys",
+      "step:representative-workflow-production-outcome": "rollout-and-retirement",
+      "step:journey-two-production-outcome": "foundation-and-control-plane",
+      "step:journey-three-production-outcome": "assurance-fabric",
+      "step:foundation-control-plane-child-outcome": "product-journeys",
+      "step:assurance-fabric-child-outcome": "rollout-and-retirement",
+      "step:successor-controls-outcome": "foundation-and-control-plane",
+      "step:rollout-readiness-child-outcome": "assurance-fabric",
+      "step:final-pre-retirement-integration-adjudication": "product-journeys",
+      "step:legacy-retirement-receipt": "rollout-and-retirement",
+      "step:final-portfolio-outcome-reconciliation": "foundation-and-control-plane"
+    },
+    "child_inputs": {
+      "foundation-and-control-plane": {
+        "child_version": 3,
+        "accepted_plan_ref": "PLAN-a1b2c3d4e5f6-v3"
+      },
+      "assurance-fabric": {
+        "child_version": 1,
+        "accepted_plan_ref": "PLAN-b2c3d4e5f601-v1"
+      },
+      "product-journeys": {
+        "child_version": 2,
+        "accepted_plan_ref": "PLAN-c3d4e5f60112-v2"
+      },
+      "rollout-and-retirement": {
+        "child_version": 1,
+        "accepted_plan_ref": null
+      }
+    },
+    "js_expected": {
+      "graph_canonical_bytes": "{\"child_program_refs\":[\"foundation-and-control-plane\",\"assurance-fabric\",\"product-journeys\",\"rollout-and-retirement\"],\"edges\":[{\"from_node_ref\":\"step:assurance-fabric-child-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:assurance-fabric-child-outcome\",\"to_node_ref\":\"step:successor-controls-outcome\"},{\"from_node_ref\":\"step:final-pre-retirement-integration-adjudication\",\"to_node_ref\":\"step:legacy-retirement-receipt\"},{\"from_node_ref\":\"step:foundation-assurance-minimum-receipt\",\"to_node_ref\":\"step:foundation-control-plane-child-outcome\"},{\"from_node_ref\":\"step:foundation-assurance-minimum-receipt\",\"to_node_ref\":\"step:j1-kernel-production-outcome\"},{\"from_node_ref\":\"step:foundation-control-plane-child-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:foundation-control-plane-child-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:foundation-control-plane-child-outcome\",\"to_node_ref\":\"step:successor-controls-outcome\"},{\"from_node_ref\":\"step:gate-zero-read-only-outcome\",\"to_node_ref\":\"step:foundation-assurance-minimum-receipt\"},{\"from_node_ref\":\"step:j1-core-production-outcome\",\"to_node_ref\":\"step:j1-pilot-and-dell-beta-outcome\"},{\"from_node_ref\":\"step:j1-core-production-outcome\",\"to_node_ref\":\"step:journey-two-production-outcome\"},{\"from_node_ref\":\"step:j1-kernel-production-outcome\",\"to_node_ref\":\"step:j1-core-production-outcome\"},{\"from_node_ref\":\"step:j1-pilot-and-dell-beta-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:journey-three-production-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:journey-three-production-outcome\",\"to_node_ref\":\"step:representative-workflow-production-outcome\"},{\"from_node_ref\":\"step:journey-three-production-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:journey-two-production-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:journey-two-production-outcome\",\"to_node_ref\":\"step:journey-three-production-outcome\"},{\"from_node_ref\":\"step:journey-two-production-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:legacy-retirement-receipt\",\"to_node_ref\":\"step:final-portfolio-outcome-reconciliation\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:scheduler-active-receipt\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:wr40-repository-outcome\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:wr48-frontier-flowing-production-outcome\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:wr54-backup-recovery-outcome\"},{\"from_node_ref\":\"step:representative-workflow-production-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:representative-workflow-production-outcome\",\"to_node_ref\":\"step:foundation-control-plane-child-outcome\"},{\"from_node_ref\":\"step:representative-workflow-production-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:rollout-readiness-child-outcome\",\"to_node_ref\":\"step:final-pre-retirement-integration-adjudication\"},{\"from_node_ref\":\"step:scheduler-active-receipt\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"},{\"from_node_ref\":\"step:successor-controls-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:wr40-repository-outcome\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"},{\"from_node_ref\":\"step:wr46-dissolution-outcome\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"},{\"from_node_ref\":\"step:wr48-frontier-flowing-production-outcome\",\"to_node_ref\":\"step:wr46-dissolution-outcome\"},{\"from_node_ref\":\"step:wr54-backup-recovery-outcome\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"}],\"nodes\":[{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":5e-324,\"budget_identity\":\"synthetic:budget-1\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:portfolio-constitution-accepted\",\"ordinal\":1,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-1\",\"terminal_predicate\":\"milestone 1 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1e-7,\"budget_identity\":\"synthetic:budget-2\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr48-frontier-flowing-production-outcome\",\"ordinal\":2,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-2\",\"terminal_predicate\":\"milestone 2 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1.5e-7,\"budget_identity\":\"synthetic:budget-3\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr46-dissolution-outcome\",\"ordinal\":3,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-3\",\"terminal_predicate\":\"milestone 3 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.000001,\"budget_identity\":\"synthetic:budget-4\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr40-repository-outcome\",\"ordinal\":4,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-4\",\"terminal_predicate\":\"milestone 4 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.00001,\"budget_identity\":\"synthetic:budget-5\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr54-backup-recovery-outcome\",\"ordinal\":5,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-5\",\"terminal_predicate\":\"milestone 5 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.0001,\"budget_identity\":\"synthetic:budget-6\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:scheduler-active-receipt\",\"ordinal\":6,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-6\",\"terminal_predicate\":\"milestone 6 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.5,\"budget_identity\":\"synthetic:budget-7\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:gate-zero-read-only-outcome\",\"ordinal\":7,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-7\",\"terminal_predicate\":\"milestone 7 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":12.5,\"budget_identity\":\"synthetic:budget-8\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:foundation-assurance-minimum-receipt\",\"ordinal\":8,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-8\",\"terminal_predicate\":\"milestone 8 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":3.141592653589793,\"budget_identity\":\"synthetic:budget-9\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:j1-kernel-production-outcome\",\"ordinal\":9,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-9\",\"terminal_predicate\":\"milestone 9 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0,\"budget_identity\":\"synthetic:budget-10\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:j1-core-production-outcome\",\"ordinal\":10,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-10\",\"terminal_predicate\":\"milestone 10 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1,\"budget_identity\":\"synthetic:budget-11\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:j1-pilot-and-dell-beta-outcome\",\"ordinal\":11,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-11\",\"terminal_predicate\":\"milestone 11 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":7,\"budget_identity\":\"synthetic:budget-12\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:representative-workflow-production-outcome\",\"ordinal\":12,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-12\",\"terminal_predicate\":\"milestone 12 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":42.25,\"budget_identity\":\"synthetic:budget-13\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:journey-two-production-outcome\",\"ordinal\":13,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-13\",\"terminal_predicate\":\"milestone 13 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1000,\"budget_identity\":\"synthetic:budget-14\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:journey-three-production-outcome\",\"ordinal\":14,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-14\",\"terminal_predicate\":\"milestone 14 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":123456.789,\"budget_identity\":\"synthetic:budget-15\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:foundation-control-plane-child-outcome\",\"ordinal\":15,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-15\",\"terminal_predicate\":\"milestone 15 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":999999.99,\"budget_identity\":\"synthetic:budget-16\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:assurance-fabric-child-outcome\",\"ordinal\":16,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-16\",\"terminal_predicate\":\"milestone 16 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":100000,\"budget_identity\":\"synthetic:budget-17\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:successor-controls-outcome\",\"ordinal\":17,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-17\",\"terminal_predicate\":\"milestone 17 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1000000000,\"budget_identity\":\"synthetic:budget-18\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:rollout-readiness-child-outcome\",\"ordinal\":18,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-18\",\"terminal_predicate\":\"milestone 18 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":2500000000,\"budget_identity\":\"synthetic:budget-19\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:final-pre-retirement-integration-adjudication\",\"ordinal\":19,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-19\",\"terminal_predicate\":\"milestone 19 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":999999999999,\"budget_identity\":\"synthetic:budget-20\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:legacy-retirement-receipt\",\"ordinal\":20,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-20\",\"terminal_predicate\":\"milestone 20 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1000000000000,\"budget_identity\":\"synthetic:budget-21\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:final-portfolio-outcome-reconciliation\",\"ordinal\":21,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-21\",\"terminal_predicate\":\"milestone 21 is terminal when its own predicate holds\"}],\"portfolio_ref\":\"WR-000062\",\"revision_version\":1,\"schema_version\":\"doctorcre-v5-portfolio-revision.v1\",\"source_digests\":{\"constitution\":\"sha256:925f501cc155fd48f320ea7a7cf66cc5d4a90738838a93a3506010199c6ad505\",\"design\":\"sha256:9bbdc2f5124fc3939c883e572f5c9077b347804b030f313e60756c28dfab07a6\",\"integration\":\"sha256:efd15770da5db52b3d21c4e829db03fafa70b354e01b3c46ff5db15f57dfcdff\",\"requirements\":\"sha256:51e0a89442fda95e537738e8321f9301af8ef48cf79d5ddb979c63421e8990ec\"}}",
+      "graph_digest": "sha256:d5d47ff3602047e963b4c62e85ebbf9f0a3e21c649b383659deb40aa8cf50a84",
+      "accepted_canonical_bytes": "{\"child_bindings\":[{\"accepted_plan_ref\":\"PLAN-a1b2c3d4e5f6-v3\",\"child_digest\":\"sha256:805bbd4489654783c10dfc900f5d9f2314a834bdc766fde90824b31735d3e436\",\"child_ordinal\":0,\"child_ref\":\"foundation-and-control-plane\",\"child_version\":3},{\"accepted_plan_ref\":\"PLAN-b2c3d4e5f601-v1\",\"child_digest\":\"sha256:f870b0f385995f699c161dfebeb71fdf56ed91ec3dfcc3831fee689260addd3f\",\"child_ordinal\":1,\"child_ref\":\"assurance-fabric\",\"child_version\":1},{\"accepted_plan_ref\":\"PLAN-c3d4e5f60112-v2\",\"child_digest\":\"sha256:d04bf2b06da8af81849ad9cd94637fc1e366db1ff2a48bd6827ef92c08a6482c\",\"child_ordinal\":2,\"child_ref\":\"product-journeys\",\"child_version\":2},{\"accepted_plan_ref\":null,\"child_digest\":\"sha256:d34ab39373364a071f9b3ef1437af327075d30150bda1012f0361aa06f5cbae4\",\"child_ordinal\":3,\"child_ref\":\"rollout-and-retirement\",\"child_version\":1}],\"graph\":{\"child_program_refs\":[\"foundation-and-control-plane\",\"assurance-fabric\",\"product-journeys\",\"rollout-and-retirement\"],\"edges\":[{\"from_node_ref\":\"step:assurance-fabric-child-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:assurance-fabric-child-outcome\",\"to_node_ref\":\"step:successor-controls-outcome\"},{\"from_node_ref\":\"step:final-pre-retirement-integration-adjudication\",\"to_node_ref\":\"step:legacy-retirement-receipt\"},{\"from_node_ref\":\"step:foundation-assurance-minimum-receipt\",\"to_node_ref\":\"step:foundation-control-plane-child-outcome\"},{\"from_node_ref\":\"step:foundation-assurance-minimum-receipt\",\"to_node_ref\":\"step:j1-kernel-production-outcome\"},{\"from_node_ref\":\"step:foundation-control-plane-child-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:foundation-control-plane-child-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:foundation-control-plane-child-outcome\",\"to_node_ref\":\"step:successor-controls-outcome\"},{\"from_node_ref\":\"step:gate-zero-read-only-outcome\",\"to_node_ref\":\"step:foundation-assurance-minimum-receipt\"},{\"from_node_ref\":\"step:j1-core-production-outcome\",\"to_node_ref\":\"step:j1-pilot-and-dell-beta-outcome\"},{\"from_node_ref\":\"step:j1-core-production-outcome\",\"to_node_ref\":\"step:journey-two-production-outcome\"},{\"from_node_ref\":\"step:j1-kernel-production-outcome\",\"to_node_ref\":\"step:j1-core-production-outcome\"},{\"from_node_ref\":\"step:j1-pilot-and-dell-beta-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:journey-three-production-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:journey-three-production-outcome\",\"to_node_ref\":\"step:representative-workflow-production-outcome\"},{\"from_node_ref\":\"step:journey-three-production-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:journey-two-production-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:journey-two-production-outcome\",\"to_node_ref\":\"step:journey-three-production-outcome\"},{\"from_node_ref\":\"step:journey-two-production-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:legacy-retirement-receipt\",\"to_node_ref\":\"step:final-portfolio-outcome-reconciliation\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:scheduler-active-receipt\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:wr40-repository-outcome\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:wr48-frontier-flowing-production-outcome\"},{\"from_node_ref\":\"step:portfolio-constitution-accepted\",\"to_node_ref\":\"step:wr54-backup-recovery-outcome\"},{\"from_node_ref\":\"step:representative-workflow-production-outcome\",\"to_node_ref\":\"step:assurance-fabric-child-outcome\"},{\"from_node_ref\":\"step:representative-workflow-production-outcome\",\"to_node_ref\":\"step:foundation-control-plane-child-outcome\"},{\"from_node_ref\":\"step:representative-workflow-production-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:rollout-readiness-child-outcome\",\"to_node_ref\":\"step:final-pre-retirement-integration-adjudication\"},{\"from_node_ref\":\"step:scheduler-active-receipt\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"},{\"from_node_ref\":\"step:successor-controls-outcome\",\"to_node_ref\":\"step:rollout-readiness-child-outcome\"},{\"from_node_ref\":\"step:wr40-repository-outcome\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"},{\"from_node_ref\":\"step:wr46-dissolution-outcome\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"},{\"from_node_ref\":\"step:wr48-frontier-flowing-production-outcome\",\"to_node_ref\":\"step:wr46-dissolution-outcome\"},{\"from_node_ref\":\"step:wr54-backup-recovery-outcome\",\"to_node_ref\":\"step:gate-zero-read-only-outcome\"}],\"nodes\":[{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":5e-324,\"budget_identity\":\"synthetic:budget-1\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:portfolio-constitution-accepted\",\"ordinal\":1,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-1\",\"terminal_predicate\":\"milestone 1 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1e-7,\"budget_identity\":\"synthetic:budget-2\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr48-frontier-flowing-production-outcome\",\"ordinal\":2,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-2\",\"terminal_predicate\":\"milestone 2 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1.5e-7,\"budget_identity\":\"synthetic:budget-3\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr46-dissolution-outcome\",\"ordinal\":3,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-3\",\"terminal_predicate\":\"milestone 3 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.000001,\"budget_identity\":\"synthetic:budget-4\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr40-repository-outcome\",\"ordinal\":4,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-4\",\"terminal_predicate\":\"milestone 4 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.00001,\"budget_identity\":\"synthetic:budget-5\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:wr54-backup-recovery-outcome\",\"ordinal\":5,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-5\",\"terminal_predicate\":\"milestone 5 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.0001,\"budget_identity\":\"synthetic:budget-6\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:scheduler-active-receipt\",\"ordinal\":6,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-6\",\"terminal_predicate\":\"milestone 6 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0.5,\"budget_identity\":\"synthetic:budget-7\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:gate-zero-read-only-outcome\",\"ordinal\":7,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-7\",\"terminal_predicate\":\"milestone 7 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":12.5,\"budget_identity\":\"synthetic:budget-8\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:foundation-assurance-minimum-receipt\",\"ordinal\":8,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-8\",\"terminal_predicate\":\"milestone 8 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":3.141592653589793,\"budget_identity\":\"synthetic:budget-9\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:j1-kernel-production-outcome\",\"ordinal\":9,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-9\",\"terminal_predicate\":\"milestone 9 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":0,\"budget_identity\":\"synthetic:budget-10\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:j1-core-production-outcome\",\"ordinal\":10,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-10\",\"terminal_predicate\":\"milestone 10 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1,\"budget_identity\":\"synthetic:budget-11\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:j1-pilot-and-dell-beta-outcome\",\"ordinal\":11,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-11\",\"terminal_predicate\":\"milestone 11 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":7,\"budget_identity\":\"synthetic:budget-12\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:representative-workflow-production-outcome\",\"ordinal\":12,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-12\",\"terminal_predicate\":\"milestone 12 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":42.25,\"budget_identity\":\"synthetic:budget-13\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:journey-two-production-outcome\",\"ordinal\":13,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-13\",\"terminal_predicate\":\"milestone 13 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1000,\"budget_identity\":\"synthetic:budget-14\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:journey-three-production-outcome\",\"ordinal\":14,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-14\",\"terminal_predicate\":\"milestone 14 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":123456.789,\"budget_identity\":\"synthetic:budget-15\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:foundation-control-plane-child-outcome\",\"ordinal\":15,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-15\",\"terminal_predicate\":\"milestone 15 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":999999.99,\"budget_identity\":\"synthetic:budget-16\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:assurance-fabric-child-outcome\",\"ordinal\":16,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-16\",\"terminal_predicate\":\"milestone 16 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":100000,\"budget_identity\":\"synthetic:budget-17\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:successor-controls-outcome\",\"ordinal\":17,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-17\",\"terminal_predicate\":\"milestone 17 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1000000000,\"budget_identity\":\"synthetic:budget-18\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:rollout-readiness-child-outcome\",\"ordinal\":18,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-18\",\"terminal_predicate\":\"milestone 18 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":2500000000,\"budget_identity\":\"synthetic:budget-19\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:final-pre-retirement-integration-adjudication\",\"ordinal\":19,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-19\",\"terminal_predicate\":\"milestone 19 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":999999999999,\"budget_identity\":\"synthetic:budget-20\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:legacy-retirement-receipt\",\"ordinal\":20,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-20\",\"terminal_predicate\":\"milestone 20 is terminal when its own predicate holds\"},{\"authority_class\":\"synthetic_authority\",\"budget_ceiling\":1000000000000,\"budget_identity\":\"synthetic:budget-21\",\"data_class\":\"synthetic_record_layer\",\"effect_class\":\"synthetic_no_effect\",\"model_floor\":{\"effort\":\"high\",\"model\":\"synthetic\",\"provider\":\"synthetic\",\"version\":\"1\"},\"node_kind\":\"milestone\",\"node_ref\":\"step:final-portfolio-outcome-reconciliation\",\"ordinal\":21,\"parent_ref\":\"WR-000062\",\"recovery_ref\":\"recovery:synthetic-21\",\"terminal_predicate\":\"milestone 21 is terminal when its own predicate holds\"}],\"portfolio_ref\":\"WR-000062\",\"revision_version\":1,\"schema_version\":\"doctorcre-v5-portfolio-revision.v1\",\"source_digests\":{\"constitution\":\"sha256:925f501cc155fd48f320ea7a7cf66cc5d4a90738838a93a3506010199c6ad505\",\"design\":\"sha256:9bbdc2f5124fc3939c883e572f5c9077b347804b030f313e60756c28dfab07a6\",\"integration\":\"sha256:efd15770da5db52b3d21c4e829db03fafa70b354e01b3c46ff5db15f57dfcdff\",\"requirements\":\"sha256:51e0a89442fda95e537738e8321f9301af8ef48cf79d5ddb979c63421e8990ec\"}},\"schema_version\":\"doctorcre-v5-portfolio-accepted-revision.v1\"}",
+      "accepted_digest": "sha256:db2d21f6e0640f5797539673c609365b06611cd4dd959e68d475f25961f34984",
+      "child_bindings": [
+        {
+          "child_ref": "foundation-and-control-plane",
+          "child_ordinal": 0,
+          "child_version": 3,
+          "child_digest": "sha256:805bbd4489654783c10dfc900f5d9f2314a834bdc766fde90824b31735d3e436",
+          "accepted_plan_ref": "PLAN-a1b2c3d4e5f6-v3"
+        },
+        {
+          "child_ref": "assurance-fabric",
+          "child_ordinal": 1,
+          "child_version": 1,
+          "child_digest": "sha256:f870b0f385995f699c161dfebeb71fdf56ed91ec3dfcc3831fee689260addd3f",
+          "accepted_plan_ref": "PLAN-b2c3d4e5f601-v1"
+        },
+        {
+          "child_ref": "product-journeys",
+          "child_ordinal": 2,
+          "child_version": 2,
+          "child_digest": "sha256:d04bf2b06da8af81849ad9cd94637fc1e366db1ff2a48bd6827ef92c08a6482c",
+          "accepted_plan_ref": "PLAN-c3d4e5f60112-v2"
+        },
+        {
+          "child_ref": "rollout-and-retirement",
+          "child_ordinal": 3,
+          "child_version": 1,
+          "child_digest": "sha256:d34ab39373364a071f9b3ef1437af327075d30150bda1012f0361aa06f5cbae4",
+          "accepted_plan_ref": null
+        }
+      ],
+      "child_member_node_refs": {
+        "foundation-and-control-plane": [
+          "step:final-portfolio-outcome-reconciliation",
+          "step:j1-kernel-production-outcome",
+          "step:journey-two-production-outcome",
+          "step:portfolio-constitution-accepted",
+          "step:successor-controls-outcome",
+          "step:wr54-backup-recovery-outcome"
+        ],
+        "assurance-fabric": [
+          "step:j1-core-production-outcome",
+          "step:journey-three-production-outcome",
+          "step:rollout-readiness-child-outcome",
+          "step:scheduler-active-receipt",
+          "step:wr48-frontier-flowing-production-outcome"
+        ],
+        "product-journeys": [
+          "step:final-pre-retirement-integration-adjudication",
+          "step:foundation-control-plane-child-outcome",
+          "step:gate-zero-read-only-outcome",
+          "step:j1-pilot-and-dell-beta-outcome",
+          "step:wr46-dissolution-outcome"
+        ],
+        "rollout-and-retirement": [
+          "step:assurance-fabric-child-outcome",
+          "step:foundation-assurance-minimum-receipt",
+          "step:legacy-retirement-receipt",
+          "step:representative-workflow-production-outcome",
+          "step:wr40-repository-outcome"
+        ]
+      },
+      "budget_ceiling_canonical_text": {
+        "step:portfolio-constitution-accepted": "5e-324",
+        "step:wr48-frontier-flowing-production-outcome": "1e-7",
+        "step:wr46-dissolution-outcome": "1.5e-7",
+        "step:wr40-repository-outcome": "0.000001",
+        "step:wr54-backup-recovery-outcome": "0.00001",
+        "step:scheduler-active-receipt": "0.0001",
+        "step:gate-zero-read-only-outcome": "0.5",
+        "step:foundation-assurance-minimum-receipt": "12.5",
+        "step:j1-kernel-production-outcome": "3.141592653589793",
+        "step:j1-core-production-outcome": "0",
+        "step:j1-pilot-and-dell-beta-outcome": "1",
+        "step:representative-workflow-production-outcome": "7",
+        "step:journey-two-production-outcome": "42.25",
+        "step:journey-three-production-outcome": "1000",
+        "step:foundation-control-plane-child-outcome": "123456.789",
+        "step:assurance-fabric-child-outcome": "999999.99",
+        "step:successor-controls-outcome": "100000",
+        "step:rollout-readiness-child-outcome": "1000000000",
+        "step:final-pre-retirement-integration-adjudication": "2500000000",
+        "step:legacy-retirement-receipt": "999999999999",
+        "step:final-portfolio-outcome-reconciliation": "1000000000000"
+      }
+    }
+  }
+}

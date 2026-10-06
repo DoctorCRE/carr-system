@@ -193,6 +193,7 @@ with tempfile.TemporaryDirectory() as raw:
         raise RuntimeError(f"coordinator E2E fixture failed: live={e2e_live.stderr!r} canary={e2e_canary.stderr!r}")
     e2e_rows = [json.loads(line) for line in e2e_log.read_text(encoding="utf-8").splitlines()]
     check("executable parent-to-child live and canary paths return isolated receipts", e2e_live.returncode == 0 and e2e_canary.returncode == 0 and json.loads(e2e_live.stdout).get("mode") == "live" and json.loads(e2e_canary.stdout).get("mode") == "canary")
+    check("parent-to-child result carries a valid skipped-attendee report (0735)", all(coordinator._valid_unknown_report(json.loads(run.stdout).get("unknown_attendees")) for run in (e2e_live, e2e_canary)))
     check("parent claim sees only the jobs credential", [row["db_env"] for row in e2e_rows if row["kind"] == "parent_claim_env"] == [["CARR_DB_JOBS_URL"], ["CARR_DB_JOBS_URL"]])
     check("child database calls receive no ambient DB credential", all(row["db_env"] == [] for row in e2e_rows if row["kind"] in {"connect", "contract", "resolver", "attestor", "live_ingest", "canary_ingest"}))
     check("collector receives no database credential", all(row["db_env"] == [] for row in e2e_rows if row["kind"] == "collector_env"))

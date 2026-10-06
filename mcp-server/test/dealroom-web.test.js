@@ -11,6 +11,7 @@ const DEALROOM_INDEX_PATH = fileURLToPath(new URL("../../dealroom/index.html", i
 const PRODUCTION_HOST = "dealroom.doctorcre.com";
 const APP_HOST = "app.doctorcre.com";
 const STAGING_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev";
+const DOCTORCRE_STAGING_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev";
 
 class MemoryKv {
   constructor() { this.values = new Map(); }
@@ -94,12 +95,15 @@ test("Deal Room host is explicit per environment and request matching fails clos
   const wrangler = await readFile(WRANGLER_PATH, "utf8");
   assert.match(wrangler, /\[vars\]\nCARR_ENV = "production"\nAPP_HOST = "app\.doctorcre\.com"\nLEGACY_DEALROOM_HOST = "dealroom\.doctorcre\.com"/);
   assert.match(wrangler,
-    /\[env\.staging\.vars\]\nCARR_ENV = "staging"\nAPP_HOST = "carr-mcp-staging\.joe-bookout-carr-us\.workers\.dev"/);
+    /\[env\.staging\.vars\]\nCARR_ENV = "staging"\nAPP_HOST = "carr-mcp-staging\.joe-bookout-carr-us\.workers\.dev"[\s\S]*DOCTORCRE_APP_HOST = "doctorcre-app-staging\.joe-bookout-carr-us\.workers\.dev"/);
 
   assert.equal(isDealroomRequest(new Request(`https://${PRODUCTION_HOST}/`), { DEALROOM_HOST: PRODUCTION_HOST }), true);
   assert.equal(isDealroomRequest(new Request(`https://${APP_HOST}/`), { APP_HOST, LEGACY_DEALROOM_HOST: PRODUCTION_HOST }), true);
   assert.equal(isDealroomRequest(new Request(`https://${PRODUCTION_HOST}/`), { APP_HOST, LEGACY_DEALROOM_HOST: PRODUCTION_HOST }), true);
   assert.equal(isDealroomRequest(new Request(`https://${STAGING_HOST}/`), { DEALROOM_HOST: STAGING_HOST }), true);
+  assert.equal(isDealroomRequest(new Request(`https://${DOCTORCRE_STAGING_HOST}/`), {
+    APP_HOST: STAGING_HOST, DOCTORCRE_APP_HOST: DOCTORCRE_STAGING_HOST,
+  }), true);
   assert.equal(isDealroomRequest(new Request(`https://${STAGING_HOST}/`), { DEALROOM_HOST: PRODUCTION_HOST }), false);
   assert.equal(isDealroomRequest(new Request(`https://${PRODUCTION_HOST}/`), {}), false);
   assert.equal(isDealroomRequest(new Request(`https://${PRODUCTION_HOST}/`), { DEALROOM_HOST: "https://bad.example" }), false);
@@ -111,6 +115,85 @@ test("Deal Room host is explicit per environment and request matching fails clos
     ...env(), DEALROOM_HOST: undefined,
   }, {});
   assert.equal(missing.status, 404);
+});
+
+test("Jev deal read requires a partner session and same-origin one-deal request", async () => {
+  const environment = env();
+  environment.TYPESAFE_API_KEY = "synthetic";
+  let readCount = 0;
+  const handler = createDealroomHandler({
+    ...identityOverrides("joe.bookout.carr.us@gmail.com"),
+    jevDealRecordReader: async (deal) => { readCount++; return { deal_id: deal }; },
+    jevDealRead: async () => ({ schema: "carr.jev-deal-reading.v1", judged: false,
+      reason: "insufficient_recorded_evidence" }),
+  });
+  const deal = "00000000-0000-4000-8000-000000000001";
+  const url = `https://${PRODUCTION_HOST}/api/v1/jev-deal-reading`;
+  const anonymous = await handler.fetch(new Request(url, { method: "POST", body: JSON.stringify({ deal }) }), environment, {});
+  assert.equal(anonymous.status, 401);
+  const callback = await login(handler, environment, "joe.bookout.carr.us@gmail.com");
+  const cookie = namedCookie(callback, "__Host-dealroom_session");
+  const post = (origin, body) => handler.fetch(new Request(url, { method: "POST",
+    headers: { cookie, origin, "content-type": "application/json" }, body: JSON.stringify(body),
+  }), environment, {});
+  assert.equal((await post("https://elsewhere.example", { deal })).status, 403);
+  assert.equal((await post(`https://${PRODUCTION_HOST}`, { deal: "not-an-id" })).status, 400);
+  assert.equal(readCount, 0);
+  const response = await post(`https://${PRODUCTION_HOST}`, { deal });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).reason, "insufficient_recorded_evidence");
+  assert.equal(readCount, 1);
+});
+
+test("independent DoctorCRE host owns its OAuth origin and cannot replay sessions across allowed hosts", async () => {
+  const environment = {
+    ...env(STAGING_HOST),
+    APP_HOST: STAGING_HOST,
+    DOCTORCRE_APP_HOST: DOCTORCRE_STAGING_HOST,
+    DEALROOM_PROGRAM6_ACTIONS_ENABLED: "true",
+  };
+  let tourHost = null;
+  const handler = createDealroomHandler({
+    ...identityOverrides("joe.bookout.carr.us@gmail.com"),
+    tourHandler: { fetch: async (_request, envArg) => {
+      tourHost = envArg.APP_HOST;
+      return new Response(JSON.stringify({ ok: true }));
+    } },
+  });
+  const callback = await login(handler, environment, "joe.bookout.carr.us@gmail.com", {
+    host: DOCTORCRE_STAGING_HOST,
+    returnTo: "/system-work.html",
+  });
+  assert.equal(callback.headers.get("location"), `https://${DOCTORCRE_STAGING_HOST}/system-work.html`);
+  const session = namedCookie(callback, "__Host-dealroom_session");
+
+  const bootstrapResponse = await handler.fetch(new Request(
+    `https://${DOCTORCRE_STAGING_HOST}/api/system-work/session`, { headers: { cookie: session } },
+  ), environment, {});
+  assert.equal(bootstrapResponse.status, 200);
+  const bootstrap = await bootstrapResponse.json();
+  const target = { action: "accept-ready-plan", human_ref: "WR-41", base_version: 3,
+    idempotency_key: "31000000-0000-0000-0000-000000000041", plan_hash: `sha256:${"a".repeat(64)}` };
+  const accepted = await handler.fetch(new Request(
+    `https://${DOCTORCRE_STAGING_HOST}/api/system-work/challenge`, {
+      method: "POST",
+      headers: { cookie: session, origin: `https://${DOCTORCRE_STAGING_HOST}`,
+        "sec-fetch-site": "same-origin", "content-type": "application/json", "x-carr-csrf": bootstrap.csrf_token },
+      body: JSON.stringify(target),
+    },
+  ), environment, {});
+  assert.equal(accepted.status, 200);
+
+  const tour = await handler.fetch(new Request(
+    `https://${DOCTORCRE_STAGING_HOST}/api/tours/library`, { headers: { cookie: session } },
+  ), environment, {});
+  assert.equal(tour.status, 200);
+  assert.equal(tourHost, DOCTORCRE_STAGING_HOST);
+
+  const crossHostReplay = await handler.fetch(new Request(
+    `https://${STAGING_HOST}/api/system-work/session`, { headers: { cookie: session } },
+  ), environment, {});
+  assert.equal(crossHostReplay.status, 401);
 });
 
 test("legacy Deal Room host redirects only browser document paths to the canonical app", async () => {
@@ -482,6 +565,10 @@ test("manifest and service worker are public with PWA-safe headers and offline t
   assert.doesNotMatch(swResponse.headers.get("content-security-policy"), /unsafe-inline/);
   assert.equal(swResponse.headers.get("x-content-type-options"), "nosniff");
   assert.equal(swResponse.headers.get("x-frame-options"), "DENY");
+  const csp = swResponse.headers.get("content-security-policy");
+  assert.match(csp, /(^|; )connect-src 'self'(;|$)/, "connect-src is same-origin only");
+  assert.doesNotMatch(csp, /127\.0\.0\.1|localhost/, "no loopback target in the hosted CSP");
+  assert.equal(swResponse.headers.get("referrer-policy"), "no-referrer");
   const sw = await swResponse.text();
   assert.match(sw, /DATA_PATHS/);
   assert.match(sw, /state: "reconnecting"/);

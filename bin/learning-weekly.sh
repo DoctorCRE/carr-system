@@ -48,6 +48,8 @@ unset CARR_VAULT
 #  · db.env carries the least-privilege exporter URL the read-only jobs ride.
 #  · BLOTATO_API_KEY has lived in ~/.zprofile since the social-media-manager
 #    skill was built; this order introduces no new secret.
+. "$REPO/bin/routine-credential-env.sh"
+carr_require_sourceable_db_env "learning-weekly" || exit $?
 [ -f "$HOME/.config/carr/db.env" ] && { set -a; . "$HOME/.config/carr/db.env"; set +a; }
 [ -f "$HOME/.zprofile" ] && . "$HOME/.zprofile" >/dev/null 2>&1
 

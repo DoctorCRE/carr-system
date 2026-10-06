@@ -15,8 +15,8 @@ from pathlib import Path
 
 import openpyxl
 
-VAULT_DEFAULT = ("/Users/booko/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/"
-                 "My Drive/CARR AI")
+VAULT_DEFAULT = str(Path.home() / "Library" / "CloudStorage"
+                    / "GoogleDrive-joe.bookout.carr.us@gmail.com" / "My Drive" / "CARR AI")
 REPO = Path(__file__).resolve().parent.parent
 
 

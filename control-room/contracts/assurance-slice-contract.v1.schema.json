@@ -1,0 +1,707 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "carr-assurance-slice-contract-v1",
+  "contract": "carr-assurance-slice-contract",
+  "version": "1.0.0",
+  "x-carr-foundation-revision": "1.1.0",
+  "status": "phase1_contract_foundation_not_deployed",
+  "description": "Exact path, test, evidence, review, rollback, rule, repository, and lease extension for one canonical Engineering Slice. Arrays marked x-carr-set are canonicalized as unordered sets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_digest",
+    "ownership_contract_digest",
+    "work_request",
+    "accepted_plan_revision",
+    "engineering_slice_plan_digest",
+    "slice_ref",
+    "outcome",
+    "risk",
+    "path_claims",
+    "forbidden_paths",
+    "dependencies",
+    "required_tests",
+    "evidence_requirements",
+    "reviewer_policy",
+    "observable_output",
+    "rollback",
+    "release_class",
+    "unfinished_work",
+    "repository_binding",
+    "rule_snapshot_binding",
+    "lease_binding",
+    "executor_identity"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "assurance-slice-contract.v1"
+    },
+    "contract_digest": {
+      "$ref": "#/$defs/Digest"
+    },
+    "ownership_contract_digest": {
+      "$ref": "#/$defs/Digest"
+    },
+    "work_request": {
+      "$ref": "#/$defs/WorkBinding"
+    },
+    "accepted_plan_revision": {
+      "$ref": "#/$defs/PlanBinding"
+    },
+    "engineering_slice_plan_digest": {
+      "$ref": "#/$defs/Digest"
+    },
+    "slice_ref": {
+      "$ref": "#/$defs/Id"
+    },
+    "outcome": {
+      "type": "string",
+      "minLength": 1
+    },
+    "risk": {
+      "$ref": "#/$defs/Risk"
+    },
+    "path_claims": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "x-carr-set": true,
+      "items": {
+        "$ref": "#/$defs/PathClaim"
+      }
+    },
+    "forbidden_paths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "x-carr-set": true,
+      "items": {
+        "$ref": "#/$defs/ForbiddenPath"
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "uniqueItems": true,
+      "x-carr-set": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slice_ref",
+          "required_state"
+        ],
+        "properties": {
+          "slice_ref": {
+            "$ref": "#/$defs/Id"
+          },
+          "required_state": {
+            "enum": [
+              "completed",
+              "independently_verified"
+            ]
+          }
+        }
+      }
+    },
+    "required_tests": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "x-carr-set": true,
+      "items": {
+        "$ref": "#/$defs/RequiredTest"
+      }
+    },
+    "evidence_requirements": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "x-carr-set": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evidence_ref",
+          "artifact_kind",
+          "required_fields"
+        ],
+        "properties": {
+          "evidence_ref": {
+            "$ref": "#/$defs/Id"
+          },
+          "artifact_kind": {
+            "$ref": "#/$defs/Id"
+          },
+          "required_fields": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "reviewer_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_independent_reviewers",
+        "executor_actor_ref",
+        "executor_session_ref",
+        "owner_acceptance_is_review",
+        "distinct_actor_and_session"
+      ],
+      "properties": {
+        "minimum_independent_reviewers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "executor_actor_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "executor_session_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "owner_acceptance_is_review": {
+          "const": false
+        },
+        "distinct_actor_and_session": {
+          "const": true
+        }
+      }
+    },
+    "observable_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "evidence_ref"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/Id"
+        }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy",
+        "argv",
+        "cwd",
+        "observable_success"
+      ],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "argv": {
+          "$ref": "#/$defs/Argv"
+        },
+        "cwd": {
+          "$ref": "#/$defs/RepoPath"
+        },
+        "observable_success": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "release_class": {
+      "enum": [
+        "none",
+        "repository_only",
+        "runtime",
+        "production"
+      ]
+    },
+    "unfinished_work": {
+      "type": "array",
+      "uniqueItems": true,
+      "x-carr-set": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "repository_binding": {
+      "$ref": "#/$defs/Repository"
+    },
+    "rule_snapshot_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshot_ref",
+        "snapshot_digest"
+      ],
+      "properties": {
+        "snapshot_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "snapshot_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "lease_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "lease_id",
+        "fencing_generation",
+        "holder_session_id",
+        "holder_host_id"
+      ],
+      "properties": {
+        "lease_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "fencing_generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "holder_session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "holder_host_id": {
+          "$ref": "#/$defs/Id"
+        }
+      }
+    },
+    "executor_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actor_ref",
+        "session_ref",
+        "host_ref"
+      ],
+      "properties": {
+        "actor_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "host_ref": {
+          "$ref": "#/$defs/Id"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "OwnershipContractPreimage": {
+      "description": "Closed normalized prelease ownership contract. It contains every assurance contract field except contract_digest, ownership_contract_digest, and the entire lease_binding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "work_request",
+        "accepted_plan_revision",
+        "engineering_slice_plan_digest",
+        "slice_ref",
+        "outcome",
+        "risk",
+        "path_claims",
+        "forbidden_paths",
+        "dependencies",
+        "required_tests",
+        "evidence_requirements",
+        "reviewer_policy",
+        "observable_output",
+        "rollback",
+        "release_class",
+        "unfinished_work",
+        "repository_binding",
+        "rule_snapshot_binding",
+        "executor_identity"
+      ],
+      "properties": {
+        "schema_version": { "$ref": "#/properties/schema_version" },
+        "work_request": { "$ref": "#/properties/work_request" },
+        "accepted_plan_revision": { "$ref": "#/properties/accepted_plan_revision" },
+        "engineering_slice_plan_digest": { "$ref": "#/properties/engineering_slice_plan_digest" },
+        "slice_ref": { "$ref": "#/properties/slice_ref" },
+        "outcome": { "$ref": "#/properties/outcome" },
+        "risk": { "$ref": "#/properties/risk" },
+        "path_claims": { "$ref": "#/properties/path_claims" },
+        "forbidden_paths": { "$ref": "#/properties/forbidden_paths" },
+        "dependencies": { "$ref": "#/properties/dependencies" },
+        "required_tests": { "$ref": "#/properties/required_tests" },
+        "evidence_requirements": { "$ref": "#/properties/evidence_requirements" },
+        "reviewer_policy": { "$ref": "#/properties/reviewer_policy" },
+        "observable_output": { "$ref": "#/properties/observable_output" },
+        "rollback": { "$ref": "#/properties/rollback" },
+        "release_class": { "$ref": "#/properties/release_class" },
+        "unfinished_work": { "$ref": "#/properties/unfinished_work" },
+        "repository_binding": { "$ref": "#/properties/repository_binding" },
+        "rule_snapshot_binding": { "$ref": "#/properties/rule_snapshot_binding" },
+        "executor_identity": { "$ref": "#/properties/executor_identity" }
+      }
+    },
+    "Id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{2,127}$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "RepoPath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*//)(?!.*/$)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\*?\\[\\]{}!])[\\x21-\\x7e]+$"
+    },
+    "WorkBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "state_version",
+        "canonical_record_digest"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "state_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "canonical_record_digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "PlanBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "digest"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Id"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_id",
+        "commit_sha",
+        "tree_sha"
+      ],
+      "properties": {
+        "repository_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "commit_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "tree_sha": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      }
+    },
+    "PathClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "mode",
+        "operation"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/RepoPath"
+        },
+        "mode": {
+          "enum": [
+            "file",
+            "tree"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "write",
+            "rename_source",
+            "rename_destination"
+          ]
+        }
+      }
+    },
+    "ForbiddenPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "mode"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/RepoPath"
+        },
+        "mode": {
+          "enum": [
+            "file",
+            "tree"
+          ]
+        }
+      }
+    },
+    "Argv": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "RequiredTest": {
+      "description": "A command refinement of one planned check in the bound Engineering Slice; check_ref coverage must be exact.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check_ref",
+        "planned_check_digest",
+        "check_profile_ref",
+        "runner",
+        "test_artifact",
+        "environment",
+        "environment_gate",
+        "argv",
+        "cwd",
+        "causal_failure",
+        "evidence_fields"
+      ],
+      "properties": {
+        "check_ref": {
+          "const": "check:compiler"
+        },
+        "planned_check_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "check_profile_ref": {
+          "const": "check-profile:assurance-compiler-v1"
+        },
+        "runner": {
+          "const": "python_pytest"
+        },
+        "test_artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "digest"
+          ],
+          "properties": {
+            "path": {
+              "const": "tools/test-assurance-slice-compiler.py"
+            },
+            "digest": {
+              "$ref": "#/$defs/Digest"
+            }
+          }
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "environment_ref",
+            "runtime",
+            "version_source",
+            "dependency_lock"
+          ],
+          "properties": {
+            "environment_ref": {
+              "const": "environment:repository-python-lock"
+            },
+            "runtime": {
+              "const": "python3"
+            },
+            "version_source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "digest"
+              ],
+              "properties": {
+                "path": {
+                  "const": ".python-version"
+                },
+                "digest": {
+                  "$ref": "#/$defs/Digest"
+                }
+              }
+            },
+            "dependency_lock": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "digest"
+              ],
+              "properties": {
+                "path": {
+                  "const": "requirements.lock"
+                },
+                "digest": {
+                  "$ref": "#/$defs/Digest"
+                }
+              }
+            }
+          }
+        },
+        "environment_gate": {
+          "const": {
+            "argv": [
+              "python3",
+              "-c",
+              "import pytest"
+            ],
+            "must_pass_before_test": true,
+            "causal_failure": {
+              "code": "TEST_ENVIRONMENT_NOT_MATERIALIZED",
+              "object": "environment:repository-python-lock",
+              "expected": "pytest importable from requirements.lock"
+            }
+          }
+        },
+        "argv": {
+          "const": [
+            "python3",
+            "-m",
+            "pytest",
+            "-q",
+            "tools/test-assurance-slice-compiler.py"
+          ]
+        },
+        "cwd": {
+          "const": "."
+        },
+        "causal_failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "object",
+            "expected"
+          ],
+          "properties": {
+            "code": {
+              "const": "REQUIRED_CHECK_FAILED"
+            },
+            "object": {
+              "const": "check:compiler"
+            },
+            "expected": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "evidence_fields": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "Cwd": {
+      "oneOf": [
+        {
+          "const": "."
+        },
+        {
+          "$ref": "#/$defs/RepoPath"
+        }
+      ]
+    },
+    "ReadBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "digest"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/RepoPath"
+        },
+        "digest": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "TestEnvironment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "environment_ref",
+        "runtime",
+        "version_source",
+        "dependency_lock"
+      ],
+      "properties": {
+        "environment_ref": {
+          "$ref": "#/$defs/Id"
+        },
+        "runtime": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version_source": {
+          "$ref": "#/$defs/ReadBinding"
+        },
+        "dependency_lock": {
+          "$ref": "#/$defs/ReadBinding"
+        }
+      }
+    },
+    "Risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "risk_class",
+        "summary"
+      ],
+      "properties": {
+        "risk_class": {
+          "pattern": "^R[0-6]$",
+          "type": "string"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

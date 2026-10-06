@@ -54,7 +54,7 @@ test("is registered as a strict read-only pure-computation tool", async () => {
   assert.ok(tool);
   assert.equal(tool.write, false);
   assert.equal(tool.inputSchema.additionalProperties, false);
-  assert.deepEqual(tool.inputSchema.required.sort(),
+  assert.deepEqual([...tool.inputSchema.required].sort(),
     ["financing", "long_term", "short_term", "square_feet"]);
 
   const db = { query: async () => { throw new Error("database must not be called"); } };

@@ -138,17 +138,28 @@ def main() -> int:
         encoding="utf-8"
     )
     check("the local liveness probe does not wake Neon faster than its health cadence",
-          "<key>StartInterval</key><integer>1800</integer>" in keepalive_plist)
+          "<!-- carr-launchd-interval-seconds: 1800 " in keepalive_plist
+          and "<key>StartInterval</key>" not in keepalive_plist)
     check("raising spend requires Joe approval", "Joe approval" in policy.get("authority", ""))
 
     github: dict[str, Any] = next(
         (entry for entry in platform_entries if entry.get("key") == "github"), {}
     )
+    # These were one check named after only half of what it asserted. The $0
+    # overage floor is permanent; the Actions pause was temporary by its own
+    # ends_after_verified_allowance_reset text and was cleared on 2026-09-12
+    # (decision 9935743c-21de-4490-83db-d11a5e20f6b1). Asserted together, a
+    # correct clearing of the pause reads as a breach of the overage floor.
     pause = registry.get("temporary_controls", {}).get("github_actions_pause", {})
     check("GitHub paid overage remains hard-stopped",
           github.get("live_evidence", {}).get("paid_overage_budget_usd") == 0
-          and pause.get("paid_overage_budget_usd") == 0
-          and pause.get("repository_actions_enabled") is False)
+          and pause.get("paid_overage_budget_usd") == 0)
+    check("the Actions pause state agrees with the observed repository state",
+          pause.get("repository_actions_enabled")
+          == github.get("live_evidence", {}).get("repository_actions_enabled"))
+    check("a cleared Actions pause names the decision that cleared it",
+          pause.get("repository_actions_enabled") is False
+          or bool(pause.get("cleared_decision_ref")))
 
     neon: dict[str, Any] = next(
         (entry for entry in platform_entries if entry.get("key") == "neon"), {}

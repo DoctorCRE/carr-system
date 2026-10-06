@@ -32,7 +32,7 @@ CASES = [
     ),
     (
         "a record ref is drift",
-        {"USER.md": GUARD, "MEMORY.md": "C-127 is the Musicologie deal; it is in negotiation.\n"},
+        {"USER.md": GUARD, "MEMORY.md": "C-127 is the Cadence Studio deal; it is in negotiation.\n"},
         1,
     ),
     (

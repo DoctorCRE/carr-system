@@ -62,8 +62,8 @@ PARKED_NOTE = {
     "deals-reciprocity": (
         "**R2–R5 retired to derivation by Joe's standing counts ruling (2026-08-01): counts "
         "always derive from deal records, never import as notes.** Backfill checks #117–#120 "
-        "record the deals underneath each (Nilesh Patel 3, Jon Shaw 2, Nate Woulston 2, "
-        "Trey Crowley 2); once those carry participant rows the positions compute themselves. "
+        "record the deals underneath each (Nikhil Shah 3, Jon Shepley 2, Nate Wexler 2, "
+        "Trey Cromwell 2); once those carry participant rows the positions compute themselves. "
         "Note also that R1's referral RELATIONSHIP is not repeated here: it is already carried "
         "by the intro graph as party_link edges V-SUP-051 → C-155 and V-SUP-051 → L-208. This "
         "render carries the commercial arrangement, which no edge holds."

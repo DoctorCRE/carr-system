@@ -17,10 +17,16 @@ Second mode, added 2026-08-02:
 classifies scheduled tasks by whether a firing window has actually PASSED, so a
 brand-new task is never mistaken for a broken one. See the scheduler section below.
 """
+import importlib.util
 import json, os, sys, glob, time, re, subprocess, calendar
 from datetime import datetime, timedelta, timezone
+from types import MappingProxyType
 from zoneinfo import ZoneInfo
 import health_submodule as _health_sub
+import jev_outage_health as _jev_outage
+import uptime_health as _uptime
+import flashlib
+from lib.credential_file import read_env_file
 
 # Script-relative, NOT expanduser("~/carr-system") — same fix as commit fad87a4
 # (tests) and c4d040d (gates). This is the ONLY caller of ops/renders-verify.py,
@@ -28,10 +34,9 @@ import health_submodule as _health_sub
 # would have left the render-tamper check dead on any clone outside $HOME.
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-DEFAULT_RECOVERY_VAULT = (
-    "/Users/booko/Library/CloudStorage/"
-    "GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI"
-)
+DEFAULT_RECOVERY_VAULT = os.path.join(
+    os.path.expanduser("~"), "Library", "CloudStorage",
+    "GoogleDrive-joe.bookout.carr.us@gmail.com", "My Drive", "CARR AI")
 
 # ── the active-rule-gap acceptance ──────────────────────────────────────────
 # A PERMANENTLY CHOSEN STATE MUST NOT READ AS A PERMANENT FAILURE — rule
@@ -68,13 +73,14 @@ def _reader_args(argv):
     vault = None
     section = "all"
     fixture = None
+    findings_json = None
     rest = []
     i = 0
     while i < len(argv):
         arg = argv[i]
         if arg == "--recovery":
             recovery = True
-        elif arg in ("--reason", "--vault", "--section", "--fixture"):
+        elif arg in ("--reason", "--vault", "--section", "--fixture", "--findings-json"):
             if i + 1 >= len(argv):
                 raise SystemExit(f"health-check: {arg} requires a value")
             value = argv[i + 1]
@@ -85,6 +91,8 @@ def _reader_args(argv):
                 vault = value
             elif arg == "--section":
                 section = value
+            elif arg == "--findings-json":
+                findings_json = value
             else:
                 fixture = value
         else:
@@ -101,16 +109,101 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
-    return recovery, reason, vault, section, fixture, rest
+    return recovery, reason, vault, section, fixture, findings_json, rest
 
 
-RECOVERY_MODE, RECOVERY_REASON, VAULT, CANONICAL_SECTION, CANONICAL_FIXTURE, _READER_REST = \
-    _reader_args(sys.argv[1:])
+RECOVERY_MODE, RECOVERY_REASON, VAULT, CANONICAL_SECTION, CANONICAL_FIXTURE, FINDINGS_JSON_PATH, \
+    _READER_REST = _reader_args(sys.argv[1:])
 sys.argv[1:] = _READER_REST
+
+
+def _headless_rows():
+    sys.path.insert(0, REPO_ROOT)
+    from pathlib import Path
+    from lib.headless_tasks import health_rows
+    return health_rows(Path(REPO_ROOT), Path.home())
+
+
+if CANONICAL_SECTION == "headless":
+    _rows = _headless_rows()
+    for _row in _rows:
+        print(_row["line"])
+    if not _rows:
+        print("OK headless — no installed headless task plists")
+    sys.exit(int(any(row["status"] == "WARN" for row in _rows)))
+
+
+def _jev_spend_row():
+    """Use the same receipt reader and response loop for manual and nightly health."""
+    spend_path = os.path.join(REPO_ROOT, "ops", "jev_spend_health.py")
+    spend_spec = importlib.util.spec_from_file_location("jev_spend_health", spend_path)
+    jev_spend_health = importlib.util.module_from_spec(spend_spec)
+    spend_spec.loader.exec_module(jev_spend_health)
+    return jev_spend_health, jev_spend_health.check_spend(
+        extra_logs=[jev_spend_health.FACTORY_USAGE_LOG],
+        worker_usage=jev_spend_health.read_worker_usage)
+
+
+def _jev_paid_cap_row():
+    try:
+        client_path = os.path.join(REPO_ROOT, "ops", "typesafe_client.py")
+        spec = importlib.util.spec_from_file_location("jev_cap_client", client_path)
+        client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(client)
+        return client.paid_cap_health()
+    except Exception as exc:
+        return (f"UNKNOWN jev paid cap — {type(exc).__name__} · on breach: "
+                "owner orchestrator · remediation restore the cap reader/configuration · "
+                "verify rerun health · auto-clear on successful read")
+
+
+def _jev_site_spend_row():
+    """Today's paid Jev attempts per registered call site, against its budget."""
+    try:
+        client_path = os.path.join(REPO_ROOT, "ops", "typesafe_client.py")
+        spec = importlib.util.spec_from_file_location("jev_site_client", client_path)
+        client = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(client)
+        return client.spend_by_site_health()
+    except Exception as exc:
+        return (f"UNKNOWN jev spend by site — {type(exc).__name__} · on breach: "
+                "owner orchestrator · remediation restore ops/config/jev-call-sites.v1.json "
+                "or the cap reader · verify rerun health · auto-clear on successful read")
+
+
+def _grok_session_row():
+    try:
+        sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
+        from grok_session import health_row
+        line = health_row()
+        return line, int(line.startswith("FAIL") or "FAILED" in line)
+    except Exception as exc:
+        return (f"UNAVAILABLE Grok session — {type(exc).__name__} · on breach: "
+                "owner orchestrator · remediation restore the Grok reader/lock storage · "
+                "verify rerun health · auto-clear on successful read", 1)
+
+
+if CANONICAL_SECTION == "jev-spend":
+    try:
+        _spend_module, _spend_line = _jev_spend_row()
+    except Exception as exc:
+        print(f"UNAVAILABLE jev spend — {type(exc).__name__}; "
+              "on breach: nightly ledger records an incident · owner orchestrator · "
+              "remediation restore the receipt reader · verify the next run reads "
+              "all usage sources · noncritical incidents auto-clear after three healthy runs")
+        sys.exit(1)
+    print(_spend_line)
+    sys.exit(_spend_module.nightly_exit_status(_spend_line))
+
+if CANONICAL_SECTION == "costs":
+    import system_costs
+    _cost_snapshot = system_costs.load_snapshot(CANONICAL_FIXTURE or os.path.join(REPO_ROOT, 'out/system-costs.json'))
+    print(system_costs.health_row(_cost_snapshot, 'nightly collector owns reconciliation'))
+    sys.exit(0 if _cost_snapshot['state'] == 'ready' and not _cost_snapshot['alerts'] else 1)
 
 # ── scheduler register (added 2026-08-02) ────────────────────────────────────
 # A TASK THAT HAS NEVER REACHED ITS FIRST WINDOW LOOKS EXACTLY LIKE A TASK THAT IS
@@ -262,13 +355,380 @@ if "--tasks" in sys.argv:
     sys.exit(classify_tasks(sys.argv[_i + 1]))
 
 
+def _canonical_workflow_truth():
+    """Print the F09 workflow-census section, WHICH IS UNAVAILABLE, and print
+    nothing else.
+
+    WHAT THIS SECTION USED TO DO, AND THE DEFECT THAT ENDED IT.  It performed the
+    V5-F09 control-plane read through ``lib/control_plane_workflow_truth_reader``
+    and printed the census it got back -- how many workflows are declared, how
+    many are evidence-backed, which ones conflict.  The reader resolved its own
+    module-level snapshot function at call time, so a caller sharing the process
+    rebound that name and this section printed the caller's census as the control
+    plane's own answer, under ``run.sh health``.  A reviewer did exactly that and
+    got a summary line of its own choosing out of this surface.
+
+    SO THE ROUTE WAS DELETED RATHER THAN HARDENED.  The reader mints nothing and
+    renders nothing any more; it exports one frozen unavailable answer built from
+    string literals at import time, and this section prints it.  There is no
+    branch here, no input, and no state to print: the same three-part line, every
+    run, whatever anybody has done to any module in this process.
+
+    WHY THE WHOLE SECTION RATHER THAN THE LABEL ONLY.  The A01 label route is what
+    converts a census into a state, and it reported not-proven one round earlier.
+    But this section DISPLAYS a census, and a displayed census is read as a report
+    of the control plane by anybody looking at ``run.sh health`` -- which is the
+    same authority, one surface out.  Both routes on this slice say the same
+    thing now: nothing here can be proven.
+    """
+    print("Workflow truth — census route deleted; this surface derives nothing")
+    try:
+        sys.path.insert(0, REPO_ROOT)
+        from lib.control_plane_workflow_truth_reader import workflow_truth_census
+    except Exception:
+        # Deliberately no exception text: this line is swept for privileged words
+        # by ops/assurance-health-selftest.py, and a traceback is caller content.
+        print("  -- workflow census   UNAVAILABLE — the census route module is absent")
+        return
+    census = workflow_truth_census()
+    print(f"  -- workflow census   UNAVAILABLE — {census['reason']}; item carried as "
+          f"{census['item_disposition']}; owed seam {census['owed_seam']}")
+
+
+def _canonical_assurance_health():
+    """Print the A01 assurance-health item, WHICH IS NOT PROVEN, and print nothing
+    else.
+
+    THERE IS NO STATE ON THIS SECTION, AND THAT IS THE FINDING.  Ten review
+    rounds tried to derive a health label for each bound workflow scope out of the
+    F09 reading, and each round closed the exact forgery route it was shown and
+    left the class open: a caller-supplied census, a caller-supplied receipt, a
+    payload attribute on the reading handle, a stateful mapping honest during
+    verification and forged during rendering, an opaque registry key swapped
+    inside its own ``__hash__``, a raw base-descriptor write to ``__class__``,
+    rebinding the reader's own snapshot function, writing its private mint
+    registry, a hostile mapping key running caller code during the thaw, and
+    finally a ``__del__`` that rebound the label route's own exported strings
+    while it was building its answer.
+
+    SO THE ROUTE WAS DELETED RATHER THAN NARROWED AGAIN.
+    ``lib/assurance_health_sources.assurance_health_census`` now takes NO
+    ARGUMENT and returns one frozen mapping built from string literals at import
+    time: ``available=False``, reason ``handle_integrity_unprovable``, disposition
+    ``not_proven``, and the short name of the durable-store seam that is owed.
+    This section prints those three facts and nothing else.  What is missing is an
+    OWNER for "this census is the one the control plane served"; an object in this
+    process cannot be that owner.
+
+    THE SECTION ABOVE SAYS THE SAME THING NOW, and that is the tenth correction:
+    the workflow-truth section DISPLAYED a census, which a reader of ``run.sh
+    health`` takes as a report of the control plane, so a forged census reached
+    the same authority one surface further out.  Both routes report unavailable.
+
+    THE --fixture DOOR IS A TEST DOOR, LABELS ITSELF AS ONE, AND IS A DIFFERENT
+    FUNCTION.  It is called instead of this one when --fixture is given, reaches
+    the adapter's unexported test hook, and prints every state as an explicit
+    would-be-<state>-if-authoritative hypothetical.  Nothing it says is evidence,
+    nothing it says is healthy, and no finding is recorded from it.
+    """
+    try:
+        sys.path.insert(0, REPO_ROOT)
+        import lib.assurance_health_sources as sources
+    except Exception:
+        # No exception text on this line either: it is swept for privileged words.
+        print("Assurance health — NOT PROVEN; no owner exists for the fact a label "
+              "would need")
+        print("  -- assurance health   UNAVAILABLE — the label route module is absent")
+        return
+    result = sources.assurance_health_census()
+    print("Assurance health — NOT PROVEN; no owner exists for the fact a label would "
+          "need")
+    print(f"  -- assurance health   UNAVAILABLE — {result['reason']}; item carried as "
+          f"{result['item_disposition']}")
+    print(f"  -- OWED SEAM {result['owed_seam']}")
+
+
+# ── the workflow-truth contradiction alarm (twelfth correction, 2026-09-11) ──
+# WHAT THE TENTH ROUND TOOK OUT WITHOUT SAYING SO.  Before that round this file
+# read the F09 census and turned `run.sh health` RED when the control plane's own
+# workflow evidence contradicted itself.  The census route was deleted because a
+# caller sharing the process could put its own census behind it -- and the alarm
+# went out with it, silently.  That is a product regression: a contradiction in
+# the control plane is exactly the condition operations must be told about, and
+# `run.sh health` stopped saying it.
+#
+# WHY THIS ROUTE IS NOT THE ROUTE THAT WAS DELETED.  The deleted one derived a
+# rendered CENSUS -- a projection over a manifest, a registry file, a freshness
+# window and a handle -- and handed it to a consumer that printed it.  This one
+# answers one yes/no question out of rows the store itself holds:
+#
+#   * ops.workflow_acceptance says a (workflow, version, mode) is BOTH accepted
+#     and rejected, and
+#   * ops.legacy_schedule_observation_receipt's latest receipt per surface has
+#     two surfaces of one workflow disagreeing about the native schedule.
+#
+# Both are contradictions in the durable rows, not in anybody's projection of
+# them.  There is no argument on the route, no module global read at call time,
+# no handle, no reader object, no fixture and no manifest: the function takes
+# nothing, runs ONE read-only statement (therefore one transaction) through the
+# canonical tap, and returns a frozen mapping whose verdict is one of two
+# module-level literals.  Nothing a caller passes anywhere in this process can
+# reach it, because there is nowhere to pass anything.
+#
+# THE ONE CLASS THIS ALARM DOES NOT COVER, NAMED RATHER THAN OMITTED.  The
+# Completion Register's own conflicting lifecycle lives in
+# ops.completion_projection, which derives its tenant from a server setting and
+# RAISES without one (`completion register requires a server-derived tenant`).
+# Reading it would need a second call with session setup, so the whole read would
+# stop being one transaction and would refuse outright on every machine that has
+# no tenant set.  So this alarm covers the two contradiction classes that live in
+# plain durable rows, and a completion contradiction is still carried by the
+# Completion Register's own surfaces.  Widening it is a seam, not a silence.
+#
+# WHAT "UNAVAILABLE" MEANS HERE, since it is a third answer and not a quiet
+# green.  If the statement cannot be run or its answer cannot be parsed, the
+# alarm says so in its own line and claims NOTHING about consistency; it does not
+# report not-red.  A normal run whose tap is broken is already red through the
+# snapshot's own source_unreadable finding, so an unreadable alarm does not need
+# to double-count it -- but it must never be mistaken for an all-clear.
+_ALARM_RED = "red"
+_ALARM_NOT_RED = "not_red"
+_ALARM_UNAVAILABLE = "unavailable"
+
+# ONE STATEMENT, therefore one implicit read-only transaction (the tap opens its
+# session with default_transaction_read_only=on).  Kept at module level rather
+# than inside the function so the acceptance suite's closed-union sweep reads the
+# function's own emitted strings and not the column vocabulary of the schema.
+_CONTRADICTION_STATEMENT = """select json_build_object(
+  'acceptance_rows', coalesce((select json_agg(json_build_object(
+       'workflow_key', a.workflow_key, 'workflow_version', a.workflow_version,
+       'mode', a.mode, 'status', a.status)
+     order by a.workflow_key, a.workflow_version, a.mode, a.status)
+     from ops.workflow_acceptance a), '[]'::json),
+  'schedule_rows', coalesce((select json_agg(json_build_object(
+       'workflow_key', o.workflow_key, 'workflow_version', o.workflow_version,
+       'surface_id', o.surface_id, 'scheduler_state', o.scheduler_state)
+     order by o.workflow_key, o.workflow_version, o.surface_id)
+     from (select distinct on (surface_id) surface_id, workflow_key, workflow_version,
+                  scheduler_state
+             from ops.legacy_schedule_observation_receipt
+            order by surface_id, observed_at desc, id desc) o), '[]'::json)
+)::text"""
+
+
+def _contradiction_groups(rows):
+    """Name every group of store rows that contradicts itself.
+
+    The predicate, and it is deliberately the whole of the decision: a group is
+    contradictory when the durable rows themselves state two things that cannot
+    both be so.  Latest-receipt-per-surface is applied in the statement, so a
+    schedule that was switched off yesterday is a change and not a contradiction;
+    two surfaces of ONE workflow disagreeing today is a contradiction.
+
+    Malformed rows raise rather than being guessed at.  On the real route that
+    refusal becomes an unavailable alarm, never a not-red one.
+    """
+    groups = []
+    acceptance = {}
+    for row in rows.get("acceptance_rows") or []:
+        subject = (str(row["workflow_key"]), int(row["workflow_version"]),
+                   str(row["mode"]))
+        acceptance.setdefault(subject, set()).add(str(row["status"]))
+    for (key, version, mode), seen in acceptance.items():
+        if "accepted" in seen and "rejected" in seen:
+            groups.append(f"acceptance/{key}@v{version}/{mode}")
+    schedule = {}
+    for row in rows.get("schedule_rows") or []:
+        subject = (str(row["workflow_key"]), int(row["workflow_version"]))
+        schedule.setdefault(subject, set()).add(str(row["scheduler_state"]))
+    for (key, version), seen in schedule.items():
+        if len(seen) > 1:
+            groups.append(f"schedule/{key}@v{version}")
+    return tuple(sorted(groups))
+
+
+def _alarm_answer(verdict, groups=(), reason=None):
+    """Freeze one alarm answer: the verdict literal, the count, and the names."""
+    return MappingProxyType({
+        "alarm": verdict,
+        "groups": len(groups),
+        "group_names": tuple(groups),
+        "reason": reason,
+    })
+
+
+def _workflow_truth_contradiction_alarm():
+    """Ask the control plane's own rows whether they contradict themselves.
+
+    NO ARGUMENT, NO GLOBAL STATE READ AT CALL TIME, NO CALLER OBJECT.  The only
+    input is the store, reached through the canonical tap in one statement.  The
+    answer is a frozen mapping carrying one of three literals defined above and
+    the count; there is no exported classifier anywhere on this route and nothing
+    here is reachable with caller-supplied input.
+    """
+    venv = os.path.join(REPO_ROOT, ".venv/bin/python")
+    try:
+        proc = subprocess.run(
+            [venv if os.path.exists(venv) else sys.executable,
+             os.path.join(REPO_ROOT, "tools/db-tap.py"), "sql", "/dev/stdin"],
+            input=_CONTRADICTION_STATEMENT, cwd=REPO_ROOT, text=True,
+            capture_output=True, timeout=120,
+            env={k: v for k, v in os.environ.items() if k != "CARR_VAULT"},
+        )
+    except Exception:
+        return _alarm_answer(_ALARM_UNAVAILABLE, reason="store_unreachable")
+    if getattr(proc, "returncode", 1):
+        return _alarm_answer(_ALARM_UNAVAILABLE, reason="store_unreachable")
+    rows = None
+    for line in reversed((getattr(proc, "stdout", "") or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                rows = json.loads(line)
+            except ValueError:
+                return _alarm_answer(_ALARM_UNAVAILABLE, reason="answer_unparseable")
+            break
+    if not isinstance(rows, dict):
+        return _alarm_answer(_ALARM_UNAVAILABLE, reason="answer_unparseable")
+    try:
+        groups = _contradiction_groups(rows)
+    except Exception:
+        return _alarm_answer(_ALARM_UNAVAILABLE, reason="answer_shape_refused")
+    return _alarm_answer(_ALARM_RED if groups else _ALARM_NOT_RED, groups=groups)
+
+
+def _hypothetical_contradiction_alarm(rows):
+    """THE TEST HOOK, and it is not a route: it classifies rows a caller composed.
+
+    The standing rule's shape, applied: the decision lives in
+    ``_contradiction_groups`` and in the real route above, both module-private,
+    and a test reaches the classification only through this unexported hook, which
+    returns it under names no consumer would take for the alarm's own keys
+    (``hypothetical-alarm``, never ``alarm``).
+
+    WHY NOT THE RULE'S OWN EXAMPLE SPELLING.  The rule offers
+    ``would_read_if_authoritative`` as the shape for such a hook, and the adapter's
+    older hook is spelled that way -- but the same rule makes ``^would_`` and
+    ``_if_authoritative`` privileged PATTERNS, and this route's functions are
+    swept BY NAME as well as by output (see ROUTE_FUNCTIONS in
+    ops/assurance-health-selftest.py).  Sweeping more is the fail-safe half of
+    that pair, so the hook takes a name that is distinct from the route's without
+    spelling a pattern the sweep forbids.  Nothing in this repository calls it
+    outside the acceptance suites.
+    """
+    groups = _contradiction_groups(rows)
+    return {"hypothetical-alarm": _ALARM_RED if groups else _ALARM_NOT_RED,
+            "hypothetical-groups": list(groups),
+            "hypothetical-group-count": len(groups)}
+
+
+def _canonical_contradiction_alarm():
+    """Print the alarm and return 1 when the control plane contradicts itself."""
+    answer = _workflow_truth_contradiction_alarm()
+    verdict = answer["alarm"]
+    if verdict == _ALARM_RED:
+        detail = (f"{answer['groups']} self-contradicting group(s) in the control "
+                  f"plane's own rows: " + ", ".join(answer["group_names"]))
+        print(f"  \u26a0\ufe0e workflow contradiction alarm   RED \u2014 {detail}")
+        _canonical_finding("workflow_truth_conflict", detail, count=int(answer["groups"]))
+        return 1
+    if verdict == _ALARM_NOT_RED:
+        print(f"  -- workflow contradiction alarm   NOT RED \u2014 {answer['groups']} "
+              "self-contradicting group(s) in the control plane's own rows")
+        return 0
+    print(f"  -- workflow contradiction alarm   UNAVAILABLE \u2014 {answer['reason']}; "
+          "this run says nothing either way about the control plane's consistency")
+    return 0
+
+
+def _print_assurance_layer_gaps(projection):
+    """Name the layers this projection could not bind or could not read."""
+    unbindable = sorted({slot for row in projection["rows"]
+                         for slot, layer in row["evidence"].items()
+                         if layer["state"] == "unbindable"})
+    if unbindable:
+        print("  -- UNBINDABLE ON THIS CENSUS " + ", ".join(unbindable) +
+              " — the workflow census carries no Work Request identity, so this layer has "
+              "nothing to join through and no scope read here can reach act capability")
+    unread = sorted({slot for row in projection["rows"]
+                     for slot, layer in row["evidence"].items()
+                     if layer["state"] == "unreadable"})
+    if unread:
+        print("  -- NOT READ BY THIS SURFACE " + ", ".join(unread) +
+              " — no scope can be shown healthy until an authoritative reading of each "
+              "reaches this census; an unread layer is never counted as passing")
+
+
+def _fixture_assurance_health(snap):
+    """The --fixture test door, which prints hypotheticals and returns 0.
+
+    A fixture census is the caller's assertion, so this door reaches the
+    adapter's UNEXPORTED test hook rather than its public entry, prints every
+    state under a would-be-<state>-if-authoritative name, records no finding, and
+    cannot turn this process red.  Its output is deliberately unusable as a
+    health claim: there is no line in it that says a scope is healthy or green.
+    """
+    sys.path.insert(0, REPO_ROOT)
+    import lib.assurance_health_sources as sources
+
+    print("Assurance health — FIXTURE-DERIVED HYPOTHETICAL, NOT A READING (test door)")
+    print("  -- --fixture supplied this census, so the adapter did NOT read the control "
+          "plane. Every line below is what the projection WOULD say IF this fixture were "
+          "authoritative; none of it is evidence, no scope in it is healthy or green, and "
+          "no finding is recorded from it.")
+    workflows = (snap or {}).get("workflows")
+    if workflows is None:
+        print("  -- assurance health   NOT IN FIXTURE (this fixture supplied no census)")
+        return 0
+    try:
+        hypothetical = sources._would_be_assurance_health_if_authoritative(
+            workflows, now=datetime.now(timezone.utc))["would_be_census_if_authoritative"]
+    except Exception as exc:
+        print(f"  -- assurance health   UNAVAILABLE — the projection refused this fixture "
+              f"({type(exc).__name__}: {exc})")
+        return 0
+    if not hypothetical.get("available"):
+        print(f"  -- assurance health   UNAVAILABLE — {hypothetical.get('reason', 'unstated')}")
+        return 0
+
+    projection = hypothetical["projection"]
+    summary = projection["summary"]
+    states = summary["states"]
+    print(f"  {summary['scopes']} bound scope(s) WOULD BE: "
+          + ", ".join(f"{states.get(state, 0)} would-be-{state}-if-authoritative"
+                      for state in projection["states"])
+          + f"; {summary['green']} would-be-green-if-authoritative")
+    for entry in hypothetical.get("unprojectable", []):
+        print(f"  -- WOULD BE UNPROJECTABLE {entry['workflow']} — {entry['reason']}")
+    for row in projection["rows"]:
+        scope = row["scope"]
+        identity = f"{scope['workflow_key']} v{scope['workflow_version']}"
+        if row["state"] in ("failed", "degraded"):
+            print(f"  ⚠︎ {identity} WOULD BE {row['state'].upper()} IF AUTHORITATIVE: "
+                  f"{row['state_reason']} — a fixture evidences nothing, so this is "
+                  "printed and no finding is recorded")
+    _print_assurance_layer_gaps(projection)
+    return 0
+
+
 def _canonical_snapshot():
-    """Read canonical database/control-plane evidence, never a Drive render."""
+    """Read canonical database/control-plane evidence, never a Drive render.
+
+    --fixture IS A TEST DOOR AND THE OUTPUT SAYS SO ON ITS FIRST LINE. A fixture
+    is composed by whoever passes it, so a run fed from one is reporting that
+    caller's assertion, not a reading of anything. The banner below is printed
+    before any section so no line of a fixture-fed run can be mistaken for
+    evidence, and the assurance-health section additionally renders every state
+    it derives as an explicit would-be-<state>-if-authoritative hypothetical.
+    """
     if CANONICAL_FIXTURE:
         with open(CANONICAL_FIXTURE, encoding="utf-8") as fh:
             value = json.load(fh)
         if not isinstance(value, dict):
             raise ValueError("canonical health fixture must be an object")
+        print(f"FIXTURE-DERIVED RUN — --fixture {CANONICAL_FIXTURE} supplied this "
+              "snapshot; nothing below was read from the control plane and no line "
+              "of it is evidence of health.")
         return value
 
     snapshot = {"exports": None, "job_definitions": None, "jobs": None,
@@ -323,7 +783,8 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
         # v_job_control is the durable provider-independent job ledger.  The
         # SQL is intentionally here (rather than a projection parser) so a test
         # can prove exactly which authority surface health reads.
-        sql = """select 'DEF',d.key,d.version,d.recurrence::text,d.registered_at
+        sql = """select 'DEF',d.key,d.version,d.recurrence::text,d.registered_at,
+                        coalesce(d.legacy_disabled_at::text,'')
                    from ops.job_definition d where d.enabled order by d.key;
                  select 'JOB',v.id,v.definition_key,v.definition_version,v.state,v.mode,
                         v.attempt,v.max_attempts,v.scheduled_for,v.created_at,
@@ -334,7 +795,25 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                             and r.kind='completion') as completion_receipt_count
                    from ops.v_job_control v join ops.job j on j.id=v.id
                    where v.created_at > now() - interval '40 days' and v.mode='live'
-                  order by v.created_at desc"""
+                  order by v.created_at desc;
+                 select 'CPB',
+                        coalesce((select r.activated_at::text
+                                    from ops.calendar_prebrief_runtime_activation_receipt r
+                                    join ops.calendar_prebrief_allowed_calendar a
+                                      on a.sponsor='joe' and a.active_revision_id=r.allowlist_revision_id
+                                    join ops.calendar_prebrief_allowlist_receipt l2
+                                      on l2.id=a.active_revision_id and l2.sponsor='joe'
+                                     and l2.configuration_digest=a.configuration_digest
+                                   where r.id=(select l.id
+                                                 from ops.calendar_prebrief_runtime_activation_receipt l
+                                                where l.sponsor='joe'
+                                                order by l.activated_at desc,l.id desc limit 1)),''),
+                        coalesce((select json_agg(json_build_object(
+                                           'job_id',p.job_id,'attempt',p.attempt,
+                                           'event_count',p.event_count))
+                                    from ops.calendar_prebrief_projection_receipt p
+                                   where p.sponsor='joe'
+                                     and p.captured_at > now() - interval '40 days')::text,'[]')"""
         _venv_python = os.path.join(REPO_ROOT, ".venv/bin/python")
         _query_python = _venv_python if os.path.exists(_venv_python) else sys.executable
         p = subprocess.run(
@@ -350,17 +829,25 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
             rows = []
             for line in p.stdout.splitlines():
                 cols = [c.strip() for c in line.split("|")]
-                if len(cols) == 5 and cols[0] == "DEF":
+                if len(cols) == 6 and cols[0] == "DEF":
                     try:
                         recurrence = json.loads(cols[3])
                     except ValueError:
                         recurrence = None
                     definitions.append({"key": cols[1], "version": int(cols[2]),
                                         "recurrence": recurrence,
-                                        "registered_at": cols[4]})
+                                        "registered_at": cols[4],
+                                        # The control plane is the executor of
+                                        # record only once the legacy schedule
+                                        # is disabled; until then its ledger is
+                                        # SILENT for this key by design, and
+                                        # afterwards it is the authority only
+                                        # from that instant forward.
+                                        "legacy_disabled_at": cols[5] or None,
+                                        "legacy_live": not cols[5]})
                 elif len(cols) == 16 and cols[0] == "JOB" and cols[4] in {
                     "queued", "running", "retry_wait", "waiting_approval", "succeeded",
-                    "failed", "timed_out", "dead_lettered", "cancelled",
+                    "failed", "timed_out", "dead_lettered", "cancelled", "skipped",
                 }:
                     rows.append({
                         "id": cols[1], "definition_key": cols[2],
@@ -372,8 +859,23 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                         "leased_until": cols[13], "timeout_seconds": int(cols[14]),
                         "completion_receipt_count": int(cols[15]),
                     })
+                elif len(cols) == 3 and cols[0] == "CPB":
+                    try:
+                        receipts = json.loads(cols[2])
+                    except ValueError:
+                        receipts = None
+                    snapshot["calendar_prebrief"] = {
+                        "activated_at": cols[1] or None,
+                        "receipts": receipts if isinstance(receipts, list) else None,
+                    }
             snapshot["job_definitions"] = definitions
             snapshot["jobs"] = rows
+        # NO F09 READING IS PERFORMED HERE ANY MORE. This run used to carry one
+        # reading and hand it to two sections; the route that produced it is
+        # deleted (see _canonical_workflow_truth), so the canonical snapshot holds
+        # no census at all and both sections print their invariant unavailable
+        # line. A --fixture file still supplies "workflows" for the fixture door,
+        # which is a test door and says so on its first line.
     if CANONICAL_SECTION == "all":
         # Built from the named constants rather than spelled inline, so the
         # acceptance and the query can never drift apart. Both values are fixed
@@ -445,6 +947,19 @@ def _live_jobs(snap):
             if isinstance(j, dict) and j.get("mode") == "live"]
 
 
+def _legacy_scheduled_definitions(snap):
+    """Enabled definitions whose LEGACY scheduler is still the executor.
+
+    Until ``disable-legacy-schedule`` fires for a key, launchd or the Claude
+    scheduler runs it and the Control Plane ledger holds nothing — so a due
+    window with no ledger row is the cutover working, not a missed run.  The
+    default is fail-closed: a definition that does not declare itself legacy
+    is still held to every due window.
+    """
+    return sorted(str(d.get("key")) for d in (snap.get("job_definitions") or [])
+                  if isinstance(d, dict) and d.get("legacy_live") is True)
+
+
 def _missing_due_executions(snap):
     """Due cron windows without a successful, exact ledger completion.
 
@@ -460,6 +975,11 @@ def _missing_due_executions(snap):
     for definition in snap.get("job_definitions") or []:
         if not isinstance(definition, dict):
             continue
+        if definition.get("legacy_live") is True:
+            # Loop #536: asserting a ledger row for a key the control plane does
+            # not dispatch produced a MISSING DUE line every day for eleven
+            # definitions, which is how a genuine miss became unreadable.
+            continue
         recurrence = definition.get("recurrence")
         if not isinstance(recurrence, dict) or not recurrence.get("cron"):
             continue
@@ -473,6 +993,15 @@ def _missing_due_executions(snap):
         registered = _iso(definition.get("registered_at"))
         registered_local = (registered.astimezone(zone).replace(tzinfo=None)
                             if registered else now_local - timedelta(days=40))
+        # A CUT-OVER DEFINITION IS THE CONTROL PLANE'S ONLY FROM THE INSTANT ITS
+        # LEGACY SCHEDULE WAS DISABLED. Windows before that stamp were the
+        # launchd or Claude scheduler's to run, so the ledger is rightly silent
+        # for them; counting them made calendar-fetch-daily read as three missed
+        # weekdays it never owned (loop #536).
+        cutover = _iso(definition.get("legacy_disabled_at"))
+        if cutover:
+            registered_local = max(registered_local,
+                                   cutover.astimezone(zone).replace(tzinfo=None))
         collapsed = "collapses window" in str(recurrence.get("source") or "").lower()
         start = max(registered_local,
                     now_local - timedelta(days=40 if collapsed else 8))
@@ -572,31 +1101,329 @@ def _stuck_live_jobs(snap):
     return findings
 
 
-def _canonical_finding(key, detail):
+# The completion marker _canonical_health() prints on EVERY path out of it,
+# clean or already-broken (see both call sites below). It must be printed
+# character-for-character identically from both places — a caller
+# (ops/release-pipeline.py's HEALTH_COMPLETE_MARKER) compares against this
+# EXACT string as the last non-empty stdout line to decide whether a read
+# is trustworthy at all (point 3 of the third round of an independent
+# review of PR #1237: this string and that constant drifted apart for
+# three rounds, silently making `complete=False` on every real run).
+_HEALTH_COMPLETION_MARKER = ("Projection freshness/tamper checks are recovery evidence; "
+                             "use --recovery --reason <why>.")
+
+_FINDINGS: list = []
+# The machine-readable form of every CANONICAL_FINDING line the run prints,
+# built alongside the text so both stay in lockstep. Schema decided against
+# Jev (architecture_or_design, 2026-09-24, full confidence on subject
+# granularity): `subject` is the specific target/job/gate name wherever one
+# exists (export_receipt: the target file; job_terminal_failure/job_stuck/
+# job_completion_receipt/job_missing_due/job_due_non_success: the
+# definition_key), because an AGGREGATE subject per key hides a target that
+# newly broke while another recovered — the exact masking bug an independent
+# review of PR #1237 flagged (point C: "duplicates collapse, counts cancel,
+# and the same text can carry a worse state"). A structural "this whole
+# section of run.sh health could not be read" finding (source_unreadable,
+# job_ledger, control_state, repo_status, registry_integrity,
+# credential_health) has no natural per-target subject, so it keeps an empty
+# `subject` (Jev noul 0.84) and is always `hard_error=True` instead — see
+# point A of the same review: a completely unreadable section must always
+# fail the release gate regardless of any count.
+#
+# `count` defaults to 1 and ACCUMULATES when the same (key, subject) is
+# reported more than once in a single run, so two failures of the same job in
+# one run show count=2 rather than two identical lines that a downstream
+# exact-string diff would collapse into "no change" (review point C again).
+# `hard_error` marks a finding that must always fail the release gate,
+# independent of any baseline comparison (an unreadable section, never a
+# business count that could legitimately improve). `time_rolling` marks a
+# finding whose (key, subject) changes purely because wall-clock time passed
+# — a job's MISSING DUE date rolling forward one day at a time, an export
+# crossing the 26h STALE clock, a rolling 24h gate-block window — none of
+# which is caused by any particular release, so the pipeline reports these
+# but excludes them from its regression diff (review point D).
+
+
+CALENDAR_PREBRIEF_KEY = "calendar-prebrief-projection-joe-daily"
+# The runtime may enqueue only inside 06:30-06:45 America/Chicago and a claim
+# retries once (base 60s, 300s timeout), so a weekday slot is judged an hour on.
+CALENDAR_PREBRIEF_JUDGED_AFTER = timedelta(minutes=60)
+CALENDAR_PREBRIEF_BREACH = (
+    "on breach: update loop #665 (owner joe-desk session) — read "
+    "out/calendar-prebrief-joe-launchd.log and the job's failure_class, fix the named "
+    "gate, verify with the next 06:30 weekday receipt; clears when the latest due slot "
+    "succeeds with event_count > 0")
+
+
+def _calendar_prebrief_standing(snap):
+    """Joe's live calendar prebrief: a missed weekday run, or 0 events 2 runs running.
+
+    Returns (finding_key, detail) pairs. Silent (no finding) while the prebrief is
+    not activated: an allowlist changed after the last activation fences the
+    scheduler by design, and a fenced job is not a missed one. Once activated,
+    every weekday 06:30 America/Chicago slot at or after the activation must end
+    in a succeeded job carrying a projection receipt, and the two latest
+    receipted slots must not both have read zero events — a bounded 52-day window
+    over Joe's primary calendar that is empty two weekdays in a row is a broken
+    source (wrong calendar, lost permission), not a quiet week.
+    """
+    state = snap.get("calendar_prebrief")
+    if not isinstance(state, dict):
+        return []
+    enabled = {d.get("key") for d in snap.get("job_definitions") or [] if isinstance(d, dict)}
+    activated = _iso(state.get("activated_at"))
+    if CALENDAR_PREBRIEF_KEY not in enabled or activated is None:
+        return []
+    receipts = state.get("receipts")
+    counts = {}
+    for row in receipts if isinstance(receipts, list) else [None]:
+        if (not isinstance(row, dict) or not isinstance(row.get("job_id"), str)
+                or type(row.get("attempt")) is not int or type(row.get("event_count")) is not int):
+            return [("calendar_prebrief_unreadable",
+                     f"{CALENDAR_PREBRIEF_KEY} projection receipts unreadable · {CALENDAR_PREBRIEF_BREACH}")]
+        counts[(row["job_id"], row["attempt"])] = row["event_count"]
+    zone = ZoneInfo("America/Chicago")
+    now = _canonical_now(snap)
+    jobs = [j for j in _live_jobs(snap) if j.get("definition_key") == CALENDAR_PREBRIEF_KEY]
+    slots = []
+    # The job ledger read covers 40 days; judge the recent fortnight only.
+    day = max(activated, now - timedelta(days=14)).astimezone(zone).date()
+    while True:
+        slot = datetime(day.year, day.month, day.day, 6, 30, tzinfo=zone)
+        if slot + CALENDAR_PREBRIEF_JUDGED_AFTER > now:
+            break
+        # The scheduler can still enqueue a slot until 06:45 local.
+        if day.isoweekday() <= 5 and slot + timedelta(minutes=15) > activated:
+            slots.append(slot)
+        day += timedelta(days=1)
+    if not slots:
+        return []
+    outcomes = []  # (slot, event_count or None when no receipted success, job state)
+    for slot in slots:
+        match = [j for j in jobs if _iso(j.get("scheduled_for")) == slot.astimezone(timezone.utc)]
+        done = [counts[(j.get("id"), j.get("attempt"))] for j in match
+                if j.get("state") == "succeeded" and (j.get("id"), j.get("attempt")) in counts]
+        outcomes.append((slot, done[0] if done else None,
+                         match[0].get("state") if match else "never scheduled"))
+    findings = []
+    latest_slot, latest_events, latest_state = outcomes[-1]
+    if latest_events is None:
+        missed = sum(1 for _, events, _ in outcomes[-2:] if events is None)
+        findings.append(("calendar_prebrief_missed_run",
+                         f"{CALENDAR_PREBRIEF_KEY} MISSED its "
+                         f"{latest_slot.strftime('%Y-%m-%d %H:%M %Z')} run ({latest_state}); "
+                         f"{missed} of the last {min(2, len(outcomes))} weekday slot(s) missed "
+                         f"· {CALENDAR_PREBRIEF_BREACH}"))
+    read = [(slot, events) for slot, events, _ in outcomes if events is not None]
+    if len(read) >= 2 and read[-1][1] == 0 and read[-2][1] == 0:
+        findings.append(("calendar_prebrief_zero_events",
+                         f"{CALENDAR_PREBRIEF_KEY} read 0 events on its last 2 runs "
+                         f"({read[-2][0].date()}, {read[-1][0].date()}) "
+                         f"· {CALENDAR_PREBRIEF_BREACH}"))
+    return findings
+
+
+CALENDAR_PREBRIEF_LAST_RUN = os.path.join(REPO_ROOT, "out", "calendar-prebrief-joe-last-run.json")
+CALENDAR_PREBRIEF_UNKNOWN_BREACH = (
+    "on breach: attendee intake (rule d7c69aa6) — search mail, research, then create the "
+    "record for each skipped attendee; owner joe-desk session; verify with the next "
+    "prebrief's count; clears at 0")
+
+
+def _calendar_prebrief_unknowns(now, path=CALENDAR_PREBRIEF_LAST_RUN):
+    """Skipped unknown attendees in the latest completed Joe prebrief (migration 0735).
+
+    Since 0735 an outside attendee the record does not know no longer refuses the
+    snapshot; it is skipped and counted. The count is intake debt, not a failure,
+    so it is surfaced here (the runtime's addressless last-run summary is the only
+    place it lives) and cleared by intake. A summary older than four days is
+    ignored: a stale run is the missed-run finding's business, not this one's.
+    The summary is written under the checkout the runtime runs from, so a
+    health run from any other checkout finds no file and stays silent.
+    Returns (finding_key, detail) pairs; never an address.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            body = json.load(fh)
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError):
+        return [("calendar_prebrief_unknowns_unreadable",
+                 f"{CALENDAR_PREBRIEF_KEY} last-run summary unreadable · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
+    report = body.get("unknown_attendees") if isinstance(body, dict) else None
+    when = _iso(body.get("scheduled_for")) if isinstance(body, dict) else None
+    if (not isinstance(report, dict) or type(report.get("count")) is not int
+            or report["count"] < 0 or when is None):
+        return [("calendar_prebrief_unknowns_unreadable",
+                 f"{CALENDAR_PREBRIEF_KEY} last-run summary malformed · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
+    if now - when > timedelta(days=4) or report["count"] == 0:
+        return []
+    return [("calendar_prebrief_unknown_attendees",
+             f"{CALENDAR_PREBRIEF_KEY} skipped {report['count']} unknown outside attendee(s) "
+             f"on its {when.date()} run · {CALENDAR_PREBRIEF_UNKNOWN_BREACH}")]
+
+
+# MONITORS NOT YET PROVISIONED (Joe 2026-10-06: "don't just leave them in place and let them
+# block things"). Both checks landed with today's batch before their backing services existed,
+# so their "cannot read" state failed every release's health baseline. Until provisioning lands,
+# that state prints as WARN and never as hard_error. A real failure the monitor DOES report
+# (production down, a cost spike) stays hard. Delete an entry the day its service is live.
+PROVISIONING_PENDING = {
+    "production_uptime": "carr-uptime monitor unreachable (Worker/secrets not provisioned)",
+    "system_costs": "billing readers unavailable (cost collector not provisioned)",
+}
+
+
+def _canonical_finding(key, detail, *, subject="", count=1, hard_error=False, time_rolling=False):
     print(f"  CANONICAL_FINDING {key} — {detail}")
+    for row in _FINDINGS:
+        if row["key"] == key and row["subject"] == subject:
+            row["count"] += count
+            # `detail` is replaced with the LATEST call's text, not left as
+            # the first call's (point 3 of round 4 of an independent review
+            # of PR #1237): a message like "98 active rule gaps" must not
+            # stay frozen at 98 while `count` climbs to 99, 100, ... on
+            # later merged calls — a reader trusts the printed detail to
+            # match the count it sits next to.
+            row["detail"] = detail
+            # hard_error merges with OR (point 4 of the THIRD round of
+            # review, correcting the second round's overcorrection): a
+            # (key, subject) that had EVEN ONE hard_error contributor this
+            # run really is broken — that must never be diluted back to
+            # False just because a later, calmer call for the same pair
+            # merged in. time_rolling still merges with AND: it only means
+            # "this pair changes on the clock alone," which is true only
+            # when EVERY contributing call agrees — one non-rolling
+            # contributor is real, non-clock news for that pair and must
+            # not be laundered into "reported but never diffed" by a
+            # rolling sibling call.
+            row["hard_error"] = row["hard_error"] or bool(hard_error)
+            row["time_rolling"] = row["time_rolling"] and bool(time_rolling)
+            return
+    _FINDINGS.append({"key": key, "subject": subject, "detail": detail, "count": count,
+                      "hard_error": bool(hard_error), "time_rolling": bool(time_rolling)})
+
+
+def _write_findings_json(path):
+    """Machine-readable sibling of the CANONICAL_FINDING text lines — added so
+    ops/release-pipeline.py's health gate can diff by (key, subject) instead
+    of scraping exact finding strings (Jev-favored design over regex parsing;
+    independent review of PR #1237)."""
+    payload = {"findings": list(_FINDINGS),
+               "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    directory = os.path.dirname(os.path.abspath(path))
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+
+
+def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=False):
+    """Record a CANONICAL_FINDING and return 1, so every `rc = 1` path inside
+    `_canonical_health()` is intrinsically self-recording (round 8 of an
+    independent review of PR #1237, replacing the per-section runtime guard
+    this file used to carry — see the comment on the whole-run backstop near
+    the bottom of `_canonical_health` for why that guard could not be
+    trusted). `tools/health-check-findings-selftest.py` statically walks
+    `_canonical_health`'s AST and asserts `rc` is never assigned a literal 1
+    (or `|=`'d with one) directly — the only way left to set `rc` is through
+    this function, so a code path that would flip the release gate red
+    without saying why fails a mechanical check before it can ever reach a
+    real run, rather than depending on a runtime check to catch it after the
+    fact."""
+    _canonical_finding(key, detail, subject=subject, count=count,
+                        hard_error=hard_error, time_rolling=time_rolling)
+    return 1
+
+
+def _seat_health_rows():
+    sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
+    from seat_health import health_rows
+    try:
+        with open(os.path.join(REPO_ROOT, "out", "orch", "budget", "seat-health.json")) as source:
+            report = json.load(source)
+    except (OSError, ValueError):
+        report = {}
+    return health_rows(report)
+
+
+def _tailscale_row():
+    spec = importlib.util.spec_from_file_location(
+        "tailscale_health", os.path.join(REPO_ROOT, "ops", "tailscale_health.py"))
+    if spec is None or spec.loader is None:
+        raise ImportError("Tailscale health loader unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
+
+
+def _system_cost_row():
+    import system_costs
+    snapshot = system_costs.load_snapshot(os.path.join(REPO_ROOT, 'out/system-costs.json'))
+    return snapshot, system_costs.health_row(snapshot, 'nightly collector owns reconciliation')
+
+
+def _branch_janitor_row():
+    sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
+    from branch_retirement import health
+    return health(REPO_ROOT)
 
 
 def _canonical_health():
     """The normal health surface: record/control-plane/local truth only."""
+    _FINDINGS.clear()
     rc = 0
+    if CANONICAL_SECTION == "all":
+        _cost_snapshot, _cost_line = _system_cost_row()
+        print("  " + _cost_line)
+        if _cost_snapshot['state'] != 'ready' or _cost_snapshot['alerts']:
+            rc = _red('system_costs', _cost_line, hard_error=_cost_snapshot['state'] == 'unavailable'
+                      and 'system_costs' not in PROVISIONING_PENDING)
+    if CANONICAL_SECTION in ("all", "credentials", "jev-cap"):
+        _cap_line = _jev_paid_cap_row()
+        print("  " + _cap_line)
+        if _cap_line.startswith(("HIT", "UNKNOWN")):
+            rc = _red("jev_paid_cap", _cap_line, hard_error=_cap_line.startswith("UNKNOWN"))
+        for _subject, _count in re.findall(r"(pending|failed)=(\d+)", _cap_line):
+            if int(_count):
+                rc = _red("jev_spend_alert", _cap_line, subject=_subject, count=int(_count))
+        _site_line = _jev_site_spend_row()
+        print("  " + _site_line)
+        if " over budget: " in _site_line or _site_line.startswith("UNKNOWN"):
+            rc = _red("jev_site_budget", _site_line, hard_error=_site_line.startswith("UNKNOWN"))
     try:
-        snap = _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "uptime") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
+        _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
+        # The completion marker must still print here (point 3 of the third
+        # round of an independent review of PR #1237): this branch already
+        # recorded a real, fully-explained hard_error finding — a read that
+        # caught its own failure and named it is COMPLETE, not unavailable.
+        # Without the marker, ops/release-pipeline.py's read_health_findings
+        # would read this as an INCOMPLETE baseline (marker missing) and
+        # hold forever waiting for a "clean" read that is never coming,
+        # instead of treating the hard_error as the decisive answer it is.
+        print(_HEALTH_COMPLETION_MARKER)
         return 1
 
     print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — canonical receipts, not Drive renders")
+    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
+        flash_line = flashlib.health_row()
+        print("  " + flash_line)
+        if flash_line.startswith("WARN"):
+            rc = _red("flash_residency", flash_line)
     for error in snap.get("errors", []):
         print(f"  ⚠︎ canonical source UNREADABLE — {error}")
-        _canonical_finding("source_unreadable", str(error))
-        rc = 1
+        rc = _red("source_unreadable", str(error), hard_error=True)
 
     if CANONICAL_SECTION in ("all", "exports"):
         exports = snap.get("exports")
         print("Export register — canonical export_run receipts")
         if not isinstance(exports, dict):
             print("  ⚠︎ export receipts UNREADABLE")
-            rc = 1
+            rc = _red("export_unreadable", "export receipts UNREADABLE", hard_error=True)
         else:
             registered = set(exports.get("registered") or [])
             # A RETIRED TARGET IS NOT A MISSED CHAIN. Subtracted before the loop
@@ -605,29 +1432,33 @@ def _canonical_health():
             retired = set(exports.get("retired") or [])
             registered -= retired
             rows = {r.get("target"): r for r in exports.get("rows") or [] if isinstance(r, dict)}
+            # (target, text, time_rolling) — STALE is purely a clock crossing
+            # (26h since last_ok), so it is reported but excluded from the
+            # release gate's regression diff; the other three reasons are
+            # genuine state and always count.
             bad = []
             for target in sorted(registered):
                 row = rows.get(target)
                 if not row:
-                    bad.append(f"NEVER RAN {target}")
+                    bad.append((target, f"NEVER RAN {target}", False))
                     continue
                 if row.get("latest_status") != "ok":
-                    bad.append(f"LATEST FAILED {target} (latest status {row.get('latest_status')})")
+                    bad.append((target, f"LATEST FAILED {target} (latest status {row.get('latest_status')})", False))
                     continue
                 last_ok = row.get("last_ok")
                 if not last_ok:
-                    bad.append(f"NEVER OK {target}")
+                    bad.append((target, f"NEVER OK {target}", False))
                     continue
                 try:
                     stamp = datetime.fromisoformat(str(last_ok).replace("Z", "+00:00"))
                     now = datetime.now(stamp.tzinfo) if stamp.tzinfo else datetime.now()
                     if now - stamp > timedelta(hours=26):
-                        bad.append(f"STALE {target} (last ok {str(last_ok)[:16]})")
+                        bad.append((target, f"STALE {target} (last ok {str(last_ok)[:16]})", True))
                 except ValueError:
-                    bad.append(f"UNPARSEABLE {target} last_ok={last_ok}")
-            for finding in bad:
+                    bad.append((target, f"UNPARSEABLE {target} last_ok={last_ok}", False))
+            for target, finding, rolling in bad:
                 print(f"  ⚠︎ {finding}")
-                _canonical_finding("export_receipt", finding)
+                rc = _red("export_receipt", finding, subject=target, time_rolling=rolling)
             # THE RETIRED COUNT RIDES ON THE LINE EITHER WAY. Rule bd4a6d22 asks
             # for a chosen state to stay visible rather than become silence, so
             # the reader is told how many targets are carried and why they have
@@ -635,7 +1466,6 @@ def _canonical_health():
             _carried = (f", {len(retired)} retired at the 2026-08-19 cutoff and "
                         f"correctly unreceipted" if retired else "")
             if bad:
-                rc = 1
                 if retired:
                     print(f"  -- RETIRED {len(retired)} md render target(s) not counted above")
             else:
@@ -643,13 +1473,45 @@ def _canonical_health():
                       f"all receipted inside 26h{_carried}")
 
     if CANONICAL_SECTION in ("all", "jobs"):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
+        import scheduled_jobs as _scheduled_jobs
+        if CANONICAL_FIXTURE and "scheduled_jobs" not in snap:
+            print("  -- scheduled jobs NOT IN FIXTURE")
+        elif sys.platform != "darwin" and not CANONICAL_FIXTURE:
+            print("  -- scheduled jobs launchd check applies to macOS")
+        else:
+            try:
+                _scheduled_rows = _scheduled_jobs.check(
+                    snapshot=snap.get("scheduled_jobs") if CANONICAL_FIXTURE else None,
+                    now=_canonical_now(snap).timestamp())
+                for _job_row, _line in zip(_scheduled_rows, _scheduled_jobs.render(_scheduled_rows)):
+                    print("  " + _line)
+                    rc = _red("scheduled_jobs_" + _job_row["code"], _line,
+                              subject=_job_row["label"],
+                              hard_error=_job_row["code"] == "evidence_unavailable",
+                              time_rolling=_job_row["code"] == "stale_log")
+                if not _scheduled_rows:
+                    print("  OK scheduled jobs match manifest; canonical main is current")
+            except Exception as exc:
+                _detail = (f"scheduled job check unreadable ({type(exc).__name__}) · on breach: "
+                           "job-watchdog.py scan files/updates loop scheduled_jobs:checker:evidence_unavailable · "
+                           "owner orchestrator · fix: restore the manifest and machine evidence reader · "
+                           "verify: python3 ops/scheduled-jobs-check.py · auto-clear: next complete scan")
+                print("  WARN " + _detail)
+                rc = _red("scheduled_jobs_evidence_unavailable", _detail,
+                          subject="checker", hard_error=True)
+        for headless_row in _headless_rows():
+            print("  " + headless_row["line"])
+            if headless_row["status"] == "WARN":
+                rc = _red("headless_"+headless_row["reason"], headless_row["line"],
+                          subject=headless_row["task_id"],
+                          hard_error=headless_row["hard_error"], time_rolling=headless_row["time_rolling"])
         print("Schedule drift — durable Control Plane job state")
         jobs = snap.get("jobs")
         definitions = snap.get("job_definitions")
         if not isinstance(jobs, list) or not isinstance(definitions, list):
             print("  ⚠︎ job ledger UNREADABLE")
-            _canonical_finding("job_ledger", "jobs or enabled definitions missing")
-            rc = 1
+            rc = _red("job_ledger", "jobs or enabled definitions missing", hard_error=True)
         else:
             live_jobs = _live_jobs(snap)
             cutoff = _canonical_now(snap) - timedelta(days=8)
@@ -660,34 +1522,93 @@ def _canonical_health():
                            int(j.get("completion_receipt_count", 0)) < 1]
             missing = _missing_due_executions(snap)
             stuck = _stuck_live_jobs(snap)
+            legacy = _legacy_scheduled_definitions(snap)
             for job in bad:
                 print(f"  ⚠︎ {job.get('definition_key')} {job.get('state')} "
                       f"attempt {job.get('attempt')}/{job.get('max_attempts')}")
-                _canonical_finding("job_terminal_failure",
-                                   f"{job.get('definition_key')} {job.get('state')}")
+                rc = _red("job_terminal_failure",
+                          f"{job.get('definition_key')} {job.get('state')}",
+                          subject=str(job.get("definition_key")))
             for job in unreceipted:
                 detail = (f"{job.get('definition_key')} job={job.get('id')} "
                           f"attempt={job.get('attempt')} succeeded without exact completion receipt")
                 print(f"  ⚠︎ {detail}")
-                _canonical_finding("job_completion_receipt", detail)
+                rc = _red("job_completion_receipt", detail,
+                          subject=str(job.get("definition_key")))
             for key, window in missing:
+                # The window is a specific calendar date/time (or a rolling
+                # NON-SUCCESS lookback), so it is reported but never diffed:
+                # a job due again tomorrow is expected drift, not a release
+                # regression. Subject is the definition key alone (not the
+                # date), so every day's occurrence of the same still-missing
+                # job accumulates onto one finding instead of minting a new
+                # one per date.
                 if " NON-SUCCESS execution" in window:
+                    # NOT time_rolling (point 4 of the second round of
+                    # review): a NON-SUCCESS execution is a specific past
+                    # run that failed — it does not become "current" again
+                    # purely because a day passed the way a MISSING DUE
+                    # window or a STALE clock does, so a rising count here
+                    # must still fail the release gate on its own terms.
                     detail = f"{key} {window}"
                     finding = "job_due_non_success"
+                    rc = _red(finding, detail, subject=str(key))
                 else:
                     detail = f"{key} MISSING DUE execution for {window}"
                     finding = "job_missing_due"
+                    rc = _red(finding, detail, subject=str(key), time_rolling=True)
                 print(f"  ⚠︎ {detail}")
-                _canonical_finding(finding, detail)
             for job, why in stuck:
                 detail = f"{job.get('definition_key')} job={job.get('id')} {why}"
                 print(f"  ⚠︎ {detail}")
-                _canonical_finding("job_stuck", detail)
-            if bad or unreceipted or missing or stuck:
-                rc = 1
-            else:
+                rc = _red("job_stuck", detail, subject=str(job.get("definition_key")))
+            prebrief = _calendar_prebrief_standing(snap)
+            if not CANONICAL_FIXTURE:
+                prebrief += _calendar_prebrief_unknowns(_canonical_now(snap))
+            for key, detail in prebrief:
+                print(f"  ⚠︎ {detail}")
+                # A missed slot is a specific calendar instant, reported like
+                # job_missing_due; zero events is a state, not a clock crossing.
+                # Skipped-attendee counts are intake debt that moves daily. The
+                # key is time_rolling but NOT on the release pipeline's
+                # first-appearance allowlist, so the release gate still diffs it
+                # like doctrine_gate: a first appearance between baseline and
+                # live read fails that release. The finding carries count 1,
+                # so N rising day to day does not.
+                rc = _red(key, detail, subject=CALENDAR_PREBRIEF_KEY,
+                          time_rolling=(key in ("calendar_prebrief_missed_run",
+                                                "calendar_prebrief_unknown_attendees")))
+            # THE CARRIED COUNT RIDES ON THE LINE EITHER WAY, same contract the
+            # exports section uses for retired targets: a chosen state stays
+            # visible rather than becoming silence (rule bd4a6d22).
+            if legacy:
+                print(f"  -- CARRIED {len(legacy)} definition(s) still on a legacy "
+                      f"scheduler, no Control Plane ledger row expected: "
+                      f"{', '.join(legacy)}")
+            if not (bad or unreceipted or missing or stuck or prebrief):
                 print(f"  OK {len(live_jobs)} live job(s), every due window present; "
                       "no terminal failure, stuck state, or unreceipted success")
+        # NEITHER OF THE TWO CENSUS SECTIONS CAN TURN THIS PROCESS RED, and
+        # neither returns a code: both report that their route cannot be proven,
+        # which is a standing fact about this repository rather than a fault of
+        # today's run. The fixture door is the one caller-fed path and it is
+        # labelled as a test door.
+        #
+        # THE ALARM BELOW IS THE EXCEPTION AND IT IS NOT FED BY ANY OF THAT. It
+        # takes no argument, ignores the fixture entirely, and reads the store
+        # itself; a contradiction in the control plane's own rows is the one
+        # condition on this slice that still turns health red. It runs on the
+        # fixture path too, because a caller must not be able to quiet it by
+        # choosing a door. It already records its own finding (workflow_truth_
+        # conflict) before returning 1, so folding its result into `rc` with
+        # `or` — rather than a bare `rc = 1` — keeps this call self-recording
+        # too without recording the same finding a second time.
+        _canonical_workflow_truth()
+        rc = _canonical_contradiction_alarm() or rc
+        if CANONICAL_FIXTURE:
+            _fixture_assurance_health(snap)
+        else:
+            _canonical_assurance_health()
 
     if CANONICAL_SECTION in ("all", "registry"):
         print("Registry integrity — canonical v_export_leads")
@@ -699,16 +1620,27 @@ def _canonical_health():
         if p.stdout:
             print(p.stdout.rstrip())
         if p.returncode:
-            print("  ⚠︎ canonical registry audit failed")
-            _canonical_finding("registry_integrity", "canonical registry audit failed")
-            rc = 1
+            # registry-audit.py exits 1 whenever it counted N > 0 data
+            # errors in its own summary line ("registry-audit: N error(s),
+            # M warning(s)") — that is a counted finding, not a broken
+            # check (point 2 of the second round of review: registry-audit
+            # data errors should not be hard_error). Only a nonzero exit
+            # WITHOUT that summary line (the process crashed or never
+            # reached its own end) is treated as a hard structural failure.
+            m = re.search(r"registry-audit:\s*(\d+)\s*error\(s\)", p.stdout or "")
+            if m:
+                n = int(m.group(1))
+                print(f"  ⚠︎ canonical registry audit found {n} data error(s)")
+                rc = _red("registry_integrity", f"{n} data error(s)", count=n)
+            else:
+                print("  ⚠︎ canonical registry audit failed")
+                rc = _red("registry_integrity", "canonical registry audit failed", hard_error=True)
     if CANONICAL_SECTION == "all":
         print("Doctrine and rule controls — canonical database state")
         controls = snap.get("controls")
         if not isinstance(controls, dict):
             print("  ⚠︎ doctrine/rule controls UNREADABLE")
-            _canonical_finding("control_state", "doctrine/rule controls unreadable")
-            rc = 1
+            rc = _red("control_state", "doctrine/rule controls unreadable", hard_error=True)
         else:
             gate_failures = int(controls.get("doctrine_gate_failures_24h", 0))
             never_reviewed = int(controls.get("doctrine_never_reviewed", 0))
@@ -731,22 +1663,29 @@ def _canonical_health():
             print(f"  {'OK' if not rule_gaps else '⚠︎'} active-rule-gaps      "
                   f"{rule_gaps} active admitted rules unenforced{_carried}")
             if gate_failures or never_reviewed or stale or rule_gaps:
-                if gate_failures:
-                    _canonical_finding("doctrine_gate", f"{gate_failures} failures in 24h")
-                if never_reviewed:
-                    _canonical_finding("doctrine_review", f"{never_reviewed} never reviewed")
-                if stale:
-                    _canonical_finding("doctrine_stale", f"{stale} stale sections")
-                if rule_gaps:
-                    _canonical_finding("rule_enforcement", f"{rule_gaps} active rule gaps")
-                rc = 1
+                # A `for` loop, not four independent sibling `if`s (point 3
+                # of the third round of review of PR #1237: the AST check is
+                # now per BRANCH, not per section — four separate un-elsed
+                # `if`s can never be PROVEN, statement by statement, to
+                # collectively cover the OR'd guard above them, even though
+                # they do here. A `for` loop's body is understood to run
+                # unconditionally once reached, same as the documented
+                # "for-loop reports one finding per bad item" pattern, so
+                # this is both simpler to read and directly verifiable.
+                for _count, _key, _detail, _time_rolling in (
+                    (gate_failures, "doctrine_gate", f"{gate_failures} failures in 24h", True),
+                    (never_reviewed, "doctrine_review", f"{never_reviewed} never reviewed", False),
+                    (stale, "doctrine_stale", f"{stale} stale sections", True),
+                    (rule_gaps, "rule_enforcement", f"{rule_gaps} active rule gaps", False),
+                ):
+                    if _count:
+                        rc = _red(_key, _detail, count=_count, time_rolling=_time_rolling)
 
         p = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_ROOT,
                            text=True, capture_output=True, timeout=30)
         if p.returncode:
             print("  ⚠︎ repository worktree status UNREADABLE")
-            _canonical_finding("repo_status", "git status unreadable")
-            rc = 1
+            rc = _red("repo_status", "git status unreadable", hard_error=True)
         else:
             _loose = _health_sub.classify_loose_status(REPO_ROOT, p.stdout.splitlines())
             _actionable = _loose["actionable_tracked"] + _loose["actionable_untracked"]
@@ -758,14 +1697,326 @@ def _canonical_health():
                   f" · {len(_loose['expected_patched_submodules'])} expected patched submodule(s)"
                   f" · {len(_loose['managed_artifacts'])} managed artifact(s)")
             if _needs_attention:
-                _canonical_finding("repo_loose_work", f"{len(_actionable)} actionable path(s)")
-                rc = 1
-    print("Projection freshness/tamper checks are recovery evidence; use --recovery --reason <why>.")
+                rc = _red("repo_loose_work", f"{len(_actionable)} actionable path(s)", count=len(_actionable))
+
+    if CANONICAL_SECTION in ("all", "credentials", "grok-session"):
+        _grok_line, _grok_rc = _grok_session_row()
+        print("  " + _grok_line)
+        if _grok_rc:
+            rc = _red("grok_session", _grok_line,
+                      hard_error=_grok_line.startswith("UNAVAILABLE"), time_rolling=True)
+
+    if CANONICAL_SECTION in ("all", "credentials"):
+        # The source log is canonical across worktrees. The row carries its
+        # response action on both OK and WARN, and the helper owns one loop.
+        try:
+            _, _spend_line = _jev_spend_row()
+            print("  " + _spend_line)
+        except Exception as exc:
+            print(f"  UNAVAILABLE jev spend — {type(exc).__name__}; "
+                  "on breach: open/update one dedup loop · owner orchestrator · "
+                  "remediation find caller in jev usage log · auto-clear when below threshold")
+        # ── credential health (added 2026-09-24) ────────────────────────────
+        # Daily liveness lane for every credential CARR needs to run
+        # unattended — wrangler/Cloudflare, Neon, the two MCP machine-bearer
+        # tokens, gh, the Claude and Codex CLI logins, and the Google OAuth
+        # client behind the Worker's sign-in. Joe is replacing interactive
+        # logins with long-lived scoped tokens (CLOUDFLARE_API_TOKEN, `claude
+        # setup-token`, a fine-grained gh PAT, …); this is the lane that tells
+        # him BEFORE one of them lapses rather than after a nightly chain goes
+        # dark for want of a re-auth prompt nobody was there to answer.
+        # ops/config/credential-inventory.v1.json is the data (one entry per
+        # credential — adding one later is a config edit, not a code change)
+        # and ops/credential-health.py is the runner. Same delegate pattern as
+        # rules-live and forgetting elsewhere in this file: stdlib parent,
+        # venv-or-system child, first line of the child's stdout is the
+        # summary this row prints, everything else the child printed is
+        # discarded here exactly like those rows discard theirs.
+        #
+        # PLACED INSIDE _canonical_health(), NOT the legacy Drive-projection
+        # WATCH/GATES block below this function. That block only runs under
+        # `--recovery --reason <why>` (see `if not RECOVERY_MODE: sys.exit(
+        # _canonical_health())` just below this function) — it is recovery
+        # evidence now, not the everyday surface, since the 2026-08-19 cutoff
+        # retired the Drive .md renders it was built to watch. `run.sh health`
+        # with no flags — what actually runs daily — calls only this
+        # function, so a lane that has to run daily belongs in it.
+        #
+        # The child's own contract (see its docstring) is what actually keeps
+        # this safe: every probe reads an exit status or an HTTP status code,
+        # never a command's output or a response body beyond one named,
+        # non-secret field, and out/credential-health.jsonl carries names and
+        # statuses only. On a failed or expiring_soon credential the child
+        # files exactly one deduplicated CARR loop per credential through the
+        # allowlisted `./run.sh call add-loop` Bash door (CLAUDE.md: "A
+        # capture-verb denial has a fallback door" — this call carries no
+        # credential of its own) — the loop IS the bound action a health row
+        # must name, filed by the child, not left for a human reading this
+        # line to remember to do.
+        try:
+            _chc = os.path.join(REPO_ROOT, "ops", "credential-health.py")
+            if not os.path.exists(_chc):
+                print(f"  -- {'credential health':<18} ops/credential-health.py not present; skipped")
+            else:
+                _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
+                _py = _venv if os.path.exists(_venv) else sys.executable
+                _p = subprocess.run([_py, _chc], capture_output=True, text=True, timeout=180)
+                _lines = (_p.stdout or "").strip().splitlines()
+                _first = _lines[0] if _lines else (
+                    f"(no output; stderr: {(_p.stderr or '').strip().splitlines()[-1]})"
+                    if (_p.stderr or "").strip() else "(no output, no stderr)")
+                if _first.startswith("SKIP"):
+                    print(f"  -- {'credential health':<18} {_first.split(': ', 1)[-1]}")
+                elif _p.returncode == 0:
+                    print(f"  OK {'credential health':<18} {_first.split('— ', 1)[-1]}")
+                else:
+                    _detail = _first.split("— ", 1)[-1]
+                    print(f"  ⚠︎ {'credential health':<18} {_detail}  · "
+                          f"see out/credential-health.jsonl and the loop(s) filed for detail")
+                    # ops/credential-health.py's first line, when it needs
+                    # attention, is "N of M credential(s) need attention
+                    # (failed=F expiring_soon=E unverifiable=U
+                    # unconfigured=C ok=O)". Point 5 of the third round of
+                    # review: each non-ok status is its OWN (key, subject),
+                    # not one bundled "credential_health" finding — a rise
+                    # in any ONE status (say expiring_soon 1 -> 2, while
+                    # failed stays 0) must show as a regression on its own
+                    # subject, not get averaged away inside one shared
+                    # count. `failed` is the only one that stays hard_error
+                    # — an actually-broken credential, unlike one that is
+                    # merely expiring, unverifiable, or unconfigured, which
+                    # are counted findings same as any other standing-debt
+                    # count (point 2 of the second round of review). A line
+                    # that does not match this module's own summary shape
+                    # at all (a crash, a format this file has never seen)
+                    # falls back to one hard_error finding on an empty
+                    # subject — this can never let a REAL failure through
+                    # as a mere count just because it didn't parse.
+                    _m = re.search(r"failed=(\d+)\s+expiring_soon=(\d+)\s+unverifiable=(\d+)\s+"
+                                   r"unconfigured=(\d+)", _detail)
+                    if _m:
+                        _failed, _expiring, _unverifiable, _unconfigured = (int(g) for g in _m.groups())
+                        # A `for` loop, not four independent sibling `if`s —
+                        # same reasoning as the doctrine/rule-gaps section
+                        # above (point 3 of the third round of review): a
+                        # `for` loop's body is understood to run
+                        # unconditionally once reached, so this is directly
+                        # verifiable by the AST check, where four un-elsed
+                        # sibling `if`s covering this dict's guaranteed
+                        # match are not.
+                        #
+                        # `rc = _red(...)` lives HERE, as this for-loop's own
+                        # direct sibling, rather than after the whole `if _m:
+                        # ... else: ...` (point 1 of round 4 of an independent
+                        # review of PR #1237): a bare loop is only trusted to
+                        # cover a sibling statement that shares its own
+                        # accumulator, in the SAME block, not a statement
+                        # outside the branch the loop lives in — the same
+                        # reasoning the jobs section above follows too.
+                        # (Round 9 correction: an earlier round of this
+                        # comment additionally claimed this closed "a real
+                        # latent gap" where all four counts could be zero
+                        # here and a bare `rc = 1` after the loop would have
+                        # gone red unrecorded. The coordinator confirmed that
+                        # claim was wrong — ops/credential-health.py's child
+                        # process cannot exit nonzero while reporting
+                        # failed=0 expiring_soon=0 unverifiable=0
+                        # unconfigured=0, so this branch was never reachable
+                        # with all four counts at zero, and no such gap ever
+                        # existed to close. Folding the assignment into the
+                        # loop is kept purely for the same-block-sibling
+                        # reasoning above, not for a gap that was never
+                        # real.)
+                        for _count, _subject, _hard in (
+                            (_failed, "failed", True),
+                            (_expiring, "expiring_soon", False),
+                            (_unverifiable, "unverifiable", False),
+                            (_unconfigured, "unconfigured", False),
+                        ):
+                            if _count:
+                                rc = _red("credential_health", _detail, subject=_subject,
+                                          count=_count, hard_error=_hard)
+                    else:
+                        rc = _red("credential_health", _detail, hard_error=True)
+        except Exception as e:
+            print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
+            rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
+
+    if CANONICAL_SECTION == "all":
+        try:
+            for _seat_line in _seat_health_rows():
+                print("  " + _seat_line)
+                if _seat_line.startswith("FAIL"):
+                    rc = _red("ai_seat_health", _seat_line, time_rolling=True)
+        except (ImportError, TypeError, AttributeError):
+            _seat_detail = ("Seat health evidence unreadable; on breach: orchestrator repairs "
+                            "ops/seat-health.py and reruns the daily exact-value probes; "
+                            "auto-clear when all seats pass")
+            print("  FAIL " + _seat_detail)
+            rc = _red("ai_seat_health", _seat_detail, time_rolling=True)
+
+    if CANONICAL_SECTION == "all":
+        # Jev liveness compares the last usable provider receipt with a
+        # recent failed judgment attempt. The row's loop is filed once and
+        # closed only after a later schema-valid judgment appears in these logs.
+        try:
+            _loop_state = os.path.join(REPO_ROOT, "out", "jev-outage-loop.json")
+            _joh = _jev_outage.evaluate(
+                os.path.join(REPO_ROOT, "out", "jev-judge.jsonl"),
+                os.path.join(REPO_ROOT, "out", "jev-calls.jsonl"),
+                state_path=_loop_state)
+            _action = _jev_outage.action(_joh.get("reason"))
+            _outcome = _jev_outage.reconcile(
+                _joh, _loop_state,
+                _jev_outage.call_verb)
+            if _joh["status"] == "warn":
+                _last = (f"last success {_joh['age_hours']}h ago"
+                         if _joh["age_hours"] is not None else "no usable call recorded")
+                _condition = ("outage evidence unreadable" if _joh["reason"] == "log_unreadable"
+                              else f"recent attempt failed ({_joh['reason']})")
+                _detail = f"{_last}; {_condition}; loop {_outcome}"
+                print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
+                rc = _red("jev_live_outage", _detail)
+            elif _outcome == "error":
+                _detail = "outage loop could not be auto-cleared"
+                print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
+                rc = _red("jev_live_outage", _detail)
+            else:
+                _summary = ("success verified; outage loop cleared" if _outcome == "cleared"
+                            else "recent failure; last success is inside the grace window"
+                            if _joh["pending"]
+                            else "no recent failed attempts" if _joh["status"] == "skip"
+                            else "successful Jev call is fresh")
+                print(f"  {'OK' if _joh['status'] == 'ok' else '--'} "
+                      f"{'Jev live judgment':<18} {_summary} · {_action}")
+        except Exception as e:
+            _detail = f"outage evidence unreadable ({type(e).__name__})"
+            print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_jev_outage.action('log_unreadable')}")
+            rc = _red("jev_live_outage", _detail)
+
+    if CANONICAL_SECTION == "all":
+        # Jev call receipt tamper audit (migrations/0587). The receipt store is
+        # detectable-not-prevented against its database owner; this is the
+        # detection half: a receipt with no matching ask-jev tool_call row, or
+        # an append-only trigger that is not enabled, is a failing line. The
+        # child asks the deployed Worker through `./run.sh call` (no credential
+        # of its own); a Worker that does not serve the verb yet (unknown_tool)
+        # is a skip line, not a failure.
+        try:
+            _rih = os.path.join(REPO_ROOT, "ops", "receipt-integrity-health.py")
+            if not os.path.exists(_rih):
+                print(f"  -- {'jev receipts':<18} ops/receipt-integrity-health.py not present; skipped")
+            else:
+                _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
+                _py = _venv if os.path.exists(_venv) else sys.executable
+                _p = subprocess.run([_py, _rih], capture_output=True, text=True, timeout=120,
+                                    stdin=subprocess.DEVNULL)
+                _lines = (_p.stdout or "").strip().splitlines()
+                _first = _lines[0] if _lines else "(no output)"
+                if _first.startswith("SKIP"):
+                    print(f"  -- {'jev receipts':<18} {_first.split(': ', 1)[-1]}")
+                elif _p.returncode == 0:
+                    print(f"  OK {'jev receipts':<18} {_first.split('— ', 1)[-1]}")
+                else:
+                    _detail = _first.split("— ", 1)[-1]
+                    print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
+                    # hard_error=True unconditionally (round 8 of an
+                    # independent review of PR #1237, point 4): this is a
+                    # tamper-DETECTION check on the Jev call receipt store,
+                    # which is detectable-not-prevented against its own
+                    # database owner (see the block comment above) — a
+                    # mismatched receipt or a disabled append-only trigger is
+                    # never a business count a baseline comparison should be
+                    # allowed to excuse, the same reasoning `failed` gets in
+                    # the credential-health loop above. `count` is the actual
+                    # number of receipts without a matching ask-jev tool_call
+                    # row when the message says so (not a fixed 1), so a rise
+                    # from one mismatch to five is visible to ops/release-
+                    # pipeline.py's baseline-vs-live regression diff instead
+                    # of two runs reporting the identical count=1.
+                    _rm = re.search(r"(\d+)\s+receipt\(s\)\s+without\s+a\s+matching", _detail)
+                    rc = _red("jev_call_receipt_integrity", _detail,
+                              count=int(_rm.group(1)) if _rm else 1, hard_error=True)
+        except Exception as e:
+            _detail = f"check failed ({type(e).__name__}: {e})"
+            print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
+            rc = _red("jev_call_receipt_integrity", _detail, hard_error=True)
+
+    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
+        print("Branch retirement — local scheduled receipts")
+        try:
+            line, failed = _branch_janitor_row()
+            print("  " + line)
+            if failed:
+                rc = _red("branch_janitor", line, subject="three-repo-retirement")
+        except Exception as exc:
+            line = (f"branch janitor unavailable ({type(exc).__name__}) · on breach: owner orchestrator "
+                    "· restore lib/branch_retirement.py · verify health · auto-clear after successful readback")
+            print("  WARN " + line)
+            rc = _red("branch_janitor", line, subject="three-repo-retirement")
+
+    if CANONICAL_SECTION in ("all", "uptime") and not CANONICAL_FIXTURE:
+        line, failed = _uptime.row()
+        print("  " + line)
+        if failed:
+            _unprovisioned = ("production_uptime" in PROVISIONING_PENDING
+                              and "monitor unreachable" in line)
+            rc = _red("production_uptime", line, subject="carr-uptime", hard_error=not _unprovisioned)
+
+    if CANONICAL_SECTION in ("all", "tailscale"):
+        try:
+            line, failed = _tailscale_row()
+            print(line)
+            if failed:
+                rc = _red("tailscale", line.strip(), subject="local-node", hard_error=True)
+        except Exception as exc:
+            detail = (f"Tailscale check unavailable ({type(exc).__name__}) · on breach: "
+                      "owner orchestrator · fix: restore ops/tailscale_health.py · "
+                      "verify: rerun health · auto-clear: next successful node read")
+            rc = _red("tailscale", detail, subject="local-node", hard_error=True)
+
+    # WHOLE-RUN backstop, alongside the static AST proof in tools/health-
+    # check-findings-selftest.py (round 8 of an independent review of PR
+    # #1237): every `rc = 1` path inside this function now goes through
+    # `_red()`, which records the finding FIRST and returns 1 — the AST check
+    # statically forbids any OTHER way of assigning `rc` (no bare literal 1,
+    # no `|= 1`), so a future section that flips this run red without a
+    # finding to explain it fails a mechanical check before it can ever reach
+    # a real run. That static proof is the real invariant now. It replaced
+    # this file's earlier `_section_runtime_guard` (round 7), which only
+    # checked a WEAKER runtime proxy — "did this section's own rc and
+    # `_FINDINGS` counters move together" — and real runs exposed two
+    # structural blind spots in that proxy: a section could satisfy "did
+    # findings increase" on a finding an unrelated EARLIER statement in the
+    # same section already recorded (jobs records its standing
+    # `job_missing_due` finding before the section's own terminal rc=1 check
+    # ever runs), rather than on the specific statement that actually flipped
+    # `rc`; and the guard's "did rc flip 0->1 during this section" precondition
+    # never even fired for any section reached with `rc` already 1 from an
+    # earlier one — which, in a real run, is every section after the first one
+    # that reports anything at all (jobs' own standing debt is normal, so by
+    # the time `registry_integrity` and everything after it runs, `rc` is
+    # already 1 and that guard could never have caught an unrecorded failure
+    # there either). `_section_runtime_guard` is removed along with every call
+    # site. This whole-run check below is kept only as a final, cheap defense
+    # — with every path in this function now self-recording via `_red()`, it
+    # should be unreachable in practice, but it still catches the one case a
+    # static AST walk of THIS function cannot: `rc` ending up 1 through some
+    # mechanism the AST check does not model.
+    if rc == 1 and not _FINDINGS:
+        _canonical_finding("unrecorded_failure",
+                           "rc=1 was set but no finding was recorded anywhere to explain it",
+                           hard_error=True)
+
+    print(_HEALTH_COMPLETION_MARKER)
     return rc
 
 
 if not RECOVERY_MODE:
-    sys.exit(_canonical_health())
+    _rc = _canonical_health()
+    if FINDINGS_JSON_PATH:
+        _write_findings_json(FINDINGS_JSON_PATH)
+    sys.exit(_rc)
 
 print(f"HEALTH RECOVERY MODE — NONCANONICAL Drive projections — reason: {RECOVERY_REASON}", file=sys.stderr)
 print(f"HEALTH RECOVERY MODE — vault: {VAULT}", file=sys.stderr)
@@ -932,12 +2183,10 @@ GATES = {
 
 
 def _keys_in_env_file():
-    """Key names declared in db.env, parsed as text. Never sources, never stores values."""
+    """Key names whose value LOADS from db.env through lib/credential_file, the
+    reader every Python job uses. Never sources, never stores values."""
     try:
-        with open(DB_ENV) as fh:
-            return {ln.split("=", 1)[0].strip()
-                    for ln in fh
-                    if "=" in ln and not ln.lstrip().startswith("#") and ln.split("=", 1)[1].strip()}
+        return {name for name, value in read_env_file(DB_ENV).items() if value}
     except OSError:
         return set()
 
@@ -979,8 +2228,47 @@ def newest(pattern):
 def age_days(path):
     return (time.time() - os.path.getmtime(path)) / 86400
 
+
+def db_env_parse_failure():
+    """Line number db.env dies on when SOURCED, or None if the whole file parses.
+
+    gate_state() below asks "can THIS KEY be loaded", per watch, and only when a
+    watch has no output. That question cannot be asked at all for a key no watch
+    names, and it is never asked on a healthy night. The failure it was built for
+    is not per-key: zsh aborts the whole `. db.env` at the first bad line, so ONE
+    unquoted DSN silently empties the file for every job on this Mac.
+
+    That is not hypothetical twice over. 2026-08-02 was CARR_DB_JOBS_URL. Then on
+    2026-08-20 CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL — a key no watch here
+    names, so nothing in this file could see it — landed unquoted and closed
+    bin/migrate-prod.sh, the one sanctioned door to production migrations, for
+    six days, for every caller that did not already have NEON_API_KEY exported.
+    This check is file-level and unconditional for exactly that reason: it does
+    not need to know which keys matter.
+
+    `zsh -n` parses and runs nothing, so no value is read, expanded or printed.
+    Only the line number is kept — zsh's message can quote a token from the
+    offending line, and every value in that file is a credential.
+    """
+    if not os.path.exists(DB_ENV):
+        return None
+    probe = subprocess.run(["/bin/zsh", "-n", DB_ENV], capture_output=True, text=True)
+    if probe.returncode == 0:
+        return None
+    found = re.search(r":(\d+):", probe.stderr)
+    return found.group(1) if found else "unknown"
+
+
 rc = 0
 print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — outputs, not schedules")
+_db_env_line = db_env_parse_failure()
+if _db_env_line is not None:
+    print(f"  ⚠︎ {'db.env':<18} UNSOURCEABLE — {DB_ENV} does not parse as shell at line "
+          f"{_db_env_line}. Every job that does `set -a; . db.env` (bin/migrate-prod.sh, "
+          f"bin/nightly.sh, bin/refresh-rules.sh, bin/control-plane-tick.sh and the rest) "
+          f"loses ALL of its keys, not just the bad one, and reports its credential missing. "
+          f"Fix: single-quote that value  · one bad line disables every credential here")
+    rc = 1
 for name, out_pat, max_age, inputs, note in WATCH:
     out = newest(out_pat)
     if not out:
@@ -1496,18 +2784,11 @@ else:
             if ("/migrations/" in _f or "node_modules" in _f or "/corpus/" in _f
                     or f"import_{_n}" in _f):
                 continue
-            # A WATCHER NAMING A FILE IS NOT A CONSUMER OF IT. Added 2026-08-09,
-            # same council pass. Five of the six deprecation rows warned solely
-            # because THIS file's own WATCH list holds those filenames, and
-            # parity-lead-board.py is the test harness that dies with them. The
-            # check was its own dependency, so the register could never go green
-            # and had printed the identical six warnings since 2026-08-02. That
-            # is not a harmless cosmetic: a row that is chronically red detects
-            # nothing, and this system has already been bitten by it once — on
-            # 2026-08-08 a plugin install deleted the entire hooks block and the
-            # catastrophic wipe printed the same headline as a benign stale row,
-            # so all five gates were off for a day and it was found by accident.
-            if os.path.basename(_f) in ("health-check.py", "parity-lead-board.py"):
+            # A WATCHER NAMING A FILE IS NOT A CONSUMER OF IT. health-check.py's
+            # WATCH list names deprecated files to detect their remaining users.
+            # Skip this watcher so its own list does not count as a dependency
+            # and keep the warning active after the last consumer is removed.
+            if os.path.basename(_f) == "health-check.py":
                 continue
             try:
                 _lines = open(_f, errors="replace").read().splitlines()
@@ -1800,6 +3081,20 @@ try:
             rc = 1
 except Exception as e:
     print(f"  ⚠︎ {'machine config':<18} check failed ({type(e).__name__}: {e})")
+    rc = 1
+
+try:
+    sys.path.insert(0, REPO_ROOT)
+    from lib import launchd_hold_health as _launchd_hold_health
+    _hold_line, _hold_rc = _launchd_hold_health.check(
+        os.path.expanduser("~"),
+        lambda name, payload: _jev_outage.call_verb(name, payload, repo=REPO_ROOT))
+    print(f"  {_hold_line}")
+    rc = max(rc, _hold_rc)
+except Exception as e:
+    print(f"  WARN launchd holds response failed ({type(e).__name__}) · "
+          "on breach: owner claude (Platform Engineer) repairs the hold health reader; "
+          "verify rerun health; auto-clear on a successful read")
     rc = 1
 
 # ── the egress guard: is its LOGIC right, and is its DATA fresh (2026-08-09) ──
@@ -2173,6 +3468,18 @@ except Exception as e:
 # --- the doctrine store (P4/P5, 2026-08-08; decisions 82a2fb62 + import door) -
 # Every row prints its bound action inline (rule 590b11e1: no metric without a
 # bound action, visible in the render itself). A failed read is never all-clear.
+print("\nrule delivery")
+try:
+    from ops.rule_recall_health import check_local as _check_rule_recall
+    _line = _check_rule_recall(REPO_ROOT)
+    print("  " + _line)
+    if not _line.startswith("OK"):
+        rc = 1
+except Exception as e:
+    from ops.rule_recall_health import ACTION as _recall_action
+    print(f"  UNAVAILABLE rule recall — {type(e).__name__}; warning retained · {_recall_action}")
+    rc = 1
+
 print("\ndoctrine store")
 try:
     _q = ("select "
@@ -2240,8 +3547,7 @@ except Exception as e:
 # Freshness only: a mirror is insurance, and stale insurance that looks valid
 # is worse than none. Bound action inline per rule 590b11e1.
 try:
-    _mp = ("/Users/booko/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us"
-           "@gmail.com/My Drive/CARR AI/Backups/portability-mirror/MANIFEST.md")
+    _mp = os.path.join(DEFAULT_RECOVERY_VAULT, "Backups", "portability-mirror", "MANIFEST.md")
     if not os.path.exists(_mp):
         print("  ⚠︎ portability-mirror  MISSING · on breach: run tools/db-tap.py run "
               "pipelines/doctrine_mirror.py (see nightly.sh for args)")

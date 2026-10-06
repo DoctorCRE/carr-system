@@ -84,7 +84,7 @@ Filter for a **blank Tenant Representative**. A healthcare tenant with no broker
 A practice in **non-contiguous suites** is a practice that has outgrown its layout. That is a relocation lead with no expiry needed.
 
 ### 5. Space inventory / matchmaking
-Properties + Availabilities: every medical-suitable space on the market, standing. When a Pappas or a Brown appears, we open a list instead of starting a search. This activates idea-bank #16 (territory property-inventory matcher), which has been parked for want of a data source.
+Properties + Availabilities: every medical-suitable space on the market, standing. When a Pellegrino or a Brown appears, we open a list instead of starting a search. This activates idea-bank #16 (territory property-inventory matcher), which has been parked for want of a data source.
 
 ### 6. The crowding signal
 **SF/Employee.** A practice well below the medical-office norm is squeezed — an expansion lead with no trigger event required. Pair with **Company Growth**.
@@ -99,7 +99,7 @@ Properties → new construction / renovations. Every medical project names a **d
 Landlord Rep and Tenant Rep fields tell us who is working what. Feeds `DNA/Network/brokers.xlsx` (76 rows, almost no relationship data).
 
 ### 10. Buy-vs-lease matchmaking
-Sales listings + our NAL (which doctors already own property) + the SDF (what things actually trade for) = a targeted list of doctors who *should* own their building and don't. This is the Pappas conversation at 4608 Opa Locka, generalized.
+Sales listings + our NAL (which doctors already own property) + the SDF (what things actually trade for) = a targeted list of doctors who *should* own their building and don't. This is the Pellegrino conversation at 4600 Harbor Ln, generalized.
 
 ---
 

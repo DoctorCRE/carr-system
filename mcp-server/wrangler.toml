@@ -2,6 +2,67 @@
 # Secrets (via `wrangler secret put`, never in this file, never in git):
 #   DATABASE_URL_READER — Neon login role granted carr_reader (views only)
 #   DATABASE_URL_WRITER — Neon login role granted carr_writer (write path; set when verbs land)
+#   DATABASE_URL_GATE_ZERO_WRITER
+#                       — Neon login role carr_gate_zero_producer, created by
+#                         migration 0502 and granted NOTHING else. It is
+#                         the ONLY role holding EXECUTE on
+#                         ops.gate_zero_record_read_only_outcome (migration 0502
+#                         revokes it from carr_writer), and the record layer
+#                         derives the producing seat from session_user rather
+#                         than from any session setting — standing-rule
+#                         amendment 9, 2026-09-14: seat-only write is enforced by
+#                         CONNECTION ROLE. Used by exactly one verb,
+#                         record-gate-zero-read-only-outcome, and by nothing else;
+#                         never widen it and never point it at app_writer.
+#                         THIS SECRET IS ONE OF A FAMILY. It moves together with
+#                         DATABASE_URL_READER and DATABASE_URL_WRITER, because a
+#                         Worker holding the new value of one and the old value
+#                         of another authenticates as the wrong identity. The
+#                         family is therefore published in ONE atomic bulk call
+#                         and read back, never one `wrangler secret put` at a
+#                         time. STAGING is provisioned as the third LoginProfile
+#                         in tools/provision-staging-app-writer.py, which
+#                         publishes all three DSNs in exactly that one atomic
+#                         bulk cutover and reads the bound names back before the
+#                         password commits.
+#                         PRODUCTION is JOE'S OWN ACT and no tool in this
+#                         repository performs it: that provisioner refuses the
+#                         Production project by design, and no session holds the
+#                         Cloudflare token or the Production owner credential.
+#                         It is RELEASE ACT (9) of PLAN-a5059eb52474-v3 -- AFTER
+#                         PR #1013 and PR #1014 have merged (acts 6 and 8) and
+#                         before the third Worker promotion (act 12).
+#                         RECORDED DEVIATION FROM THE PLAN'S NUMBERING, ruled at
+#                         execution 2026-09-13: the plan lists act (9) BEFORE the
+#                         apply at act (10), and that order cannot be run --
+#                         migration 0502 is what CREATES
+#                         carr_gate_zero_producer, so before the apply there is
+#                         no role to set a password on and (9)(a)'s own first
+#                         proof would find no pg_authid row at all. The
+#                         executable order is (8) merge, (10) apply 0502 and 0503
+#                         as one group, (9) Joe provisions and publishes, then
+#                         (11) the schema refresh, (12) the promotion, (13) the
+#                         live run. Every reason the plan gives for (9)'s
+#                         position survives it: what (9) must precede is the
+#                         PROMOTION, never the apply. The plan is immutable and
+#                         unedited; the deviation is recorded at execution in the
+#                         outcome feedback, and migration 0502's own header and
+#                         PR #1014's body carry this same statement.
+#                         Joe sets the role's password per
+#                         the Neon Database SOP, section
+#                         `01-connections-and-roles`, proving from pg_authid that
+#                         the role is still passwordless first and leaving that
+#                         transaction uncommitted; then publishes the whole
+#                         DATABASE_URL* family to the production Worker in one
+#                         `wrangler secret bulk` call with the payload on stdin,
+#                         reads the bound names back with `wrangler secret list
+#                         --format json`, and verifies from the CONSUMER rather
+#                         than from an exit code, per the Cloudflare Edge SOP,
+#                         section `02-secrets-and-tokens` -- the same atomic
+#                         bulk-plus-readback shape the staging provisioner uses.
+#                         Only then does the password commit. A Worker promoted
+#                         before this secret exists refuses every write and names
+#                         required_secret.
 #   INGEST_TOKENS       — JSON map { "<source>": "<token>" } for the ingest socket
 #   PROBE_TOKENS        — JSON map { "<slug>": "<token>" } for the smoke suite ONLY
 #                         (loop #192, 2026-08-06). Authenticates as one locked-
@@ -59,6 +120,34 @@
 #                         HERMES_TOKENS just to add this client: secret values
 #                         cannot be read back, so replacement could invalidate
 #                         the existing Hermes runtime.
+#   HERMES_COS_TOKENS — separate JSON map for the server-locked Hermes
+#                       chief-of-staff door, e.g. { "hermes-pilot": "<token>" }.
+#                       This map is checked before HERMES_TOKENS and selects only
+#                       the `hermes-cos` profile (ordinary Hermes/projector
+#                       credentials remain on their existing profile). Joe
+#                       provisions the secret value; it never appears here.
+#                       Local proof uses CARR_MCP_CLIENT_PROFILE=hermes-cos and
+#                       CARR_HERMES_COS_MCP_TOKEN in the existing 0600
+#                       ~/.config/carr/mcp-tokens.env. It must never reuse
+#                       CARR_HERMES_MCP_TOKEN / HERMES_TOKENS_EXTRA.
+#                       Native Hermes Desktop is provisioned separately through
+#                       its sanctioned CLI:
+#                         hermes mcp add carr-cos \
+#                           --url https://api.doctorcre.com/mcp --auth header
+#                       Enter the same dedicated CoS bearer only at the prompt.
+#                       Hermes stores it as MCP_CARR_COS_API_KEY in its 0600
+#                       ~/.hermes/.env and stores only ${MCP_CARR_COS_API_KEY}
+#                       interpolation in ~/.hermes/config.yaml. Post-merge:
+#                         hermes config path; hermes config env-path
+#                         stat -f %Lp ~/.hermes/.env ~/.hermes/config.yaml
+#                         hermes mcp list; hermes mcp test carr-cos
+#                       Both files must read 600, carr-cos must be enabled, and
+#                       a fresh native session's tools/list must include
+#                       update-deal/add-premises. The ordinary/projector server
+#                       must remain distinct and must omit both verbs. Rollback:
+#                         hermes mcp remove carr-cos
+#                       then remove only MCP_CARR_COS_API_KEY through the Hermes
+#                       credential owner; never edit or reuse the plain token.
 #   (PARTNER_TOKENS     — RETIRED 2026-08-03. Was an interim per-partner bearer
 #                         for /mcp during the OAuth rollout. Both partners are on
 #                         provider-issued tokens; the secret is deleted and the
@@ -68,6 +157,24 @@
 #                         narrow machine actor, never as a full human actor.)
 #   GOOGLE_CLIENT_ID    — Google Cloud OAuth 2.0 web client (upstream sign-in)
 #   GOOGLE_CLIENT_SECRET— ditto. Joe sets both himself; Claude never holds them.
+#   DATABASE_URL_OWNERSHIP_ISSUER_G1 / DATABASE_URL_OWNERSHIP_ISSUER_G2
+#                         — generation-specific login URLs for the canonical
+#                         ownership issuer capability.  The two slots are
+#                         published independently and carry only one of the
+#                         two login roles at a time: active or draining.
+#                         They are intentionally absent from every local
+#                         dispatcher environment.  WR126's provisioner is a
+#                         dry-run planner only; it never reads or publishes
+#                         these values.  The Worker lifecycle seam remains
+#                         disabled until a separately accepted production
+#                         change provisions and verifies the slots.
+#   ENGINEERING_CONTROLLER_TOKENS
+#                         — one isolated Worker bearer map for the registered
+#                         Codex controller: {"codex":"<token>"}.  It opens
+#                         only the four canonical-ownership MCP operations;
+#                         it is not LOCAL_TOKENS, AGENT_TOKENS, or either
+#                         generation-specific issuer slot.  No local model
+#                         process receives this bearer.
 name = "carr-mcp"
 account_id = "12ccca77eb49142a6be8eb84c0d6a3a0"
 main = "src/index.js"
@@ -76,19 +183,27 @@ compatibility_date = "2026-07-01"
 # Required by workers-oauth-provider for Client ID Metadata Document support:
 # it disables the legacy same-zone fetch shortcut, which is the SSRF guard for
 # fetching a client's metadata document.
-compatibility_flags = ["global_fetch_strictly_public"]
+compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
 
-# Custom domains. api.* is the machine surface; reports.* (client links) is a
-# separate Pages project per open-loops #105; the apex stays free for the future
-# public site. doctorcre.com added 2026-08-01 (Joe's domain ruling): PRIMARY name
+# Custom domains. api.* is the machine surface; reports.* is the isolated
+# client-link surface routed through the same Worker so its digest-only exchange
+# and reads remain same-origin. The apex stays free for the future public site.
+# doctorcre.com added 2026-08-01 (Joe's domain ruling): PRIMARY name
 # as of Dell's onboarding — practicecre.com stays live as an alias; its
 # retirement is a later, unhurried decision. Same Worker answers both.
 routes = [
   { pattern = "api.practicecre.com", custom_domain = true },
   { pattern = "api.doctorcre.com", custom_domain = true },
-  { pattern = "app.doctorcre.com", custom_domain = true },
-  { pattern = "dealroom.doctorcre.com", custom_domain = true }
+  { pattern = "dealroom.doctorcre.com", custom_domain = true },
+  { pattern = "reports.doctorcre.com", custom_domain = true }
 ]
+
+# Pinned OFL font binaries are bundled as private Worker data modules for the
+# deterministic Tour PDF renderer. They are not served by the ASSETS binding.
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true
 
 # WHICH DEPLOYMENT IS ANSWERING. Added 2026-08-14, after the routes incident
 # below: for about two minutes api.doctorcre.com was served by carr-mcp-staging
@@ -117,6 +232,17 @@ DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 # Authenticated Command Center cutover: / serves workspace.html while enabled;
 # /deals remains the explicit Deal Room route. Disable to roll back the root.
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
+# Final half of the reviewed zero-downtime credential cutover. Dedicated Codex
+# and Claude token maps and native profiles passed the isolated live lifecycle
+# proof on the compatibility release, so this release requires surface-bound
+# credentials. Absent or unknown values fail closed in index.js.
+CONTINUITY_SURFACE_ENFORCEMENT = "required"
+# Canonical ownership issuer lifecycle is deliberately inert in this source
+# slice.  Keep the default explicit in both environments so a deploy cannot
+# turn a credential plan into a production effect by omission.
+CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
+CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
+CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
 
 # Cloudflare supplies the immutable version ID, optional tag, and creation
 # timestamp at runtime. /release reads this binding as provider identity; it is
@@ -125,11 +251,11 @@ WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
 [version_metadata]
 binding = "CF_VERSION_METADATA"
 
-# One Worker + one asset binding is the smallest deployable structure. The
-# parallel Deal Room lane writes its no-build bundle directly under dealroom/;
-# src/dealroom-web.js also checks dist/ and falls back to public-shell/index.html.
+# One Worker + one asset binding is the smallest deployable structure. P2
+# materializes the exact digest-pinned DoctorCRE release into this ignored path
+# before Wrangler runs; editable dealroom/ source is no longer deployment input.
 [assets]
-directory = "../dealroom"
+directory = "../out/doctorcre-artifacts/current"
 binding = "ASSETS"
 run_worker_first = true
 
@@ -139,6 +265,14 @@ run_worker_first = true
 [[kv_namespaces]]
 binding = "OAUTH_KV"
 id = "b033d3b5c454445080e9d0ab51ff8f3c"
+
+[[durable_objects.bindings]]
+name = "OAUTH_CONSENT_STATE"
+class_name = "OAuthConsentState"
+
+[[migrations]]
+tag = "oauth-consent-v1"
+new_sqlite_classes = ["OAuthConsentState"]
 
 [observability]
 enabled = true
@@ -175,7 +309,7 @@ bucket_name = "carr-documents"
 name = "carr-mcp-staging"
 main = "src/index.js"
 compatibility_date = "2026-07-01"
-compatibility_flags = ["global_fetch_strictly_public"]
+compatibility_flags = ["global_fetch_strictly_public", "nodejs_compat"]
 workers_dev = true
 
 # `routes = []` IS LOAD-BEARING AND CAUSED A PRODUCTION INCIDENT BY ITS ABSENCE.
@@ -201,8 +335,16 @@ routes = []
 [env.staging.vars]
 CARR_ENV = "staging"
 APP_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev"
+# The independent DoctorCRE staging Worker reaches this Worker only through a
+# private service binding. This exact host keeps OAuth redirects, host-only
+# sessions, CSRF, tenant checks, and authorization inside CARR.
+DOCTORCRE_APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
 DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
+CONTINUITY_SURFACE_ENFORCEMENT = "required"
+CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
+CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
+CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
 
 # Environment configuration is explicit: staging's separate Worker needs the
 # same runtime version-identity binding and must not depend on inheritance.
@@ -210,7 +352,7 @@ WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
 binding = "CF_VERSION_METADATA"
 
 [env.staging.assets]
-directory = "../dealroom"
+directory = "../out/doctorcre-artifacts/current"
 binding = "ASSETS"
 run_worker_first = true
 
@@ -219,6 +361,10 @@ run_worker_first = true
 [[env.staging.kv_namespaces]]
 binding = "OAUTH_KV"
 id = "faa513fd07ec45d88abc5949f323aec5"
+
+[[env.staging.durable_objects.bindings]]
+name = "OAUTH_CONSENT_STATE"
+class_name = "OAuthConsentState"
 
 [env.staging.observability]
 enabled = true

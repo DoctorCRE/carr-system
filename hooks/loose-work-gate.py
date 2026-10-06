@@ -31,6 +31,29 @@ WHAT IT IS NOT. Not a security control and not a commit policy — it does not c
 what you commit, only that you do not walk away from your own edits. It fails
 open on every broken input, because a Stop hook that strands sessions is worse
 than the thing it checks for.
+
+IT ANNOUNCES, IT NO LONGER REOPENS (2026-08-23, the gates-audit council's
+Stop-gate rationing, Joe's order). It used to exit 2, which forces a whole extra
+assistant message. Eleven Stop hooks could do that, and the council measured one
+real shipped session paying nine of those reopens for findings that changed
+nothing — while every reopen is direct token spend against a system whose
+standing constraint is no steady-state token ceremony. Only three keep the
+power now: core conduct, completion-evidence, and drift-assertion.
+
+WHY THIS ONE LOST IT, and it is not that the finding stopped mattering. Loose
+work is real and Joe's complaint that birthed this gate stands. But the harm it
+prevents is a file nobody else can see, and the honest question the council's
+test asks is whether STOP is the last cheap reversible moment before that harm —
+it is not. Nothing has been lost when the session ends: the tree still holds the
+files, tools/health-check.py still reports them, and the next session inherits a
+message that named them. A reopened turn buys a restatement, not a commit. So
+the finding still reaches the model, in context, at the same moment; what it
+stops doing is charging a turn for it.
+
+WHAT WOULD REVERSE THIS. The demotion is measured, not permanent: if a week of
+the hook telemetry shows loose work actually being ABANDONED at a higher rate
+than before — the finding announced and then ignored — the register goes back
+to a reopen and this paragraph is the record of why it was tried.
 """
 import json
 import os
@@ -49,6 +72,7 @@ REPO = os.path.dirname(HOOKS)
 sys.path.insert(0, HOOKS)
 sys.path.insert(0, REPO)
 
+from stop_latch import announce  # noqa: E402
 from worktree_scope import worktree_root  # noqa: E402
 
 
@@ -198,7 +222,7 @@ def main():
         return 0                     # fail open on anything unexpected
 
     if not left and ahead:
-        print(
+        return announce(
             f"LOOSE WORK GATE — this session committed {ahead} change(s) and never "
             f"pushed them.\n\n"
             "  They exist on no other machine. The repository looks finished from\n"
@@ -213,16 +237,14 @@ def main():
             "  ALREADY LANDED ANOTHER WAY? Then nothing here is missing from origin\n"
             "  and this gate would not have fired; re-read the count above.\n\n"
             "  GENUINELY PARKING THEM:  CARR_ALLOW_LOOSE_WORK=1\n\n"
-            "  Say which it is. Do not simply stop again.",
-            file=sys.stderr)
-        return 2
+            "  Say which it is, next time you speak.")
 
     if not left:
         return 0                     # the quiet, common case: say nothing
 
     rel = sorted(os.path.relpath(p, repo) for p in left)
     listing = "\n".join(f"      {r}" for r in rel)
-    print(
+    return announce(
         "LOOSE WORK GATE — this session edited these and never landed them:\n\n"
         f"{listing}\n\n"
         "  They are still in the working tree, uncommitted. Nobody else can see\n"
@@ -238,9 +260,7 @@ def main():
         "  discard them deliberately rather than leaving them: git checkout -- <paths>\n\n"
         "  GENUINELY PARKING THEM — handing the tree on, or stopping mid-investigation:\n\n"
         "      CARR_ALLOW_LOOSE_WORK=1\n\n"
-        "  Say which it is. Do not simply stop again.",
-        file=sys.stderr)
-    return 2
+        "  Say which it is, next time you speak.")
 
 
 if __name__ == "__main__":

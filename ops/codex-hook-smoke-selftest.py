@@ -41,15 +41,12 @@ import sys
 REPO = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(REPO)  # ops/ -> repo root
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 # ── 1. the judge function ────────────────────────────────────────────────
@@ -59,6 +56,10 @@ _spec = importlib.util.spec_from_file_location(
 assert _spec and _spec.loader
 judge_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(judge_mod)
+
+BOOT_DENIAL = 'RULE BOOT: this context must read the CARR rules before any other tool. Fetch each missing page'
+check('rule-boot denial is not hook_skipped', judge_mod.diagnose(BOOT_DENIAL) == 'boot_gate')
+check('boot denial alone never proves guard fired', judge_mod.judge(BOOT_DENIAL) == 'FAIL')
 
 print("judge()")
 
@@ -170,6 +171,11 @@ check("builds the prompt into a file rather than inlining it on a command line",
 check("reads the probe host from the judge module rather than hardcoding it",
       "codex_hook_smoke_judge" in smoke_src and "PROBE_HOST" in smoke_src)
 
+check('probe instructions fetch every boot page before issuing probe',
+      '"detail":"boot","page":1' in smoke_src and 'pages_total' in smoke_src
+      and smoke_src.index('First satisfy the CARR rule-boot gate') < smoke_src.index('After boot is complete, run exactly'))
+check('shell reports boot_gate separately', 'boot_gate)' in smoke_src)
+
 # Before spending a live Codex run the smoke asks the guard whether it still
 # refuses the probe. Without this, adding the host to KNOWN_HOSTS would turn
 # the smoke into a test that quietly proves nothing.
@@ -256,5 +262,4 @@ for root, dirs, files in os.walk(REPO):
 check("no OTHER file invokes `codex exec` without the flag (new site check)",
       not uncovered, f"uncovered: {uncovered}")
 
-print(f"\n{'OK all checks passed' if not failures else f'FAIL {len(failures)} check(s): ' + ', '.join(failures)}")
-sys.exit(1 if failures else 0)
+sys.exit(CHECKER.summary())

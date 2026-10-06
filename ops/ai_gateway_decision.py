@@ -17,7 +17,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 DECISION_PATH = ROOT / "evals" / "ai" / "gateway-decision.v1.json"
-DECISION_FIXTURE_SHA256 = "bc91f9bd7621d632b9d18807fdfa1713d7027e5ea5221f08e037182428677f3d"
+DECISION_FIXTURE_SHA256 = "5c64fd4a7f5f42be36215a4244f349285642df9eb26e01195c3d01a97b0cb5ca"
 REQUIRED_BINDING_PATHS = (
     "evals/ai/synthetic-observed-run.v1.json",
     "evals/ai/model-boundary.v1.json",

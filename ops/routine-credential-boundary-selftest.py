@@ -81,13 +81,34 @@ def main() -> int:
     check("no admin nightly step launches a refusal process any more",
           "routine-admin-refusal.sh" not in nightly_code)
     check("routine nightly contains no db-tap escalation", "CARR_BREAK_GLASS=1" not in nightly)
-    # Scope only: the mirror gets the backup capability and nothing wider. What
-    # happens when that capability is ABSENT is not this file's question — the
-    # mirror answers it itself with exit 78, and
+    # Scope only: the mirror binds a NAMED read-only capability explicitly, and
+    # never one wider than the backup role. This used to pin the variable NAME
+    # CARR_DB_BACKUP_URL, which is a different claim, and the two diverged.
+    #
+    # WHY IT IS A SET NOW, 2026-09-01. carr_backup's password is by design a value
+    # no agent may ever hold — migration 0119 states it in capitals, "THE PASSWORD
+    # IS NOT IN THIS FILE AND NOBODY HAS EVER SEEN IT", because that role exists
+    # for the GitHub-Actions pg_dump and its secret lives in Actions. So the key is
+    # absent from ~/.config/carr/db.env, the mirror exited 78 every night from
+    # 2026-08-16, and 78 reads as a benign SKIP. A boundary that can only be
+    # satisfied by a credential the system may not possess does not protect the
+    # step; it silently deletes it, which is what happened for two weeks.
+    #
+    # THE EXPORTER ROLE IS STRICTLY NARROWER, measured against production rather
+    # than argued: over public+ops, app_exporter_local can SELECT 236 relations and
+    # carr_backup 459; relations the exporter can read that the backup role CANNOT
+    # is ZERO, the reverse is 223, and the exporter holds no non-SELECT grant
+    # anywhere. So this lowers the ceiling the check exists to hold rather than
+    # raising it. Re-measure with has_table_privilege(role, oid, 'SELECT') over
+    # pg_class before ever adding a third name to this tuple.
+    #
+    # What happens when the bound capability is ABSENT is still not this file's
+    # question — the mirror answers it itself with exit 78, and
     # ops/nightly-capability-skip-selftest.py proves that by running it.
-    check("portability mirror uses only the backup capability",
+    mirror_capabilities = ("CARR_DB_BACKUP_URL", "CARR_DB_EXPORTER_URL")
+    check("portability mirror binds one named capability, none wider than backup",
           'portability mirror (md+csv, 2 locations)' in nightly
-          and 'DATABASE_URL="$CARR_DB_BACKUP_URL"' in nightly)
+          and any(f'DATABASE_URL="${name}"' in nightly for name in mirror_capabilities))
     # WAS 3 UNTIL 2026-08-21, now 2, and the boundary is unchanged. The chain
     # used to carry two separate recovery-point catch-up call sites — one for
     # "no prior backup at all" and one for "N hours since the last one" —

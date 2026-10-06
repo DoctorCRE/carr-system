@@ -1,7 +1,7 @@
 #!/bin/bash
 # capture-poll.sh — CARR dictation rig, WO-4 capture-bridge poll side.
 #
-# Run by launchd (com.carr.capture-poll) on a 5-minute StartInterval, and
+# Run by launchd (com.carr.capture-poll) on a 5-minute calendar schedule, and
 # safe to run by hand for testing. Each invocation scans the recordings
 # root for session directories that are claimed (.capture.json present) but
 # not yet ingested (no ingested.json), and asks capture-bridge.py to check

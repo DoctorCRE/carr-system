@@ -40,7 +40,13 @@
       "database": {
         "kind": "neon-project",
         "project": "carr-staging",
-        "resolution": "by name, so a deleted and recreated project is picked up rather than silently missed"
+        "resolution": "by name, so a deleted and recreated project is picked up rather than silently missed",
+        "replacement_candidate_spec": {
+          "postgres_version": 18,
+          "region_id": "aws-us-east-1",
+          "compute_min_cu": 0.25,
+          "compute_max_cu": 8
+        }
       },
       "worker": {"deployed": true, "name": "carr-mcp-staging", "config": "mcp-server/wrangler.toml [env.staging]"},
       "domains": [],
@@ -58,7 +64,10 @@
         "resolution": "PINNED BY ID, never by name — resolving production by a name somebody could recreate elsewhere is the worst failure this map could have"
       },
       "worker": {"deployed": true, "name": "carr-mcp", "config": "mcp-server/wrangler.toml [top level]"},
-      "domains": ["api.practicecre.com", "api.doctorcre.com", "app.doctorcre.com", "dealroom.doctorcre.com"],
+      "domains": ["api.practicecre.com", "api.doctorcre.com", "dealroom.doctorcre.com", "reports.doctorcre.com"],
+      "product_domains": [
+        {"hostname": "app.doctorcre.com", "worker": "doctorcre-app", "repository": "jbookout/doctorcre-app"}
+      ],
       "secrets": {"source": "wrangler secrets and ~/.config/carr/db.env; never in the repository"},
       "telemetry": {"destination": "Cloudflare observability, healthchecks.io dead-man switch, the ops ledger"},
       "who_may_write": "human-gated paths only; tools/db-tap.py is read-only here without break-glass"
@@ -66,12 +75,12 @@
   ],
   "intentional_differences": [
     {
-      "difference": "staging has no custom domain while production has four",
+      "difference": "staging has no custom domain while production has five",
       "why": "A staging hostname on the same zone is one typo and one certificate away from production. workers.dev costs nothing, needs no DNS, and is unmistakably not production at a glance."
     },
     {
       "difference": "staging has no R2 bucket while production declares carr_documents",
-      "why": "The production binding is declared but referenced nowhere in src/. Staging gets one when the code uses it; an unused binding is a surface to isolate for no benefit."
+      "why": "Production stores governed Tour PDF artifacts in carr_documents. Staging remains bucketless until a separately isolated staging bucket and synthetic artifact proof are provisioned; it must never inherit production storage."
     },
     {
       "difference": "staging and production hold different KV namespace ids",

@@ -182,9 +182,24 @@ with tempfile.TemporaryDirectory() as tmp:
     check("environment-only findings do not fail --strict", rc == 0,
           f"rc={rc} {out[:200]}")
 
+# The owning tool must never put the git email into a committed audit field.
+with tempfile.TemporaryDirectory() as tmp:
+    root = make_fixture(tmp)
+    env = dict(os.environ, GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="user.email",
+               GIT_CONFIG_VALUE_0="private-fixture@example.invalid")
+    proc = subprocess.run([sys.executable, str(root / "hooks/gate-integrity.py"), "--bless"],
+                          cwd=root, env=env, text=True, capture_output=True)
+    baseline = json.loads((root / "ops/config/gate-baseline.json").read_text())
+    check("bless persists private attribution without a raw git email",
+          proc.returncode == 0 and "@" not in baseline["blessed_by"] and
+          "private-fixture" not in baseline["blessed_by"], proc.stdout)
+
 print(f"\n{passed} passed, {len(failures)} failed")
 if failures:
     print(f"FAILED: {', '.join(failures)}")
     sys.exit(1)
 print("GATE INTEGRITY STRICT SELFTEST PASSED: content drift fails CI, the boot "
       "hook still never blocks, and machine state never fabricates a failure.")
+
+import runpy as _dot_runpy
+_dot_runpy.run_path(str(Path(__file__).with_name("dot-review-selftest.py")))["run_regressions"](["test_b30"])

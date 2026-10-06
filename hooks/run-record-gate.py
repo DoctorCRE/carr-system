@@ -51,6 +51,31 @@ def bail(reason: str) -> int:
     return 1
 
 
+def hand_stdin_to_exec() -> None:
+    """Make fd 0 carry the hook payload again before execve.
+
+    hooks/hook-meter-run.py runs this wrapper in-process: it reads the real
+    stdin (fd 0) to EOF and hands this code a replacement sys.stdin holding the
+    same bytes. execve keeps fd 0, not sys.stdin, so the exec'd gate used to
+    read a drained pipe, fail json.load, log ALLOW(parse-error) and allow.
+    drift-claim-gate logged nothing else in production on 2026-09-23 and -24;
+    ops/gate-replay.py found it by reading that log line. The payload now goes
+    into an unlinked temporary file that becomes fd 0. When this wrapper is
+    run directly, sys.stdin is the real one and fd 0 is untouched."""
+    if sys.stdin is sys.__stdin__:
+        return
+    try:
+        data = sys.stdin.buffer.read()
+        import tempfile
+        handle = tempfile.TemporaryFile()
+        handle.write(data)
+        handle.flush()
+        handle.seek(0)
+        os.dup2(handle.fileno(), 0)
+    except Exception as exc:  # noqa: BLE001 — the gate then fails open, loudly
+        bail(f"could not hand the payload to the gate on stdin: {exc}")
+
+
 def main() -> int:
     gate = sys.argv[1] if len(sys.argv) == 2 else ""
     if gate not in ALLOWED:
@@ -73,6 +98,7 @@ def main() -> int:
     # ALLOW(internal-error) — so all it did was convert their fail-open into
     # this wrapper's fail-closed, at the cost of a second Python cold start.
     # Raising the timeout would move the cliff; deleting the probe removes it.
+    hand_stdin_to_exec()
     try:
         os.execve(str(python), [str(python), str(REPO / "hooks" / gate)], env)
     except OSError as exc:

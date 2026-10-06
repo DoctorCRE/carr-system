@@ -7,10 +7,10 @@ professions, trims to minimal joinable fields, dedups, writes licenses-pool.json
 Then quarantines the raw files into <scratch>/_to_delete (device_bash cannot delete;
 Joe empties it). Raw PII never goes to Google Drive — scratch is a LOCAL mount.
 
-Usage: python3 build-license-pool-from-raw.py <scratch_dir>
+Usage: python3 build-license-pool-from-raw.py <scratch_dir> [as_of_date YYYY-MM-DD]
 """
 import sys, os, json, gzip, glob, io
-from datetime import date
+from datetime import date, timedelta
 HERE = os.path.dirname(os.path.abspath(__file__))
 UP = os.path.join(HERE, "upstream")
 PROF = {"501":"Chiropractic Physician","701":"Dental","1512":"Physician Assistant",
@@ -18,7 +18,8 @@ PROF = {"501":"Chiropractic Physician","701":"Dental","1512":"Physician Assistan
         "1901":"Osteopathic Physician","2101":"Podiatric Physician",
         "5203":"Licensed Mental Health Counselor","5501":"Physical Therapist",
         "5601":"Occupational Therapist"}
-CUTOFF = date(2025,7,14)  # 12-mo lookback
+AS_OF = date.fromisoformat(sys.argv[2]) if len(sys.argv) > 2 else date.today()
+CUTOFF = AS_OF - timedelta(days=365)  # 12-mo lookback, relative to the run (or --as-of override)
 def tc(s): return " ".join(w.capitalize() for w in str(s).split())
 def pd(s):
     s=(s or "").strip()

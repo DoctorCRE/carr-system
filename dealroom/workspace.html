@@ -12,6 +12,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="/css/workspace.css">
+  <link rel="stylesheet" href="/css/workspace-business.css">
+  <link rel="stylesheet" href="/css/doc-panel.css">
 </head>
 <body>
   <a class="skip" href="#main">Skip to Home</a>
@@ -21,9 +23,17 @@
       <a class="active" href="/" aria-current="page">Home</a>
       <a href="/leads">Leads</a>
       <a href="/deals">Deals</a>
-      <a href="/system-work.html">System work</a>
-      <a href="/room.html">Observatory</a>
+      <a href="/clients">Clients</a>
+      <a href="/vendors">Vendors</a>
     </nav>
+    <details class="nav-more">
+      <summary aria-label="More, including operations">More</summary>
+      <div class="nav-more-panel">
+        <p class="nav-more-heading">Operations</p>
+        <a href="/system-work.html">System work</a>
+        <a href="/room.html">Observatory</a>
+      </div>
+    </details>
   </header>
 
   <main id="main" class="shell">
@@ -31,27 +41,36 @@
       <div>
         <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> <span id="viewerWorkspace">Partner workspace</span></p>
         <h1 id="pageTitle">Home</h1>
-        <p class="intro">Resume your work, see what needs you, and check what Doc is moving.</p>
+        <p class="intro">Start in the combined team book, switch to your own work when you need it, and see what Doc is moving.</p>
       </div>
       <div class="hero-meta" aria-label="Home status">
-        <span class="status-pill"><span id="healthOrb" class="status-orb loading" aria-hidden="true"></span> <span id="healthLabel">Checking workspace…</span></span>
+        <span class="status-pill"><span id="healthOrb" class="status-orb loading" aria-hidden="true"></span> <span id="healthLabel">Checking the workspace read…</span></span>
         <span id="observedAt" class="observed">Reading canonical state…</span>
       </div>
     </section>
 
     <section class="home-primary-layout" data-home-primary-region aria-labelledby="attentionTitle">
-      <article id="dealAttention" class="attention-card glass loading" aria-labelledby="attentionTitle" aria-live="polite" aria-busy="true">
-        <div class="attention-icon" aria-hidden="true"><span></span></div>
-        <div class="attention-content">
-          <p class="eyebrow">Pick up where work is moving</p>
-          <h2 id="attentionTitle">Loading your next place…</h2>
-          <p class="attention-copy">Checking verified workspace state.</p>
-          <div class="skeleton-line"></div><div class="skeleton-line short"></div>
-          <div class="home-actions"><a id="homePrimaryAction" class="action primary-action" data-primary-action data-state="loading" href="/deals">Open Deal Room</a><button class="action secondary-action" type="button" id="retryHome" hidden>Retry</button></div>
+      <div class="primary-column">
+        <div class="scope-bar">
+          <div class="scope-switch" id="scopeSwitch" role="group" aria-label="Home scope">
+            <button type="button" class="scope-option on" id="scopeTeam" data-scope="team" aria-pressed="true"><span>Team book</span><small>Joe and Dell</small></button>
+            <button type="button" class="scope-option" id="scopeMine" data-scope="mine" aria-pressed="false"><span>My work</span><small>Secondary view</small></button>
+          </div>
+          <p class="scope-note" id="scopeNote">Showing the combined team book for Joe and Dell. My work is the secondary view.</p>
         </div>
-      </article>
+        <article id="dealAttention" class="attention-card glass loading" aria-labelledby="attentionTitle" aria-live="polite" aria-busy="true">
+          <div class="attention-icon" aria-hidden="true"><span></span></div>
+          <div class="attention-content">
+            <p class="eyebrow">Pick up where work is moving</p>
+            <h2 id="attentionTitle">Loading your next place…</h2>
+            <p class="attention-copy">Checking verified workspace state.</p>
+            <div class="skeleton-line"></div><div class="skeleton-line short"></div>
+            <div class="home-actions"><a id="homePrimaryAction" class="action primary-action" data-primary-action data-state="loading" href="/deals">Open Deal Room</a><button class="action secondary-action" type="button" id="retryHome" hidden>Retry read</button></div>
+          </div>
+        </article>
+      </div>
       <div class="aggregate-grid" aria-label="At a glance" aria-live="polite">
-        <a id="needsYouNow" class="aggregate-card glass" href="/deals"><p class="eyebrow">Needs you</p><h2>Loading…</h2><p class="aggregate-detail">Reading safe aggregate state.</p><p class="source">Source pending</p></a>
+        <a id="needsYouNow" class="aggregate-card glass" href="/deals"><p class="eyebrow">Flagged · Team book</p><h2>Loading…</h2><p class="aggregate-detail">Reading safe aggregate state.</p><p class="source">Source pending</p></a>
         <a id="docAtWork" class="aggregate-card glass" href="/system-work.html"><p class="eyebrow">Doc at work</p><h2>Loading…</h2><p class="aggregate-detail">Reading safe aggregate state.</p><p class="source">Source pending</p></a>
         <a id="recentActivity" class="aggregate-card glass" href="/system-work.html"><p class="eyebrow">Changed in 7 days</p><h2>Loading…</h2><p class="aggregate-detail">Reading safe aggregate state.</p><p class="source">Source pending</p></a>
       </div>
@@ -62,7 +81,9 @@
       <div class="module-grid" aria-label="Open a workspace">
       <a class="module-card glass pulse-calm" href="/leads"><span class="module-kicker">Pipeline input</span><h2>Lead Board</h2><p>Review the full lead set where it belongs.</p><span class="module-arrow" aria-hidden="true">→</span></a>
       <a class="module-card glass pulse-calm" href="/deals"><span class="module-kicker">Canonical record</span><h2>Deal Room</h2><p>Move active work with the shared book.</p><span class="module-arrow" aria-hidden="true">→</span></a>
-      <a class="module-card glass pulse-calm" href="/deals"><span class="module-kicker">Conversation</span><h2>Calls</h2><p>Capture and review conversations in Deal Room Call Mode.</p><span class="module-arrow" aria-hidden="true">→</span></a>
+      <a class="module-card glass pulse-calm" href="/clients"><span class="module-kicker">Relationships</span><h2>Clients</h2><p>Search everyone the team works with and open a record.</p><span class="module-arrow" aria-hidden="true">→</span></a>
+      <a class="module-card glass pulse-calm" href="/vendors"><span class="module-kicker">Relationships</span><h2>Vendors</h2><p>Search every vendor the team knows and open a record.</p><span class="module-arrow" aria-hidden="true">→</span></a>
+      <a class="module-card glass pulse-calm" href="/deals"><span class="module-kicker">Conversation</span><h2>Calls</h2><p>Calls are not part of this release. Calls already recorded still reach the board.</p><span class="module-arrow" aria-hidden="true">→</span></a>
       <a class="module-card glass pulse-calm" href="/system-work.html"><span class="module-kicker">System state</span><h2>System work</h2><p>Review bounded requests and observed system concerns.</p><span class="module-arrow" aria-hidden="true">→</span></a>
       <a class="module-card glass pulse-calm" href="/room.html"><span class="module-kicker">Shared context</span><h2>Observatory</h2><p>See the partner and agent conversation in one room.</p><span class="module-arrow" aria-hidden="true">→</span></a>
       </div>
@@ -85,9 +106,10 @@
     <a href="/" aria-label="Home" aria-current="page"><span aria-hidden="true">⌂</span>Home</a>
     <a href="/leads" aria-label="Leads"><span aria-hidden="true">⌁</span>Leads</a>
     <a href="/deals" aria-label="Deals"><span aria-hidden="true">◈</span>Deals</a>
-    <a href="/system-work.html" aria-label="System"><span aria-hidden="true">◌</span>System</a>
-    <a href="/room.html" aria-label="Observe"><span aria-hidden="true">◎</span>Observe</a>
+    <a href="/clients" aria-label="Clients"><span aria-hidden="true">◍</span>Clients</a>
+    <a href="/vendors" aria-label="Vendors"><span aria-hidden="true">◇</span>Vendors</a>
   </nav>
   <script type="module" src="/js/workspace-command-center.js"></script>
+  <script type="module" src="/js/doc-panel.js"></script>
 </body>
 </html>

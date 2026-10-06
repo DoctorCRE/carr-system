@@ -174,11 +174,24 @@ def validate(config: dict[str, Any]) -> list[str]:
     # what happens when the capability is absent — and one the callee now
     # answers itself by exiting 78 (#387). Asserting it here made a provisioning
     # preflight fail over the shape of a caller's error handling.
+    #
+    # WIDENED FROM ONE NAME TO A SET, 2026-09-01, and the ceiling is unchanged.
+    # carr_backup's password is deliberately a value no agent may hold (migration
+    # 0119: "THE PASSWORD IS NOT IN THIS FILE AND NOBODY HAS EVER SEEN IT" — the
+    # role exists for the GitHub-Actions pg_dump and its secret lives in Actions),
+    # so the key is absent from ~/.config/carr/db.env, the mirror exited 78 every
+    # night from 2026-08-16, and 78 reads as a benign SKIP. A scope that only one
+    # unobtainable credential can satisfy does not scope the step, it deletes it.
+    # The exporter capability is STRICTLY NARROWER, measured against production:
+    # over public+ops, app_exporter_local can SELECT 236 relations to carr_backup's
+    # 459, the relations the exporter can read and the backup role cannot is ZERO,
+    # the reverse is 223, and the exporter holds no non-SELECT grant anywhere.
+    mirror_capabilities = ("CARR_DB_BACKUP_URL", "CARR_DB_EXPORTER_URL")
     if (
-        'env DATABASE_URL="$CARR_DB_BACKUP_URL"' not in nightly
+        not any(f'env DATABASE_URL="${name}"' in nightly for name in mirror_capabilities)
         or "pipelines/doctrine_mirror.py" not in nightly
     ):
-        errors.append("backup credential is not scoped to the portability mirror step")
+        errors.append("portability mirror step is not scoped to a named read-only capability")
     if not all(token in calendar and token in notes for token in ("CARR_CANARY_DESTINATION_ID", "CARR_CONTROL_PLANE_MODE")) or "CARR_CALENDAR_CANARY_ENV" not in calendar or "CARR_NOTES_CANARY_ENV" not in notes:
         errors.append("isolated deterministic canary declarations are not bound by both entrypoints")
     return errors

@@ -108,9 +108,12 @@ done || exit 1
 # on one contended Mac, times the eleven implementation sessions pushing from it.
 #
 # The council's second chair was explicit that this is a COST TRADE and not a
-# defect finding: the old design was right for its date. What it costs today is
-# minutes per push (the gates class alone is 204 seconds, 252 selftest suites)
-# and what it buys, post-Pro, is catching hosted-CI failures slightly earlier.
+# defect finding: the old design was right for its date. What it costs is minutes
+# per push, dominated by the gates class, and what it buys, post-Pro, is catching
+# hosted-CI failures slightly earlier. (This line used to quote a fixed second
+# count for that class. It was measured once and never again, drifted badly, and
+# was still being cited as justification -- so the number is gone rather than
+# refreshed. ops/ci.sh prints the real one on every run.)
 #
 # So the split is now:
 #   * HOSTED keeps the full strict ten-class suite, unchanged, as the gate on
@@ -118,6 +121,27 @@ done || exit 1
 #   * LOCAL keeps the floor -- the classes that are cheap AND whose failure is
 #     dramatically more expensive to discover later. See check_pushfloor() in
 #     ops/ci.sh for why each member is in it.
+#
+# THE FLOOR IS A SMOKE PATH, TARGETING ABOUT A MINUTE (F4, 2026-09-08). Every
+# check on it is scoped to the pushed diff, so what a push pays for is the
+# selftests of the gates it actually touched. That is a target, not a guarantee:
+# a push that touches several gates pays for several suites, and a slow paired
+# selftest is still slow.
+#
+# What was removed is the one UNBOUNDED item -- check_pushfloor() used to fall
+# back to running the entire gates class whenever the push touched a gate with
+# no paired selftest. The gate is still detected and named; the class runs
+# hosted, where it is the required check that blocks the merge.
+#
+# Nothing is skipped and no timeout is involved. ops/ci.sh prints the floor's
+# own wall-clock on every run, so the cost stays visible rather than remembered
+# -- which is how the stale price above went unnoticed in the first place.
+#
+# WHY A BOUND IS WORTH MORE THAN THE EXTRA COVERAGE. The realistic failure of
+# this hook is not that it misses something; it is that a session facing a
+# six-minute wait reaches for --no-verify, which disables the WHOLE file --
+# owner check, secret scan and all. A floor that always returns quickly is a
+# floor that keeps running.
 #
 # IT STILL CALLS ops/ci.sh AND DEFINES NO CHECKS OF ITS OWN (rule a8c55a47).
 # That is why the subset is expressed as `--only <classes>` rather than as a
@@ -139,9 +163,45 @@ done || exit 1
 # ---------------------------------------------------------------------------
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+
+# bypass audit item 10 (2026-09-24), REDESIGNED 2026-09-24 (Opus review):
+# CARR_SKIP_CI=1 alone used to skip the floor silently, with no receipt
+# anywhere it was used and printed by the refusal text below as the obvious
+# next move on any failure. A bare skip flag with no stated reason and no
+# trail is exactly the "quiet door" the audit named. A skip now needs a
+# non-empty, non-whitespace-only CARR_SKIP_CI_REASON, AND a receipt that
+# actually lands on disk — a reason of "   " is not a reason, and a skip
+# whose receipt could not be written is not honoured at all: no receipt, no
+# skip, the checks run instead. Fail CLOSED on the receipt write, same
+# direction as everything else in this file that would rather run the checks
+# than silently let one through.
+_SKIP_REASON_TRIMMED="$(printf '%s' "$CARR_SKIP_CI_REASON" | tr -d '[:space:]')"
+_EFFECTIVE_SKIP_CI="$CARR_SKIP_CI"
+if [ "$CARR_SKIP_CI" = "1" ] 2>/dev/null && [ -z "$_SKIP_REASON_TRIMMED" ]; then
+  echo "  pre-push: CARR_SKIP_CI=1 requires a non-empty, non-whitespace CARR_SKIP_CI_REASON — ignoring the skip and running quality checks" >&2
+  _EFFECTIVE_SKIP_CI=""
+fi
+
 if [ -n "$REPO_ROOT" ] && [ -x "$REPO_ROOT/ops/ci.sh" ]; then
-  if [ "$CARR_SKIP_CI" = "1" ] 2>/dev/null; then
-    echo "  pre-push: CARR_SKIP_CI=1 — quality checks skipped for this command" >&2
+  if [ "$_EFFECTIVE_SKIP_CI" = "1" ] 2>/dev/null; then
+    mkdir -p "$REPO_ROOT/out" 2>/dev/null
+    _SKIP_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)"
+    _SKIP_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+    _SKIP_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if ! python3 - "$_SKIP_TS" "$_SKIP_BRANCH" "$_SKIP_HEAD" "$CARR_SKIP_CI_REASON" \
+      >> "$REPO_ROOT/out/ci-skip-receipts.jsonl" 2>/dev/null <<'PYEOF'
+import json, sys
+ts, branch, head, reason = sys.argv[1:5]
+print(json.dumps({"ts": ts, "branch": branch, "head": head, "reason": reason}))
+PYEOF
+    then
+      echo "  pre-push: could not write the skip receipt to out/ci-skip-receipts.jsonl — refusing the skip and running quality checks instead (fail closed, bypass audit item 10)" >&2
+      _EFFECTIVE_SKIP_CI=""
+    fi
+  fi
+
+  if [ "$_EFFECTIVE_SKIP_CI" = "1" ] 2>/dev/null; then
+    echo "  pre-push: CARR_SKIP_CI=1 — quality checks skipped for this command (reason: $CARR_SKIP_CI_REASON)" >&2
   else
     # THE PUSHED RANGE, which is what makes the secret scan cost O(this push)
     # instead of O(repository): 1,514 files were read on every push before this.
@@ -203,10 +263,35 @@ EOF
     #   migration  — ONLY when the diff touches migrations/. The class is 33s
     #                hosted and needs a throwaway Postgres, so it SKIPs on a
     #                laptop; adding it unconditionally would buy a skip line.
-    FLOOR_CLASSES="pushfloor,secret,freshness"
+    #
+    # SPACE-SEPARATED, NOT COMMA-SEPARATED, and the separator is the whole bug.
+    #
+    # ci.sh accepts either — its usage line says "comma- or space-separated" —
+    # but it has only accepted COMMAS since the push-floor change that taught
+    # `--only` to split them. Before that, `--only` was a plain assignment, so a
+    # comma list arrived as ONE token and ci.sh refused it with
+    # "no such class: pushfloor,secret,freshness,migration".
+    #
+    # That skew is not hypothetical and it is not self-healing. THIS HOOK IS
+    # ALWAYS CANONICAL'S, because core.hooksPath is one shared path for every
+    # worktree on the machine, while ci.sh is resolved from REPO_ROOT — the tree
+    # actually being pushed. So a worktree branched from a commit older than that
+    # change runs TODAY'S hook against THAT DAY'S ci.sh, and every push from it is
+    # refused for a class name that does not exist. Observed 2026-08-26: the
+    # refusal reads as a quality failure and tells the caller to iterate on the
+    # failing class with `ops/ci.sh --only`, which cannot work, because the class
+    # it names is the joined string. The natural next move is CARR_SKIP_CI=1
+    # without running anything, which is how a broken hook becomes a habit of
+    # skipping the floor.
+    #
+    # Spaces work on BOTH versions: the old assignment leaves the string intact
+    # and ci.sh's `for _want in $ONLY` splits it on whitespace; the new one runs
+    # tr over a string with no commas and changes nothing. Verified against both
+    # parsers before this was written. Do not "tidy" these back into commas.
+    FLOOR_CLASSES="pushfloor secret freshness"
     if [ -n "$CARR_CI_RANGE" ] \
         && git diff --name-only "$CARR_CI_RANGE" 2>/dev/null | grep -q '^migrations/'; then
-      FLOOR_CLASSES="$FLOOR_CLASSES,migration"
+      FLOOR_CLASSES="$FLOOR_CLASSES migration"
     fi
 
     if [ -n "$CARR_CI_RANGE" ]; then
@@ -292,9 +377,10 @@ EOF
 
   Each failing check above names its own remedy.
 
-  Fix it, or say out loud that you are pushing anyway:
-
-      CARR_SKIP_CI=1 git push
+  Fix it. A skip is not printed here on purpose (bypass audit item 10,
+  2026-09-24): CARR_SKIP_CI=1 still exists, but only with a non-empty
+  CARR_SKIP_CI_REASON, and it now leaves a receipt in
+  out/ci-skip-receipts.jsonl -- it is not the obvious next line to paste.
 
 EOF
       # WHOSE FILE IS IT? A refusal that names a path and stops there is one a
@@ -333,4 +419,145 @@ EOF
   fi
 fi
 
+# ── WHAT THIS CHANGE OWES ─────────────────────────────────────────────────
+# Advisory only, and it can never refuse a push. Hosted CI on one branch
+# refused three times on 2026-09-18 and not one refusal was about whether the
+# code worked: each was a toll this repository charges for a KIND of change --
+# a seal derived before the last edit, a branch left conflicting so the pull
+# request drew zero checks, a derived file resolved by picking a side. All
+# three are readable off the changed-file list, and all three were missed
+# because catching them depended on a session remembering nine separate
+# lessons at the moment it typed git push.
+#
+# IT NOW HOLDS A PUSH, AND THE MODEL STILL DOES NOT DECIDE ANYTHING.
+#
+# The first version printed and returned zero on every path. On 2026-09-18 it
+# scored `inventory_reseal` at 0.94 on a push, in the session's own terminal,
+# naming the exact remedy -- and the session pushed anyway. Hosted CI failed
+# 25 minutes later on precisely that. The judgment was not missing, not wrong
+# and not quiet. It had no consequence attached, and a warning with no
+# consequence is a warning that gets read past.
+#
+# WHAT CHANGED IS NOT THAT A PROBABILITY CAN NOW REFUSE A PUSH. It cannot,
+# and the rule that judgment advises beside the deterministic layer rather
+# than deciding inside it is intact. The model chooses WHICH DETERMINISTIC
+# CHECK IS WORTH RUNNING; that check's own exit code decides. A push is
+# refused by the seal assertion, by gate-integrity, by the wiring selftest --
+# never by a score.
+#
+# WHAT A WRONG JUDGMENT COSTS, which is the whole reason this is safe: a
+# false positive runs a check that passes. This advisory has scored
+# `gate_rebless` at 0.71 on changes owing no rebless; under this design that
+# buys a sub-second run of gate-integrity.py and nothing else. The full
+# verification pass over a clean tree measured 3.7 seconds. Against a failed
+# hosted cycle at 25 to 40 minutes, the trade is not close.
+#
+# EVERY OTHER PATH STILL RETURNS ZERO. No credential, no network, no service,
+# an exception anywhere, a verifier that cannot be launched -- all of those
+# pass the push through untouched. The only thing that stops a push here is a
+# deterministic check that ran and failed.
+#
+# CARR_SKIP_TOLL_ADVISORY still skips the whole block, deliberately: a door
+# with no handle gets taken off its hinges.
+if [ -z "$CARR_SKIP_TOLL_ADVISORY" ] && [ -f "$REPO_ROOT/ops/jev_change_tolls.py" ]; then
+  # NOT 2>/dev/null. The advisory writes to stderr, so silencing stderr wired
+  # it to a door and made it invisible in the same commit -- the exact failure
+  # this session built ops/judgment-wiring-selftest.py to catch, committed by
+  # the person who built it. The block below catches every exception itself and
+  # exits 0, so there is nothing left to suppress.
+  # NOT 2>/dev/null. The advisory writes to stderr, so silencing stderr wired
+  # it to a door and made it invisible in the same commit -- the exact failure
+  # this session built ops/judgment-wiring-selftest.py to catch, committed by
+  # the person who built it.
+  #
+  # Exit 3 is this block's own refusal, kept distinct from the deterministic
+  # classes above so a reader can tell them apart at a glance.
+  # The verifier can launch Git-backed selftests. The CI block above strips
+  # Git's hook variables, and this second child needs the same isolation:
+  # otherwise a fixture's git init can change the shared checkout's .git/config.
+  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+      -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      -u GIT_COMMON_DIR -u GIT_NAMESPACE -u GIT_CEILING_DIRECTORIES \
+      -u GIT_WORK_TREE_OVERRIDE -u GIT_CONFIG -u GIT_CONFIG_GLOBAL \
+      -u GIT_CONFIG_SYSTEM -u GIT_CONFIG_COUNT \
+      REPO_ROOT="$REPO_ROOT" "$REPO_ROOT/.venv/bin/python" - <<'TOLLS'
+import importlib.util, os, sys
+root = os.environ.get("REPO_ROOT") or os.getcwd()
+try:
+    spec = importlib.util.spec_from_file_location(
+        "jev_change_tolls", os.path.join(root, "ops", "jev_change_tolls.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    state = module.change(repo=root)
+    rows = module.owed(state)
+    failures = module.verify(state, repo=root)
+except Exception:
+    # Unreachable service, missing credential, malformed answer: the push is
+    # not this check's to refuse when the check itself could not run.
+    sys.exit(0)
+
+if rows:
+    print("\n  WHAT THIS CHANGE LOOKS LIKE IT OWES:", file=sys.stderr)
+    for probability, name, fix in rows:
+        mark = "UNPAID" if any(f[0] == name for f in failures) else "ok"
+        print(f"    {probability:.2f}  {name}  [{mark}]", file=sys.stderr)
+        print(f"          {fix}", file=sys.stderr)
+    print("", file=sys.stderr)
+
+if failures:
+    print("  PUSH HELD. These are not predictions -- each is a deterministic",
+          file=sys.stderr)
+    print("  check that RAN against this tree and FAILED:\n", file=sys.stderr)
+    for name, probability, reason, output in failures:
+        print(f"    {name}: {reason}", file=sys.stderr)
+        for line in (output or "").strip().splitlines()[-6:]:
+            print(f"        {line}", file=sys.stderr)
+        print("", file=sys.stderr)
+    print("  Pay the toll above and push again. Nothing here is a judgment",
+          file=sys.stderr)
+    print("  call: fix the check and it goes green. To push regardless, set",
+          file=sys.stderr)
+    print("  CARR_SKIP_TOLL_ADVISORY=1 and say in the commit why.\n",
+          file=sys.stderr)
+    sys.exit(3)
+TOLLS
+  status=$?
+  if [ "$status" -eq 3 ]; then
+    exit 1
+  fi
+fi
+
+# The two REPORTERS below run on every push that got this far. Neither can
+# change the outcome, so no exit sits above them: until 2026-09-30 a bare
+# `exit 0` here left the client-name note unreachable from the day it landed.
+# ops/pr-size-check-selftest.py fails if a top-level exit returns above them.
+
+# ---------------------------------------------------------------------------
+# CLIENT-NAME NOTE, a REPORTER and not a gate (decision 4d6ce1c7, 2026-09-24).
+# Joe: no bulk scrub and no history rewrite; new lines should ideally carry no
+# client name, and old ones convert gradually as they are touched. This prints
+# file:line for any line the branch ADDS against main that carries a name from
+# the gitignored local list, never the name itself, and a one-line reminder to
+# swap in a pseudonym. It never changes the push's outcome: its exit status is
+# discarded, it is silent when the local list is absent, and it has no CI step.
+# ---------------------------------------------------------------------------
+if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/ops/githooks/client-name-warn.py" ] \
+    && command -v python3 >/dev/null 2>&1; then
+  python3 "$REPO_ROOT/ops/githooks/client-name-warn.py" "origin/main...HEAD" "$REPO_ROOT" || true
+fi
+
+# ---------------------------------------------------------------------------
+# DECOMPOSITION NOTE, a REPORTER and not a gate (engineering-workflow-sop
+# section 15, small incremental changes). Over 300 changed lines or 5 files
+# outside generated paths, or moves mixed with edits, prints a short split
+# suggestion. Silent otherwise; exit status discarded; Git's hook variables
+# stripped so its git calls read this checkout and nothing else.
+# ---------------------------------------------------------------------------
+if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/ops/pr-size-check.py" ] \
+    && command -v python3 >/dev/null 2>&1; then
+  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+      -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+      -u GIT_COMMON_DIR -u GIT_NAMESPACE -u GIT_CEILING_DIRECTORIES \
+      python3 "$REPO_ROOT/ops/pr-size-check.py" "origin/main...HEAD" "$REPO_ROOT" || true
+fi
 exit 0

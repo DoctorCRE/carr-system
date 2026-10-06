@@ -1,0 +1,33 @@
+{
+  "_note": "Which unfrozen installs ops/frozen-install-check.py tolerates, and WHY each one exists. Every entry needs a reason, and the check PRINTS every entry it applies on every run — an install that stops being judged must never do so quietly. Same discipline ops/config/ci-check-scope.json applies to the gates class.",
+  "_categories": "handoff = the finding is real and the file belongs to another owner's surface, so R05 could not fix it and did not try; it is carried in out/repo-hygiene-program/r05-contract-change-draft.md instead. exempt = the unfrozen form is deliberate and has a reason in the tree. Neither fails the check.",
+  "_added": "2026-09-01, slice R05 of the Repo Hygiene Program (WR-000040).",
+  "handoff": [
+    {
+      "path": ".github/workflows/edge-liveness.yml",
+      "match": "psycopg[binary]",
+      "reason": "Hosted-CI workflow files are the master plan's CI/CD hardening owner's surface; R05's authority is explicitly build-only with no hosted-CI or Actions changes. The finding is real: the edge-liveness job installs psycopg unpinned while every other workflow installs requirements.lock, so this one job can resolve a different psycopg than the suite it is checking. Carried to that owner in out/repo-hygiene-program/r05-contract-change-draft.md.",
+      "added": "2026-09-01"
+    }
+  ],
+  "exempt": [
+    {
+      "path": "bin/migrate-dell.sh",
+      "match": "-r \"$REPO/requirements.txt\"",
+      "reason": "DELIBERATE, and the reasoning is written down in ops/ci-dep-check.py's header: requirements.txt is the human-facing declaration whose environment markers keep Dell's older runtime installing correctly, requirements.lock is the pinned output CI installs. 'CI installs the lock; a human installs the txt.' migrate-dell.sh bootstraps a HUMAN'S machine, so forcing one machine's resolution onto it is the thing that header refuses. Revisit only together with that decision.",
+      "added": "2026-09-01"
+    },
+    {
+      "path": "bin/migrate-dell.sh",
+      "match": "pip install --user --quiet uv",
+      "reason": "Toolchain bootstrap on the last-resort path, not a project dependency: it is reached only when the machine has NO Python new enough to build the venv at all, and it installs uv purely to fetch a standalone CPython. There is no lockfile that could pin it, because it runs before this repo's runtime exists. Named in out/repo-hygiene-program/r05-contract-change-draft.md as a candidate for a pinned version by migrate-dell.sh's owner; R05's write set does not include the Dell migration path.",
+      "added": "2026-09-01"
+    },
+    {
+      "path": "tools/doc-convo/bin/setup-tts-env.sh",
+      "match": "pip install chatterbox-tts librosa",
+      "reason": "Opt-in developer rig, installed into its own throwaway .venv-tts and shared with nothing: it is not on any worktree, CI or deploy path. No lockfile exists for it, and generating one needs a network resolution R05 could not perform (the session's egress guard refused the package index host). Recorded as an open item in out/repo-hygiene-program/r05-contract-change-draft.md rather than left invisible.",
+      "added": "2026-09-01"
+    }
+  ]
+}

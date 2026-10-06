@@ -6,20 +6,34 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
+import { USAGE_PATH, usageResponse } from './usage-signals.js';
 import {
   exchangeGoogleCode,
   googleAuthorizationUrl,
   randomString,
   verifyGoogleIdToken,
 } from "./google-oidc.js";
-import { actorFromProps, personalScopeForActor, propsForSlug, slugForEmail } from "./identity.js";
+import { authenticatedIdentity, personalScopeForActor, propsForSlug, slugForEmail } from "./identity.js";
 import { normalizeRoomPaging, ROOM_BODY_MAX } from "./partner-room.js";
 import { redeemProgram6BrowserChallenge } from "./program6-browser-challenge.js";
 import { program6ActionsEnabled } from "./program6-feature-flag.js";
 import { workspaceCommandCenterEnabled } from "./workspace-feature-flag.js";
 import { COMMAND_CENTER_PATH } from "./workspace-command-center.js";
+import { neon } from "@neondatabase/serverless";
+import { readWorkInventoryCensus, WORK_INVENTORY_PATH } from "./work-inventory-census.v5.js";
+import { ATLAS_GRAPH_PATH, readAtlasInventoryGraph } from "./atlas-inventory-graph.v5.js";
+import { PROGRAM_CONTROLLER_PATH, readProgramControllerCensus } from "./program-controller-census.v5.js";
+import { METERING_PATH, readMeteringProjection } from "./cost-ledger-projection.v5.js";
+import {
+  BUSINESS_ASSET_PATH, CLIENTS_ROUTE, VENDORS_ROUTE,
+  createWorkspaceBusinessReader, isBusinessApiPath,
+} from "./workspace-business-read.js";
+import { isTourInternalRequest } from "./tour-internal-web.js";
+import { executeRegisteredTool } from "./tools.js";
+import { readDealWithJev } from "./jev-deal-reading.js";
+import { callTool } from "./mcp.js";
 
-export const DEALROOM_ASSET_DIRECTORY = "../dealroom"; // mirrors wrangler.toml [assets]
+export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]
 
 const SESSION_COOKIE = "__Host-dealroom_session";
 const PENDING_COOKIE = "__Host-dealroom_oauth";
@@ -35,6 +49,7 @@ const ACTION_CHALLENGE_TTL = 5 * 60;
 const SYSTEM_WORK_MAX_BODY = 16 * 1024;
 const SYSTEM_WORK_PREFIX = "/api/system-work";
 const COMMAND_CENTER_API_PREFIX = "/api/v1/";
+const JEV_DEAL_READING_PATH = "/api/v1/jev-deal-reading";
 // The Model Room observatory (Joe's ruling 0892c539). One read door onto the
 // partner-room wire and one write door back into it, both behind the same
 // cookie session the rest of this host uses.  The room's own body cap is
@@ -62,16 +77,50 @@ const PUBLIC_SHELL = new Map([
   ["/offline.html", "/public-shell/offline.html"],
 ]);
 const DEALROOM_HOST_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+// DoctorCRE's own page routes. The app Worker serves the HTML itself but first
+// forwards the request here, unchanged, as its sign-in gate and requires a 200.
+// A page path missing from this list falls through to the OAuth provider and the
+// gate refuses it, whatever the app has shipped (defect 4ef6ce10: the V5-UX-C10
+// inventory screen was delivered without this entry). Each new app page adds its
+// route here; they share the workspace flag with Home, Clients and Vendors.
+const APP_DOCUMENT_PATHS = new Set(["/work-inventory", "/tasks", "/business", "/pipeline", "/control-room", "/incidents", "/notifications", "/conversations"]);
 const DEALROOM_EXACT_PATHS = new Set([
   "/", "/index.html", "/deals", "/leads", "/leads.html", "/workspace", "/workspace.html", "/system-work.html", "/room.html", "/queue.html",
-  "/manifest.webmanifest", "/sw.js", "/offline.html",
+  CLIENTS_ROUTE, VENDORS_ROUTE, BUSINESS_ASSET_PATH, ...APP_DOCUMENT_PATHS,
+  "/manifest.webmanifest", "/sw.js", "/offline.html", "/tours",
 ]);
+// Clients and Vendors are two views of one authenticated business asset. The
+// route, not the file name, is the address a partner keeps, so the .html path
+// itself is a redirect below rather than a second bookmarkable surface.
 const DEALROOM_ROUTE_ASSETS = new Map([
   ["/deals", "/index.html"],
   ["/leads", "/leads.html"],
   ["/workspace", "/workspace.html"],
+  [CLIENTS_ROUTE, BUSINESS_ASSET_PATH],
+  [VENDORS_ROUTE, BUSINESS_ASSET_PATH],
 ]);
-const DEALROOM_PATH_PREFIXES = ["/auth/", "/api/system-work/", "/api/room/", COMMAND_CENTER_API_PREFIX, "/css/", "/js/", "/data/", "/icons/"];
+const BUSINESS_VIEW_PATHS = new Set([CLIENTS_ROUTE, VENDORS_ROUTE]);
+// One typed refusal per read-model failure class, so the browser can tell a bad
+// filter from a refused audience from an unavailable database.
+const BUSINESS_ERROR_STATUS = {
+  QUERY_INVALID: 400,
+  AUTHORIZATION_REFUSED: 403,
+  TENANT_SCOPE_REFUSED: 404,
+  RECORD_NOT_FOUND: 404,
+  VIEWER_OWNER_UNKNOWN: 409,
+  FRESHNESS_UNKNOWN: 409,
+  DEPENDENCY_UNAVAILABLE: 503,
+  // A read the deployment has not been given access to is unavailable, not
+  // broken: 503 like the other dependency answers, and it says which CLASS of
+  // access is missing so an operator is not left guessing.
+  DEPENDENCY_NOT_PROVISIONED: 503,
+  INTERNAL_ERROR: 500,
+};
+// The only classes an unprovisioned read may name. Anything else answers with a
+// bare code, so no driver message, statement text or schema name can reach a
+// browser through this door.
+const BUSINESS_DEPENDENCY_CLASSES = new Set(["read_access", "read_source", "read_credential"]);
+const DEALROOM_PATH_PREFIXES = ["/auth/", "/api/system-work/", "/api/room/", "/api/tours/", "/tours/", COMMAND_CENTER_API_PREFIX, "/css/", "/js/", "/data/", "/icons/"];
 const LEGACY_BROWSER_REDIRECT_PATHS = new Set([
   "/", "/index.html", "/deals", "/leads", "/leads.html", "/workspace", "/workspace.html",
   "/system-work.html", "/room.html", "/queue.html", "/auth/login", "/auth/reauth",
@@ -125,6 +174,29 @@ function dealroomOrigin(env) {
   return `https://${host}`;
 }
 
+function doctorcreAppOrigin(env) {
+  const host = env?.DOCTORCRE_APP_HOST;
+  if (typeof host !== "string" || !DEALROOM_HOST_PATTERN.test(host)) return null;
+  return `https://${host}`;
+}
+
+function dealroomOriginForRequest(request, env) {
+  let requestOrigin;
+  try { requestOrigin = new URL(request.url).origin; }
+  catch { return null; }
+  for (const origin of [dealroomOrigin(env), doctorcreAppOrigin(env)]) {
+    if (origin && requestOrigin === origin) return origin;
+  }
+  return null;
+}
+
+function envForDealroomOrigin(env, origin) {
+  const scoped = Object.create(env || null);
+  scoped.PRIMARY_APP_HOST = env?.APP_HOST || env?.DEALROOM_HOST;
+  scoped.APP_HOST = new URL(origin).hostname;
+  return scoped;
+}
+
 function legacyDealroomOrigin(env) {
   const host = env?.LEGACY_DEALROOM_HOST;
   if (typeof host !== "string" || !DEALROOM_HOST_PATTERN.test(host)) return null;
@@ -160,24 +232,28 @@ function withHeaders(response, additions, status = response.status) {
   return new Response(response.body, { status, statusText: response.statusText, headers });
 }
 
+export const DEALROOM_CSP = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self'",
+  "style-src 'self' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+].join("; ");
+
 function withSecurityHeaders(response) {
   const headers = new Headers(response.headers);
   // Deal Room is a static asset bundle.  The public shell uses external CSS
   // and JavaScript too, so neither scripts nor styles need unsafe-inline.
-  headers.set("content-security-policy", [
-    "default-src 'self'",
-    "base-uri 'none'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "form-action 'self'",
-    "script-src 'self'",
-    "style-src 'self' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com",
-    "img-src 'self' data:",
-    "connect-src 'self' http://127.0.0.1:4682",
-    "worker-src 'self'",
-    "manifest-src 'self'",
-  ].join("; "));
+  // connect-src is same-origin only: no served page loads post-call-client.js
+  // (the only loopback client), and that client refuses non-loopback pages.
+  headers.set("content-security-policy", DEALROOM_CSP);
   headers.set("strict-transport-security", "max-age=31536000; includeSubDomains");
   headers.set("x-content-type-options", "nosniff");
   headers.set("x-frame-options", "DENY");
@@ -300,6 +376,7 @@ async function completeLogin(request, env, dependencies) {
 
   await env.OAUTH_KV.put(sessionKey, JSON.stringify({
     props,
+    origin,
     createdAt: now,
     expiresAt: now + SESSION_IDLE_TTL * 1000,
     csrfToken: randomString(32),
@@ -318,6 +395,14 @@ async function sessionFor(request, env, dependencies) {
   if (!session) return null;
   const now = dependencies.now();
   const actor = dependencies.actorFromPropsFn(session.props);
+  const currentOrigin = dealroomOrigin(env);
+  const primaryHost = env?.PRIMARY_APP_HOST || env?.APP_HOST || env?.DEALROOM_HOST;
+  const primaryOrigin = typeof primaryHost === "string" && DEALROOM_HOST_PATTERN.test(primaryHost)
+    ? `https://${primaryHost}` : null;
+  // Sessions issued before the independent host existed had no origin field.
+  // They remain valid only on the primary host; new sessions stay pinned to
+  // the host that issued their host-only cookie.
+  if (session.origin ? session.origin !== currentOrigin : currentOrigin !== primaryOrigin) return null;
   const absoluteEnd = Number(session.createdAt) + SESSION_ABSOLUTE_TTL * 1000;
   if (!actor || !Number.isFinite(absoluteEnd) || session.expiresAt <= now || absoluteEnd <= now) {
     await env.OAUTH_KV.delete(key);
@@ -436,6 +521,30 @@ async function roomTurns(request, env, session, dependencies) {
     csrf_token: session.csrfToken });
 }
 
+/** GET /api/room/latest — the read-room-latest verb through the same wire. */
+async function roomLatest(request, env, session, dependencies) {
+  if (typeof dependencies.roomLatestFn !== "function") return json({ error: "not_found" }, 404);
+  const url = new URL(request.url);
+  const rawBefore = url.searchParams.get("before_seq");
+  const rawLimit = url.searchParams.get("limit");
+  const rawMode = url.searchParams.get("mode") || "all";
+  if (rawBefore !== null && !/^\d{1,15}$/.test(rawBefore)) return json({ error: "before_seq_invalid" }, 400);
+  if (rawLimit !== null && !/^\d{1,15}$/.test(rawLimit)) return json({ error: "limit_invalid" }, 400);
+  if (!["all", "conversation"].includes(rawMode)) return json({ error: "mode_invalid" }, 400);
+  const { limit } = normalizeRoomPaging({ limit: rawLimit === null ? undefined : Number(rawLimit) });
+  let read;
+  try {
+    read = await dependencies.roomLatestFn(env, {
+      before_seq: rawBefore === null ? undefined : Number(rawBefore), limit, mode: rawMode,
+    });
+  } catch (error) {
+    return json({ error: "wire_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
+  }
+  if (!read || read.ok !== true) return json({ error: read?.error || "wire_unavailable" }, 503);
+  return json({ ...read, actor: { slug: session.actor.slug, display: session.actor.display },
+    csrf_token: session.csrfToken });
+}
+
 /** GET /api/room/queue — the read-room-queue verb's exact projection. */
 async function roomQueue(_request, env, _session, dependencies) {
   if (typeof dependencies.queueReadFn !== "function") return json({ error: "not_found" }, 404);
@@ -527,6 +636,10 @@ async function roomTurnPost(request, env, session, dependencies) {
 
 async function roomRequest(request, env, session, dependencies) {
   const pathname = new URL(request.url).pathname;
+  if (pathname === `${ROOM_PREFIX}/latest`) {
+    if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+    return roomLatest(request, env, session, dependencies);
+  }
   if (pathname === `${ROOM_PREFIX}/turns`) {
     if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
     return roomTurns(request, env, session, dependencies);
@@ -671,6 +784,298 @@ async function commandCenterResponse(request, env, session, dependencies) {
   }
 }
 
+// Default census reader. Built from the SAME client factory index.js uses for
+// commandCenterReader — neon() over DATABASE_URL_READER, wrapped so .query()
+// returns { rows } — imported from @neondatabase/serverless directly rather
+// than from index.js, which must stay free of any dependency on this route.
+async function defaultWorkInventoryReader(env, actor, correlationId, params = {}) {
+  const sql = neon(env.DATABASE_URL_READER);
+  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
+  return readWorkInventoryCensus({
+    client, actor, correlationId: correlationId || env.CORRELATION_ID,
+    ...params,
+  });
+}
+
+/**
+ * GET /api/v1/work-inventory — the V5-UX-C10 complete work inventory census.
+ *
+ * Mounted exactly like the Command Center read: same feature flag, same typed
+ * error-to-status map, same dependency-injected reader so the route carries no
+ * database knowledge. The three query parameters (cursor, limit, kinds,
+ * statuses) are handed to the reader unparsed — the reader owns bounding and
+ * refusal so the paging semantics keep ONE definition.
+ */
+async function workInventoryResponse(request, env, session, dependencies) {
+  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
+  const url = new URL(request.url);
+  const allowed = new Set(["cursor", "limit", "kinds", "statuses", "system", "source", "age", "text", "live_library", "id"]);
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
+    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
+      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
+    });
+  }
+  // The census route owns its own default reader, so the surface is reachable
+  // without index.js wiring it; an injected reader (the web test's, or a future
+  // caller's) still wins. The default is READER-role only: this is a read.
+  const reader = typeof dependencies.workInventoryReader === "function"
+    ? dependencies.workInventoryReader : defaultWorkInventoryReader;
+  try {
+    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
+      cursor: url.searchParams.get("cursor"),
+      limit: url.searchParams.get("limit"),
+      kinds: url.searchParams.get("kinds"),
+      statuses: url.searchParams.get("statuses"),
+      ...Object.fromEntries(["system", "source", "age", "text", "live_library", "id"]
+        .filter(key => url.searchParams.has(key)).map(key => [key, url.searchParams.get(key)])),
+    });
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
+    return json(payload);
+  } catch (error) {
+    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
+    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
+    return json({ error: code }, status);
+  }
+}
+
+// A partner asks for one advisory at a time. This route reuses the authenticated
+// Deal Room record verb, then sends only bounded deal evidence to TypeSafe.
+async function jevDealReadingResponse(request, env, session, dependencies) {
+  if (request.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+  if (!sameOrigin(request, env)) return json({ error: "forbidden", reason: "origin_mismatch" }, 403);
+  let args;
+  try {
+    const body = await request.text();
+    if (body.length > 1024) throw new Error("too_large");
+    args = JSON.parse(body);
+  } catch { return json({ error: "INVALID_REQUEST" }, 400); }
+  if (!args || Object.keys(args).length !== 1 ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(args.deal || ""))
+    return json({ error: "INVALID_REQUEST" }, 400);
+  try {
+    const reader = dependencies.jevDealRecordReader || (async (deal) => {
+      const sql = neon(env.DATABASE_URL_READER);
+      const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
+      return executeRegisteredTool(client, session.actor, "get-deal-room", { deal });
+    });
+    const record = await reader(args.deal);
+    const read = dependencies.jevDealRead || readDealWithJev;
+    return json(await read(record, { askJev: env.TYPESAFE_API_KEY ? request =>
+      callTool(env, session.actor, "ask-jev", {
+        idempotency_key: crypto.randomUUID(), session_id: `worker-deal-reading-${crypto.randomUUID()}`,
+        purpose: "call", ...request,
+      }, "full", "app_runtime") : undefined }));
+  } catch {
+    return json({ error: "DEPENDENCY_UNAVAILABLE" }, 503);
+  }
+}
+
+// Default Atlas reader. Same client factory as the census route above — neon()
+// over DATABASE_URL_READER, wrapped so .query() returns { rows } — so this route
+// carries no database knowledge of its own and no write credential can reach it.
+async function defaultAtlasGraphReader(env, actor, correlationId, params = {}) {
+  const sql = neon(env.DATABASE_URL_READER);
+  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
+  return readAtlasInventoryGraph({
+    client, actor, correlationId: correlationId || env.CORRELATION_ID,
+    layer: params.layer, q: params.q, include_retired: params.include_retired,
+    limit: params.limit, cursor: params.cursor,
+  });
+}
+
+/**
+ * GET /api/v1/atlas-graph — the V5-UX-C07 Atlas inventory graph and linked index.
+ *
+ * Mounted exactly like the work-inventory census: same feature flag, same typed
+ * error-to-status map, same dependency-injected reader. The five query
+ * parameters are handed to the reader unparsed — the reader owns bounding and
+ * refusal so the paging semantics keep ONE definition.
+ */
+async function atlasGraphResponse(request, env, session, dependencies) {
+  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
+  const url = new URL(request.url);
+  const allowed = new Set(["layer", "q", "include_retired", "limit", "cursor"]);
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
+    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
+      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
+    });
+  }
+  const reader = typeof dependencies.atlasGraphReader === "function"
+    ? dependencies.atlasGraphReader : defaultAtlasGraphReader;
+  try {
+    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
+      layer: url.searchParams.get("layer"),
+      q: url.searchParams.get("q"),
+      include_retired: url.searchParams.get("include_retired"),
+      limit: url.searchParams.get("limit"),
+      cursor: url.searchParams.get("cursor"),
+    });
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
+    return json(payload);
+  } catch (error) {
+    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
+    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
+    return json({ error: code }, status);
+  }
+}
+
+// Default metering reader. Same client factory as the census routes above --
+// neon() over DATABASE_URL_READER, wrapped so .query() returns { rows } -- so
+// this route carries no database knowledge of its own and no write credential
+// can reach it. The WRITER path of the cost ledger is not mounted here at all.
+async function defaultMeteringReader(env, actor, correlationId, params = {}) {
+  const sql = neon(env.DATABASE_URL_READER);
+  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
+  return readMeteringProjection({
+    client, actor, correlationId: correlationId || env.CORRELATION_ID,
+    tree_ref: params.tree_ref, period: params.period,
+  });
+}
+
+/**
+ * GET /api/v1/metering -- the WR-000111 producer cost projection.
+ *
+ * Mounted exactly like the Atlas graph: same feature flag, same typed
+ * error-to-status map, same dependency-injected reader. The two query
+ * parameters are handed to the reader unparsed -- the reader owns bounding and
+ * refusal so the semantics keep ONE definition.
+ */
+async function meteringResponse(request, env, session, dependencies) {
+  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
+  const url = new URL(request.url);
+  const allowed = new Set(["tree_ref", "period"]);
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
+    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
+      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
+    });
+  }
+  const reader = typeof dependencies.meteringReader === "function"
+    ? dependencies.meteringReader : defaultMeteringReader;
+  try {
+    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
+      tree_ref: url.searchParams.get("tree_ref"),
+      period: url.searchParams.get("period"),
+    });
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
+    return json(payload);
+  } catch (error) {
+    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
+    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
+    return json({ error: code }, status);
+  }
+}
+
+// Default program-controller reader. Same client factory as the two census
+// routes above — neon() over DATABASE_URL_READER, wrapped so .query() returns
+// { rows } — so this route carries no database knowledge of its own and no
+// write credential can reach it.
+async function defaultProgramControllerReader(env, actor, correlationId, params = {}) {
+  const sql = neon(env.DATABASE_URL_READER);
+  const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
+  return readProgramControllerCensus({
+    client, actor, correlationId: correlationId || env.CORRELATION_ID,
+    program_ref: params.program_ref, slice_ref: params.slice_ref, release_ref: params.release_ref,
+  });
+}
+
+/**
+ * GET /api/v1/program-controller — the V5-F02 program-controller census.
+ *
+ * Mounted exactly like the atlas graph: same feature flag, same typed
+ * error-to-status map, same dependency-injected reader.
+ *
+ * THE ADMITTED PARAMETER SET IS EXACTLY THREE, and `auto_release_requested` is
+ * deliberately absent. It is a stated invariant in the census reader, not a
+ * store and not a caller input, so asking for it here is an unknown parameter
+ * and refuses 403 — a gated party may not ask for its own auto release.
+ */
+async function programControllerResponse(request, env, session, dependencies) {
+  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
+  const url = new URL(request.url);
+  const allowed = new Set(["program_ref", "slice_ref", "release_ref"]);
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
+    return json({ error: "AUTHORIZATION_REFUSED" }, 403);
+  }
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
+      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
+    });
+  }
+  const reader = typeof dependencies.programControllerReader === "function"
+    ? dependencies.programControllerReader : defaultProgramControllerReader;
+  try {
+    const payload = await reader(env, session.actor, env.CORRELATION_ID, {
+      program_ref: url.searchParams.get("program_ref"),
+      slice_ref: url.searchParams.get("slice_ref"),
+      release_ref: url.searchParams.get("release_ref"),
+    });
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
+    return json(payload);
+  } catch (error) {
+    const code = ["AUTHORIZATION_REFUSED", "TENANT_SCOPE_REFUSED", "FRESHNESS_UNKNOWN", "DEPENDENCY_UNAVAILABLE", "INTERNAL_ERROR"].includes(error?.code) ? error.code : "INTERNAL_ERROR";
+    const status = code === "AUTHORIZATION_REFUSED" ? 403 : code === "TENANT_SCOPE_REFUSED" ? 404 : code === "FRESHNESS_UNKNOWN" ? 409 : code === "DEPENDENCY_UNAVAILABLE" ? 503 : 500;
+    return json({ error: code }, status);
+  }
+}
+
+/**
+ * GET /api/v1/business/{clients,vendors}[/<uuid>] — the Journey 1 business read.
+ *
+ * The route holds no query knowledge of its own: the read model parses,
+ * bounds and refuses the query so the list, the total and the filter semantics
+ * keep exactly ONE definition. The actor comes from the verified session and is
+ * never taken from the URL.
+ */
+async function businessResponse(request, env, session, dependencies) {
+  if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { allow: "GET, HEAD, OPTIONS", "cache-control": "no-store" } });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return new Response(JSON.stringify({ error: "METHOD_NOT_ALLOWED" }), {
+      status: 405, headers: { ...JSON_HEADERS, allow: "GET, HEAD, OPTIONS" },
+    });
+  }
+  if (typeof dependencies.businessReader !== "function") return json({ error: "DEPENDENCY_UNAVAILABLE" }, 503);
+  try {
+    const payload = await dependencies.businessReader(env, session.actor, request, env.CORRELATION_ID);
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
+    return json(payload);
+  } catch (error) {
+    const code = Object.prototype.hasOwnProperty.call(BUSINESS_ERROR_STATUS, error?.code) ? error.code : "INTERNAL_ERROR";
+    // Only a malformed query says which parameter was wrong, and only an
+    // unprovisioned read says which class of access is missing. Neither says
+    // anything about the record, the tenant, the schema or the statement.
+    const body = { error: code };
+    if (code === "QUERY_INVALID" && error?.detail) body.detail = error.detail;
+    if (code === "DEPENDENCY_NOT_PROVISIONED" && BUSINESS_DEPENDENCY_CLASSES.has(error?.detail?.dependency)) {
+      body.dependency = error.detail.dependency;
+    }
+    return json(body, BUSINESS_ERROR_STATUS[code]);
+  }
+}
+
 async function bundleAsset(env, request) {
   const url = new URL(request.url);
   const requested = url.pathname === "/" ? "/index.html" : (DEALROOM_ROUTE_ASSETS.get(url.pathname) || url.pathname);
@@ -694,7 +1099,14 @@ export function createDealroomHandler(overrides = {}) {
     verifyGoogleIdTokenFn: verifyGoogleIdToken,
     slugForEmailFn: slugForEmail,
     propsForSlugFn: propsForSlug,
-    actorFromPropsFn: actorFromProps,
+    // The Deal Room session surface builds an actor from grant props and needs
+    // no receipt identity, so it presents no server witness and the actor it
+    // gets back is deliberately unbranded (identity.js, amendment 8).
+    actorFromPropsFn: props => authenticatedIdentity.connectionForGrant(props),
+    // The business read ships with its own production adapter so the Clients
+    // and Vendors views work wherever this handler is mounted; a test replaces
+    // the whole reader rather than reaching past it to a database.
+    businessReader: createWorkspaceBusinessReader(),
     now: () => Date.now(),
     ...overrides,
   };
@@ -708,7 +1120,7 @@ export function createDealroomHandler(overrides = {}) {
 }
 
 async function handleRequest(request, env, ctx, dependencies) {
-      const origin = dealroomOrigin(env);
+      const primaryOrigin = dealroomOrigin(env);
       const legacyOrigin = legacyDealroomOrigin(env);
       if (legacyOrigin && requestMatchesDealroomOrigin(request, legacyOrigin)) {
         const legacyUrl = new URL(request.url);
@@ -717,12 +1129,14 @@ async function handleRequest(request, env, ctx, dependencies) {
         // never let API, machine, asset, or mutation requests become HTML
         // redirects by accident.
         if ((request.method === "GET" || request.method === "HEAD") &&
-            LEGACY_BROWSER_REDIRECT_PATHS.has(legacyUrl.pathname) && origin) {
-          return redirect(`${origin}/deals`);
+            LEGACY_BROWSER_REDIRECT_PATHS.has(legacyUrl.pathname) && primaryOrigin) {
+          return redirect(`${primaryOrigin}/deals`);
         }
         return json({ error: "not_found" }, 404);
       }
-      if (!origin || !requestMatchesDealroomOrigin(request, origin)) return json({ error: "not_found" }, 404);
+      const origin = dealroomOriginForRequest(request, env);
+      if (!origin) return json({ error: "not_found" }, 404);
+      env = envForDealroomOrigin(env, origin);
       const url = new URL(request.url);
       const publicResponse = await publicShellAsset(env, request, url.pathname);
       if (publicResponse) return publicResponse;
@@ -731,9 +1145,25 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname === "/auth/reauth" && request.method === "GET") return startReauth(request, env, dependencies);
       // The first prototype's workspace API was intentionally retired. Keep
       // it a quiet 404 so stale browser bundles cannot reach a second read.
-      if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH) return json({ error: "not_found" }, 404);
-      if (url.pathname === COMMAND_CENTER_PATH && !workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
+      // The business read is the ONLY addition to that surface, and it is
+      // admitted by an exact path parser rather than a prefix.
+      if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
+          url.pathname !== USAGE_PATH && url.pathname !== `${USAGE_PATH}/session` &&
+          url.pathname !== JEV_DEAL_READING_PATH &&
+          url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
+          url.pathname !== PROGRAM_CONTROLLER_PATH && url.pathname !== METERING_PATH &&
+          !isBusinessApiPath(url.pathname)) return json({ error: "not_found" }, 404);
+      // Home, Clients and Vendors are one workspace surface and share its flag.
+      if ((url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
+           url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
+           url.pathname === METERING_PATH ||
+           isBusinessApiPath(url.pathname) ||
+           BUSINESS_VIEW_PATHS.has(url.pathname) || url.pathname === BUSINESS_ASSET_PATH ||
+           APP_DOCUMENT_PATHS.has(url.pathname)) &&
+          !workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
       if (url.pathname === "/workspace" || url.pathname === "/workspace.html") return redirect(`${origin}/`);
+      // /clients and /vendors are the addresses; the asset file is not a second one.
+      if (url.pathname === BUSINESS_ASSET_PATH) return redirect(`${origin}${CLIENTS_ROUTE}`);
 
       if (url.pathname === "/auth/signout") {
         if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -748,18 +1178,26 @@ async function handleRequest(request, env, ctx, dependencies) {
 
       const session = await sessionFor(request, env, dependencies);
       if (!session) {
-        if (url.pathname === COMMAND_CENTER_PATH) {
+        if (url.pathname.startsWith(USAGE_PATH) || url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
+            url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
+            url.pathname === METERING_PATH ||
+            isBusinessApiPath(url.pathname)) {
           return json({ error: "AUTHENTICATION_REQUIRED" }, 401);
         }
         if (url.pathname === "/mcp" || url.pathname === "/pipeline/changes" ||
-            url.pathname.startsWith(SYSTEM_WORK_PREFIX) || url.pathname.startsWith(ROOM_PREFIX)) {
+            url.pathname.startsWith(SYSTEM_WORK_PREFIX) || url.pathname.startsWith(ROOM_PREFIX) ||
+            url.pathname.startsWith("/api/tours/")) {
           return json({ error: "unauthorized", state: "sign_in_required" }, 401);
         }
         return redirect(`${origin}/auth/login?return_to=${encodeURIComponent(url.pathname + url.search)}`);
       }
 
       let response;
-      if (url.pathname.startsWith(ROOM_PREFIX)) {
+      if (url.pathname === USAGE_PATH || url.pathname === `${USAGE_PATH}/session`) {
+        response = await usageResponse(request, env, session, dependencies, guardSystemWorkPost);
+      } else if (isTourInternalRequest(request) && dependencies.tourHandler?.fetch) {
+        response = await dependencies.tourHandler.fetch(request, env, ctx, session.actor, session);
+      } else if (url.pathname.startsWith(ROOM_PREFIX)) {
         response = await roomRequest(request, env, session, dependencies);
       } else if (url.pathname.startsWith(SYSTEM_WORK_PREFIX)) {
         if (!program6ActionsEnabled(env)) return json({ error: "program6_actions_disabled" }, 404);
@@ -782,8 +1220,20 @@ async function handleRequest(request, env, ctx, dependencies) {
         response = await dependencies.mcpHandler(request, env, ctx, session.actor);
       }
       else if (url.pathname === "/pipeline/changes") response = await dependencies.pipelineHandler(request, env, ctx, session.actor);
-      else if (url.pathname === COMMAND_CENTER_PATH) {
+      else if (url.pathname === JEV_DEAL_READING_PATH) {
+        response = await jevDealReadingResponse(request, env, session, dependencies);
+      } else if (url.pathname === COMMAND_CENTER_PATH) {
         response = await commandCenterResponse(request, env, session, dependencies);
+      } else if (url.pathname === WORK_INVENTORY_PATH) {
+        response = await workInventoryResponse(request, env, session, dependencies);
+      } else if (url.pathname === ATLAS_GRAPH_PATH) {
+        response = await atlasGraphResponse(request, env, session, dependencies);
+      } else if (url.pathname === PROGRAM_CONTROLLER_PATH) {
+        response = await programControllerResponse(request, env, session, dependencies);
+      } else if (url.pathname === METERING_PATH) {
+        response = await meteringResponse(request, env, session, dependencies);
+      } else if (isBusinessApiPath(url.pathname)) {
+        response = await businessResponse(request, env, session, dependencies);
       } else if (url.pathname.startsWith("/api/v1/")) {
         response = json({ error: "not_found" }, 404);
       } else if (url.pathname === "/" && workspaceCommandCenterEnabled(env)) {
@@ -796,10 +1246,9 @@ async function handleRequest(request, env, ctx, dependencies) {
 }
 
 export function isDealroomRequest(request, env) {
-  const origin = dealroomOrigin(env);
   const legacyOrigin = legacyDealroomOrigin(env);
   if (requestMatchesDealroomOrigin(request, legacyOrigin)) return true;
-  if (!requestMatchesDealroomOrigin(request, origin)) return false;
+  if (!dealroomOriginForRequest(request, env)) return false;
   const pathname = new URL(request.url).pathname;
   if (pathname === SYSTEM_WORK_PREFIX || DEALROOM_EXACT_PATHS.has(pathname) ||
       DEALROOM_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;

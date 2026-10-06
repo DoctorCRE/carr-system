@@ -24,6 +24,15 @@ import json
 import os
 import sys
 
+PACK_DELIVERY_RAIL = (
+    " RULE DELIVERY: use only exact canonical pack names from standing-context "
+    "rule_delivery.pack_index. A name in packs_not_found is unknown and is NOT "
+    "loaded. If observed work enters a pack absent from "
+    "rule_delivery.declared_packs, call standing-context again with that canonical "
+    "pack and read the result before acting. Shadow mode records drift without "
+    "blocking, but does not waive this recall protocol."
+)
+
 STATIC_RAIL = (
     "CARR AI (Joe Bookout's healthcare-CRE system, partner Dell McCraney; "
     "business only — personal is Life AI). OPENING ACT: call standing-context "
@@ -40,6 +49,7 @@ STATIC_RAIL = (
     "The main seat orchestrates, verifies and performs authorized "
     "writes; it does not reclaim the mechanical sweep. Before each phase, state "
     "the executor; a second inline mechanical tool call trips the delegation gate."
+    + PACK_DELIVERY_RAIL
 )
 
 

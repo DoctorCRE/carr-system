@@ -1,0 +1,4 @@
+{
+  "schema": "carr-ingest-transport/v1",
+  "max_body_bytes": 1048576
+}

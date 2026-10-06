@@ -73,6 +73,8 @@ fi
 # the same reasons stated there: a Neon API key needs no browser, and production
 # is pinned BY ID because a name lookup can drift to another project.
 if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then
+  . "$REPO"/bin/routine-credential-env.sh
+  carr_require_sourceable_db_env "sync-control-plane-prod" || exit $?
   set -a; . "$HOME/.config/carr/db.env"; set +a
 fi
 if [ -z "${NEON_API_KEY:-}" ]; then

@@ -171,7 +171,7 @@ def monthly_note(s, r):
 # these renderers run instead of the rate ones.
 #
 # ADDITIVE BY DESIGN. Nothing fires unless a record carries "sale", so every
-# existing lease search still renders byte for byte. Verified against Hughes.
+# existing lease search still renders byte for byte. Verified against Ferris.
 # ---------------------------------------------------------------------------
 
 def price_line(x):
@@ -226,7 +226,7 @@ def sale_specs(p, s, b):
 
 
 # ---------------------------------------------------------------------------
-# TOUR-PACKET SUPPORT (added 2026-08-20, River Bank & Trust C-200 US-98 search)
+# TOUR-PACKET SUPPORT (added 2026-08-20, Harbor State Bank C-200 US-98 search)
 #
 # Three things a packet that gets CARRIED needs and a report that gets READ
 # does not: who is meeting us at the door, somewhere to write while standing in
@@ -377,7 +377,7 @@ def build_tour_card(p, photos, minis=None, photo_px=None):
     inlined as a data URI, so there is no network request to defer and lazy loading buys nothing.
     What it DID cost: 11 of 16 images stayed blank until a human scrolled them into view, so every
     screenshot, thumbnail and print-to-PDF captured empty photo frames and an empty map. Dell's
-    side read the Hughes report as having no photos and no map. Do not add it back.
+    side read the Ferris report as having no photos and no map. Do not add it back.
     """
     img = ""
     if p.get("photo") and p["photo"] in photos:
@@ -774,7 +774,7 @@ def main():
     assert not leftover, f"unreplaced tokens: {set(leftover)}"
 
     # The default takes the last word of the client's name, which is a surname for a
-    # doctor and a noun for an organisation: "River Bank & Trust" produced
+    # doctor and a noun for an organisation: "Harbor State Bank" produced
     # trust-space-search.html. A client may name its own slug.
     slug = re.sub(r"[^a-z0-9]+", "-",
                   (c.get("slug") or c["name"].split(",")[0].split()[-1]).lower()).strip("-")

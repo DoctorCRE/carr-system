@@ -31,7 +31,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { callTool } from "../src/mcp.js";
+import { callTool, foundationAssuranceRuntimeBinding } from "../src/mcp.js";
 
 const ACTOR = { slug: "joe", human: true, via: "oauth-google" };
 
@@ -93,4 +93,20 @@ test("the verb name is still required, and recursion is still refused", async ()
   assert.equal((await callVerb({ args: PROBE_PAYLOAD }))?.error, "missing_verb");
   assert.equal((await callVerb({ verb: "call-verb" }))?.error, "no_recursion");
   assert.equal((await callVerb({ verb: "list-verbs" }))?.error, "no_recursion");
+});
+
+test("foundation assurance runtime binding comes only from deploy/provider metadata", () => {
+  assert.deepEqual(foundationAssuranceRuntimeBinding({
+    CARR_ENV: "production",
+    GIT_SHA: "a".repeat(40),
+    CF_VERSION_METADATA: { id: "00000000-0000-4000-8000-000000000095" },
+    DATABASE_URL_FOUNDATION_ASSURANCE_WRITER: "postgresql://must-not-leak",
+  }), {
+    schema_version: "doctorcre-v5-foundation-assurance-runtime-binding.v1",
+    environment: "production",
+    source_sha: "a".repeat(40),
+    provider: "cloudflare-workers",
+    provider_version: "00000000-0000-4000-8000-000000000095",
+  });
+  assert.equal(foundationAssuranceRuntimeBinding({}).provider_version, null);
 });

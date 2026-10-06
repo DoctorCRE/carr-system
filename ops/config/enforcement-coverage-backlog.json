@@ -4,6 +4,7 @@
   "_why_these_remain": "They are modules imported BY gates, blessed so tampering stays detectable, denying nothing on their own. A control naming one would claim enforcement that does not exist there. They are listed rather than silently filtered, because a silent filter is how a real gate gets excluded by accident — and this file exists because exactly that kind of blindness cost a day.",
   "unmapped_gates": [
     "hook_meter.py",
+    "grok_invocation.py",
     "hook-meter-run.py",
     "cmd_text.py",
     "conduct_patterns.py",
@@ -12,9 +13,16 @@
     "md_manifest.py",
     "refused_content.py",
     "turn_origin.py",
-    "worktree_scope.py"
+    "worktree_scope.py",
+    "stop_latch.py",
+    "worktree-self-plumb.py",
+    "jev-supervisor.py",
+    "rule-boot-gate.py",
+    "session-presence-hook.py",
+    "job-watchdog-digest.py"
   ],
   "reasons": {
+    "grok_invocation.py": "shared helper — authenticates the bounded read-only Grok process owner and limits process readback time; imported by lifecycle hooks and the meter, has no standalone entrypoint or refusal, and is hash-covered because its predicate decides whether lifecycle hooks run",
     "hook_meter.py": "shared helper — the live/fixture/unclassified split and the telemetry writer, imported by the 21 gates that write out/hook-guard.log; denies nothing itself, and every gate that imports it does so inside a try so that losing it cannot change a verdict",
     "hook-meter-run.py": "measurement, not enforcement — every wired gate now runs inside it so each firing can be timed and recorded, but it reaches no verdict of its own: it passes the gate's exit code, stdout and stderr through untouched, which ops/hook-meter-selftest.py proves by firing 14 real gates bare and wrapped and requiring byte-identical results. A control naming it would claim a refusal it never makes. It lives in hooks/ rather than ops/ deliberately, so gate-integrity.py hashes it like every other file in the enforcement path — it is blessed for tamper-detection, not because it enforces anything",
     "cmd_text.py": "shared helper — command-text extraction imported by the Bash-facing gates; denies nothing itself",
@@ -24,6 +32,12 @@
     "md_manifest.py": "shared helper — manifest reading imported by record-home-gate.py",
     "refused_content.py": "shared helper — refusal-text shaping imported by the write gates",
     "turn_origin.py": "shared helper — the one answer to whether a partner actually typed a turn, imported by ledger-sweep and weekend-quiet-gate; reads no hook payload, refuses nothing and runs on no schedule. It exists because those two gates answered that question differently and the weaker answer shipped, matching zero of 3,271 real records for a week. Enforcement lives in the gates that import it, so a control naming this file would claim a refusal it cannot make.",
-    "worktree_scope.py": "shared helper — resolves WHICH TREE a Bash command is about (a named worktree, else the session's cwd, else the canonical checkout), imported by git-writer-gate.py, staging-attribution-gate.py and staging-observation-tracker.py; denies nothing itself"
+    "worktree_scope.py": "shared helper — resolves WHICH TREE a Bash command is about (a named worktree, else the session's cwd, else the canonical checkout); imported by staging-observation-tracker.py (and, before WR-000019 slice S3 retired them 2026-08-27, by git-writer-gate.py and staging-attribution-gate.py too); denies nothing itself",
+    "stop_latch.py": "shared helper — the Stop-gate register, added 2026-08-23 with Joe's Stop-gate rationing. Two things live in it: a claim-set latch keyed on WHAT was claimed rather than how it was worded (hooks/drift-assertion-gate.py held a council chair twice over one changed word because its own latch was a hash of the prose), and the announce emit the five demoted gates now speak through. It reads no hook payload, has no entry point and refuses nothing — the enforcement lives in the gates that import it, so a control naming this file would claim a refusal it cannot make.",
+    "worktree-self-plumb.py": "SessionStart self-plumb, not a gate — symlinks .venv/out/mcp-server-node_modules into a worktree Claude/Codex created outside bin/worktree.sh, and reaps orphaned worktrees. It denies nothing and has no PreToolUse binding moment. It sat in control_catalog's canonical_edit entry alongside hooks/canonical-edit-gate.py until WR-000019 slice S3 retired that gate on 2026-08-27, and moved here rather than be left pointing at a deleted sibling. Joe's ruling 7f48abf6 REINSTATED canonical_edit on 2026-09-01, so the deleted-sibling half of that reasoning is void — but the entry STAYS, on the half that still holds: this file denies nothing and has no binding moment, so a control naming it would claim a refusal it cannot make. Re-mapping it under canonical_edit would put a SessionStart plumbing helper inside a deny gate's implementation, which is exactly the overstatement the backlog exists to avoid.",
+    "jev-supervisor.py": "shadow-only Jev supervision dispatcher (2026-09-23 local-workhorse supervision list): it records Jev's view of loops, planted instructions, failures, done claims and review risk to out/jev-judge.jsonl and, in the flash sessions' advise mode, hands the model one advisory line. It never blocks and enforces no taught rule yet, so a control naming it would claim enforcement that does not exist. Map it once a check graduates from shadow on measured agreement.",
+    "rule-boot-gate.py": "A real PreToolUse deny gate (matcher .*): it holds every tool call in a session or subagent until that context has fetched every page of standing-context detail=boot. It is recorded here, not mapped, for one reason: no taught rule id is enforced by it yet, and adding a control_catalog entry moves the byte digest of rule-enforcement-map.json, which is pinned by the production rule-delivery activation preimage (migration 0554 and its acceptance/seed/trigger pins). That repin needs its own forward migration, so it is owed as a follow-up rather than folded into the PR that introduced the gate (Jev 2026-09-26, rule-boot-gate-coverage-home: backlog 0.82). Clear it by adding a rule_boot_gate control naming hooks/rule-boot-gate.py, lib/rule_boot_gate.py and hooks/gate-integrity.py, with enforcement_class deny_gate, in the same change as that repin migration.",
+    "session-presence-hook.py": "presence, not enforcement: it announces a session to the Model Room so other sessions can reach it (the 2026-09-27 requirement), always exits 0 with empty stdout, and refuses nothing. It is wired in hooks.json, so gate-integrity.py hashes it for tamper-detection like every file in the hook path; a control naming it would claim a refusal it never makes",
+    "job-watchdog-digest.py": "read-only orchestrator reporting adapter: it injects a compact digest of open deterministic watchdog findings into UserPromptSubmit, runs no scan or action, and refuses no tool call. It is blessed for integrity because it is registered in hooks.json. Naming it as an enforcement control would claim a denial decision it never makes; operating contract is STORE doctrine job-watchdog."
   }
 }

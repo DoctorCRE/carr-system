@@ -1,0 +1,1703 @@
+{
+ "_note": "Committed classification for the gated rule boot (standing-context detail=boot, mcp-server/src/rule-boot.js). Holds ids, class, a <=20-word trigger summary and a length per rule; NEVER a rule statement. Statements are read live from the store when a context fetches its boot. `chars` is the statement length at classification, read only by the CI budget guard, which has no store to call. Class a includes standing person, team and business facts independent of task, including factual premises in mixed rules. ops/sync-rule-boot-classes.py validates supported fact shapes against the existing rule-selection corpus; unrecognized shapes require full-statement review. always_on = class a, plus rules whose only enforcement is a Stop gate (chat_lint, conduct_stop, completion_evidence: the gate fires after the reply is written), plus class-b rules with a conversational moment that Jev confirmed against the rule text. sponsors lists every partner whose scope the budget check measures.",
+ "budget_tokens": 80000,
+ "chars_per_token": 3.6,
+ "sponsors": ["dell", "joe"],
+ "class_legend": {
+  "a": "always-on conduct and standing facts: full text loaded",
+  "b": "action point",
+  "c": "topic-conditional",
+  "d": "enforced by a deterministic gate",
+  "e": "stale, duplicate or conflicting"
+ },
+ "rules": {
+  "015183f5": {
+   "always_on": true,
+   "always_on_reason": "class-a; stop-gate:conduct_stop",
+   "chars": 2222,
+   "class": "a",
+   "moment": "any turn: classifying, defining terms, or planning multi-step work",
+   "summary": "When classifying or defining terms, state the ordered decision procedure, not just the conclusion.",
+   "when": "classifying, defining or planning"
+  },
+  "0156e9fa": {
+   "always_on": true,
+   "always_on_reason": "class-a; stop-gate:conduct_stop",
+   "chars": 1238,
+   "class": "a",
+   "moment": "closing any message to Joe",
+   "personal_to": "joe",
+   "summary": "When closing a message to Joe, give one recommended next action, never a menu.",
+   "when": "closing any message to Joe"
+  },
+  "018ce972": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 137,
+   "class": "a",
+   "moment": "presenting a structural change to Joe",
+   "personal_to": "joe",
+   "summary": "When proposing structural changes to Joe, frame them as cost-now-vs-later window math for fast decisions.",
+   "when": "presenting a structural change to Joe"
+  },
+  "0c1bac27": {
+   "always_on": false,
+   "chars": 1083,
+   "class": "c",
+   "moment": "Monday brief / partnership-fit summary content",
+   "summary": "When writing partnership-fit notes, keep them symmetric and visible to both partners",
+   "when": "Monday brief / partnership-fit summary content"
+  },
+  "0e22e34a": {
+   "always_on": false,
+   "chars": 167,
+   "class": "b",
+   "moment": "creating or naming files/folders (pre-commit path check)",
+   "summary": "When creating folders or filenames, keep 3-4 levels deep, descriptive names, no final_v2.",
+   "when": "naming files or folders"
+  },
+  "0f38532e": {
+   "always_on": false,
+   "chars": 597,
+   "class": "e",
+   "moment": "duplicate of 14181e60 (single source of truth / DB-first)",
+   "summary": "Near-duplicate of 14181e60: single-source-of-truth doctrine already covered by the DB-first gate.",
+   "when": "duplicate DB-first rule"
+  },
+  "1021fa84": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 436,
+   "class": "a",
+   "moment": "any turn - assessing Joe's work patterns/history",
+   "personal_to": "joe",
+   "summary": "When assessing Joe's work patterns, read him as brokerage-first; don't infer unfinished-project habits from build-phase files.",
+   "when": "any turn - assessing Joe's work patterns/history"
+  },
+  "113b3833": {
+   "always_on": false,
+   "chars": 283,
+   "class": "b",
+   "moment": "run.sh retrieve lookup beyond standing core",
+   "personal_to": "joe",
+   "summary": "When looking up anything beyond core memory, run retrieve script first, read only that",
+   "when": "run.sh retrieve lookup beyond standing core"
+  },
+  "11b2b73b": {
+   "always_on": false,
+   "chars": 683,
+   "class": "c",
+   "moment": "Joe shares UI/UX or web-design content",
+   "personal_to": "joe",
+   "summary": "When Joe shares UI/UX or design content, mine it and merge applicable parts into ux-doctrine.",
+   "when": "Joe shares UI/UX or web-design content"
+  },
+  "14181e60": {
+   "always_on": false,
+   "chars": 1453,
+   "class": "d",
+   "moment": "record_home gate (record-home-gate.py), before vault record write",
+   "summary": "Before writing a .md file, route content to the database via a verb; markdown-first is blocked.",
+   "when": "before vault record writes"
+  },
+  "152ceb65": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2963,
+   "class": "a",
+   "moment": "any turn explaining something with a shape",
+   "summary": "When explaining anything with a shape, render it compactly (table/diagram/list) instead of narrating in prose.",
+   "when": "any turn explaining something with a shape"
+  },
+  "173119a8": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2203,
+   "class": "a",
+   "moment": "before claiming who owns uncommitted/dirty-tree work",
+   "summary": "Before naming who owns uncommitted work, diff against origin not HEAD, and check the sign",
+   "when": "before claiming who owns uncommitted/dirty-tree work"
+  },
+  "179be4b8": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 924,
+   "class": "a",
+   "moment": "wrapping up an agreed deliverable",
+   "summary": "When wrapping up agreed work, finish feasible follow-ups in-session; don't park inconvenient remaining steps.",
+   "when": "wrapping up an agreed deliverable"
+  },
+  "17ffd587": {
+   "always_on": false,
+   "chars": 329,
+   "class": "b",
+   "moment": "rendering open-loops, heartbeat, or Monday brief",
+   "summary": "Never surface lead-outreach reminders on open-loops, heartbeat or Monday brief; leads live on Lead Board; deal follow-up dates excepted.",
+   "when": "rendering open-loops, heartbeat, or Monday brief"
+  },
+  "185013c6": {
+   "always_on": false,
+   "chars": 2753,
+   "class": "b",
+   "moment": "spawning a subagent/workflow or sizing 30+min work (model selection)",
+   "summary": "When spawning a subagent or sizing 30+ min work, pick the cheapest fit-map executor and state it.",
+   "when": "delegating or sizing 30+ minute work"
+  },
+  "19304882": {
+   "always_on": false,
+   "chars": 1687,
+   "class": "c",
+   "moment": "Joe's decision/timing reviews and order-writing ramp",
+   "personal_to": "joe",
+   "summary": "During decision reviews, invite Joe's framing first and log timing calls and overrides",
+   "when": "Joe's decision/timing reviews and order-writing ramp"
+  },
+  "1b8e7f43": {
+   "always_on": false,
+   "chars": 2078,
+   "class": "b",
+   "moment": "add-loop verb, when a capability/verb call is blocked",
+   "summary": "When a verb or action is blocked, file a loop recording it; never just drop it.",
+   "when": "add-loop verb, when a capability/verb call is blocked"
+  },
+  "1c21263c": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2151,
+   "class": "a",
+   "moment": "same-shape fix recurring about four times in one session",
+   "summary": "When the same problem shape needs fixing four times, stop and fix the instruction, not the instance.",
+   "when": "four same-shape fixes in one session"
+  },
+  "1c42d80c": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 1331,
+   "class": "a",
+   "moment": "hitting unexpected friction (refusal, error, workaround)",
+   "summary": "When friction (refusal, error, workaround) hits, fix the root cause in-session; never route around it silently.",
+   "when": "unexpected friction"
+  },
+  "1d50a3bb": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:conduct_stop",
+   "chars": 1393,
+   "class": "d",
+   "moment": "conduct_stop gate",
+   "summary": "When a Stop gate reopens a turn, resend only the missing delta, never the whole message",
+   "when": "conduct_stop gate"
+  },
+  "1f3a7372": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 1516,
+   "class": "d",
+   "moment": "completion_evidence gate",
+   "summary": "When a scheduled run ends, write its findings, decisions, and rulings to the record before it ends.",
+   "when": "completion_evidence gate"
+  },
+  "1fcaa63a": {
+   "always_on": false,
+   "chars": 1292,
+   "class": "c",
+   "moment": "heavy build protocol invoked",
+   "summary": "When heavy build protocol is invoked, run all its research/plan/review/admission/dispatch phases unprompted.",
+   "when": "heavy build protocol invoked"
+  },
+  "1fddcffb": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 217,
+   "class": "a",
+   "moment": "deciding what belongs in always-read core vs task-loaded files",
+   "summary": "When deciding what's always-loaded, keep the core to universal needs and push task-specific content to loaded files.",
+   "when": "choosing core versus task-loaded context"
+  },
+  "204391be": {
+   "always_on": false,
+   "chars": 1298,
+   "class": "b",
+   "moment": "discovering a missing record-layer verb while building",
+   "summary": "When a needed record-layer verb is missing, build it via the heavy path, don't just ask",
+   "when": "discovering a missing record-layer verb while building"
+  },
+  "20d106f1": {
+   "always_on": false,
+   "chars": 1292,
+   "class": "c",
+   "moment": "Joe's development: new builds, predictions, confident direction",
+   "personal_to": "joe",
+   "summary": "When Joe opens a build, predicts confidently, or rules on structure, surface open items and calibrate.",
+   "when": "new builds, predictions or confident direction"
+  },
+  "2271e684": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 159,
+   "class": "d",
+   "moment": "completion_evidence gate, terminal technical claim",
+   "summary": "Before any terminal technical claim, search to verify; never trust memory for specifics.",
+   "when": "completion_evidence gate, terminal technical claim"
+  },
+  "236ca227": {
+   "always_on": false,
+   "chars": 301,
+   "class": "d",
+   "moment": "weekend_quiet deny_gate - before a partner-facing send",
+   "summary": "Weekends are off for both partners; never plan around or read weekend silence as drift.",
+   "when": "weekend_quiet deny_gate - before a partner-facing send"
+  },
+  "23ea0607": {
+   "always_on": false,
+   "chars": 873,
+   "class": "d",
+   "moment": "deal_guard schema (Salesforce reconciliation)",
+   "summary": "Never apply a Salesforce row that moves a closed deal backwards to an earlier phase",
+   "when": "deal_guard schema (Salesforce reconciliation)"
+  },
+  "24e10ee8": {
+   "always_on": false,
+   "chars": 970,
+   "class": "b",
+   "moment": "writing a commit message or close-out claiming an act",
+   "summary": "When writing a commit message claiming an act, verify the diff actually performs that act.",
+   "when": "writing a commit message or close-out claiming an act"
+  },
+  "25fab860": {
+   "always_on": false,
+   "chars": 452,
+   "class": "b",
+   "moment": "weekly social batch proposal validation",
+   "personal_to": "joe",
+   "summary": "Never include quote tweets in the weekly social batch; that lane belongs to the daily X reply run.",
+   "when": "weekly social batch proposal validation"
+  },
+  "25fcddee": {
+   "always_on": false,
+   "chars": 221,
+   "class": "c",
+   "moment": "first attempt in new/unfamiliar-territory work",
+   "summary": "On first attempts at unfamiliar work, interview Joe on ambiguities or show cheap variants before committing.",
+   "when": "first attempt in new/unfamiliar-territory work"
+  },
+  "27277539": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 96,
+   "class": "a",
+   "moment": "any turn discussing technical topics with Joe",
+   "personal_to": "joe",
+   "summary": "Never steer Joe to simpler alternatives; explain terms fully and encourage his technical stretch",
+   "when": "any turn discussing technical topics with Joe"
+  },
+  "2a3ff869": {
+   "always_on": false,
+   "chars": 389,
+   "class": "d",
+   "moment": "update-document-status verb (outbound_format check)",
+   "summary": "When marking a client document sent, default to Microsoft formats unless the partner says otherwise.",
+   "when": "update-document-status verb (outbound_format check)"
+  },
+  "2b66211d": {
+   "always_on": false,
+   "chars": 693,
+   "class": "b",
+   "moment": "fan-out brief / delegating tasks to agents",
+   "summary": "When fanning out to agents, give verifiers fresh context and scope new fleets before widening.",
+   "when": "fan-out brief / delegating tasks to agents"
+  },
+  "2b889e80": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 1103,
+   "class": "a",
+   "moment": "any turn - before asserting a negative finding",
+   "summary": "Before claiming something doesn't exist, name and check every parallel collection, not just one source.",
+   "when": "any turn - before asserting a negative finding"
+  },
+  "2ca2add2": {
+   "always_on": false,
+   "chars": 603,
+   "class": "c",
+   "moment": "pulling records from any source platform",
+   "summary": "When capturing from a source, grab every available field; apply client-facing rules only at render",
+   "when": "pulling records from any source platform"
+  },
+  "2e362970": {
+   "always_on": false,
+   "chars": 2549,
+   "class": "c",
+   "moment": "standing up a new capability, tool, or first-of-kind work",
+   "summary": "Before building anything first-of-its-kind, run a deep research pass before designing or building.",
+   "when": "first-of-kind implementation"
+  },
+  "2e8b4840": {
+   "always_on": false,
+   "chars": 248,
+   "class": "b",
+   "moment": "confirm-merge verb",
+   "summary": "At confirm-merge, never flag or merge a lead/client pair for the same person as duplicates.",
+   "when": "confirm-merge verb"
+  },
+  "308ef1de": {
+   "always_on": false,
+   "chars": 1245,
+   "class": "d",
+   "moment": "pr_only_main_ruleset (GitHub server ruleset) - before a change reaches main",
+   "summary": "Before branching or switching in a shared checkout, claim the working tree or use a worktree instead.",
+   "when": "before a change reaches main"
+  },
+  "30a189fb": {
+   "always_on": false,
+   "chars": 138,
+   "class": "c",
+   "moment": "non-CARR task detected",
+   "personal_to": "joe",
+   "summary": "When a task isn't CARR-related, stop and ask if it belongs in Life AI instead",
+   "when": "non-CARR task detected"
+  },
+  "347a9ca6": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2392,
+   "class": "a",
+   "moment": "any turn reasoning from a session's own or another's name",
+   "summary": "Never infer safety, scope, or isolation needs from a session's name; judge by observed work.",
+   "when": "reasoning from a session name"
+  },
+  "3578d799": {
+   "always_on": true,
+   "always_on_reason": "conversational-moment (b->a, Jev-confirmed)",
+   "chars": 1309,
+   "class": "a",
+   "moment": "naming a new verb or system noun",
+   "reclassified_from": "b",
+   "summary": "When naming a new verb or system noun, use human words a person could guess, not jargon.",
+   "when": "naming a new verb or system noun"
+  },
+  "388cc81e": {
+   "always_on": false,
+   "chars": 677,
+   "class": "d",
+   "moment": "candidate_match schema check - candidate-pool duplicate classification",
+   "summary": "When matching candidate records across datasets, never merge on a single field; require a second corroborating field.",
+   "when": "candidate duplicate classification"
+  },
+  "38b15dc6": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:chat_lint",
+   "chars": 1648,
+   "class": "d",
+   "moment": "chat_lint gate",
+   "summary": "Never pack multiple required steps into one sentence; number each clause of an instruction",
+   "when": "chat_lint gate"
+  },
+  "3a9dbafd": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:conduct_stop",
+   "chars": 2598,
+   "class": "d",
+   "moment": "conduct_stop (conduct-stop-gate.py Stop)",
+   "summary": "When replying to a partner, never show a bare id; say what the thing is in plain words first.",
+   "when": "conduct_stop (conduct-stop-gate.py Stop)"
+  },
+  "3d185f2b": {
+   "always_on": true,
+   "chars": 1409,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Joe leads system-design builds; Dell reviews the finished product.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_role"
+  },
+  "3fa17fa0": {
+   "always_on": false,
+   "chars": 118,
+   "class": "b",
+   "moment": "drafting re-engagement off notes older than ~60 days",
+   "summary": "Before drafting re-engagement from notes older than ~60 days, ask Joe whether they're still true.",
+   "when": "drafting re-engagement off notes older than ~60 days"
+  },
+  "4039b9b5": {
+   "always_on": false,
+   "chars": 2083,
+   "class": "d",
+   "moment": "versioned_record schema (doctrine section write)",
+   "summary": "Any qualified seat may write doctrine; store versioning, not a single writer, prevents collisions",
+   "when": "versioned_record schema (doctrine section write)"
+  },
+  "412d37d3": {
+   "always_on": false,
+   "chars": 66,
+   "class": "c",
+   "moment": "client/compliance writing mentioning HIPAA",
+   "summary": "When writing about healthcare compliance, spell HIPAA correctly and double-check compliance references.",
+   "when": "client/compliance writing mentioning HIPAA"
+  },
+  "424ba0cc": {
+   "always_on": true,
+   "chars": 416,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "The practice operates from abundance; avoid default cold-client nurture pings.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:organization_posture"
+  },
+  "4399df76": {
+   "always_on": false,
+   "chars": 386,
+   "class": "c",
+   "moment": "working with LOI template terms",
+   "summary": "Treat every LOI template term as a negotiable default, never fixed policy from one client's documents.",
+   "when": "working with LOI template terms"
+  },
+  "43e2ef76": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 1272,
+   "class": "d",
+   "moment": "completion_evidence gate",
+   "summary": "Before building anything non-trivial, plan how it will be verified before implementation starts",
+   "when": "completion_evidence gate"
+  },
+  "4402973a": {
+   "always_on": false,
+   "chars": 860,
+   "class": "b",
+   "moment": "healing/regenerating detected drifted vault content",
+   "summary": "Before regenerating or overwriting drifted content, quarantine it and route it through intake verbs first.",
+   "when": "healing/regenerating detected drifted vault content"
+  },
+  "466a545a": {
+   "always_on": false,
+   "chars": 1188,
+   "class": "c",
+   "moment": "grading a fed source against the system",
+   "personal_to": "joe",
+   "summary": "When grading a source, test each claim against its actual standard; never call resemblance validation.",
+   "when": "grading a fed source against the system"
+  },
+  "48083552": {
+   "always_on": false,
+   "chars": 1585,
+   "class": "c",
+   "moment": "client or prospect meeting, before recommending",
+   "summary": "In every client/prospect meeting, run discovery questions and reflect them back before recommending anything.",
+   "when": "client or prospect meeting, before recommending"
+  },
+  "49533583": {
+   "always_on": false,
+   "chars": 2139,
+   "class": "b",
+   "moment": "reading Joe's calendar or mail",
+   "personal_to": "joe",
+   "summary": "When reading Joe's meetings or mail, read the local Apple/Outlook stores, never the Google connector",
+   "when": "reading Joe's calendar or mail"
+  },
+  "49c627cc": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 955,
+   "class": "a",
+   "moment": "claiming the record layer or verbs cannot do something",
+   "summary": "Before claiming the record layer can't do something, grep the full verb list and read descriptions.",
+   "when": "claiming the record layer or verbs cannot do something"
+  },
+  "4a53ff82": {
+   "always_on": false,
+   "chars": 957,
+   "class": "d",
+   "moment": "canonical_edit gate, first write to tracked canonical files",
+   "summary": "Before any first edit to tracked repo files, take an isolated worktree; never edit the canonical tree.",
+   "when": "first tracked repository edit"
+  },
+  "4a9188f3": {
+   "always_on": false,
+   "chars": 1773,
+   "class": "b",
+   "moment": "the teach verb, at a partner-correction/decision trigger",
+   "summary": "When a partner corrects, decides, or states a durable fact, teach it immediately, not at session close.",
+   "when": "partner correction, decision or durable fact"
+  },
+  "4c21d86b": {
+   "always_on": false,
+   "chars": 1610,
+   "class": "d",
+   "moment": "merge_survivor verb check (confirm-merge)",
+   "summary": "When merging duplicate parties, the row with a business ref and more corroboration wins",
+   "when": "merge_survivor verb check (confirm-merge)"
+  },
+  "4dd44fd7": {
+   "always_on": false,
+   "chars": 316,
+   "class": "d",
+   "moment": "update-document-status verb (outbound_format split)",
+   "summary": "When sending outbound documents, use Word for LOIs/letters and PDF only for spreadsheets.",
+   "when": "update-document-status verb (outbound_format split)"
+  },
+  "4e104d4c": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 2282,
+   "class": "d",
+   "moment": "completion_evidence gate, new-verb deployment claim",
+   "summary": "Before claiming a verb is missing, run list-verbs/call-verb; never assume a redeploy is needed.",
+   "when": "completion_evidence gate, new-verb deployment claim"
+  },
+  "4f7c348f": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 652,
+   "class": "a",
+   "moment": "session start",
+   "summary": "At session start, recite both shared and that partner's personal rule files before any other output.",
+   "when": "session start"
+  },
+  "4fae20f4": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2274,
+   "class": "a",
+   "moment": "before stating a rate/average as a baseline",
+   "summary": "Before calling a rate a baseline, check the window for interventions or migrations first",
+   "when": "before stating a rate/average as a baseline"
+  },
+  "51d9f05f": {
+   "always_on": true,
+   "chars": 144,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Prospects know healthcare, not CRE or CARR; use educational communication.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:audience_persona"
+  },
+  "5409731b": {
+   "always_on": false,
+   "chars": 1150,
+   "class": "d",
+   "moment": "trigger_grant check, migration adding/modifying a trigger",
+   "summary": "Before shipping a new trigger, grant-check every table it reads as the role that fires it.",
+   "when": "adding or changing a trigger"
+  },
+  "54e2bcb9": {
+   "always_on": false,
+   "chars": 1417,
+   "class": "d",
+   "moment": "versioned_record schema (tools.js+db) - contact fact promotion",
+   "summary": "Never write a CARR agent's own contact info into a client/vendor/lead contact field; treat it as null.",
+   "when": "promoting contact facts"
+  },
+  "557838a5": {
+   "always_on": false,
+   "chars": 878,
+   "class": "c",
+   "moment": "Joe posts an x.com link",
+   "personal_to": "joe",
+   "summary": "When Joe shares an x.com link, read the quoted post and its linked article fully",
+   "when": "Joe posts an x.com link"
+  },
+  "5697071b": {
+   "always_on": true,
+   "chars": 2787,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Joe holds Florida licensure only; Dell carries Alabama representation.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_license_territory"
+  },
+  "57d13061": {
+   "always_on": false,
+   "chars": 2809,
+   "class": "b",
+   "moment": "any X/x.com retrieval",
+   "personal_to": "joe",
+   "summary": "For any X/Twitter retrieval, use Grok Build first; Chrome only for Joe's logged-in-only surfaces.",
+   "when": "any X/x.com retrieval"
+  },
+  "57d83b75": {
+   "always_on": false,
+   "chars": 383,
+   "class": "d",
+   "moment": "record_research deny_gate (tools.js) - new-client creation",
+   "summary": "On every new client, verify the intake record against open-source research and report discrepancies.",
+   "when": "creating a client"
+  },
+  "58b44ccb": {
+   "always_on": false,
+   "chars": 1270,
+   "class": "d",
+   "moment": "one_repo gate",
+   "summary": "If the code repo is unreachable, stop and say so; cloud sessions teleport instead",
+   "when": "one_repo gate"
+  },
+  "58cef3a1": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 800,
+   "class": "a",
+   "moment": "correcting one of Joe's mislabeled statements",
+   "personal_to": "joe",
+   "summary": "When correcting Joe's mislabel, find the true intuition first, then correct the label with reasoning.",
+   "when": "correcting one of Joe's mislabeled statements"
+  },
+  "590b11e1": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 1385,
+   "class": "d",
+   "moment": "completion_evidence gate, metric completion claim",
+   "summary": "When adding any health metric, name the bound response to a threshold breach or refuse the metric.",
+   "when": "completion_evidence gate, metric completion claim"
+  },
+  "596f7549": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 567,
+   "class": "a",
+   "moment": "any turn - diagnosing a tool error that blames a subsystem",
+   "summary": "When a tool error blames a subsystem, verify the claim and check the call for missing arguments first.",
+   "when": "a tool error blames a subsystem"
+  },
+  "5be2f462": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:chat_lint",
+   "chars": 2532,
+   "class": "d",
+   "moment": "chat_lint gate",
+   "summary": "Cut empty intensifier words and never invent an opposing view for contrast in partner prose",
+   "when": "chat_lint gate"
+  },
+  "5cd8d0f6": {
+   "always_on": false,
+   "chars": 1052,
+   "class": "b",
+   "moment": "a blocked terminal command with a self-serve fix available",
+   "summary": "When a command is blocked but self-serve fixable, fix the block yourself and run the command.",
+   "when": "a self-serve-fixable command block"
+  },
+  "5d44d3f3": {
+   "always_on": false,
+   "chars": 1304,
+   "class": "b",
+   "moment": "new-client or bulk record intake",
+   "summary": "On intake or bulk import, verify every party/deal against primary sources and stamp verification status.",
+   "when": "new-client or bulk record intake"
+  },
+  "5e896ed6": {
+   "always_on": false,
+   "chars": 342,
+   "class": "c",
+   "moment": "Joe feeds a link (article/video/thread)",
+   "personal_to": "joe",
+   "summary": "When Joe feeds a link, merge its learnings into doctrine/loops/capture the same session, not just summarize.",
+   "when": "Joe feeds a link (article/video/thread)"
+  },
+  "5e89c211": {
+   "always_on": false,
+   "chars": 1680,
+   "class": "b",
+   "moment": "registering or dispatching a cognition workflow",
+   "summary": "Never spend a model call on state, routing, or validation already expressible as a tested predicate",
+   "when": "registering or dispatching a cognition workflow"
+  },
+  "614c1209": {
+   "always_on": true,
+   "chars": 3147,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Partners cannot hand-log everything; infer contact from available evidence.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_capacity_constraint"
+  },
+  "6172e7d5": {
+   "always_on": false,
+   "chars": 2556,
+   "class": "b",
+   "moment": "video/image source retrieval (watch-video skill)",
+   "personal_to": "joe",
+   "summary": "When a session cannot read a video/image source, delegate it to Grok's watch-video skill, then verify.",
+   "when": "video/image source retrieval (watch-video skill)"
+  },
+  "61c64d91": {
+   "always_on": false,
+   "chars": 477,
+   "class": "c",
+   "moment": "creating any new asset (shared vs personal tier)",
+   "summary": "When creating any new asset, assign its shared-vs-personal tier at creation, never retrofit later.",
+   "when": "creating any new asset (shared vs personal tier)"
+  },
+  "6330bec8": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 578,
+   "class": "a",
+   "moment": "any non-trivial problem or decision",
+   "personal_to": "joe",
+   "summary": "Before generating options, name the crux; never jump to options before a cause is found",
+   "when": "any non-trivial problem or decision"
+  },
+  "6437ae15": {
+   "always_on": false,
+   "chars": 386,
+   "class": "c",
+   "moment": "Joe shares an article, video, or source",
+   "personal_to": "joe",
+   "summary": "When Joe shares a source, read it fully and mine it for CARR-applicable insights, never by preview.",
+   "when": "Joe shares an article, video, or source"
+  },
+  "647f843d": {
+   "always_on": false,
+   "chars": 3425,
+   "class": "b",
+   "moment": "add-loop / opening an open_loop",
+   "summary": "Before opening a loop, name a real external blocker from the closed list; otherwise just do the work.",
+   "when": "add-loop / opening an open_loop"
+  },
+  "67580c28": {
+   "always_on": true,
+   "chars": 1839,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Joe defines calm positively; CARR surfaces use the dark cinematic register.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_preference"
+  },
+  "6901cc3b": {
+   "always_on": false,
+   "chars": 2382,
+   "class": "c",
+   "moment": "building or evaluating Dr. CRE (Doc) features",
+   "summary": "When Doc is missing a capability, find real tooling for it, never design around the gap",
+   "when": "building or evaluating Dr. CRE (Doc) features"
+  },
+  "6a4e6283": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 262,
+   "class": "d",
+   "moment": "completion_evidence gate (shipping claim)",
+   "summary": "Before client-facing or public work ships, get an independent fresh-eyes review; fix flags, never caveat; drafts Joe line-reviews exempt.",
+   "when": "before client-facing or public work ships"
+  },
+  "6cfb67f5": {
+   "always_on": false,
+   "chars": 686,
+   "class": "b",
+   "moment": "dispatching a task to another seat",
+   "summary": "When delegating a task, name the specific model and reasoning effort, never just a vendor name.",
+   "when": "dispatching a task to another seat"
+  },
+  "70e372f0": {
+   "always_on": false,
+   "chars": 860,
+   "class": "c",
+   "moment": "calibrating to Dell's working style",
+   "summary": "When calibrating to Dell's style, learn only from what he says/asks/corrects; never assess his personality.",
+   "when": "calibrating to Dell's working style"
+  },
+  "7105955b": {
+   "always_on": false,
+   "chars": 968,
+   "class": "d",
+   "moment": "loop_successor schema (close-loop verb)",
+   "summary": "When closing a renumbered or superseded loop, use dropped and say it was superseded, not abandoned",
+   "when": "loop_successor schema (close-loop verb)"
+  },
+  "725dff46": {
+   "always_on": true,
+   "chars": 140,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Our vendor network belongs to the team; Dell's healthcare experience is his.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:team_asset_ownership"
+  },
+  "72e06bdf": {
+   "always_on": false,
+   "chars": 405,
+   "class": "b",
+   "moment": "lead board presentation",
+   "summary": "Never pre-qualify leads before the board; present every lead with an estimated score, Joe qualifies.",
+   "when": "lead board presentation"
+  },
+  "73381d78": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 1503,
+   "class": "d",
+   "moment": "completion_evidence stop_gate - config-file change completion",
+   "summary": "After a config-file change, enumerate and verify every consumer, since format fixes for one can break another.",
+   "when": "after config-file changes"
+  },
+  "737a68d6": {
+   "always_on": false,
+   "chars": 198,
+   "class": "e",
+   "moment": "duplicate of 204391be",
+   "summary": "Duplicate of 204391be: a missing record-layer verb should be built immediately, not left manual",
+   "when": "duplicate of 204391be"
+  },
+  "740bb505": {
+   "always_on": false,
+   "chars": 2162,
+   "class": "c",
+   "moment": "projecting a long-running job's completion time",
+   "summary": "When projecting a long job's finish, exclude idle dead time, include crash overhead, and state which.",
+   "when": "projecting a long-running job's completion time"
+  },
+  "767f9b41": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 156,
+   "class": "d",
+   "moment": "completion_evidence gate, confirmation response",
+   "summary": "On any confirmation question, actually re-verify and report honestly, even if the answer is no.",
+   "when": "completion_evidence gate, confirmation response"
+  },
+  "76a53dfe": {
+   "always_on": false,
+   "chars": 1148,
+   "class": "d",
+   "moment": "record_home deny_gate - blocked markdown write workaround",
+   "summary": "When a markdown write is blocked, route content through record verbs, never redirect it to an unwatched file.",
+   "when": "a markdown write is blocked"
+  },
+  "7e9739f2": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 4755,
+   "class": "a",
+   "moment": "any turn replying to Joe",
+   "personal_to": "joe",
+   "summary": "Every reply to Joe must be clear, concise, scannable, and matched in shape to his question",
+   "when": "any turn replying to Joe"
+  },
+  "80def9d2": {
+   "always_on": false,
+   "chars": 241,
+   "class": "c",
+   "moment": "building a human-facing surface or choice for Joe/Dell",
+   "summary": "When building any human-facing surface or choice, follow ux-doctrine: one action, say what changed.",
+   "when": "building a human-facing surface or choice for Joe/Dell"
+  },
+  "81709f57": {
+   "always_on": false,
+   "chars": 2384,
+   "class": "c",
+   "moment": "convening a red team/review panel",
+   "summary": "When convening a red team, assign distinct lenses and one seat that re-runs the evidence, never redundant votes.",
+   "when": "convening a red team/review panel"
+  },
+  "847f9995": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 2730,
+   "class": "d",
+   "moment": "completion_evidence stop_gate - unattended-path credential verification",
+   "summary": "When building or reviewing any unattended/scheduled job, never let it depend on an expiring interactive credential.",
+   "when": "unattended-path credential verification"
+  },
+  "86647daf": {
+   "always_on": false,
+   "chars": 470,
+   "class": "b",
+   "moment": "finishing a substantive build/change/decision (posting to shared files)",
+   "summary": "When a build or decision changes the shared system, post it to shared files immediately",
+   "when": "finishing a substantive build, change or decision"
+  },
+  "88e9b5eb": {
+   "always_on": false,
+   "chars": 1151,
+   "class": "d",
+   "moment": "blocker_decider gate",
+   "summary": "When reporting a blocker, name whether it's a refusal or true impossibility; never conflate the two.",
+   "when": "blocker_decider gate"
+  },
+  "8aefcdce": {
+   "always_on": false,
+   "chars": 159,
+   "class": "c",
+   "moment": "choosing Copilot vs Claude for a task",
+   "summary": "Route Outlook/calendar/Teams tasks to Copilot; use Claude for everything else in the pipeline.",
+   "when": "choosing Copilot vs Claude for a task"
+  },
+  "8c1e6057": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:chat_lint",
+   "chars": 197,
+   "class": "d",
+   "moment": "chat_lint stop_gate - asking a partner to open/edit/review a file",
+   "summary": "When asking a partner to open, edit, or review a file, include a clickable markdown link to it.",
+   "when": "asking a partner to open, edit or review a file"
+  },
+  "8c812bed": {
+   "always_on": false,
+   "chars": 695,
+   "class": "c",
+   "moment": "publishing a partnership-fit summary",
+   "summary": "Never publish a partnership-fit summary until Dell's evidence base reaches rough parity with Joe's",
+   "when": "publishing a partnership-fit summary"
+  },
+  "8cddc6ad": {
+   "always_on": false,
+   "chars": 1813,
+   "class": "b",
+   "moment": "renaming a shared-by-design row (party.org_id, vendor_category.slug)",
+   "summary": "Before renaming a shared row, count its attachments; if more than one, mint a new row instead.",
+   "when": "renaming a shared-by-design row"
+  },
+  "9293d609": {
+   "always_on": true,
+   "chars": 2639,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Joe wants rich motion and interactivity in his everyday workstations.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_preference"
+  },
+  "9310827b": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 1328,
+   "class": "a",
+   "moment": "any turn - a partner asks for something risky or mistaken",
+   "summary": "When either partner requests something risky or mistaken, say so with the specific reason before doing it.",
+   "when": "a partner requests something risky or mistaken"
+  },
+  "94806da2": {
+   "always_on": false,
+   "chars": 1293,
+   "class": "b",
+   "moment": "fetching a source feeding doctrine/rules/records",
+   "summary": "When a source will feed doctrine or a record write, read the raw artifact, not a summary",
+   "when": "fetching a source feeding doctrine/rules/records"
+  },
+  "9530fb1c": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2613,
+   "class": "a",
+   "moment": "the moment a session says 'the right fix is X'",
+   "summary": "When naming a fix as right, either build it in-session or explicitly recommend against it.",
+   "when": "the moment a session says 'the right fix is X'"
+  },
+  "95e76c1f": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 612,
+   "class": "a",
+   "moment": "any turn (register/tone toward Joe)",
+   "personal_to": "joe",
+   "summary": "Deliver criticism as a service Joe asked for; never soften a correction to protect his ego.",
+   "when": "any turn (register/tone toward Joe)"
+  },
+  "9730f565": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 135,
+   "class": "a",
+   "moment": "any turn asserting a date or time",
+   "summary": "When asserting any date or time, derive it from a real timestamp, never from conversational mood.",
+   "when": "any turn asserting a date or time"
+  },
+  "97326357": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 371,
+   "class": "d",
+   "moment": "completion_evidence gate",
+   "summary": "A surface capability claim becomes doctrine only after a live test from that surface itself",
+   "when": "completion_evidence gate"
+  },
+  "9873a0d2": {
+   "always_on": false,
+   "chars": 895,
+   "class": "c",
+   "moment": "a partner re-explains the same how-to twice",
+   "summary": "When a partner re-explains a how-to twice, propose promoting it to a skill; never convert silently.",
+   "when": "a partner re-explains the same how-to twice"
+  },
+  "98e74e7c": {
+   "always_on": false,
+   "chars": 471,
+   "class": "c",
+   "moment": "reviewing a fed link or source",
+   "personal_to": "joe",
+   "summary": "When reviewing a source, run a lateral pass against the whole system, not just its stated use case.",
+   "when": "reviewing a fed link or source"
+  },
+  "99e951b9": {
+   "always_on": false,
+   "chars": 221,
+   "class": "d",
+   "moment": "index_upkeep pre-commit - content added under indexed multi-folder category",
+   "summary": "When adding content under an indexed multi-folder category, update its INDEX.md in the same session.",
+   "when": "adding content under an indexed category"
+  },
+  "9b081605": {
+   "always_on": false,
+   "chars": 208,
+   "class": "d",
+   "moment": "no_send_worker check (outbound send)",
+   "personal_to": "joe",
+   "summary": "Auto-send drafts only to Joe's own CARR address; everything else stays a pending draft",
+   "when": "no_send_worker check (outbound send)"
+  },
+  "9d80fd2d": {
+   "always_on": false,
+   "chars": 277,
+   "class": "c",
+   "moment": "planning prospect outreach cadence",
+   "summary": "When planning outreach cadence, treat frequency as content; respect a prospect's stated follow-up terms.",
+   "when": "planning prospect outreach cadence"
+  },
+  "9e3fb6d0": {
+   "always_on": false,
+   "chars": 1129,
+   "class": "c",
+   "moment": "industry content shared from a colleague/competitor",
+   "summary": "On colleague/competitor content, extract substance to the playbook and analyze craft without ever copying it.",
+   "when": "industry content shared from a colleague/competitor"
+  },
+  "9f15f21a": {
+   "always_on": false,
+   "chars": 1386,
+   "class": "d",
+   "moment": "deal_guard schema (tools.js+sql) - national-account deal assignment",
+   "summary": "For national-account deals, attach each franchisee's own deal to their sub-client, never to the parent brand.",
+   "when": "assigning national-account deals"
+  },
+  "9ff56260": {
+   "always_on": false,
+   "chars": 907,
+   "class": "d",
+   "moment": "egress_guard gate",
+   "summary": "Never name a private key path in a command; let the script resolve its own secret",
+   "when": "egress_guard gate"
+  },
+  "a2e78f48": {
+   "always_on": false,
+   "chars": 693,
+   "class": "c",
+   "moment": "detecting a known broken thing with a known fix",
+   "summary": "When a known issue with a known fix is found, repair it immediately and brief; heavy-path still gates.",
+   "when": "detecting a known broken thing with a known fix"
+  },
+  "a3f6c7f9": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 88,
+   "class": "a",
+   "moment": "proposing a restructuring",
+   "summary": "Diagnose from a real slow task before restructuring; never restructure against a hypothetical.",
+   "when": "proposing a restructuring"
+  },
+  "a6e6ab4e": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 1111,
+   "class": "d",
+   "moment": "completion_evidence stop_gate - changed-system completion",
+   "summary": "When modifying something that already worked, compare before-and-after, not only against the spec.",
+   "when": "verifying a changed system"
+  },
+  "a7784a18": {
+   "always_on": false,
+   "chars": 359,
+   "class": "b",
+   "moment": "starting a coding session through delivery completion",
+   "summary": "Every coding session works in its own worktree and owns delivery through merge and cleanup",
+   "when": "starting a coding session through delivery completion"
+  },
+  "a8c55a47": {
+   "always_on": false,
+   "chars": 1276,
+   "class": "b",
+   "moment": "writing a command into a doc, SOP, or instruction",
+   "summary": "Before writing a raw command into docs or instructions, check for and name an existing script instead.",
+   "when": "writing a command into a doc, SOP, or instruction"
+  },
+  "a8f159ad": {
+   "always_on": true,
+   "chars": 1750,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Joe and Dell are visual thinkers; structured surfaces include visuals.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_persona"
+  },
+  "a9ecd5b4": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 2381,
+   "class": "d",
+   "moment": "completion_evidence stop_gate - check-result reporting",
+   "summary": "A check compares the artifact to its known-good shape; a success signal must read the artifact, never exit code alone.",
+   "when": "building guards or wiring work signals"
+  },
+  "ab814a26": {
+   "always_on": false,
+   "chars": 923,
+   "class": "d",
+   "moment": "rule_shape gate (approve-rule)",
+   "summary": "Every taught rule must ship classified as machine-enforceable with a gate, or judgment with a reason",
+   "when": "rule_shape gate (approve-rule)"
+  },
+  "af7de070": {
+   "always_on": false,
+   "chars": 2789,
+   "class": "b",
+   "moment": "a tool call blocked by a permission classifier",
+   "summary": "On a classifier block, retry once before handing the command to the partner; it's usually transient.",
+   "when": "a tool call blocked by a permission classifier"
+  },
+  "b01edd26": {
+   "always_on": false,
+   "chars": 113,
+   "class": "b",
+   "moment": "committing any source or doc file",
+   "summary": "Never hardcode counts or blanket summaries in committed files that a later edit could falsify.",
+   "when": "committing any source or doc file"
+  },
+  "b1521526": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 284,
+   "class": "a",
+   "moment": "any source conflict",
+   "summary": "When sources conflict, rank live partner word, source-of-truth file, newer dated file; never backups; public content only cleared material.",
+   "when": "any source conflict"
+  },
+  "b3ea627f": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2002,
+   "class": "a",
+   "moment": "closing a message to Joe",
+   "personal_to": "joe",
+   "summary": "Never end a message telling Joe a phrase to say back; just do the next step",
+   "when": "closing a message to Joe"
+  },
+  "b42e217e": {
+   "always_on": false,
+   "chars": 880,
+   "class": "d",
+   "moment": "humanOnly verb call gate (versioned_record schema)",
+   "summary": "Never scope verb capability by which partner holds it; scope only by session risk, not identity.",
+   "when": "humanOnly verb call gate (versioned_record schema)"
+  },
+  "b42f11a0": {
+   "always_on": false,
+   "chars": 1417,
+   "class": "c",
+   "moment": "sizing a system build or architecture choice",
+   "summary": "Size builds for the future trajectory, not today's headcount; never cite current smallness to cut scope.",
+   "when": "sizing a system build or architecture choice"
+  },
+  "b587f6c2": {
+   "always_on": false,
+   "chars": 4168,
+   "class": "c",
+   "moment": "architecture/mechanism-class design fork with no deterministic verifier",
+   "summary": "For an architecture fork with no deterministic verifier and expensive reversal, convene a frontier-model council.",
+   "when": "costly architecture forks without deterministic verification"
+  },
+  "b7ec8f3b": {
+   "always_on": true,
+   "chars": 1524,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Team means Joe and Dell; DoctorCRE uses the shared interaction grammar.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:team_identity"
+  },
+  "bbffc139": {
+   "always_on": false,
+   "chars": 4416,
+   "class": "c",
+   "moment": "Joe overrules, predicts, compresses, rules, or corrects within CARR work",
+   "personal_to": "joe",
+   "summary": "When Joe overrules, predicts, compresses, rules, or corrects within work scope, log it to the ledger.",
+   "when": "Joe overrides, predicts, compresses, rules or corrects"
+  },
+  "bc4145f6": {
+   "always_on": false,
+   "chars": 858,
+   "class": "c",
+   "moment": "monthly review or recurring behavior pattern",
+   "personal_to": "joe",
+   "summary": "Recommend media matched to one specific observed pattern at a time; never generic self-improvement lists.",
+   "when": "monthly review or recurring behavior pattern"
+  },
+  "bc9188b4": {
+   "always_on": false,
+   "chars": 1206,
+   "class": "d",
+   "moment": "loose_work stop_gate - session Stop",
+   "summary": "Every run commits files it wrote by named path before ending or checkout; never add -A; push; leave others' files.",
+   "when": "ending a run or switching with own work uncommitted"
+  },
+  "bd4a6d22": {
+   "always_on": false,
+   "chars": 694,
+   "class": "b",
+   "moment": "updating a CI check after Joe accepts a permanent state",
+   "summary": "When Joe permanently accepts a machine/system state, update the check to pass, never route around it",
+   "when": "updating a CI check after Joe accepts a permanent state"
+  },
+  "c0b38d80": {
+   "always_on": false,
+   "chars": 1515,
+   "class": "b",
+   "moment": "committing a change to a gate script or enforcement map",
+   "summary": "When committing a change to a gate script, re-bless the baseline hash in the same commit.",
+   "when": "committing a change to a gate script or enforcement map"
+  },
+  "c1547ed1": {
+   "always_on": false,
+   "chars": 433,
+   "class": "b",
+   "moment": "creating a new workflow/system/asset",
+   "summary": "For any new workflow or asset, state where it lives (repo, vault, or both) and why.",
+   "when": "creating a new workflow/system/asset"
+  },
+  "c1db316c": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 76,
+   "class": "a",
+   "moment": "any turn - choosing a solution approach",
+   "summary": "Always choose the complete, cleanest correct solution first, not an incremental patch.",
+   "when": "any turn - choosing a solution approach"
+  },
+  "c20dc3d5": {
+   "always_on": false,
+   "chars": 1285,
+   "class": "b",
+   "moment": "handing up or acting on a subagent finding",
+   "summary": "Before acting on a subagent's material finding, re-run it yourself; don't just relay it",
+   "when": "handing up or acting on a subagent finding"
+  },
+  "c315befa": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:chat_lint",
+   "chars": 522,
+   "class": "d",
+   "moment": "chat_lint gate",
+   "summary": "When asking a question or presenting a draft, name the specific deal in the question text itself.",
+   "when": "chat_lint gate"
+  },
+  "c4a284b2": {
+   "always_on": false,
+   "chars": 2985,
+   "class": "c",
+   "moment": "a compliance or convention question",
+   "summary": "For a solved compliance question, start from practitioner convention, then verify it against rule text.",
+   "when": "a compliance or convention question"
+  },
+  "c53beeaa": {
+   "always_on": false,
+   "chars": 1341,
+   "class": "d",
+   "moment": "versioned_record schema (tools.js+db) - record mutation acknowledgement",
+   "summary": "After any record write with long/multiline text, re-read the row and check for swallowed parameter tags.",
+   "when": "after record mutations"
+  },
+  "c66dc739": {
+   "always_on": false,
+   "chars": 753,
+   "class": "b",
+   "moment": "reading/capturing Joe's mail",
+   "personal_to": "joe",
+   "summary": "Read Joe's mail from local Mac stores only; never use Gmail API or ask for OAuth",
+   "when": "reading/capturing Joe's mail"
+  },
+  "c6f69dee": {
+   "always_on": false,
+   "chars": 1067,
+   "class": "b",
+   "moment": "staffing or naming a delegated Agent",
+   "summary": "When staffing an agent, name it by human job title and give it only rules its role needs.",
+   "when": "staffing or naming a delegated Agent"
+  },
+  "c864b8cb": {
+   "always_on": true,
+   "always_on_reason": "class-a; stop-gate:conduct_stop",
+   "chars": 147,
+   "class": "a",
+   "moment": "asking Joe multiple things",
+   "personal_to": "joe",
+   "summary": "When several calls are needed, ask one question at a time via an interview box, never batched.",
+   "when": "asking Joe multiple things"
+  },
+  "c8ebeb5b": {
+   "always_on": true,
+   "chars": 1242,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "CARR represents buyers and tenants; practice exits yield future-startup leads.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:organization_service_model"
+  },
+  "ca841807": {
+   "always_on": false,
+   "chars": 1710,
+   "class": "d",
+   "moment": "record_home gate (markdown write outside manifest)",
+   "summary": "Write findings and record updates through database verbs, never as a markdown report",
+   "when": "record_home gate (markdown write outside manifest)"
+  },
+  "cd84d22a": {
+   "always_on": true,
+   "always_on_reason": "conversational-moment (b->a, Jev-confirmed)",
+   "chars": 2362,
+   "class": "a",
+   "moment": "the Claude Code feedback-survey prompt appearing",
+   "reclassified_from": "b",
+   "summary": "When the Claude Code feedback-survey appears, decline the transcript share; it now uploads CLAUDE.md and tools.",
+   "when": "the Claude Code feedback-survey prompt appearing"
+  },
+  "ce12c11e": {
+   "always_on": true,
+   "chars": 156,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "CARR's tenant/buyer-only model is Joe's strongest sales hook.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:organization_service_model"
+  },
+  "cff429f5": {
+   "always_on": false,
+   "chars": 2587,
+   "class": "d",
+   "moment": "record_research deny_gate (tools.js) - new party creation with blank field",
+   "summary": "Before creating or updating a party with a blank field, research it yourself; never ask Joe first.",
+   "when": "creating a party with blank fields"
+  },
+  "d26d63b0": {
+   "always_on": false,
+   "chars": 1092,
+   "class": "c",
+   "moment": "a new contact enters the system",
+   "summary": "When a new contact appears, research everything findable before asking the partner for it",
+   "when": "a new contact enters the system"
+  },
+  "d3774a28": {
+   "always_on": true,
+   "chars": 198,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "personal_to": "joe",
+   "summary": "Concept coherence is Joe's strength; surface divergence for his ruling.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_persona"
+  },
+  "d5dcfe26": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 2579,
+   "class": "a",
+   "moment": "asserting a decision or memo state is stale or unruled",
+   "summary": "Before asserting a memo is current or a decision unruled, check for later amendments and search by behavior.",
+   "when": "asserting a decision or memo state is stale or unruled"
+  },
+  "d7c69aa6": {
+   "always_on": false,
+   "chars": 2586,
+   "class": "b",
+   "moment": "calendar ingest surfaces an unmatched attendee",
+   "summary": "When calendar intake surfaces an unmatched attendee, search mail, research, and create the record without asking.",
+   "when": "calendar ingest surfaces an unmatched attendee"
+  },
+  "d7e6de46": {
+   "always_on": false,
+   "chars": 1233,
+   "class": "d",
+   "moment": "deal_guard schema (deal value write)",
+   "summary": "Never put client benefit value and commission revenue into the same money field",
+   "when": "deal_guard schema (deal value write)"
+  },
+  "d7f74c93": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:chat_lint",
+   "chars": 1930,
+   "class": "d",
+   "moment": "chat_lint gate",
+   "summary": "Never justify denying model or agent access to CARR material on confidentiality; the boundary is credentials/autonomy.",
+   "when": "chat_lint gate"
+  },
+  "d8c9b1f0": {
+   "always_on": true,
+   "always_on_reason": "conversational-moment (b->a, Jev-confirmed)",
+   "chars": 1043,
+   "class": "a",
+   "moment": "raising a loop/finding to Joe or Dell",
+   "reclassified_from": "b",
+   "summary": "Before raising a machine-found item, confirm it reached the partner already; if not, explain it from scratch.",
+   "when": "raising a loop/finding to Joe or Dell"
+  },
+  "d9874334": {
+   "always_on": true,
+   "always_on_reason": "conversational-moment (b->a, Jev-confirmed)",
+   "chars": 2566,
+   "class": "a",
+   "moment": "about to name capability as a blocker or request a permission",
+   "reclassified_from": "b",
+   "summary": "Before naming capability as a blocker, prove it's not throughput by testing a smaller request first.",
+   "when": "before claiming capability or requesting permission"
+  },
+  "d9ce2b08": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 1529,
+   "class": "a",
+   "moment": "before reporting work as blocked or parked",
+   "summary": "Before calling anything blocked, verify the fix isn't already applied by testing the actual gate",
+   "when": "before reporting work as blocked or parked"
+  },
+  "dcf98880": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 106,
+   "class": "d",
+   "moment": "completion_evidence gate (human verification instruction)",
+   "personal_to": "joe",
+   "summary": "When handing Joe verification steps, give precise instructions in full; never simplify them away.",
+   "when": "giving human verification instructions"
+  },
+  "def3e84e": {
+   "always_on": false,
+   "chars": 588,
+   "class": "b",
+   "moment": "superseding an artifact",
+   "summary": "Overwrite a superseded artifact with a visible tombstone and queue its deletion via add-loop, never delete silently.",
+   "when": "superseding an artifact"
+  },
+  "df55c398": {
+   "always_on": false,
+   "chars": 1951,
+   "class": "b",
+   "moment": "writing a delegated subagent scope brief",
+   "summary": "When writing any delegated subagent brief, state an explicit data-class boundary excluding encrypted/credential/production data.",
+   "when": "writing a delegated subagent scope brief"
+  },
+  "df8f1da0": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 1073,
+   "class": "a",
+   "moment": "answering an opinion request from Joe",
+   "summary": "When Joe asks what you think, answer and stop; don't build the thing unasked",
+   "when": "answering an opinion request from Joe"
+  },
+  "e313a3ca": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:conduct_stop",
+   "chars": 2295,
+   "class": "d",
+   "moment": "conduct_stop gate (before command handoff)",
+   "summary": "When you can run a command yourself, run it; don't paste it for the partner to execute.",
+   "when": "conduct_stop gate (before command handoff)"
+  },
+  "e4d965d9": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 1545,
+   "class": "a",
+   "moment": "telling a partner something cannot be done",
+   "summary": "Before refusing, try more than one route and name them; only true authority limits actually stop.",
+   "when": "telling a partner something cannot be done"
+  },
+  "e65efc68": {
+   "always_on": false,
+   "chars": 2216,
+   "class": "c",
+   "moment": "building any gate, hook, linter, or CI validator",
+   "summary": "When building any gate, hook, linter, or CI check, write and run its test before the implementation.",
+   "when": "building any gate, hook, linter, or CI validator"
+  },
+  "e8868cbe": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 2852,
+   "class": "d",
+   "moment": "completion_evidence gate",
+   "summary": "(Full text is in the always-on section; no summary is faithful enough to stand for it.)",
+   "when": "shipping, parking work on Joe, or weekend-spanning runs"
+  },
+  "eaa31ac5": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 2177,
+   "class": "d",
+   "moment": "completion_evidence gate (delivery claim)",
+   "summary": "Never claim something was handed off, sent, or delivered without naming the specific recipient.",
+   "when": "completion_evidence gate (delivery claim)"
+  },
+  "ede4b241": {
+   "always_on": false,
+   "chars": 485,
+   "class": "b",
+   "moment": "dispatching work to another model or launching a cloud session (model choice)",
+   "summary": "When launching a cloud session, pick Sonnet 5.5 for well-scoped checkable work and Opus 5.5 for design, gates and reviews.",
+   "when": "model dispatch or cloud-session launch"
+  },
+  "ede4c735": {
+   "always_on": false,
+   "chars": 1071,
+   "class": "b",
+   "moment": "writing any prospect-visible draft",
+   "summary": "Lint prospect-visible drafts (outreach, social, proposals) hard; internal-only text is exempt.",
+   "when": "writing any prospect-visible draft"
+  },
+  "eeb3d106": {
+   "always_on": false,
+   "chars": 1816,
+   "class": "c",
+   "moment": "building or reviewing any CARR workstation surface",
+   "summary": "When building or reviewing any workstation surface, use pulse rate as a redundant urgency channel, honoring reduced-motion.",
+   "when": "building or reviewing any CARR workstation surface"
+  },
+  "efbdfb1a": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 1189,
+   "class": "a",
+   "moment": "after a non-trivial build works, before shipping",
+   "summary": "Once a non-trivial build works, ask if a materially simpler shape now exists",
+   "when": "after a non-trivial build works, before shipping"
+  },
+  "f04a05aa": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 446,
+   "class": "d",
+   "moment": "completion_evidence gate (autonomous-run completion)",
+   "summary": "Give every scheduled task a verifiable done-condition, failure path, watched first run, and dated ledger.",
+   "when": "completion_evidence gate (autonomous-run completion)"
+  },
+  "f0f9156e": {
+   "always_on": true,
+   "chars": 1430,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Joe values mobility; local-first was never his ruling.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_preference"
+  },
+  "f2d58a30": {
+   "always_on": true,
+   "chars": 1515,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "CARR never represents landlords or sellers; recommendations demonstrate fee-neutral judgment.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:organization_service_model"
+  },
+  "f47a8fe9": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 2045,
+   "class": "d",
+   "moment": "completion_evidence gate",
+   "summary": "Verify claims by re-running the query, never by re-reading the report",
+   "when": "completion_evidence gate"
+  },
+  "f5bac101": {
+   "always_on": true,
+   "chars": 92,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Joe and Dell are early-stage; prioritize pipeline over low-impact polish.",
+   "when": "every turn",
+   "always_on_reason": "class-a; standing-fact:partner_operating_stage"
+  },
+  "f5beac20": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 197,
+   "class": "a",
+   "moment": "encountering useful-but-not-today knowledge",
+   "summary": "Never dismiss useful-but-not-today knowledge; capture it and propose scope expansions for Joe to rule on.",
+   "when": "encountering useful-but-not-today knowledge"
+  },
+  "f5d97b4a": {
+   "always_on": false,
+   "chars": 625,
+   "class": "d",
+   "moment": "costar_lane deny_gate - Chrome-extension tool call targeting costar.com",
+   "summary": "Drive CoStar only in the desktop app's own Browser pane, never Chrome or its extension.",
+   "when": "Chrome-extension calls targeting CoStar"
+  },
+  "f92dfab2": {
+   "always_on": false,
+   "chars": 503,
+   "class": "d",
+   "moment": "client_asset_packet render (search-packet)",
+   "summary": "Every client search packet must include sourced market commentary, never generic or stale figures",
+   "when": "client_asset_packet render (search-packet)"
+  },
+  "fa217e48": {
+   "always_on": true,
+   "always_on_reason": "stop-gate:completion_evidence",
+   "chars": 193,
+   "class": "d",
+   "moment": "completion_evidence gate (completion/file claims)",
+   "summary": "Verify any completion claim against an actual this-session tool result, never against a summary.",
+   "when": "completion_evidence gate (completion/file claims)"
+  },
+  "faae6748": {
+   "always_on": false,
+   "chars": 257,
+   "class": "d",
+   "moment": "egress_guard gate, before destructive filesystem action",
+   "personal_to": "joe",
+   "summary": "Never tell Joe to delete a file; move candidates to _to_delete and let him decide.",
+   "when": "egress_guard gate, before destructive filesystem action"
+  },
+  "faf1b643": {
+   "always_on": false,
+   "chars": 905,
+   "class": "b",
+   "moment": "nightly vendor-level-drift check over active vendors",
+   "summary": "Nightly, flag vendors whose recorded relationship level disagrees with countable two-way contact/value evidence.",
+   "when": "nightly vendor-level-drift check over active vendors"
+  },
+  "fb110a39": {
+   "always_on": false,
+   "chars": 2299,
+   "class": "b",
+   "moment": "starting a task or fan-out brief (model choice)",
+   "summary": "Reserve Fable for design/judgment; delegate execution work to Opus/Sonnet/Codex/Grok subagents by default",
+   "when": "starting a task or fan-out brief (model choice)"
+  },
+  "fb2b263d": {
+   "always_on": false,
+   "chars": 211,
+   "class": "b",
+   "moment": "after deciding or building, checking other index/context files",
+   "summary": "After deciding or building anything, grep other index files for stale phrasing before declaring it propagated.",
+   "when": "after decisions or builds, checking propagation"
+  },
+  "fc21a431": {
+   "always_on": true,
+   "always_on_reason": "conversational-moment (b->a, Jev-confirmed)",
+   "chars": 1474,
+   "class": "a",
+   "moment": "any partner correction",
+   "reclassified_from": "b",
+   "summary": "On any correction from Joe or Dell, capture it as a rule via teach in the same session.",
+   "when": "any partner correction"
+  },
+  "fc4d7753": {
+   "always_on": true,
+   "always_on_reason": "class-a",
+   "chars": 221,
+   "class": "a",
+   "moment": "any turn - evaluating whether to add structure or ideas",
+   "summary": "When adding structure or outside ideas, apply merit tests: real need, smallest structure, output as tiebreaker.",
+   "when": "any turn - evaluating whether to add structure or ideas"
+  }
+ },
+ "schema": "carr-rule-classes/v1"
+}

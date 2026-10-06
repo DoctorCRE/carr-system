@@ -11,8 +11,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildRelease } from "../src/release.js";
+import { mutationManifestIdentity } from "../src/mutation-registry.js";
 
 const FIXED_NOW = () => new Date("2026-08-13T21:00:00.000Z");
+const SCHEMA_LEDGER_SHA256 = "sha256:" + "7".repeat(64);
 
 // A minimal stand-in for neon()'s tagged-template `sql` function. Routes each
 // call by matching a substring of the query text against `responses`, so
@@ -24,12 +26,33 @@ function fakeSql(responses) {
     for (const [needle, result] of responses) {
       if (q.includes(needle)) {
         if (result instanceof Error) throw result;
+        if (needle === "v_schema_ledger" && Array.isArray(result)) {
+          return result.map((row) => ({
+            ...row,
+            ledger_sha256: row.ledger_sha256 ?? SCHEMA_LEDGER_SHA256,
+          }));
+        }
         return result;
       }
     }
     throw new Error("release.test.mjs: unmocked query: " + q);
   };
 }
+
+test("buildRelease pins highest migration to C collation", async () => {
+  let schemaQuery = "";
+  const sql = async (strings) => {
+    const query = strings.join(" ");
+    if (query.includes("v_schema_ledger")) {
+      schemaQuery = query;
+      return [{ applied_count: 2, highest_applied_migration: "0494a_reference.sql" }];
+    }
+    if (query.includes("doctrine_meta")) return [{ generation: 1 }];
+    throw new Error(`unmocked query: ${query}`);
+  };
+  await buildRelease({ env: { GIT_SHA: "a".repeat(40) }, sql, verbCount: 1, now: FIXED_NOW });
+  assert.match(schemaQuery, /max\(filename collate "C"\) collate "default"/);
+});
 
 test("buildRelease: full shape when everything is reachable and stamped", async () => {
   const sql = fakeSql([
@@ -63,6 +86,7 @@ test("buildRelease: full shape when everything is reachable and stamped", async 
   assert.deepEqual(out.git_sha, { value: "a".repeat(40), reason: null });
   assert.equal(out.schema.highest_applied_migration, "0099_thing.sql");
   assert.equal(out.schema.applied_count, 101);
+  assert.equal(out.schema.ledger_sha256, SCHEMA_LEDGER_SHA256);
   assert.equal(out.schema.reason, null);
   // The honesty note belongs on every response, success included — the field
   // is "what the tracking table claims" even when the table is reachable.
@@ -154,6 +178,27 @@ test("buildRelease: a database failure degrades schema and doctrine_generation t
   // database outage untouched.
   assert.deepEqual(out.git_sha, { value: "b".repeat(40), reason: null });
   assert.equal(out.verb_count, 50);
+});
+
+test("buildRelease: independent database readbacks overlap and fail independently", async () => {
+  let active = 0;
+  let maxActive = 0;
+  const sql = async (strings) => {
+    const query = strings.join(" ");
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise(resolve => setImmediate(resolve));
+    active -= 1;
+    if (query.includes("v_schema_ledger")) throw new Error("schema read unavailable");
+    if (query.includes("doctrine_meta")) return [{ generation: 42 }];
+    throw new Error(`unmocked query: ${query}`);
+  };
+  const out = await buildRelease({ env: { GIT_SHA: "b".repeat(40) },
+    sql, verbCount: 50, now: FIXED_NOW });
+  assert.equal(maxActive, 2, "schema and doctrine reads must start before either settles");
+  assert.match(out.schema.reason, /schema read unavailable/);
+  assert.deepEqual(out.doctrine_generation, { value: 42, reason: null },
+    "one failed readback must not erase the independent successful field");
 });
 
 test("buildRelease: an empty v_schema_ledger reports zero, not an error", async () => {
@@ -287,6 +332,56 @@ test("buildRelease: env is the ONLY field that separates the environments — th
   assert.notDeepEqual(prod.env, stage.env);
   assert.equal(prod.env.value, "production");
   assert.equal(stage.env.value, "staging");
+});
+
+// --- command-contract identity (V5-F07, Q058) ------------------------------
+// The command-contract axis a caller needs for a compatibility test. It is the
+// SAME identity the runtime dispatches against (mutation-registry.js), read
+// here rather than restated, so /release cannot report a command contract this
+// deploy is not running.
+
+test("buildRelease: reports the shipped command-contract identity, not a second registry", async () => {
+  const sql = fakeSql([
+    ["v_schema_ledger", [{ applied_count: 120, highest_applied_migration: "0114_x.sql" }]],
+    ["doctrine_meta", [{ generation: 359 }]],
+  ]);
+  const out = await buildRelease({
+    env: { GIT_SHA: "a".repeat(40), CARR_ENV: "production" }, sql, verbCount: 105, now: FIXED_NOW,
+  });
+
+  assert.deepEqual(out.command_contract, mutationManifestIdentity());
+  assert.match(out.command_contract.registry_version, /^scac-mutation-registry\.v[1-9]\d*$/);
+  assert.match(out.command_contract.registry_digest, /^[0-9a-f]{64}$/);
+});
+
+test("buildRelease: command_contract is code identity — identical across environments", async () => {
+  const identicalSql = () => fakeSql([
+    ["v_schema_ledger", [{ applied_count: 120, highest_applied_migration: "0114_x.sql" }]],
+    ["doctrine_meta", [{ generation: 359 }]],
+  ]);
+  const sha = "b".repeat(40);
+  const prod = await buildRelease({
+    env: { GIT_SHA: sha, CARR_ENV: "production" }, sql: identicalSql(), verbCount: 105, now: FIXED_NOW,
+  });
+  const stage = await buildRelease({
+    env: { GIT_SHA: sha, CARR_ENV: "staging" }, sql: identicalSql(), verbCount: 105, now: FIXED_NOW,
+  });
+
+  // Same reasoning as the incident test above: env stays the only field that
+  // separates the environments, so nobody reads this one as an identity either.
+  assert.deepEqual(prod.command_contract, stage.command_contract);
+});
+
+test("buildRelease: command_contract has no database dependency and survives an outage", async () => {
+  const sql = fakeSql([
+    ["v_schema_ledger", new Error("connection terminated unexpectedly")],
+    ["doctrine_meta", new Error("connection terminated unexpectedly")],
+  ]);
+  const out = await buildRelease({ env: { GIT_SHA: "c".repeat(40) }, sql, verbCount: 105, now: FIXED_NOW });
+
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.command_contract, mutationManifestIdentity());
+  assert.match(out.schema.reason, /database unreachable/);
 });
 
 test("buildRelease: response is JSON-safe (no undefined, no function, round-trips clean)", async () => {

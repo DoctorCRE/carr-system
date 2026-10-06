@@ -1,0 +1,49 @@
+# Source-only merge controller. The job always runs code from protected main;
+# pull-request code is never executed with either the MCP reader credential or
+# the write-capable GitHub token.
+
+name: Authorized source merge controller
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: carr-authorized-source-merge-controller
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  merge:
+    if: >-
+      ${{ vars.CARR_SOURCE_MERGE_CONTROLLER_ENABLED == 'true' &&
+          (github.event_name != 'workflow_run' ||
+           github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Re-read canonical authority and merge at most one exact head
+        env:
+          CARR_SOURCE_MERGE_READER_TOKEN: ${{ secrets.CARR_SOURCE_MERGE_READER_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node mcp-server/bin/run-source-merge.mjs auto

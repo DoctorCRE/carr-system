@@ -1,0 +1,54 @@
+diff --git a/lib/rule_routes.py b/lib/rule_routes.py
+index 53c92ced..3840824a 100644
+--- a/lib/rule_routes.py
++++ b/lib/rule_routes.py
+@@ -48,6 +48,11 @@ ROUTE_KINDS = frozenset({"boot", "trigger", "path_rule", "gate", "duplicate"})
+ TRIGGER_KEYS = ("tools", "verbs", "bash_patterns")
+ ENTRY_KEYS = frozenset({"moment", "routes", "no_trigger_reason", "note"})
+ PATH_INPUT_KEYS = ("file_path", "path", "notebook_path")
++# Built-in tools that only look. A path_rule route is a write-moment route (the
++# moments name building, editing and committing), so a call that merely reads a
++# matching path is not that moment. evals/rule-delivery measured routine reads
++# receiving rules through these globs. Every other tool keeps matching.
++READ_ONLY_TOOLS = frozenset({"Read", "Grep", "Glob", "LS", "NotebookRead"})
+ BASH_TOOLS = frozenset({"Bash", "functions.exec"})
+ 
+ # Tool names a route may name. Built-ins are Claude Code's own tools; the
+@@ -300,6 +305,8 @@ def route_matches(route: dict, tool_name: str, tool_input: object,
+         globs = _strings(route, "path_globs")
+         if not globs:
+             raise RouteShapeError("path_globs")
++        if tool_name in READ_ONLY_TOOLS:
++            return False
+         paths = call_paths(tool_input)
+         return any(fnmatch.fnmatch(path, pattern) for pattern in globs for path in paths)
+     if kind != "trigger":
+diff --git a/ops/rule-pack-preuse-reselection-selftest.py b/ops/rule-pack-preuse-reselection-selftest.py
+index 77b54c5e..b0246186 100644
+--- a/ops/rule-pack-preuse-reselection-selftest.py
++++ b/ops/rule-pack-preuse-reselection-selftest.py
+@@ -1379,6 +1379,24 @@ with tempfile.TemporaryDirectory() as route_tmp:
+         ci_ids = set(routed_for("Edit", {"file_path": str(REPO / "ops/ci.sh")}))
+         check("an edit to ops/ci.sh routes the CI-check rules",
+               {"e65efc68", "bd4a6d22"} <= ci_ids, sorted(ci_ids))
++        # A path route is a WRITE-moment route: reading a file binds no
++        # build-time rule (evals/rule-delivery: routine reads received rules).
++        hooks_glob = {"kind": "path_rule", "path_globs": ["*hooks/*.py"]}
++        for reader, args in (("Read", {"file_path": str(REPO / "hooks/x-gate.py")}),
++                             ("Grep", {"pattern": "x", "path": str(REPO / "hooks/x-gate.py")}),
++                             ("Glob", {"pattern": "*.py", "path": str(REPO / "hooks/x-gate.py")})):
++            check(f"a {reader} under hooks/ does not match a path_rule route",
++                  not routes_lib.route_matches(hooks_glob, reader, args))
++        for writer, args in (("Write", {"file_path": str(REPO / "hooks/x-gate.py"), "content": ""}),
++                             ("Edit", {"file_path": str(REPO / "hooks/x-gate.py")}),
++                             ("MultiEdit", {"file_path": str(REPO / "hooks/x-gate.py")}),
++                             ("NotebookEdit", {"notebook_path": str(REPO / "hooks/x-gate.py")}),
++                             ("Bash", {"path": str(REPO / "hooks/x-gate.py")})):
++            check(f"a {writer} under hooks/ still matches a path_rule route",
++                  routes_lib.route_matches(hooks_glob, writer, args))
++        check("an apply_patch header path still matches a path_rule route",
++              routes_lib.route_matches(hooks_glob, "apply_patch", {"command":
++                  "*** Begin Patch\n*** Add File: hooks/x-gate.py\n+x\n*** End Patch"}))
+         path_rules = rules_routed_by(lambda r: r["kind"] == "path_rule")
+         check("every path_rule route carries only globs",
+               bool(all(set(r) == {"kind", "path_globs"} for e in ROUTES["rules"].values()

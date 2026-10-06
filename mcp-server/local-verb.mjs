@@ -65,11 +65,15 @@
 // through this path is unverifiable because of it. There is no argv slug
 // anymore. On the default path the actor is server-derived from the
 // LOCAL_TOKENS bearer (identity.js), never from anything this Mac asserts.
-// One bounded internal caller, the queue projector, sets
+// Two bounded internal callers select credentials distinct from an ordinary
+// local-machine bearer. The queue projector sets
 // CARR_MCP_CLIENT_PROFILE=hermes-projector so this client reads the separate
 // CARR_HERMES_MCP_TOKEN from the same 600-mode token file. That selector is a
 // client purpose, not an actor claim: the Worker still derives hermes-pilot by
 // matching the bearer against HERMES_TOKENS. No ordinary run.sh call sets it.
+// The chief-of-staff client selects hermes-cos and reads only
+// CARR_HERMES_COS_MCP_TOKEN; the Worker must match it against the wholly
+// separate HERMES_COS_TOKENS map. Neither selector falls through to the other.
 // On the break-glass path the actor is still derived from ONE place,
 // ~/.config/carr/local-actor.json, written once per machine by
 // bin/set-local-actor.sh — see resolveIdentity() below for why break-glass
@@ -85,23 +89,41 @@
 // ordinary, unintentional case impossible on the default path, and makes the
 // deliberate direct-database case receipted and visible rather than silent.
 
-import { Pool, neonConfig } from "@neondatabase/serverless";
-import ws from "ws";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { humanOnlyGuidance, isHumanOnlyError } from "./human-only-hint.mjs";
-import { selectLocalClientCredential } from "./local-client-auth.mjs";
-import { TOOLS, ToolError, executeRegisteredTool } from "./src/tools.js";
+import {
+  LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential, tokenFileSecurityIssue,
+} from "./local-client-auth.mjs";
 
-// The `ws` package, NOT Node's built-in WebSocket: under Node 26 the native
-// constructor makes the driver die with an unhandled ErrorEvent before any
-// query runs (measured 2026-08-06, first real use of this harness). `ws` is
-// already in node_modules and works. Only touched on the break-glass path,
-// but wired at module scope same as before — importing it costs nothing on
-// the default path and keeps this one file simple.
-neonConfig.webSocketConstructor = ws;
+// ZERO-INSTALL DEFAULT PATH. The ordinary `run.sh call` route is only an HTTPS
+// client of the deployed Worker. It must therefore boot from a clean checkout
+// with no mcp-server/node_modules at all. Loading the database driver, ws, and
+// the full local tool registry at module scope made that path die before its
+// first fetch whenever the canonical runtime cache was absent or mid-refresh.
+// Those packages and the registry are direct-database break-glass machinery,
+// so load them only after DATABASE_URL has selected that explicitly receipted
+// path. This also keeps a broken optional recovery runtime from taking the
+// normal STORE front door down with it.
+async function loadBreakGlassRuntime() {
+  const [{ Pool, neonConfig }, { default: ws }, tools] = await Promise.all([
+    import("@neondatabase/serverless"),
+    import("ws"),
+    import("./src/tools.js"),
+  ]);
+  // The `ws` package, NOT Node's built-in WebSocket: under Node 26 the native
+  // constructor makes the driver die with an unhandled ErrorEvent before any
+  // query runs (measured 2026-08-06, first real use of this harness).
+  neonConfig.webSocketConstructor = ws;
+  return {
+    Pool,
+    TOOLS: tools.TOOLS,
+    ToolError: tools.ToolError,
+    executeRegisteredTool: tools.executeRegisteredTool,
+  };
+}
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -125,7 +147,8 @@ if (cliArgs.length > 2) {
   );
   process.exit(2);
 }
-const args = JSON.parse(rawArgs);
+// '-' keeps multi-page record content off argv and avoids the OS argument cap.
+const args = JSON.parse(rawArgs === "-" ? fs.readFileSync(0, "utf8") : rawArgs);
 
 // ---------------------------------------------------------------------------
 // DEFAULT PATH — HTTPS client of the deployed Worker.
@@ -136,12 +159,28 @@ const MCP_TOKENS_ENV = process.env.CARR_MCP_ENV ||
   path.join(os.homedir(), ".config", "carr", "mcp-tokens.env");
 async function runViaWorker(verbName, verbArgs) {
   let tokenFile = "";
-  try { tokenFile = fs.readFileSync(MCP_TOKENS_ENV, "utf8"); } catch { /* named below */ }
+  try {
+    const stat = fs.lstatSync(MCP_TOKENS_ENV);
+    const issue = tokenFileSecurityIssue({
+      mode: stat.mode, uid: stat.uid, isFile: stat.isFile(),
+      isSymbolicLink: stat.isSymbolicLink(),
+    }, process.getuid?.());
+    if (issue) {
+      console.error(`refusing MCP token file ${MCP_TOKENS_ENV}: ${issue}`);
+      process.exit(2);
+    }
+    tokenFile = fs.readFileSync(MCP_TOKENS_ENV, "utf8");
+  } catch (e) {
+    if (e?.code !== "ENOENT") {
+      console.error(`could not securely read MCP token file ${MCP_TOKENS_ENV}: ${e.message}`);
+      process.exit(2);
+    }
+  }
   let credential;
   try {
     credential = selectLocalClientCredential(process.env, tokenFile);
   } catch (e) {
-    console.error(`${e.message}; supported profiles: local, hermes-projector`);
+    console.error(`${e.message}; supported profiles: ${LOCAL_CLIENT_PROFILE_NAMES.join(", ")}`);
     process.exit(2);
   }
   if (!credential.token) {
@@ -150,8 +189,9 @@ async function runViaWorker(verbName, verbArgs) {
       `in ${MCP_TOKENS_ENV} (600, outside the repo) or export ${credential.tokenVariable} directly. ` +
       `Local-machine provisioning: pipelines/provision-local-client.sql (Joe) or ` +
       `pipelines/provision-dell-local-client.sql (Dell). Hermes-projector provisioning uses the ` +
-      `existing HERMES_TOKENS door. Then update the matching Worker secret with ` +
-      `\"wrangler secret put ${credential.profile === "hermes-projector" ? "HERMES_TOKENS_EXTRA" : "LOCAL_TOKENS"}\" ` +
+      `existing HERMES_TOKENS door. Hermes-cos uses its separately provisioned bearer and never ` +
+      `reuses the projector token. Then update the matching Worker secret with ` +
+      `\"wrangler secret put ${credential.workerSecret}\" ` +
       "— see mcp-server/wrangler.toml's secrets header.\n" +
       "This is the default path failing VISIBLY, per design — it does not fall back to a direct " +
       "database connection. That path exists only as explicit break-glass; see this file's header."
@@ -265,6 +305,8 @@ function appendReceipt(actor, mode, target, host, reason) {
 }
 
 async function runBreakGlass(verbName, verbArgs, url) {
+  const { Pool, TOOLS, ToolError, executeRegisteredTool } =
+    await loadBreakGlassRuntime();
   const engaged = process.env.CARR_BREAK_GLASS === "1" &&
     Boolean(process.env.CARR_BREAK_GLASS_REASON && process.env.CARR_BREAK_GLASS_REASON.trim());
   const host = (url.match(/@([^/?]+)/) || [])[1] || "(unparsed)";

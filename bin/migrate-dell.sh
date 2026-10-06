@@ -250,7 +250,7 @@ receipt = {
 }
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(receipt, handle, indent=2, sort_keys=True)
-    handle.write("\\n")
+    handle.write("\n")
 ' "$tmp" "$receipt_status" "$commit" "$branch" "$rc" "$ok" "$warn" "$fail" \
     && mv -f "$tmp" "$RECEIPT" \
     && say "receipt: $RECEIPT" \

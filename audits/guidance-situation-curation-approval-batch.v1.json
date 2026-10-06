@@ -1,0 +1,31 @@
+{
+  "schema": "guidance-situation-curation-approval-batch/v1",
+  "review_source": "audits/guidance-situation-curation-review.v1.json",
+  "golden_suite_digest": "b1a5a61945c5e5fc5f7c74f45c3403f2c5df3e61db29e58f281d49015f63dae3",
+  "proposal_ids": [
+    "c25d5333-7111-4a10-acf8-31cca41d6320", "23eecdde-9cbe-4c9d-8f75-4fe2a57d7a8d",
+    "4f2573bc-ee34-43de-ac34-71825fb33bbf", "eccae8c1-ff93-4a72-948d-0cbd44e17459",
+    "7ba92102-48ce-4f9f-adbb-b628a6889c56", "b60fdc59-3e48-4d91-b291-d345aa176004",
+    "eb34968e-bc1d-42bd-9217-f7da073f8bd8", "1b2c02ef-8d5a-4221-871b-3fdc3fd6a6a5",
+    "b9bb1437-e49a-4d11-aed4-68a967e2bb63", "3fc61f51-95f3-4f3d-83ec-b7c29a3cf359",
+    "8d350185-39ac-4204-96db-30d6e973a53d", "aef50308-749a-4ff2-81d1-1e40cd6620b3",
+    "c7674241-e986-4562-8d6f-c0738831dc45", "5e1cc7c7-765a-437a-a34a-b32a86eece41",
+    "ad6b4235-0e70-478d-9d46-2a991ee0e98b", "8db78c9a-cd18-4ed6-a8e9-874640296aee",
+    "d48e543d-0026-4b85-9278-3b1fe5d1997c", "6b38f514-4172-4180-bb0d-eeb998ba6f3b",
+    "7ef8a7fc-3d79-424e-ba30-ef50cc49e7d9", "0ee22eb0-4f3a-4e4e-950c-c90c75cfe67e",
+    "62b93b26-0e1c-4d17-982d-1e97cf45caf9", "0843ca0a-bbd7-4d03-bde6-05b9f9847399",
+    "a170d862-5fe4-4a1e-b52c-7d0d2ded3450", "787b4b47-bc3d-4cc9-a248-d60891f89db7",
+    "c43c937f-d247-4744-b4cb-d20a4a99f8ea", "ad70fc8a-3c8e-4815-af65-250c82d9b8f3",
+    "8644c978-8d25-4932-8508-a900226c67f0", "0fc908bc-1780-471d-8864-fbea47a907cd",
+    "8ebde12c-2384-4a08-aa87-e0f14e25cee6", "3b883519-f3b2-48af-984d-7e57f17216c8",
+    "30046271-2917-4073-86f0-0b0dd5b47a35", "59d2b498-4000-41a5-8234-2fdb3feb1a01",
+    "6a82c7c6-ba5a-4aec-a65b-9aefc3b24de6", "e8332363-e8bc-4715-bcea-38f0a9a5943b",
+    "f2516c3b-e6cf-406d-ad15-6c5c64e17417", "57c5a043-fc1c-4313-bc76-b700bc305f1d",
+    "f2cce7a5-9a24-4c81-bdd8-af0ca10a1c03", "71b5dbdd-b108-48f9-bcda-c954919baf3d"
+  ],
+  "base_version": 1,
+  "explicitly_excluded_pending_proposal_ids": [
+    "ae218a8b-261c-49d0-8b5e-8f0ed35ae102",
+    "c632cdda-8ff4-4003-9d06-d8fbfa2df956"
+  ]
+}

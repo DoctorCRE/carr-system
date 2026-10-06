@@ -27,6 +27,8 @@ import tempfile
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from lib.machine_prerequisites import openssl_executable  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 OWNER_ENV = "CARR_DB_CALENDAR_PREBRIEF_PRODUCTION_OWNER_URL"
@@ -484,7 +486,7 @@ def ensure_keypair(paths: ProfilePaths, *, run: Run = subprocess.run) -> str:
     if private_exists:
         _secure_regular(paths.private_key, "collector private key", 0o600)
         _secure_regular(paths.public_key, "collector public key")
-        derived = _run_key_command(["openssl", "pkey", "-in", str(paths.private_key), "-pubout"], run=run).stdout.encode()
+        derived = _run_key_command([openssl_executable(), "pkey", "-in", str(paths.private_key), "-pubout"], run=run).stdout.encode()
         actual = paths.public_key.read_bytes()
         if not derived or derived != actual:
             raise ProvisioningRefusal("collector public key does not exactly match its private key")
@@ -493,9 +495,9 @@ def ensure_keypair(paths: ProfilePaths, *, run: Run = subprocess.run) -> str:
         _secure_parent(paths.public_key)
         with tempfile.TemporaryDirectory(prefix="carr-calendar-key-", dir=paths.private_key.parent) as raw:
             private, public = pathlib.Path(raw) / "private.pem", pathlib.Path(raw) / "public.pem"
-            _run_key_command(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(private)], run=run)
+            _run_key_command([openssl_executable(), "genpkey", "-algorithm", "ED25519", "-out", str(private)], run=run)
             private.chmod(0o600)
-            _run_key_command(["openssl", "pkey", "-in", str(private), "-pubout", "-out", str(public)], run=run)
+            _run_key_command([openssl_executable(), "pkey", "-in", str(private), "-pubout", "-out", str(public)], run=run)
             _secure_regular(private, "generated collector private key", 0o600)
             _secure_regular(public, "generated collector public key")
             _atomic_secret_file(paths.private_key, private.read_text(encoding="utf-8"))

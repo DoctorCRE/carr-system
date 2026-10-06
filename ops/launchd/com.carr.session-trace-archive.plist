@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- doctrine: session-trace-archive -->
+  <!-- Nightly local archive of agent session transcripts, so old sessions
+       are no longer lost. Claude Code and Codex both prune old transcripts
+       on this Mac; only 8 survived for this project before this job existed.
+       ops/session-trace-archive.py gzips CARR-scoped *.jsonl session files
+       (lib/carr_session_scope.py: vault, repo and worktree projects; Codex
+       sessions by their metadata cwd; nothing else) into
+       ~/carr-local/session-trace-archive/, outside the repo; beyond a Codex
+       session's cwd metadata line it never reads or prints content.
+
+       PER-MACHINE BY DESIGN, unlike the shared-state jobs listed in
+       ops/config-as-code.py's PRIMARY_ONLY: both the source transcripts and
+       the destination archive are local to whichever Mac runs this, so each
+       machine wants and needs its own copy. No entry in PRIMARY_ONLY,
+       SECONDARY_ONLY, or DEFINITION_ONLY is required. -->
+  <key>Label</key>
+  <string>com.carr.session-trace-archive</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>session-trace-archive</string>
+    <string>launchd.run</string>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/ops/session-trace-archive.py</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>3</integer>
+    <key>Minute</key>
+    <integer>10</integer>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{{REPO}}/out/session-trace-archive.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{REPO}}/out/session-trace-archive.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>

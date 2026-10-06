@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "work_request": "WR-000019",
+  "slice": "s11",
+  "note": "Offline snapshot of live default standing-context summary/pack-index bytes and the mandatory boot full-text/index bytes. Refresh through the live verb when delivery changes. These are different payloads and corpus size is not a loaded-rule count.",
+  "measured_at": "2026-10-05",
+  "measured_by": "live standing-context default response, retro candidate 11",
+  "delivered_summary_bytes": 505,
+  "delivered_summary_rule_count": 6,
+  "pack_index_bytes": 3053,
+  "projection_note": "delivered_summary_bytes measures delivered SUMMARY text in the default scoped response, not full text. Pack index is routing metadata. Mandatory detail=boot full text plus corpus index are separately capped by rule-boot-classes-check; neither corpus size nor core_preview is a loaded-rule count.",
+  "rule_boot_full_text_bytes": 91806,
+  "rule_boot_corpus_index_bytes": 31920,
+  "rule_boot_digest": "sha256:c3e5629bfb406b198e062252ad4169879c4b520fb7105c3cffe38a0a6a668fb6",
+  "rule_boot_counts": {
+    "rules": 197,
+    "always_on": 69,
+    "index": 197,
+    "unclassified": 2
+  }
+}

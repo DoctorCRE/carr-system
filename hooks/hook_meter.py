@@ -63,6 +63,72 @@ UNCLASSIFIED = "unclassified"
 # 38MB file that started this; the size is read from the handle emit() already
 # holds, so the check costs nothing.
 ROTATE_BYTES = 16 * 1024 * 1024
+INVOCATION_REPO_ENV = "CARR_HOOK_INVOCATION_REPO"
+
+
+def _checkout(root):
+    """Return (checkout, canonical, common-dir, linked) using Git's files only."""
+    try:
+        candidate = os.path.abspath(os.path.expanduser(str(root)))
+        while True:
+            marker = os.path.join(candidate, ".git")
+            if os.path.isdir(marker):
+                return candidate, candidate, os.path.realpath(marker), False
+            if os.path.isfile(marker):
+                line = open(marker, encoding="utf-8").read().strip()
+                if not line.startswith("gitdir: "):
+                    return None
+                admin = os.path.realpath(os.path.join(candidate, line[8:].strip()))
+                common_file = os.path.join(admin, "commondir")
+                common = os.path.realpath(os.path.join(
+                    admin, open(common_file, encoding="utf-8").read().strip()
+                ))
+                return candidate, os.path.dirname(common), common, True
+            parent = os.path.dirname(candidate)
+            if parent == candidate:
+                return None
+            candidate = parent
+    except Exception:
+        return None
+
+
+def _registered_helper(path, canonical, common):
+    """Resolve a Git-registered helper below canonical .claude/worktrees."""
+    try:
+        checkout = _checkout(path)
+        if not checkout:
+            return None
+        root, owner, helper_common, linked = checkout
+        helpers = os.path.realpath(os.path.join(canonical, ".claude", "worktrees"))
+        if (not linked or os.path.realpath(owner) != os.path.realpath(canonical)
+                or helper_common != os.path.realpath(common)
+                or os.path.commonpath([os.path.realpath(root), helpers]) != helpers):
+            return None
+        marker = os.path.join(root, ".git")
+        line = open(marker, encoding="utf-8").read().strip()
+        admin = os.path.realpath(os.path.join(root, line[8:].strip()))
+        registry = os.path.realpath(os.path.join(common, "worktrees"))
+        if os.path.commonpath([admin, registry]) != registry:
+            return None
+        back = open(os.path.join(admin, "gitdir"), encoding="utf-8").read().strip()
+        if os.path.realpath(back) != os.path.realpath(marker):
+            return None
+        return root
+    except Exception:
+        return None
+
+
+def routing_repo(repo, invocation=None):
+    """Select one evidence tree; ambiguity or invalid context means canonical."""
+    base = _checkout(repo)
+    if not base:
+        return os.path.abspath(os.path.expanduser(str(repo)))
+    _root, canonical, common, _linked = base
+    requested = (os.environ.get(INVOCATION_REPO_ENV)
+                 if invocation is None else invocation)
+    if requested:
+        return _registered_helper(requested, canonical, common) or canonical
+    return _registered_helper(repo, canonical, common) or canonical
 
 
 def _truthy(value):
@@ -105,7 +171,7 @@ def mark_live():
 
 
 def out_dir(repo):
-    return os.path.join(repo, "out")
+    return os.path.join(routing_repo(repo), "out")
 
 
 def guard_log_path(repo, src=None):

@@ -13,8 +13,10 @@ import Foundation
 struct Config: Codable {
     /// Virtual keycodes of the push-to-talk / mode-toggle trigger — a SET for
     /// configurable keyboards. The default is 54 = right Command on both the
-    /// MacBook and the Logitech; logitech-keymap.sh repairs that keyboard's
-    /// swapped E4/E7 HID usages before events reach this app.
+    /// MacBook and the Logitech; on a Logitech keyboard with swapped E4/E7 HID
+    /// usages, logitech-keymap.sh repairs them before events reach this app
+    /// (per-machine opt-out for keyboards that don't need the repair — see
+    /// that script's header).
     var triggerKeyCodes: [Int64] = [54]
 
     /// Keycode that speaks while held inside conversation mode. 49 = space.

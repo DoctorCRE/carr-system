@@ -1,0 +1,630 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "carr://control-room/contracts/memory-evaluation-s0.v1.schema.json",
+  "version": "1.0.0",
+  "status": "phase0_frozen_contracts_only",
+  "title": "CARR memory evaluation S0 frozen baseline",
+  "description": "Synthetic-only source, evaluation, threat, cost, gap, legacy-route, and acceptance-evidence baseline. It calls no model, writes no record, changes no production behavior, and grants no memory or policy authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "version",
+    "status",
+    "data_class",
+    "calls_models",
+    "writes_records",
+    "production_behavior_changes",
+    "binding",
+    "record_state_binding",
+    "resource_bindings",
+    "gate_registry",
+    "source_lock",
+    "memory_evaluation_contract",
+    "synthetic_scope_fixtures",
+    "threat_model",
+    "cost_latency_storage_model",
+    "current_gap_legacy_inventory",
+    "acceptance_evidence_matrix",
+    "forbidden_changes",
+    "artifact_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "memory-evaluation-s0.v1"},
+    "version": {"const": "1.0.0"},
+    "status": {"const": "frozen_contracts_only"},
+    "data_class": {"const": "synthetic_only"},
+    "calls_models": {"const": false},
+    "writes_records": {"const": false},
+    "production_behavior_changes": {"const": false},
+    "binding": {"$ref": "#/$defs/binding"},
+    "record_state_binding": {"$ref": "#/$defs/record_state_binding"},
+    "resource_bindings": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "x-carr-unique-by": "resource_ref",
+      "items": {"$ref": "#/$defs/resource_binding"}
+    },
+    "gate_registry": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "x-carr-unique-by": "gate_ref",
+      "items": {"$ref": "#/$defs/gate"}
+    },
+    "source_lock": {"$ref": "#/$defs/source_lock"},
+    "memory_evaluation_contract": {"$ref": "#/$defs/evaluation"},
+    "synthetic_scope_fixtures": {"$ref": "#/$defs/scope_fixtures"},
+    "threat_model": {"$ref": "#/$defs/threat_model"},
+    "cost_latency_storage_model": {"$ref": "#/$defs/cost_model"},
+    "current_gap_legacy_inventory": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 20,
+      "x-carr-unique-by": "inventory_id",
+      "items": {"$ref": "#/$defs/gap_inventory"}
+    },
+    "acceptance_evidence_matrix": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "x-carr-unique-by": "criterion_id",
+      "items": {"$ref": "#/$defs/acceptance_row"}
+    },
+    "forbidden_changes": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {"enum": [
+        "forbid:parallel-context-authority",
+        "forbid:raw-transcript-mirror",
+        "forbid:model-self-approval",
+        "forbid:simultaneous-hermes-neon-authority",
+        "forbid:shared-postfilter-ann",
+        "forbid:implicit-policy-override",
+        "forbid:mutable-history"
+      ]}
+    },
+    "artifact_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "nonempty": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "reference": {"type": "string", "pattern": "^(repo:|test:|gate:|check:|resource:|owner:|https://|doctrine:)[^\\s]+$"},
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_request_ref", "work_request_version", "accepted_plan_ref", "accepted_plan_digest", "registered_slice_plan_id", "registered_slice_plan_digest", "runbook_section_id", "runbook_revision_id", "runbook_content_digest", "slice_ref"],
+      "properties": {
+        "work_request_ref": {"const": "WR-000013"},
+        "work_request_version": {"const": 3},
+        "accepted_plan_ref": {"const": "PLAN-d85ba97ccd46-v1"},
+        "accepted_plan_digest": {"const": "sha256:d85ba97ccd4686b619fe72eaab80732057327ecbdb9b436fd1af2083960bad2e"},
+        "registered_slice_plan_id": {"const": "cfc1d210-1069-4994-8145-8ef9b1299e9c"},
+        "registered_slice_plan_digest": {"const": "sha256:5bb7039f727da6c99d2b7b36a563b12234360bdb23219ab7800e42dbc7ce2149"},
+        "runbook_section_id": {"const": "0d3a6481-583f-4b3a-893f-505fd98ddcb4"},
+        "runbook_revision_id": {"const": "0c3ecb3e-ff2f-49ac-8466-60f5f698726a"},
+        "runbook_content_digest": {"const": "sha256:ad2316cf6c9f28c56f9c19f3033601a78021c3ade5628c2f3ea1d09d4434c718"},
+        "slice_ref": {"const": "slice:learning-baseline-contracts-v2"}
+      }
+    },
+    "record_state_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_request_id", "state_version", "canonical_record_digest", "accepted_resource_revisions"],
+      "properties": {
+        "work_request_id": {"const": "wr:7225c61a-324b-46b4-a234-8aff42f831fd"},
+        "state_version": {"const": 3},
+        "canonical_record_digest": {"const": "sha256:7d3e18d350d0241af9e060fa336fb978b97b5053629a4c60b1a04a09e51b680c"},
+        "accepted_resource_revisions": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "x-carr-unique-by": "resource_ref",
+          "items": {"$ref": "#/$defs/accepted_resource_revision"}
+        }
+      }
+    },
+    "accepted_resource_revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_ref", "revision_ref", "content_digest"],
+      "properties": {
+        "resource_ref": {"enum": ["resource:source-lock", "resource:evaluation-contract", "resource:threat-model", "resource:cost-model", "resource:legacy-inventory"]},
+        "revision_ref": {"const": "revision:3"},
+        "content_digest": {"enum": [
+          "sha256:a4bd7234feadf4556abc10091a6e7464b96fcb8a293fc0dbfce3ad6171a6996d",
+          "sha256:9deb92a11ce6e86c96427b26d53d1600163888d69a6ddc8e4950327e11cf471c",
+          "sha256:f802c5ef05ebb49c64adc28725f544fb2d34c60b4ee63b9cce6ba7c11aefc0ff",
+          "sha256:39c51c478ceff930a43bdb6846c17515c2a6c236603472866c8ad018c4c7604c",
+          "sha256:78d122e08129a489f3f14ef850f890c5a7ba276096924f448eb48f7d8103914a"
+        ]}
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resource_ref", "revision_ref", "content_digest"],
+          "properties": {
+            "resource_ref": {"const": "resource:source-lock"},
+            "revision_ref": {"const": "revision:3"},
+            "content_digest": {"const": "sha256:a4bd7234feadf4556abc10091a6e7464b96fcb8a293fc0dbfce3ad6171a6996d"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resource_ref", "revision_ref", "content_digest"],
+          "properties": {
+            "resource_ref": {"const": "resource:evaluation-contract"},
+            "revision_ref": {"const": "revision:3"},
+            "content_digest": {"const": "sha256:9deb92a11ce6e86c96427b26d53d1600163888d69a6ddc8e4950327e11cf471c"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resource_ref", "revision_ref", "content_digest"],
+          "properties": {
+            "resource_ref": {"const": "resource:threat-model"},
+            "revision_ref": {"const": "revision:3"},
+            "content_digest": {"const": "sha256:f802c5ef05ebb49c64adc28725f544fb2d34c60b4ee63b9cce6ba7c11aefc0ff"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resource_ref", "revision_ref", "content_digest"],
+          "properties": {
+            "resource_ref": {"const": "resource:cost-model"},
+            "revision_ref": {"const": "revision:3"},
+            "content_digest": {"const": "sha256:39c51c478ceff930a43bdb6846c17515c2a6c236603472866c8ad018c4c7604c"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["resource_ref", "revision_ref", "content_digest"],
+          "properties": {
+            "resource_ref": {"const": "resource:legacy-inventory"},
+            "revision_ref": {"const": "revision:3"},
+            "content_digest": {"const": "sha256:78d122e08129a489f3f14ef850f890c5a7ba276096924f448eb48f7d8103914a"}
+          }
+        }
+      ]
+    },
+    "resource_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_ref", "revision_ref", "content_digest"],
+      "properties": {
+        "resource_ref": {"enum": ["resource:source-lock", "resource:evaluation-contract", "resource:threat-model", "resource:cost-model", "resource:legacy-inventory"]},
+        "revision_ref": {"const": "revision:3"},
+        "content_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate_ref", "check_ref", "owner_ref", "command", "evidence_requirement"],
+      "properties": {
+        "gate_ref": {"enum": ["gate:S0-1-source-lock", "gate:S0-2-evaluation-contract", "gate:S0-3-evidence-ownership"]},
+        "check_ref": {"enum": ["check:S0-1", "check:S0-2", "check:S0-3"]},
+        "owner_ref": {"type": "string", "pattern": "^owner:[a-z0-9-]+$"},
+        "command": {"type": "string", "pattern": "^node --test --test-name-pattern='check:S0-[1-3]' control-room/test/contracts\\.test\\.mjs$"},
+        "evidence_requirement": {"const": "redacted_evidence_required"}
+      }
+    },
+    "source_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "gate_ref", "sources"],
+      "properties": {
+        "policy": {"type": "string", "minLength": 20, "maxLength": 1000},
+        "gate_ref": {"const": "gate:S0-1-source-lock"},
+        "sources": {
+          "type": "array",
+          "minItems": 13,
+          "maxItems": 13,
+          "x-carr-unique-by": "source_id",
+          "items": {"$ref": "#/$defs/source"}
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "family", "exact_ref", "pin", "behavior_epoch", "claim_class", "claims", "verification"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,80}$"},
+        "family": {"enum": ["mem0", "openviking", "hermes", "neon", "postgresql", "carr", "practitioner"]},
+        "exact_ref": {"type": "string", "pattern": "^(https://|repo:|doctrine:).+"},
+        "pin": {"$ref": "#/$defs/pin"},
+        "behavior_epoch": {"enum": ["current", "legacy", "mixed"]},
+        "claim_class": {"enum": ["vendor_claim", "packet_bound_claim", "source_inspected", "locally_reproduced"]},
+        "claims": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 10, "maxLength": 1000}},
+        "verification": {"$ref": "#/$defs/verification"}
+      }
+    },
+    "pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "kind"],
+      "properties": {
+        "value": {"type": "string", "pattern": "^(git:[a-f0-9]{7,40}|sha256:[a-f0-9]{64}|revision:[a-z0-9][a-z0-9._:-]+)$"},
+        "kind": {"type": "string", "minLength": 3, "maxLength": 100}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "observed_at", "max_age_days", "status", "verification_ref"],
+      "properties": {
+        "method": {"type": "string", "minLength": 8, "maxLength": 500},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "max_age_days": {"type": "integer", "minimum": 1, "maximum": 90},
+        "status": {"const": "fresh"},
+        "verification_ref": {"$ref": "#/$defs/reference"}
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate_ref", "corpus_digest", "splits", "suites", "labels", "metrics", "confidence", "model_versions", "index_generation", "outcome_horizons", "measurement_units", "cases"],
+      "properties": {
+        "gate_ref": {"const": "gate:S0-2-evaluation-contract"},
+        "corpus_digest": {"$ref": "#/$defs/digest"},
+        "splits": {"type": "array", "minItems": 5, "maxItems": 5, "x-carr-unique-by": "name", "items": {"$ref": "#/$defs/split"}},
+        "suites": {"type": "array", "minItems": 8, "maxItems": 8, "x-carr-unique-by": "suite_id", "items": {"$ref": "#/$defs/suite"}},
+        "labels": {"$ref": "#/$defs/labels"},
+        "metrics": {"type": "array", "minItems": 6, "maxItems": 30, "x-carr-unique-by": "metric_id", "items": {"$ref": "#/$defs/metric"}},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "model_versions": {"$ref": "#/$defs/model_versions"},
+        "index_generation": {"type": "string", "minLength": 8, "maxLength": 200},
+        "outcome_horizons": {"type": "array", "minItems": 1, "maxItems": 12, "x-carr-unique-by": "horizon_id", "items": {"$ref": "#/$defs/outcome_horizon"}},
+        "measurement_units": {"$ref": "#/$defs/measurement_units"},
+        "cases": {"type": "array", "minItems": 15, "maxItems": 100, "x-carr-unique-by": "case_id", "items": {"$ref": "#/$defs/evaluation_case"}}
+      }
+    },
+    "split": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "case_set_digest"],
+      "properties": {
+        "name": {"enum": ["development", "tuning", "held_out", "temporal_holdout", "prospective_non_derivation"]},
+        "case_set_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "suite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suite_id"],
+      "properties": {"suite_id": {"enum": ["held_out_real", "temporal", "adversarial", "accumulation", "outage", "public_directional", "exact_vs_ann", "lexical_degraded"]}}
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adjudication"],
+      "properties": {"adjudication": {"type": "array", "minItems": 5, "maxItems": 30, "uniqueItems": true, "items": {"type": "string", "minLength": 3, "maxLength": 100}}}
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric_id", "formula", "threshold", "bound_action", "failure_action"],
+      "properties": {
+        "metric_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_]{2,80}$"},
+        "formula": {"type": "string", "minLength": 8, "maxLength": 1000},
+        "threshold": {"type": "string", "minLength": 2, "maxLength": 300},
+        "bound_action": {"type": "string", "minLength": 8, "maxLength": 500},
+        "failure_action": {"enum": ["block_release", "pause_canary", "degrade_lexical", "require_review", "report_only"]}
+      }
+    },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "bootstrap_iterations", "random_seed", "threshold"],
+      "properties": {
+        "method": {"type": "string", "minLength": 8, "maxLength": 200},
+        "bootstrap_iterations": {"type": "integer", "minimum": 1000, "maximum": 100000},
+        "random_seed": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "threshold": {"type": "string", "minLength": 3, "maxLength": 200}
+      }
+    },
+    "model_versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["answerer", "judge", "embedding", "reranker", "extractor"],
+      "properties": {
+        "answerer": {"$ref": "#/$defs/nonempty"},
+        "judge": {"$ref": "#/$defs/nonempty"},
+        "embedding": {"$ref": "#/$defs/nonempty"},
+        "reranker": {"$ref": "#/$defs/nonempty"},
+        "extractor": {"$ref": "#/$defs/nonempty"}
+      }
+    },
+    "outcome_horizon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["horizon_id", "window", "state"],
+      "properties": {
+        "horizon_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,80}$"},
+        "window": {"type": "string", "minLength": 2, "maxLength": 100},
+        "state": {"enum": ["not_measured", "measured", "unavailable", "stale"]}
+      }
+    },
+    "measurement_units": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latency", "cost", "storage", "tokens"],
+      "properties": {
+        "latency": {"const": "milliseconds"},
+        "cost": {"const": "usd"},
+        "storage": {"const": "bytes"},
+        "tokens": {"const": "model_tokens"}
+      }
+    },
+    "evaluation_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "split", "suite_ids", "label", "adjudication_label", "critical", "synthetic", "contains_business_payload", "input_fixture", "expected_fixture", "immutable_input_digest", "expected_output_digest"],
+      "properties": {
+        "case_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,100}$"},
+        "split": {"enum": ["development", "tuning", "held_out", "temporal_holdout", "prospective_non_derivation"]},
+        "suite_ids": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"enum": ["held_out_real", "temporal", "adversarial", "accumulation", "outage", "public_directional", "exact_vs_ann", "lexical_degraded"]}},
+        "label": {"type": "string", "minLength": 3, "maxLength": 120},
+        "adjudication_label": {"enum": ["supported", "unsupported", "contradictory", "scope_violation", "unresolved"]},
+        "critical": {"type": "boolean"},
+        "synthetic": {"const": true},
+        "contains_business_payload": {"const": false},
+        "input_fixture": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+$"}},
+        "expected_fixture": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+$"}},
+        "immutable_input_digest": {"$ref": "#/$defs/digest"},
+        "expected_output_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "scope_fixtures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenants", "sponsors", "agents", "projects", "sessions", "cases"],
+      "properties": {
+        "tenants": {"$ref": "#/$defs/two_synthetic_ids"},
+        "sponsors": {"$ref": "#/$defs/two_synthetic_ids"},
+        "agents": {"$ref": "#/$defs/two_synthetic_ids"},
+        "projects": {"$ref": "#/$defs/two_synthetic_ids"},
+        "sessions": {"type": "array", "minItems": 2, "maxItems": 2, "x-carr-unique-by": "id", "items": {"$ref": "#/$defs/synthetic_session"}},
+        "cases": {"type": "array", "minItems": 2, "maxItems": 12, "x-carr-unique-by": "case_id", "items": {"$ref": "#/$defs/scope_case"}}
+      }
+    },
+    "two_synthetic_ids": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "x-carr-unique-by": "id",
+      "items": {"$ref": "#/$defs/synthetic_id"}
+    },
+    "synthetic_id": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "synthetic"],
+      "properties": {"id": {"type": "string", "minLength": 3, "maxLength": 100}, "synthetic": {"const": true}}
+    },
+    "synthetic_session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tenant_id", "synthetic"],
+      "properties": {"id": {"type": "string", "minLength": 3, "maxLength": 100}, "tenant_id": {"type": "string", "minLength": 3, "maxLength": 100}, "synthetic": {"const": true}}
+    },
+    "scope_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "tenant_id", "sponsor_id", "agent_id", "project_id", "session_id", "synthetic", "contains_business_payload", "expected_assertions", "immutable_input_digest", "expected_output_digest"],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 3, "maxLength": 100},
+        "tenant_id": {"type": "string", "minLength": 3, "maxLength": 100},
+        "sponsor_id": {"type": "string", "minLength": 3, "maxLength": 100},
+        "agent_id": {"type": "string", "minLength": 3, "maxLength": 100},
+        "project_id": {"type": "string", "minLength": 3, "maxLength": 100},
+        "session_id": {"type": "string", "minLength": 3, "maxLength": 100},
+        "synthetic": {"const": true},
+        "contains_business_payload": {"const": false},
+        "expected_assertions": {"type": "array", "minItems": 2, "maxItems": 4, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9_-]+:[a-z0-9_-]+$"}},
+        "immutable_input_digest": {"$ref": "#/$defs/digest"},
+        "expected_output_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "threat_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "human_acceptance", "threats"],
+      "properties": {
+        "authority": {"$ref": "#/$defs/authority"},
+        "human_acceptance": {"$ref": "#/$defs/human_acceptance"},
+        "threats": {"type": "array", "minItems": 10, "maxItems": 30, "x-carr-unique-by": "threat_id", "items": {"$ref": "#/$defs/threat"}}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory_is_authority", "model_can_activate", "neon_is_sole_canonical_store"],
+      "properties": {
+        "memory_is_authority": {"const": false},
+        "model_can_activate": {"const": false},
+        "neon_is_sole_canonical_store": {"const": true}
+      }
+    },
+    "human_acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "approver_role", "executor_role", "distinct_actor_required", "acceptance_requires", "binding_fields", "evidence_fields", "failure_action"],
+      "properties": {
+        "status": {"const": "contract_only_no_acceptance_recorded"},
+        "approver_role": {"const": "verified_human"},
+        "executor_role": {"const": "agent_executor"},
+        "distinct_actor_required": {"const": true},
+        "acceptance_requires": {"const": "fresh_execution_envelope_and_typed_receipt"},
+        "binding_fields": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {"enum": ["work_request_ref", "work_request_version", "accepted_plan_ref", "accepted_plan_digest", "slice_ref", "envelope_id", "source_commit", "artifact_digest"]}
+        },
+        "evidence_fields": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "uniqueItems": true,
+          "items": {"enum": ["human_approver_ref", "executor_ref", "accepted_at", "receipt_ref", "acceptance_digest", "independent_session_ref"]}
+        },
+        "failure_action": {"const": "block_release"}
+      }
+    },
+    "threat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["threat_id", "asset_ref", "boundary_ref", "abuse_case", "severity", "likelihood", "owner_ref", "controls", "mitigation_refs", "evidence_refs", "test_refs", "release_action"],
+      "properties": {
+        "threat_id": {"enum": ["cross_scope_leak", "memory_poisoning", "secret_capture", "stale_publish_race", "model_self_approval", "dual_memory_authority", "shared_postfilter_ann", "deletion_restore_revival", "opaque_ranking", "cost_runaway"]},
+        "asset_ref": {"type": "string", "pattern": "^asset:[a-z0-9-]+$"},
+        "boundary_ref": {"type": "string", "pattern": "^boundary:[a-z0-9-]+$"},
+        "abuse_case": {"type": "string", "minLength": 20, "maxLength": 1000},
+        "severity": {"enum": ["critical", "high", "medium", "low"]},
+        "likelihood": {"enum": ["high", "medium", "low"]},
+        "owner_ref": {"type": "string", "pattern": "^owner:[a-z0-9-]+$"},
+        "controls": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "minLength": 8, "maxLength": 500}},
+        "mitigation_refs": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "pattern": "^control:[a-z0-9-]+$"}},
+        "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"$ref": "#/$defs/reference"}},
+        "test_refs": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "pattern": "^(test:|check:|gate:).+"}},
+        "release_action": {"enum": ["block_release", "require_review", "pause_canary", "degrade_lexical"]}
+      }
+    },
+    "cost_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["envelopes", "ceilings", "measurements", "storage_model"],
+      "properties": {
+        "envelopes": {"type": "array", "minItems": 2, "maxItems": 2, "x-carr-unique-by": "envelope_id", "items": {"$ref": "#/$defs/cost_envelope"}},
+        "ceilings": {"type": "array", "minItems": 14, "maxItems": 14, "x-carr-unique-by": "ceiling_id", "items": {"$ref": "#/$defs/ceiling"}},
+        "measurements": {"type": "array", "minItems": 3, "maxItems": 3, "x-carr-unique-by": "measurement_id", "items": {"$ref": "#/$defs/measurement"}},
+        "storage_model": {"$ref": "#/$defs/storage_model"}
+      }
+    },
+    "cost_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["envelope_id", "horizon_months", "scope", "window", "measurement_ref"],
+      "properties": {
+        "envelope_id": {"enum": ["carr_operating_12_month", "fleet_stress_12_month"]},
+        "horizon_months": {"const": 12},
+        "scope": {"type": "string", "minLength": 8, "maxLength": 200},
+        "window": {"const": "12_months"},
+        "measurement_ref": {"type": "string", "pattern": "^measurement:(latency|cost|storage)$"}
+      }
+    },
+    "ceiling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ceiling_id", "limit", "unit", "scope", "window", "measurement_ref", "formula", "bound_action"],
+      "properties": {
+        "ceiling_id": {"enum": ["event_bytes", "events_session", "routine_model_jobs", "proposed_memories", "neighbors", "score_rows", "queue_p95", "canary_spend", "live_spend", "ann_payload", "latency_prefetch", "latency_deep", "tokens_prefetch", "tokens_deep"]},
+        "limit": {"type": "number", "minimum": 0.000001},
+        "unit": {"enum": ["bytes", "events", "model_jobs", "memories", "neighbors", "score_rows", "minutes", "usd_per_day", "payload_ratio", "milliseconds", "model_tokens"]},
+        "scope": {"type": "string", "minLength": 3, "maxLength": 200},
+        "window": {"type": "string", "minLength": 2, "maxLength": 100},
+        "measurement_ref": {"type": "string", "pattern": "^measurement:(latency|cost|storage)$"},
+        "formula": {"type": "string", "minLength": 8, "maxLength": 500},
+        "bound_action": {"type": "string", "minLength": 8, "maxLength": 500}
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["measurement_id", "measurement_status", "value", "unit", "sample_count", "window", "measured_at", "estimate_basis", "evidence_refs"],
+      "properties": {
+        "measurement_id": {"enum": ["latency", "cost", "storage"]},
+        "measurement_status": {"enum": ["estimated", "measured"]},
+        "value": {"type": "number", "minimum": 0},
+        "unit": {"enum": ["milliseconds", "usd", "bytes"]},
+        "sample_count": {"type": "integer", "minimum": 1},
+        "window": {"type": "string", "minLength": 2, "maxLength": 100},
+        "measured_at": {"type": "string", "format": "date-time"},
+        "estimate_basis": {"type": "string", "minLength": 12, "maxLength": 500},
+        "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"$ref": "#/$defs/reference"}}
+      }
+    },
+    "storage_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["components", "starting_envelopes"],
+      "properties": {
+        "components": {"type": "array", "minItems": 3, "maxItems": 3, "x-carr-unique-by": "component_id", "items": {"$ref": "#/$defs/storage_component"}},
+        "starting_envelopes": {"type": "array", "minItems": 2, "maxItems": 2, "x-carr-unique-by": "envelope_id", "items": {"$ref": "#/$defs/storage_envelope"}}
+      }
+    },
+    "storage_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component_id", "baseline_bytes", "growth_bytes_per_window", "window", "retention_days", "formula", "bound_action"],
+      "properties": {
+        "component_id": {"enum": ["memory_rows", "evidence_rows", "indexes"]},
+        "baseline_bytes": {"type": "integer", "minimum": 0},
+        "growth_bytes_per_window": {"type": "integer", "minimum": 0},
+        "window": {"const": "30_days"},
+        "retention_days": {"type": "integer", "minimum": 1, "maximum": 3650},
+        "formula": {"type": "string", "minLength": 8, "maxLength": 500},
+        "bound_action": {"type": "string", "minLength": 8, "maxLength": 500}
+      }
+    },
+    "storage_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["envelope_id", "window", "scale_multiplier", "sponsor_count", "agent_count", "session_count", "event_count", "retrieval_count", "baseline_bytes", "growth_bytes", "retention_days", "measurement_ref"],
+      "properties": {
+        "envelope_id": {"enum": ["carr_operating_12_month", "fleet_stress_12_month"]},
+        "window": {"const": "12_months"},
+        "scale_multiplier": {"type": "integer", "minimum": 1},
+        "sponsor_count": {"type": "integer", "minimum": 0},
+        "agent_count": {"type": "integer", "minimum": 0},
+        "session_count": {"type": "integer", "minimum": 0},
+        "event_count": {"type": "integer", "minimum": 0},
+        "retrieval_count": {"type": "integer", "minimum": 0},
+        "baseline_bytes": {"type": "integer", "minimum": 0},
+        "growth_bytes": {"type": "integer", "minimum": 0},
+        "retention_days": {"type": "integer", "minimum": 1, "maximum": 3650},
+        "measurement_ref": {"const": "measurement:storage"}
+      }
+    },
+    "gap_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventory_id", "status", "truthful_current_behavior", "evidence_refs", "gap", "owning_slice_ref", "executable_gate_ref", "baseline_gate_ref", "authority_class"],
+      "properties": {
+        "inventory_id": {"enum": ["migration-0299", "human-acceptance-runtime", "context-bundle-v1", "security-redaction-v1", "policy-learning-v1", "memory-evaluation", "hermes-native-memory", "standing-context", "situation-retrieval"]},
+        "status": {"enum": ["current", "legacy", "partial", "missing"]},
+        "truthful_current_behavior": {"type": "string", "minLength": 20, "maxLength": 1500},
+        "evidence_refs": {"type": "array", "minItems": 2, "maxItems": 12, "uniqueItems": true, "items": {"$ref": "#/$defs/reference"}},
+        "gap": {"type": "string", "minLength": 10, "maxLength": 1000},
+        "owning_slice_ref": {"type": "string", "pattern": "^slice:learning-[a-z0-9-]+-v2$"},
+        "executable_gate_ref": {"type": "string", "pattern": "^(check:|test:|gate:).+"},
+        "baseline_gate_ref": {"const": "gate:S0-3-evidence-ownership"},
+        "authority_class": {"enum": ["canonical", "derived", "advisory", "legacy_non_authoritative", "not_implemented"]}
+      }
+    },
+    "acceptance_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["criterion_id", "producing_slice_refs", "check_refs", "evidence_owner_refs", "executable_gate_refs", "baseline_gate_ref", "evidence_refs"],
+      "properties": {
+        "criterion_id": {"enum": ["RESEARCH-SOURCE-LOCK", "SINGLE-NEON-AUTHORITY", "IMMUTABLE-BITEMPORAL-LINEAGE", "ATTESTED-CONCURRENT-CAPTURE", "SCOPE-DATABASE-ISOLATION", "NONFORGEABLE-HUMAN-ACCEPTANCE", "SAFE-HERMES-CONTEXT", "HYBRID-PROGRESSIVE-RECALL", "POISONING-PRIVACY-DELETION", "EXECUTABLE-EVALUATION", "DEMONSTRATED-PROCEDURAL-LEARNING", "OPERATED-RECOVERED-FIRST-USE"]},
+        "producing_slice_refs": {"type": "array", "minItems": 1, "maxItems": 14, "uniqueItems": true, "items": {"type": "string", "pattern": "^slice:learning-[a-z0-9-]+-v2$"}},
+        "check_refs": {"type": "array", "minItems": 1, "maxItems": 42, "uniqueItems": true, "items": {"type": "string", "pattern": "^check:S([0-9]|1[0-3])-[1-3]$"}},
+        "evidence_owner_refs": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "pattern": "^owner:[a-z0-9-]+$"}},
+        "executable_gate_refs": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"type": "string", "pattern": "^(test:|gate:|check:).+"}},
+        "baseline_gate_ref": {"const": "gate:S0-3-evidence-ownership"},
+        "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 12, "uniqueItems": true, "items": {"$ref": "#/$defs/reference"}}
+      }
+    }
+  }
+}

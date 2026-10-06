@@ -1,0 +1,30 @@
+{
+  "schema_version": "doctorcre-v5-foundation-assurance-benchmark-config.v1",
+  "benchmark_ref": "doctorcre-v5-foundation-assurance-production",
+  "draft_version": 1,
+  "samples_per_cell": 20,
+  "warmup_runs": 1,
+  "p95_aggregation_method": "nearest-rank-per-required-cell-all-cells-must-pass",
+  "outlier_rule": "No exclusions in the release benchmark; every post-warmup observation is counted.",
+  "capacity_profiles": ["production-single-tenant"],
+  "workload_mix": [
+    {
+      "workload_id": "foundation-assurance-minimum",
+      "weight_basis_points": 10000,
+      "operation_mix_digest": "sha256:1f74826a18a7e19a395c42622431354995855a5817c145f2f44ad56e3284d69c"
+    }
+  ],
+  "request_size_distribution": [{"percentile": 50, "bytes": 1024}],
+  "concurrency_levels": [1],
+  "arrival_patterns": ["serial-release-verification"],
+  "routes": ["/system-work.html"],
+  "device_profiles": ["desktop"],
+  "hardware_profiles": ["release-runner"],
+  "network_profiles": ["public-internet"],
+  "cache_states": ["cold", "warm"],
+  "acknowledgement_endpoints": ["standing-context"],
+  "comparator_versions": ["wr95-v1"],
+  "cost_expectation_matrix_digest": "sha256:7be1dbfe5f81488c5cf92686cd32281a534c01e75dcbd5be82919f9783f6a795",
+  "maximum_member_receipt_ttl_ms": 3600000,
+  "minimum_receipt_ttl_ms": 3600000
+}

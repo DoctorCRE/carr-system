@@ -157,6 +157,28 @@ def main():
         check("the unknown answer still carries the mtime",
               "last modified" in rec["detail"], rec)
 
+        # 6b. A PUSHER'S NEW FILE UNDER AN INHERITED GIT_DIR. Git exports
+        #     GIT_DIR into ops/githooks/pre-push; inherited, it made `git -C beta
+        #     status` read alpha's index against beta's disk and report alpha's
+        #     new file as " D" in beta (2026-09-23, headroom false positive).
+        import os
+        (alpha / "pushed-new.py").write_text("print('new')\n")
+        git(alpha, "add", "pushed-new.py", env=env)
+        git(alpha, "commit", "-qm", "alpha adds pushed-new.py", env=env)
+        alpha_gitdir = git(alpha, "rev-parse", "--path-format=absolute",
+                           "--git-dir", env=env).stdout.strip()
+        saved = os.environ.get("GIT_DIR")
+        os.environ["GIT_DIR"] = alpha_gitdir
+        try:
+            beta_dirty = wa.dirty_paths(str(beta), ["pushed-new.py"])
+        finally:
+            if saved is None:
+                os.environ.pop("GIT_DIR", None)
+            else:
+                os.environ["GIT_DIR"] = saved
+        check("an inherited GIT_DIR does not make a peer 'own' the pusher's new file",
+              beta_dirty == {}, beta_dirty)
+
         # 7. THE REPORTER NEVER FAILS THE COMMAND IT EXPLAINS.
         rc = subprocess.run(
             [sys.executable, str(ROOT / "ops" / "worktree-attribution.py"),

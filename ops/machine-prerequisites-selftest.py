@@ -17,6 +17,7 @@ from lib.machine_prerequisites import (
     Requirement,
     find_executable,
     machine_prerequisites,
+    openssl_executable,
     prerequisite_failure_report,
     probe_openssl_ed25519,
     probe_output_root,
@@ -49,6 +50,17 @@ with tempfile.TemporaryDirectory() as raw:
     binary.chmod(0o755)
     check("an explicit executable candidate wins", find_executable([str(binary)]) == str(binary))
     check("a missing executable is absent", find_executable([str(root / "missing")], which=lambda _name: None) is None)
+    # macOS PATH resolves bare "openssl" to Apple's LibreSSL; the Homebrew
+    # OpenSSL 3 path must win over whatever PATH says (2026-09-23 Studio).
+    homebrew_ssl = root / "openssl"
+    homebrew_ssl.write_text("fixture", encoding="utf-8")
+    homebrew_ssl.chmod(0o755)
+    check("OpenSSL 3 by absolute path outranks PATH's openssl",
+          openssl_executable(candidates=(str(homebrew_ssl), "openssl"),
+                             which=lambda _name: "/usr/bin/openssl") == str(homebrew_ssl))
+    check("PATH's openssl is only the fallback",
+          openssl_executable(candidates=(str(root / "missing"), "openssl"),
+                             which=lambda _name: "/usr/bin/openssl") == "/usr/bin/openssl")
 
     good_ssl = probe_openssl_ed25519(
         candidates=["openssl-fixture"], which=lambda name: f"/fixture/{name}",
@@ -94,7 +106,7 @@ assert spec and spec.loader
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
 setattr(config, "codex_configuration_state", lambda: "absent")
-setattr(config, "pairs", lambda: [])
+setattr(config, "pairs", lambda holds=None: [])
 setattr(config, "hook_scripts_untracked", lambda: [])
 setattr(config, "secondary_scheduled_task_violations", lambda: [])
 setattr(config, "PREREQUISITE_CHECK", lambda _repo: [

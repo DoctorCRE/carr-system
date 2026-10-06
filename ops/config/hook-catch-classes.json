@@ -25,6 +25,12 @@
     "Add the date and initials of the check in 'verified'."
   ],
   "hooks": {
+    "canonical-edit-gate.py": {
+      "catch_class": "an edit to a file git already tracks inside the shared canonical checkout, at the moment of the edit",
+      "also_caught_by": "none-known",
+      "verified": "2026-09-01 — checked against the two controls that look like they overlap and do not. ops/githooks/pre-commit refuses a commit on `main` and the PR-only ruleset rejects a direct push, but both bind LATER, at commit/push/merge; by then the dirty state already exists in the shared tree, which is the whole failure this gate catches. No pre-commit check and no ops/ci.sh class sees a file edit before it lands. The class is unowned at this binding moment.",
+      "note": "REINSTATED 2026-09-01 (Joe's ruling 7f48abf6, Repo Hygiene Program R02) after WR-000019 slice S3 retired it on 2026-08-27. NOTE FOR THE RETIRE-CANDIDATE RULE: this gate shows zero true positives for its first windows simply because it did not exist during them, and ops/gate-lifecycle-report.py already proposes retirement on that basis. 'none-known' blocks candidacy, which is the correct outcome — a quiet window here means the shared tree stayed clean, not that the gate is redundant."
+    },
     "guard-unattended.py": {
       "catch_class": "destructive-or-exfiltrating action from a session (rm/force-git/key-read/unknown-host/destructive-SQL)",
       "also_caught_by": "none-known",
@@ -32,16 +38,10 @@
       "note": "Fires on every Bash and WebFetch. Highest-volume gate in the stack."
     },
     "gate-edit-gate.py": {
-      "catch_class": "quiet edit of an enforcement file (hooks/*.py, hooks.json, settings.json, gate-baseline.json)",
+      "catch_class": "an ordinary gate edit is announced; a brand-new BLOCKING gate with no admission card is still denied",
       "also_caught_by": "pre-commit:staged-gate-bless-check.py",
       "verified": "2026-08-23 — ops/githooks/pre-commit runs staged-gate-bless-check.py, and ops/ci.sh's gates class runs hooks/gate-integrity.py --strict.",
-      "note": "NOT interchangeable with those two, and the rollup must not be read as saying it is: this gate PREVENTS a quiet edit at the moment it is attempted; the pre-commit and CI checks DETECT one that already landed. Same class, different times. Retiring it would trade prevention for detection, which is a decision for Joe, not an inference from a zero-deny week."
-    },
-    "canonical-edit-gate.py": {
-      "catch_class": "edit aimed at the canonical checkout instead of a worktree",
-      "also_caught_by": "none-known",
-      "verified": "2026-08-23 — ops/githooks/pre-commit refuses a COMMIT on main, which is a narrower class: it does not see an edit to a canonical checkout sitting on any other branch, and it does not see an edit that is never committed. Not the same catch, so not recorded as an owner.",
-      "note": "Documented as making a real catch during the 2026-08-23 audit session itself."
+      "note": "WR-000019 slice S3 (2026-08-27): the ordinary-edit path no longer denies anything to prevent — it announces, and CODEOWNERS + the PR-only ruleset + required CI are what actually keep an enforcement-code edit from reaching main without review. The admission-card sub-case (a NEW blocking gate born with no seven-question card) still denies and is not touched by this change; retiring THAT half would be a separate, considered decision, not an inference from a zero-deny week."
     },
     "one-repo-gate.py": {"catch_class": "code written outside the repo", "also_caught_by": "unverified"},
     "record-home-gate.py": {"catch_class": "record written to a file instead of the database (rule 14181e60)", "also_caught_by": "unverified"},
@@ -52,10 +52,12 @@
       "note": "Decides nothing itself: it extracts write targets and delegates to the two policy gates."
     },
     "close-before-open-gate.py": {"catch_class": "new work opened while prior work is unclosed", "also_caught_by": "unverified"},
-    "git-writer-gate.py": {"catch_class": "git write from a session that does not own the tree", "also_caught_by": "unverified"},
-    "staging-attribution-gate.py": {"catch_class": "staged change with no attributed owner", "also_caught_by": "unverified"},
     "staging-observation-tracker.py": {"catch_class": "observation tracking for staged work", "also_caught_by": "unverified"},
-    "settings-change-gate.py": {"catch_class": "change to installed machine configuration", "also_caught_by": "unverified"},
+    "settings-change-gate.py": {
+      "catch_class": "change to installed machine configuration",
+      "also_caught_by": "unverified",
+      "note": "WR-000019 slice S3 (2026-08-27): the PreToolUse half no longer denies an unreasoned settings change — it announces, and the reason's durable home moved to the PR-description convention CODEOWNERS and required CI now enforce. PostToolUse still records the outcome unconditionally."
+    },
     "write-effect-check.py": {"catch_class": "declared-versus-actual effect of a write", "also_caught_by": "unverified"},
     "draft-export-gate.py": {"catch_class": "draft exported outside the sanctioned path", "also_caught_by": "unverified"},
     "executor-tier-gate.py": {"catch_class": "subagent dispatched with no named model tier", "also_caught_by": "unverified"},
@@ -72,11 +74,10 @@
     "conduct-stop-gate.py": {"catch_class": "conduct violation in the turn being ended", "also_caught_by": "unverified"},
     "completion-evidence-gate.py": {"catch_class": "completion claimed without evidence", "also_caught_by": "unverified"},
     "ledger-sweep.py": {"catch_class": "ruling in the turn that belongs in the decision ledger", "also_caught_by": "unverified"},
-    "context-handoff-gate.py": {"catch_class": "context ending with no handoff written", "also_caught_by": "unverified"},
+    "context-handoff-gate.py": {"catch_class": "context threshold crossed without a verified same-task successor takeover", "also_caught_by": "none-known", "verified": "2026-08-31 — no other hook preserves precompact high-water and binds Stop to immutable cross-surface takeover evidence."},
     "scheduled-run-record.py": {"catch_class": "scheduled run finishing with no run row", "also_caught_by": "unverified"},
     "chat-lint-gate.py": {"catch_class": "writing lint on the turn's prose", "also_caught_by": "unverified"},
     "chat-lint-carryover.py": {"catch_class": "carryover of the previous turn's lint", "also_caught_by": "unverified"},
-    "stale-claim-gate.py": {"catch_class": "claim asserted from stale state", "also_caught_by": "unverified"},
     "loose-work-gate.py": {"catch_class": "turn ended with loose work outstanding", "also_caught_by": "unverified"},
     "unread-artifact-gate.py": {"catch_class": "artifact referenced but never read", "also_caught_by": "unverified"},
     "drift-claim-gate.py": {"catch_class": "drift claimed without a record", "also_caught_by": "unverified"},

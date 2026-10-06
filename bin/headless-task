@@ -1,0 +1,6 @@
+#!/bin/sh
+# launchd has a sparse PATH; retain an explicit caller PATH for fake-CLI tests.
+set -eu
+HEADLESS_SOURCE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export PYTHONPATH="$HEADLESS_SOURCE${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -c 'from lib.headless_tasks import main; raise SystemExit(main())' "$@"

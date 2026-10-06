@@ -152,7 +152,7 @@ def check(path, max_accent_run):
                          f"({sample.group(0).strip()!r})" if sample else
                          f"p{pno}: {n_em} em dash(es)")
 
-        # A page can be a defect without being empty. The Hughes pre-tour map orphaned a
+        # A page can be a defect without being empty. The Ferris pre-tour map orphaned a
         # single paragraph onto its own sheet, which the blank-page test passed because
         # the sheet was not blank. A page carrying no image and almost no text is a
         # widow: something above it should have been made to fit.

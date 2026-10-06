@@ -283,6 +283,25 @@ with tempfile.TemporaryDirectory() as tmp:
           == sha256_of('{"rules": 1}\n'),
           blessed_hash(repo, "rule-enforcement-map.json", "contracts"))
 
+    # The session lifecycle's executable wiring and data contract are both
+    # enforcement. Protecting only the Python would allow a threshold, event,
+    # or model window to move without the same reviewed bless.
+    for contract_name, body in (
+        ("hooks.json", '{"Stop": []}\n'),
+        ("session-context-lifecycle.v2.json", '{"schema_version": 1}\n'),
+    ):
+        contract = repo / "ops" / "config" / contract_name
+        contract.write_text(body)
+        git(repo, "add", f"ops/config/{contract_name}")
+        r = git(repo, "commit", "-m", f"{contract_name} without bless", env=NO_AUTO)
+        check(f"{contract_name} edit without baseline is refused",
+              r.returncode != 0, f"exit {r.returncode}")
+        r = git(repo, "commit", "-m", f"{contract_name}, bless applied")
+        check(f"{contract_name} is auto-blessed", r.returncode == 0, r.stderr)
+        check(f"{contract_name} lands in contracts table",
+              blessed_hash(repo, contract_name, "contracts") == sha256_of(body),
+              blessed_hash(repo, contract_name, "contracts"))
+
     # ── 6. what the check must leave alone ──────────────────────────────────
     (repo / "unrelated.txt").write_text("hello\n")
     git(repo, "add", "unrelated.txt")

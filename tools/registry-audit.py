@@ -41,10 +41,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import openpyxl
 from registry import (REGISTRY_COLUMNS, RETIRED_IDS, id_num, fmt_id, _s)
 
-DEFAULT_RECOVERY_VAULT = (
-    "/Users/booko/Library/CloudStorage/"
-    "GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI"
-)
+DEFAULT_RECOVERY_VAULT = os.path.join(
+    os.path.expanduser("~"), "Library", "CloudStorage",
+    "GoogleDrive-joe.bookout.carr.us@gmail.com", "My Drive", "CARR AI")
 
 
 def parse_args(argv):
@@ -106,7 +105,7 @@ STOP = {"the", "and", "for", "llc", "pllc", "inc", "pa", "pc", "dds", "dmd", "md
 def tokens(*parts):
     """Word set for loose identity comparison.
 
-    Dossier filenames are CamelCase-and-hyphen ("GulfCoastPelvicFloor",
+    Dossier filenames are CamelCase-and-hyphen ("HarborlinePelvicTherapy",
     "PremierHealthWellness-RandallMacDonnell"), so a naive lowercase split makes
     one giant token that matches nothing and reports a false mismatch. Split on
     the case boundary first.

@@ -44,7 +44,7 @@ NOLOGIN_BUNDLES = [
     "carr_reader", "carr_writer", "carr_exporter", "carr_authority",
     "carr_device_evidence", "carr_calendar_prebrief_jobs",
     "carr_calendar_prebrief_canary_jobs", "carr_calendar_prebrief_attestors",
-    "carr_calendar_prebrief_email_resolver",
+    "carr_calendar_prebrief_email_resolver", "carr_program5_forward_fix_verifiers",
 ]
 EXPECTED_ROLES = [*NOLOGIN_BUNDLES, "carr_jobs"]
 
@@ -90,10 +90,37 @@ def main():
           re.search(r"elsif not jobs_can_login", head, re.I) is not None)
 
     generated = re.search(r"cat > \"\$TMP\" <<'ROLES'\n(.*?)\nROLES", generator, re.S)
+    conditional = re.search(
+        r"cat >> \"\$TMP\" <<'CANONICAL_OWNERSHIP_ROLES'\n"
+        r"(?P<body>.*?)\nCANONICAL_OWNERSHIP_ROLES",
+        generator,
+        re.S,
+    )
+    conditional_gate = (
+        'if [ "$CANONICAL_OWNERSHIP_ACTIVATION_APPLIED" = t ]; then\n'
+        'cat >> "$TMP" <<\'CANONICAL_OWNERSHIP_ROLES\''
+    ) in generator and "filename='0532a_canonical_ownership_lease_activation.sql'" in generator
+    issuer_in_snapshot_ledger = re.search(
+        r"^0532a_canonical_ownership_lease_activation\.sql\t[0-9a-f]{64}\t",
+        sql,
+        re.M,
+    ) is not None
+    expected_preamble = generated.group(1).strip() if generated else None
+    if expected_preamble is not None and issuer_in_snapshot_ledger:
+        expected_preamble = (
+            expected_preamble + "\n\n\n" + conditional.group("body").strip()
+            if conditional and conditional_gate else None
+        )
+    # Once 0756 is absorbed, the generated bootstrap also carries Dot's
+    # passwordless role before role-bound policies from pg_dump.
+    dot = re.search(r"cat >> \"\$TMP\" <<'DOT_READER_ROLES'\n(?P<body>.*?)\nDOT_READER_ROLES", generator, re.S)
+    dot_applied = re.search(r"^0756_dot_reader\.sql\t[0-9a-f]{64}\t", sql, re.M) is not None
+    if expected_preamble is not None and dot_applied:
+        expected_preamble = expected_preamble + "\n" + dot.group("body").strip() if dot else None
     preamble_end = sql.find("--\n-- PostgreSQL database dump")
     check("the snapshot generator carries the exact checked-in role preamble",
-          generated is not None and preamble_end > 0
-          and generated.group(1).strip() == sql[:preamble_end].strip())
+          expected_preamble is not None and preamble_end > 0
+          and expected_preamble == sql[:preamble_end].strip())
 
     normalizer = re.search(r"EOF_NORMALIZER='\n(.*?)\n'", generator, re.S)
     if normalizer is None:
@@ -116,6 +143,102 @@ def main():
     check("creating them is idempotent, so loading the snapshot onto a cluster "
           "that already has them is not an error",
           re.search(r"pg_roles", head, re.I) is not None)
+
+    # 0475 creates this policy only on production-like clusters where the
+    # externally provisioned carr_backup login exists. pg_dump renders the
+    # resulting policy as an unconditional CREATE POLICY, which makes the
+    # portable snapshot unloadable on vanilla CI PostgreSQL unless the checked-
+    # in artifact preserves 0475's conditional role boundary.
+    normalized_sql = re.sub(r"\s+", " ", sql.lower())
+    check("the external carr_backup policy is conditional on that role existing",
+          re.search(
+              r"if exists \(select 1 from pg_roles where rolname = 'carr_backup'\) then "
+              r"create policy carr_backup_full_read on ops\.work_request "
+              r"for select to carr_backup using \(true\); end if",
+              normalized_sql,
+          ) is not None)
+    # EVERY carr_backup policy, not only 0475's. 0573 added one on
+    # public.memory_item; pg_dump rendered it unconditionally and hosted CI
+    # refused the snapshot with 'role "carr_backup" does not exist'.
+    check("the memory_item carr_backup policy is conditional on that role existing",
+          re.search(
+              r"if exists \(select 1 from pg_roles where rolname = 'carr_backup'\) then "
+              r"create policy carr_backup_full_read_memory_item on public\.memory_item "
+              r"for select to carr_backup using \(true\); end if",
+              normalized_sql,
+          ) is not None)
+    check("no carr_backup policy in the snapshot is unconditional",
+          re.search(r"^CREATE POLICY \S+ ON \S+ .*\bTO carr_backup\b", sql, re.M) is None)
+    check("the generator owns the carr_backup policy rewrite instead of relying "
+          "on a hand-patched snapshot",
+          "FOR SELECT TO carr_backup USING" in generator
+          and "emit_carr_backup_policy(words[3], words[5])" in generator
+          and 'print "do $carr_backup_snapshot_policy$"' in generator
+          and 'pg_dump\'s exit status cannot be hidden behind a' in generator)
+
+    policy_filter = re.search(r"if ! awk '\n(function emit_carr_backup_policy.*?)\n' \"\$SCHEMA_BODY\"", generator, re.S)
+    for existing in (False, True):
+        fixture = ""
+        for policy, table in (("carr_backup_full_read", "ops.work_request"),
+                              ("carr_backup_full_read_memory_item", "public.memory_item")):
+            schema, name = table.split(".")
+            if existing:
+                fixture += f"CREATE POLICY {policy} ON {table} FOR SELECT TO carr_backup USING (true);\n"
+            fixture += f"-- Name: {name}; Type: ROW SECURITY; Schema: {schema}; Owner: -\n"
+        filtered = subprocess.run(["awk", policy_filter.group(1)] if policy_filter else ["false"],
+                                  input=fixture, text=True, capture_output=True, check=False)
+        check(f"the generator preserves both backup policies exactly once (existing={existing})",
+              filtered.returncode == 0
+              and filtered.stdout.count("create policy carr_backup_full_read on ops.work_request") == 1
+              and filtered.stdout.count("create policy carr_backup_full_read_memory_item on public.memory_item") == 1
+              and filtered.stdout.count("if exists (select 1 from pg_roles") == 2)
+
+    # The schema body installs deferred policy-epoch triggers before the
+    # appended data seeds are restored.  The migration ledger arrives before
+    # the rule-delivery policy and sealed SCAC registry, so autocommitting the
+    # ledger COPY makes the trigger inspect a deliberately incomplete restore.
+    # Keep the whole appended data region in one transaction: the deferred
+    # triggers then settle against the final coherent seed set at COMMIT.
+    restore_begin = sql.find("-- CARR SNAPSHOT DATA RESTORE TRANSACTION BEGIN")
+    ledger_copy = sql.find(
+        "COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;"
+    )
+    registry_seed = sql.find("insert into ops.scac_mutation_registry_version")
+    restore_commit = sql.rfind("-- CARR SNAPSHOT DATA RESTORE TRANSACTION COMMIT")
+    check("the appended data restore is one deferred-trigger transaction",
+          restore_begin >= 0
+          and ledger_copy > restore_begin
+          and registry_seed > ledger_copy
+          and restore_commit > registry_seed
+          and re.search(r"\bBEGIN;", sql[restore_begin:ledger_copy], re.I) is not None
+          and re.search(r"\bCOMMIT;", sql[restore_commit:], re.I) is not None)
+    registry_entry_tail = sql.rfind("insert into ops.scac_mutation_registry_entry")
+    registry_trigger_enable = sql.find(
+        "alter table ops.scac_mutation_registry_entry enable trigger"
+    )
+    check("deferred epoch events settle before sealed registry triggers re-enable",
+          registry_entry_tail > registry_seed
+          and registry_trigger_enable > registry_entry_tail
+          and re.search(
+              r"set constraints all immediate;",
+              sql[registry_entry_tail:registry_trigger_enable],
+              re.I,
+          ) is not None)
+    # 2026-09-23: rendering every sealed SCAC version's full entry set grew the
+    # file to 114.8 MB and GitHub refused the push (GH001, 100 MiB). The
+    # generator now writes each distinct entry once; this ceiling makes the
+    # next regression a test failure instead of a refused push.
+    snapshot_bytes = os.path.getsize(SNAPSHOT)
+    check("the snapshot stays far below GitHub's 100 MiB file limit",
+          snapshot_bytes < 50 * 1024 * 1024, f"{snapshot_bytes} bytes")
+    check("SCAC entries are restored from a deduplicated pool",
+          "create temporary table carr_scac_entry_pool" in sql
+          and sql.count("insert into ops.scac_mutation_registry_entry select r.* from") >= 1
+          and "drop table pg_temp.carr_scac_entry_pool;" in sql)
+    check("the generator owns the deferred-trigger restore transaction",
+          "CARR SNAPSHOT DATA RESTORE TRANSACTION BEGIN" in generator
+          and "CARR SNAPSHOT DATA RESTORE TRANSACTION COMMIT" in generator
+          and "set constraints all immediate;" in generator)
 
     # Ordering is the whole point: a grant that runs before its role exists
     # fails, and pg_dump puts the schema body after whatever we prepend.

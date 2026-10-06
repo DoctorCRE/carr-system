@@ -37,6 +37,8 @@ if [[ " $* " == *" --apply "* ]]; then
   # migrate-prod.sh and tools/db-tap.py: an expiring browser login does not fail,
   # it prompts and times out, and this is the fourth caller that inherited it.
   if [ -z "${NEON_API_KEY:-}" ] && [ -f "$HOME/.config/carr/db.env" ]; then
+    . "$REPO"/bin/routine-credential-env.sh
+    carr_require_sourceable_db_env "import-doctrine" || exit $?
     set -a; . "$HOME/.config/carr/db.env"; set +a
   fi
   DSN="$(neonctl connection-string production --role-name app_writer 2>/dev/null)"

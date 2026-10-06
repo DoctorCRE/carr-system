@@ -12,20 +12,256 @@
 // NO SEND CAPABILITY EXISTS OR WILL EXIST IN THIS WORKER.
 
 import { neon, Pool } from "@neondatabase/serverless";
-import { TOOLS, ToolError, executeRegisteredTool, auditIdentity, assertNoCallerAuthorityFields } from "./tools.js";
-import { partnerAuthoritySlugForActor } from "./partner-authority.js";
-import { actorFromProps, authorizationClassForActor, organizationTenantForActor, personalScopeForActor } from "./identity.js";
+import { mcpOriginRefusal } from "./oauth-policy.js";
+import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.js";
+import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput,
+  auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
+  pgConstraintError, describeConstraint } from "./tools.js";
+import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
+import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, organizationTenantForActor,
+  personalScopeForActor, verifiedAgentSlugForClient } from "./identity.js";
+import { deriveTrustedPrincipalBinding,
+  ExactEffectRefusal, SCAC_TRUSTED_PRINCIPAL_READBACK_SQL } from "./scac-exact-effects.js";
 import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
+import { gateZeroSeatConnection } from "./gate-zero-seat-connection.v5.js";
+import { providerFor as judgeProviderFor } from "./judge-provider.js";
+import { jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
+  validateAskJevArgs } from "./jev-call-receipt.js";
+import { foundationAssuranceSeatConnection } from
+  "./foundation-assurance-seat-connection.v5.js";
+import { stampedGitSha } from "./build-stamp.js";
+import { parksADecision, classifyLoopText, needsDecider, loopRowText,
+         ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
+import { controllerOperationInput, controllerToolList, isEngineeringControllerActor,
+  opaqueControllerResult, operationIdempotencyKey, ENGINEERING_CONTROLLER_EXECUTOR,
+  ENGINEERING_CONTROLLER_WORKER } from "./authenticated-canonical-ownership.js";
+import { withTrustedCanonicalOwnershipContext } from "./engineering-runtime.js";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 
+// This route deliberately does not use dispatch()/allowedIn().  Every regular
+// MCP profile inherits read verbs; an ownership controller must inherit none.
+async function controllerBinding(client, actor, name, input) {
+  const operation = name.replace(/^canonical-ownership-/, "");
+  const found = await client.query(
+    `select ops.authenticated_canonical_ownership_controller_binding(
+       $1::uuid,$2::uuid,$3::text,$4::text) as row
+       /* engineering-controller:closed-binding-readback */`,
+    [input.job_id, input.lease_token, ENGINEERING_CONTROLLER_WORKER, operation],
+  );
+  const row = found.rows[0]?.row;
+  if (!row || typeof row !== "object")
+    throw new ToolError({ error: "engineering_controller_binding_unavailable" });
+  const binding = row.binding;
+  if (!binding || binding.executor_actor?.slug !== ENGINEERING_CONTROLLER_EXECUTOR ||
+      binding.envelope_id !== row.envelope_id || !binding.slice_plan ||
+      binding.slice_plan.work_request?.id !== `wr:${row.work_request_id}` ||
+      binding.slice_plan.accepted_plan_revision?.id !== `plan:${row.accepted_plan_id}` ||
+      binding.slice_plan.plan_digest !== binding.plan_digest || actor.slug !== ENGINEERING_CONTROLLER_EXECUTOR)
+    throw new ToolError({ error: "engineering_controller_binding_mismatch" });
+  // The lifecycle definer derives the exact accepted source scope itself.  The
+  // Worker is intentionally not a second source-path projection.
+  return { row, binding };
+}
+
+async function controllerOperation(client, actor, name, input, issuerGeneration) {
+  const resolved = await controllerBinding(client, actor, name, input);
+  const { row, binding } = resolved;
+  const contextBinding = {
+    work_request_id: row.work_request_id, accepted_plan_id: row.accepted_plan_id,
+    envelope_id: row.envelope_id, agent_session_id: row.agent_session_id,
+    attempt: row.attempt, expires_at: row.runtime_expires_at, idempotency_key: input.lease_token,
+    // The request token becomes authority only after the binding query above
+    // proves it equals ops.job.lease_token on this live engineering worker.
+    job_lease_token: input.lease_token,
+  };
+  const result = await withTrustedCanonicalOwnershipContext(client, actor, contextBinding, ToolError, async context => {
+    const stableOperationSubject = name === "canonical-ownership-acquire"
+      ? `${context.binding_id}:${row.attempt}:${input.job_id}`
+      : `${context.binding_id}:${input.prior_operation_key}:${name}`;
+    const operationKey = operationIdempotencyKey(name, stableOperationSubject);
+    let prior = null;
+    if (input.prior_operation_key) {
+      prior = (await client.query(
+        "select ops.read_canonical_ownership_operation($1::uuid) as result /* engineering-controller:ambiguity-readback */",
+        [input.prior_operation_key],
+      )).rows[0]?.result;
+      if (!prior?.ok || prior.lease_id !== input.lease_id ||
+          typeof prior.lease_token !== "string" || !Number.isSafeInteger(Number(prior.fencing_generation)))
+        throw new ToolError({ error: "engineering_controller_prior_operation_unavailable" });
+    }
+    const remainingSeconds = Math.floor((Date.parse(context.expires_at) - Date.now()) / 1000);
+    if (!Number.isSafeInteger(remainingSeconds) || remainingSeconds < 30)
+      throw new ToolError({ error: "engineering_controller_runtime_runway_insufficient" });
+    const lifecycle = name === "canonical-ownership-acquire"
+      ? {
+        operation: "acquire", idempotency_key: operationKey, ttl_seconds: Math.min(900, remainingSeconds),
+      }
+      : name === "canonical-ownership-check"
+        ? { operation: "check", idempotency_key: operationKey, lease_id: input.lease_id,
+          lease_token: prior.lease_token, fencing_generation: Number(prior.fencing_generation) }
+        : name === "canonical-ownership-renew"
+          ? { operation: "renew", idempotency_key: operationKey, lease_id: input.lease_id,
+            lease_token: prior.lease_token, fencing_generation: Number(prior.fencing_generation),
+            ttl_seconds: Math.min(900, remainingSeconds) }
+          : { operation: "release", idempotency_key: operationKey, lease_id: input.lease_id,
+            lease_token: prior.lease_token, fencing_generation: Number(prior.fencing_generation) };
+    const applied = (await client.query(
+      "select ops.canonical_ownership_lifecycle($1::jsonb) as result /* engineering-controller:lifecycle */",
+      [JSON.stringify(lifecycle)],
+    )).rows[0]?.result;
+    // The bounded readback is the ambiguity path: a response loss cannot cause
+    // a second lease operation with freshly chosen authority.
+    const readback = (await client.query(
+      "select ops.read_canonical_ownership_operation($1::uuid) as result /* engineering-controller:operation-readback */",
+      [operationKey],
+    )).rows[0]?.result;
+    const settled = readback?.ok ? readback : applied;
+    return { result: settled, operationKey };
+  });
+  return opaqueControllerResult(name, result.result, result.operationKey, issuerGeneration);
+}
+
+export function ownershipIssuerConnection(env, input) {
+  const mode = env?.CANONICAL_OWNERSHIP_RUNTIME_MODE;
+  if (!new Set(["canary_only", "attended_active"]).has(mode)) return null;
+  if (mode === "canary_only" && env?.CANONICAL_OWNERSHIP_CANARY_JOB_ID !== input.job_id) return null;
+  const generation = input.issuer_generation || Number(env?.CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION);
+  if (![1, 2].includes(generation)) return null;
+  const connectionString = generation === 1
+    ? env.DATABASE_URL_OWNERSHIP_ISSUER_G1 : env.DATABASE_URL_OWNERSHIP_ISSUER_G2;
+  return connectionString ? { connectionString, generation } : null;
+}
+
+/** The controller's closed MCP surface, called only by index.js's token door. */
+export async function dispatchEngineeringController(request, env, ctx, actor) {
+  if (!isEngineeringControllerActor(actor)) return json({ error: "engineering_controller_auth_refused" }, 401);
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  let rpc;
+  try { rpc = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+  const reply = result => json({ jsonrpc: "2.0", id: rpc.id, result });
+  if (rpc.method === "initialize") return reply({ protocolVersion: PROTOCOL, capabilities: { tools: {} },
+    serverInfo: { name: "carr-engineering-ownership-controller", version: "1" } });
+  if (rpc.method === "tools/list") return reply({ tools: controllerToolList() });
+  if (rpc.method !== "tools/call") return json({ jsonrpc: "2.0", id: rpc.id, error: { code: -32601, message: "method not found" } });
+  try {
+    const name = rpc.params?.name;
+    const input = controllerOperationInput(name, rpc.params?.arguments);
+    const issuer = ownershipIssuerConnection(env, input);
+    if (!issuer) throw new ToolError({ error: "engineering_controller_issuer_unavailable" });
+    const pool = new Pool({ connectionString: issuer.connectionString });
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query("set local role carr_ownership_issuer /* engineering-controller:issuer-capability */");
+      const result = await controllerOperation(client, actor, name, input, issuer.generation);
+      await client.query("commit");
+      return reply({ content: [{ type: "text", text: JSON.stringify(result) }] });
+    } catch (error) {
+      await client.query("rollback").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+      ctx?.waitUntil?.(pool.end());
+    }
+  } catch (error) {
+    const payload = error instanceof ToolError ? error.payload : (error.payload || { error: "engineering_controller_operation_failed" });
+    return reply({ isError: true, content: [{ type: "text", text: JSON.stringify(payload) }] });
+  }
+}
+
+export const FOUNDATION_ASSURANCE_RUNTIME_BINDING_SCHEMA =
+  "doctorcre-v5-foundation-assurance-runtime-binding.v1";
+const CANONICAL_OWNERSHIP_HOST_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,95}$/;
+
+// This is deployment metadata the Worker received from Cloudflare, not a
+// header, RPC parameter, or tool argument.  The ownership adapter refuses when
+// it is absent: a pool connection that cannot name its configured host cannot
+// be trusted to acquire or renew a canonical ownership lease.
+export function canonicalOwnershipExecutionHost(env) {
+  const version = typeof env?.CF_VERSION_METADATA?.id === "string"
+    ? env.CF_VERSION_METADATA.id.trim() : "";
+  return CANONICAL_OWNERSHIP_HOST_VERSION.test(version)
+    ? `cloudflare-workers:${version}` : null;
+}
+
+// The foundation oracle must prove which deployed Worker is answering before
+// the record layer exposes any material. These values are runtime/provider
+// facts, not caller input: the source comes from the same deploy stamp used by
+// /release and the provider id comes from Cloudflare's immutable metadata
+// binding. Missing values remain null so the SQL boundary can refuse by name.
+export function foundationAssuranceRuntimeBinding(env) {
+  const providerId = typeof env?.CF_VERSION_METADATA?.id === "string"
+    ? env.CF_VERSION_METADATA.id.trim() : "";
+  return Object.freeze({
+    schema_version: FOUNDATION_ASSURANCE_RUNTIME_BINDING_SCHEMA,
+    environment: typeof env?.CARR_ENV === "string" ? env.CARR_ENV : null,
+    source_sha: stampedGitSha(env),
+    provider: "cloudflare-workers",
+    provider_version: providerId || null,
+  });
+}
+
+// Transaction-local actor context for SECURITY DEFINER functions that must
+// derive authorship from the authenticated server principal rather than accept
+// it in a caller payload. Sponsored actors receive the verified sponsor only
+// for a registry-declared humanOnly act; ordinary writes keep the setting empty
+// so unrelated human-presence gates do not widen.
+export async function setWriterActorContext(client, actor, { partnerAuthorityAct = false } = {}) {
+  const authorizationClass = actor?.authorization_class || authorizationClassForActor(actor);
+  // A partner-authority agent is not reclassified as a human: acting_actor_slug
+  // remains the authenticated Codex/Claude/local-machine actor.  The separate
+  // verified-human setting names the server-derived sponsor whose authority
+  // connection this transaction is already using.  This lets SECURITY DEFINER
+  // functions preserve both facts instead of forcing a second interactive
+  // session merely to restate an approval the partner gave in the active task.
+  const verifiedHumanSlug = authorizationClass === "verified_partner"
+    ? actor.slug
+    : (partnerAuthorityAct && canExercisePartnerAuthority(actor)
+        ? partnerAuthoritySlugForActor(actor) : "");
+  const receiptSessionRef = typeof actor?.correlation_id === "string" && actor.correlation_id
+    ? `session:${actor.correlation_id.toLowerCase()}` : null;
+  const tenant = organizationTenantForActor(actor);
+  const executionHost = typeof actor?.execution_host_id === "string" ? actor.execution_host_id : "";
+  // WHOSE PERSONAL ROWS THIS TRANSACTION MAY SEE (migration 0573). The same
+  // server-derived sponsor memory.js already filters by: the verified human
+  // partner, or the verified sponsor of an agent session. Empty for shared-only
+  // machine tokens and on a sponsor error, so row security then shows shared
+  // rows only. Never read from a caller argument. Unlike the verified-human
+  // setting above it is set for every verb, read or write, because reads are
+  // what the memory_item policies fence.
+  const personalScope = personalScopeForActor(actor);
+  const sponsoringHumanSlug = personalScope.status === "personal" ? personalScope.sponsor : "";
+  if (receiptSessionRef === null) {
+    await client.query(
+      "select set_config('carr.acting_actor_slug',$1::text,true), " +
+      "set_config('carr.verified_human_actor_slug',$2::text,true), " +
+      "set_config('carr.organization_tenant_id',$3::text,true), " +
+      "set_config('carr.execution_host_id',$4::text,true), " +
+      "set_config('carr.sponsoring_human_slug',$5::text,true) /* writer-actor-context */",
+      [actor.slug, verifiedHumanSlug, tenant, executionHost, sponsoringHumanSlug],
+    );
+    return;
+  }
+  await client.query(
+    "select set_config('carr.acting_actor_slug',$1::text,true), " +
+    "set_config('carr.verified_human_actor_slug',$2::text,true), " +
+    "set_config('carr.receipt_session_ref',$3::text,true), " +
+    "set_config('carr.organization_tenant_id',$4::text,true), " +
+    "set_config('carr.execution_host_id',$5::text,true), " +
+    "set_config('carr.sponsoring_human_slug',$6::text,true) /* writer-actor-context */",
+    [actor.slug, verifiedHumanSlug, receiptSessionRef, tenant, executionHost, sponsoringHumanSlug],
+  );
+}
+
 const PROTOCOL = "2025-06-18";
+const RULE_DELIVERY_RAIL = ` RULE DELIVERY: use only exact canonical pack names from standing-context rule_delivery.pack_index. A name in packs_not_found is unknown and is NOT loaded. If observed work enters a pack absent from rule_delivery.declared_packs, call standing-context again with that canonical pack and read the result before acting. Shadow mode records drift without blocking, but does not waive this recall protocol.`;
 
 // ---------- capability profiles (2026-08-02) ----------
 //
-// WHAT THIS IS, AND WHAT IT IS NOT. This is a BLAST-RADIUS REDUCER for surfaces
+// Ordinary profiles are a BLAST-RADIUS REDUCER for surfaces
 // a human configured, not an authorization boundary. Authorization is, and stays,
 // the OAuth grant plus `humanOnly` — a caller who wants the full surface simply
 // omits the parameter, and that is fine, because the threat this addresses is not
@@ -42,10 +278,23 @@ const PROTOCOL = "2025-06-18";
 // b42e217e, 2026-08-02). A newer partner needs better defaults and clearer verb
 // descriptions, never fewer capabilities.
 //
-// Selected per-request: POST /mcp?profile=capture
+// Selected per-request: POST /mcp?profile=capture. Doc is separately pinned by
+// its OAuth resource path and inherits no unnamed read verbs.
 export const PROFILES = {
   // Everything. The default, and what both partners' interactive sessions use.
   full: null,
+
+  // Closed read AND write set, forced by the OAuth resource path.
+  doc: new Set(DOC_TOOL_NAMES),
+
+  // Native lifecycle credentials are purpose-bound server-side. They expose
+  // only their own record surface even if a caller asks for ?profile=full.
+  "codex-continuity": new Set([
+    "codex-checkpoint", "codex-read-recovery", "codex-record-event",
+  ]),
+  "claude-continuity": new Set([
+    "claude-checkpoint", "claude-read-recovery", "claude-record-event",
+  ]),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
   // additive, carries an idempotency key, and cannot destroy or re-point an
@@ -70,10 +319,10 @@ export const PROFILES = {
     // least likely to have a human beside it. It is additive and keyed, it
     // de-dupes onto an open fingerprint rather than growing the pile, and it
     // structurally cannot touch the columns that close an incident — closing is
-    // partner authority (close-incident is humanOnly and refuses anything that
-    // is not Joe or Dell), so the widest thing this profile can do with the
-    // operational ledger is say truthfully that something broke.
-    "open-incident",
+    // partner authority (close-incident is humanOnly). Triage may advance only
+    // detected -> triaged with a next action and provisional impact; it cannot
+    // set severity, root cause, recovery evidence, or a closed state.
+    "open-incident", "triage-incident",
   ]),
 
   // AWAY MODE, added 2026-08-03 on Joe's ruling. The scheduled CEO session that
@@ -108,7 +357,7 @@ export const PROFILES = {
     // everything capture holds
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
-    "record-signal", "record-branch-evidence", "record-defect", "open-incident",
+    "record-signal", "record-branch-evidence", "record-defect", "open-incident", "triage-incident",
     // plus: close what it opened, advance the book, draft, and keep the record honest
     "close-loop", "update-deal", "add-premises", "record-counter",
     "prepare-document", "update-document-status",
@@ -131,28 +380,12 @@ export const PROFILES = {
   // that actor. That is the server-side lock: the token cannot be asked for
   // more than it was provisioned for, no matter what the request says.
   //
-  // THE WRITE SET IS EXACTLY THE VERBS THE SUITE REPLAYS UNDER A FROZEN
-  // IDEMPOTENCY KEY, never a verb it would have to mint a fresh key for:
-  //   - log-activity: three fixtures — the ORDER 18 addendum write probe
-  //     (smoke-write-probe-permanent), the ORDER 34 auto-edge probe
-  //     (smoke-links-probe-permanent), the ORDER 36 analysis probe
-  //     (smoke-analysis-probe-permanent).
-  //   - set-next-action + complete-action: the ORDER 19 completion-path pair
-  //     on the AMA Law Office fixture (smoke-ball-probe-permanent /
-  //     smoke-complete-probe-permanent).
-  // Every one of those keys already exists in `tool_call` from years of runs
-  // under a human actor, and withEnvelope() in tools.js keys its replay
-  // lookup on idempotency_key + request hash alone, never on the calling
-  // actor — so a probe call against any of them can only ever replay the
-  // stored response, never insert a second row. No other write verb is safe
-  // to hand this token: the 0066 marketing negative-answer probes vary their
-  // idempotency key on purpose (a refusal stores no row, so editing them
-  // never causes key_reuse), which means a probe call against them would be a
-  // LIVE write attempt, not a replay — exactly what this profile exists to
-  // rule out. Those checks self-skip instead: they are gated behind a
-  // tools/list capability check, and tools/list is itself profile-filtered,
-  // so a probe-authenticated caller never even sees those verbs are there.
-  probe: new Set(["log-activity", "set-next-action", "complete-action"]),
+  // SIEP-11 removed the historical cross-actor replay exception. A frozen
+  // idempotency key is not a capability: every replay is now bound to the
+  // exact operation and server-derived principal. Smoke reads remain useful;
+  // mutation probes must use a separately enrolled, operation-bound identity
+  // once SIEP-17/21 provide one. Until then this machine door is read-only.
+  probe: new Set(),
 
   // REVIEWER (Automatic Review Council, Codex lane, 2026-08-06). The write set
   // is EXACTLY `record-finding` — nothing else, ever. Like `probe`, this
@@ -177,7 +410,35 @@ export const PROFILES = {
   // the profile is the whole point, not a suggestion the model could widen by
   // passing a different verb name (callTool's allowedIn() check enforces this
   // at call time, same as every other profile).
-  reviewer: new Set(["record-finding"]),
+  // THE SECOND ENTRY, ADDED 2026-09-13, AND IT IS NARROWER THAN IT LOOKS. The
+  // profile now admits two write verbs rather than one, and the addition is
+  // record-gate-zero-read-only-outcome under Joe's ruling
+  // d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70. This entry is NOT the authority: it
+  // is the blast-radius limiter, and on its own it would admit BOTH reviewer
+  // lanes, because grok-reviewer authenticates through the same door and lands
+  // in the same profile. The authority is the `oracleSeatOnly` gate in
+  // executeRegisteredTool, which reads the staffed seat off the frozen
+  // registration and refuses every lane but that one. Both are kept: the
+  // profile keeps a reviewer out of the other two hundred write verbs, and the
+  // seat gate keeps the wrong reviewer out of this one.
+  reviewer: new Set([
+    "record-finding", "record-gate-zero-read-only-outcome",
+    "produce-foundation-assurance-benchmark-coverage",
+    "produce-assurance-fabric-preactivation-receipt",
+    "produce-foundation-control-plane-preactivation-receipt",
+    "produce-global-execution-contract-receipt",
+    "produce-global-no-phi-boundary-receipt",
+    "produce-global-prompt-injection-boundary-receipt",
+    "produce-global-secrets-boundary-receipt",
+    "produce-global-source-authority-receipt",
+    "record-foundation-assurance-minimum-outcome",
+  ]),
+
+  // The benchmark subject author and independent reviewer are separate
+  // server-locked Codex review-token actors. Each gets only its half of the
+  // exact-digest rail; neither can accept the benchmark or call an oracle.
+  "benchmark-author": new Set(["propose-benchmark-manifest-draft"]),
+  "benchmark-reviewer": new Set(["review-benchmark-manifest-draft"]),
 
   // HERMES (R0 runtime evaluation, 2026-08-16). The write set is EMPTY, which
   // is the whole design: the 2026-08-12 frontier council cleared Hermes for a
@@ -222,8 +483,20 @@ export const PROFILES = {
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
     "record-defect",
-    // A runtime-only door: exact queue receipts, fixed provenance, no raw room prose.
-    "project-room-queue",
+    // Runtime-only dispatch doors. The link's database function independently
+    // requires the server-derived hermes-pilot actor.
+    "project-room-queue", "record-dispatch-link",
+  ]),
+
+  // HERMES CoS (loop #459). This is a separate server-locked capability door,
+  // never a request-side profile override. It inherits the ordinary Hermes
+  // business-write set and adds exactly the two bounded brief/premises verbs.
+  // Keep this explicit rather than spreading the set so a future ordinary
+  // Hermes write cannot silently land in the CoS credential.
+  "hermes-cos": new Set([
+    "log-activity", "stamp-touch", "add-loop", "update-loop",
+    "set-next-action", "complete-action", "add-critical-date", "record-finding",
+    "record-defect", "project-room-queue", "record-dispatch-link", "update-deal", "add-premises",
   ]),
 };
 
@@ -252,14 +525,17 @@ const PROFILE_NOTICE = {
     "\n\n<notice>This session runs on the READ profile: no write verb is available. This is " +
     "intentional. Do not try to work around it; report what you would have written.</notice>",
   probe:
-    "\n\n<notice>This session runs on the PROBE profile: reads, plus exactly the three write " +
-    "verbs the smoke suite replays under a frozen idempotency key (log-activity, set-next-action, " +
-    "complete-action). Every other write verb refuses with not_in_profile. This profile is locked " +
+    "\n\n<notice>This session runs on the PROBE profile: reads only. Frozen idempotency keys are " +
+    "not capabilities and cannot replay another principal's mutation receipt. Every write verb refuses " +
+    "with not_in_profile. This profile is locked " +
     "server-side by a PROBE_TOKENS bearer, not by ?profile=, and cannot be widened by this token " +
     "under any request. This is the smoke-probe machine actor, never a human seat.</notice>",
   reviewer:
-    "\n\n<notice>This session runs on the REVIEWER profile: reads, plus exactly one write verb, " +
-    "record-finding. Every other write verb refuses with not_in_profile — no advancing a deal, no " +
+    "\n\n<notice>This session runs on the REVIEWER profile: reads, plus exactly two write verbs, " +
+    "record-finding and record-gate-zero-read-only-outcome. The second one additionally refuses every " +
+    "reviewer lane except the one staffed with the DoctorCRE v5 Gate Zero oracle seat, so being in this " +
+    "profile is not by itself permission to call it. Every other write verb refuses with not_in_profile " +
+    "— no advancing a deal, no " +
     "drafting a document, no touching a party or a rule. This profile is locked server-side by a " +
     "REVIEW_TOKENS bearer, not by ?profile=, and cannot be widened by this token under any request. " +
     "This is the Automatic Review Council's Codex-reviewer machine actor, never a human seat. Land " +
@@ -269,14 +545,21 @@ const PROFILE_NOTICE = {
   hermes:
     "\n\n<notice>This session runs on the HERMES profile: every read verb, plus exactly nine " +
     "additive write verbs — log-activity, stamp-touch, add-loop, update-loop, set-next-action, " +
-    "complete-action, add-critical-date, record-finding, record-defect, and one runtime-only " +
-    "shape-checked queue projection door. Every other write verb " +
+    "complete-action, add-critical-date, record-finding, record-defect, and two runtime-only " +
+    "dispatch doors: shape-checked queue projection and a database-restricted dispatch link. Every other write verb " +
     "refuses with not_in_profile: no advancing a deal, no creating a party, no merging, no touching " +
     "a rule, no drafting a client document, and there is no send verb in this system at all. This " +
     "profile is locked server-side by a HERMES_TOKENS bearer, not by ?profile=, and cannot be " +
     "widened by this token under any request. You carry Joe's personal brain and never Dell's. " +
-    "File what he tells you to file; for anything outside those nine verbs, say what you would have " +
+    "File what he tells you to file; for anything outside those nine business verbs and two dispatch doors, say what you would have " +
     "written and hand it back for a human.</notice>",
+  "hermes-cos":
+    "\n\n<notice>This session runs on the HERMES CoS profile: the ordinary Hermes business-write set " +
+    "plus exactly update-deal (deal_type, segment, city and lane only) and add-premises against " +
+    "existing parties only. Its server-issued door cannot be widened by ?profile= or caller fields. " +
+    "It may hand a next action to Joe, its verified sponsor, but never Dell; created_by remains the " +
+    "Hermes runtime. Phase, outcome, close/value, identity, merge, teach, authority-only and send " +
+    "operations remain refused.</notice>",
 };
 
 /** Resolve ?profile= to a name, defaulting to full. An unknown value fails CLOSED to read. */
@@ -301,17 +584,44 @@ function profileFor(request) {
  * voluntary limiter for everyone else and a no-op for these three.
  */
 export function profileForActor(actor, request) {
+  if (new URL(request.url).pathname === "/doc/mcp") return "doc";
+  if (actor?.continuity_surface === "codex" && actor?.via === "codex-continuity-token")
+    return "codex-continuity";
+  if (actor?.continuity_surface === "claude" && actor?.via === "claude-continuity-token")
+    return "claude-continuity";
   if (actor?.probe) return "probe";
+  if (actor?.benchmarkAuthor === true && actor?.via === "review-token") return "benchmark-author";
+  if (actor?.benchmarkReviewer === true && actor?.via === "review-token") return "benchmark-reviewer";
   if (actor?.review) return "reviewer";
+  if (actor?.hermesCos === true && actor?.via === "hermes-cos-token") return "hermes-cos";
   if (actor?.hermes) return "hermes";
   return profileFor(request);
 }
 
 export function allowedIn(profile, name, tool) {
+  if (profile === "doc") return PROFILES.doc.has(name);
   if (profile === "full") return true;
   if (tool.fullOnly) return false;            // sensitive operational reads stay off probe/reviewer/read
   if (!tool.write) return true;              // reads are allowed in every profile
   return PROFILES[profile].has(name);
+}
+
+// update-deal is globally allowed for interactive sessions, including its
+// closed deal_type vocabulary. The CoS door is field-locked separately: one
+// extra field refuses the whole call rather than applying a silent subset.
+export const HERMES_COS_DEAL_FIELDS = Object.freeze(["deal_type", "segment", "city", "lane"]);
+
+export function hermesCosDealFieldRefusal(profile, name, args) {
+  if (profile !== "hermes-cos" || name !== "update-deal") return null;
+  const fields = args?.fields;
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return null;
+  const refused = Object.keys(fields).filter((key) => !HERMES_COS_DEAL_FIELDS.includes(key));
+  return refused.length ? refused : null;
+}
+
+export function hermesCosPremisesRefusal(profile, name, args) {
+  return profile === "hermes-cos" && name === "add-premises" &&
+    Array.isArray(args?.ownership) && args.ownership.some((row) => row && row.new_party);
 }
 
 function toolList(profile = "full") {
@@ -323,9 +633,9 @@ function toolList(profile = "full") {
       inputSchema: t.inputSchema,
       // Machine-readable danger signal, so a client's permission layer and the
       // model can tell `find` from `reassign-deal` without parsing prose.
-      annotations: {
+      annotations: profile === "doc" ? docToolAnnotations(t) : {
         readOnlyHint: !t.write,
-        destructiveHint: Boolean(t.write),
+        destructiveHint: t.destructiveHint ?? Boolean(t.write),
         idempotentHint: true,               // every write runs the idempotency envelope
         openWorldHint: false,
       },
@@ -378,12 +688,25 @@ export async function recordReadCall(insertFn, actor, verb, ok, errorKind) {
   }
 }
 
+// Actor-scoped read doors use a read-only writer transaction and bypass the
+// ordinary reader branch. Schedule their identity-only audit after that
+// transaction; never classify a mutating writer call as a read.
+export function scheduleWriterReadCall(tool, actor, verb, ok, errorKind, waitUntil, insertFn) {
+  if (tool?.writerConnection !== true || tool.write ||
+      typeof waitUntil !== "function" || typeof insertFn !== "function") return false;
+  waitUntil(recordReadCall(insertFn, actor, verb, ok, errorKind));
+  return true;
+}
+
 // Authority operations have a separate, human-principal-bound database
 // connection. The scoped variables permit Joe and Dell to have distinct DB
 // login identities. The unscoped value is deliberately Joe-only: letting a
 // Dell-attributed call fall back to a Joe login would make the application actor
 // and database principal disagree, bypassing DB-enforced Joe-only operations.
 export function authorityDsnForActor(env, runtimeActor) {
+  if (runtimeActor?.human === false && (runtimeActor.slug === "codex" || runtimeActor.slug === "claude") &&
+      verifiedAgentSlugForClient(runtimeActor.client_id, runtimeActor.slug,
+        env?.CARR_NATIVE_AGENT_OAUTH_CLIENTS) !== runtimeActor.slug) return null;
   const partner = partnerAuthoritySlugForActor(runtimeActor);
   if (!partner) return null;
   // Preserve the provisioning contract's actor-shaped binding while selecting
@@ -394,9 +717,46 @@ export function authorityDsnForActor(env, runtimeActor) {
   return partner === "joe" ? env?.CARR_DB_AUTHORITY_URL || null : null;
 }
 
+// The one reader-route decision callTool makes, extracted so a test can hold a
+// verb to it without a live Worker. "reader" is the stateless carr_reader HTTP
+// connection: no transaction, no actor context, and only what carr_reader is
+// granted. A read verb whose SQL is granted to carr_writer/carr_authority only
+// (a SECURITY DEFINER door that raises 42501 for anyone else) must declare
+// writerConnection so it lands on "writer_read_only" instead -- V5-A05's
+// cadence-status missed exactly this and its daily sweep could never succeed.
+// Active supersession keeps retire-rule's credential boundary. Human teach
+// calls carrying a replacement use authority; machine capture stays writer.
+export function requiresAuthorityConnection(tool, actor, args = {}) {
+  return tool.authorityOnly === true ||
+    (tool === TOOLS["teach"] && actor?.human === true && !!args?.supersedes);
+}
+
+export function connectionRouteForTool(tool) {
+  if (!tool.write && !tool.writerConnection) return "reader";
+  if (tool.authorityOnly) return "authority";
+  return tool.writerConnection && !tool.write ? "writer_read_only" : "writer";
+}
+
+export async function executeWithTrustedPrincipal(actor, readback, requiredBundle, handler) {
+  let trustedPrincipal;
+  try {
+    trustedPrincipal = await deriveTrustedPrincipalBinding(actor, readback, requiredBundle);
+  } catch (error) {
+    if (error instanceof ExactEffectRefusal) {
+      throw new ToolError({ error: error.error,
+        security_boundary: "scac_trusted_principal",
+        ...(error.detail === null ? {} : { detail: error.detail }) });
+    }
+    throw error;
+  }
+  // In place, not a copy: identity.js's authentication brand is object identity
+  // (amendment 8, 2026-09-13), so a spread here would strip it.
+  return handler(Object.assign(actor, { trusted_principal: trustedPrincipal }));
+}
+
 // Exported for deterministic no-network identity-gate tests. It remains the
 // single normal dispatcher path; callers receive no additional route or grant.
-export async function callTool(env, actor, name, args, profile = "full") {
+export async function callTool(env, actor, name, args, profile = "full", judgeWorkClass = "system_work") {
   const personalScope = personalScopeForActor(actor);
   if (personalScope.status === "error") {
     throw new ToolError({ error: personalScope.error,
@@ -406,6 +766,20 @@ export async function callTool(env, actor, name, args, profile = "full") {
   // executeRegisteredTool repeats this same pure gate for composite dispatches
   // that bypass callTool, so no registered handler gets a different boundary.
   assertNoCallerAuthorityFields(args);
+  const tool = TOOLS[name];
+  if (!tool) throw new ToolError({ error: "unknown_tool", name });
+  // Refuse even generic delegation before it can recurse into an allowed verb.
+  if (profile === "doc" && !allowedIn(profile, name, tool))
+    throw new ToolError({ error: "not_in_profile", verb: name, profile });
+  // Judge payload limits on the canonical values the registered handler sees.
+  if (profile === "doc") coerceArgsToSchema(tool.inputSchema, args);
+  // A capture dedup override needs separate human confirmation. This endpoint
+  // exposes ordinary capture only, not a caller-asserted confirmation bypass.
+  if (profile === "doc" && name === "log-capture" && args?.force_new === true)
+    throw new ToolError({ error: "not_in_profile", verb: "log-capture (force_new)", profile });
+  // The generic call-verb delegator is itself a reviewed ingress. Validate its
+  // immutable outer contract before parsing or recursing into the inner tool.
+  await assertRegisteredToolInput(name, tool, args || {});
   // call-verb: the deploy-gap passthrough (Joe, 2026-08-08: "theres got to be
   // a way to fix the need for having to reconnect the connector to ship
   // things"). Connectors cache tools/list at connect time, so a freshly
@@ -448,15 +822,16 @@ export async function callTool(env, actor, name, args, profile = "full") {
         hint: "call-verb takes {verb, args} where args is the inner verb's own argument object" });
     return callTool(env, actor, inner, innerArgs, profile);
   }
-  const tool = TOOLS[name];
-  if (!tool) throw new ToolError({ error: "unknown_tool", name });
+  // The pure generated-manifest check above ran before any reader/writer
+  // credential was opened. executeRegisteredTool repeats it for direct
+  // composite dispatches and any in-process contract drift.
   // ENFORCED AT CALL TIME, not just filtered out of tools/list. Removing a verb
   // from the list is a hint; a model that has seen the full list in an earlier
   // turn, or guesses a name, would otherwise still reach it.
   if (!allowedIn(profile, name, tool))
     throw new ToolError({ error: "not_in_profile", verb: name, profile,
       hint: "this session is scoped; report what you would have done and let an interactive partner session do it" });
-  if (tool.authorityOnly && !authorityDsnForActor(env, actor))
+  if (requiresAuthorityConnection(tool, actor, args) && !authorityDsnForActor(env, actor))
     throw new ToolError({ error: "authority_connection_unavailable",
       hint: "this partner-authority operation requires a verified Joe/Dell principal or sponsored Codex/Claude identity plus the sponsor-scoped authority database binding" });
   // Payload-aware profile guard (2026-08-05). Name-level gating cannot see that
@@ -469,6 +844,40 @@ export async function callTool(env, actor, name, args, profile = "full") {
       Array.isArray(args?.ownership) && args.ownership.some(o => o && o.new_party))
     throw new ToolError({ error: "not_in_profile", verb: "add-premises (new_party)", profile,
       hint: "away mode may not create a party — file the ownership facts with add-loop and let an interactive partner session create the party, then re-run add-premises by ref" });
+  // PORTED VERB GATES (bypass audit C33/C34). The CANONICAL enforcement for
+  // these moved on 2026-09-24 (second Opus re-review) into tools.js's
+  // executeRegisteredTool(): local-verb.mjs's break-glass mode calls
+  // executeRegisteredTool() directly and never reaches this function, so a
+  // check placed only here missed that door. executeRegisteredTool() is the
+  // one function every path (callTool read, callTool write, break-glass)
+  // calls — see its own comment there, and verb-gate-checks.js's header, for
+  // the full parity note.
+  //
+  // The pure gate is ALSO run here, same pattern as assertNoCallerAuthorityFields
+  // a few lines up ("executeRegisteredTool repeats this same pure gate..."):
+  // this callTool() copy is not a second implementation, it is the SAME
+  // imported function, called early so a write-verb call fails before the
+  // writer Pool connects a few lines below, instead of only after — both for
+  // production fail-fast and so this can be asserted in a test with no live
+  // DB. executeRegisteredTool()'s copy is what makes the verdict correct even
+  // when this copy is skipped, i.e. break-glass.
+  if (name === "add-loop") {
+    if (needsDecider(args))
+      throw new ToolError({ error: "capability_no_decider", hint: BLOCKER_DECIDER_REASON });
+    if (parksADecision(args)) {
+      const { allow, why } = classifyLoopText(loopRowText(args));
+      if (!allow)
+        throw new ToolError({ error: "internal_decision_parked", why, hint: ESCALATION_REASON });
+    }
+  }
+  if (hermesCosPremisesRefusal(profile, name, args))
+    throw new ToolError({ error: "not_in_profile", verb: "add-premises (new_party)", profile,
+      hint: "the Hermes CoS door may capture premises against existing party refs only; a human session must create a new party first" });
+  const refusedDealFields = hermesCosDealFieldRefusal(profile, name, args);
+  if (refusedDealFields)
+    throw new ToolError({ error: "not_in_profile", verb: "update-deal", profile,
+      refused_fields: refusedDealFields, allowed_fields: HERMES_COS_DEAL_FIELDS,
+      hint: "the Hermes CoS door may correct deal_type and search criteria only; phase, outcome, close/value, identity and narrative fields remain human-owned" });
   // [#214 RED-4, 2026-08-06] The same payload-aware pattern, eleven lines down
   // from its model: log-activity's links[] array runs link-parties' exact INSERT
   // (writeLinks, tools.js), so a profile that refuses link-parties BY NAME could
@@ -482,7 +891,7 @@ export async function callTool(env, actor, name, args, profile = "full") {
       Array.isArray(args?.links) && args.links.length)
     throw new ToolError({ error: "not_in_profile", verb: "log-activity (links[])", profile,
       hint: "a narrow profile may log the activity but not assert relationships — drop links[] from this call and file the introduction facts with add-loop for an interactive partner session to link-parties" });
-  if (!tool.write) {
+  if (connectionRouteForTool(tool) === "reader") {
     const sql = neon(env.DATABASE_URL_READER);
     // sideWrite is the ONLY way a read verb may write, and it is deliberately
     // awkward: a separate credential, never awaited, failure isolated. A read
@@ -521,11 +930,62 @@ export async function callTool(env, actor, name, args, profile = "full") {
 
   // Writes use the routine writer pool except the two authority operations,
   // which receive a separate DB identity and cannot fall back to writer.
-  const connectionString = tool.authorityOnly ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
+  // A billable Jev call needs a durable attempt before any vendor request.
+  // Cache promotion waits until the receipt transaction commits below.
+  let validatedJevRequest = null;
+  if (tool.jevProxy === true && env?.TYPESAFE_API_KEY) {
+    const jevArgs = args || {};
+    await assertRegisteredToolInput(name, tool, jevArgs);
+    coerceArgsToSchema(tool.inputSchema, jevArgs);
+    const normalized = validateAskJevArgs(jevArgs);
+    validatedJevRequest = { state: normalized.state, model: normalized.model,
+      questions: normalized.questions };
+  }
+  const needsAuthority = requiresAuthorityConnection(tool, actor, args);
+  const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();
+  // THE ORACLE SEAT WRITES ON ITS OWN CREDENTIAL, under standing-rule amendment
+  // 9 (2026-09-14): seat-only write is enforced by connection role, not by a
+  // session setting. `client` above authenticates as the ordinary writer, whose
+  // EXECUTE on ops.gate_zero_record_read_only_outcome migration 0502 revokes; the
+  // seat's own login role holds it and nothing else does. This attaches the door
+  // rather than opening it — nothing connects unless the handler calls it, and a
+  // Worker with no such secret gets null, which the handler refuses by name
+  // instead of silently falling back to the writer connection.
+  if (tool.oracleSeatOnly === true && tool.oracleFamily !== "foundation-assurance")
+    client.seatConnection = gateZeroSeatConnection(env, Pool);
+  if (tool.oracleSeatOnly === true && tool.oracleFamily === "foundation-assurance")
+    client.seatConnection = foundationAssuranceSeatConnection(env, Pool);
+  if (tool.oracleSeatOnly === true && tool.oracleFamily === "foundation-assurance")
+    client.foundationAssuranceRuntime = foundationAssuranceRuntimeBinding(env);
+  let jevPrefetched, jevAsk, jevRequest;
+  let jevKeyLocked = false;
+  const writerRead = tool.writerConnection === true && !tool.write;
+  let readOk = true, readErrorKind = null;
   try {
-    await client.query("begin");
+    if (tool.jevProxy === true && (env?.TYPESAFE_API_KEY || judgeProviderFor(judgeWorkClass) === "decisions")) {
+      const jevArgs = args || {};
+      jevRequest = validatedJevRequest;
+      // An envelope replay already has its receipt; do not spend or reserve
+      // another attempt. Serialize the check through commit so concurrent
+      // same-key calls cannot both pay before the envelope replay check.
+      await client.query("select pg_advisory_lock(hashtextextended($1,0))", [jevArgs.idempotency_key]);
+      jevKeyLocked = true;
+      // withEnvelope still checks the full request hash.
+      const prior = await client.query("select 1 from tool_call where idempotency_key=$1", [jevArgs.idempotency_key]);
+      if (!prior.rows.length) {
+        const actorRow = (await client.query("select id from actor where slug=$1", [actor.slug])).rows[0];
+        if (!actorRow?.id)
+          throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug });
+        jevAsk = jevAskBinding(env, fetch, { reserveAttempt: async () => {
+          return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs);
+        } });
+        jevPrefetched = await prefetchJevAnswer(jevArgs, jevAsk, judgeWorkClass);
+        client.jevPrefetched = jevPrefetched;
+      }
+    }
+    await client.query(tool.writerConnection && !tool.write ? "begin read only" : "begin");
     const a = await client.query("select id from actor where slug=$1", [actor.slug]);
     // Guarded 2026-08-03. Unguarded, a missing actor row made this a raw
     // TypeError on `undefined.id` — a 500 with a stack trace where the real
@@ -536,20 +996,72 @@ export async function callTool(env, actor, name, args, profile = "full") {
     if (!a.rows.length) throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug,
       hint: "the token authenticates as this actor but no row exists in the actor table — " +
             "provision the actor before any write verb will run" });
-    const fullActor = { ...actor, id: a.rows[0].id };
-    const result = await executeRegisteredTool(client, fullActor, name, args || {});
+    // In place, not a copy — see executeWithTrustedPrincipal above.
+    const actorWithId = Object.assign(actor, { id: a.rows[0].id });
+    if (tool.oracleSeatOnly === true && tool.oracleFamily === "foundation-assurance")
+      client.foundationAssuranceActorSlug = actorWithId.slug;
+    await setWriterActorContext(client, actorWithId,
+      { partnerAuthorityAct: tool.humanOnly === true });
+    const principalReadback = await client.query(SCAC_TRUSTED_PRINCIPAL_READBACK_SQL.text);
+    if (principalReadback.rows.length !== 1)
+      throw new ToolError({ error: "trusted_database_principal_unavailable" });
+    const result = await executeWithTrustedPrincipal(actorWithId, principalReadback.rows[0],
+      needsAuthority ? "carr_authority" : "carr_writer",
+      fullActor => executeRegisteredTool(client, fullActor, name, args || {}));
     await client.query("commit");
+    if (jevPrefetched?.ok === true && result?.ok === true)
+      await jevAsk.cacheAfterCommit(jevRequest, jevPrefetched.result);
     return result;
   } catch (e) {
     await client.query("rollback").catch(() => {});
+    if (writerRead) {
+      readOk = false;
+      readErrorKind = e instanceof ToolError
+        ? String(e.payload?.error || "tool_error").slice(0, 64) : "internal_error";
+    }
+    // TRANSLATE THE DATABASE'S REFUSAL HERE, WHERE THE CONNECTION IS STILL
+    // OPEN. pgConstraintError has existed and been tested since 2026-08-21 and
+    // until now had no production caller at all: every check, foreign-key,
+    // unique and not-null violation fell through to the outer handler and
+    // reached the caller as `unhandled_verb_failure` with a stack string,
+    // which is the shape that says "the server broke" about an input the
+    // server correctly refused. A tested translator nobody calls is not a
+    // capability, and this is the same failure the judgment-wiring selftest
+    // was written to catch one level up.
+    //
+    // This is also the only place the enrichment can happen: the rollback
+    // above ends the aborted transaction but `client` lives until the finally
+    // below, so the catalog lookup rides the connection that is already here.
+    // By the time the RPC handler's catch sees this, the pool is closed.
+    if (!(e instanceof ToolError)) {
+      const refusal = pgConstraintError(e);
+      if (refusal) {
+        const failure = await describeConstraint(client, refusal);
+        if (writerRead && failure instanceof ToolError)
+          readErrorKind = String(failure.payload?.error || "tool_error").slice(0, 64);
+        throw failure;
+      }
+    }
     throw e;
   } finally {
+    if (jevKeyLocked)
+      await client.query("select pg_advisory_unlock(hashtextextended($1,0))", [args.idempotency_key]).catch(() => {});
     client.release();
+    // Actor-scoped read doors use a read-only writer transaction. Record their
+    // metadata through the same detached audit path as ordinary reader calls;
+    // the transaction has already ended, so this cannot change its answer.
+    if (writerRead && env?.DATABASE_URL_WRITER) {
+      const insertFn = (text, params) => neon(env.DATABASE_URL_WRITER).query(text, params);
+      scheduleWriterReadCall(tool, actor, name, readOk, readErrorKind,
+        env.ctx?.waitUntil?.bind(env.ctx), insertFn);
+    }
     env.ctx?.waitUntil?.(pool.end());
   }
 }
 
 export async function dispatch(request, env, ctx, actor) {
+  const originRefused = mcpOriginRefusal(request, env);
+  if (originRefused) return originRefused;
   // PROBE LOCK (loop #192, 2026-08-06): a probe-authenticated actor's profile
   // is decided here, server-side, and NEVER by ?profile= — actor.probe is set
   // in exactly one place (index.js's probeActorFor, on a PROBE_TOKENS bearer
@@ -578,7 +1090,13 @@ export async function dispatch(request, env, ctx, actor) {
   // The authority class is server-derived from the authenticated actor. The
   // legacy ?profile= remains only a voluntary operational limiter: it can
   // reduce the listed/callable verbs, never select a sponsor or widen humanOnly.
-  const scopedActor = { ...actor,
+  // DECORATED IN PLACE. This used to be `{ ...actor, ... }`, and the copy was
+  // load-bearing in the wrong direction: identity.js's brand is now object
+  // identity (amendment 8), so an actor spread here reaches the verb dispatch
+  // authenticated as nobody. The fields a receipt identity is derived from were
+  // pinned at authentication and are not re-read off this object, so decorating
+  // it cannot move who the actor is either.
+  const scopedActor = Object.assign(actor, {
     authorization_class: authorizationClassForActor(actor),
     organization_tenant_id: organizationTenantForActor(actor),
     operational_profile: profile,
@@ -590,7 +1108,8 @@ export async function dispatch(request, env, ctx, actor) {
     // every verb handler — means every write verb's existing withEnvelope()/
     // writeEvent() calls pick it up for free through auditIdentity(actor)
     // (tools.js), with zero change to any individual verb.
-    correlation_id: env.CORRELATION_ID || null };
+    correlation_id: env.CORRELATION_ID || null,
+    execution_host_id: canonicalOwnershipExecutionHost(env) });
   if (request.method !== "POST")
     return json({ error: "method_not_allowed", hint: "MCP streamable HTTP: POST JSON-RPC" }, 405);
 
@@ -611,7 +1130,7 @@ export async function dispatch(request, env, ctx, actor) {
           protocolVersion: PROTOCOL,
           capabilities: { tools: {} },
           serverInfo: { name: "carr-record-layer", version: "0.1.0" },
-          instructions:
+          instructions: profile === "doc" ? DOC_INSTRUCTIONS :
             "CARR's record layer AND the doctrine store — the ONE source of truth for Joe Bookout's " +
             "healthcare-CRE practice (partner Dell McCraney; business only, personal life is Life AI). " +
             "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
@@ -629,7 +1148,7 @@ export async function dispatch(request, env, ctx, actor) {
             "correctly; this may be a peer-tier agent, never a forced downgrade. The main seat " +
             "orchestrates, verifies and performs authorized " +
             "writes; it does not reclaim the mechanical sweep. State the executor before each phase; " +
-            "a second inline mechanical tool call is the tripwire." +
+            "a second inline mechanical tool call is the tripwire." + RULE_DELIVERY_RAIL +
             (profile === "full" ? "" : ` ACTIVE PROFILE: ${profile}.` + (PROFILE_NOTICE[profile] || "")),
         });
       case "notifications/initialized":
@@ -669,7 +1188,10 @@ export async function dispatch(request, env, ctx, actor) {
             .replace(/\b\w+:\/\/[^\s'"]+/gi, "[redacted]");
           scheduleFailureRecord(env, ctx, {
             routeKey: `mcp:tools/call:${rpc?.params?.name || "unknown"}`,
-            failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE),
+            failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
+              verb: rpc?.params?.name || null,
+              error: e,
+            }),
             detail: cause.slice(0, 300),
           });
           return reply({ isError: true, content: [{ type: "text", text: JSON.stringify({
@@ -697,7 +1219,10 @@ export async function dispatch(request, env, ctx, actor) {
     const detail = String(e).slice(0, 300);
     scheduleFailureRecord(env, ctx, {
       routeKey: `mcp:${rpc?.method || "unknown"}${rpc?.params?.name ? ":" + rpc.params.name : ""}`,
-      failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE),
+      failureClass: rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, {
+        verb: rpc?.params?.name || null,
+        error: e,
+      }),
       detail,
     });
     return rpcError(-32603, "internal error", detail);
@@ -707,7 +1232,11 @@ export async function dispatch(request, env, ctx, actor) {
 /** Mounted as OAuthProvider `apiHandler` for /mcp. ctx.props is already authenticated. */
 export const mcpApiHandler = {
   async fetch(request, env, ctx) {
-    const actor = actorFromProps(ctx.props);
+    // The grant door, with the server's witness — see index.js's note on the
+    // same call. identity.js brands only when the witness is a credential byte
+    // string it read from the server's own environment at initialisation.
+    const actor = authenticatedIdentity.connectionForGrant(
+      ctx.props, env.CARR_NATIVE_AGENT_OAUTH_CLIENTS, env.GOOGLE_CLIENT_SECRET);
     // Fails closed: a token whose grant does not name one of the two actors is
     // no better than no token at all.
     if (!actor) {
@@ -724,6 +1253,11 @@ export const mcpApiHandler = {
       });
       return json({ error: "unauthorized" }, 401);
     }
+    // Doc is the partner connector. Purpose-bound native-agent OAuth grants
+    // keep their own endpoint/profile and cannot gain brokerage writes here.
+    if (new URL(request.url).pathname === "/doc/mcp" &&
+        (actor.human !== true || !isKnownPartner(actor.slug)))
+      return json({ error: "doc_partner_grant_required" }, 403);
     return dispatch(request, env, ctx, actor);
   },
 };

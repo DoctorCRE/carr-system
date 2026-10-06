@@ -52,6 +52,7 @@ git log rather than a side effect.
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from collections import Counter
@@ -121,11 +122,15 @@ RULE_ENFORCEMENT_MAP_CHECK = os.path.join(REPO, "ops", "rule-enforcement-map-che
 # floor without anything noticing, which is the whole failure the baseline
 # exists to make visible.
 MODEL_FLOORS = os.path.join(REPO, "ops", "config", "model-floors.json")
+SESSION_CONTEXT_LIFECYCLE = os.path.join(
+    REPO, "ops", "config", "session-context-lifecycle.v2.json")
 CONTRACTS = {
     "delegation-gate-hook.json": DELEGATION_HOOK_CONFIG,
+    "hooks.json": REPO_HOOKS_JSON,
     "codex-hooks.json": CODEX_HOOKS_REPO,
     "rule-enforcement-map.json": RULE_ENFORCEMENT_MAP,
     "model-floors.json": MODEL_FLOORS,
+    "session-context-lifecycle.v2.json": SESSION_CONTEXT_LIFECYCLE,
 }
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
 
@@ -340,7 +345,7 @@ def bless(only=None):
                  "naming specific gates rewrites only those; everything else is "
                  "carried forward, so one session's bless cannot adopt another's "
                  "in-flight edit.",
-        "blessed_by": who or "unknown",
+        "blessed_by": "git-actor-sha256:" + hashlib.sha256(who.encode()).hexdigest() if who else "unknown",
         "blessed_at_rev": rev or "unknown",
         "hashes": hashes,
         "contracts": contracts,
@@ -411,6 +416,41 @@ def settings_matches_repo():
     return validate_expected_wiring(live, want), None
 
 
+# A gate new in source and not yet installed reports PENDING INSTALL, not a
+# failure: its source lands (and is blessed) before `config-as-code install`
+# wires it, and a false GATE INTEGRITY FAILURE in every session in between
+# would teach sessions to ignore the real one. Only while NONE of the gate's
+# tuples is installed, and only until it has been seen installed once on this
+# machine (a stamp under out/): after that, a missing tuple is tampering and
+# fails like any other.
+PENDING_INSTALL_GATES = ("rule-boot-gate.py",)
+PENDING_INSTALL_STAMP_DIR = os.path.join(REPO, "out", "gate-install-seen")
+
+
+def split_pending_install(wiring_errors, live):
+    """(real_errors, pending_gate_names) for the Claude adapter wiring."""
+    live_commands = [str(t[3]) for t in hook_tuples(live)]
+    pending, real = set(), []
+    for err in wiring_errors:
+        gate = next((g for g in PENDING_INSTALL_GATES
+                     if err.endswith(f"hook {g}; found 0")), None)
+        installed_any = gate and any(c.endswith("/" + gate) or c.endswith(" " + gate)
+                                     for c in live_commands)
+        seen = gate and os.path.exists(os.path.join(PENDING_INSTALL_STAMP_DIR, gate))
+        if gate and not installed_any and not seen:
+            pending.add(gate)
+        else:
+            real.append(err)
+    for gate in PENDING_INSTALL_GATES:
+        if any(c.endswith("/" + gate) for c in live_commands):
+            try:
+                os.makedirs(PENDING_INSTALL_STAMP_DIR, exist_ok=True)
+                open(os.path.join(PENDING_INSTALL_STAMP_DIR, gate), "a").close()
+            except OSError:
+                pass
+    return real, sorted(pending)
+
+
 def delegation_hook_contract():
     """Load the versioned, exact CARR-project interception contract."""
     try:
@@ -430,9 +470,39 @@ def delegation_hook_contract():
     if (not isinstance(contract["command"], str)
             or not isinstance(contract["timeout"], int)):
         return None, "delegation hook contract command/timeout is malformed"
-    if "/Users/" in contract["command"] or "${HOME}/carr-system/" not in contract["command"]:
-        return None, "delegation hook contract is not machine-portable"
+    err = contract_shape_error(contract["command"],
+                               contract.get("canonical_only_commands", []))
+    if err:
+        return None, err
     return contract, None
+
+
+def contract_shape_error(command, canonical_only=()):
+    """The path-resolution contract for the delegation hook command.
+
+    The command must prefer the canonical ~/carr-system checkout (so on a Mac a
+    worktree or branch can never swap in its own gate) and must fall back to
+    $CLAUDE_PROJECT_DIR when that checkout is absent (a Claude Code cloud
+    container clones the repo elsewhere; without the fallback python3 exits 2
+    and every Bash/Read/Grep/Glob call is blocked). ops/cloud-hook-paths-
+    selftest.py runs the command itself in both layouts; this is the static
+    half, so a hand edit to the contract that drops either path fails here.
+
+    canonical_only_commands is an exact, enumerated list of the older
+    canonical-only form, accepted for Mac-only projects such as the Drive vault
+    whose live settings still carry it. On a Mac both forms run the same file.
+    """
+    if "/Users/" in command or "${HOME}/carr-system/" not in command:
+        return "delegation hook contract is not machine-portable"
+    if "${CLAUDE_PROJECT_DIR" not in command:
+        return "delegation hook contract has no $CLAUDE_PROJECT_DIR fallback"
+    if not isinstance(canonical_only, (list, tuple)):
+        return "delegation hook canonical_only_commands must be a list"
+    for extra in canonical_only:
+        if (not isinstance(extra, str) or "/Users/" in extra
+                or "${HOME}/carr-system/" not in extra):
+            return "delegation hook canonical_only_commands entry is not machine-portable"
+    return None
 
 
 def validate_delegation_wiring(live, contract):
@@ -448,12 +518,13 @@ def validate_delegation_wiring(live, contract):
                 and entry.get("matcher") == contract["matcher"]]
     if len(matching) != 1:
         return False, "expected exactly one project PreToolUse matcher"
-    expected_hook = {
+    accepted = [contract["command"], *contract.get("canonical_only_commands", [])]
+    expected_hooks = [[{
         "type": "command",
-        "command": contract["command"],
+        "command": command,
         "timeout": contract["timeout"],
-    }
-    if matching[0].get("hooks") != [expected_hook]:
+    }] for command in accepted]
+    if matching[0].get("hooks") not in expected_hooks:
         return False, "project matcher command or timeout is not exact"
     return True, None
 
@@ -563,6 +634,40 @@ def delegation_wiring_selftest():
     for name, live, expected in cases:
         accepted, _ = validate_delegation_wiring(live, contract)
         ok = accepted == expected
+        print(f"{'PASS' if ok else 'FAIL'}  {name}")
+        outcomes.append(ok)
+    # A Mac-only project (the Drive vault) may keep the canonical-only form;
+    # it is an exact, enumerated alternative, never a substring match.
+    legacy = "/exact/canonical-only/delegation-gate.py"
+    with_legacy = dict(contract, canonical_only_commands=[legacy])
+    legacy_live = {"PreToolUse": [{"matcher": "Bash|Read", "hooks": [{
+        "type": "command", "command": legacy, "timeout": 10,
+    }]}]}
+    suffixed_legacy = {"PreToolUse": [{"matcher": "Bash|Read", "hooks": [{
+        "type": "command", "command": legacy + " --later", "timeout": 10,
+    }]}]}
+    legacy_cases = [
+        ("listed canonical-only command accepted", legacy_live, with_legacy, True),
+        ("canonical-only command without a listing rejected", legacy_live, contract, False),
+        ("suffixed canonical-only command rejected", suffixed_legacy, with_legacy, False),
+        ("portable command still accepted beside a listing", good, with_legacy, True),
+    ]
+    for name, live, which, expected in legacy_cases:
+        accepted, _ = validate_delegation_wiring(live, which)
+        ok = accepted == expected
+        print(f"{'PASS' if ok else 'FAIL'}  {name}")
+        outcomes.append(ok)
+    portable = ('if [ -d "${HOME}/carr-system/hooks" ]; then r="${HOME}/carr-system"; '
+                'else r="${CLAUDE_PROJECT_DIR:-}"; fi; exec python3 "$r/hooks/delegation-gate.py"')
+    shape_cases = [
+        ("contract with a $CLAUDE_PROJECT_DIR fallback accepted", portable, [], True),
+        ("contract without a $CLAUDE_PROJECT_DIR fallback rejected",
+         '/usr/bin/env python3 "${HOME}/carr-system/hooks/delegation-gate.py"', [], False),
+        ("contract with a machine-specific canonical-only command rejected", portable,
+         ["/usr/bin/env python3 /Users/x/carr-system/hooks/delegation-gate.py"], False),
+    ]
+    for name, command, extra, expected in shape_cases:
+        ok = (contract_shape_error(command, extra) is None) == expected
         print(f"{'PASS' if ok else 'FAIL'}  {name}")
         outcomes.append(ok)
     expected_wiring = {"PreToolUse": [{"matcher": "Bash", "hooks": [{
@@ -701,7 +806,9 @@ def main():
         got = now.get(name)
         if got is None:
             content(f"MISSING: hooks/{name} is GONE — that gate is off")
-        elif want and got != want:
+        elif not isinstance(want, str) or not re.fullmatch(r"[0-9a-f]{64}", want):
+            content(f"INVALID: hooks/{name} has no valid SHA-256 baseline")
+        elif got != want:
             content(f"CHANGED: hooks/{name} no longer matches the blessed baseline")
     for name, got in now.items():
         if name not in base and got:
@@ -710,7 +817,9 @@ def main():
         got = now_contracts.get(name)
         if got is None:
             content(f"MISSING: ops/config/{name} is GONE — its wiring contract is off")
-        elif want and got != want:
+        elif not isinstance(want, str) or not re.fullmatch(r"[0-9a-f]{64}", want):
+            content(f"INVALID: ops/config/{name} has no valid SHA-256 baseline")
+        elif got != want:
             content(f"CHANGED: ops/config/{name} no longer matches the blessed baseline")
     for name, got in now_contracts.items():
         if name not in base_contracts and got:
@@ -737,8 +846,15 @@ def main():
             )
 
     claude_state = claude_configuration_state()
+    pending_install = []
     if claude_state == "configured":
         wiring_errors, err = settings_matches_repo()
+        if not err and wiring_errors:
+            try:
+                live_hooks = json.load(open(SETTINGS)).get("hooks", {})
+            except Exception:
+                live_hooks = {}
+            wiring_errors, pending_install = split_pending_install(wiring_errors, live_hooks)
         if err:
             problems.append(f"CLAUDE ADAPTER WIRING: {err}")
         elif wiring_errors:
@@ -820,18 +936,74 @@ def main():
                 f"so a buggy gate never needs a password to fix. In-session gate edits "
                 f"are approved through gate-edit-gate.py instead. Do NOT propose "
                 f"ops/harden-gates.sh as a fix; it is kept only for a deliberate reversal")
-    print(f"GATE INTEGRITY: {len(base)} gates match baseline; installed adapter wiring exact{note}")
+    wiring_word = ("installed adapter wiring exact except PENDING INSTALL (in source, not yet "
+                   f"installed by config-as-code install; not a failure): {', '.join(pending_install)}"
+                   if pending_install else "installed adapter wiring exact")
+    print(f"GATE INTEGRITY: {len(base)} gates match baseline; {wiring_word}{note}")
     print(f"CLIENT ADAPTERS: Claude={claude_state}; Codex={codex_state}; "
           f"Claude-project={project_adapter_state}. CARR core is client-independent; "
           "adapter equality does not prove runtime invocation.")
     return 0
 
 
-if __name__ == "__main__":
+def _session_start_payload():
+    """The SessionStart hook payload, or None when this is not a hook run.
+
+    Only a bare invocation (no flags) fed a SessionStart JSON payload counts:
+    CI's --strict, --bless, --selftest and every script that runs this file by
+    hand never arm the rule boot gate and never touch the network. stdin is
+    read without blocking, because hand runs inherit whatever stdin they have;
+    under hooks/hook-meter-run.py it is an in-memory stream with no fileno.
+    """
+    if len(sys.argv) > 1 or sys.stdin is None:
+        return None
     try:
-        sys.exit(main())
+        if sys.stdin.isatty():
+            return None
+        try:
+            import select
+            ready, _, _ = select.select([sys.stdin.fileno()], [], [], 0.2)
+            if not ready:
+                return None
+        except (AttributeError, OSError, ValueError):
+            pass
+        payload = json.loads(sys.stdin.read() or "null")
+    except Exception:
+        return None
+    if isinstance(payload, dict) and payload.get("hook_event_name") == "SessionStart":
+        return payload
+    return None
+
+
+def arm_rule_boot(payload):
+    """Arm (or re-arm) hooks/rule-boot-gate.py for this session.
+
+    Runs on every SessionStart source -- startup, resume, clear and compact --
+    because each of them starts a context that has not read the rules: a
+    compacted context has lost them. lib/rule_boot_gate.py reads page 1 of
+    standing-context detail=boot from the store to learn the digest and the
+    page count, writes the arm state, and returns the instruction text
+    (under the 10k SessionStart cap). The store unreachable is stated, never
+    papered over (CLAUDE.md: no local fallback). Never raises.
+    """
+    try:
+        sys.path.insert(0, REPO)
+        from lib.rule_boot_gate import arm_session
+        return arm_session(payload.get("session_id") or payload.get("sessionId"),
+                           payload.get("source"))
+    except Exception as exc:
+        return f"RULE BOOT: could not arm the rule gate ({exc}); read the rules with standing-context detail=boot before acting."
+
+
+if __name__ == "__main__":
+    hook_payload = _session_start_payload()
+    try:
+        rc = main()
     except Exception as exc:
         # Fail OPEN and SILENT-ish: a broken attestation must never block a
         # session, but it must not claim everything is fine either.
         print(f"GATE INTEGRITY: check could not run ({exc}) — treat gates as UNVERIFIED.")
-        sys.exit(0)
+        rc = 0
+    if hook_payload is not None:
+        print(arm_rule_boot(hook_payload))
+    sys.exit(rc)

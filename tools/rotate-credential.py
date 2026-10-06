@@ -17,10 +17,12 @@ scoped to one database and does not expire. Rotation was the remedy, and doing
 it by hand would have meant a password on a command line, which is the same
 class of mistake one step further along.
 
-THE THREE THINGS IT ROTATES (AND ONE DISABLED BACKUP PATH)
+SUPPORTED ROTATIONS (AND ONE DISABLED BACKUP PATH)
 
   --role carr_jobs             ALTER ROLE, then rewrite CARR_DB_JOBS_URL
   --role app_exporter_local    ALTER ROLE, then rewrite CARR_DB_EXPORTER_URL
+  --role carr_program5_forward_fix_verifier
+                              ALTER ROLE, then rewrite CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL
   --role carr_backup           DISABLED: refuses before local or provider work
                                until a canonical server-validated receipt exists
   --neon-api-key               mint a new Neon API key, then revoke the old one
@@ -76,7 +78,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from typing import NoReturn
+from typing import Callable, NoReturn
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 ENV_PATH = os.path.expanduser("~/.config/carr/db.env")
@@ -90,7 +92,15 @@ ROLE_ENV = {
     "carr_jobs": "CARR_DB_JOBS_URL",
     "app_exporter_local": "CARR_DB_EXPORTER_URL",
     "carr_backup": "CARR_DB_BACKUP_URL",
+    "carr_program5_forward_fix_verifier": "CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL",
 }
+
+# Both generic rotation entrypoints share this allowlist. Backup stays disabled.
+ROTATABLE_ROLES = frozenset({
+    "carr_jobs",
+    "app_exporter_local",
+    "carr_program5_forward_fix_verifier",
+})
 
 # No role may mint a connection while the backup provider mutation is disabled.
 #
@@ -139,8 +149,16 @@ def _fsync_directory(path: str) -> None:
         os.close(fd)
 
 
-def _durable_replace(path: str, content: str, *, prefix: str) -> None:
-    """Write a 0600 file, fsync it, atomically replace it, then fsync its dir."""
+def _durable_replace(path: str, content: str, *, prefix: str,
+                     verify: Callable[[str], None] | None = None) -> None:
+    """Write a 0600 file, fsync it, atomically replace it, then fsync its dir.
+
+    ``verify`` is handed the finished TEMPORARY file, before the swap. Raising
+    from it aborts the write: the temporary is unlinked by the handler below and
+    ``path`` is never touched. Checking the candidate rather than the installed
+    file is the whole point — a credential file that fails its contract must
+    never become the live one, not even for the instant it takes to notice.
+    """
     directory = os.path.dirname(path) or "."
     fd, temporary = tempfile.mkstemp(dir=directory, prefix=prefix)
     try:
@@ -149,6 +167,8 @@ def _durable_replace(path: str, content: str, *, prefix: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+        if verify is not None:
+            verify(temporary)
         os.replace(temporary, path)
         _fsync_directory(directory)
     except BaseException:
@@ -199,6 +219,8 @@ def _postgres_parts(url: str, label: str):
         if "@" in parts.netloc.rsplit("@", 1)[0]:
             raise ValueError("multiple at signs")
         port = parts.port  # force urlsplit to reject a non-numeric port
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("invalid port")
     except ValueError:
         sys.exit(f"rotate-credential: {label} is not a strict PostgreSQL URI")
     # A libpq query parameter can replace the URI's authority, database,
@@ -212,7 +234,7 @@ def _postgres_parts(url: str, label: str):
             or not parts.hostname or not parts.username or parts.password is None
             or not database or "/" in database):
         sys.exit(f"rotate-credential: {label} is not a strict PostgreSQL URI")
-    return parts, (parts.hostname.lower(), port or 5432, database)
+    return parts, (parts.hostname.lower(), 5432 if port is None else port, database)
 
 
 def _url_for_role(parts, role: str, password: str, query: str) -> str:
@@ -363,7 +385,9 @@ def read_env() -> dict[str, str]:
 def shell_quote(value: str) -> str:
     """Single-quote a value so `set -a; . db.env` survives it.
 
-    THIS FILE HAS TWO PARSERS AND THEREFORE TWO CONTRACTS (rule 73381d78). Python
+    THIS FILE HAS TWO PARSERS AND THEREFORE TWO CONTRACTS — the rule that a config
+    file read by two parsers has two contracts, and fixing one breaks the other
+    unless you check (73381d78). Python
     readers split on '=' and strip quotes, so they do not care. zsh SOURCES this
     file — bin/migrate-prod.sh, bin/nightly.sh and every other shell job do
     `set -a; . db.env` — and an unquoted '&' in a DSN is a background operator,
@@ -378,6 +402,61 @@ def shell_quote(value: str) -> str:
     Single quotes because a postgres URL cannot contain one; the escape below
     handles it anyway rather than trusting that."""
     return "'" + value.replace("'", "'\\''") + "'"
+
+
+ZSH = "/bin/zsh"
+SHELL_PROBE_TIMEOUT_SECONDS = 10
+_ZSH_DIAGNOSTIC_LINE = re.compile(r":(\d+):")
+
+
+def shell_parse_failure(path: str) -> str | None:
+    """Line number in `path` that `set -a; . path` dies on, or None if it parses.
+
+    THE SECOND PARSER, ASKED DIRECTLY. shell_quote() above states the contract;
+    this states whether the file we are about to install actually meets it, which
+    is not the same claim. `zsh -n` parses and runs NOTHING: it never connects,
+    never expands, never echoes a value, and costs a few milliseconds.
+
+    Why it exists at all, when the only writer here already quotes: on 2026-08-20
+    CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL reached db.env unquoted from outside
+    this tool. Its `&channel_binding=require` is a background operator to zsh, so
+    the source line died on a parse error and took ALL FIVE keys in the file with
+    it. bin/migrate-prod.sh — the one sanctioned door to production migrations —
+    was closed from then until 2026-08-26 for every caller that did not already
+    have NEON_API_KEY exported, and the error text named neither the file's role
+    nor the script, so it read as a broken script. A guard that only trusts this
+    tool's own quoting would not have caught it; a guard that reads the finished
+    file does.
+
+    Only the LINE NUMBER crosses back. zsh's message can quote a token from the
+    offending line, and every value here is a credential.
+
+    None on a missing or unusable shell: a rotation must not fail because the
+    probe could not run. The pre-swap caller treats that as "unproven, proceed",
+    which is exactly where this tool stood before the probe existed.
+    """
+    try:
+        probe = subprocess.run([ZSH, "-n", path], capture_output=True, text=True,
+                               timeout=SHELL_PROBE_TIMEOUT_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if probe.returncode == 0:
+        return None
+    found = _ZSH_DIAGNOSTIC_LINE.search(probe.stderr)
+    return found.group(1) if found else "unknown"
+
+
+def _require_shell_sourceable(candidate: str) -> None:
+    """Refuse to install a db.env that zsh cannot source. Never prints a value."""
+    line = shell_parse_failure(candidate)
+    if line is None:
+        return
+    sys.exit(
+        f"rotate-credential: refusing to install {ENV_PATH} — the new file does not "
+        f"parse as shell at line {line}, so `set -a; . db.env` would discard EVERY "
+        f"key in it and every routine that sources it would report its credential "
+        f"missing. Nothing was changed. A value carrying '&', ';', '(' or a space "
+        f"must be single-quoted; see shell_quote() in this file.")
 
 
 def write_env_key(key: str, value: str) -> None:
@@ -402,7 +481,8 @@ def write_env_key(key: str, value: str) -> None:
     if not replaced:
         lines.append(f"{key}={value}")
 
-    _durable_replace(ENV_PATH, "\n".join(lines) + "\n", prefix=".db.env.")
+    _durable_replace(ENV_PATH, "\n".join(lines) + "\n", prefix=".db.env.",
+                     verify=_require_shell_sourceable)
 
 
 def swap_password(url: str, password: str) -> str:
@@ -576,8 +656,9 @@ def _rotate_existing_role(role: str, generate: bool) -> int:
     # This private helper is intentionally an allowlist too: callers importing
     # it must not bypass the public carr_backup refusal before any lock, import,
     # environment read, password generation, or database work.
-    if role not in {"carr_jobs", "app_exporter_local"}:
-        sys.exit("rotate-credential: generic rotation is permitted only for carr_jobs or app_exporter_local")
+    if role not in ROTATABLE_ROLES:
+        sys.exit("rotate-credential: generic rotation is permitted only for "
+                 + ", ".join(sorted(ROTATABLE_ROLES)))
     with credential_env_lock():
         return _rotate_existing_role_locked(role, generate)
 
@@ -585,8 +666,9 @@ def _rotate_existing_role(role: str, generate: bool) -> int:
 def _rotate_existing_role_locked(role: str, generate: bool) -> int:
     # Defense in depth for imported/private callers: this is the deepest helper
     # that holds ALTER ROLE, so it carries the same closed non-backup allowlist.
-    if role not in {"carr_jobs", "app_exporter_local"}:
-        sys.exit("rotate-credential: generic rotation is permitted only for carr_jobs or app_exporter_local")
+    if role not in ROTATABLE_ROLES:
+        sys.exit("rotate-credential: generic rotation is permitted only for "
+                 + ", ".join(sorted(ROTATABLE_ROLES)))
     import psycopg
     from psycopg import sql
 
@@ -598,21 +680,19 @@ def _rotate_existing_role_locked(role: str, generate: bool) -> int:
     env_key = ROLE_ENV[role]
     env = read_env()
     existing = env.get(env_key)
-    minting = False
     if not existing:
-        if role not in MINTABLE:
-            sys.exit(f"rotate-credential: {env_key} is not in {ENV_PATH} — nothing to rotate. "
-                     f"Add the line first; this tool changes a password, it does not mint a "
-                     f"connection.")
-        minting = True
-        if not generate:
-            # A first provision has no old value to preserve compatibility with,
-            # so there is nothing a typed password buys and one thing it costs:
-            # a human-chosen secret for an unattended role, typed twice, at the
-            # keyboard. Generated is strictly better here.
-            sys.exit(f"rotate-credential: {env_key} does not exist yet, so this run would MINT "
-                     f"it. Pass --generate: a credential no human ever needs to type should not "
-                     f"be one a human chooses.")
+        sys.exit(f"rotate-credential: {env_key} is not in {ENV_PATH} — nothing to rotate. "
+                 "Add the line first; this tool changes a password, it does not mint a connection.")
+
+    # Validate the effective libpq target before generating a password or
+    # opening the owner connection. The narrow parser rejects query overrides
+    # of the host, login, database, or startup role as well as malformed URIs.
+    _, owner_target = _postgres_parts(owner, "owner connection")
+    parts, target = _postgres_parts(existing, env_key)
+    if unquote(parts.username) != role:
+        sys.exit(f"rotate-credential: {env_key} has the wrong login — nothing changed")
+    if target != owner_target:
+        sys.exit(f"rotate-credential: {env_key} and owner target differ — nothing changed")
 
     if generate:
         pw = new_password()
@@ -625,29 +705,30 @@ def _rotate_existing_role_locked(role: str, generate: bool) -> int:
         if any(c in pw for c in " '\"@/:?#"):
             sys.exit("avoid spaces, quotes, and @ / : ? # (they break the URL form) — nothing changed")
 
+    new_url = swap_password(existing, pw)
     with psycopg.connect(owner) as conn:
         conn.execute(sql.SQL("alter role {} with password {}").format(
             sql.Identifier(role), sql.Literal(pw)))
         conn.commit()
-
-    # carr_backup is disabled. The two permitted roles retain their historical
-    # behavior: replace only the password in an existing URL.
-    assert existing is not None
-    new_url = swap_password(existing, pw)
 
     # PROVE IT BEFORE WRITING IT. If the new credential does not connect, the old
     # line stays in db.env and the only damage is a role whose password no longer
     # matches a file — recoverable by re-running. Writing first and verifying
     # after would leave an unusable file if the connection failed.
     with psycopg.connect(new_url) as conn:
-        row = conn.execute("select current_user").fetchone()
-        if not row or row[0] != role:
-            sys.exit(f"rotate-credential: verification connected as {row[0] if row else 'nobody'}, "
-                     f"expected {role} — db.env NOT written")
+        expected: tuple[str, str, bool] | tuple[str]
+        if role == "carr_program5_forward_fix_verifier":
+            row = conn.execute("select session_user,current_user,pg_has_role(session_user,'carr_program5_forward_fix_verifiers','member')").fetchone()
+            expected = (role, role, True)
+        else:
+            row = conn.execute("select current_user").fetchone()
+            expected = (role,)
+        if row != expected:
+            sys.exit(f"rotate-credential: verification is not the exact scoped identity "
+                     f"expected for {role} — db.env NOT written")
 
     write_env_key(env_key, new_url)
-    print(f"{role}: password {'set' if minting else 'rotated'} · {env_key} "
-          f"{'created' if minting else 'rewritten'} · verified connection as {role}")
+    print(f"{role}: password rotated · {env_key} rewritten · verified connection as {role}")
 
     return 0
 

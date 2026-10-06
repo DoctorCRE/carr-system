@@ -1,0 +1,378 @@
+{
+ "schema": "carr-jev-code-review-pilot-corpus.v1",
+ "pinned_commit": "c1fb71b",
+ "labeled_by": "Claude Code session, 2026-09-29; not yet reviewed by a person",
+ "how_to_read": "Each item is a location in a real tracked CARR file, found by `anchor` (the exact text of one line; `occurrence` picks the Nth match) and gold-labelled for some of jev_code_review.QUESTIONS. `labels` are scored; `disputed` questions are excluded from both sides with the reason. A question not named is unlabelled for that item and never scored.",
+ "items": [
+  {
+   "id": "vdw-baseline",
+   "path": "ops/vault-drift-watch.py",
+   "anchor": "        return json.loads(manifest_path.read_text())",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": true,
+    "swallow_is_wrong_here": true,
+    "state_can_change_between": false
+   },
+   "disputed": {},
+   "rationale": "A corrupt manifest.json returns None, the same as a missing one; the caller then prints 'NO BASELINE ... nothing to compare against yet' and skips the tamper comparison. A corruption silently disables the tamper check under a message that names a different cause. The exists() then read gap is caught by the except, so it is not a race bug."
+  },
+  {
+   "id": "vdw-corpus-set",
+   "path": "ops/vault-drift-watch.py",
+   "anchor": "        for line in CORPUS_SET_FILE.read_text().splitlines():",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": true,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "Unreadable corpus-set returns an empty exclusion set with no trace; the cost is double-reporting files another script watches, which is louder, not quieter."
+  },
+  {
+   "id": "rrn-load-json",
+   "path": "ops/rule-replay-nightly.py",
+   "anchor": "def load_json(path: Path, default=None):",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": true
+   },
+   "disputed": {
+    "swallow_is_wrong_here": "depends on each caller's default; not established from the region"
+   },
+   "rationale": "Any exception, corrupt JSON included, returns the default with no log."
+  },
+  {
+   "id": "intake-route",
+   "path": "ops/jev_intake.py",
+   "anchor": "        return _unavailable(check_id, kind, task_text, exc)",
+   "occurrence": 4,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "The failure is returned as an explicit unavailable result carrying the exception."
+  },
+  {
+   "id": "brief-no-ids",
+   "path": "pipelines/brief_pack.py",
+   "anchor": "                  lambda m: ID_WORDS[m.group(1)], str(s or \"\"))",
+   "occurrence": 1,
+   "labels": {
+    "truthy_coercion_bug": false
+   },
+   "disputed": {},
+   "rationale": "str(s or '') only feeds re.sub for display; no decision depends on it."
+  },
+  {
+   "id": "stale-claim-pick",
+   "path": "ops/stale_claim_judge.py",
+   "anchor": "        picked = answer[\"answers\"][\"pick\"]",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false,
+    "comment_no_longer_true": false
+   },
+   "disputed": {},
+   "rationale": "None is the documented 'no judgment obtained' signal, distinct from an empty list, and the caller falls back to the stem matcher."
+  },
+  {
+   "id": "resort-parse-date",
+   "path": "ops/rule-resort-weekly.py",
+   "anchor": "        dt = datetime.fromisoformat(text)",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "Parsing an optional timestamp; None is the normal 'no date' answer."
+  },
+  {
+   "id": "gate-integrity-select",
+   "path": "hooks/gate-integrity.py",
+   "anchor": "            ready, _, _ = select.select([sys.stdin.fileno()], [], [], 0.2)",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "A probe for non-blocking stdin inside a hook that must fail open; absence is the normal case on in-memory stdin."
+  },
+  {
+   "id": "gate-replay-snapshot",
+   "path": "ops/gate-replay.py",
+   "anchor": "                rows.append(tuple(line.split(\"\\t\")))",
+   "occurrence": 1,
+   "labels": {
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {
+    "failure_leaves_no_trace": "a missing snapshot shows up as every row changed in the printed diff; whether that counts as a trace is a judgment call"
+   },
+   "rationale": "Missing snapshot yields an empty baseline, which the diff reports loudly."
+  },
+  {
+   "id": "flash-examples",
+   "path": "tools/flash-run.py",
+   "anchor": "                    rows.append(json.loads(line))",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": true,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "Malformed example lines are skipped with no count; the examples log is advisory input, so skipping is acceptable."
+  },
+  {
+   "id": "precheck-route",
+   "path": "ops/command_precheck.py",
+   "anchor": "            return source.split(MODEL_ROOM_START, 1)[1].split(MODEL_ROOM_END, 1)[0].strip()",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "Tries each root in turn and returns None when none has the section; None is the documented answer."
+  },
+  {
+   "id": "codex-gitdir",
+   "path": "ops/codex-history.py",
+   "anchor": "                line = marker.read_text(encoding=\"utf-8\", errors=\"strict\").strip()",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "A probe over parent directories; an unreadable .git file just moves to the next candidate."
+  },
+  {
+   "id": "release-names",
+   "path": "ops/release-pipeline.py",
+   "anchor": "            return {m.group(2) for m in re.finditer(r\"^(export\\s+)?([A-Z0-9_]+)=\\S\", text, re.M)}",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "An unreadable env file yields no names, which the preflight reports as a Blocked naming each missing name."
+  },
+  {
+   "id": "identity-oracle-lanes",
+   "path": "mcp-server/src/identity.js",
+   "anchor": "    const { gateZeroOracleSeatLane } = await import(\"./gate-zero-outcome-store.v5.js\");",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": true
+   },
+   "disputed": {
+    "swallow_is_wrong_here": "a broken module reads as an unstaffed seat; the comment says that is intended, but it also hides a real import fault"
+   },
+   "rationale": "catch {} with no trace around a dynamic import."
+  },
+  {
+   "id": "correlation-safe-path",
+   "path": "mcp-server/src/correlation.js",
+   "anchor": "    return new URL(request.url).pathname;",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "An unparseable URL yields null for a log field."
+  },
+  {
+   "id": "build-stamp-env",
+   "path": "mcp-server/src/build-stamp.js",
+   "anchor": "    return typeof process === \"undefined\" || !process.env ? {} : process.env;",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false,
+    "comment_no_longer_true": false
+   },
+   "disputed": {},
+   "rationale": "Documented degrade to 'no stamps' on a runtime with no process global; the docstring matches."
+  },
+  {
+   "id": "wbr-rows-of",
+   "path": "mcp-server/src/workspace-business-read.js",
+   "anchor": "function rowsOf(value) {",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "Invalid JSON returns null, which callers treat as 'not rows'."
+  },
+  {
+   "id": "pdf-page-content",
+   "path": "mcp-server/src/tour-pdf-renderer.js",
+   "anchor": "    try { return decoder.decode(decodePDFRawStream(stream).decode()); }",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": true
+   },
+   "disputed": {
+    "swallow_is_wrong_here": "an undecodable stream drops out of the geometry proof; whether any other check catches it was not traced"
+   },
+   "rationale": "catch returns an empty string with no trace."
+  },
+  {
+   "id": "pdf-numeric",
+   "path": "mcp-server/src/tour-pdf-renderer.js",
+   "anchor": "function numeric(object) {",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "A typed accessor that returns null for a non-number; null is the answer."
+  },
+  {
+   "id": "seam-store-instance",
+   "path": "mcp-server/src/gate-zero-seam-stores.v5.js",
+   "anchor": "function seamStoreInstance(value) {",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false,
+    "boundary_bug": false
+   },
+   "disputed": {},
+   "rationale": "A type predicate that answers false when reflection throws; the walk is bounded by PROTOTYPE_WALK_LIMIT."
+  },
+  {
+   "id": "dealroom-origin",
+   "path": "mcp-server/src/dealroom-web.js",
+   "anchor": "function dealroomOriginForRequest(request, env) {",
+   "occurrence": 1,
+   "labels": {
+    "failure_leaves_no_trace": false,
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "An unparseable request URL has no origin; null makes the request fail closed."
+  },
+  {
+   "id": "outlook-as-list",
+   "path": "bin/outlook-draft.py",
+   "anchor": "    return [p.strip() for p in parts if str(p).strip()]",
+   "occurrence": 1,
+   "labels": {
+    "truthy_coercion_bug": true
+   },
+   "disputed": {},
+   "rationale": "A None element passes the str(p).strip() guard as 'None' and then p.strip() raises AttributeError: the guard admits the input it exists to reject."
+  },
+  {
+   "id": "cutover-reason",
+   "path": "lib/control_plane_scheduler_cutover_db.py",
+   "anchor": "        if str(approved_by) != \"joe\" or not str(reason).strip():",
+   "occurrence": 1,
+   "labels": {
+    "truthy_coercion_bug": true
+   },
+   "disputed": {},
+   "rationale": "A NULL reason becomes the string 'None', passes the not-blank guard, and the receipt is accepted as Joe-bound with no reason."
+  },
+  {
+   "id": "drift-gate-triggers",
+   "path": "hooks/rule-pack-drift-gate.py",
+   "anchor": "        words = [re.escape(t) for t in pack.get(\"triggers\", []) if str(t).strip()]",
+   "occurrence": 1,
+   "labels": {
+    "truthy_coercion_bug": true
+   },
+   "disputed": {},
+   "rationale": "A null trigger passes the guard and re.escape(None) raises."
+  },
+  {
+   "id": "lead-board-counties",
+   "path": "generators/build-lead-board.py",
+   "anchor": "counties_n = len({str(x[\"co\"]).strip() for x in L if str(x.get(\"co\",\"\")).strip()})",
+   "occurrence": 1,
+   "labels": {
+    "truthy_coercion_bug": true
+   },
+   "disputed": {},
+   "rationale": "A lead with co=None is counted as a county named 'None'."
+  },
+  {
+   "id": "cadence-seeded",
+   "path": "ops/delivery-cadence-a05-assurance-reader-local-pg-gate.py",
+   "anchor": "            seeded = [row for row in batch if str(row.get(\"notification_id\")) == str(notification_id)]",
+   "occurrence": 1,
+   "labels": {
+    "truthy_coercion_bug": false
+   },
+   "disputed": {},
+   "rationale": "An equality comparison of two ids, not a truth test on the coerced value."
+  },
+  {
+   "id": "supervisor-notable",
+   "path": "hooks/jev-supervisor.py",
+   "anchor": "    verdict = str(result.get(\"verdict\", \"\"))",
+   "occurrence": 1,
+   "labels": {
+    "truthy_coercion_bug": false
+   },
+   "disputed": {},
+   "rationale": "A missing verdict becomes 'None', which is not in the quiet set, so it is surfaced: the coercion errs toward reporting."
+  },
+  {
+   "id": "task-selftest-docstring",
+   "path": "ops/jev-review-task-selftest.py",
+   "anchor": "beside the existing advisory one; it never blocks. A fake vendor client and a",
+   "occurrence": 1,
+   "labels": {
+    "comment_no_longer_true": true
+   },
+   "disputed": {},
+   "rationale": "Says the task-fit check records a shadow decision and never blocks. Since decision 5ec806a4 (2026-09-24) review_for_edit returns _would_block and lint-gate surfaces it as a required finding."
+  },
+  {
+   "id": "answer-value-doc",
+   "path": "ops/jev_code_review.py",
+   "anchor": "def answer_value(body):",
+   "occurrence": 1,
+   "labels": {
+    "comment_no_longer_true": false
+   },
+   "disputed": {},
+   "rationale": "Docstring matches: reads body[body['type']] and raises KeyError otherwise."
+  },
+  {
+   "id": "latest-task-doc",
+   "path": "ops/jev_code_review.py",
+   "anchor": "def latest_task(transcript_path, *, tail_chars=TASK_TAIL_CHARS,",
+   "occurrence": 1,
+   "labels": {
+    "comment_no_longer_true": false,
+    "boundary_bug": false
+   },
+   "disputed": {},
+   "rationale": "Docstring matches the tail read, the tool_result skip and the never-raises contract."
+  },
+  {
+   "id": "supervisor-latest-task",
+   "path": "hooks/jev-supervisor.py",
+   "anchor": "        return _lib(\"jev_code_review\").latest_task(transcript) or \"\"",
+   "occurrence": 1,
+   "labels": {
+    "swallow_is_wrong_here": false
+   },
+   "disputed": {},
+   "rationale": "A hook helper; no task means the task-fit questions are simply not asked."
+  }
+ ]
+}

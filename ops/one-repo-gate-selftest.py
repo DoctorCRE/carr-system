@@ -71,15 +71,12 @@ GATE = os.path.join(REPO, "hooks", "one-repo-gate.py")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env  # noqa: E402
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 def git(repo, *args):
@@ -219,6 +216,47 @@ def main():
         rc, _ = run(os.path.join(foreign, "sideproject.py"), home, escape=True)
         check("the escape hatch allows the write", rc == 0, f"exit {rc}")
 
+        # 14. THE AUTHORIZED SIBLING HOMES (loop #610). Decision
+        #     1ceee300-7627-426f-b729-ab339d6984fc superseded the single-code-home
+        #     rule on 2026-09-14 and AGENTS.md now names three: carr-system,
+        #     doctorcre-app and software-factory. Until this case existed the gate
+        #     refused every NEW file in the other two, and the V5-UX slices worked
+        #     around it by authoring outside the clone and copying files in —
+        #     which is the gate teaching sessions to route around it, the exact
+        #     failure its own docstring warns about.
+        #
+        #     IDENTITY IS THE ORIGIN REMOTE, not the directory name, because a
+        #     clone can sit anywhere and be called anything. Both URL spellings
+        #     are tested: a directory named doctorcre-app pointing at somebody
+        #     else's remote must still be refused.
+        for name, url in (
+            ("ssh", "git@github.com:jbookout/doctorcre-app.git"),
+            ("https", "https://github.com/jbookout/software-factory"),
+        ):
+            sibling = make_repo(os.path.join(tmp, f"authorized-{name}"))
+            git(sibling, "remote", "add", "origin", url)
+            rc, err = run(os.path.join(sibling, "app", "page.ts"), home)
+            check(f"new code in an authorized home ({name} remote) is allowed",
+                  rc == 0, f"exit {rc}: {err[:200]}")
+
+        # …and the identity test has to be able to FAIL, or it is not a test.
+        impostor = make_repo(os.path.join(tmp, "doctorcre-app"))
+        git(impostor, "remote", "add", "origin",
+            "git@github.com:someone-else/doctorcre-app.git")
+        rc, _ = run(os.path.join(impostor, "app", "page.ts"), home)
+        check("a look-alike clone on a foreign remote is still DENIED", rc == 2,
+              f"exit {rc}")
+
+        unrelated = make_repo(os.path.join(tmp, "life-ai"))
+        git(unrelated, "remote", "add", "origin",
+            "git@github.com:jbookout/life-ai.git")
+        rc, _ = run(os.path.join(unrelated, "thing.py"), home)
+        check("another repo of Joe's own is still DENIED", rc == 2, f"exit {rc}")
+
+        rc, _ = run(os.path.join(foreign, "no-remote.py"), home)
+        check("a repo with no origin remote at all is still DENIED", rc == 2,
+              f"exit {rc}")
+
         # 13. A nested repo INSIDE the home tree is still foreign. This is the
         #     rev-10 shape on a laptop: a scaffold repo cloned somewhere handy.
         nested = make_repo(os.path.join(home, "vendor-checkout"))
@@ -228,12 +266,7 @@ def main():
     finally:
         subprocess.run(["rm", "-rf", tmp])
 
-    print()
-    if failures:
-        print(f"FAIL {len(failures)} check(s): {', '.join(failures)}")
-        return 1
-    print("OK all checks passed")
-    return 0
+    return CHECKER.summary()
 
 
 if __name__ == "__main__":

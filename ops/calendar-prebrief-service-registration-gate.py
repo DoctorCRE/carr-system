@@ -70,11 +70,14 @@ def insert_projection_evidence(cur, *, job_id: uuid.UUID,
                (id,job_id,attempt,lease_token,sponsor,resolver_identity,mode,
                 destination,scheduled_for,window_starts_at,window_ends_at,
                 allowlist_revision_id,allowlist_digest,calendar_keys,issued_at)
-             values (%s,%s,1,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+             values (%s,%s,1,%s,%s,%s,%s,%s,
+                     %s,
+                     %s::timestamptz - interval '7 days',
+                     %s::timestamptz + interval '45 days',
+                     %s,%s,%s,%s)""",
         (challenge_id, job_id, lease, sponsor,
          f"carr_calendar_prebrief_resolver_{sponsor}", mode, destination,
-         observed_at, observed_at - timedelta(days=7),
-         observed_at + timedelta(days=45), allowlist_id, digest,
+         observed_at, observed_at, observed_at, allowlist_id, digest,
          [calendar_key], observed_at),
     )
     cur.execute(

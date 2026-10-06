@@ -32,6 +32,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS } from "../src/tools.js";
+import { connectionRouteForTool } from "../src/mcp.js";
 
 const ids = {
   joe: "10000000-0000-0000-0000-000000000002",
@@ -144,4 +145,40 @@ test("an unparseable date is left alone, not guessed at", async () => {
   const out = await logIt(fake, "sometime last week");
   assert.equal(out.ok, true,
     "this guard judges FUTURE dates; malformed input is a different problem and not this one to invent a verdict on");
+});
+
+// Upgrade reconciliation reads canonical capture evidence from the existing record reader.
+test("record history includes complete calendar replay evidence", async () => {
+  const calls = [];
+  const history = [{ key: "calcap-person@example.test-2026-09-25",
+    summary: "Meeting: Original", activity_id: "legacy-activity" }];
+  const c = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    if (sql.includes("v_ref_index")) return { rows: [{ id: ids.vendor, subject_id: ids.vendor, subject_type: "vendor" }] };
+    if (sql.includes("from tool_call")) return { rows: history };
+    return { rows: [] };
+  }};
+  const result = await TOOLS["catch-me-up"].handler(c, joe, { ref: "V-SUP-007" });
+  assert.deepEqual(result.calendar_history, history);
+  assert.match(calls.at(-1).sql, /actor_id/);
+  assert.deepEqual(calls.at(-1).params, [joe.id, ids.vendor]);
+  assert.equal(TOOLS["catch-me-up"].write, false);
+});
+test("truncated calendar history refuses upgrade evidence", async () => {
+  const c = { query: async sql => sql.includes("v_ref_index")
+    ? { rows: [{ id: ids.vendor, subject_id: ids.vendor, subject_type: "vendor" }] }
+    : { rows: sql.includes("from tool_call") ? Array(5001).fill({}) : [] } };
+  await assert.rejects(() => TOOLS["catch-me-up"].handler(c, joe, { ref: "V-SUP-007" }));
+});
+
+test("calendar reconciliation uses the authenticated read-only writer route", () => {
+  assert.equal(connectionRouteForTool(TOOLS["catch-me-up"]), "writer_read_only");
+  assert.equal(TOOLS["catch-me-up"].write, false);
+});
+
+test("timeline compositions retain the authenticated read-only calendar-history route", () => {
+  for (const name of ["find-and-catch-up", "prepare-conversation"]) {
+    assert.equal(connectionRouteForTool(TOOLS[name]), "writer_read_only", name);
+    assert.equal(TOOLS[name].write, false);
+  }
 });

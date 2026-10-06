@@ -1,6 +1,26 @@
 #!/usr/bin/env python3
 # ci: db-gate
-"""PostgreSQL 17 proof for SQL-created staging reader/writer login profiles."""
+"""PostgreSQL 17 proof for the staging login profiles, against a real database.
+
+TWO SHAPES OF PROFILE, AND THE SECOND ONE IS WHY THIS GATE GREW (2026-09-13).
+`reader` and `writer` are roles this tool CREATES and credentials in one
+operation. `gate_zero_producer` is not: migration 0502 creates
+`carr_gate_zero_producer` as a LOGIN role with NO PASSWORD, so its first
+provisioning is an ADOPTION -- the owner connection sets the password on a role
+that is already there. That transition, and the state that looks identical to it
+from outside the database, are proved here rather than against fakes:
+
+- FIRST PASSWORDLESS TRANSITION: pg_authid says the seat has no password, the
+  adopt path sets one, and the seat then AUTHENTICATES for real with the exact
+  canonical closure.
+- LOST LOCAL FILE: the same role, the same absent credential file, and the one
+  difference the database can see -- a password is already set. Adoption must
+  refuse and must leave the live credential working, because the local file
+  lives under one machine's home directory and its absence proves nothing.
+
+The seat is restored to exactly the state 0502 left behind before this gate
+returns: no password, no role-level settings.
+"""
 
 from __future__ import annotations
 
@@ -87,16 +107,22 @@ def main() -> int:
     profiles = {profile.label: profile for profile in provision.PROFILES}
     plans = {
         label: provision.snapshot_grants.load_current_grants_to_role(
-            provision.SCHEMA, provision.MIGRATIONS, profile.bundle_role
+            provision.SCHEMA, provision.MIGRATIONS, profile.grant_role
         ) for label, profile in profiles.items()
     }
+    seat = profiles["gate_zero_producer"]
+    if not seat.created_by_migration:
+        raise RuntimeError("the Gate Zero seat is no longer a migration-created profile")
     passwords = {"reader": "reader-fixture-" + "r" * 48,
                  "writer": "writer-fixture-" + "w" * 48,
+                 "seat": "seat-fixture-" + "g" * 48,
+                 "seat_rotation": "rotation-fixture-" + "x" * 44,
                  "owner": "owner-fixture-" + "o" * 48}  # ci-secret-scan: allow — disposable loopback fixture
     with psycopg.connect(admin_dsn) as admin:
         failure: BaseException | None = None
         fixture_mutated = False
         setup_committed = False
+        read_all_granted = False
         try:
             with admin.cursor() as cur:
                 cur.execute(
@@ -148,15 +174,44 @@ def main() -> int:
                 )
                 if cur.fetchall():
                     raise RuntimeError("disposable login roles already exist before gate")
+                # THE SEAT'S BASELINE, captured rather than assumed. This class
+                # loads the committed schema and applies every pending migration
+                # before any db-gate runs, so 0502 has created the seat and
+                # nothing has credentialed it. Anything else is the finding this
+                # gate exists to catch, not a reason to skip.
+                # rolpassword lives ONLY in pg_authid; rolconfig lives only in
+                # the pg_roles view. The baseline needs both, so it joins them.
+                cur.execute(
+                    "select r.rolcanlogin,a.rolpassword is null,r.rolconfig is null "
+                    "from pg_roles r join pg_authid a on a.oid=r.oid "
+                    "where r.rolname=%s", (seat.login_role,)
+                )
+                seat_baseline = cur.fetchone()
+                if seat_baseline != (True, True, True):
+                    raise RuntimeError(
+                        f"{seat.login_role} is not the pristine passwordless LOGIN role "
+                        f"migration 0502 creates: {seat_baseline!r}"
+                    )
                 fixture_mutated = True
                 cur.execute(sql.SQL(
                     "alter role neondb_owner login createrole nosuperuser nocreatedb "
                     "noreplication nobypassrls password {}"
                 ).format(sql.Literal(passwords["owner"])))
                 for profile in profiles.values():
-                    cur.execute(sql.SQL(
-                        "grant {} to neondb_owner with admin true"
-                    ).format(sql.Identifier(profile.bundle_role)))
+                    if profile.bundle_role is None:
+                        # THE MIGRATED SEAT HAS NO BUNDLE, so the edge the owner
+                        # needs is the one PostgreSQL would have created had the
+                        # owner created the role: ADMIN, no INHERIT, no SET. Any
+                        # other shape fails the profile's own creator-edge check,
+                        # which is the point -- the gate must not hand the seat
+                        # authority the real provisioning path would refuse.
+                        cur.execute(sql.SQL(
+                            "grant {} to neondb_owner with admin true, inherit false, set false"
+                        ).format(sql.Identifier(profile.grant_role)))
+                    else:
+                        cur.execute(sql.SQL(
+                            "grant {} to neondb_owner with admin true"
+                        ).format(sql.Identifier(profile.grant_role)))
             admin.commit()
             setup_committed = True
 
@@ -173,12 +228,12 @@ def main() -> int:
                     if cur.fetchall():
                         raise RuntimeError("disposable login roles already exist before gate")
                     for label, profile in profiles.items():
-                        bundle = provision.collect_role_authority(cur, profile.bundle_role)
+                        bundle = provision.collect_role_authority(cur, profile.grant_role)
                         if set(bundle.direct_acl_facts) != set(
                             provision.snapshot_grants.acl_facts(plans[label])
                         ):
                             raise RuntimeError(
-                                f"{profile.bundle_role} must already be exact; gate will not repair it"
+                                f"{profile.grant_role} must already be exact; gate will not repair it"
                             )
                 owner.rollback()
 
@@ -224,6 +279,130 @@ def main() -> int:
                         "protected mutation",
                     )
                     reader.rollback()
+
+                # ---- THE SEAT'S PASSWORDLESS WITNESS, AND WHO CAN READ IT ---
+                # `rolpassword` lives only in pg_authid, which no ordinary role
+                # may read. On Neon the production owner CAN: neondb_owner
+                # reaches neon_superuser, which reaches pg_read_all_data -- the
+                # predefined role that confers SELECT on every table including
+                # pg_authid. That reachability is measured, not assumed: it is
+                # the same list tools/cleanup-staging-app-writer.py pins as
+                # EXPECTED_PROVIDER_REACHABLE_ROLES. This fixture's neondb_owner
+                # starts WITHOUT it, so the first thing proved here is the
+                # fail-closed half.
+                blind_owner = psycopg.connect(direct_owner_dsn)
+                try:
+                    try:
+                        provision.apply_login_profile(
+                            blind_owner, seat, plans["gate_zero_producer"],
+                            passwords["seat"], expected_creator=creator, adopt=True,
+                        )
+                    except provision.ProvisioningRefusal as exc:
+                        if "cannot see it" not in str(exc):
+                            raise RuntimeError(
+                                f"an owner that cannot read pg_authid refused for the "
+                                f"wrong reason: {exc}")
+                    else:
+                        raise RuntimeError(
+                            "adoption proceeded without ever proving the seat passwordless")
+                finally:
+                    blind_owner.close()
+                with admin.cursor() as cur:
+                    cur.execute(
+                        "select rolpassword is null from pg_authid where rolname=%s",
+                        (seat.login_role,),
+                    )
+                    if cur.fetchone() != (True,):
+                        raise RuntimeError(
+                            "the refused adoption credentialed the seat anyway")
+                    cur.execute("grant pg_read_all_data to neondb_owner")
+                admin.commit()
+                read_all_granted = True
+
+                # ---- THE MIGRATED SEAT'S FIRST PASSWORDLESS TRANSITION ------
+                # Not a fake anywhere below: the role is the one 0502 created,
+                # the password is set by the real adopt path, and the proof is a
+                # real authenticated connection.
+                seat_owner = psycopg.connect(direct_owner_dsn)
+                try:
+                    with seat_owner.cursor() as cur:
+                        if not provision.role_is_passwordless(cur, seat.login_role):
+                            raise RuntimeError(
+                                f"{seat.login_role} was credentialed before its own transition")
+                    seat_owner.rollback()
+                    provision.apply_login_profile(
+                        seat_owner, seat, plans["gate_zero_producer"], passwords["seat"],
+                        expected_creator=creator, adopt=True,
+                    )
+                    seat_dsn = role_dsn(admin_dsn, seat.login_role, passwords["seat"])
+                    provision.validate_profile_login(
+                        seat_dsn, seat, plans["gate_zero_producer"], expected_creator=creator,
+                    )
+                    with psycopg.connect(seat_dsn) as authenticated, authenticated.cursor() as cur:
+                        cur.execute("select session_user,current_user")
+                        if cur.fetchone() != (seat.login_role, seat.login_role):
+                            raise RuntimeError("the adopted seat authenticates as the wrong role")
+                        authenticated.rollback()
+                    with seat_owner.cursor() as cur:
+                        if provision.role_is_passwordless(cur, seat.login_role):
+                            raise RuntimeError("the adopted seat still has no password")
+                    seat_owner.rollback()
+                    # THE STORED VERIFIER IS THE WITNESS, NOT A LOGIN ATTEMPT.
+                    # This disposable cluster authenticates loopback connections
+                    # on trust, so connecting with a wrong password proves
+                    # nothing here. What a refused rotation must leave untouched
+                    # is the SCRAM verifier itself, and that is read directly.
+                    with admin.cursor() as cur:
+                        cur.execute("select rolpassword from pg_authid where rolname=%s",
+                                    (seat.login_role,))
+                        adopted_verifier = cur.fetchone()
+                    admin.rollback()
+                    if not adopted_verifier or not adopted_verifier[0]:
+                        raise RuntimeError("the adopted seat has no stored verifier")
+
+                    # ---- THE LOST LOCAL FILE, IDENTICAL FROM OUTSIDE --------
+                    # Same role, same absent credential file, and the one thing
+                    # only the database can say: the seat is already
+                    # credentialed. The decision must refuse, the mutator must
+                    # refuse, and the working credential must still work.
+                    with seat_owner.cursor() as cur:
+                        observed = provision.role_is_passwordless(cur, seat.login_role)
+                    seat_owner.rollback()
+                    try:
+                        provision.decide_profile_action(
+                            role_exists_now=True, credential_state="absent",
+                            role_created_by_migration=True, role_passwordless=observed,
+                        )
+                    except provision.ProvisioningRefusal as exc:
+                        if "lost local file" not in str(exc):
+                            raise RuntimeError(
+                                f"the lost-file refusal does not name what happened: {exc}")
+                    else:
+                        raise RuntimeError(
+                            "a credentialed seat with no local file was routed to adoption")
+                    try:
+                        provision.apply_login_profile(
+                            seat_owner, seat, plans["gate_zero_producer"],
+                            passwords["seat_rotation"], expected_creator=creator, adopt=True,
+                        )
+                    except provision.ProvisioningRefusal as exc:
+                        if "already holds a password" not in str(exc):
+                            raise RuntimeError(f"adoption refused for the wrong reason: {exc}")
+                    else:
+                        raise RuntimeError(
+                            "adoption rotated a credential that was still in use")
+                    provision.validate_profile_login(
+                        seat_dsn, seat, plans["gate_zero_producer"], expected_creator=creator,
+                    )
+                    with admin.cursor() as cur:
+                        cur.execute("select rolpassword from pg_authid where rolname=%s",
+                                    (seat.login_role,))
+                        if cur.fetchone() != adopted_verifier:
+                            raise RuntimeError(
+                                "the refused rotation changed the seat's stored verifier")
+                    admin.rollback()
+                finally:
+                    seat_owner.close()
         except BaseException as exc:  # preserve maker failure if cleanup also fails
             failure = exc
         try:
@@ -235,9 +414,27 @@ def main() -> int:
                     cur.execute("drop role if exists app_writer")
                     cur.execute("drop role if exists app_reader")
                     for profile in profiles.values():
+                        if profile.bundle_role is None:
+                            # The seat is NOT dropped -- it belongs to the
+                            # schema. It is returned to exactly what 0502 left:
+                            # no password, no role-level settings, no edge to
+                            # the owner that this gate invented.
+                            cur.execute(sql.SQL("revoke {} from neondb_owner").format(
+                                sql.Identifier(profile.grant_role)))
+                            cur.execute(sql.SQL("alter role {} password null").format(
+                                sql.Identifier(profile.login_role)))
+                            cur.execute(sql.SQL(
+                                "alter role {} reset statement_timeout"
+                            ).format(sql.Identifier(profile.login_role)))
+                            cur.execute(sql.SQL(
+                                "alter role {} reset idle_in_transaction_session_timeout"
+                            ).format(sql.Identifier(profile.login_role)))
+                            continue
                         cur.execute(sql.SQL(
                             "revoke admin option for {} from neondb_owner"
-                        ).format(sql.Identifier(profile.bundle_role)))
+                        ).format(sql.Identifier(profile.grant_role)))
+                    if read_all_granted:
+                        cur.execute("revoke pg_read_all_data from neondb_owner")
                     cur.execute("alter role neondb_owner nologin nocreaterole password null")
                 admin.commit()
                 with admin.cursor() as cur:
@@ -265,6 +462,29 @@ def main() -> int:
                     )
                     if cur.fetchone() != (False, False, False, False, False, False):
                         raise RuntimeError("neondb_owner fixture attributes were not restored")
+                    cur.execute(
+                        "select r.rolcanlogin,a.rolpassword is null,r.rolconfig is null "
+                        "from pg_roles r join pg_authid a on a.oid=r.oid "
+                        "where r.rolname=%s", (seat.login_role,)
+                    )
+                    if cur.fetchone() != seat_baseline:
+                        raise RuntimeError(
+                            f"{seat.login_role} was not restored to its migration state")
+                    cur.execute(
+                        "select count(*) from pg_auth_members m "
+                        "join pg_roles granted on granted.oid=m.roleid "
+                        "join pg_roles member on member.oid=m.member "
+                        "where member.rolname='neondb_owner' and granted.rolname=%s",
+                        (seat.login_role,),
+                    )
+                    if cur.fetchone() != (0,):
+                        raise RuntimeError(
+                            f"the gate left neondb_owner holding {seat.login_role}")
+                    cur.execute(
+                        "select pg_has_role('neondb_owner','pg_read_all_data','USAGE')")
+                    if cur.fetchone() != (False,):
+                        raise RuntimeError(
+                            "the gate left neondb_owner holding pg_read_all_data")
             if fixture_mutated and not setup_committed:
                 # All fixture writes were transactional and must have rolled back.
                 with admin.cursor() as cur:
@@ -300,7 +520,11 @@ def main() -> int:
         if failure is not None:
             raise failure
     print("PASS (DISPOSABLE LOOPBACK ONLY): SQL-created app_reader/app_writer authenticate with exact closed profiles; "
-          "reader DML/DDL/sequence/role escalation is denied")
+          "reader DML/DDL/sequence/role escalation is denied; "
+          f"{seat.login_role} refuses adoption when pg_authid is unreadable, adopts its first "
+          "password from the passwordless state 0502 leaves, authenticates with the exact "
+          "canonical closure, refuses a second adoption once credentialed without touching its "
+          "stored verifier, and is restored to its migration state")
     return 0
 
 

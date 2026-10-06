@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- doctrine: carr-clean-end-state-control-plane-roadmap -->
+  <key>Label</key><string>com.carr.canary-ingest-sink</string>
+  <!-- Explicit interpreter, same reason as doc-engine: launchd's PATH resolves
+       python3 to macOS's system 3.9, and this repo assumes a modern
+       interpreter (the repo venv, when present, is not required by this
+       stdlib-only script but /opt/homebrew's python3 is still the safe
+       default on this Mac). -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/python3</string>
+    <string>{{REPO}}/tools/canary-ingest-sink.py</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{{REPO}}</string>
+  <key>RunAtLoad</key><true/>
+  <!-- KeepAlive server, the same shape as doc-engine and call-mode: the
+       health question is "is it up", never "did it fire recently", so it is
+       deliberately NOT wrapped by bin/run-scheduled.sh — that wrapper records
+       on child EXIT, and a KeepAlive child exiting just means launchd
+       restarted it; wrapping it would file a row per restart and read as
+       repeated failures of a service working exactly as designed.
+       bin/probe-keepalive.py is the thing that turns "is it up" into a
+       cadence for this server, the same way it already does for doc-engine
+       and call-mode. -->
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{{REPO}}/out/canary/notes-ingest/sink.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/canary/notes-ingest/sink.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>

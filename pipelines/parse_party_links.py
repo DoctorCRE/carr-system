@@ -55,7 +55,7 @@ THE XLSX CROSS-CHECK (ORDER 32(a))
 
 ALREADY-RESOLVED REVIEW ITEMS
   A review item is not open for ever. Three of ORDER 17's four ("Rick
-  McClanahan", who is Ric McClanahan, V-BNK-030) were settled by Joe and written
+  McAllister", who is Ric McAllister, V-BNK-030) were settled by Joe and written
   with `link-parties`, so the edges exist and the grammar still cannot see them —
   it re-flags the same prose every run. The report now marks an ambiguous item
   RESOLVED when a verb-written edge already leaves that vendor, so Joe's review
@@ -83,11 +83,11 @@ OUT = REPO / "out"
 # ── the grammar, ruling (b) ──────────────────────────────────────────────────
 REF_RE = re.compile(r"\b(?:V-[A-Z]{3}-\d+|T-\d+|C-\d+|L-\d+)\b")
 # Items inside one label. ' / ' only with surrounding whitespace, so a slash
-# inside a name ("Tubbs / George DVM" is a real party name) cannot split it by
+# inside a name ("Whitley / Moreau DVM" is a real party name) cannot split it by
 # accident when it is written without spaces.
 ITEM_SPLIT_RE = re.compile(r"\s*(?:;|·|\||\n|(?<=\s)/(?=\s))\s*")
 PAREN_RE = re.compile(r"\([^)]*\)")
-# Prose after a dash separator: 'Chris Kelly (V-CPA-006) — offered intro'
+# Prose after a dash separator: 'Chris Kellan (V-CPA-006) — offered intro'
 DASH_CUT_RE = re.compile(r"\s+[—–-]\s+.*$")
 
 PROVENANCE_SOURCE = "links_label_parse"   # party_link.source is NOT NULL and is

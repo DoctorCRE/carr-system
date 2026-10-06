@@ -108,6 +108,14 @@ export function implementationShapeError(work, currentShape) {
   return null;
 }
 
+async function sourcedDispositionLineage(c, workRequestId) {
+  const row = (await c.query(
+    `select ops.read_sourced_work_request_shape_disposition_lineage($1::uuid) as lineage /* work-shape:disposition-lineage */`,
+    [workRequestId],
+  )).rows[0];
+  return row?.lineage ?? null;
+}
+
 function shapeRow(row) {
   if (!row) return null;
   return {
@@ -183,12 +191,17 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
         properties: { work_request: { type: "string" }, include_history: { type: "boolean" } }, required: ["work_request"],
       },
       handler: async (c, _actor, args) => {
-        const work = (await c.query(`select id, ref, title, state, version, shape_disposition, shape_fixed_surface_ref, shape_rationale, shape_decided_by_actor_id, shape_decided_at from ops.work_request where ref=$1 or id::text=$1 limit 1`, [args.work_request])).rows[0];
+        const work = (await c.query(`select id, ref, title, state, version, capture_idempotency_key, shape_disposition, shape_fixed_surface_ref, shape_rationale, shape_decided_by_actor_id, shape_decided_at from ops.work_request where ref=$1 or id::text=$1 limit 1`, [args.work_request])).rows[0];
         if (!work) throw new ToolError({ error: "work_request_not_found", work_request: args.work_request });
         const revisions = (await c.query(`select * from ops.work_shape_revision where work_request_id=$1 order by version desc`, [work.id])).rows;
+        // Sourced requests carry receipt-backed lineage (original receipt plus at
+        // most one forward correction) behind a narrow definer projection; the
+        // receipt tables themselves stay denied. Unsourced requests have none.
+        const dispositionLineage = work.capture_idempotency_key ? await sourcedDispositionLineage(c, work.id) : null;
         return {
           ok: true,
           work_request: { id: work.id, ref: work.ref, title: work.title, state: work.state, version: Number(work.version), shape_disposition: work.shape_disposition || null, shape_fixed_surface_ref: work.shape_fixed_surface_ref || null, shape_rationale: work.shape_rationale || null, shape_decided_by_actor_id: work.shape_decided_by_actor_id || null, shape_decided_at: work.shape_decided_at || null },
+          disposition_lineage: dispositionLineage,
           current: shapeRow(revisions[0]), revision_count: revisions.length,
           history: args.include_history ? revisions.map(shapeRow) : undefined,
         };
@@ -215,15 +228,37 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
         if (Number(args.base_version) !== Number(work.version))
           throw new ToolError({ error: "version_conflict", current_version: Number(work.version), base_version: Number(args.base_version), resolution: "re-read the Work Request and reconsider its shape disposition; never overwrite blind" });
         const fixedSurface = args.disposition === "not_required" ? args.fixed_surface_ref.trim() : null;
-        const updated = work.capture_idempotency_key
-          ? (await c.query(
+        let updated;
+        if (work.capture_idempotency_key) {
+          // Sourced branch only. An INITIAL not_required is preflighted through
+          // the server classifier with empty dependencies and minimal caps: an
+          // intrinsically heavy request needs a Work Shape, so not_required is
+          // refused here before any receipt is written. A zero-row wrapper result
+          // is not "standard"; it only defers to the sourced setter, whose own
+          // ops.heavy_build_classification call is authoritative and fail-closed.
+          // A correction (an existing disposition moving to required) and an
+          // initial required never consult the classifier.
+          if (args.disposition === "not_required" && !work.shape_disposition) {
+            const classified = (await c.query(
+              `select * from ops.classify_sourced_work_request_build($1::text,$2::integer,$3::text,$4::jsonb,$5::jsonb)
+                 /* work-shape:classify-initial-not-required */`,
+              [work.ref, Number(args.base_version), "", "[]", "{}"],
+            )).rows[0];
+            if (classified && classified.tier !== "standard")
+              throw new ToolError({ error: "heavy_build_shape_required", work_request: work.ref, work_request_version: Number(work.version),
+                classification_reasons: Array.isArray(classified.reasons) ? classified.reasons : [],
+                resolution: "an intrinsically heavy sourced Work Request needs a Work Shape; set the disposition to required, then write the evidence-backed Work Shape" });
+          }
+          updated = (await c.query(
             `select * from ops.set_sourced_work_request_shape_disposition($1,$2,$3,$4,$5,$6,$7)`,
             [work.ref, Number(args.base_version), args.disposition, fixedSurface, args.rationale.trim(), actor.id, args.idempotency_key],
-          )).rows[0]
-          : (await c.query(
+          )).rows[0];
+        } else {
+          updated = (await c.query(
             `update ops.work_request set shape_disposition=$2, shape_fixed_surface_ref=$3, shape_rationale=$4, shape_decided_by_actor_id=$5, shape_decided_at=now(), updated_at=now(), version=version+1 where id=$1 returning *`,
             [work.id, args.disposition, fixedSurface, args.rationale.trim(), actor.id],
           )).rows[0];
+        }
         await writeEvent(c, actor, "set-work-shape-disposition", "ops_work_request", work.id, {
           field: "implementation_shape_disposition",
           old: { disposition: work.shape_disposition || null, fixed_surface_ref: work.shape_fixed_surface_ref || null, rationale: work.shape_rationale || null },
@@ -247,12 +282,22 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
       handler: async (c, actor, args) => withEnvelope(c, actor, "write-work-shape", args, async () => {
         const validation = shapeDecisionError(args);
         if (validation) throw new ToolError(validation);
-        const work = (await c.query(`select id, ref, title, state, version, shape_disposition, shape_fixed_surface_ref, shape_rationale from ops.work_request where ref=$1 or id::text=$1 limit 1 for update`, [args.work_request])).rows[0];
+        const work = (await c.query(`select id, ref, title, state, version, capture_idempotency_key, shape_disposition, shape_fixed_surface_ref, shape_rationale from ops.work_request where ref=$1 or id::text=$1 limit 1 for update`, [args.work_request])).rows[0];
         if (!work) throw new ToolError({ error: "work_request_not_found", work_request: args.work_request });
         if (!PREBUILD_STATES.has(work.state))
           throw new ToolError({ error: "work_shape_frozen", work_request: work.ref, state: work.state, allowed_states: [...PREBUILD_STATES] });
         if (work.shape_disposition !== "required")
           throw new ToolError({ error: "work_shape_not_required", work_request: work.ref, shape_disposition: work.shape_disposition || null, resolution: "set the Work Request shape disposition to required against a fresh base version before writing analysis" });
+        // A sourced Shape needs the EFFECTIVE receipt-backed required disposition
+        // (original receipt or its forward correction) exactly current for this
+        // version, not merely the column; the database trigger enforces the same
+        // rule on insert. Unsourced requests keep the column check above.
+        if (work.capture_idempotency_key) {
+          const lineage = await sourcedDispositionLineage(c, work.id);
+          if (!lineage || lineage.backs_current_version !== true || lineage.effective?.disposition !== "required")
+            throw new ToolError({ error: "work_shape_not_required", work_request: work.ref, shape_disposition: work.shape_disposition || null, disposition_lineage: lineage,
+              resolution: "the sourced required disposition must be receipt-backed for the current Work Request version; record or correct it through set-work-shape-disposition first" });
+        }
         if (Number(args.work_request_base_version) !== Number(work.version))
           throw new ToolError({ error: "work_request_version_conflict", current_version: Number(work.version), work_request_base_version: Number(args.work_request_base_version), resolution: "re-read the Work Request and reassess its implementation shape; never attach reasoning based on stale requirements" });
         const current = (await c.query(`select * from ops.work_shape_revision where work_request_id=$1 order by version desc limit 1`, [work.id])).rows[0];

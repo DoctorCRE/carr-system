@@ -82,6 +82,7 @@ run_canary() {
 
 if [ "${1:-}" = "--preflight" ]; then
   required=(
+    ops/seat-health.py ops/seat_health.py
     ops/vault-drift-watch.py bin/schema-snapshot.sh ops/p1-environment-gate.py
     ops/p1-rebuild-gate.py ops/p1-integration-gate.py pipelines/cadence_engine.py
     pipelines/availability_matcher.py ops/fetch-allowlist.py
@@ -89,7 +90,8 @@ if [ "${1:-}" = "--preflight" ]; then
     ops/vendor-level-drift-check.py bin/backup-dump.sh bin/archive-calendar.sh
     bin/sync-settings.sh bin/type-check.sh ops/store-markup-scan.py
     generators/build-open-items-dashboard.py ops/nightly-verb-probe.py
-    bin/smoke-and-record.sh tools/ops-record.py
+    bin/smoke-and-record.sh tools/ops-record.py ops/staging-observed-prune.py
+    tools/health-check.py ops/jev_spend_health.py ops/grok_session.py
     # bin/routine-canonical-seam-refusal.sh came off this list on 2026-08-23: the
     # chain stopped launching it when the refusals became tombstones, and a
     # preflight that requires a file no step runs is checking the wrong thing.
@@ -124,6 +126,18 @@ else
 fi
 LOG="$REPO/out/nightly.log"
 mkdir -p "$REPO/out"
+
+# ── WHERE THIS RUN'S LINES BEGIN, so the trim below cannot eat them ──────────
+# The rolling trim at the end of carr_chain_exit keeps the last 2000 lines, and
+# its comment used to say that was "several months". It is not: one chain now
+# emits well over 2000 lines on its own, so the trim was deleting the FIRST half
+# of the very run that had just written it. Measured 2026-09-15: the whole log
+# held 36 timestamped lines, all from 07:14Z onward, and the exports step at
+# 07:05Z — the step that had failed twelve nights running — was gone before
+# anyone could read why. A chain that destroys its own diagnostics is worse than
+# one that keeps none, because the green-looking remainder reads as the whole run.
+LOG_START_LINES=0
+[ -f "$LOG" ] && LOG_START_LINES="$(wc -l < "$LOG" | tr -d ' ')"
 
 say() { print -r -- "$(date -u '+%Y-%m-%dT%H:%M:%SZ')  $*" >> "$LOG"; }
 
@@ -205,6 +219,24 @@ carr_chain_exit() {             # carr_chain_exit <exit-status>
     print -r -- "nightly receipt: died_before_completion=1 exit=$rc"
     print -r -- "nightly result: chain_failed"
   fi
+  # ── KEEP THIS RUN'S OWN LOG BEFORE THE ROLLING TRIM ────────────────────────
+  # Here rather than at the foot of the script because the foot is only reached
+  # by a chain that completes, and a chain that DIES is exactly the one whose
+  # log is worth keeping. carr_chain_exit runs on both paths.
+  local runlog_dir="$REPO/out/nightly-runs"
+  mkdir -p "$runlog_dir" 2>/dev/null || true
+  if [ -f "$LOG" ] && [ -d "$runlog_dir" ]; then
+    tail -n "+$(( LOG_START_LINES + 1 ))" "$LOG" \
+      > "$runlog_dir/nightly-$(date -u '+%Y%m%dT%H%M%SZ').log" 2>/dev/null || true
+    # Last 14 runs. Bounded on purpose: the point is diagnosing the last two
+    # weeks of nightlies, not keeping an archive nobody prunes.
+    ls -1t "$runlog_dir"/nightly-*.log 2>/dev/null | tail -n +15 | while read -r stale; do
+      rm -f "$stale"
+    done
+  fi
+  # Keep the rolling log from growing without bound. The per-run archive above
+  # is what a diagnosis reads; this file is the recent-history tail.
+  tail -n 2000 "$LOG" > "$LOG.trim" 2>/dev/null && mv "$LOG.trim" "$LOG"
   [ "$LOCK_HELD" -eq 1 ] && carr_release_lock
   return 0
 }
@@ -243,6 +275,12 @@ carr_load_routine_db_env CARR_DB_JOBS_URL CARR_DB_EXPORTER_URL CARR_DB_BACKUP_UR
 # variable here is what lets that graceful path be reached at all: the callee's
 # fallback cannot run if dereferencing the variable kills the caller first.
 CARR_DB_BACKUP_URL="${CARR_DB_BACKUP_URL:-}"
+# The portability mirror binds the exporter capability (see its step below) and
+# needs the same treatment for the same reason: ops/nightly-tombstone-selftest.py
+# runs this chain with a stripped environment, and an unset variable under set -u
+# aborts the whole run before any step can report — which is the failure the
+# paragraph above exists to prevent, not a second one.
+CARR_DB_EXPORTER_URL="${CARR_DB_EXPORTER_URL:-}"
 
 rc_total=0
 # LAST_STEP_RC carries the outcome of the step that just ran (0 = OK, 78 = SKIP,
@@ -697,6 +735,36 @@ tombstone "environment integration proof" \
   "admin capability — the same rehearsal lane the rebuild proof above cannot open" \
   "an admin credential is provisioned here and ops/p1-integration-gate.py is restored to this line"
 
+# ── THE ENFORCEMENT STACK'S OTHER COST: DISK (2026-08-27) ────────────────────
+# On 2026-08-27 out/staging-observed held 152 orphaned temp files over 1MB
+# apiece (~3.2GB) beside per-session observation files, one of them 110MB. The
+# disk filled and no new worktree could be created — a hard stop on every
+# session on this Mac, not a slow morning.
+#
+# hooks/staging-observation-tracker.py now sweeps abandoned temps before each
+# of its own writes and bounds its state files in bytes. That handles the
+# machine while sessions are running on it and cannot handle anything else: a
+# hook only runs while a session runs, so the state file of a session that has
+# ENDED is precisely the one nothing will ever touch again. Reaping by
+# absence-of-activity is a question only something outside the sessions can
+# ask, which is why it is a line here and not more code in the hook.
+#
+# IT RUNS HERE, AHEAD OF EVERYTHING THAT WRITES, and the position is the point.
+# The first cut of this put it beside the hook telemetry rollup near the bottom,
+# on the reasoning that both price the enforcement stack — one in latency, one
+# in bytes. That is a tidy grouping and it is the wrong order: the encrypted
+# backup is the LAST step and it writes a dump, so a full disk fails the backup
+# and then frees 3.2GB immediately afterwards. Reclamation belongs before the
+# steps that need the space, not beside the report it rhymes with.
+#
+# NO NEW SCHEDULED JOB, same argument the rollup makes: one more step on a chain
+# that is already awake. It exits 0 whether or not it removes anything — a
+# housekeeping step that reddens the chain is a check people learn to skip.
+step "staging-observed prune (temp orphans + idle sessions)" \
+    ./.venv/bin/python ops/staging-observed-prune.py
+
+step "daily AI seat health" ./.venv/bin/python ops/seat-health.py
+
 # ── ORDER 14: the two writing steps, BEFORE the exports ──────────────────────
 # The cadence engine WRITES (next_action + event), so the read-only exporter
 # credential above cannot run it. Both steps look for CARR_DB_JOBS_URL first
@@ -772,7 +840,28 @@ step "fetch allowlist (client domains -> guard)"     ./.venv/bin/python ops/fetc
 # the cutoff. The seventh was a markdown render, retired with the other 38 and
 # counted as a survivor by mistake. The retired renders stay retired: each still
 # prints RETIRED here rather than being rewritten.
-step "exports (6 targets -> OneDrive)" env CARR_EXPORT_LIVE=1 ./run.sh export
+#
+# ── PRE-PUBLISH WAKE (defect: nightly.exports failed 9/22, 9/23, 9/24; on 9/24
+# it consumed the FULL 1800s exports wall-clock with zero partial output — see
+# out/nightly-runs/nightly-20260924T080221Z.log). Jev at 0.71: the OneDrive
+# File Provider idling overnight. ops/onedrive-prepublish-wake.py does one
+# single-attempt stat+small-read per live export target, bounded ONLY by its
+# own short external wall-clock (see bin/step-timeout.zsh), so a fully dark
+# provider costs at most that budget here rather than eating into the exports
+# step's own, much larger, wait_for_provider() budget below. A cold read here
+# is not a failure and never blocks the exports step from running.
+step "onedrive pre-publish wake" ./.venv/bin/python ops/onedrive-prepublish-wake.py
+#
+# CAFFEINATE (same defect). Runs the exports step under `caffeinate -i -s` so
+# this Mac cannot drop into an idle/system sleep state DURING the publish
+# window — the 02:05 launchd fire lands ten minutes into a scheduled dark
+# wake (see wait_for_provider()'s own header in exporters/common.py), and an
+# idle-related sleep transition mid-publish is exactly the kind of thing that
+# would leave the File Provider unresponsive with no error to catch. `-i`
+# prevents idle sleep, `-s` prevents system sleep while on AC power; both end
+# the instant this one command exits, so nothing outside this step is held
+# awake by it.
+step "exports (6 targets -> OneDrive)" caffeinate -i -s env CARR_EXPORT_LIVE=1 ./run.sh export
 EXPORTS_RC=$LAST_STEP_RC
 
 # CUTOVER READINESS (Phase 1, 2026-08-13, August 21 cutover). Right after the
@@ -975,6 +1064,58 @@ step "rule-admission drift (reports, never admits)" ./.venv/bin/python ops/rule-
 # contract as its siblings: 0 whether or not it finds a miss, 78 = SKIP.
 step "rule-delivery shadow (reports, never scopes)" ./.venv/bin/python ops/rule-delivery-shadow-watch.py
 
+# CREDENTIAL HEALTH, added 2026-09-24. Joe is replacing every interactive login
+# CARR depends on with a long-lived scoped token, so the daily question is no
+# longer "did somebody re-authenticate" but "is each credential still good, and
+# how long until it isn't". ops/credential-health.py probes every credential in
+# ops/config/credential-inventory.v1.json (exit status / HTTP status only, never
+# a command's output or a response body beyond one named non-secret field),
+# writes out/credential-health.jsonl, and on a failed or expiring_soon finding
+# files exactly one deduplicated CARR loop per credential through
+# `./run.sh call add-loop` — the SAME finding-channel a human reading
+# `run.sh health` sees under tools/health-check.py's `credentials` section.
+#
+# --nightly IS THE POINT OF THIS COMMENT. Without it this step would exit
+# nonzero on every ordinary finding and redden the whole night for something
+# the loop it just filed already says — the exact "an alarm that fires every
+# day trains people to stop reading alarms" failure the four report-only steps
+# above this one were each written to avoid, and the same shape as
+# ops/rule-admission-drift.py: 0 on a finding, nonzero reserved for the lane
+# itself being unable to run (its inventory unreadable, or zero credentials
+# configured — a real defect, not a credential going stale).
+#
+# THE CREDENTIAL BOUNDARY (bin/routine-credential-env.sh's carr_routine_exec,
+# which every step runs through) strips the child process down to
+# HOME/PATH/LANG/TMPDIR plus the two named database capabilities — never a
+# broader ambient credential set, by design (see that file's own header). An
+# earlier version of this lane read NEON_API_KEY, CARR_MCP_PROBE_TOKEN and
+# CARR_MCP_LOCAL_TOKEN straight from os.environ, so all three read `unknown`
+# under every nightly run and a genuine finding on any of them would have
+# gone unfiled forever (independent review, PR #1218, blocked at aa435a54).
+# Fixed: those three probes now read their tokens file-first, the same way
+# cloudflare-deploy-token and claude-cli-oauth-token-studio always have —
+# straight off their dotenv files in ~/.config/carr/db.env and
+# ~/.config/carr/mcp-tokens.env via HOME, which IS in the stripped set — and
+# fall back to the (here, absent) environment variable only when the file
+# itself doesn't exist. All five file-backed credentials are therefore
+# checked for real under this boundary now; only a credential with no `path`
+# configured at all in the inventory, or one Joe hasn't provisioned as a file
+# on THIS machine yet, can still read `unknown` here — and that unknown now
+# files its own deduplicated loop too, whenever the file it names IS present
+# but couldn't be verified, so a never-checked credential can't stay silent.
+# `run.sh health` run by hand carries the fuller ambient environment and
+# reads all eleven credentials the same way; this nightly step is the same
+# lane, not a second implementation of it.
+step "credential health (reports, never rotates; loops on a finding)" \
+     ./.venv/bin/python ops/credential-health.py --nightly
+
+step "Monthly system cost view and spike loops" \
+     ./run.sh costs --publish --alerts
+
+# Authentication readback only; no model work and no interactive login.
+step "Grok authentication health" \
+     ./.venv/bin/python tools/health-check.py --section grok-session
+
 step "encrypted backup -> R2"                        env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh
 # CAPTURED HERE, ON THE NEXT LINE, AND THAT IS THE WHOLE POINT (fixed 2026-08-23).
 # This assignment used to sit at the bottom of the portability mirror below, so
@@ -1035,9 +1176,31 @@ BACKUP_RC=$LAST_STEP_RC
 # and swallows the rest of the file. It parsed as an unmatched brace 200 lines
 # later, which is a long way from the cause.
 portability_root="${CARR_EXPORT_HOME:-}"
-[ -n "$portability_root" ] || portability_root="/Users/booko/Library/CloudStorage/OneDrive-CARR,Inc/Joe's Folder/CARR AI"
+[ -n "$portability_root" ] || portability_root="$HOME/Library/CloudStorage/OneDrive-CARR,Inc/Joe's Folder/CARR AI"
+# THE CAPABILITY THIS STEP WAS PINNED TO IS ONE NO AGENT MAY EVER HOLD, so the
+# step deleted itself quietly. carr_backup's password is deliberately a value
+# nothing here can possess — migration 0119 says so in capitals ("THE PASSWORD IS
+# NOT IN THIS FILE AND NOBODY HAS EVER SEEN IT") because that role's purpose is
+# the GitHub-Actions pg_dump, whose secret lives in Actions and not on this Mac.
+# So CARR_DB_BACKUP_URL is absent from ~/.config/carr/db.env, doctrine_mirror.py
+# exited 78 on it every night from 2026-08-16, and 78 is the house SKIP contract,
+# which reads as "nothing to do" rather than as a step that has not run in two
+# weeks. INC-20260817-01 stayed open the whole time.
+#
+# THE MIRROR IS A RENDER, NOT A DUMP. It reads the doctrine database and writes
+# markdown and csv — the same shape as the six business exports a few steps
+# above, which is why the exporter capability fits it and the backup capability
+# was only ever incidental.
+#
+# AND THE EXPORTER ROLE IS STRICTLY NARROWER, measured against production rather
+# than argued: over public+ops, app_exporter_local can SELECT 236 relations and
+# carr_backup 459; relations the exporter can read that the backup role cannot is
+# ZERO, the reverse is 223, and the exporter holds no non-SELECT grant anywhere.
+# ops/routine-credential-boundary-selftest.py holds that ceiling and was updated
+# in this same commit, because the check it was making pinned a variable NAME
+# where its stated intent was a privilege LIMIT.
 step "portability mirror (md+csv, 2 locations)" \
-  env DATABASE_URL="$CARR_DB_BACKUP_URL" .venv/bin/python pipelines/doctrine_mirror.py \
+  env DATABASE_URL="$CARR_DB_EXPORTER_URL" .venv/bin/python pipelines/doctrine_mirror.py \
     --out "$portability_root/Backups/portability-mirror" \
     --also "$HOME/carr-system/out/mirror"
 # NO BACKUP_RC HERE ANY MORE — it is captured beside the encrypted backup above,
@@ -1053,6 +1216,34 @@ step "portability mirror (md+csv, 2 locations)" \
 # Shortcuts drop files, so archiving survives a dead Shortcut. Exit 78 = SKIP
 # when ~/.config/carr/calendar.env is absent, same contract as the other steps.
 step "calendar archive (both partners' feeds)"       ./bin/archive-calendar.sh
+
+# The archive is a participant-stripped schedule, not meeting-touch evidence.
+# Use the attendee-aware EventKit capture after the live contact exports above.
+# Unknown attendees remain queued separately; exact write failures fail the step.
+step "calendar meetings to touches (EventKit)" \
+  ./bin/calendar-eventkit-capture.sh --days 7
+
+# MAIL, loop #169. The calendar lane proves a meeting happened; most follow-up
+# never becomes one, so a calendar-only view of the relationship sees a fraction
+# of the real contact. That gap is why vendor touch coverage sat at 0.7%.
+#
+# WHY IT LIVES IN THIS CHAIN RATHER THAN A 25TH LAUNCHD AGENT. The row asked for
+# "launchd, weekly is enough", written before the scheduler cutover. Recurrence
+# is moving to ONE adapter (loop #532), and this file's own scheduled-task note
+# says anything the chain gains in future goes inside bin/nightly.sh. Apple Mail
+# is a LOCAL store the cloud tick cannot reach, so the local edge is right and a
+# new scheduler is not. Daily also beats the weekly the row settled for.
+#
+# NEITHER STEP WRITES TO THE RECORD. The extractor emits envelope metadata only,
+# never message bodies (decision 745ab4aa admits derived facts); the matcher
+# emits proposals to out/mail-matched.json. Exit 78 = SKIP when Mail is not
+# running, because launching Joe's mail client at 02:05 with nobody at the
+# machine is a side effect no capture is worth.
+step "mail capture (extract + match, writes nothing)" ./bin/mail-capture.sh
+
+# Consume canonical local contact activities. The Worker records stage evidence
+# and prepares human-send-only drafts; this step has no mail send operation.
+step "lead stages (evidence and approval drafts)" python3 ./bin/lead-stage-job.py
 
 # Added 2026-08-12 (Joe's go, "put settings in the repo"): mirror the Claude Code
 # permission surface — the three settings.json files carrying the allow list, the
@@ -1091,6 +1282,16 @@ step "type-check tripwire (mypy)"                    ./bin/type-check.sh
 # Read-only (exporter role) and reports only; repair needs the absorbed text read
 # first and each parameter returned to its own field, per row.
 step "tool-call markup sweep (records)"              ./.venv/bin/python ops/store-markup-scan.py
+
+# Added 2026-08-25 (loop #314's named work). tools/check.sh verifies code
+# integrity (every manifest.tsv row clean vs HEAD), canonical export receipts,
+# and the manifest-governed runtime fork. It is read-only. Both of its
+# historical blockers are gone: the twin-copy SPLIT retired as an intentional
+# runtime fork (manifest-governed) and export receipts are current. A chronically
+# red check detects nothing; it is green today and wired so a new drift is seen
+# by the chain that runs every night, not only by a session that remembers to
+# run it.
+step "code integrity (manifest rows vs HEAD)"        ./tools/check.sh
 
 # The legacy one-page file is recovery-only. Normal dashboard delivery is the
 # record-native Front Door composition (today-triage, deal-room-board, and
@@ -1214,6 +1415,19 @@ step "healthchecks dead-man pings"               ./bin/hc-ping.sh
 # cleared by 09:06 rather than by the next night.
 step "incident assessment (latest run of every job)"  ./.venv/bin/python tools/ops-record.py assess --environment production
 
+# ── PR-NAMED RECOVERY EVIDENCE (WR-000019 slice S1, Obedience & Autonomy,
+# 2026-08-27) ─────────────────────────────────────────────────────────────
+# A merged PR naming an INC-<id> in its title or body is itself evidence the
+# fix shipped, and until this step existed nothing carried that fact onto the
+# incident row — recovery_evidence_ref stayed null until a human typed it in
+# at close time. Same boundary as the assessment step just above: carr_jobs
+# already holds 0117's grant on recovery_evidence_ref and nothing more, so this
+# can attach evidence and structurally cannot resolve, reclassify, or theorise
+# about the incident it attaches to. `resolve`/`sweep` remain the only close
+# path. --since-hours 36 overlaps this step's own ~24h cadence on purpose, so
+# a PR merged just before or after midnight is never missed by a boundary.
+step "pr recovery evidence (merged PRs -> incident evidence)"  ./.venv/bin/python tools/ops-record.py pr-evidence --since-hours 36
+
 # WHAT IS LEFT FOR A HUMAN. 0293 closes recovered lower-severity collector
 # incidents from their own three-run evidence. It deliberately does not touch:
 #
@@ -1249,6 +1463,34 @@ tombstone "incident sweep" \
 # NO NEW SCHEDULED JOB: this is the council's "piggyback on what already runs",
 # and one more step on a chain that is already awake is the whole cost.
 step "hook telemetry rollup (reports, never retires)"  ./.venv/bin/python ops/hook-telemetry-rollup.py --days 7
+
+# ── RULE REPLAY + WEEKLY RE-SORT (WR-000019 slice S12, Obedience & Autonomy,
+# 2026-08-27) ─────────────────────────────────────────────────────────────
+# The measurement loop that makes the 219-rule rulebook a MANAGED population
+# rather than a fixed one. Every night, ops/rule-replay-nightly.py scores the
+# prior day's real transcripts for this repo against the rules that were live
+# for each turn -- reusing hooks/rule-pack-preuse-reselection.py's own
+# trigger matcher and ops/gate-lifecycle-report.py's own read_rows()/
+# is_true_positive() rather than a second copy of either. It writes one row
+# per (session, fired rule-signal) plus a summary row to
+# out/rule-replay-nightly.jsonl, and stages -- never files -- defect
+# proposals to out/rule-replay-defect-proposals.jsonl for the two named
+# failure-class signatures (shadow writing-check findings, materially
+# under-delegated sessions); a human morning session reviews and files them
+# through record-defect with its own fresh idempotency_key, same reasoning
+# as this file's own "WHAT IS LEFT FOR A HUMAN" note two steps up.
+step "rule replay (nightly transcript scoring, deterministic, reports only)" \
+    ./.venv/bin/python ops/rule-replay-nightly.py --since-hours 24
+
+# The weekly re-sort report reads that ledger plus gate-lifecycle-report.py's
+# own build() (imported, not duplicated) plus the JIT shadow ledger, and
+# proposes exact ops/config/rule-triage.v1.json / gate-lifecycle.json edits
+# for a PR -- nothing here self-applies. The Monday-only cadence is guarded
+# INSIDE the script itself (same convention bin/notes-sweep-post.sh's own
+# business-hours guard uses), so this step call is unconditional every
+# night and a non-Monday run prints SKIP and exits 0.
+step "rule re-sort (weekly proposals: gate/jit/core moves, reports only)" \
+    ./.venv/bin/python ops/rule-resort-weekly.py --days 7
 
 if [ "$seam_blocked" -gt 0 ]; then
   say "===== $seam_blocked step(s) BLOCKED on a missing canonical seam — not counted as failures ====="
@@ -1298,6 +1540,6 @@ else
   print -r -- "nightly result: chain_failed"
 fi
 
-# Keep the log from growing without bound: last 2000 lines is several months.
-tail -n 2000 "$LOG" > "$LOG.trim" && mv "$LOG.trim" "$LOG"
+# The trim moved into carr_chain_exit, which runs on the dead path too, and it
+# now happens AFTER this run has been archived to out/nightly-runs/.
 exit "$rc_total"

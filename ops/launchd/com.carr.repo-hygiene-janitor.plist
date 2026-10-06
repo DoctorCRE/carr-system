@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- doctrine: repo-hygiene-program-build-plan -->
+  <!-- DEFINITION ONLY. This agent is deliberately not installed and not loaded.
+       It is listed in DEFINITION_ONLY in lib/launchd_hold.py, so `install`
+       skips it by name and `check` accepts its absence from the machine as the
+       intended state while refusing any copy that turns up in LaunchAgents.
+
+       WHY THE DEFINITION EXISTS AT ALL, given that nothing runs it: the janitor
+       plans branch, registered-helper-worktree and cache cleanup, and a
+       scheduled cleanup is exactly the shape that should be reviewed as source
+       before it is reviewed as a running job. Writing the schedule down now,
+       inert, is what lets a later reviewer read the cadence, the arguments and
+       the log path rather than being handed them at activation time. Activation
+       is a separate reviewed live-effect packet and is not granted here. -->
+  <key>Label</key><string>com.carr.repo-hygiene-janitor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>repo-hygiene-janitor</string>
+    <string>launchd.run</string>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/tools/repo-hygiene-janitor.py</string>
+    <!-- The execute flag is absent, and its absence is the point rather than an omission.
+         The janitor plans and reports by default; mutation additionally needs
+         this flag, a non-empty CARR_REPO_HYGIENE_EFFECT_PACKET naming a
+         separately reviewed live-effect packet, and a repository that is not
+         the canonical checkout. Even if this definition were installed and
+         loaded by hand, the job it describes would still only census and
+         report; three independent keys stand between this file and a
+         deletion, and this file holds none of them. -->
+    <string>--repository</string>
+    <string>{{REPO}}</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <!-- NO CADENCE AND NO TRIGGER. RunAtLoad is false and there is deliberately
+       no StartCalendarInterval, no StartInterval and no WatchPaths, so this
+       agent has no moment at which it would fire. A cadence belongs to the
+       activation packet that reviews the live effect, not to the source change
+       that writes the definition down; a plist that carried one would be a
+       schedule waiting for a single `launchctl load` rather than a document. -->
+  <key>RunAtLoad</key><false/>
+  <!-- A log path from the first line, because an unwrapped job whose output
+       goes nowhere fails silently: launchd discards output when neither path
+       is set, and a janitor that quietly never ran looks exactly like a janitor
+       that ran and found nothing. Both streams share one file so a reader can
+       see which output preceded a failure. -->
+  <key>StandardOutPath</key><string>{{REPO}}/out/repo-hygiene-janitor.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/repo-hygiene-janitor.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/opt/node@22/bin:/opt/homebrew/opt/libpq/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

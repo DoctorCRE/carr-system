@@ -1,0 +1,39 @@
+{
+  "base_sha": "f5e441150b19a3cf9dba234008f06a7f465416c6",
+  "measured_at": "2026-10-04T18:58:45+00:00",
+  "boards": 28,
+  "project_boards": 27,
+  "cards_with_pr": 591,
+  "before": {
+    "calls": 243,
+    "graphql": 243,
+    "pr_view": 236,
+    "note": "Executed original renderer on copies of live board JSON with recording GitHub adapter; requests counted without consuming the depleted GraphQL pool."
+  },
+  "cold": {
+    "calls": 483,
+    "graphql": 0,
+    "breakdown": {
+      "pull_detail": 93,
+      "check_runs": 93,
+      "other_rest": 297
+    },
+    "failed_card_or_repo_reads": 0,
+    "elapsed_seconds": 186.67
+  },
+  "warm": {
+    "calls": 117,
+    "graphql": 0,
+    "breakdown": {
+      "pull_detail": 36,
+      "check_runs": 29,
+      "other_rest": 52
+    },
+    "failed_card_or_repo_reads": 0,
+    "elapsed_seconds": 48.59
+  },
+  "scope": "One in-process sweep of every live project board and all-repos; PR/discovery reads only, release probes disabled in both versions. Temporary copies; no publication or record-layer calls.",
+  "recorded_board_pr_identities": 292,
+  "legacy_terminal_identities": 247,
+  "legacy_terminal_pr_queries": []
+}

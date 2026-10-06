@@ -20,6 +20,9 @@ concurrency:
   group: carr-overnight-merge-pilot
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   plan:
     name: Plan against current GitHub evidence
@@ -92,7 +95,8 @@ jobs:
     needs: plan
     if: ${{ needs.plan.outputs.eligible == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Keep the independent full-strict verification ceiling aligned with CI.
+    timeout-minutes: 30
     permissions:
       contents: read
     outputs:

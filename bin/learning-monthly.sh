@@ -29,6 +29,8 @@ mkdir -p "$REPO/out" "$LEARN_DIR"
 # leak into either child clause merely because a caller still has one mounted.
 unset CARR_VAULT
 
+. "$REPO/bin/routine-credential-env.sh"
+carr_require_sourceable_db_env "learning-monthly" || exit $?
 [ -f "$HOME/.config/carr/db.env" ] && { set -a; . "$HOME/.config/carr/db.env"; set +a; }
 jobs_url="${CARR_DB_JOBS_URL:-}"
 unset DATABASE_URL CARR_DB_WRITER_URL CARR_DB_OWNER_URL CARR_DB_CADENCE_URL CARR_IMPORT_DB_URL
@@ -47,21 +49,10 @@ rc=0
 ./.venv/bin/python pipelines/learning_jobs.py monthly-chain \
   --report-dir "$LEARN_DIR" >> "$LOG" 2>&1 || rc=$?
 
-# CORRECTIONS SWEEP (loop #113, added 2026-08-13). The rule store had a rich output
-# path and no INPUT path except a session noticing in the moment and remembering to
-# call `teach`. This looks for corrections Joe has had to make MORE THAN ONCE, which
-# is the clearest possible signal that a rule is missing.
-#
-# IT LIVES HERE RATHER THAN IN A SCHEDULED SESSION on the cost model loop #177
-# settled: a script costs nothing and a session costs tokens, so anything mechanical
-# belongs in a chain like this one. It PROPOSES only — it never calls `teach`, and a
-# proposal binds nobody until Joe says yes.
-#
-# Its exit code is deliberately not checked: a sweep that finds nothing is a normal
-# month, and a broken sweep must not take the learning chain down with it.
+# Evidence stays outside the checkout; the log reports collection and review gaps.
 ./.venv/bin/python ops/corrections-sweep.py \
-  > "$REPO/out/Learning/corrections-sweep-$(date -u +%Y%m).md" 2>> "$LOG" \
-  && say "corrections sweep written to out/Learning/corrections-sweep-$(date -u +%Y%m).md" \
+  >> "$LOG" 2>&1 \
+  && say "correction corpus collected privately — coverage and review gaps are in $LOG" \
   || say "corrections sweep did not complete — see $LOG (chain continues)"
 
 # 3 = at least one clause read a tier that could not answer it and SAID SO in

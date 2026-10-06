@@ -183,8 +183,12 @@ def main() -> int:
         sel = f'"{pk}"::text' if pk else "'(no pk)'"
         hist = HISTORICAL_SQL.get(table)
         hist_sel = f"({hist})" if hist else "false"
+        # No LIMIT. A capped, unordered fetch returned an arbitrary subset, so a
+        # column holding more mentions or audit rows than the cap could hide a
+        # live-damage row and still print "LIVE RECORDS: OK". Every match is
+        # fetched; only the printed lists are abbreviated below.
         q = (f'select {sel}, "{column}", {hist_sel} from "{table}" where '
-             + like.format(col=f'"{column}"') + " limit 50")
+             + like.format(col=f'"{column}"'))
         try:
             cur.execute(q, params)
         except Exception as e:  # a view or permission we cannot read

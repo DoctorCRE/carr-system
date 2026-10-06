@@ -3,6 +3,10 @@
   "contract": "drive-dependencies",
   "binary_exclusions": [
     {
+      "path": "mcp-server/assets/*.ttf",
+      "reason": "pinned OFL font binaries embedded by the deterministic Tour PDF renderer"
+    },
+    {
       "path": "claude-tree/skills/write-content/graphics/assets/*.png",
       "reason": "versioned raster brand assets"
     },
@@ -15,20 +19,8 @@
       "reason": "versioned application icons"
     },
     {
-      "path": "deliverables/hughes-pretour-2026-08-19/src.zip",
-      "reason": "versioned source archive accompanying a rendered deliverable"
-    },
-    {
-      "path": "deliverables/hughes-pretour-2026-08-19/tour-route.jpg",
-      "reason": "versioned route image accompanying a rendered deliverable"
-    },
-    {
       "path": "deliverables/instagram-grid-reset-2026-08-11/rendered/*.png",
       "reason": "versioned rendered deliverables"
-    },
-    {
-      "path": "deliverables/pensacola-industrial-pretour-2026-08-20/pensacola-industrial-pretour.pdf",
-      "reason": "versioned rendered deliverable"
     },
     {
       "path": "roadmap-revisions/*.docx",
@@ -45,6 +37,34 @@
     {
       "path": "tools/doc-voice/reference/*.wav",
       "reason": "versioned voice reference audio"
+    },
+    {
+      "path": "plugins/pstack/assets/logo.png",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/design.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/overnight.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/recipes.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/router.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/understanding.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/verification.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
     }
   ],
   "entries": [
@@ -66,7 +86,7 @@
         "normal_path": "normal_path_repointed_to_record_mcp_reader",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "bin/local-briefs.sh gates the Drive render behind an explicit --recovery flag (line 39); the normal path reads the morning-brief composite."
       }
     },
@@ -88,8 +108,8 @@
         "normal_path": "normal_path_refuses_missing_canonical_seams",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
-        "verified": "bin/nightly.sh refuses every remaining Drive projection on the normal path. Exercised live 2026-08-22: 13 steps logged BLOCKED and none touched Drive. Now ONE, and every step that left did so for a recorded reason rather than by being bypassed. The exports gained a canonical destination (CARR OneDrive, decision bdbb7441). The section index and the system graph were found already reading the store and writing inside the repository, refusing only because the wrapper still called them Drive projections; both were run on the normal path first and exited 0. Four retired outright because what they acted on is gone: cutover readiness verified compiled-rules markdown the cutoff retired, the vault drift watch at both ends guards a vault with no writers and no tracked files left, and the settings mirror had already declared itself retired in its own header with config-as-code owning the hooks block. The portability mirror joined them on 2026-08-22, repointed to the same OneDrive root as the exports; it wrote to two places and only the Drive half had died, so a live second copy under out/mirror had gone quiet with it. Verified by running it: 234 markdown documents, 36 tables, 52,809 rows into OneDrive. It carries a SEPARATE unresolved blocker that repointing does not touch \u2014 the step names CARR_DB_BACKUP_URL, which is absent from this Mac's credential file and is not among the two database URLs the routine boundary passes to children, so it will report NOT CONFIGURED and skip until that credential is provisioned. The remaining five still refuse: upstream corroborate, corpus push, the consumer boards, lead promote, and the graph. The consumer boards and lead promote left on 2026-08-23, and neither needed a destination or a grant: lib/record_sources.pool_reach returned failure as soon as its elevated probe raised, so the exporter view path below it was reachable only when no elevated DSN was configured at all. The routine boundary passes both credentials, the jobs one is refused on candidate_pool and on v_export_pool_all, and the exporter one reads the view with 9,870 rows \u2014 so a working path was skipped and reported as a privilege problem. Verified under the boundary's exact two credentials: lead board 9,868 leads, deal room 172 deals, lead promote 11 candidates, all exit 0. The remaining three refuse: upstream corroborate, corpus push, and the graph. The corpus push left on 2026-08-23 without weakening the retirement: the tool refuses vault-rooted rows itself, on retirement rather than on reachability, because the Drive mount still resolves here and a reachability probe would have rewritten retired renders back into the vault. Twelve home-rooted rows addressing ~/.claude/skills now push on the normal path; forty-two vault rows are held and printed with their reason, and move only inside an opened recovery envelope. Guarded by ops/corpus-push-root-split-selftest.py, which asserts both halves because either alone is satisfied by a version that breaks the other. The remaining two refuse: upstream corroborate and the graph. The graph left on 2026-08-23. Its label said it derived from exported files and it does not: both halves read the store and write out/Graph in the repository. One raw disk read had been left behind \u2014 a listing of DNA/Clients/prospects used to recover the casing of hand-written client dossiers \u2014 and that directory was retired with the vault, so the listing raised and took the graph with it. The client records name those files themselves (23 of 201), so the map is built from the rows. Verified under the routine boundary's credentials: 77 nodes, 1,895 edges, 178 client nodes, exit 0. Only upstream corroborate still refuses, and it waits on an external listing intake rather than on anything in this repository. ONE remains, and it is not a Drive problem at all \u2014 its seam name said 'record-backed pre-entity-watch document destination', which describes the output and sent two readers hunting for somewhere to write. Corrected 2026-08-23. Upstream corroborate joins seven weak signal families and needs weight 3 across at least two classes before it names anyone. Those seven files are built by five scripts under pipelines/radar and, checked that day, not one of the five is called by the chain, by ops/ or by run.sh. They consume externally acquired datasets \u2014 a quarterly CMS provider-enrolment extract, a licensing file filtered in browser memory so the raw statewide file never touches disk \u2014 and both DELETE their input immediately after running, because it identifies real practitioners. That discard rule is a deliberate privacy control. Making this step nightly is therefore a decision about acquiring and retaining other people's data, not a wiring task, and it stays refused until someone with the authority to answer that does. HOW IT REFUSES CHANGED ON 2026-08-23, and what it refuses did not. Until then a refused projection was EXECUTED so that it could refuse: the step launched bin/routine-canonical-seam-refusal.sh under the step wrapper, that process exited 69, and step() printed BLOCKED into out/nightly.log. The sentence was the whole product and the process was overhead \u2014 a launch, a wall clock and a ledger row to say something already known before the chain started, every night for weeks, in the same word a real break would use. It is now a TOMBSTONE: the step is gated out before it runs, and one log line names what is missing and what would reopen it. Nothing about the refusal itself moved \u2014 the drive_projection callsites are unchanged, the recovery envelope still runs the real command, and this row's normal_path is still normal_path_refuses_missing_canonical_seams. A reader looking for the word BLOCKED in the nightly log will not find it, and should read the receipt line (blocked=N tombstoned=N timed_out=N) instead."
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
+        "verified": "bin/nightly.sh refuses every remaining Drive projection on the normal path. Exercised live 2026-08-22: 13 steps logged BLOCKED and none touched Drive. Now ONE, and every step that left did so for a recorded reason rather than by being bypassed. The exports gained a canonical destination (CARR OneDrive, decision bdbb7441). The section index and the system graph were found already reading the store and writing inside the repository, refusing only because the wrapper still called them Drive projections; both were run on the normal path first and exited 0. Four retired outright because what they acted on is gone: cutover readiness verified compiled-rules markdown the cutoff retired, the vault drift watch at both ends guards a vault with no writers and no tracked files left, and the settings mirror had already declared itself retired in its own header with config-as-code owning the hooks block. The portability mirror joined them on 2026-08-22, repointed to the same OneDrive root as the exports; it wrote to two places and only the Drive half had died, so a live second copy under out/mirror had gone quiet with it. Verified by running it: 234 markdown documents, 36 tables, 52,809 rows into OneDrive. It carries a SEPARATE unresolved blocker that repointing does not touch — the step names CARR_DB_BACKUP_URL, which is absent from this Mac's credential file and is not among the two database URLs the routine boundary passes to children, so it will report NOT CONFIGURED and skip until that credential is provisioned. The remaining five still refuse: upstream corroborate, corpus push, the consumer boards, lead promote, and the graph. The consumer boards and lead promote left on 2026-08-23, and neither needed a destination or a grant: lib/record_sources.pool_reach returned failure as soon as its elevated probe raised, so the exporter view path below it was reachable only when no elevated DSN was configured at all. The routine boundary passes both credentials, the jobs one is refused on candidate_pool and on v_export_pool_all, and the exporter one reads the view with 9,870 rows — so a working path was skipped and reported as a privilege problem. Verified under the boundary's exact two credentials: lead board 9,868 leads, deal room 172 deals, lead promote 11 candidates, all exit 0. The remaining three refuse: upstream corroborate, corpus push, and the graph. The corpus push left on 2026-08-23 without weakening the retirement: the tool refuses vault-rooted rows itself, on retirement rather than on reachability, because the Drive mount still resolves here and a reachability probe would have rewritten retired renders back into the vault. Twelve home-rooted rows addressing ~/.claude/skills now push on the normal path; forty-two vault rows are held and printed with their reason, and move only inside an opened recovery envelope. Guarded by ops/corpus-push-root-split-selftest.py, which asserts both halves because either alone is satisfied by a version that breaks the other. The remaining two refuse: upstream corroborate and the graph. The graph left on 2026-08-23. Its label said it derived from exported files and it does not: both halves read the store and write out/Graph in the repository. One raw disk read had been left behind — a listing of DNA/Clients/prospects used to recover the casing of hand-written client dossiers — and that directory was retired with the vault, so the listing raised and took the graph with it. The client records name those files themselves (23 of 201), so the map is built from the rows. Verified under the routine boundary's credentials: 77 nodes, 1,895 edges, 178 client nodes, exit 0. Only upstream corroborate still refuses, and it waits on an external listing intake rather than on anything in this repository. ONE remains, and it is not a Drive problem at all — its seam name said 'record-backed pre-entity-watch document destination', which describes the output and sent two readers hunting for somewhere to write. Corrected 2026-08-23. Upstream corroborate joins seven weak signal families and needs weight 3 across at least two classes before it names anyone. Those seven files are built by five scripts under pipelines/radar and, checked that day, not one of the five is called by the chain, by ops/ or by run.sh. They consume externally acquired datasets — a quarterly CMS provider-enrolment extract, a licensing file filtered in browser memory so the raw statewide file never touches disk — and both DELETE their input immediately after running, because it identifies real practitioners. That discard rule is a deliberate privacy control. Making this step nightly is therefore a decision about acquiring and retaining other people's data, not a wiring task, and it stays refused until someone with the authority to answer that does. HOW IT REFUSES CHANGED ON 2026-08-23, and what it refuses did not. Until then a refused projection was EXECUTED so that it could refuse: the step launched bin/routine-canonical-seam-refusal.sh under the step wrapper, that process exited 69, and step() printed BLOCKED into out/nightly.log. The sentence was the whole product and the process was overhead — a launch, a wall clock and a ledger row to say something already known before the chain started, every night for weeks, in the same word a real break would use. It is now a TOMBSTONE: the step is gated out before it runs, and one log line names what is missing and what would reopen it. Nothing about the refusal itself moved — the drive_projection callsites are unchanged, the recovery envelope still runs the real command, and this row's normal_path is still normal_path_refuses_missing_canonical_seams. A reader looking for the word BLOCKED in the nightly log will not find it, and should read the receipt line (blocked=N tombstoned=N timed_out=N) instead."
       }
     },
     {
@@ -110,7 +130,7 @@
         "normal_path": "normal_path_repointed_to_eventkit_record_capture",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "bin/fetch-calendar.sh refuses with MISSING_CANONICAL_SEAM naming the EventKit-to-record capture (line 30) unless --recovery --reason is given. The nightly calendar archive ran OK through EventKit on 2026-08-22."
       }
     },
@@ -132,7 +152,7 @@
         "normal_path": "normal_path_refuses_missing_canonical_seam",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "bin/pull-gmail-calendar.py refuses with MISSING_CANONICAL_SEAM naming the calendar record source (line 491); Drive needs --recovery --reason --recovery-root."
       }
     },
@@ -155,7 +175,7 @@
         "normal_path": "normal_path_repointed_to_repo_document_output",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "bin/learning-weekly.sh and bin/learning-monthly.sh write to $REPO/out/Learning and explicitly unset the inherited vault-root variable, so a Drive root cannot be used."
       }
     },
@@ -177,7 +197,7 @@
         "normal_path": "normal_path_repointed_to_repo_config_as_code",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "bin/sync-settings.sh prints 'normal Drive mirror retired; repository config is canonical' and directs callers to ops/config-as-code.py."
       }
     },
@@ -199,8 +219,8 @@
         "normal_path": "normal_path_delegates_to_scoped_recovery_boundaries",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
-        "verified": "run.sh never sets or exports the vault-root variable \u2014 its only two matches in the inventory are COMMENTS (lines 17 and 103), not code. Each scoped command parses its own explicit recovery boundary instead. Verified behaviourally 2026-08-22: with a poisoned ambient vault root in the environment, lib/drive_recovery.parse_recovery_controls returns vault=None, recovery=False, removes the variable from the environment, and sets the source mode to records. ops/drive-zero-default-cli-selftest.py passes."
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
+        "verified": "run.sh never sets or exports the vault-root variable — its only two matches in the inventory are COMMENTS (lines 17 and 103), not code. Each scoped command parses its own explicit recovery boundary instead. Verified behaviourally 2026-08-22: with a poisoned ambient vault root in the environment, lib/drive_recovery.parse_recovery_controls returns vault=None, recovery=False, removes the variable from the environment, and sets the source mode to records. ops/drive-zero-default-cli-selftest.py passes."
       }
     },
     {
@@ -221,7 +241,7 @@
         "normal_path": "normal_path_repointed_to_record_native_front_door",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "generators/build-open-items-dashboard.py accepts a Drive root only with --recovery --vault. Exercised live 2026-08-22: the nightly logged the record-native Front Door step OK."
       }
     },
@@ -243,7 +263,7 @@
         "normal_path": "normal_path_blocks_ambient_drive_root",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "tools/control-plane.py contains ZERO references to Drive, vault or CloudStorage; the dependency is gone rather than merely gated."
       }
     },
@@ -265,7 +285,7 @@
         "normal_path": "normal_path_uses_declared_source_root",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "lib/record_sources.py requires normal callers to pass their repository root and a recovery caller to pass the legacy root explicitly, rather than falling back to Drive."
       }
     },
@@ -287,7 +307,7 @@
         "normal_path": "normal_path_repointed_to_repo_owned_agents",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "hooks/executor-tier-gate.py contains ZERO references to Drive, vault or CloudStorage; agent definitions are repo-owned."
       }
     },
@@ -309,7 +329,7 @@
         "normal_path": "normal_path_repointed_to_record_view",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "hooks/drift-claim-gate.py reads the record-layer decision history; the named noncanonical path is test and recovery injection only."
       }
     },
@@ -331,7 +351,7 @@
         "normal_path": "normal_path_blocks_ambient_drive_root",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "bin/routine-credential-env.sh passes the vault root to a routine child only when the Drive recovery envelope is explicitly opened (lines 74-77); a Drive root is not routine ambient state."
       }
     },
@@ -339,12 +359,13 @@
       "id": "normal-client-artifacts",
       "class": "normal_runtime",
       "sources": [
+        "lib/control_plane_workflow_truth_reader.py",
         "pipelines/brief_pack.py",
         "pipelines/review_queue.py",
-        "tools/report-card.py",
-        "tools/retrieve.py",
         "tools/health-check.py",
-        "tools/registry-audit.py"
+        "tools/registry-audit.py",
+        "tools/report-card.py",
+        "tools/retrieve.py"
       ],
       "path_pattern": "{{VAULT}}/**",
       "producer": "interactive generators and retrieval",
@@ -358,8 +379,8 @@
         "normal_path": "normal_path_pops_ambient_root_and_resolves_drive_only_under_recovery",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
-        "verified": "All six sources fail closed on the normal path. tools/health-check.py (line 103), tools/registry-audit.py (line 67) and tools/report-card.py (line 510) each sit on the same `if recovery: resolve / else: pop the ambient vault root` branch, and health-check additionally strips the variable from every child environment it spawns (lines 312, 344, 407, 697). pipelines/brief_pack.py resolves a recovery root only when --recovery is passed and errors if --vault arrives without it. tools/retrieve.py resolves Drive only inside recovery_vault(), whose own docstring states it resolves only after the caller has selected recovery mode. pipelines/review_queue.py has ZERO Drive references."
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
+        "verified": "All six sources fail closed on the normal path. tools/health-check.py (line 103), tools/registry-audit.py (line 67) and tools/report-card.py (line 510) each sit on the same `if recovery: resolve / else: pop the ambient vault root` branch, and health-check additionally strips the variable from every child environment it spawns (lines 571, 604, 676, 1005). lib/control_plane_workflow_truth_reader.py joined this entry when the V5-F09 reading moved out of health-check so the assurance-health adapter could perform it rather than be handed a census; its ONLY Drive reference is the same child-environment scrub (line 67), it resolves no vault root and has no recovery mode at all. pipelines/brief_pack.py resolves a recovery root only when --recovery is passed and errors if --vault arrives without it. tools/retrieve.py resolves Drive only inside recovery_vault(), whose own docstring states it resolves only after the caller has selected recovery mode. pipelines/review_queue.py has ZERO Drive references."
       }
     },
     {
@@ -386,7 +407,7 @@
         "normal_path": "normal_path_routes_every_consumer_through_the_shared_recovery_boundary",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "This entry IS the shared boundary plus its consumers, and every consumer goes through it. lib/drive_recovery.py provides RecoveryContext and parse_recovery_controls; fill-engine/audit_template_colors.py, pipelines/build-space-search.py, pipelines/dso-match.py, pipelines/map_radar_lanes.py, pipelines/prepare_document.py and tools/verify-emails.py all import it rather than resolving a Drive root themselves. Verified 2026-08-22 by checking each of the six for the import; none hand-rolls its own resolution."
       }
     },
@@ -416,7 +437,7 @@
         "normal_path": "normal_path_uses_versioned_brand_assets_and_refuses_missing_media_seam",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "video/asset_boundary.py returns Drive assets only for explicit, reasoned noncanonical recovery, through lib/drive_recovery's parsed controls."
       }
     },
@@ -477,7 +498,7 @@
         "normal_path": "normal_path_repointed_to_record_native_launcher",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
         "verified": "pipelines/build-front-door.py refuses outright: 'no folder or recovery arguments are accepted' (line 10)."
       }
     },
@@ -487,9 +508,6 @@
       "sources": [
         "tools/apply-graph-colors.py",
         "tools/check.sh",
-        "tools/diff-dossier-renders.py",
-        "tools/parity-lead-board.py",
-        "tools/parity-records.py",
         "tools/smoke.sh",
         "tools/stamp-doctrine-ownership.py",
         "ops/renders-verify.py",
@@ -509,8 +527,8 @@
         "normal_path": "normal_path_refuses_without_an_explicit_root_or_reasoned_recovery",
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 \u2014 Joe approves Drive retirement across all dependency classes",
-        "verified": "All eleven sources are covered. Six carried a hardcoded Drive root with no flag, no reason and no refusal and are now gated through lib/drive_recovery: ops/renders-verify.py, ops/vault-duplicate-sweep.py, tools/apply-graph-colors.py and tools/stamp-doctrine-ownership.py refuse with the seam named and exit 69 in normal mode (verified by running each); workflows/health-audit.workflow.js throws instead of guessing a root when none is passed; ops/vault-drift-watch.py lost its hardcoded --root default, so naming a root runs normally (what its 40-case selftest does, still passing) while omitting one means the real vault and requires --recovery --reason, and bin/refresh-rules.sh, its one sanctioned caller, now passes those controls with a fixed reason. tools/check.sh and tools/smoke.sh already carried the recovery pattern and unset the ambient root in normal mode. tools/diff-dossier-renders.py, tools/parity-lead-board.py and tools/parity-records.py are TOMBSTONED: nothing invoked them, they existed to diff the record path against the Drive path, and that second side is what this phase retires. Each tombstone names what it proved, the commit holding the implementation, and a recovery command that was run and confirmed to return the file. Drive references across the repo fell from 230 to 218 in this pass."
+        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
+        "verified": "The remaining projection tools require an explicit root or reasoned recovery through lib/drive_recovery. The uncalled dossier/parity tombstones were removed in the module deletion pass; their former implementations remain in git history at d574a443."
       }
     },
     {
@@ -569,7 +587,8 @@
         "hooks/gate_paths.py",
         "hooks/guard-unattended.py",
         "hooks/lint-gate.py",
-        "hooks/record-home-gate.py"
+        "hooks/record-home-gate.py",
+        "lib/carr_paths.py"
       ],
       "path_pattern": "{{VAULT}}/**",
       "producer": "policy gates",

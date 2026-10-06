@@ -117,11 +117,11 @@ def main():
     # 1. The verb answers, and is preferred over a credential that also works.
     mod = load()
     hosts, counts, notes = run_case(
-        mod, verb_ok({"v_export_clients": ["gulfcoastpelvichealth.com"],
-                      "v_export_leads": ["baysidefamilymed.com"]}),
+        mod, verb_ok({"v_export_clients": ["example-pelvichealth.com"],
+                      "v_export_leads": ["example-familymed.com"]}),
         db_raw={"v_export_clients": ["should-not-be-used.com"]})
     cases.append(("verb path is preferred when it answers",
-                  hosts == ["baysidefamilymed.com", "gulfcoastpelvichealth.com"]))
+                  hosts == ["example-familymed.com", "example-pelvichealth.com"]))
     cases.append(("a preferred verb read does not mention the database",
                   not any("direct database" in n for n in notes)))
 
@@ -166,7 +166,7 @@ def main():
     hosts, _, _ = run_case(mod, verb_ok({"v_export_clients": [
         "realpractice.com",            # kept
         "gmail.com",                   # free-mail, excluded
-        "mcgilvraydmd.gccoxmail.com",  # free-mail SUBDOMAIN, suffix match
+        "harlowdmd.gccoxmail.com",  # free-mail SUBDOMAIN, suffix match
         "some-school.edu",             # institutional TLD
         "not a hostname",              # fails the shape check
     ]}))

@@ -1,0 +1,2 @@
+{"type":"text","data":"Partial"}
+{"type":"end","stopReason":"cancelled","num_turns":1,"cost_usd":0.001,"modelUsage":{"grok-4.7":{}}}

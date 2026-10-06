@@ -80,12 +80,15 @@ PROBE_TIMEOUT_S = 8.0
 # refused by name rather than guessed at: launching the wrong binary at a
 # sign-in prompt is exactly the class of mistake an allowlist exists to stop.
 AUTH_STATUS_COMMANDS = {
+    "grok-cli": ["grok", "models"],
     "claude-session": ["claude", "auth", "status"],
+    "claude-desktop": ["claude", "auth", "status"],
     "codex-session": ["codex", "login", "status"],
     "codex-live": ["codex", "login", "status"],
 }
 AUTH_LOGIN_COMMANDS = {
     "claude-session": ["claude", "auth", "login", "--claudeai"],
+    "claude-desktop": ["claude", "auth", "login", "--claudeai"],
     "codex-session": ["codex", "login"],
     "codex-live": ["codex", "login"],
 }

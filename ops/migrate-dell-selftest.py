@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import subprocess
 import sys
@@ -16,7 +17,10 @@ CLAUDE = ROOT / "CLAUDE.md"
 CONFIG_AS_CODE = ROOT / "ops" / "config-as-code.py"
 
 script = SCRIPT.read_text(encoding="utf-8")
-claude = CLAUDE.read_text(encoding="utf-8")
+claude_boot = CLAUDE.read_text(encoding="utf-8")
+packet = json.loads((ROOT / "ops/config/task-boot/dell-migration.json").read_text())
+assert "ops/config/task-boot/dell-migration.json" in claude_boot
+claude = packet["instructions"]
 config_as_code = CONFIG_AS_CODE.read_text(encoding="utf-8")
 combined = script + "\n" + claude
 flat_script = re.sub(r"\s+", " ", script)
@@ -73,6 +77,31 @@ require(
     and '"$tmp" "$receipt_status" "$commit"' in script
     and 'local status=' not in script,
 )
+def _receipt_writer_parses() -> bool:
+    """Run the receipt's embedded Python writer and parse what it writes."""
+    import json
+    import tempfile
+    match = re.search(r"/usr/bin/python3 -c '\n(.*?)\n' \"\$tmp\"", script, re.S)
+    if not match:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "receipt.json"
+        run = subprocess.run(
+            [sys.executable, "-c", match.group(1), str(out),
+             "machine_migrated_pending_record_closeout", "abc123", "main", "0", "19", "1", "0"],
+            capture_output=True, text=True,
+        )
+        if run.returncode != 0:
+            return False
+        try:
+            data = json.loads(out.read_text(encoding="utf-8"))
+        except ValueError:
+            return False
+        return data.get("status") == "machine_migrated_pending_record_closeout"
+
+
+require("receipt the script writes is valid JSON a reader can parse", _receipt_writer_parses())
+
 requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
 require(
     "type checking is a Python-gated dev dependency, not a Dell runtime dependency",

@@ -80,6 +80,26 @@ for (const j of projection.judgment_calls) {
     `judgment call '${j.id}' must state why, what it costs, and what reopens it`);
 }
 
+// REASON SURVIVES COLLAPSE, NAMED AT A PLACE. declined and superseded now share
+// one projection target on rows that actually exist (migration 0426 made
+// superseded reachable), so the invariant stops being a principle and becomes a
+// field somebody has to populate. A judgment call that collapses two canonical
+// states must say WHERE the distinguishing reason lives, or the next reader has
+// no way to check the cost it accepted is actually being paid.
+// Scoped to the one collapse whose reason is a real column on a real row:
+// declined and superseded both project to 'declined', and 0426 made the second
+// of them enterable. The released collapse is deliberately NOT covered — nothing
+// records a distinguishing reason for it, and asserting one would demand a field
+// no writer produces.
+const supersedeCall = projection.judgment_calls.find((j) => j.id === "superseded-projects-as-declined");
+check(Boolean(supersedeCall && supersedeCall.reason_carrier),
+  "superseded-projects-as-declined names no reason_carrier; declined and superseded share one " +
+  "projection target, so REASON SURVIVES COLLAPSE has no enforcement site without one");
+check(Boolean(supersedeCall && /\bexit_reason\b/.test(supersedeCall.reason_carrier) &&
+              /\bsuperseded_by\b/.test(supersedeCall.reason_carrier)),
+  "the reason_carrier must name the canonical columns that carry the distinction " +
+  "(exit_reason and superseded_by), not gesture at one");
+
 // THE KNOWN CONFLICT STAYS VISIBLE until it is actually fixed. The workspace contract
 // declares nine states where doctrine grants seven; this test fails loudly once that
 // is repaired, so the note cannot outlive the problem it describes.

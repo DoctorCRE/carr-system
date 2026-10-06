@@ -1,0 +1,241 @@
+{
+  "synthetic": true,
+  "tenant": "carr-internal",
+  "property": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "organization_tenant_id": "carr-internal",
+    "property_status": "active"
+  },
+  "rights_receipt": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "organization_tenant_id": "carr-internal",
+    "provider": "county-records",
+    "policy_key": "county-property-record",
+    "receipt_version": 1,
+    "receipt_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "terms_url": "https://provider.invalid/terms",
+    "reviewed_at": "2026-07-31T12:00:00Z",
+    "reviewer": "actor:joe",
+    "intended_use": "public tour facts",
+    "status": "active",
+    "effective_at": "2026-08-01T00:00:00Z",
+    "expires_at": null,
+    "revoked_at": null,
+    "supersedes_receipt_id": null,
+    "allowed_field_classes": ["display.name", "display.address", "photos"],
+    "allowed_use_classes": ["source_intake", "canonical_fact", "client_public_display"]
+  },
+  "source_evidence": {
+    "id": "33333333-3333-4333-8333-333333333333",
+    "organization_tenant_id": "carr-internal",
+    "stable_locator": "provider:county-records:parcel:synthetic-1",
+    "evidence_class": "direct_source",
+    "retrieved_at": "2026-08-25T11:30:00Z",
+    "retrieval_status": "read",
+    "content_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "rights_receipt_id": "22222222-2222-4222-8222-222222222222",
+    "rights_provider": "county-records",
+    "rights_policy_key": "county-property-record",
+    "data_classification": "public"
+  },
+  "field_assertion": {
+    "id": "44444444-4444-4444-8444-444444444444",
+    "organization_tenant_id": "carr-internal",
+    "property_id": "11111111-1111-4111-8111-111111111111",
+    "field_key": "display.name",
+    "value": "Synthetic Medical Office",
+    "source_evidence_id": "33333333-3333-4333-8333-333333333333",
+    "rights_receipt_id": "22222222-2222-4222-8222-222222222222",
+    "observed_at": "2026-08-25T11:35:00Z",
+    "effective_from": "2026-08-01T00:00:00Z",
+    "effective_to": null,
+    "confidence": "high",
+    "review_state": "reviewed",
+    "data_classification": "public"
+  },
+  "membership": {
+    "id": "55555555-5555-4555-8555-555555555555",
+    "organization_tenant_id": "carr-internal",
+    "tour_id": "66666666-6666-4666-8666-666666666666",
+    "property_id": "11111111-1111-4111-8111-111111111111",
+    "route_version": 1,
+    "route_sequence": 1,
+    "route_label": "Stop 1",
+    "selected_at": "2026-08-25T11:00:00Z",
+    "assertion_set_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "projection": {
+    "id": "77777777-7777-4777-8777-777777777777",
+    "organization_tenant_id": "carr-internal",
+    "tour_id": "66666666-6666-4666-8666-666666666666",
+    "projection_version": 1,
+    "route_version": 1,
+    "as_of": "2026-08-25T12:00:00Z",
+    "facts_only": true,
+    "projection_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "status": "draft"
+  },
+  "projection_fact": {
+    "organization_tenant_id": "carr-internal",
+    "projection_id": "77777777-7777-4777-8777-777777777777",
+    "property_id": "11111111-1111-4111-8111-111111111111",
+    "field_assertion_id": "44444444-4444-4444-8444-444444444444",
+    "route_version": 1,
+    "display_field_key": "display.name"
+  },
+  "contract_entities": {
+    "Property": {
+      "property_id": "11111111-1111-4111-8111-111111111111",
+      "organization_tenant_id": "carr-internal",
+      "property_status": "active"
+    },
+    "RightsReceipt": {
+      "rights_receipt_id": "22222222-2222-4222-8222-222222222222",
+      "organization_tenant_id": "carr-internal",
+      "policy_key": "county-property-record",
+      "receipt_version": 1,
+      "receipt_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "provider": "county-records",
+      "terms_url": "https://provider.invalid/terms",
+      "reviewed_at": "2026-07-31T12:00:00Z",
+      "reviewer": "actor:joe",
+      "intended_use": "public tour facts",
+      "allowed_field_classes": ["display.name"],
+      "allowed_use_classes": ["canonical_fact"],
+      "effective_at": "2026-08-01T00:00:00Z",
+      "expires_at": null,
+      "revoked_at": null,
+      "supersedes_receipt_id": null,
+      "status": "active"
+    },
+    "SourceEvidence": {
+      "source_evidence_id": "33333333-3333-4333-8333-333333333333",
+      "organization_tenant_id": "carr-internal",
+      "stable_locator": "provider:county-records:parcel:synthetic-1",
+      "evidence_class": "direct_source",
+      "retrieved_at": "2026-08-25T11:30:00Z",
+      "retrieval_status": "read",
+      "content_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "rights_receipt_id": "22222222-2222-4222-8222-222222222222",
+      "rights_provider": "county-records",
+      "rights_policy_key": "county-property-record",
+      "data_classification": "public"
+    },
+    "FieldAssertion": {
+      "field_assertion_id": "44444444-4444-4444-8444-444444444444",
+      "organization_tenant_id": "carr-internal",
+      "property_id": "11111111-1111-4111-8111-111111111111",
+      "field_key": "display.name",
+      "value": "Synthetic Medical Office",
+      "source_evidence_id": "33333333-3333-4333-8333-333333333333",
+      "rights_receipt_id": "22222222-2222-4222-8222-222222222222",
+      "observed_at": "2026-08-25T11:35:00Z",
+      "effective_from": "2026-08-01T00:00:00Z",
+      "effective_to": null,
+      "confidence": "high",
+      "data_classification": "public",
+      "review_state": "reviewed"
+    },
+    "FactConflict": {
+      "conflict_id": "88888888-8888-4888-8888-888888888888",
+      "organization_tenant_id": "carr-internal",
+      "property_id": "11111111-1111-4111-8111-111111111111",
+      "field_key": "display.name",
+      "state": "open",
+      "opened_at": "2026-08-25T11:40:00Z"
+    },
+    "Tour": {
+      "tour_id": "66666666-6666-4666-8666-666666666666",
+      "organization_tenant_id": "carr-internal",
+      "tour_name": "Synthetic Tour",
+      "tour_status": "draft",
+      "route_version": 1,
+      "canonical_dataset_version": "dataset:synthetic:v1"
+    },
+    "TourPropertyMembership": {
+      "tour_stop_id": "55555555-5555-4555-8555-555555555555",
+      "organization_tenant_id": "carr-internal",
+      "tour_id": "66666666-6666-4666-8666-666666666666",
+      "property_id": "11111111-1111-4111-8111-111111111111",
+      "route_version": 1,
+      "route_sequence": 1,
+      "route_label": "Stop 1",
+      "selected_at": "2026-08-25T11:00:00Z",
+      "assertion_set_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "PublicTourProjection": {
+      "projection_id": "77777777-7777-4777-8777-777777777777",
+      "organization_tenant_id": "carr-internal",
+      "tour_id": "66666666-6666-4666-8666-666666666666",
+      "projection_version": 1,
+      "facts_only": true,
+      "route_version": 1,
+      "as_of": "2026-08-25T12:00:00Z",
+      "projection_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "status": "draft"
+    },
+    "ProjectionFact": {
+      "projection_fact_id": "99999999-9999-4999-8999-999999999999",
+      "organization_tenant_id": "carr-internal",
+      "projection_id": "77777777-7777-4777-8777-777777777777",
+      "property_id": "11111111-1111-4111-8111-111111111111",
+      "field_assertion_id": "44444444-4444-4444-8444-444444444444",
+      "route_version": 1,
+      "display_field_key": "display.name"
+    },
+    "CheatSheetRevision": {
+      "cheat_sheet_revision_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "organization_tenant_id": "carr-internal",
+      "tour_id": "66666666-6666-4666-8666-666666666666",
+      "revision_number": 1,
+      "content": {"notes": "synthetic"},
+      "editor_actor_id": "actor:joe",
+      "created_at": "2026-08-25T12:05:00Z",
+      "status": "draft"
+    },
+    "ShareGrant": {
+      "share_grant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "organization_tenant_id": "carr-internal",
+      "projection_id": "77777777-7777-4777-8777-777777777777",
+      "grant_version": 1,
+      "token_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "audience": "client",
+      "permission_scopes": ["view_packet"],
+      "created_at": "2026-08-25T12:10:00Z",
+      "expires_at": "2026-08-26T12:10:00Z",
+      "revoked_at": null,
+      "status": "active",
+      "rotated_from_grant_id": null
+    },
+    "QualityFinding": {
+      "qc_finding_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "organization_tenant_id": "carr-internal",
+      "artifact_type": "public_projection",
+      "artifact_id": "77777777-7777-4777-8777-777777777777",
+      "check_id": "check:foundation-contracts",
+      "severity": "blocker",
+      "state": "open",
+      "evidence": {"synthetic": true},
+      "created_at": "2026-08-25T12:15:00Z"
+    },
+    "Publication": {
+      "publication_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "organization_tenant_id": "carr-internal",
+      "projection_id": "77777777-7777-4777-8777-777777777777",
+      "publication_state": "draft",
+      "projection_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "created_at": "2026-08-25T12:20:00Z"
+    },
+    "AuditEvent": {
+      "audit_event_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "organization_tenant_id": "carr-internal",
+      "event_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "event_type": "foundation_fixture_validated",
+      "entity_type": "FieldAssertion",
+      "entity_id": "44444444-4444-4444-8444-444444444444",
+      "occurred_at": "2026-08-25T12:25:00Z",
+      "actor_id": "actor:codex",
+      "payload": {"synthetic": true}
+    }
+  }
+}

@@ -42,6 +42,7 @@ WHAT IT PROVES
 """
 
 import atexit
+import copy
 import importlib.util
 import json
 import shutil
@@ -117,6 +118,12 @@ def main() -> int:
           first.get("program6_actions") in (
               {"enabled": True, "posture": "enabled"},
               {"enabled": False, "posture": "disabled"}))
+    doctorcre = first.get("doctorcre_artifact")
+    check("0i. manifest binds the independent DoctorCRE source and archive",
+          isinstance(doctorcre, dict)
+          and doctorcre.get("source_commit") == "35936628aba4c7189b17f5b195c41c8ba9b782be"
+          and doctorcre.get("archive_sha256") == "dca7745d28d6871f988c62c406406d652fce5ba9e61769083edd2ee5541aa6e5"
+          and first.get("artifact_paths") == ["mcp-server"])
 
     # Seed the exact failure with the same numeric prefix but a different
     # filename/content pair.  A numeric-prefix comparison would incorrectly
@@ -177,12 +184,17 @@ def main() -> int:
     #    real difference is the precise question, and it keeps the assertion
     #    exactly as strong: a different deployed tree must digest differently.
     other = None
-    for sha in git("log", "-40", "--format=%H", "--", "mcp-server", "dealroom").split():
+    # The Worker artifact digests mcp-server only since the DoctorCRE pin (P2):
+    # dealroom ships as its own pinned artifact. Searching dealroom too let a
+    # dealroom-only branch pick a comparison commit whose Worker tree is
+    # identical, so the assertion failed on a true "same digest" (2026-09-25,
+    # run 36138851445). Compare only the paths the digest actually covers.
+    for sha in git("log", "-40", "--format=%H", "--", "mcp-server").split():
         if sha == head_sha:
             continue
         differs = subprocess.run(
             ("git", "-C", str(REPO), "diff", "--quiet", sha, head_sha,
-             "--", "mcp-server", "dealroom",
+             "--", "mcp-server",
              ":(exclude)mcp-server/.last-deployed-verb-count"))
         if differs.returncode != 0:
             candidate_attempt = run("build", "--sha", sha,
@@ -285,12 +297,67 @@ def main() -> int:
     check("6g. changing the full applied-ledger digest moves the plan hash",
           out.stdout.strip() and out.stdout.strip() != first["plan_hash"])
 
+    external_product = copy.deepcopy(first)
+    external_product["doctorcre_artifact"]["archive_sha256"] = "3" * 64
+    out = run("plan-hash", "--manifest", _tmp_json(external_product))
+    check("6h. changing the pinned DoctorCRE artifact moves the plan hash",
+          out.stdout.strip() and out.stdout.strip() != first["plan_hash"])
+    external_product["plan_hash"] = out.stdout.strip()
+    out = run("verify", "--manifest", _tmp_json(external_product))
+    check("6i. a self-consistent but false DoctorCRE pin fails rebuild verification",
+          out.returncode != 0)
+
     legacy_out = run("build", "--sha", tested_sha)
     legacy = json.loads(legacy_out.stdout) if legacy_out.returncode == 0 else {}
     legacy_path = _tmp_json(legacy)
     legacy_verify = run("verify", "--manifest", legacy_path)
-    check("6h. an all-absent historical assurance group still round-trips",
+    check("6j. an all-absent historical assurance group still round-trips",
           legacy_out.returncode == 0 and legacy_verify.returncode == 0)
+
+    # Find the pre-P2 commit deterministically rather than walking a fixed
+    # number of commits back from HEAD. A commit-count window rots: every
+    # merge to main pushes the P2-adding commit further back, and once it
+    # falls outside the window this assertion silently stops finding a
+    # historical (pre-P2) commit at all. Instead, locate the commit that
+    # ADDED ops/config/doctorcre-artifact.v1.json and use its first parent —
+    # the file is added exactly once, and everything before that add is, by
+    # definition, pre-P2.
+    add_commits = git("log", "--diff-filter=A", "--format=%H",
+                      "--", "ops/config/doctorcre-artifact.v1.json").strip()
+    if add_commits == "":
+        raise SystemExit(
+            "release-manifest-selftest: could not find the commit that added "
+            "ops/config/doctorcre-artifact.v1.json — history is unavailable "
+            "(shallow clone?). This job's checkout needs fetch-depth: 0.")
+    artifact_added_sha = add_commits.splitlines()[-1]  # oldest, if ever re-added
+
+    parent = subprocess.run(
+        ("git", "-C", str(REPO), "rev-parse", f"{artifact_added_sha}^"),
+        capture_output=True, text=True)
+    if parent.returncode != 0:
+        raise SystemExit(
+            "release-manifest-selftest: could not resolve the parent of the "
+            f"commit that added the P2 artifact ({artifact_added_sha}) — "
+            "history is unavailable (shallow clone?). This job's checkout "
+            "needs fetch-depth: 0.")
+    historical_sha = parent.stdout.strip()
+
+    present = subprocess.run(
+        ("git", "-C", str(REPO), "cat-file", "-e",
+         f"{historical_sha}:ops/config/doctorcre-artifact.v1.json"),
+        capture_output=True)
+    if present.returncode == 0:
+        raise SystemExit(
+            "release-manifest-selftest: expected the P2 artifact to be "
+            f"absent at {historical_sha} (parent of the commit that added "
+            "it), but it is present. The add-commit detection is wrong.")
+
+    historical = build("--sha", historical_sha) if historical_sha else {}
+    historical_verify = run("verify", "--manifest", _tmp_json(historical)) if historical else None
+    check("6k. pre-P2 manifests retain the legacy joint-source recipe",
+          bool(historical_sha and historical.get("artifact_paths") == ["mcp-server", "dealroom"]
+               and "doctorcre_artifact" not in historical
+               and historical_verify and historical_verify.returncode == 0))
 
     # 7. Provider versions do not exist until Cloudflare has uploaded the
     # source. Binding that returned identity must preserve source evidence and
@@ -307,7 +374,7 @@ def main() -> int:
         source_fields = ("git_sha", "artifact_digest", "dependency_lock_digest",
                          "config_fingerprint", "migration_set",
                          "schema_highest_migration", "schema_applied_count",
-                         "schema_ledger_sha256")
+                         "schema_ledger_sha256", "doctorcre_artifact")
         check("7b. binding preserves the SHA and every source digest",
               all(bound.get(k) == first.get(k) for k in source_fields))
         check("7c. provider/version binding changes the approval plan hash",
@@ -356,6 +423,7 @@ def main() -> int:
                    "schema_ledger_sha256", "migration_set"),
         "config": ("config_fingerprint", "config_paths"),
         "plan": ("plan_hash",),
+        "doctorcre": ("doctorcre_artifact",),
     }
     missing = [f"{name}.{field}"
                for name, fields in classes.items()

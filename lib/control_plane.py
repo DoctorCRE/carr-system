@@ -45,6 +45,47 @@ PREDICATES = {"facts.all_true": _all_true}
 PROPOSAL_GUARDS = {"weekly_social_no_quote_tweets"}
 
 
+class EntrypointFailure(RuntimeError):
+    """A deterministic entrypoint child exited nonzero.
+
+    Carries the bounded, already-redacted stdout/stderr tails as structured
+    fields so a caller can put them INTO stored failure/dead-letter evidence,
+    instead of losing them to a generic exception's flat ``str(exc)`` cap
+    (rule 1f3a7372: an unattended run must record what it FOUND).
+    """
+
+    def __init__(self, returncode: int, *, stdout_tail: str, stderr_tail: str):
+        super().__init__(f"entrypoint exited {returncode}")
+        self.returncode = returncode
+        self.stdout_tail = stdout_tail
+        self.stderr_tail = stderr_tail
+
+
+class EntrypointNotConfigured(EntrypointFailure):
+    """A deterministic entrypoint child exited 78 (EX_CONFIG).
+
+    This repo's standing convention (bin/nightly.sh and every other launchd
+    chain) is that 78 means the step RAN, found a credential or setting it
+    needs absent, wrote nothing, and said so on its own stdout/stderr -- not
+    that it failed. Rule 88e9b5eb: "not authorized" and "not possible" are
+    different findings and must never be reported as the same one.
+
+    Subclasses EntrypointFailure so the stdout/stderr capture in
+    ``_execute_deterministic`` and the JSON-tail encoding in
+    ``_failure_detail`` stay ONE piece of code, not a duplicate for this exit
+    code. Only the terminal ledger call a caller makes differs: run_once
+    routes this to ``ops.skip_job``, never ``ops.fail_job`` -- no retry
+    budget spent, no dead-letter, because a missing credential does not
+    self-heal on a timer the way a transient failure might.
+    """
+
+    def __init__(self, *, stdout_tail: str, stderr_tail: str):
+        RuntimeError.__init__(self, "entrypoint exited 78 (not configured)")
+        self.returncode = 78
+        self.stdout_tail = stdout_tail
+        self.stderr_tail = stderr_tail
+
+
 def deterministic_args(execution: dict[str, Any], mode: str) -> list[str]:
     """Return the registered command arguments for one deterministic mode.
 
@@ -73,6 +114,32 @@ def deterministic_args(execution: dict[str, Any], mode: str) -> list[str]:
     if not isinstance(selected, list) or not all(isinstance(x, str) for x in selected):
         raise RuntimeError(f"deterministic {mode} execution is not explicitly registered")
     return list(selected)
+
+
+def resolve_auto_mode(canary_contract: dict[str, Any] | None,
+                       acceptance_rows: list[dict[str, Any]]) -> str:
+    """Resolve one workflow's HIGHEST mode tier permitted by the acceptance ladder.
+
+    This is the same ladder ``ops.enqueue_job`` enforces (migration 0332),
+    reimplemented as a pure function so ``tick --mode auto`` can pick a tier to
+    try without a database round trip per candidate.  The database guard stays
+    authoritative; a wrong resolution here only causes a refused enqueue, never
+    an unguarded one.
+
+    ``canary_contract`` is a workflow's ``execution.canary`` object (or None/
+    missing, as for every cognition workflow).  ``acceptance_rows`` is the raw
+    ``ops.workflow_acceptance`` row set for the workflow's current definition
+    version, each item shaped ``{"mode": ..., "status": ...}``.
+    """
+    accepted = {row.get("mode") for row in acceptance_rows if row.get("status") == "accepted"}
+    canary_disabled = isinstance(canary_contract, dict) and canary_contract.get("enabled") is False
+    if canary_disabled:
+        return "live" if "shadow" in accepted else "shadow"
+    if "canary" in accepted:
+        return "live"
+    if "shadow" in accepted:
+        return "canary"
+    return "shadow"
 
 
 def evaluate_predicate(decision: dict[str, Any], context: dict[str, Any]) -> bool:

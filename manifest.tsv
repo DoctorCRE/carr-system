@@ -1,12 +1,13 @@
-# repo-path <TAB> vault-path (relative to CARR AI). One row per synced code file.
-# check.sh reads this for the code-drift pass. Dell's migrated Mac uses this repo
-# and the live record/doctrine store, not these Drive copies. Vault copies remain
-# only for cloud-only delivery/runtime until that surface is separately retired.
-# FORKED BY DESIGN 2026-07-31 (ORDER 29a ratification): repo copy reads record views
-# (records-mode default); the vault copy is the cloud-only FILE-mode runtime and stays so
-# per the ORDER 28 finding (no DB path off this Mac). The two can never match again, so
-# the drift pairing is retired rather than alarming every night. Vault copy governed by
-# dna-protocol as before. Former row: generators/build-deal-room.py <TAB> DNA/Team/live-boards/build-deal-room.py
+# repo-path <TAB> vault-path (relative to CARR AI). One row per repo code file still paired
+# with a Drive copy. The repo is canonical on both partner Macs, and the doctrine store
+# (not Drive) is the only doctrine surface since the 2026-08-19 cutoff. A paired Drive copy
+# is a cloud-only delivery fallback, not a runtime on either Mac, and stays only until that
+# surface is separately retired. check.sh default mode checks each row's repo file against
+# HEAD; the repo-vs-vault drift pass runs only under check.sh --recovery --reason WHY.
+# FORKED BY DESIGN 2026-07-31 (ORDER 29a ratification): the repo deal-room copy reads record
+# views (records-mode default); the Drive copy was the cloud-only FILE-mode fallback per the
+# ORDER 28 finding (no DB path off this Mac). The two can never match, so the drift pairing
+# is retired. Former row: generators/build-deal-room.py <TAB> DNA/Team/live-boards/build-deal-room.py
 generators/build-lead-board.py	Automation/build-lead-board.py
 # THE LEAD-BOARD SHELL, moved into the repo 2026-08-20. It is hand-authored SOURCE,
 # not a render: build-lead-board.py reads it and writes lead-board.html from it. It

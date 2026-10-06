@@ -29,6 +29,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td); script = root / "bin" / "learning-monthly.sh"
         script.parent.mkdir(); shutil.copy2(MONTHLY, script)
+        # learning-monthly.sh sources bin/routine-credential-env.sh for the
+        # shared db.env sourceability guard; the fixture bin/ must carry it.
+        shutil.copy2(REPO / "bin" / "routine-credential-env.sh",
+                     script.parent / "routine-credential-env.sh")
         (root / "out" / "Learning").mkdir(parents=True)
         fake = root / ".venv" / "bin" / "python"; fake.parent.mkdir(parents=True)
         fake.write_text("#!/usr/bin/python3\nimport json,os,sys\n"

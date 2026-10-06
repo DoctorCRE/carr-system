@@ -35,8 +35,8 @@ from lib.record_sources import (MODE_FILES, MODE_RECORDS, load_clients, load_dea
 # [loop #133] THE TWO PARTNERS ARE NODES OF THIS GRAPH, not just owner colours.
 #
 # THE DEFECT. v_party_graph held 31 edges and this script drew 24. Six of the
-# seven it dropped were Joe's own `can_introduce` edges — Heather Lavallo,
-# Josh Durst, Bruce Pardington, Justin Gay, Katherine Wilborn, Gary Tringas — so
+# seven it dropped were Joe's own `can_introduce` edges — Heather Lavigne,
+# Josh Dunmore, Bruce Partridge, Justin Gale, Katherine Welby, Gary Trellis — so
 # 100% of the "Joe can introduce you to X" class, which is the single most
 # valuable edge class in the referral engine, was missing from the one surface
 # built to show relationships. Joe is party P-1084 and carries no client, lead or
@@ -496,7 +496,7 @@ if party_links is not None:
         here without loosening the identity rule one inch:
           · the party is a bare party (Joe, P-1084) — name_ref finds it, and the
             partner pass above has already minted the node;
-          · the link still points at a MERGED party (P-0365 -> P-0384, Tyrer) — the
+          · the link still points at a MERGED party (P-0365 -> P-0384, Okafor) — the
             tombstone is excluded from the name index, so the exact name resolves
             to the SURVIVOR's preferred ref (C-155) and the edge lands on the one
             node that record has. The already-live duplicate of that same edge

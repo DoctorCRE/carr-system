@@ -48,7 +48,7 @@
 
 **Vendor sequence:**
 1. **Site selection** — smell/sound and parking are live site constraints here in a way other verticals don't have; flag early with whoever's doing site selection.
-2. **Deal** — Banker/Lender: **check the vertical AND state split** before naming a name (BofA vet lending splits Diehl=AL / Nieto=FL per `introduction-rules.md`'s vertical-awareness section — this vertical has the clearest documented state-split example in the network). CPA; Attorney for entity/lease.
+2. **Deal** — Banker/Lender: **check the vertical AND state split** before naming a name (BofA vet lending splits Dahl=AL / Navarro=FL per `introduction-rules.md`'s vertical-awareness section — this vertical has the clearest documented state-split example in the network). CPA; Attorney for entity/lease.
 3. **Build-out** — Architect/Design + General Contractor familiar with the standard vet room list (dual-access exam rooms, separate cat/canine kennels, comfort/euthanasia room, back-door freezer, lead-lined x-ray); vet-specific Supply/Equipment Rep.
 4. **Ongoing** — IT Services, Insurance.
 

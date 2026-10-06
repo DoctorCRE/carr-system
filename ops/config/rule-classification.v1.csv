@@ -1,0 +1,197 @@
+id,layer,class,moment
+015183f5,pack,a,"any turn: classifying, defining terms, or planning multi-step work"
+0156e9fa,layer0,a,closing any message to Joe
+018ce972,pack,a,presenting a structural change to Joe
+0c1bac27,pack,c,Monday brief / partnership-fit summary content
+0e22e34a,control,b,creating or naming files/folders (pre-commit path check)
+0f38532e,pack,e,duplicate of 14181e60 (single source of truth / DB-first)
+1021fa84,layer0,a,any turn - assessing Joe's work patterns/history
+113b3833,pack,b,run.sh retrieve lookup beyond standing core
+11b2b73b,pack,c,Joe shares UI/UX or web-design content
+14181e60,control,d,"record_home gate (record-home-gate.py), before vault record write"
+152ceb65,layer0,a,any turn explaining something with a shape
+173119a8,pack,a,before claiming who owns uncommitted/dirty-tree work
+179be4b8,pack,a,wrapping up an agreed deliverable
+17ffd587,control,b,"rendering open-loops, heartbeat, or Monday brief"
+185013c6,pack,b,spawning a subagent/workflow or sizing 30+min work (model selection)
+19304882,pack,c,Joe's decision/timing reviews and order-writing ramp
+1b8e7f43,layer0,b,"add-loop verb, when a capability/verb call is blocked"
+1c21263c,pack,a,same-shape fix recurring about four times in one session
+1c42d80c,layer0,a,"hitting unexpected friction (refusal, error, workaround)"
+1d50a3bb,control,d,conduct_stop gate
+1f3a7372,control,d,completion_evidence gate
+1fcaa63a,pack,c,heavy build protocol invoked
+1fddcffb,layer0,a,deciding what belongs in always-read core vs task-loaded files
+204391be,pack,b,discovering a missing record-layer verb while building
+20d106f1,pack,c,"Joe's development: new builds, predictions, confident direction"
+2271e684,control,d,"completion_evidence gate, terminal technical claim"
+236ca227,control,d,weekend_quiet deny_gate - before a partner-facing send
+23ea0607,control,d,deal_guard schema (Salesforce reconciliation)
+24e10ee8,control,b,writing a commit message or close-out claiming an act
+25fab860,control,b,weekly social batch proposal validation
+25fcddee,pack,c,first attempt in new/unfamiliar-territory work
+27277539,layer0,a,any turn discussing technical topics with Joe
+2a3ff869,control,d,update-document-status verb (outbound_format check)
+2b66211d,pack,b,fan-out brief / delegating tasks to agents
+2b889e80,layer0,a,any turn - before asserting a negative finding
+2ca2add2,pack,c,pulling records from any source platform
+2e362970,pack,c,"standing up a new capability, tool, or first-of-kind work"
+2e8b4840,control,b,confirm-merge verb
+308ef1de,control,d,pr_only_main_ruleset (GitHub server ruleset) - before a change reaches main
+30a189fb,layer0,c,non-CARR task detected
+347a9ca6,layer0,a,any turn reasoning from a session's own or another's name
+3578d799,pack,b,naming a new verb or system noun
+388cc81e,control,d,candidate_match schema check - candidate-pool duplicate classification
+38b15dc6,control,d,chat_lint gate
+3a9dbafd,control,d,conduct_stop (conduct-stop-gate.py Stop)
+3d185f2b,pack,c,"system-design builds (personas, tools, app surfaces)"
+3fa17fa0,pack,b,drafting re-engagement off notes older than ~60 days
+4039b9b5,control,d,versioned_record schema (doctrine section write)
+412d37d3,pack,c,client/compliance writing mentioning HIPAA
+424ba0cc,pack,c,cold or paused client cadence
+4399df76,pack,c,working with LOI template terms
+43e2ef76,control,d,completion_evidence gate
+4402973a,control,b,healing/regenerating detected drifted vault content
+466a545a,pack,c,grading a fed source against the system
+48083552,pack,c,"client or prospect meeting, before recommending"
+49533583,pack,b,reading Joe's calendar or mail
+49c627cc,layer0,a,claiming the record layer or verbs cannot do something
+4a53ff82,control,d,"canonical_edit gate, first write to tracked canonical files"
+4a9188f3,pack,b,"the teach verb, at a partner-correction/decision trigger"
+4c21d86b,control,d,merge_survivor verb check (confirm-merge)
+4dd44fd7,control,d,update-document-status verb (outbound_format split)
+4e104d4c,control,d,"completion_evidence gate, new-verb deployment claim"
+4f7c348f,layer0,a,session start
+4fae20f4,layer0,a,before stating a rate/average as a baseline
+51d9f05f,pack,c,prospect-facing communications
+5409731b,control,d,"trigger_grant check, migration adding/modifying a trigger"
+54e2bcb9,control,d,versioned_record schema (tools.js+db) - contact fact promotion
+557838a5,pack,c,Joe posts an x.com link
+5697071b,pack,c,an Alabama lead or deal arriving
+57d13061,pack,b,any X/x.com retrieval
+57d83b75,control,d,record_research deny_gate (tools.js) - new-client creation
+58b44ccb,control,d,one_repo gate
+58cef3a1,layer0,a,correcting one of Joe's mislabeled statements
+590b11e1,control,d,"completion_evidence gate, metric completion claim"
+596f7549,layer0,a,any turn - diagnosing a tool error that blames a subsystem
+5be2f462,control,d,chat_lint gate
+5cd8d0f6,layer0,b,a blocked terminal command with a self-serve fix available
+5d44d3f3,pack,b,new-client or bulk record intake
+5e896ed6,pack,c,Joe feeds a link (article/video/thread)
+5e89c211,control,b,registering or dispatching a cognition workflow
+614c1209,pack,c,assessing deal staleness or follow-up status
+6172e7d5,pack,b,video/image source retrieval (watch-video skill)
+61c64d91,pack,c,creating any new asset (shared vs personal tier)
+6330bec8,layer0,a,any non-trivial problem or decision
+6437ae15,pack,c,"Joe shares an article, video, or source"
+647f843d,control,b,add-loop / opening an open_loop
+67580c28,pack,c,"building, restyling, or reviewing any CARR surface"
+6901cc3b,pack,c,building or evaluating Dr. CRE (Doc) features
+6a4e6283,control,d,completion_evidence gate (shipping claim)
+6cfb67f5,control,b,dispatching a task to another seat
+70e372f0,pack,c,calibrating to Dell's working style
+7105955b,control,d,loop_successor schema (close-loop verb)
+725dff46,pack,b,writing prospect-visible content
+72e06bdf,pack,b,lead board presentation
+73381d78,control,d,completion_evidence stop_gate - config-file change completion
+737a68d6,layer0,e,duplicate of 204391be
+740bb505,pack,c,projecting a long-running job's completion time
+767f9b41,control,d,"completion_evidence gate, confirmation response"
+76a53dfe,control,d,record_home deny_gate - blocked markdown write workaround
+7e9739f2,layer0,a,any turn replying to Joe
+80def9d2,pack,c,building a human-facing surface or choice for Joe/Dell
+81709f57,pack,c,convening a red team/review panel
+847f9995,control,d,completion_evidence stop_gate - unattended-path credential verification
+86647daf,pack,b,finishing a substantive build/change/decision (posting to shared files)
+88e9b5eb,control,d,blocker_decider gate
+8aefcdce,pack,c,choosing Copilot vs Claude for a task
+8c1e6057,control,d,chat_lint stop_gate - asking a partner to open/edit/review a file
+8c812bed,pack,c,publishing a partnership-fit summary
+8cddc6ad,control,b,"renaming a shared-by-design row (party.org_id, vendor_category.slug)"
+9293d609,pack,b,building or reviewing any CARR surface
+9310827b,layer0,a,any turn - a partner asks for something risky or mistaken
+94806da2,layer0,b,fetching a source feeding doctrine/rules/records
+9530fb1c,layer0,a,the moment a session says 'the right fix is X'
+95e76c1f,layer0,a,any turn (register/tone toward Joe)
+9730f565,layer0,a,any turn asserting a date or time
+97326357,control,d,completion_evidence gate
+9873a0d2,pack,c,a partner re-explains the same how-to twice
+98e74e7c,pack,c,reviewing a fed link or source
+99e951b9,control,d,index_upkeep pre-commit - content added under indexed multi-folder category
+9b081605,control,d,no_send_worker check (outbound send)
+9d80fd2d,pack,c,planning prospect outreach cadence
+9e3fb6d0,pack,c,industry content shared from a colleague/competitor
+9f15f21a,control,d,deal_guard schema (tools.js+sql) - national-account deal assignment
+9ff56260,control,d,egress_guard gate
+a2e78f48,pack,c,detecting a known broken thing with a known fix
+a3f6c7f9,pack,a,proposing a restructuring
+a6e6ab4e,control,d,completion_evidence stop_gate - changed-system completion
+a7784a18,layer0,b,starting a coding session through delivery completion
+a8c55a47,pack,b,"writing a command into a doc, SOP, or instruction"
+a8f159ad,pack,b,building or reviewing a structured CARR surface
+a9ecd5b4,control,d,completion_evidence stop_gate - check-result reporting
+ab814a26,control,d,rule_shape gate (approve-rule)
+af7de070,layer0,b,a tool call blocked by a permission classifier
+b01edd26,control,b,committing any source or doc file
+b1521526,pack,a,any source conflict
+b3ea627f,layer0,a,closing a message to Joe
+b42e217e,control,d,humanOnly verb call gate (versioned_record schema)
+b42f11a0,pack,c,sizing a system build or architecture choice
+b587f6c2,pack,c,architecture/mechanism-class design fork with no deterministic verifier
+b7ec8f3b,pack,c,designing or reviewing the Doc app surface
+bbffc139,pack,c,"Joe overrules, predicts, compresses, rules, or corrects within CARR work"
+bc4145f6,pack,c,monthly review or recurring behavior pattern
+bc9188b4,control,d,loose_work stop_gate - session Stop
+bd4a6d22,pack,b,updating a CI check after Joe accepts a permanent state
+c0b38d80,control,b,committing a change to a gate script or enforcement map
+c1547ed1,pack,b,creating a new workflow/system/asset
+c1db316c,pack,a,any turn - choosing a solution approach
+c20dc3d5,pack,b,handing up or acting on a subagent finding
+c315befa,control,d,chat_lint gate
+c4a284b2,pack,c,a compliance or convention question
+c53beeaa,control,d,versioned_record schema (tools.js+db) - record mutation acknowledgement
+c66dc739,pack,b,reading/capturing Joe's mail
+c6f69dee,pack,b,staffing or naming a delegated Agent
+c864b8cb,layer0,a,asking Joe multiple things
+c8ebeb5b,pack,c,a finding surfaces a practice-acquisition exit
+ca841807,control,d,record_home gate (markdown write outside manifest)
+cd84d22a,layer0,b,the Claude Code feedback-survey prompt appearing
+ce12c11e,pack,c,framing a sales pitch to a client/lead
+cff429f5,control,d,record_research deny_gate (tools.js) - new party creation with blank field
+d26d63b0,pack,c,a new contact enters the system
+d3774a28,pack,c,brand copy review / conceptual-model vs file-reality divergence
+d5dcfe26,layer0,a,asserting a decision or memo state is stale or unruled
+d7c69aa6,control,b,calendar ingest surfaces an unmatched attendee
+d7e6de46,control,d,deal_guard schema (deal value write)
+d7f74c93,control,d,chat_lint gate
+d8c9b1f0,layer0,b,raising a loop/finding to Joe or Dell
+d9874334,layer0,b,about to name capability as a blocker or request a permission
+d9ce2b08,pack,a,before reporting work as blocked or parked
+dcf98880,control,d,completion_evidence gate (human verification instruction)
+def3e84e,pack,b,superseding an artifact
+df55c398,pack,b,writing a delegated subagent scope brief
+df8f1da0,layer0,a,answering an opinion request from Joe
+e313a3ca,control,d,conduct_stop gate (before command handoff)
+e4d965d9,layer0,a,telling a partner something cannot be done
+e65efc68,pack,c,"building any gate, hook, linter, or CI validator"
+e8868cbe,control,d,completion_evidence gate
+eaa31ac5,control,d,completion_evidence gate (delivery claim)
+ede4b241,pack,b,dispatching work to another model or launching a cloud session (model choice)
+ede4c735,pack,b,writing any prospect-visible draft
+eeb3d106,pack,c,building or reviewing any CARR workstation surface
+efbdfb1a,pack,a,"after a non-trivial build works, before shipping"
+f04a05aa,control,d,completion_evidence gate (autonomous-run completion)
+f0f9156e,pack,c,an architecture fork with a local-vs-cloud dimension
+f2d58a30,pack,b,drafting any client-facing recommendation document
+f47a8fe9,control,d,completion_evidence gate
+f5bac101,pack,c,deciding where to spend effort (prospecting vs polish)
+f5beac20,pack,a,encountering useful-but-not-today knowledge
+f5d97b4a,control,d,costar_lane deny_gate - Chrome-extension tool call targeting costar.com
+f92dfab2,control,d,client_asset_packet render (search-packet)
+fa217e48,control,d,completion_evidence gate (completion/file claims)
+faae6748,control,d,"egress_guard gate, before destructive filesystem action"
+faf1b643,pack,b,nightly vendor-level-drift check over active vendors
+fb110a39,pack,b,starting a task or fan-out brief (model choice)
+fb2b263d,pack,b,"after deciding or building, checking other index/context files"
+fc21a431,pack,b,any partner correction
+fc4d7753,pack,a,any turn - evaluating whether to add structure or ideas

@@ -1,16 +1,218 @@
 {
-  "schema": "guidance-situation-curation-review/v1",
-  "review_state": "proposed",
-  "reviewed_source_manifest": {
-    "path": "audits/guidance-migration-manifest.v1.tsv",
-    "sha256": "5034d7d0a6e630abec06ba74274419e7243f0b3b341da319daad144d1d97b127"
-  },
-  "reviewed_base_inventory": {
-    "path": "ops/config/rule-enforcement-map.json",
-    "sha256": "266ebb98076361b74cc2e22e5ea96380b2d3d1946b2d5d06b23ff349a5c98d9a",
-    "standing_source_count": 205,
-    "excluded_rule_surface": "intro_politics"
-  },
+  "doctrine_guidance": [
+    {
+      "concept_key": "partner-complementarity-reasoning",
+      "definition": "Reasoning about how Joe and Dell's demonstrated strengths fit together without profiling either partner in isolation.",
+      "guidance_id": "rule-0c1bac27-whole-v1",
+      "label": "Partner complementarity reasoning",
+      "mappings": [
+        {
+          "concept_key": "partner-complementarity-reasoning",
+          "doctrine_section_id": "22de7c0f-195d-44b5-8c9d-8ae8130cc7f8",
+          "rationale": "The active collaboration-model section supports partner-complementarity reasoning, while the source rule remains authoritative for evidence, symmetry, no profiling, and visibility requirements.",
+          "role": "supports",
+          "section_address": "twin-system-playbook#collaboration-model-designed-with-joe-july-6-2026-the-max-efficiency-layer",
+          "weight": 1
+        }
+      ],
+      "phrase": "Joe and Dell partner complementarity"
+    },
+    {
+      "concept_key": "authoritative-record-ownership",
+      "definition": "Choosing one canonical home for a record and making every other surface a governed consumer instead of a competing copy.",
+      "guidance_id": "rule-0f38532e-whole-v1",
+      "label": "Authoritative record ownership",
+      "mappings": [
+        {
+          "concept_key": "authoritative-record-ownership",
+          "doctrine_section_id": "1debbdd7-9880-47f7-81a6-55e788716c57",
+          "rationale": "The active knowledge-architecture section supports authoritative ownership during change; it does not replace the source rule's universal anti-duplication and generated-view mandate.",
+          "role": "supports",
+          "section_address": "carr-production-maturity-baseline#s15-deprecation-decisions-and-knowledge-architecture",
+          "weight": 1
+        }
+      ],
+      "phrase": "choose the authoritative source of truth"
+    },
+    {
+      "concept_key": "joe-brokerage-priority-context",
+      "definition": "Interpreting Joe's priorities from his healthcare brokerage role and current pipeline-building work rather than over-weighting recent system construction.",
+      "guidance_id": "rule-1021fa84-whole-v1",
+      "label": "Joe brokerage priority context",
+      "mappings": [
+        {
+          "concept_key": "joe-brokerage-priority-context",
+          "doctrine_section_id": "47bbeb45-ddc9-4277-8290-ac64fbca0edf",
+          "rationale": "The active profile section states Joe's present brokerage stage and primary prospecting, outreach, follow-up, and market-work focus without treating historical system-building residue as his defining work or unfinished-project behavior.",
+          "role": "governs",
+          "section_address": "carr-profile#current-stage",
+          "weight": 1
+        }
+      ],
+      "phrase": "Joe brokerage priorities and current focus"
+    },
+    {
+      "concept_key": "session-work-shape-assessment",
+      "definition": "Assessing an agent session from its actual scope, authority, tools, and actions rather than inferring behavior from its title.",
+      "guidance_id": "rule-347a9ca6-whole-v1",
+      "label": "Session work-shape assessment",
+      "mappings": [
+        {
+          "concept_key": "session-work-shape-assessment",
+          "doctrine_section_id": "7af45c76-0872-4182-9772-6763d14cebe2",
+          "rationale": "The active AgentOps contract supports judging actual tool use, dirty paths, transcript, concurrency, and worktree risk rather than trusting a session label.",
+          "role": "governs",
+          "section_address": "carr-production-maturity-baseline#s13-agentops-doc-and-engineering-sessions",
+          "weight": 1
+        }
+      ],
+      "phrase": "assess the actual session work shape"
+    },
+    {
+      "concept_key": "loi-term-negotiation-posture",
+      "definition": "Treating every LOI term and template value as a deal-specific negotiable position rather than fixed policy.",
+      "guidance_id": "rule-4399df76-whole-v1",
+      "label": "LOI term negotiation posture",
+      "mappings": [
+        {
+          "concept_key": "loi-term-negotiation-posture",
+          "doctrine_section_id": "154546ca-fea6-41dd-ba03-fce5cdb2e2aa",
+          "rationale": "The active negotiation section supports deal-specific LOI judgment; templates remain overridable defaults rather than fixed policy, and one client's documents do not establish common terms.",
+          "role": "governs",
+          "section_address": "negotiation#5-documents-rfp-vs-loi",
+          "weight": 1
+        }
+      ],
+      "phrase": "negotiate LOI template terms"
+    },
+    {
+      "concept_key": "source-study-capability-proof",
+      "definition": "Testing an existing-system capability claim property by property against a supplied source, with the burden on the claim that the capability already exists.",
+      "guidance_id": "rule-466a545a-whole-v1",
+      "label": "Source-study capability proof",
+      "mappings": [
+        {
+          "concept_key": "source-study-capability-proof",
+          "doctrine_section_id": "259be747-8cff-4b8a-b71f-d91727cce7a4",
+          "rationale": "The active corrected study is the proof example and provenance; the source rule remains authoritative across every Joe-provided source.",
+          "role": "supports",
+          "section_address": "2026-08-07-tenex-metaharness-sdlc-takeaways#preamble",
+          "weight": 1
+        }
+      ],
+      "phrase": "prove an existing capability against the source"
+    },
+    {
+      "concept_key": "partner-calibration-without-profiling",
+      "definition": "Adapting to a partner's directly stated preferences and corrections without inferring hidden psychology, motivation, mood, or personality.",
+      "guidance_id": "rule-70e372f0-whole-v1",
+      "label": "Partner calibration without profiling",
+      "mappings": [
+        {
+          "concept_key": "partner-calibration-without-profiling",
+          "doctrine_section_id": "36ad619e-29fc-4501-9779-d739e44c46f9",
+          "rationale": "The active memory doctrine supports Dell-specific calibration from directly stated or demonstrated preferences while forbidding personality, motive, mood, or state inference.",
+          "role": "governs",
+          "section_address": "dr-cre-doctrine-2026-08-01#iii-memory-what-he-keeps-and-the-line-he-never-crosses",
+          "weight": 1
+        }
+      ],
+      "phrase": "adapt to Dell without personality profiling"
+    },
+    {
+      "concept_key": "one-implementation-for-every-write-path",
+      "definition": "Keeping manual and automated callers on the same governed implementation so configuration, validation, and evidence cannot drift between paths.",
+      "guidance_id": "rule-a8c55a47-whole-v1",
+      "label": "One implementation for every write path",
+      "mappings": [
+        {
+          "concept_key": "one-implementation-for-every-write-path",
+          "doctrine_section_id": "b19c9b29-25bd-492a-bc12-e3a889bd06dc",
+          "rationale": "The active domain-data write law governs shared write services; the source rule's broader anti-drift scope still covers scripts, documented commands, environment setup, and duplicated configuration contracts.",
+          "role": "governs",
+          "section_address": "carr-mature-software-end-state-bduf#s14-domain-data",
+          "weight": 1
+        }
+      ],
+      "phrase": "manual and automated paths use the same implementation"
+    },
+    {
+      "concept_key": "architecture-for-the-planned-trajectory",
+      "definition": "Sizing durable foundations for the practice's intended future scale while keeping unproven workflow details reversible.",
+      "guidance_id": "rule-b42f11a0-whole-v1",
+      "label": "Architecture for the planned trajectory",
+      "mappings": [
+        {
+          "concept_key": "architecture-for-the-planned-trajectory",
+          "doctrine_section_id": "4552de91-0806-47ae-ae02-6ea313b90d72",
+          "rationale": "The active end-state ruling governs real planned growth while preserving the source rule's discipline against speculative complexity and its requirement to state cost and complexity honestly.",
+          "role": "governs",
+          "section_address": "carr-mature-software-end-state-bduf#s40-owner-controlled-tenant-readiness-evolving-workflows-and-low-toil-end-state",
+          "weight": 1
+        }
+      ],
+      "phrase": "design for the planned future trajectory"
+    },
+    {
+      "concept_key": "constraint-preserving-alternative-route",
+      "definition": "Continuing to solve the underlying problem after one route is refused by finding another route that preserves the binding constraint and authority boundary.",
+      "guidance_id": "rule-e4d965d9-whole-v1",
+      "label": "Constraint-preserving alternative route",
+      "mappings": [
+        {
+          "concept_key": "constraint-preserving-alternative-route",
+          "doctrine_section_id": "68135ed4-6e69-4eaf-9baf-c64c9ba62efe",
+          "rationale": "The active judgment doctrine governs safe sanctioned alternative routes while preserving the requirement to stop for actions that genuinely require human authority.",
+          "role": "governs",
+          "section_address": "dr-cre-doctrine-2026-08-01#iv-judgment-how-he-pushes-back-and-how-he-acts-alone",
+          "weight": 1
+        }
+      ],
+      "phrase": "find another route after a refusal"
+    },
+    {
+      "concept_key": "mobility-privacy-architecture-choice",
+      "definition": "Designing for cross-device mobility while presenting the specific data, exposure, and consequences of privacy choices for a human decision.",
+      "guidance_id": "rule-f0f9156e-whole-v1",
+      "label": "Mobility and privacy architecture choice",
+      "mappings": [
+        {
+          "concept_key": "mobility-privacy-architecture-choice",
+          "doctrine_section_id": "8ffc1ed4-5f87-4a73-85fe-862552ce3618",
+          "rationale": "The active cross-device section governs mobile continuity while preserving explicit privacy disclosure and all non-negotiable legal and trust safeguards.",
+          "role": "governs",
+          "section_address": "carr-workspace-bduf#s14-cross-device-continuity",
+          "weight": 1
+        },
+        {
+          "concept_key": "mobility-privacy-architecture-choice",
+          "doctrine_section_id": "12bb6df7-a08a-479a-8463-6961f22ff569",
+          "rationale": "The active privacy section supplies the exact identity, data-classification, retention, provider, and threat-model facts that must be presented with the mobility option.",
+          "role": "supports",
+          "section_address": "carr-workspace-bduf#s17-security-privacy-and-retention",
+          "weight": 1
+        }
+      ],
+      "phrase": "choose between mobility and privacy architecture"
+    },
+    {
+      "concept_key": "capture-reusable-deferred-knowledge",
+      "definition": "Placing useful knowledge outside today's task into its canonical durable home with enough context to retrieve and apply it later.",
+      "guidance_id": "rule-f5beac20-whole-v1",
+      "label": "Capture reusable deferred knowledge",
+      "mappings": [
+        {
+          "concept_key": "capture-reusable-deferred-knowledge",
+          "doctrine_section_id": "1debbdd7-9880-47f7-81a6-55e788716c57",
+          "rationale": "The active knowledge-placement section governs the related durable home, provenance, review triggers, and generated consumers; the source rule remains authoritative for proactive capture, future-use proposals, and Joe's sole authority over scope expansion.",
+          "role": "governs",
+          "section_address": "carr-production-maturity-baseline#s15-deprecation-decisions-and-knowledge-architecture",
+          "weight": 1
+        }
+      ],
+      "phrase": "capture reusable knowledge for later"
+    }
+  ],
   "proposed_constitution_guidance_ids": [
     "rule-0f38532e-whole-v1",
     "rule-fa217e48-whole-v1",
@@ -18,235 +220,16 @@
     "rule-015183f5-whole-v1",
     "rule-2271e684-whole-v1"
   ],
-  "doctrine_guidance": [
-    {
-      "guidance_id": "rule-0c1bac27-whole-v1",
-      "concept_key": "partner-complementarity-reasoning",
-      "label": "Partner complementarity reasoning",
-      "definition": "Reasoning about how Joe and Dell's demonstrated strengths fit together without profiling either partner in isolation.",
-      "phrase": "Joe and Dell partner complementarity",
-      "mappings": [
-        {
-          "concept_key": "partner-complementarity-reasoning",
-          "section_address": "twin-system-playbook#collaboration-model-designed-with-joe-july-6-2026-the-max-efficiency-layer",
-          "doctrine_section_id": "22de7c0f-195d-44b5-8c9d-8ae8130cc7f8",
-          "role": "supports",
-          "weight": 1,
-          "rationale": "The active collaboration-model section supports partner-complementarity reasoning, while the source rule remains authoritative for evidence, symmetry, no profiling, and visibility requirements."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-0f38532e-whole-v1",
-      "concept_key": "authoritative-record-ownership",
-      "label": "Authoritative record ownership",
-      "definition": "Choosing one canonical home for a record and making every other surface a governed consumer instead of a competing copy.",
-      "phrase": "choose the authoritative source of truth",
-      "mappings": [
-        {
-          "concept_key": "authoritative-record-ownership",
-          "section_address": "carr-production-maturity-baseline#s15-deprecation-decisions-and-knowledge-architecture",
-          "doctrine_section_id": "1debbdd7-9880-47f7-81a6-55e788716c57",
-          "role": "supports",
-          "weight": 1,
-          "rationale": "The active knowledge-architecture section supports authoritative ownership during change; it does not replace the source rule's universal anti-duplication and generated-view mandate."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-1021fa84-whole-v1",
-      "concept_key": "joe-brokerage-priority-context",
-      "label": "Joe brokerage priority context",
-      "definition": "Interpreting Joe's priorities from his healthcare brokerage role and current pipeline-building work rather than over-weighting recent system construction.",
-      "phrase": "Joe brokerage priorities and current focus",
-      "mappings": [
-        {
-          "concept_key": "joe-brokerage-priority-context",
-          "section_address": "carr-profile#current-stage",
-          "doctrine_section_id": "47bbeb45-ddc9-4277-8290-ac64fbca0edf",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active profile section states Joe's present brokerage stage and primary prospecting, outreach, follow-up, and market-work focus without treating historical system-building residue as his defining work or unfinished-project behavior."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-347a9ca6-whole-v1",
-      "concept_key": "session-work-shape-assessment",
-      "label": "Session work-shape assessment",
-      "definition": "Assessing an agent session from its actual scope, authority, tools, and actions rather than inferring behavior from its title.",
-      "phrase": "assess the actual session work shape",
-      "mappings": [
-        {
-          "concept_key": "session-work-shape-assessment",
-          "section_address": "carr-production-maturity-baseline#s13-agentops-doc-and-engineering-sessions",
-          "doctrine_section_id": "7af45c76-0872-4182-9772-6763d14cebe2",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active AgentOps contract supports judging actual tool use, dirty paths, transcript, concurrency, and worktree risk rather than trusting a session label."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-4399df76-whole-v1",
-      "concept_key": "loi-term-negotiation-posture",
-      "label": "LOI term negotiation posture",
-      "definition": "Treating every LOI term and template value as a deal-specific negotiable position rather than fixed policy.",
-      "phrase": "negotiate LOI template terms",
-      "mappings": [
-        {
-          "concept_key": "loi-term-negotiation-posture",
-          "section_address": "negotiation#5-documents-rfp-vs-loi",
-          "doctrine_section_id": "154546ca-fea6-41dd-ba03-fce5cdb2e2aa",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active negotiation section supports deal-specific LOI judgment; templates remain overridable defaults rather than fixed policy, and one client's documents do not establish common terms."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-466a545a-whole-v1",
-      "concept_key": "source-study-capability-proof",
-      "label": "Source-study capability proof",
-      "definition": "Testing an existing-system capability claim property by property against a supplied source, with the burden on the claim that the capability already exists.",
-      "phrase": "prove an existing capability against the source",
-      "mappings": [
-        {
-          "concept_key": "source-study-capability-proof",
-          "section_address": "2026-08-07-tenex-metaharness-sdlc-takeaways#preamble",
-          "doctrine_section_id": "259be747-8cff-4b8a-b71f-d91727cce7a4",
-          "role": "supports",
-          "weight": 1,
-          "rationale": "The active corrected study is the proof example and provenance; the source rule remains authoritative across every Joe-provided source."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-70e372f0-whole-v1",
-      "concept_key": "partner-calibration-without-profiling",
-      "label": "Partner calibration without profiling",
-      "definition": "Adapting to a partner's directly stated preferences and corrections without inferring hidden psychology, motivation, mood, or personality.",
-      "phrase": "adapt to Dell without personality profiling",
-      "mappings": [
-        {
-          "concept_key": "partner-calibration-without-profiling",
-          "section_address": "dr-cre-doctrine-2026-08-01#iii-memory-what-he-keeps-and-the-line-he-never-crosses",
-          "doctrine_section_id": "36ad619e-29fc-4501-9779-d739e44c46f9",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active memory doctrine supports Dell-specific calibration from directly stated or demonstrated preferences while forbidding personality, motive, mood, or state inference."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-a8c55a47-whole-v1",
-      "concept_key": "one-implementation-for-every-write-path",
-      "label": "One implementation for every write path",
-      "definition": "Keeping manual and automated callers on the same governed implementation so configuration, validation, and evidence cannot drift between paths.",
-      "phrase": "manual and automated paths use the same implementation",
-      "mappings": [
-        {
-          "concept_key": "one-implementation-for-every-write-path",
-          "section_address": "carr-mature-software-end-state-bduf#s14-domain-data",
-          "doctrine_section_id": "b19c9b29-25bd-492a-bc12-e3a889bd06dc",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active domain-data write law governs shared write services; the source rule's broader anti-drift scope still covers scripts, documented commands, environment setup, and duplicated configuration contracts."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-b42f11a0-whole-v1",
-      "concept_key": "architecture-for-the-planned-trajectory",
-      "label": "Architecture for the planned trajectory",
-      "definition": "Sizing durable foundations for the practice's intended future scale while keeping unproven workflow details reversible.",
-      "phrase": "design for the planned future trajectory",
-      "mappings": [
-        {
-          "concept_key": "architecture-for-the-planned-trajectory",
-          "section_address": "carr-mature-software-end-state-bduf#s40-owner-controlled-tenant-readiness-evolving-workflows-and-low-toil-end-state",
-          "doctrine_section_id": "4552de91-0806-47ae-ae02-6ea313b90d72",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active end-state ruling governs real planned growth while preserving the source rule's discipline against speculative complexity and its requirement to state cost and complexity honestly."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-d367188d-whole-v1",
-      "concept_key": "consolidate-duplicate-authorities",
-      "label": "Consolidate duplicate authorities",
-      "definition": "Choosing one surviving authority, migrating its consumers, and retiring parallel versions instead of maintaining two sources of truth.",
-      "phrase": "consolidate duplicate sources of truth",
-      "mappings": [
-        {
-          "concept_key": "consolidate-duplicate-authorities",
-          "section_address": "carr-production-maturity-baseline#s15-deprecation-decisions-and-knowledge-architecture",
-          "doctrine_section_id": "1debbdd7-9880-47f7-81a6-55e788716c57",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active deprecation and knowledge-architecture section governs consolidation while preserving the proactive rule not to create two maintained authorities in the first place."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-e4d965d9-whole-v1",
-      "concept_key": "constraint-preserving-alternative-route",
-      "label": "Constraint-preserving alternative route",
-      "definition": "Continuing to solve the underlying problem after one route is refused by finding another route that preserves the binding constraint and authority boundary.",
-      "phrase": "find another route after a refusal",
-      "mappings": [
-        {
-          "concept_key": "constraint-preserving-alternative-route",
-          "section_address": "dr-cre-doctrine-2026-08-01#iv-judgment-how-he-pushes-back-and-how-he-acts-alone",
-          "doctrine_section_id": "68135ed4-6e69-4eaf-9baf-c64c9ba62efe",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active judgment doctrine governs safe sanctioned alternative routes while preserving the requirement to stop for actions that genuinely require human authority."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-f0f9156e-whole-v1",
-      "concept_key": "mobility-privacy-architecture-choice",
-      "label": "Mobility and privacy architecture choice",
-      "definition": "Designing for cross-device mobility while presenting the specific data, exposure, and consequences of privacy choices for a human decision.",
-      "phrase": "choose between mobility and privacy architecture",
-      "mappings": [
-        {
-          "concept_key": "mobility-privacy-architecture-choice",
-          "section_address": "carr-workspace-bduf#s14-cross-device-continuity",
-          "doctrine_section_id": "8ffc1ed4-5f87-4a73-85fe-862552ce3618",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active cross-device section governs mobile continuity while preserving explicit privacy disclosure and all non-negotiable legal and trust safeguards."
-        },
-        {
-          "concept_key": "mobility-privacy-architecture-choice",
-          "section_address": "carr-workspace-bduf#s17-security-privacy-and-retention",
-          "doctrine_section_id": "12bb6df7-a08a-479a-8463-6961f22ff569",
-          "role": "supports",
-          "weight": 1,
-          "rationale": "The active privacy section supplies the exact identity, data-classification, retention, provider, and threat-model facts that must be presented with the mobility option."
-        }
-      ]
-    },
-    {
-      "guidance_id": "rule-f5beac20-whole-v1",
-      "concept_key": "capture-reusable-deferred-knowledge",
-      "label": "Capture reusable deferred knowledge",
-      "definition": "Placing useful knowledge outside today's task into its canonical durable home with enough context to retrieve and apply it later.",
-      "phrase": "capture reusable knowledge for later",
-      "mappings": [
-        {
-          "concept_key": "capture-reusable-deferred-knowledge",
-          "section_address": "carr-production-maturity-baseline#s15-deprecation-decisions-and-knowledge-architecture",
-          "doctrine_section_id": "1debbdd7-9880-47f7-81a6-55e788716c57",
-          "role": "governs",
-          "weight": 1,
-          "rationale": "The active knowledge-placement section governs the related durable home, provenance, review triggers, and generated consumers; the source rule remains authoritative for proactive capture, future-use proposals, and Joe's sole authority over scope expansion."
-        }
-      ]
-    }
-  ]
+  "review_state": "proposed",
+  "reviewed_base_inventory": {
+    "excluded_rule_surface": "intro_politics",
+    "path": "ops/config/rule-enforcement-map.json",
+    "sha256": "b4e0d6689df3d96be24fb0cb888587f545bef8ffeba79c3ee6757b447f3fb308",
+    "standing_source_count": 196
+  },
+  "reviewed_source_manifest": {
+    "path": "audits/guidance-migration-manifest.v1.tsv",
+    "sha256": "9549f834aedd86b2d77fdc736ff81a7da503b4612ed0eac87c57e6830af016ce"
+  },
+  "schema": "guidance-situation-curation-review/v1"
 }

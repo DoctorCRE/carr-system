@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-08-17T08:08:30Z",
+  "reviewed_at": "2026-09-12T09:01:51Z",
   "owner": "joe",
   "objective": "Keep CARR reliable without using paid cloud execution as an iteration loop.",
   "standing_rule_binding": {
@@ -40,17 +40,20 @@
     "github_actions_pause": {
       "effective_at": "2026-08-17",
       "ends_after_verified_allowance_reset": "2026-09-01",
-      "repository_actions_enabled": false,
-      "verified_allowance_reset": false,
+      "repository_actions_enabled": true,
+      "verified_allowance_reset": true,
       "paid_overage_budget_usd": 0,
-      "reason": "2,995 of 3,000 included minutes were consumed by repeated CI fanout."
+      "reason": "2,995 of 3,000 included minutes were consumed by repeated CI fanout.",
+      "cleared_at": "2026-09-12",
+      "cleared_decision_ref": "9935743c-21de-4490-83db-d11a5e20f6b1",
+      "cleared_reason": "The control reached its own stated end (2026-09-01) with nobody recording the reset, so it kept refusing every admission on a fact that had stopped being true. Joe asserts the allowance reset happened and approves clearing it; repository_actions_enabled now matches GitHub's live enabled:true, read 2026-09-12T09:01Z. The $0 paid_overage_budget_usd above is NOT part of what was cleared: it is the standing hard stop and stays in force."
     }
   },
   "execution_gates": {
     "github-actions-remote-ci": {
       "platform": "github",
       "installed": true,
-      "installed_enforcement_ref": "GitHub repository Actions disabled plus account Actions paid-usage budget $0",
+      "installed_enforcement_ref": "account Actions paid-usage budget $0 with stop-usage enabled, plus lib/platform_metering.py authorize_metered_execution before every dispatch (the repository Actions disable was lifted 2026-09-12, decision 9935743c-21de-4490-83db-d11a5e20f6b1)",
       "temporary_control": "github_actions_pause",
       "required_true": ["local_checks_green"],
       "required_nonempty": ["candidate_sha"],
@@ -65,6 +68,16 @@
       "maximums": {
         "requested_lifetime_minutes": 120,
         "active_nondefault_branches": 2
+      }
+    },
+    "neon-standing-project-create": {
+      "platform": "neon",
+      "installed": true,
+      "installed_enforcement_ref": "tools/staging-project-replacement.py authorizes exactly one operation-bound standing project create before provider dispatch",
+      "required_true": ["local_checks_green"],
+      "required_nonempty": ["candidate_sha", "operation_id"],
+      "maximums": {
+        "standing_project_create_count": 1
       }
     },
     "cloudflare-worker-release": {
@@ -98,21 +111,27 @@
   "platforms": [
     {
       "key": "github",
-      "covers_service_runtimes": [],
+      "covers_service_runtimes": ["github-actions"],
       "scope": "source control, pull requests, packages and GitHub Actions",
       "billing_model": "fixed GitHub plan plus metered Actions minutes and retained artifact/cache/package storage",
       "meter_units": ["hosted runner minutes", "GB-month artifact and package storage", "GB-month cache storage"],
       "current_plan": "GitHub Pro",
       "live_evidence": {
-        "observed_at": "2026-08-17",
-        "actions_minutes_used": 2995,
+        "observed_at": "2026-09-12T09:01:51Z",
+        "actions_minutes_used": null,
         "actions_minutes_included": 3000,
-        "repository_actions_enabled": false,
-        "paid_overage_budget_usd": 0
+        "actions_minutes_readback_verified": false,
+        "actions_minutes_readback_blocker": "the GitHub billing endpoints need the `user` OAuth scope this machine's token does not hold; Joe holds the reset verification instead (decision 9935743c-21de-4490-83db-d11a5e20f6b1)",
+        "repository_actions_enabled": true,
+        "paid_overage_budget_usd": 0,
+        "prior_observation": {
+          "observed_at": "2026-08-17",
+          "actions_minutes_used": 2995,
+          "repository_actions_enabled": false
+        }
       },
       "hard_controls": [
-        "Actions disabled through September 1 reset verification",
-        "$0 Actions budget with stop-usage enabled",
+        "$0 Actions budget with stop-usage enabled is the standing hard stop; the 2026-08-17 Actions pause was cleared 2026-09-12 and is no longer a control",
         "one remote full CI run per publication candidate after local checks"
       ],
       "optimization": "Batch related changes into one branch and one PR; diagnose failures locally; cancel superseded runs; do not run post-merge CI when the identical protected source head already passed unless main-only integration evidence is required.",
@@ -317,8 +336,8 @@
     },
     {
       "key": "local-mac",
-      "covers_service_runtimes": ["launchd"],
-      "scope": "Joe's local deterministic jobs and launchd adapters",
+      "covers_service_runtimes": ["launchd", "operator-invoked"],
+      "scope": "Joe's local deterministic jobs and launchd adapters, plus operator-invoked local doors (the WR-000048 migrate-prod wrapper)",
       "billing_model": "no per-run vendor charge; bounded by local power, storage and network",
       "meter_units": ["local runtime", "local disk bytes", "network bytes sent to metered services"],
       "current_plan": "owned_hardware",

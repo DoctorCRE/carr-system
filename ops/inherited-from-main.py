@@ -42,6 +42,8 @@ your fault" about a defect that IS their fault.
 
 EVERY UNCERTAINTY RESOLVES TO "CANNOT TELL", never to "inherited". No merge
 base, a shallow clone, a check that did not exist at the merge base, a check
+ops/ci.sh only started COLLECTING on this branch (see newly_collected: it fails
+at the base, but main has never run it, so the failure is not main's), a check
 that declined to run there (exit 78), a command that could not be executed
 (126/127), a timeout, a worktree that would not materialise — all of them exit
 2, and ops/ci.sh carries on with its normal full run. The failure mode of this
@@ -58,7 +60,9 @@ Exit 2  CANNOT TELL — refused to answer; the caller must behave as it did befo
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -118,6 +122,211 @@ def check_file_of(cmd: list[str], repo: str) -> str | None:
         cand = os.path.normpath(os.path.join(repo, arg))
         if os.path.isfile(cand) and cand.startswith(repo + os.sep):
             return os.path.relpath(cand, repo)
+    return None
+
+
+def collection_globs(ci_sh: str) -> list[str]:
+    """The selftest collection patterns, read out of ops/ci.sh's own source.
+
+    Deliberately derived rather than restated, for the reason
+    ops/ci-selftest.py's collection invariant already gives: a copy of the globs
+    here would be a second contract to keep in sync, which is the same failure
+    one level up. Shell variables (`$eligible`) name no path and are dropped.
+    """
+    patterns: list[str] = []
+    for match in re.finditer(r"for t in ([^;]+); do", ci_sh):
+        patterns += [p for p in match.group(1).split() if "$" not in p]
+    return patterns
+
+
+def glob_collects(pattern: str, rel: str) -> bool:
+    """Shell-glob semantics: `*` matches inside a path segment, never across /.
+
+    fnmatch alone would translate `*` to `.*` and let `tools/test_*.py` swallow
+    `tools/room-bridge/test_x.py` — the exact file the base does NOT collect,
+    and the one case this has to get right.
+    """
+    parts, path = pattern.split("/"), rel.split("/")
+    return len(parts) == len(path) and all(
+        fnmatch.fnmatchcase(segment, part) for part, segment in zip(parts, path))
+
+
+def newly_collected(repo: str, mb: str, rel: str) -> str | None:
+    """Refusal text if THIS BRANCH is what makes ops/ci.sh run <rel>, else None.
+
+    2026-09-10. A branch that widened ci.sh's collection globs to reach
+    tools/<subdir>/test_*.py was told, run after run, "INHERITED FROM MAIN —
+    wait for main to go green" about a suite main's own globs had never
+    collected once. Every word of that was unactionable: main was green, the
+    canary had nothing to name, no merge freeze was going to lift, and the
+    branch could not merge. The re-run was not wrong about the exit code — the
+    suite really did exit 1 at the merge base — it was wrong about whose break
+    that is. A check nothing on main runs cannot be a break inherited FROM main,
+    and the branch that starts running it is the only place it can be diagnosed.
+
+    This is the guard above it one step later: a check this branch ADDED cannot
+    have failed at the merge base, and a check this branch newly COLLECTED is
+    that same case with the file already sitting in the tree.
+
+    DELIBERATELY NARROW, because the cost of over-reaching here is the mechanism
+    quietly switching itself off. It refuses only when NO glob at the merge base
+    collects the check AND one in this tree does — that is, only when the
+    branch's own change to ci.sh is what makes the check run at all. Everything
+    ci.sh invokes by name rather than by glob (hooks/gate-integrity.py, the
+    inventory checks) is collected by neither side and keeps its verdict, a
+    check both sides collect keeps its verdict, and a ci.sh that cannot be read
+    on either side yields no opinion rather than a refusal.
+    """
+    rc, base_ci = git(repo, "show", f"{mb}:ops/ci.sh")
+    if rc != 0:
+        return None
+    try:
+        with open(os.path.join(repo, "ops", "ci.sh"), encoding="utf-8") as handle:
+            head_ci = handle.read()
+    except OSError:
+        return None
+    base_globs, head_globs = collection_globs(base_ci), collection_globs(head_ci)
+    if not base_globs or not head_globs:
+        return None
+    if any(glob_collects(p, rel) for p in base_globs):
+        return None
+    if not any(glob_collects(p, rel) for p in head_globs):
+        return None
+    return (f"this branch is what makes {rel} run — no collection glob in "
+            f"ops/ci.sh at the merge base matches it, so main has never run it "
+            f"once and a failure there is not main's to fix — diagnose it here")
+
+
+def missing_replay_prerequisite(repo: str, tree: str, output: str) -> str | None:
+    """Name a caller-only runtime path that made detached replay non-equivalent.
+
+    A Git worktree materialises tracked source, not ignored installed runtimes
+    such as node_modules. If a failed replay names a path absent from the
+    detached tree but present and untracked in the caller checkout, the replay
+    did not reproduce the caller's environment. That is uncertainty, never
+    evidence that the base is broken.
+    """
+    roots = ((tree, repo), (os.path.realpath(tree), os.path.realpath(repo)))
+    seen: set[str] = set()
+    for replay_root, caller_root in roots:
+        pattern = re.compile(re.escape(replay_root) + r"/[^\s'\"():,\[\]]+")
+        for match in pattern.finditer(output):
+            replay_path = match.group(0).rstrip(".;")
+            if replay_path in seen:
+                continue
+            seen.add(replay_path)
+            if os.path.lexists(replay_path):
+                continue
+            rel = os.path.relpath(replay_path, replay_root)
+            if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+                continue
+            caller_path = os.path.join(caller_root, rel)
+            if not os.path.lexists(caller_path):
+                continue
+            if git(repo, "ls-files", "--error-unmatch", "--", rel)[0] == 0:
+                continue
+            return rel
+    return None
+
+
+# Directories `npm install` / `python -m venv` populate that a plain
+# `git worktree add` never brings along, because they are ignored rather than
+# tracked (see .gitignore: `.venv`, `node_modules/`). Without this, EVERY
+# node- or python-dependent check in ops/ci.sh fails at the merge base for a
+# reason that has nothing to do with main, and missing_replay_prerequisite()
+# above only catches the cases where the failing output happens to print an
+# absolute path under the tree — which a bare `require('pkg')` specifier does
+# not (Node's MODULE_NOT_FOUND names the missing package, not a path; the
+# only tree-rooted path in that message is the require-stack ENTRY, i.e.
+# where the failing require was called FROM, not what is missing). PR #1195 /
+# defect 71c7c3f2 is exactly that: ci-selftest.py's "ci.yml parses" check
+# shells out to `node -e "require('js-yaml')..."`, the merge-base worktree
+# had no mcp-server/node_modules, and the resulting MODULE_NOT_FOUND was
+# reported INHERITED FROM MAIN even though main's own gate had passed on its
+# own PR. Symlinking the caller's installed dependencies in BEFORE the replay
+# fixes the common case outright, rather than merely detecting it after the
+# fact.
+INSTALL_DIRS = (
+    ".venv",
+    "mcp-server/node_modules",
+    "control-room/node_modules",
+    "workspace/node_modules",
+)
+
+
+def link_install_dirs(repo: str, tree: str) -> None:
+    """Symlink the caller's installed runtimes into the detached merge-base tree.
+
+    Best-effort and silent on failure: a symlink that cannot be made leaves the
+    replay exactly as unreproducible as it was before this function existed,
+    and environment_class_signal() below is the backstop for whatever this
+    does not cover — it must never be the reason a verdict comes out wrong.
+    Only directories that already exist in the caller's checkout are linked,
+    and only into a destination that is not already there (a tracked
+    `mcp-server/node_modules` would never occur, but a re-run must not clobber
+    anything the worktree checkout itself materialised).
+    """
+    for rel in INSTALL_DIRS:
+        src = os.path.join(repo, rel)
+        if not os.path.isdir(src):
+            continue
+        dst = os.path.join(tree, rel)
+        if os.path.lexists(dst):
+            continue
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.symlink(os.path.realpath(src), dst)
+        except OSError:
+            continue
+
+
+# Text signatures of "the tool this check needed is not here", independent of
+# whether the message happens to spell out a tree-rooted path.
+# missing_replay_prerequisite() is the path-based, precise detector; this is
+# the pattern-based backstop for the messages that name a missing PACKAGE or
+# COMMAND instead of a missing PATH. Kept deliberately small and specific —
+# broad patterns like a bare "No such file or directory" would swallow real
+# defects (a check that legitimately asserts a file must exist), so every
+# entry here is a signature that names the runtime itself, never the
+# subject under test.
+_ENVIRONMENT_SIGNATURES: tuple[tuple[re.Pattern, str], ...] = (
+    (re.compile(r"\bMODULE_NOT_FOUND\b"),
+     "a missing Node module (MODULE_NOT_FOUND)"),
+    (re.compile(r"Cannot find module '([^']+)'"),
+     "a missing Node module"),
+    (re.compile(r"ModuleNotFoundError: No module named '([^']+)'"),
+     "a missing Python module"),
+    (re.compile(r"\bcommand not found\b"),
+     "a missing command (command not found)"),
+    (re.compile(r"No such file or directory.*\.venv/bin/(python3?|pip3?)"),
+     "a missing virtualenv (.venv/bin not present)"),
+    (re.compile(r"\.venv/bin/(python3?|pip3?): No such file or directory"),
+     "a missing virtualenv (.venv/bin not present)"),
+)
+
+
+def environment_class_signal(output: str) -> str | None:
+    """Name the environment-class failure in a base replay, if the output is one.
+
+    A base re-run that fails because a dependency was never installed in the
+    detached tree is not evidence that main is broken — it is evidence that
+    `git worktree add` does not bring along ignored install directories.
+    link_install_dirs() fixes the common case before the check ever runs;
+    this is what catches what that missed, so the failure still never gets
+    read as INHERITED FROM MAIN. Matches by MESSAGE SIGNATURE rather than by
+    path, because Node's own MODULE_NOT_FOUND text names the missing package
+    ('js-yaml'), not a filesystem path under the tree — see the INSTALL_DIRS
+    comment above for the incident (PR #1195 / defect 71c7c3f2) this exists
+    to stop from recurring.
+    """
+    for pattern, label in _ENVIRONMENT_SIGNATURES:
+        m = pattern.search(output)
+        if not m:
+            continue
+        groups = [g for g in m.groups() if g]
+        if groups:
+            return f"{label}: {groups[0]}"
+        return label
     return None
 
 
@@ -184,12 +393,20 @@ def main() -> int:
     if rel and git(repo, "cat-file", "-e", f"{mb}:{rel}")[0] != 0:
         return refuse(f"{rel} does not exist at the merge base — this branch added it")
 
+    # A check the merge base never RAN cannot be a break inherited from main,
+    # even when it does fail there. See newly_collected() for the case.
+    if rel:
+        never_ran_on_main = newly_collected(repo, mb, rel)
+        if never_ran_on_main:
+            return refuse(never_ran_on_main)
+
     tmp = tempfile.mkdtemp(prefix=f"carr-mergebase-{os.getpid()}-")
     tree = os.path.join(tmp, "base")
     try:
         rc, out = git(repo, "worktree", "add", "--detach", "--quiet", tree, mb)
         if rc != 0:
             return refuse(f"could not materialise the merge base: {out[:160]}")
+        link_install_dirs(repo, tree)
         try:
             p = subprocess.run(cmd, cwd=tree, capture_output=True, text=True,
                                env=_clean_env(), timeout=a.timeout)
@@ -207,6 +424,29 @@ def main() -> int:
         if p.returncode in (126, 127):
             return refuse(f"{name} could not be executed at the merge base (exit {p.returncode})")
 
+        replay_output = (p.stdout or "") + (p.stderr or "")
+        prerequisite = missing_replay_prerequisite(repo, tree, replay_output)
+        if prerequisite:
+            return refuse(
+                "runtime prerequisite is absent from the merge-base worktree "
+                f"but present only in the caller checkout: {prerequisite}"
+            )
+
+        # THE PATTERN-BASED BACKSTOP. link_install_dirs() already symlinked in
+        # whatever install directories the caller checkout had, and the guard
+        # above catches whatever still names a tree-rooted path. This is for
+        # what neither reaches: a message that names the missing PACKAGE or
+        # COMMAND rather than a path (Node's MODULE_NOT_FOUND, a Python
+        # ModuleNotFoundError, a shell "command not found", an absent
+        # .venv/bin). Attribution unavailable, never inherited and never the
+        # branch's fault — see environment_class_signal()'s docstring.
+        env_signal = environment_class_signal(replay_output)
+        if env_signal:
+            return refuse(
+                "the merge-base replay failed on an environment-class signature, "
+                f"not a code defect — attribution unavailable: {env_signal}"
+            )
+
         # THE ANSWER. It fails on a tree that contains none of this branch.
         print(f"INHERITED FROM MAIN — do not diagnose this branch; "
               f"the break is {name} on main")
@@ -217,7 +457,11 @@ def main() -> int:
               f"merge freeze holds until it is fixed — then re-run this check.")
         print(f"  If you mean to be the one who fixes it, fix it ON MAIN in its own change; "
               f"a fix smuggled into this branch merges a second unrelated thing.")
-        tail = ((p.stdout or "") + (p.stderr or "")).strip().splitlines()[-6:]
+        # Wide enough to carry the failing assertion itself, not just the runner's
+        # closing summary: at six lines the FAIL line of a suite that fails only on
+        # the hosted runner never once reached the log, and the case below it could
+        # not be diagnosed from any run.
+        tail = replay_output.strip().splitlines()[-60:]
         for line in tail:
             print(f"    | {line}")
         return INHERITED

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import hashlib
 import json
 import os
 import shutil
 import sys
 import tempfile
+import time
 import traceback
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timezone
@@ -422,12 +424,47 @@ def compute_file_hashes(root: Path) -> dict[str, str]:
         if not path.is_file():
             continue
         relpath = path.relative_to(root).as_posix()
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1 << 20), b""):
-                digest.update(chunk)
-        hashes[relpath] = digest.hexdigest()
+        hashes[relpath] = _hash_one_file(path)
     return hashes
+
+
+# The same three errnos exporters/common.py retries, and for the same reason:
+# one definition of "the cloud provider cannot serve this right now", two places
+# that must agree about it.
+_TRANSIENT_ERRNOS = frozenset({errno.EAGAIN, errno.EDEADLK, errno.ETIMEDOUT})
+_HASH_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0, 5.0, 15.0)
+
+
+def _hash_one_file(path: Path) -> str:
+    """sha256 one mirror file, retrying only a transient cloud-provider refusal.
+
+    THE MIRROR WRITES INTO ONEDRIVE AND THEN READS ITSELF BACK, which is the
+    step that failed on 2026-09-17: `OSError: [Errno 11] Resource deadlock
+    avoided` out of this loop, thirty seconds into the manifest. The files are
+    freshly written, so this is not Files On-Demand evicting them — it is the
+    File Provider still coming up ten minutes into a scheduled 01:55 dark wake,
+    refusing reads it will happily serve minutes later. Re-running the identical
+    mirror by hand at 06:08 the same morning wrote all 313 files clean.
+
+    A manifest that cannot vouch for every file it claims is worthless, so this
+    retries rather than skipping the file or writing a partial manifest. Only
+    the transient errnos: a permission or path failure escapes on the first
+    attempt, where it belongs.
+    """
+    for attempt in range(len(_HASH_RETRY_BACKOFF_SECONDS) + 1):
+        digest = hashlib.sha256()
+        try:
+            with path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1 << 20), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+        except OSError as error:
+            if error.errno not in _TRANSIENT_ERRNOS:
+                raise
+            if attempt == len(_HASH_RETRY_BACKOFF_SECONDS):
+                raise
+            time.sleep(_HASH_RETRY_BACKOFF_SECONDS[attempt])
+    raise AssertionError("unreachable: the loop returns or raises")
 
 
 def render_output_manifest(timestamp: str, files: Mapping[str, str]) -> str:

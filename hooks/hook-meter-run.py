@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""hook-meter-run.py — runs a gate, times it, records what happened, decides nothing.
+"""hook-meter-run.py — dispatches hooks, times them, preserves gate verdicts.
+
+Bounded read-only Grok print children do not own a CARR session lifecycle.
+Only their named context/state hooks are suppressed; effect guards still run.
 
     /usr/bin/env python3 hooks/hook-meter-run.py hooks/guard-unattended.py [args...]
 
@@ -98,6 +101,26 @@ DENY_MARKER = "DENY-CLASS:"
 STOP_EVENTS = ("Stop", "SubagentStop")
 
 MAX_FIELD = 300
+INVOCATION_REPO_ENV = "CARR_HOOK_INVOCATION_REPO"
+
+def bounded_grok_read_only():
+    # Keep one classifier for marked and ordinary context invocations. The
+    # protected probe returns immediately without ps for unmarked sessions.
+    # Missing optional plumbing must keep every gate running.
+    sys.path.insert(0, REPO)
+    try:
+        from hooks.grok_invocation import bounded_grok_read_only as probe
+    except ImportError:
+        return False
+    return probe()
+
+# Bounded retrieval has no CARR session lifecycle. Keep effect guards running;
+# suppress only context delivery/state hooks imported through Claude settings.
+GROK_CONTEXT_HOOKS = frozenset({
+    "gate-integrity.py", "rule-boot-gate.py", "context-handoff-gate.py",
+    "session-presence-hook.py", "rule-pack-preuse-reselection.py",
+    "rule-pack-drift-gate.py", "chat-lint-carryover.py",
+})
 
 
 class Tee(io.TextIOBase):
@@ -197,6 +220,95 @@ def _scan_field(raw, key):
         return None
 
 
+def _top_level_cwd(raw):
+    """Return only the root object's ``cwd`` string, without parsing payload bodies.
+
+    Tool input can contain arbitrary source text, including a seeded ``"cwd"``
+    key.  A substring search would let that fixture select the evidence writer.
+    This small scanner tracks JSON nesting and accepts the key only at depth one;
+    unusual escapes fall back to no context, which makes hook_meter use canonical.
+    """
+    try:
+        stack = []
+        in_string = False
+        escaped = False
+        start = None
+        tokens = []
+        root_started = False
+        root_closed = False
+        for index, byte in enumerate(raw):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif byte == 0x5C:
+                    escaped = True
+                elif byte == 0x22:
+                    token = raw[start:index]
+                    in_string = False
+                    if len(stack) == 1:
+                        tokens.append((index, token))
+                continue
+            if not root_started:
+                if byte in b" \t\r\n":
+                    continue
+                if byte != 0x7B:
+                    return None
+                root_started = True
+                stack.append(0x7D)
+                continue
+            if byte == 0x22:
+                in_string = True
+                start = index + 1
+            elif byte == 0x7B:
+                stack.append(0x7D)
+            elif byte == 0x5B:
+                stack.append(0x5D)
+            elif byte in (0x7D, 0x5D):
+                if not stack or stack[-1] != byte:
+                    return None
+                stack.pop()
+                if not stack:
+                    root_closed = True
+                    if raw[index + 1:].strip():
+                        return None
+                    break
+        if in_string or not root_started or not root_closed:
+            return None
+        cwd = None
+        cwd_count = 0
+        for end, token in tokens:
+            if token != b"cwd":
+                continue
+            pos = end + 1
+            while pos < len(raw) and raw[pos] in b" \t\r\n":
+                pos += 1
+            if pos >= len(raw) or raw[pos] != 0x3A:
+                continue
+            cwd_count += 1
+            if cwd_count > 1:
+                return None
+            pos += 1
+            while pos < len(raw) and raw[pos] in b" \t\r\n":
+                pos += 1
+            if pos >= len(raw) or raw[pos] != 0x22:
+                return None
+            pos += 1
+            value_start = pos
+            while pos < len(raw):
+                if raw[pos] == 0x5C:
+                    return None
+                if raw[pos] == 0x22:
+                    cwd = raw[value_start:pos].decode("utf-8", "strict")
+                    break
+                pos += 1
+            else:
+                return None
+        return cwd
+    except Exception:
+        pass
+    return None
+
+
 def _payload_facts(raw):
     """The identifying fields from the harness payload. Never raises.
 
@@ -262,12 +374,14 @@ def _register_from_output(text, event, code, crashed):
     WHY THIS IS ITS OWN FIELD rather than something a rollup derives from the
     exit code. Five Stop gates — map-architecture, context-handoff, stale-claim,
     loose-work and unread-artifact — were demoted on 2026-08-23 from blocking to
-    announcing. They fire exactly as often as before and now charge nothing. A
-    reader inferring from the exit code sees exit 0 and records "allow", which is
-    true about the DECISION and silent about the INTERVENTION, so five gates
-    doing real work would look like five gates that had gone quiet — and the
-    retire rule keys on denies, so each would drift toward being a candidate for
-    precisely the reason it is working.
+    announcing. A0c deliberately restores context-handoff as the fourth admitted
+    reopener at a measured lifecycle threshold; the other four still announce
+    and charge nothing. A reader inferring from the exit code sees exit 0 and
+    records "allow" for those announcements, which is true about the DECISION
+    and silent about the INTERVENTION, so four gates doing real work would look
+    like four gates that had gone quiet — and the retire rule keys on denies, so
+    each would drift toward being a candidate for precisely the reason it is
+    working.
 
     It also settles a misreading already in the record: the council brief counted
     "eight chat-lint reopens" when chat-lint has not blocked since 2026-08-16 —
@@ -345,6 +459,33 @@ def _deny_class(text):
         return None
 
 
+def _structured_reason(text):
+    """Stable reason code carried by a canonical structured Stop refusal."""
+    try:
+        import json
+        outer = json.loads((text or "").strip())
+        reason = outer.get("reason") if isinstance(outer, dict) else None
+        if isinstance(reason, str) and reason.lstrip().startswith("{"):
+            inner = json.loads(reason)
+            reason = inner.get("reason") if isinstance(inner, dict) else None
+        if (isinstance(reason, str) and reason
+                and all(c.isalnum() or c in "._-" for c in reason)):
+            return reason[:64]
+    except Exception:
+        pass
+    return None
+
+
+def _error_tail(text, lines=6, cap=1200):
+    """The last `lines` non-empty stderr lines, capped, for an error row."""
+    try:
+        kept = [line.rstrip() for line in (text or "").splitlines() if line.strip()]
+        tail = "\n".join(kept[-lines:])
+        return tail if len(tail) <= cap else "…" + tail[-cap:]
+    except Exception:
+        return None
+
+
 def _headline(text):
     """First non-empty line of a refusal — the de-facto class gates already have."""
     try:
@@ -366,6 +507,10 @@ def main():
     target = argv[0]
     if not os.path.isabs(target):
         target = os.path.join(REPO, target)
+    if (os.path.dirname(os.path.abspath(target)) == os.path.join(REPO, "hooks")
+            and os.path.basename(target) in GROK_CONTEXT_HOOKS
+            and bounded_grok_read_only()):
+        return 0
 
     # ── setup. The two steps that would change a verdict if they failed —
     #    handing the gate its stdin, and passing its output through — use io
@@ -375,6 +520,19 @@ def main():
         raw = sys.stdin.buffer.read()
     except Exception:
         raw = b""
+    try:
+        # Never inherit an earlier wrapper's routing hint.  Only this payload's
+        # existing top-level cwd may nominate an invocation checkout.
+        os.environ.pop(INVOCATION_REPO_ENV, None)
+        # Jev calls the gate makes for itself go straight to the vendor; only
+        # the build advisory takes the server path (ops/typesafe_client.py
+        # IN_HOOK_ENV), so no hook spends its time budget on a receipt.
+        os.environ["CARR_JEV_IN_HOOK"] = "1"
+        invocation_cwd = _top_level_cwd(raw)
+        if invocation_cwd and os.path.isdir(invocation_cwd):
+            os.environ[INVOCATION_REPO_ENV] = os.path.abspath(invocation_cwd)
+    except Exception:
+        pass
     try:
         sys.stdin = replacement_stdin(raw)
     except Exception:
@@ -455,7 +613,10 @@ def main():
         else:
             outcome = "allow"
 
-        event = facts["event"] or ""
+        # For a malformed payload, JSON cannot name the hook event. The tracked
+        # wiring supplies it independently; it is also authoritative when a
+        # semantically corrupt payload claims a different event.
+        event = os.environ.get("CARR_CONTEXT_HOOK_EVENT") or facts["event"] or ""
         record = {
             "ts": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
             "event": event or None,
@@ -470,9 +631,16 @@ def main():
             "exit": code,
             "register": _register_from_output(captured_out, event, code, crashed),
             "reopen": bool(event in STOP_EVENTS and outcome == "deny"),
-            "deny_class": _deny_class(captured_err) or _deny_class(captured_out),
+            "deny_class": (_deny_class(captured_err) or _deny_class(captured_out)
+                           or _structured_reason(captured_out)),
             "deny_headline": (_clip(_headline(captured_err))
                               if outcome in ("deny", "ask", "error") else None),
+            # The last lines of stderr when the gate fell over. One headline
+            # was not enough: on 2026-09-23 two gates died at import on every
+            # call for a day and the row said only "Traceback (most recent
+            # call last):", which names nothing. The tail names the file and
+            # the exception.
+            "error_tail": (_error_tail(captured_err) if outcome == "error" else None),
             "pid": os.getpid(),
         }
         record["meter_ms"] = round(_time.monotonic() * 1000.0 - _T0 - elapsed, 2)

@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.machine_prerequisites import openssl_executable  # noqa: E402
 
 
 class SourceContractError(ValueError):
@@ -124,7 +126,7 @@ def _verify_ed25519(payload: bytes, signature_text: object, public_key: Path) ->
             os.write(write_fd, signature)
         os.close(write_fd)
         result = subprocess.run(
-            ["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public_key), "-rawin",
+            [openssl_executable(), "pkeyutl", "-verify", "-pubin", "-inkey", str(public_key), "-rawin",
              "-in", input_path, "-sigfile", signature_path], input=input_data,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             pass_fds=tuple(fd for fd in (read_fd, payload_fd, signature_fd) if fd >= 0), timeout=10, check=False,

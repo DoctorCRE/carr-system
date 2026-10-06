@@ -40,7 +40,7 @@ As of July 6, 2026 this skill is the capture layer for the *whole* system, not j
 
 **Sibling mode:** when Joe asks for a "vendor interview" / "quiz me on vendors" — Claude DRIVING through the sheet's pending gaps rather than capturing what Joe reports — run `CARR AI/DNA/Network/enrichment-interview.md` (ability #27). Same routing rules as this skill; different direction.
 
-**Use it** any time Joe wants to log real activity: after a meeting or coffee, at the end of a busy day, or as the weekly recap (the Monday `weekly-routine.md` calls this skill for Part 1). Even a single line — "just met Josh Holder, he wants pediatric clients" — is worth running.
+**Use it** any time Joe wants to log real activity: after a meeting or coffee, at the end of a busy day, or as the weekly recap (the Monday `weekly-routine.md` calls this skill for Part 1). Even a single line — "just met Josh Holden, he wants pediatric clients" — is worth running.
 
 **Don't use it** to generate the brief or hunt for introductions (that's `engine.md` / "run the network brief"), to draft outreach (`DNA/templates.md`), or to write posts (`write-content`).
 

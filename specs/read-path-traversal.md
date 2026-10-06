@@ -14,13 +14,13 @@
 Observed today:
 
 ```
-catch-me-up L-005  (Jonathan Weiler, lead)   → 3 bare rows: import, convert-lead, last-touch stamp
-catch-me-up C-113  (Jonathan Weiler, client) → the actual narrative
+catch-me-up L-005  (Jonathan Sorbara, lead)   → 3 bare rows: import, convert-lead, last-touch stamp
+catch-me-up C-113  (Jonathan Sorbara, client) → the actual narrative
 ```
 
 Same person. The pointer from L-005 to C-113 exists and is unused. The work queues
 (`today-triage`, `lead-hot`) surface the *lead*, so they surface the empty record — which
-is why Beasley's standing "do not contact" instruction is invisible to the queue that
+is why Castillo's standing "do not contact" instruction is invisible to the queue that
 keeps scheduling her.
 
 This is the cheapest high-value fix available: **no data changes, no backfill, and it
@@ -53,7 +53,7 @@ Given any ref, resolve to the set of records linked to it:
 Union the timelines, sort by `occurred_at` descending.
 
 **Traversal is one hop. Never chain.** A deal resolves to its client and stops — it does
-not then pick up the client's *other* deals. `C-131` (Trambadia) carries twelve deals;
+not then pick up the client's *other* deals. `C-131` (Deshmukh) carries twelve deals;
 rendering all of them on each one is noise, not context.
 
 ### 2. Attribute every row to its source
@@ -97,16 +97,16 @@ person from name similarity, even with high confidence.
 This system has already been burned by exactly that. From the C-117 record:
 
 > *Identity note (Jul 6, 2026): a same-day import error briefly merged this prospect with
-> Jeff Beasley DMD (a dentist from Dell's contact export — different person, now registry
+> Jeff Castillo, DMD (a dentist from Dell's contact export — different person, now registry
 > L-158). Corrected within the hour by Joe.*
 
-`find Beasley` returns Dr. Jenna Beasley (L-001), Jeff Beasley DMD (L-158) and Dr. Jenna
-Beasley (C-117). A name matcher merges the wrong pair. Linking stays explicit and human-
+`find Castillo` returns Dr. Jenna Castillo (L-001), Jeff Castillo, DMD (L-158) and Dr. Jenna
+Castillo (C-117). A name matcher merges the wrong pair. Linking stays explicit and human-
 confirmed via `convert-lead` / `confirm-merge`.
 
 ### What to do about unlinked records instead
 
-Beasley has no `convert-lead` event — her L-001 and C-117 are unlinked, so traversal will
+Castillo has no `convert-lead` event — her L-001 and C-117 are unlinked, so traversal will
 not help her. Surface them rather than guessing:
 
 > When a record's timeline contains only import-era rows, and another record shares its
@@ -142,14 +142,14 @@ Use real records — these are the ones that failed today:
 
 | # | Given | Expect |
 |---|---|---|
-| 1 | `catch-me-up L-005` | Weiler's C-113 narrative rows, each tagged `source_ref: C-113` |
+| 1 | `catch-me-up L-005` | Sorbara's C-113 narrative rows, each tagged `source_ref: C-113` |
 | 2 | `catch-me-up C-113` | Same set as #1, symmetric |
-| 3 | `catch-me-up` on the Hughes deal `5e4ee8f4` | C-127's analysis rows included |
-| 4 | `catch-me-up L-001` (Beasley, unlinked) | Unchanged content, **plus** `possible_unlinked_counterpart: C-117` |
-| 5 | `find Beasley` | L-001 and C-117 shown as one person; **L-158 Jeff Beasley stays separate** |
-| 6 | `today-triage` | Beasley's row excluded once C-117's "PAUSED — inbound only" resolves across the pair |
+| 3 | `catch-me-up` on the Ferris deal `5e4ee8f4` | C-127's analysis rows included |
+| 4 | `catch-me-up L-001` (Castillo, unlinked) | Unchanged content, **plus** `possible_unlinked_counterpart: C-117` |
+| 5 | `find Castillo` | L-001 and C-117 shown as one person; **L-158 Jeff Castillo stays separate** |
+| 6 | `today-triage` | Castillo's row excluded once C-117's "PAUSED — inbound only" resolves across the pair |
 | 7 | `catch-me-up` on any C-131 deal | That deal + C-131's own rows. **No rows from C-131's other eleven deals** |
-| 8 | `catch-me-up C-129` (Collin Myrick, genuinely empty) | Still empty. Traversal must not invent content |
+| 8 | `catch-me-up C-129` (Colby Marsh, genuinely empty) | Still empty. Traversal must not invent content |
 
 Test 8 matters as much as the rest: the fix must make hidden content visible without
 making empty records look populated.

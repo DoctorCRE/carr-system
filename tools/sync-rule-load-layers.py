@@ -21,6 +21,12 @@ THREE RAILS, and each one is a way the tags could quietly stop being true:
 
 The map digest is stamped on every row, so a session can ask which reviewed map
 produced the delivery it got.
+
+SCOPE IS NOT MAP CONFIGURATION. The durable rule row's personal_to owner is the
+authority for shared/Joe/Dell scope. active_rule_ids is the reviewed coverage
+inventory, but older render lanes can flatten a partner-only surface into that
+inventory. The compiler therefore proves the id is reviewed, then writes scope
+from rule.personal_to; the production audit independently compares them.
 """
 from __future__ import annotations
 
@@ -52,18 +58,24 @@ def main() -> int:
     data = json.loads(raw)
     packs = data["rule_packs"]
     layers = data["rule_load_layers"]
-    scope_by_id = {rid: scope for scope, ids in data["active_rule_ids"].items() for rid in ids}
+    reviewed_ids = {rid for ids in data["active_rule_ids"].values() for rid in ids}
 
     counts = {"packs": 0, "tagged": 0, "removed": 0}
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
-        cur.execute("select id from rule where status='active'")
-        active = {str(row[0]): str(row[0])[:8] for row in cur.fetchall()}
+        cur.execute("""select r.id, owner.slug
+                         from rule r
+                         left join actor owner on owner.id = r.personal_to
+                        where r.status='active'""")
+        active = {str(row[0]): {"short": str(row[0])[:8],
+                               "scope": str(row[1]) if row[1] else "shared"}
+                  for row in cur.fetchall()}
         if not active and args.allow_empty_store:
             print(json.dumps({"active_rules": 0, **counts,
                               "note": "sanitized empty store; nothing to tag"}, sort_keys=True))
             return 0
         short_to_uuid: dict[str, str] = {}
-        for uuid, short in active.items():
+        for uuid, rule in active.items():
+            short = rule["short"]
             if short in short_to_uuid:
                 raise RuntimeError(f"two active rules share the short id {short}")
             short_to_uuid[short] = uuid
@@ -77,6 +89,12 @@ def main() -> int:
         if stale:
             raise RuntimeError(
                 "delivery tag(s) name a rule that is not active: " + ", ".join(stale))
+        missing_inventory = sorted(
+            rule["short"] for rule in active.values() if rule["short"] not in reviewed_ids)
+        if missing_inventory:
+            raise RuntimeError(
+                "active rule(s) are absent from the reviewed inventory: "
+                + ", ".join(missing_inventory))
 
         for name, pack in sorted(packs.items()):
             cur.execute("""insert into ops.rule_pack (pack,title,description,triggers,source)
@@ -101,7 +119,7 @@ def main() -> int:
                              source=excluded.source, map_digest=excluded.map_digest,
                              updated_at=now()""",
                         (rule_id, short, entry["load_layer"], entry.get("packs", []),
-                         scope_by_id[short], entry.get("why"), SOURCE, digest))
+                         active[rule_id]["scope"], entry.get("why"), SOURCE, digest))
             counts["tagged"] += 1
         cur.execute("delete from ops.rule_load_layer where short_id <> all(%s)", (sorted(layers),))
         counts["removed"] += cur.rowcount

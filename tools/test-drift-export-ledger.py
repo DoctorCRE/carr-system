@@ -112,7 +112,7 @@ def main():
     #    the two from shadowing each other's writer label. Pin all three edges:
     #    Graph/ derived, Graph-System/ derived under its own writer, and a
     #    sibling dir that merely starts with "Graph" still UNEXPECTED.
-    tag = vdw.classify("Graph/leads/Blair Stiles (lead).md", {}, {})
+    tag = vdw.classify("Graph/leads/Brooke Tallis (lead).md", {}, {})
     check("Graph/ files classify as derived (run.sh graph)",
           "derived" in tag and "run.sh graph" in tag and "graph-system" not in tag,
           f"tag={tag}")

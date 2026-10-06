@@ -29,6 +29,7 @@ A codex-exec run is synchronous, so its line carries the actual result.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import re
@@ -38,6 +39,7 @@ import subprocess
 import sys
 import time
 import tempfile
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,8 +50,19 @@ sys.path.insert(0, str(HERE))
 import desks  # noqa: E402
 from desks import DeskError, Registry  # noqa: E402
 import claude_wire as inject_mod  # noqa: E402  — the Idea 78 wire, see the module
+import claude_desktop_wire  # noqa: E402 — background supervisor + supported /desktop
 import codex_wire  # noqa: E402  — Codex worked out this protocol, see the module
+import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
+import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
+import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import execution_contract  # noqa: E402 — portable Job Passport v1 seam
+import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
+
+TOOLS_ROOT = HERE.parent
+if str(TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TOOLS_ROOT))
+import credential_env  # noqa: E402 — shared long-lived-token loader
+import flashlib
 
 DEFAULT_RESULTS = Path(
     os.environ.get(
@@ -77,9 +90,10 @@ def _record(results_path: Path, row: dict) -> None:
 
 def _to_claude(entry: dict, task: str, msg_id: str) -> dict:
     """Deliver one peer turn to a live labeled session."""
+    desks.dispatched_permission_mode(entry.get("permission_mode"))
     payload = {
         "type": "user",
-        "message": {"role": "user", "content": task},
+        "message": {"role": "user", "content": desks.desk_prompt(task)},
         "origin": {"kind": "peer", "from": f"hermes:{entry['name']}", "msg_id": msg_id},
     }
     conn = inject_mod.inject_keepalive(entry["socket"], payload)
@@ -96,6 +110,14 @@ def _to_claude(entry: dict, task: str, msg_id: str) -> dict:
         conn.close()
 
 
+def _to_claude_desktop(entry: dict, task: str) -> dict:
+    """Create one durable background session; later bridge cycles observe it."""
+    try:
+        return claude_desktop_wire.launch_background(entry, task)
+    except claude_desktop_wire.ClaudeDesktopError as exc:
+        return {"status": "failed", "detail": exc.code, "error": str(exc)}
+
+
 def _codex_events(stdout: str) -> list[dict]:
     """Codex prints one JSON object per line with --json. Ignore the rest."""
     out = []
@@ -110,7 +132,39 @@ def _codex_events(stdout: str) -> list[dict]:
     return out
 
 
-def _to_codex(entry: dict, task: str, env: dict | None, fresh: bool = False) -> dict:
+def _run_codex_streamed(argv, env, timeout):
+    """Preserve result parsing while exposing actual executor output to its job log."""
+    proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    chunks = []
+    def relay():
+        with proc.stdout:
+            for line in proc.stdout:
+                chunks.append(line)
+                print(line, end="", flush=True)
+    reader = threading.Thread(target=relay, daemon=True)
+    reader.start()
+    try:
+        code = proc.wait(timeout=timeout)
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    reader.join(timeout=timeout)
+    if reader.is_alive():
+        raise subprocess.TimeoutExpired(argv, timeout)
+    return subprocess.CompletedProcess(argv, code, "".join(chunks), "")
+
+
+def _to_codex(
+    entry: dict,
+    task: str,
+    env: dict | None,
+    fresh: bool = False,
+    config_overrides: tuple[str, ...] = (),
+    live_desktop: bool = False,
+    stream_output: bool = False,
+) -> dict:
     """Send one task to a standing Codex thread, resuming it when there is one.
 
     The thread is what makes this an equal seat rather than a shot: Codex
@@ -118,7 +172,27 @@ def _to_codex(entry: dict, task: str, env: dict | None, fresh: bool = False) -> 
     would throw away everything it had been told. `codex exec resume <id>`
     carries it, and --json reports the thread id in its first event.
     """
+    task = desks.desk_prompt(task)
     thread = None if fresh else entry.get("thread_id")
+    # A THREAD CODEX DESKTOP HOLDS OPEN CANNOT BE RESUMED FROM HERE. Found live
+    # 2026-09-27: the orchestrator's Desktop thread refused `codex exec resume`
+    # with "thread ... already has an active writer", so a turn addressed to it
+    # never arrived. When the Desktop router names an owner, the turn is
+    # started inside that owner instead; the session answers in its own window,
+    # the same contract as a live Claude desk. No owner (Desktop closed, or the
+    # thread not open there) keeps the durable resume path below.
+    #
+    # OPT-IN, and its own status. Only the conversational bridge asks for this
+    # (bridge.deliver passes live_desktop=True). A caller that waits for a result
+    # in the desk log, like the queue executor, would read a plain "delivered" as
+    # "wait", time out, and dispatch again, starting a fresh turn in the same
+    # Desktop thread on every retry (PR #1345 review). "delivered_live" says the
+    # answer arrives in the session's own window and nowhere a caller can wait on.
+    if live_desktop and thread and codex_ipc.thread_owner(thread) is not None:
+        live = codex_ipc.start_turn(thread, task, approval_policy="never")
+        if live.get("status") != "not_live":
+            status = "delivered_live" if live.get("status") == "delivered" else live.get("status")
+            return {"resumed": True, **live, "status": status, "thread_id": thread}
     with tempfile.TemporaryDirectory(prefix="hermes-codex-") as tmp:
         last = Path(tmp) / "last-message.txt"
         argv = ["codex", "exec"]
@@ -141,6 +215,20 @@ def _to_codex(entry: dict, task: str, env: dict | None, fresh: bool = False) -> 
             "-c", f"model_reasoning_effort={entry['effort']}",
             "-o", str(last),
         ]
+        # Callers may carry a reviewed, desk-specific Codex posture without
+        # teaching the shared registry or CLI how to widen every desk. The
+        # Engineering adapter is the only production caller and supplies an
+        # exact constant tuple; ordinary dispatches keep this empty and stay
+        # offline. -c is valid on both fresh and resumed exec paths.
+        for override in config_overrides:
+            if not isinstance(override, str) or not override.strip():
+                raise DeskError(
+                    "bad_codex_config",
+                    "Codex config overrides must be non-empty strings")
+            argv += ["-c", override]
+        # Bind both starts and resumes, after overrides, so an old thread or
+        # caller config cannot restore human approval cards.
+        argv += ["-c", 'approval_policy="never"']
         # `codex exec resume` does not accept -C/-s/--add-dir at all — a
         # resumed session already carries the cwd, sandbox and extra dirs it
         # was FIRST started with, and passing them again is a hard CLI parse
@@ -166,10 +254,13 @@ def _to_codex(entry: dict, task: str, env: dict | None, fresh: bool = False) -> 
             # pipe makes the run hang or swallow whatever the caller was fed.
             # It is the same reason every command in CLAUDE.md carries
             # `</dev/null`.
-            proc = subprocess.run(
-                argv, env=env or os.environ.copy(), capture_output=True,
-                text=True, timeout=CODEX_TIMEOUT_S, stdin=subprocess.DEVNULL,
-            )
+            if stream_output:
+                proc = _run_codex_streamed(argv, env or os.environ.copy(), CODEX_TIMEOUT_S)
+            else:
+                proc = subprocess.run(
+                    argv, env=env or os.environ.copy(), capture_output=True,
+                    text=True, timeout=CODEX_TIMEOUT_S, stdin=subprocess.DEVNULL,
+                )
         except FileNotFoundError:
             return {"status": "failed", "detail": "codex is not on PATH"}
         except subprocess.TimeoutExpired:
@@ -221,13 +312,41 @@ def dispatch(
     results_path: Path | None = None,
     env: dict | None = None,
     fresh: bool = False,
+    config_overrides: tuple[str, ...] = (),
+    cwd: str | None = None,
+    live_desktop: bool = False,
+    stream_output: bool = False,
+    retrieval: bool = False,
 ) -> dict:
-    """Send one task to one desk. Raises DeskError when the desk is not usable."""
+    """Send one task to one desk. Raises DeskError when the desk is not usable.
+
+    `live_desktop` (codex-session desks only) lets a thread Codex Desktop holds
+    open take the turn in its own window, returning status "delivered_live".
+    Only a caller that expects no result back may set it; see _to_codex.
+
+    `cwd` (codex-session desks only) runs this one task in that directory on a FRESH
+    thread and leaves the desk's standing thread untouched: flash-run's escalation gives
+    the Sol fixer desk a throwaway copy per task (2026-09-24)."""
     registry = registry or Registry()
     results_path = Path(results_path or DEFAULT_RESULTS)
+    if name == "flash" and registry.entries().get(name, {}).get("kind") == "claude-session":
+        try:
+            flashlib.ensure_desk(lambda: desks.is_live(registry.entries()[name].get("socket", "")))
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)          # every refusal happens here
+    if retrieval and entry["kind"] != "grok-cli":
+        raise DeskError("unsupported_retrieval", "explicit source retrieval requires a Grok desk")
+    if stream_output and entry["kind"] not in ("codex-session", "codex-exec"):
+        raise DeskError("unsupported_stream", "stream output requires a headless Codex desk")
+    stream_options = {"stream_output": True} if stream_output else {}
+    original_task = task
+    # The background wire validates the original task before adding its own
+    # instruction. Prepending here would turn a blank task into valid work.
+    if entry["kind"] != "claude-desktop":
+        task = desks.desk_prompt(task)
     msg_id = str(uuid.uuid4())
-    if entry["kind"] in ("codex-session", "codex-live"):
+    if entry["kind"] in ("claude-desktop", "codex-session", "codex-live", "flash-local", "grok-cli"):
         if not entry.get("model") or not str(entry.get("model")).strip():
             raise DeskError(
                 "unnamed_model_or_effort",
@@ -244,7 +363,17 @@ def dispatch(
             )
 
     if entry["kind"] == "claude-session":
-        outcome = _to_claude(entry, task, msg_id)
+        if name == "flash":
+            with flashlib.activity_scope():
+                outcome = _to_claude(entry, task, msg_id)
+        else:
+            outcome = _to_claude(entry, task, msg_id)
+    elif entry["kind"] == "claude-desktop":
+        outcome = _to_claude_desktop(entry, task)
+    elif entry["kind"] == "grok-cli":
+        outcome = grok_wire.run_task(entry, task, **({"retrieval": True} if retrieval else {}))
+    elif entry["kind"] == "flash-local":
+        outcome = flash_wire.run_task(task)
     elif entry["kind"] == "codex-live":
         outcome = codex_wire.run_turn(
             entry["socket"], task,
@@ -253,8 +382,17 @@ def dispatch(
         )
         if outcome.get("thread_id"):
             registry.remember_thread(name, outcome["thread_id"])
+    elif cwd:
+        outcome = _to_codex(
+            {**entry, "cwd": cwd}, task, env, fresh=True, config_overrides=config_overrides,
+            **stream_options,
+        )
     else:
-        outcome = _to_codex(entry, task, env, fresh=fresh)
+        outcome = _to_codex(
+            entry, task, env, fresh=fresh, config_overrides=config_overrides,
+            live_desktop=live_desktop,
+            **stream_options,
+        )
         # pin the desk to its thread so the next task lands in the same one
         if outcome.get("thread_id"):
             registry.remember_thread(name, outcome["thread_id"])
@@ -263,12 +401,49 @@ def dispatch(
         "msg_id": msg_id,
         "desk": name,
         "kind": entry["kind"],
-        "task": task,
+        "task": original_task,
         "dispatched_at": _now(),
         **outcome,
     }
     _record(results_path, row)
     return row
+
+
+# WR-000119 — THE DESK'S OWN ACKNOWLEDGEMENT, AND ONLY ITS OWN.
+#
+# The stage is a MODULE CONSTANT and not a parameter. A desk observes exactly
+# one thing first-hand: that a turn landed in a window, at a byte offset it can
+# name. Whether the session then TOOK THE TURN UP is the session's own fact and
+# it writes that itself, from inside its own turn -- so there is deliberately no
+# way to reach `acknowledged` through this function, and a caller that wanted to
+# send it would have to write a second one.
+#
+# The evidence is the desk name and the injection offset, both measured, never a
+# guess that "it probably arrived".
+DESK_ACK_STAGE = "received"
+
+
+def acknowledge_received(dispatch_ref: str, *, desk: str, log_offset: int,
+                          injected_at: str | None = None,
+                          call_verb=verb_io._run_verb) -> dict:
+    """Append this desk's `received` acknowledgement for one dispatch.
+
+    ``verb_io._run_verb`` is reused rather than a second subprocess path being
+    invented here: two paths to the record layer would be two places for the
+    identity derivation to drift, and verb_io.py is outside this Work Request's
+    authorized paths, so no public wrapper could be added to it.
+    """
+    if not dispatch_ref:
+        raise DeskError("dispatch_ref_missing",
+                        "an acknowledgement names the dispatch it acknowledges")
+    evidence = f"desk {desk} log offset {int(log_offset)}"
+    if injected_at:
+        evidence = f"{evidence} injected at {injected_at}"
+    return call_verb("acknowledge-dispatch", {
+        "dispatch_ref": dispatch_ref,
+        "stage": DESK_ACK_STAGE,
+        "evidence": evidence,
+    })
 
 
 def dispatch_envelope(
@@ -328,6 +503,39 @@ def _read_pid(pid_file: Path) -> int | None:
         return None
 
 
+def _send_seed(fifo: Path, seed: str, pid: int, deadline: float) -> None:
+    """Bound both FIFO open and backpressure by the startup deadline."""
+    payload = (json.dumps({"type": "user", "message": {
+        "role": "user", "content": desks.desk_prompt(seed)}}) + "\n").encode()
+    fd = None
+    try:
+        while time.monotonic() < deadline:
+            if not _alive(pid):
+                raise DeskError("desk_failed_to_start", "the desk exited while accepting its seed")
+            if fd is None:
+                try:
+                    fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+                except OSError as exc:
+                    if exc.errno != errno.ENXIO:
+                        raise
+                    time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+                    continue
+            try:
+                written = os.write(fd, payload)
+            except BlockingIOError:
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+                continue
+            payload = payload[written:]
+            if not payload:
+                return
+        raise DeskError("desk_failed_to_start", "the desk did not accept its seed within the startup deadline")
+    except OSError as exc:
+        raise DeskError("desk_failed_to_start", "the desk seed input became unavailable") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def desk_start(
     name: str,
     registry: Registry | None = None,
@@ -335,6 +543,7 @@ def desk_start(
     sock_dir: Path | None = None,
     env: dict | None = None,
     seed: str | None = None,
+    token_path: "Path | str | None" = None,
 ) -> dict:
     """Start a Claude session that STAYS, and register it under `name`.
 
@@ -387,12 +596,23 @@ def desk_start(
     shell = (
         f"exec 3<>{shlex.quote(str(fifo))}; "
         f"exec claude --messaging-socket-path {shlex.quote(str(sock))} "
+        f"--permission-mode dontAsk "
         f"-p --input-format stream-json --output-format stream-json --verbose "
         f"<&3 >>{shlex.quote(str(log))} 2>&1"
     )
+    # This is the ONE unattended launch of `claude -p` a room-bridge poll cycle
+    # can make (see bridge.py's own header: launchd fires the cycle, no human
+    # is present). The child gets the long-lived login merged into ITS OWN
+    # env only — os.environ itself is never touched — so a keychain entry
+    # that has expired between launchd wakes does not take this desk down.
+    # Absent-safe: with no token configured, this is exactly the env the
+    # caller already passed (or a plain copy of the current environment).
+    child_env, warning = credential_env.claude_child_env(env or None, path=token_path)
+    if warning:
+        print(f"desk_start {name}: {warning}", flush=True)
     proc = subprocess.Popen(
         ["/bin/sh", "-c", shell],
-        env=env or os.environ.copy(),
+        env=child_env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -413,11 +633,14 @@ def desk_start(
         raise DeskError("desk_failed_to_start",
                         f"nothing bound {sock} within {BIND_TIMEOUT_S:.0f}s")
 
-    registry.register(name, "claude-session", socket=str(sock))
+    if proc.poll() is not None or not _alive(proc.pid):
+        raise DeskError("desk_failed_to_start", "the session exited after binding its socket")
+    # An unseeded desk has no pending turn. The instruction rides on its
+    # first dispatched task, avoiding an unrelated bootstrap result racing
+    # with bridge.deliver's first task log offset.
     if seed:
-        with fifo.open("w") as fh:
-            fh.write(json.dumps(
-                {"type": "user", "message": {"role": "user", "content": seed}}) + "\n")
+        _send_seed(fifo, seed, proc.pid, deadline)
+    registry.register(name, "claude-session", socket=str(sock))
 
     return {"name": name, "socket": str(sock), "pid": proc.pid, "log": str(log),
             "already_running": False}
@@ -520,6 +743,10 @@ def main(argv: list[str]) -> int:
     s.add_argument("task")
     s.add_argument("--fresh", action="store_true",
                    help="start a new Codex thread instead of resuming the desk's")
+    s.add_argument("--stream-output", action="store_true",
+                   help="tee headless Codex events into the caller's registered job log")
+    s.add_argument("--retrieve", action="store_true",
+                   help="require public source text evidence from a Grok desk")
 
     a = p.parse_args(argv)
     reg = Registry(a.registry) if a.registry else Registry()
@@ -578,7 +805,8 @@ def main(argv: list[str]) -> int:
             return 0
 
         row = dispatch(a.name, a.task, registry=reg, results_path=results,
-                       fresh=getattr(a, "fresh", False))
+                       fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
+                       retrieval=a.retrieve)
         print(json.dumps(row, indent=2))
         return 0 if row["status"] in ("delivered", "completed") else 1
 

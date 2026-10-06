@@ -54,6 +54,7 @@
       "decision": "superseded projects to declined.",
       "why": "Doctrine grants the projection seven states and superseded is not among them, while superseded IS a canonical terminal. It must map somewhere. declined is the nearest granted terminal that does not falsely claim the work was done. The canonical reason field carries what actually happened, and the canonical machine already requires every side exit to record a reason.",
       "cost_accepted": "declined reads as a rejection to a requester whose request was in fact absorbed into another one. The reason text has to carry that weight, and if it is thin the projection is misleading.",
+      "reason_carrier": "ops.work_request.exit_reason and superseded_by, surfaced together as the sourced card's withdrawal block (exit_reason, closed_at, superseded_by_ref). Named here because REASON SURVIVES COLLAPSE had no enforcement site until migration 0426 made these two terminals reachable: before it, superseded was declared by the canonical machine and entered by nothing, so the cost above was hypothetical. It is now paid on real rows, and the successor's human ref is what keeps 'absorbed into WR-n' from reading as 'rejected'.",
       "reopens_if": "The reason field proves insufficient in practice, or doctrine grants the projection a superseded state. Either would be a better answer than this mapping."
     }
   ],

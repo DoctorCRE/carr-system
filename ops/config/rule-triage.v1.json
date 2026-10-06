@@ -1,0 +1,1691 @@
+{
+  "counts": {
+    "core": 20,
+    "gate": 60,
+    "gone": 0,
+    "jit": 130
+  },
+  "fallback_narrowing": {
+    "delegation-council": {
+      "exclude_terms": [
+        "codex"
+      ]
+    },
+    "joe-comms": {
+      "exclude_terms": [
+        "post"
+      ]
+    },
+    "joe-development": {
+      "exclude_terms": [
+        "ledger"
+      ]
+    },
+    "records-intake": {
+      "exclude_terms": [
+        "merge"
+      ]
+    }
+  },
+  "generated_note": "Triage of the 219 active rules into gate/jit/core/gone homes. Classification and tooling only per S7 scope boundary; no rule was retired, amended, or taught by producing this file. Source data: standing-context (205 rules, full text) + ops/config/rule-enforcement-map.json rule_controls (all 219, including the 14 vendor-intros-pack rules that standing-context does not surface to this session -- see defect ad4e25bd-3c98-4334-a7d3-f53c8158711f). ROWS PRUNED 2026-08-27 (WR-000019 rule-retirement batch): Joe accepted and executed the batch this slice's 11 GONE rows named (each already carrying its merge_target in this file); the 11 rows are removed from `rules` and `counts.gone` moves 11 -> 0, keeping this file in exact id-for-id parity with the now-208-row ops/config/rule-enforcement-map.json rule_controls, per ops/rule-triage-selftest.py's coverage checks. The 219/205 figures above describe the file as generated at S7 time and are left as historical record. LIVE PARITY REPAIRED 2026-09-23: removed five retired ids and added three active rules (204391be, a2e78f48, b7ec8f3b) with their existing production pack memberships; current map and triage each carry 209 active rules. 2026-09-29: rule ede4b241 (cloud model choice) added as a JIT row with a delegation-council dispatch detector; current map and triage each carry 210 active rules.",
+  "rules": [
+    {
+      "home": "jit",
+      "id": "015183f5",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: OPERATE PROCEDURALLY: DEFINE BY DECISION PROCEDURE, NOT BY DESCRIPTION",
+      "reason": "Currently only SURFACED (a reminder via 'conduct_stop' at message close, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "OPERATE PROCEDURALLY: DEFINE BY DECISION PROCEDURE, NOT BY DESCRIPTION"
+    },
+    {
+      "home": "jit",
+      "id": "0156e9fa",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: END WITH ONE NEXT ACTION, NEVER A MENU. Close a message to Joe with a single thing to do\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'conduct_stop' at message close, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "END WITH ONE NEXT ACTION, NEVER A MENU. Close a message to Joe with a single thing to do or say \u2014 not two"
+    },
+    {
+      "home": "jit",
+      "id": "018ce972",
+      "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Cheapest-window timing: present structural changes as window math",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Cheapest-window timing: present structural changes as window math"
+    },
+    {
+      "home": "jit",
+      "id": "0c1bac27",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Partnership complementarity ledger: the goal is finding how Joe and Dell FIT, not\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Partnership complementarity ledger: the goal is finding how Joe and Dell FIT, not assessing either man"
+    },
+    {
+      "carrying_control": "path_hygiene",
+      "home": "gate",
+      "id": "0e22e34a",
+      "reason": "Already machine-enforced via control 'path_hygiene' (ops/githooks/path-hygiene-check.py, ops/githooks/pre-commit); binds pre-commit over staged paths. Failure mode on violation: pre-commit refusal",
+      "title_gist": "3\u20134 levels deep max; unambiguous folder names"
+    },
+    {
+      "home": "core",
+      "id": "0f38532e",
+      "reason": "Single source of truth: every file, idea and fact has ONE home, everything else points at it. Foundational architecture law; absorbs d367188d's terser restatement of the same consolidation bias (below).",
+      "title_gist": "Single source of truth: every file, idea and fact has ONE home, and every other mention points at it rather"
+    },
+    {
+      "home": "jit",
+      "id": "1021fa84",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: Read Joe brokerage-first, not system-first",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Read Joe brokerage-first, not system-first"
+    },
+    {
+      "home": "jit",
+      "id": "113b3833",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Retrieval-as-code: for any lookup beyond the standing core, run `~/carr-system/run.sh\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at file lookup, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Retrieval-as-code: for any lookup beyond the standing core, run `~/carr-system/run.sh retrieve \"<question>\"`"
+    },
+    {
+      "home": "jit",
+      "id": "11b2b73b",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: DESIGN CONTENT JOE SHARES FEEDS THE DOCTRINE, EVERY TIME",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "DESIGN CONTENT JOE SHARES FEEDS THE DOCTRINE, EVERY TIME"
+    },
+    {
+      "home": "core",
+      "id": "14181e60",
+      "reason": "Database-first write law: content goes through verbs, markdown only where a machine literally requires a file. The one fact every session must hold before writing anything.",
+      "title_gist": "DATABASE FIRST; MARKDOWN ONLY WHERE A MACHINE REQUIRES A FILE"
+    },
+    {
+      "home": "jit",
+      "id": "152ceb65",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: SHOW THE SHAPE, DO NOT NARRATE IT. When a session explains anything to a partner that HAS\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "SHOW THE SHAPE, DO NOT NARRATE IT. When a session explains anything to a partner that HAS a shape \u2014 an"
+    },
+    {
+      "detector": {
+        "kind": "bash_family",
+        "pattern": "\\bgit\\s+push\\b|\\bgh\\s+pr\\s+(?:create|merge)\\b"
+      },
+      "home": "jit",
+      "id": "173119a8",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: CONSTRAINT, binding at the moment a session is about to say anything about UNCOMMITTED\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'whose_work' at before any claim about uncommitted work, a dirty tree, or who is blocking whom, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "CONSTRAINT, binding at the moment a session is about to say anything about UNCOMMITTED WORK, a DIRTY TREE, or"
+    },
+    {
+      "home": "jit",
+      "id": "179be4b8",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: FOLLOW-UPS IDENTIFIED DURING A BUILD GET BUILT IN THE SAME SESSION, NOT PARKED \u2014 parking\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "FOLLOW-UPS IDENTIFIED DURING A BUILD GET BUILT IN THE SAME SESSION, NOT PARKED \u2014 parking is only for work"
+    },
+    {
+      "carrying_control": "glanceable_lead",
+      "home": "gate",
+      "id": "17ffd587",
+      "reason": "Already machine-enforced via control 'glanceable_lead' (ops/glanceable-lead-check.py); binds over the rendered glanceable surfaces. Failure mode on violation: CI class failure",
+      "title_gist": "No lead-outreach reminders on ANY glanceable surface"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^Agent$"
+      },
+      "home": "jit",
+      "id": "185013c6",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: OUTSIDE MODELS ARE PART OF THE DELEGATION POOL FOR ACTUAL JOBS, NOT ONLY ADVISORY CHAIRS\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'delegation_tripwire' at model selection, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "OUTSIDE MODELS ARE PART OF THE DELEGATION POOL FOR ACTUAL JOBS, NOT ONLY ADVISORY CHAIRS \u2014 AND COST TIER IS"
+    },
+    {
+      "home": "jit",
+      "id": "19304882",
+      "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Joe's strength-training kit: COMPRESSION REPS \u2014 on major decisions and builds, the\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Joe's strength-training kit: COMPRESSION REPS \u2014 on major decisions and builds, the session invites Joe's"
+    },
+    {
+      "home": "jit",
+      "id": "1b8e7f43",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: A BLOCKED ACTION IS FILED, NEVER DROPPED",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A BLOCKED ACTION IS FILED, NEVER DROPPED"
+    },
+    {
+      "home": "jit",
+      "id": "1c21263c",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: REWORK IS A SIGNAL THE SESSION READS ON ITSELF, NOT ONE IT WAITS FOR A PARTNER TO NOTICE",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "REWORK IS A SIGNAL THE SESSION READS ON ITSELF, NOT ONE IT WAITS FOR A PARTNER TO NOTICE"
+    },
+    {
+      "home": "jit",
+      "id": "1c42d80c",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: ALWAYS FIX THE THING; A WORKAROUND IS NOT A FIX",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "ALWAYS FIX THE THING; A WORKAROUND IS NOT A FIX"
+    },
+    {
+      "carrying_control": "conduct_stop",
+      "home": "gate",
+      "id": "1d50a3bb",
+      "reason": "Already machine-enforced via control 'conduct_stop' (hooks/conduct-stop-gate.py); binds a Stop-blocked turn being re-sent. Failure mode on violation: Stop block",
+      "title_gist": "WHEN A STOP GATE REOPENS A TURN, SEND THE DELTA, NOT THE MESSAGE AGAIN"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "1f3a7372",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds scheduled finding completion. Failure mode on violation: Stop block",
+      "title_gist": "A SCHEDULED ROUTINE LOGS ITS FINDINGS TO THE RECORD BEFORE IT ENDS \u2014 an unattended run that only prints is a"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-vendor|update-vendor|merge-vendor-rows)$"
+      },
+      "home": "jit",
+      "id": "1f750181",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "No verb represents 'co-invite'; guest lists live in prose a human sends, and the exception is Joe's to give for a given event. (planned_control on record: a guest-list check running the same pairing predicate as e6e0b0e7, once events and vendor Category are both on the record.)",
+      "title_gist": "A shared-event guest list is assembled outside any tool call"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "\\bheavy[-\\s]?build\\b|\\bheavy\\s+build\\s+protocol\\b|\\b(?:write\\-work\\-shape|set\\-work\\-shape\\-disposition|propose\\-ready\\-plan|review\\-heavy\\-build\\-plan|accept\\-ready\\-plan|register\\-engineering\\-slice\\-plan|admit\\-engineering\\-slice|review\\-engineering\\-slice)\\b"
+      },
+      "home": "jit",
+      "id": "1fcaa63a",
+      "jit_trigger_hint": "Joe calling for a heavy build in words, or any verb at which the admission machinery derives work heavy (shape, ready-plan, plan review, acceptance, slice packets).",
+      "reason": "Fires on an occasion rather than at every boot -- Joe's ruling 554db63d. Its enforced half already lives in the admission validators; the protocol discipline it adds is delivered when the occasion arrives.",
+      "title_gist": "RUN THE FULL HEAVY BUILD PROTOCOL WITHOUT BEING REMINDED OF ANY PHASE"
+    },
+    {
+      "home": "core",
+      "id": "1fddcffb",
+      "reason": "Core routing test: the always-read core holds only what every session needs regardless of task. The founding definition of 'core' itself, which this very S7 triage operationalizes. Its named enforcement (00_Context/sweep-sop.md) is a pre-cutover file pointer and reads stale; the TEST it states is exactly what this slice applies via rule-triage.v1.json instead.",
+      "title_gist": "Core routing test: the always-read core holds ONLY what every session needs regardless of task"
+    },
+    {
+      "home": "jit",
+      "id": "204391be",
+      "jit_trigger_hint": "Deliver with engineering-git or governance-rules when product work discovers a missing record-layer verb.",
+      "reason": "The missing-verb obligation binds during a product build or research task; its existing production load tag names both packs.",
+      "title_gist": "MISSING VERB, BUILD IT"
+    },
+    {
+      "home": "jit",
+      "id": "20d106f1",
+      "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Joe's development kit: CLOSE-BEFORE-OPEN \u2014 when Joe opens a substantial new build or\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Joe's development kit: CLOSE-BEFORE-OPEN \u2014 when Joe opens a substantial new build or design thread, the"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "2271e684",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds terminal technical claim. Failure mode on violation: Stop block",
+      "title_gist": "Double-check before delivering; flag uncertainty"
+    },
+    {
+      "carrying_control": "weekend_quiet",
+      "home": "gate",
+      "id": "236ca227",
+      "reason": "Already machine-enforced via control 'weekend_quiet' (hooks/weekend-quiet-gate.py); binds before a partner-facing send. Failure mode on violation: PreToolUse deny",
+      "title_gist": "Weekends are off, both humans: Sat/Sun are not workdays for Joe or Dell"
+    },
+    {
+      "carrying_control": "deal_guard",
+      "home": "gate",
+      "id": "23ea0607",
+      "reason": "Already machine-enforced via control 'deal_guard' (mcp-server/src/tools.js, migrations/0079_deal_room_api.sql); binds Salesforce reconciliation. Failure mode on violation: transaction refusal",
+      "title_gist": "SALESFORCE PHASE IS NOT AUTHORITATIVE FOR A DEAL ALREADY CLOSED IN THE DEAL ROOM"
+    },
+    {
+      "home": "core",
+      "id": "24e10ee8",
+      "reason": "The commit message and the diff must agree. Universal git-honesty law underneath every commit any session makes; already hard_pre_action-gated via commit_claims, and worth holding consciously too.",
+      "title_gist": "THE COMMIT MESSAGE AND THE DIFF MUST AGREE"
+    },
+    {
+      "carrying_control": "weekly_social_route",
+      "home": "gate",
+      "id": "25fab860",
+      "reason": "Already machine-enforced via control 'weekly_social_route' (lib/control_plane_runner.py, tools/social-batch-candidates.py); binds weekly social cognition proposal validation. Failure mode on violation: weekly proposal is rejected before acceptance",
+      "title_gist": "QUOTE TWEETS BELONG TO THE DAILY X REPLY RUN, NEVER TO THE WEEKLY BATCH"
+    },
+    {
+      "home": "jit",
+      "id": "25fcddee",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Unknowns pass before unfamiliar deliverables",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at new-territory task, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Unknowns pass before unfamiliar deliverables"
+    },
+    {
+      "home": "jit",
+      "id": "27277539",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: Encourage Joe's technical stretch; explain terms fully",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Encourage Joe's technical stretch; explain terms fully"
+    },
+    {
+      "carrying_control": "outbound_format",
+      "home": "gate",
+      "id": "2a3ff869",
+      "reason": "Already machine-enforced via control 'outbound_format' (mcp-server/src/tools.js); binds update-document-status, when a human marks a document sent. Failure mode on violation: verb refuses the write",
+      "title_gist": "Microsoft formats are the default for client and company documents rather than Google-native formats, unless"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^Agent$"
+      },
+      "home": "jit",
+      "id": "2b66211d",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: Fan-out hygiene: Verifiers get fresh context \u2014 a checker never inherits the maker's\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'delegation_tripwire' at fan-out brief, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Fan-out hygiene: Verifiers get fresh context \u2014 a checker never inherits the maker's conversation"
+    },
+    {
+      "home": "core",
+      "id": "2b889e80",
+      "reason": "No negative finding from a single collection. Base honesty law for any 'X does not exist' claim \u2014 the exact law this very session had to apply mid-task (four retrieval paths checked before concluding the vendor-intros gap was real, see rule-count-in-scope-exceeds-retrievable-set defect).",
+      "title_gist": "NO NEGATIVE FINDING FROM A SINGLE COLLECTION"
+    },
+    {
+      "home": "jit",
+      "id": "2ca2add2",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires on: Capture and rendering are separate decisions",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Capture and rendering are separate decisions"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^(WebFetch|WebSearch)$"
+      },
+      "home": "jit",
+      "id": "2e362970",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: EVERY NEW IMPLEMENTATION STARTS WITH A DEEP-DIVE RESEARCH PASS, BEFORE ANY BUILDING",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "EVERY NEW IMPLEMENTATION STARTS WITH A DEEP-DIVE RESEARCH PASS, BEFORE ANY BUILDING"
+    },
+    {
+      "carrying_control": "lead_client_pair",
+      "home": "gate",
+      "id": "2e8b4840",
+      "reason": "Already machine-enforced via control 'lead_client_pair' (mcp-server/src/tools.js); binds confirm-merge, before anything is written. Failure mode on violation: verb refuses the write",
+      "title_gist": "A lead record and a client record for the same person are not a duplicate"
+    },
+    {
+      "carrying_control": "pr_only_main_ruleset",
+      "home": "gate",
+      "id": "308ef1de",
+      "reason": "WR-000019 slice S3 (2026-08-27) retired hooks/git-writer-gate.py; reassigned to control 'pr_only_main_ruleset' (the PR-only main ruleset + required hosted CI, backed locally by ops/githooks/pre-commit), the same structural control the enforcement map itself now names for this rule. Binds later than the retired gate did -- at merge, not the git command itself. Failure mode on violation: server-side push rejection / local pre-commit refusal on a direct main commit",
+      "title_gist": "TWO-WRITER DISCIPLINE COVERS THE GIT WORKING TREE"
+    },
+    {
+      "home": "jit",
+      "id": "30a189fb",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: Life AI check: a non-CARR task \u2192 STOP and ask whether it belongs in Life AI before\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at non-CARR task, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Life AI check: a non-CARR task \u2192 STOP and ask whether it belongs in Life AI before writing here"
+    },
+    {
+      "home": "jit",
+      "id": "347a9ca6",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: A SESSION'S NAME DOES NOT PREDICT THE WORK IT WILL DO",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A SESSION'S NAME DOES NOT PREDICT THE WORK IT WILL DO"
+    },
+    {
+      "home": "jit",
+      "id": "3578d799",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: NAME VERBS AND SYSTEM NOUNS IN HUMAN WORDS, NOT MACHINE OR DATA-PIPELINE WORDS",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "NAME VERBS AND SYSTEM NOUNS IN HUMAN WORDS, NOT MACHINE OR DATA-PIPELINE WORDS"
+    },
+    {
+      "carrying_control": "candidate_match",
+      "home": "gate",
+      "id": "388cc81e",
+      "reason": "Already machine-enforced via control 'candidate_match' (pipelines/import_candidate_pool.py); binds candidate-pool duplicate classification. Failure mode on violation: name-only candidates remain reviewable; only exact email suppresses",
+      "title_gist": "THE MATCH THRESHOLD, and what to do when it is not met"
+    },
+    {
+      "carrying_control": "chat_lint",
+      "home": "gate",
+      "id": "38b15dc6",
+      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before an outgoing multi-clause partner instruction can end. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
+      "title_gist": "ANY MULTI-CLAUSE INSTRUCTION GIVEN TO A PARTNER MUST PRESENT EACH CLAUSE SEPARATELY, NUMBERED, WITH AN"
+    },
+    {
+      "carrying_control": "conduct_stop",
+      "home": "gate",
+      "id": "3a9dbafd",
+      "reason": "Already machine-enforced via control 'conduct_stop' (hooks/conduct-stop-gate.py bare_id_hits(), backed by hooks/conduct_patterns.py BARE_ID + ID_EXPLAINED); binds a reply to a partner carrying a bare id, pre-send at Stop. Failure mode on violation: Stop block \u2014 the turn is held open until the id is explained. Detection moved from chat_lint 2026-08-22; corrected here 2026-08-27.",
+      "title_gist": "NEVER MAKE A PARTNER DECODE AN ID. Say what the thing IS, in plain words, every time"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-vendor|update-vendor|merge-vendor-rows)$"
+      },
+      "home": "jit",
+      "id": "3b0cd546",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "A NEW rivalry is taught as it surfaces, so a fixed predicate would go stale the day one appears; this stays a living, taught list. (planned_control on record: a named-rivalry pair list on the vendor record, checked by the same draft-time pairing check as e6e0b0e7.)",
+      "title_gist": "A named-rivalry list keeps two competing vendors apart, and the list grows by teaching"
+    },
+    {
+      "home": "jit",
+      "id": "3d185f2b",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: SYSTEM-DESIGN BUILDS FINISH THROUGH JOE; DELL REVIEWS FINISHED PRODUCT, NEVER GATES THE\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "SYSTEM-DESIGN BUILDS FINISH THROUGH JOE; DELL REVIEWS FINISHED PRODUCT, NEVER GATES THE PROCESS"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-conversation|add-deal-note|log-activity|log-outreach)$"
+      },
+      "home": "jit",
+      "id": "3fa17fa0",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Stale notes are not status: before drafting re-engagement off notes older than ~60 days,\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at stale-note re-engagement, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Stale notes are not status: before drafting re-engagement off notes older than ~60 days, ask Joe \"is this"
+    },
+    {
+      "carrying_control": "versioned_record",
+      "home": "gate",
+      "id": "4039b9b5",
+      "reason": "Already machine-enforced via control 'versioned_record' (path:mcp-server/src/tools.js, external:database constraints); binds at every doctrine-section write. Failure mode on violation: transaction refusal",
+      "title_gist": "DOCTRINE WRITING IS MODEL-AGNOSTIC. Any qualified seat writes doctrine \u2014 Fable, Sol 5.6, Opus, or whatever"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-document|compare-lease-terms|record-executed-lease)$"
+      },
+      "home": "jit",
+      "id": "412d37d3",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: HIPAA is always spelled HIPAA; double-check compliance references",
+      "reason": "Currently only SURFACED (a reminder via 'writing_lint' at writing HIPAA in any surface, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "HIPAA is always spelled HIPAA; double-check compliance references"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-conversation|add-deal-note|log-activity|log-outreach)$"
+      },
+      "home": "jit",
+      "id": "424ba0cc",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Cold and paused clients leave the active book and go to a separate not-top-of-mind\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Cold and paused clients leave the active book and go to a separate not-top-of-mind category \u2014 never pester a"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-document|compare-lease-terms|record-executed-lease)$"
+      },
+      "home": "jit",
+      "id": "4399df76",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Every LOI term is negotiable and template values are placeholders holding the most-common\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Every LOI term is negotiable and template values are placeholders holding the most-common case, never fixed"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "43e2ef76",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds non-trivial build completion. Failure mode on violation: Stop block",
+      "title_gist": "PLAN THE CHECK BEFORE YOU BUILD THE THING"
+    },
+    {
+      "carrying_control": "vault_salvage",
+      "home": "gate",
+      "id": "4402973a",
+      "reason": "Already machine-enforced via control 'vault_salvage' (ops/vault-drift-watch.py); binds after drift detection and before any regeneration or overwrite. Failure mode on violation: quarantine, diff and intake evidence precede healing",
+      "title_gist": "SALVAGE BEFORE HEAL. When any healing, regeneration, or rewrite process detects content that was written to"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^(WebFetch|WebSearch)$"
+      },
+      "home": "jit",
+      "id": "466a545a",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: When Joe feeds a source, the job is to IMPROVE the system with it, and the burden of\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "When Joe feeds a source, the job is to IMPROVE the system with it, and the burden of proof sits on \"we"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-conversation|add-deal-note|log-activity|log-outreach)$"
+      },
+      "home": "jit",
+      "id": "48083552",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: DISCOVERY BEFORE SOLVING, IN EVERY CLIENT AND PROSPECT MEETING",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "DISCOVERY BEFORE SOLVING, IN EVERY CLIENT AND PROSPECT MEETING"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(send_message|reply|forward|create_draft|update_draft)$"
+      },
+      "home": "jit",
+      "id": "49533583",
+      "jit_trigger_hint": "Delivered by pack(s) joe-comms \u2014 fires on: CONSTRAINT, binding at the moment a session reaches for any of Joe's meetings, attendees,\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at calendar/mail read, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "CONSTRAINT, binding at the moment a session reaches for any of Joe's meetings, attendees, or mail"
+    },
+    {
+      "home": "jit",
+      "id": "49c627cc",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: Before claiming the record layer cannot do something, read the FULL verb list and match\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Before claiming the record layer cannot do something, read the FULL verb list and match on BEHAVIOR, not on"
+    },
+    {
+      "carrying_control": "canonical_edit",
+      "home": "core",
+      "id": "4a53ff82",
+      "reason": "Worktree-per-session is the default; the canonical tree is the integration lane only. The baseline discipline for where a session is even allowed to write code.",
+      "title_gist": "WORKTREE-PER-SESSION IS THE DEFAULT; THE CANONICAL TREE IS THE INTEGRATION LANE ONLY"
+    },
+    {
+      "home": "jit",
+      "id": "4a9188f3",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: THE TEST FOR CAPTURING A TAUGHT RULE IS 'would the system have to ask this again?' \u2014\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'ledger_capture' at partner correction, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "THE TEST FOR CAPTURING A TAUGHT RULE IS 'would the system have to ask this again?' \u2014 never whether the"
+    },
+    {
+      "carrying_control": "merge_survivor",
+      "home": "gate",
+      "id": "4c21d86b",
+      "reason": "Already machine-enforced via control 'merge_survivor' (mcp-server/src/tools.js); binds confirm-merge before either party row changes. Failure mode on violation: confirm-merge refuses the wrong survivor before mutation",
+      "title_gist": "SURVIVORSHIP RULE FOR DUPLICATE PARTIES \u2014 which row wins a merge, decided in advance so no merge is an"
+    },
+    {
+      "carrying_control": "outbound_format",
+      "home": "gate",
+      "id": "4dd44fd7",
+      "reason": "Already machine-enforced via control 'outbound_format' (mcp-server/src/tools.js); binds update-document-status, when a human marks a document sent. Failure mode on violation: verb refuses the write",
+      "title_gist": "Outbound document formats: LOIs and letters are sent in WORD format so the listing agent can easily edit or"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "4e104d4c",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds new-verb deployment claim. Failure mode on violation: Stop block",
+      "title_gist": "A NEWLY DEPLOYED VERB IS REACHABLE IMMEDIATELY THROUGH `call-verb`"
+    },
+    {
+      "home": "core",
+      "id": "4f7c348f",
+      "reason": "Session-boot recitation law. Its literal wording (recite both rule FILES) is stale post the 2026-08-19 md-cutoff per Joe's own A28 note \u2014 the files are gone, counts now come from standing-context \u2014 but the underlying obligation (state what's loaded, both counts) is still every session's opening act. Stays CORE pending the wording fix Joe owns; not this slice's to amend.",
+      "title_gist": "EVERY session recites BOTH rule files for its partner \u2014 the shared file AND that partner's own personal file"
+    },
+    {
+      "home": "jit",
+      "id": "4fae20f4",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: A RATE IS NOT A BASELINE UNTIL YOU CHECK WHAT ELSE IS IN THE WINDOW",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A RATE IS NOT A BASELINE UNTIL YOU CHECK WHAT ELSE IS IN THE WINDOW"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-deal|update-deal|patch-deal-field|reassign-deal|revert-deal-field)$"
+      },
+      "home": "jit",
+      "id": "51d9f05f",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Prospects are healthcare experts unfamiliar with CRE",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Prospects are healthcare experts unfamiliar with CRE"
+    },
+    {
+      "carrying_control": "trigger_grant",
+      "home": "gate",
+      "id": "5409731b",
+      "reason": "Already machine-enforced via control 'trigger_grant' (ops/trigger-grant-check.py); binds a migration adding or modifying a trigger. Failure mode on violation: CI migration-class failure",
+      "title_gist": "A NEW TRIGGER CHANGES THE PERMISSION SURFACE OF EVERY VERB THAT WRITES ITS TABLE \u2014 GRANT-CHECK EVERY TABLE"
+    },
+    {
+      "carrying_control": "versioned_record",
+      "home": "gate",
+      "id": "54e2bcb9",
+      "reason": "Already machine-enforced via control 'versioned_record' (path:mcp-server/src/tools.js, external:database constraints); binds contact fact promotion. Failure mode on violation: transaction refusal",
+      "title_gist": "A CARR AGENT'S OWN CONTACT DETAILS IN A CLIENT CONTACT FIELD ARE A PLACEHOLDER, NEVER DATA \u2014 confirmed by Joe"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "\\bx\\.com\\b|\\btwitter\\.com\\b"
+      },
+      "home": "jit",
+      "id": "557838a5",
+      "jit_trigger_hint": "Delivered by pack(s) joe-comms \u2014 fires on: WHEN JOE POSTS A LINK, THE QUOTED POST INSIDE IT IS PART OF THE SOURCE, NOT A FOOTNOTE",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at X link intake, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "WHEN JOE POSTS A LINK, THE QUOTED POST INSIDE IT IS PART OF THE SOURCE, NOT A FOOTNOTE"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-document|compare-lease-terms|record-executed-lease)$"
+      },
+      "home": "jit",
+      "id": "5697071b",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "\\bx\\.com\\b|\\btwitter\\.com\\b"
+      },
+      "home": "jit",
+      "id": "57d13061",
+      "jit_trigger_hint": "Delivered by pack(s) joe-comms \u2014 fires on: For any x.com/X retrieval \u2014 single links and research at scale alike \u2014 GROK BUILD IS THE\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at X retrieval, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "For any x.com/X retrieval \u2014 single links and research at scale alike \u2014 GROK BUILD IS THE FIRST MOVE"
+    },
+    {
+      "carrying_control": "record_research",
+      "home": "gate",
+      "id": "57d83b75",
+      "reason": "Already machine-enforced via control 'record_research' (mcp-server/src/tools.js); binds new-client creation. Failure mode on violation: record verb refuses an unsourced intake",
+      "title_gist": "On every new client, run open-source research before working from the handed-over record alone"
+    },
+    {
+      "home": "core",
+      "id": "58b44ccb",
+      "reason": "A session that cannot reach the code repo stops and says so; a cloud session teleports rather than improvising. The base 'no second surface, say so' law this repo's own CLAUDE.md restates verbatim.",
+      "title_gist": "A SESSION THAT CANNOT REACH THE CODE REPO STOPS, AND IF IT IS A CLAUDE CODE CLOUD SESSION IT TELEPORTS RATHER"
+    },
+    {
+      "home": "jit",
+      "id": "58cef3a1",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: Steelman Joe's labels: Joe's confident statements that are slightly off are usually\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Steelman Joe's labels: Joe's confident statements that are slightly off are usually correct intuitions"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "590b11e1",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds metric completion claim. Failure mode on violation: Stop block",
+      "title_gist": "NO METRIC WITHOUT A BOUND ACTION \u2014 a CONSTRAINT that binds at the moment of building"
+    },
+    {
+      "home": "jit",
+      "id": "596f7549",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: When a tool error blames a subsystem, do not act on the blame until you have verified the\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "When a tool error blames a subsystem, do not act on the blame until you have verified the subsystem claim"
+    },
+    {
+      "carrying_control": "chat_lint",
+      "home": "gate",
+      "id": "5be2f462",
+      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before an assistant reply with a banned contrast-reframe or hard AI-tell construction can end. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
+      "title_gist": "CUT MODIFIERS THAT CARRY NO INFORMATION, AND NEVER INVENT AN OPPOSING VIEW FOR CONTRAST"
+    },
+    {
+      "home": "jit",
+      "id": "5cd8d0f6",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: SELF-SERVE THE BLOCKER, THEN RUN THE COMMAND",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "SELF-SERVE THE BLOCKER, THEN RUN THE COMMAND"
+    },
+    {
+      "home": "jit",
+      "id": "5d44d3f3",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires on: Verification backfill: every client, party, and deal already in the system gets the same\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'verification_status' at canonical enrichment and deal-history queue construction, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Verification backfill: every client, party, and deal already in the system gets the same open-source"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^(WebFetch|WebSearch)$"
+      },
+      "home": "jit",
+      "id": "5e896ed6",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: When Joe feeds a link, the session incorporates the applicable learnings into the system\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "When Joe feeds a link, the session incorporates the applicable learnings into the system in the same session"
+    },
+    {
+      "carrying_control": "control-plane-workflow-manifest",
+      "home": "gate",
+      "id": "5e89c211",
+      "reason": "Already machine-enforced via control 'cognition_token_admission' (ops/config/control-plane-workflows.v1.json, lib/control_plane.py); binds before a cognition workflow is registered or dispatched. Failure mode on violation: control-plane manifest loading and the cognition dispatcher refuse an untyped, unbudgeted, or canonical-write-authorized cognition",
+      "title_gist": "NEVER SPEND A COGNITION TOKEN ON STATE, RECURRENCE, ROUTING, VALIDATION, OR A DECISION ALREADY EXPRESSIBLE AS"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(who-do-we-know|counterparty-history)$"
+      },
+      "home": "jit",
+      "id": "5f8c661d",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "Vertical-match strength versus relationship-stage strength is a weighing judgment with no fixed formula. (No planned_control named.)",
+      "title_gist": "Vertical match is weighed against relationship stage when picking a vendor"
+    },
+    {
+      "home": "jit",
+      "id": "614c1209",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires on: THE SYSTEM INFERS CONTACT FROM EVIDENCE IT ALREADY HAS",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "THE SYSTEM INFERS CONTACT FROM EVIDENCE IT ALREADY HAS"
+    },
+    {
+      "home": "jit",
+      "id": "6172e7d5",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: GROK RUNS THE WATCH-VIDEO SKILL, AND IT IS THE DEFAULT SEAT FOR VIDEO AND IMAGE SOURCES",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "GROK RUNS THE WATCH-VIDEO SKILL, AND IT IS THE DEFAULT SEAT FOR VIDEO AND IMAGE SOURCES"
+    },
+    {
+      "home": "jit",
+      "id": "61c64d91",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Twin readiness: every new asset gets a tier AT CREATION, never retrofitted",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Twin readiness: every new asset gets a tier AT CREATION, never retrofitted"
+    },
+    {
+      "home": "jit",
+      "id": "6330bec8",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: On any non-trivial problem or decision, apply the crux discipline before generating\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "On any non-trivial problem or decision, apply the crux discipline before generating options"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^(WebFetch|WebSearch)$"
+      },
+      "home": "jit",
+      "id": "6437ae15",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: When Joe provides an article, video, or any source, READ IT IN FULL and mine it for gold\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "When Joe provides an article, video, or any source, READ IT IN FULL and mine it for gold nuggets applicable"
+    },
+    {
+      "carrying_control": "loop_guard",
+      "home": "gate",
+      "id": "647f843d",
+      "reason": "Already machine-enforced via control 'loop_guard' (migrations/0081_loop_blocker.sql, mcp-server/src/tools.js); binds before opening a loop. Failure mode on violation: transaction refusal",
+      "title_gist": "THE DEFERRAL GATE: A LOOP IS FOR WORK THAT IS GENUINELY BLOCKED AND AT RISK OF BEING LOST, AND FOR NOTHING"
+    },
+    {
+      "home": "jit",
+      "id": "67580c28",
+      "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE - a board, the Deal"
+    },
+    {
+      "home": "jit",
+      "id": "6901cc3b",
+      "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: DOC MUST BE PERFECT, BECAUSE ADOPTION IS THE ONLY METRIC THAT MATTERS \u2014 AND ADOPTION IS\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "DOC MUST BE PERFECT, BECAUSE ADOPTION IS THE ONLY METRIC THAT MATTERS \u2014 AND ADOPTION IS BINARY"
+    },
+    {
+      "home": "core",
+      "id": "6a4e6283",
+      "reason": "Independent verification before anything ships is the base law underneath the whole completion_evidence gate family (18 sibling rules stay GATE as its specific corollaries). The one-line law every session should hold, not just the mechanism that checks it.",
+      "title_gist": "Independent verification before anything ships"
+    },
+    {
+      "carrying_control": "delegation_names_model_and_effort",
+      "home": "gate",
+      "id": "6cfb67f5",
+      "reason": "Already machine-enforced via control 'delegation_names_model_and_effort' (tools/room-bridge/dispatch.py, tools/room-bridge/desks.py); binds at dispatch of a delegated task to another seat. Failure mode on violation: DeskError unnamed_model_or_effort at dispatch, before anything reaches the desk, when a codex-kind desk lacks a named model or rea",
+      "title_gist": "CONSTRAINT, binding at the moment a session delegates any task to another seat"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(who-do-we-know|counterparty-history)$"
+      },
+      "home": "jit",
+      "id": "6ec7312d",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "Ordering three soft factors for one client's need is judgment; the ORDER is fixed but the weighing per case is not. (No planned_control named.)",
+      "title_gist": "Delivery tier is the last tiebreaker, below hard blocks and vertical/state fit, above relationship stage"
+    },
+    {
+      "home": "jit",
+      "id": "70e372f0",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Dell experience calibration: Dell's sessions learn and adapt to his working style through\u2026",
+      "reason": "Dell-experience calibration is a shared rule read into Joe's own sessions; both council chairs (A28) recommend it move to Dell's personal set instead. Stays JIT (situational, fires only in Dell's sessions) pending that relocation, which is Joe's act, not this slice's.",
+      "title_gist": "Dell experience calibration: Dell's sessions learn and adapt to his working style through what he SAYS, ASKS"
+    },
+    {
+      "carrying_control": "loop_successor",
+      "home": "gate",
+      "id": "7105955b",
+      "reason": "Already machine-enforced via control 'loop_successor' (mcp-server/src/tools.js); binds close-loop for a renumbered, superseded, merged or split row. Failure mode on violation: bookkeeping close refuses without an open successor",
+      "title_gist": "A RENUMBERED OR SUPERSEDED ROW IS NOT AN ABANDONED ONE, AND THE CLOSE MUST SAY SO IN ITS FIRST WORDS"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-conversation|add-deal-note|log-activity|log-outreach)$"
+      },
+      "home": "jit",
+      "id": "725dff46",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: The vendor network is the TEAM's, never Dell's alone",
+      "reason": "Currently only SURFACED (a reminder via 'writing_lint' at at each prospect-visible write, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "The vendor network is the TEAM's, never Dell's alone"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-deal|update-deal|patch-deal-field|reassign-deal|revert-deal-field)$"
+      },
+      "home": "jit",
+      "id": "72e06bdf",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Never pre-qualify leads before the board",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at lead board presentation, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Never pre-qualify leads before the board"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "73381d78",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds config change completion. Failure mode on violation: Stop block",
+      "title_gist": "A CONFIG FILE READ BY TWO PARSERS HAS TWO CONTRACTS, AND FIXING ONE BREAKS THE OTHER UNLESS YOU CHECK"
+    },
+    {
+      "home": "core",
+      "id": "737a68d6",
+      "reason": "Any system task can expose a missing record-layer capability. The create-it-now rule must therefore be present before work is routed, not discovered through a narrower pack afterward.",
+      "title_gist": "If a verb needs to be created to do something, create the verb immediately and add it to the system"
+    },
+    {
+      "home": "jit",
+      "id": "740bb505",
+      "jit_trigger_hint": "Delivered by pack(s) scheduled-automation \u2014 fires on: PROJECTING A LONG JOB: EXCLUDE DEAD TIME, INCLUDE CRASH OVERHEAD, AND SAY WHICH YOU DID",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "PROJECTING A LONG JOB: EXCLUDE DEAD TIME, INCLUDE CRASH OVERHEAD, AND SAY WHICH YOU DID"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "767f9b41",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds confirmation response. Failure mode on violation: Stop block",
+      "title_gist": "A confirmation question is an audit trigger \u2014 actually re-verify, then report honestly what was and wasn't at"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(who-do-we-know|counterparty-history)$"
+      },
+      "home": "jit",
+      "id": "76a1ae2b",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "No fixed predicate can weigh territory and vertical fit for a specific client's specific location at once. (No planned_control named.)",
+      "title_gist": "Territory and Vertical must be read together against one client's location"
+    },
+    {
+      "carrying_control": "record_home",
+      "home": "gate",
+      "id": "76a53dfe",
+      "reason": "Already machine-enforced via control 'record_home' (hooks/record-home-gate.py, hooks/bash-write-gate.py); binds before blocked markdown workaround. Failure mode on violation: PreToolUse deny",
+      "title_gist": "A BLOCKED MARKDOWN WRITE IS NOT REDIRECTED, IT IS RE-ROUTED THROUGH THE VERBS"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(who-do-we-know|counterparty-history)$"
+      },
+      "home": "jit",
+      "id": "7b4ba3aa",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "'Fragile, high-stakes client' and 'a Trusted option fits' are both judgments about one specific deal. (No planned_control named; deal-specific risk read.)",
+      "title_gist": "A fragile, high-stakes client may justify pairing with a Trusted vendor as an exception"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-vendor|update-vendor|merge-vendor-rows)$"
+      },
+      "home": "jit",
+      "id": "7e4ca905",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "This rule only binds wherever e6e0b0e7 binds, and both are pure interpretation calls with no separate machine surface. (Inherits e6e0b0e7's planned_control if that ever lands.)",
+      "title_gist": "Closes a loophole in the same-category rule (e6e0b0e7) by interpretation"
+    },
+    {
+      "home": "jit",
+      "id": "7e9739f2",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: All dialogue with Joe must be clear, concise, easily scannable, and as simple as possible\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "All dialogue with Joe must be clear, concise, easily scannable, and as simple as possible while still"
+    },
+    {
+      "home": "jit",
+      "id": "80def9d2",
+      "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: User-friendly by law: every human-facing surface and every choice handed to Joe/Dell\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "User-friendly by law: every human-facing surface and every choice handed to Joe/Dell follows"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^Agent$"
+      },
+      "home": "jit",
+      "id": "81709f57",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: A RED TEAM ASSIGNS DISTINCT LENSES, NEVER REDUNDANT VOTES \u2014 and one seat re-runs the\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A RED TEAM ASSIGNS DISTINCT LENSES, NEVER REDUNDANT VOTES \u2014 and one seat re-runs the evidence instead of"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "(?=.*\\b(?:prepare-conversation|log-outreach)\\b)(?=.*\\bvendor\\b)"
+      },
+      "home": "jit",
+      "id": "83b9a362",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "Whether a caveat was actually carried in the prose is a reading judgment, not a checkable field. (No planned_control named.)",
+      "title_gist": "Suggest a pairing with a caveat until a partner rules on it"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "847f9995",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds unattended-path verification. Failure mode on violation: Stop block",
+      "title_gist": "NO UNATTENDED PATH MAY DEPEND ON AN INTERACTIVE CREDENTIAL"
+    },
+    {
+      "home": "jit",
+      "id": "86647daf",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: The moment any substantive build/change/decision/lesson finishes, ask",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "The moment any substantive build/change/decision/lesson finishes, ask"
+    },
+    {
+      "home": "core",
+      "id": "88e9b5eb",
+      "reason": "'Not authorized' and 'not possible' are different findings and must never be conflated. Universal reporting-honesty law needed the moment any session hits a boundary.",
+      "title_gist": "\"NOT AUTHORIZED\" AND \"NOT POSSIBLE\" ARE DIFFERENT FINDINGS AND MUST NEVER BE REPORTED AS THE SAME ONE"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-vendor|update-vendor|merge-vendor-rows)$"
+      },
+      "home": "jit",
+      "id": "893aeec5",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "The override happens in prose even once Stage exists on the record, so it stays a judgment call at the moment, never a gate. (planned_control on record: the same Stage check as defee176 plus a log-decision receipt whenever Joe overrides a Benched vendor.)",
+      "title_gist": "A Benched-vendor override is Joe's to give, in conversation"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^Agent$"
+      },
+      "home": "jit",
+      "id": "8aefcdce",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: Copilot: Microsoft-native. Claude: everything else \u2014 lead gen, outreach, research,\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Copilot: Microsoft-native. Claude: everything else \u2014 lead gen, outreach, research, automation, documents"
+    },
+    {
+      "carrying_control": "chat_lint",
+      "home": "gate",
+      "id": "8c1e6057",
+      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds a reply asking a partner to open, edit or review a file. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
+      "title_gist": "Whenever a partner is asked to edit, open, or review a file, the message must include a clickable markdown"
+    },
+    {
+      "home": "jit",
+      "id": "8c812bed",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Complementarity ledger data-parity gate: the ledger PUBLISHES NOTHING \u2014 no Monday-brief\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Complementarity ledger data-parity gate: the ledger PUBLISHES NOTHING \u2014 no Monday-brief notes, no fit"
+    },
+    {
+      "carrying_control": "shared_rename_absence",
+      "home": "gate",
+      "id": "8cddc6ad",
+      "reason": "Already machine-enforced via control 'shared_rename_absence' (mcp-server/src/tools.js); binds CI when a shared-row rename SQL surface is introduced. Failure mode on violation: CI refuses introduction of an ungated shared-row rename surface",
+      "title_gist": "RENAMING A SHARED ROW RE-LABELS EVERY RECORD ATTACHED TO IT \u2014 COUNT THE ATTACHMENTS BEFORE ANY RENAME"
+    },
+    {
+      "home": "jit",
+      "id": "9293d609",
+      "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: CONSTRAINT, binding at the moment a session BUILDS OR REVIEWS ANY CARR SURFACE",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "CONSTRAINT, binding at the moment a session BUILDS OR REVIEWS ANY CARR SURFACE"
+    },
+    {
+      "home": "jit",
+      "id": "9310827b",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: BE THE SAFETY CHECK FOR BOTH PARTNERS, EQUALLY AND OUT LOUD",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "BE THE SAFETY CHECK FOR BOTH PARTNERS, EQUALLY AND OUT LOUD"
+    },
+    {
+      "home": "jit",
+      "id": "94806da2",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: FOR ANY SOURCE THAT WILL CHANGE DOCTRINE, RULES, OR RECORDS, READ THE RAW BYTES \u2014 never\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "FOR ANY SOURCE THAT WILL CHANGE DOCTRINE, RULES, OR RECORDS, READ THE RAW BYTES \u2014 never let a fetch tool's"
+    },
+    {
+      "home": "jit",
+      "id": "9530fb1c",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: NAMING THE RIGHT FIX AND NOT BUILDING IT IS THE SAME FAILURE AS DEFERRING IT",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "NAMING THE RIGHT FIX AND NOT BUILDING IT IS THE SAME FAILURE AS DEFERRING IT"
+    },
+    {
+      "home": "jit",
+      "id": "95e76c1f",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: Joe's stated operating posture, in his own words",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Joe's stated operating posture, in his own words"
+    },
+    {
+      "home": "jit",
+      "id": "9730f565",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: Check the clock, don't infer it: dates/times from real timestamps, never conversational\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at date/time assertion, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Check the clock, don't infer it: dates/times from real timestamps, never conversational mood"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "97326357",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds surface capability claim. Failure mode on violation: Stop block",
+      "title_gist": "A claim about what a surface can or cannot do becomes doctrine only after a live test from that surface itself"
+    },
+    {
+      "home": "jit",
+      "id": "9873a0d2",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: PROMOTION WATCH: when A PARTNER re-explains the same \"how\" twice across sessions, or an\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "PROMOTION WATCH: when A PARTNER re-explains the same \"how\" twice across sessions, or an existing ability"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^(WebFetch|WebSearch)$"
+      },
+      "home": "jit",
+      "id": "98e74e7c",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: When Joe feeds a link or source, never evaluate it only against its stated use case",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "When Joe feeds a link or source, never evaluate it only against its stated use case"
+    },
+    {
+      "carrying_control": "index_upkeep",
+      "home": "gate",
+      "id": "99e951b9",
+      "reason": "Already machine-enforced via control 'index_upkeep' (ops/githooks/index-upkeep-check.py, ops/githooks/pre-commit); binds pre-commit when content is added under an indexed multi-folder category. Failure mode on violation: pre-commit refusal",
+      "title_gist": "Index upkeep: any multi-folder category gets a short INDEX.md, updated same session as changes"
+    },
+    {
+      "carrying_control": "no_send_worker",
+      "home": "gate",
+      "id": "9b081605",
+      "reason": "Already machine-enforced via control 'no_send_worker' (mcp-server/src/mcp.js); binds before outbound send. Failure mode on violation: capability absent",
+      "title_gist": "Email handover: drafts for Joe's action are emailed from the AI Gmail TO joe.bookout@carr.us"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-deal|update-deal|patch-deal-field|reassign-deal|revert-deal-field)$"
+      },
+      "home": "jit",
+      "id": "9d80fd2d",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Doctor cadence is the message: outreach frequency IS content \u2014 pressure reads as\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Doctor cadence is the message: outreach frequency IS content \u2014 pressure reads as desperation"
+    },
+    {
+      "home": "jit",
+      "id": "9e3fb6d0",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: WHEN JOE SHARES INDUSTRY CONTENT FROM A COLLEAGUE OR COMPETITOR, RUN BOTH PASSES",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "WHEN JOE SHARES INDUSTRY CONTENT FROM A COLLEAGUE OR COMPETITOR, RUN BOTH PASSES"
+    },
+    {
+      "carrying_control": "deal_guard",
+      "home": "gate",
+      "id": "9f15f21a",
+      "reason": "Already machine-enforced via control 'deal_guard' (mcp-server/src/tools.js, migrations/0079_deal_room_api.sql); binds national-account deal assignment. Failure mode on violation: transaction refusal",
+      "title_gist": "NATIONAL ACCOUNT MODELLING, ruled by Joe 2026-08-02 on the Cadence Studio case"
+    },
+    {
+      "carrying_control": "egress_guard",
+      "home": "gate",
+      "id": "9ff56260",
+      "reason": "Already machine-enforced via control 'egress_guard' (hooks/guard-unattended.py); binds before command exposes key path. Failure mode on violation: PreToolUse deny",
+      "title_gist": "A command a session issues never names a private key path"
+    },
+    {
+      "home": "jit",
+      "id": "a2e78f48",
+      "jit_trigger_hint": "Deliver with engineering-git when a known defect is found and its repair is available.",
+      "reason": "Autonomous repair binds when engineering work finds a known fix; the existing production load tag names engineering-git.",
+      "title_gist": "AUTONOMOUS REPAIR OF KNOWN ISSUES"
+    },
+    {
+      "home": "jit",
+      "id": "a3f6c7f9",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Diagnose before restructuring: point to a real task that was slow, never a hypothetical",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Diagnose before restructuring: point to a real task that was slow, never a hypothetical"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "a6e6ab4e",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds changed-system completion. Failure mode on violation: Stop block",
+      "title_gist": "CHECK AGAINST THE BASELINE, NOT ONLY AGAINST THE SPEC"
+    },
+    {
+      "home": "core",
+      "id": "a7784a18",
+      "reason": "Repository isolation binds before the first edit, and complete delivery binds until merge and cleanup. Both apply to every coding session, so this is always-loaded operating law.",
+      "title_gist": "Each coding session owns an isolated checkout and the full delivery path through merge, verification, and cleanup"
+    },
+    {
+      "home": "core",
+      "id": "a8c55a47",
+      "reason": "A manual path and an automated path doing the same job must be the same code. Cited as the rationale inside 18 different hook files in this repo (grep hooks/*.py) \u2014 the connective engineering law underneath nearly every gate here, worth holding directly rather than only inheriting from one gate's comments.",
+      "title_gist": "A MANUAL PATH AND AN AUTOMATED PATH THAT DO THE SAME JOB MUST BE THE SAME CODE"
+    },
+    {
+      "home": "jit",
+      "id": "a8f159ad",
+      "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: CONSTRAINT, binding at the moment a session BUILDS OR REVIEWS ANY CARR SURFACE that\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "CONSTRAINT, binding at the moment a session BUILDS OR REVIEWS ANY CARR SURFACE that carries structure - a"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "a9ecd5b4",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds check result report. Failure mode on violation: Stop block",
+      "title_gist": "A CHECK MUST COMPARE THE ARTIFACT AGAINST WHAT IT SHOULD BE, AND A SUCCESS SIGNAL MUST BE DERIVED FROM"
+    },
+    {
+      "home": "core",
+      "id": "ab814a26",
+      "reason": "A rule ships with its enforcement, decided at creation; recitation is not enforcement. The meta-law this entire S7 triage exists to satisfy \u2014 every session authoring or reviewing a rule needs it.",
+      "title_gist": "A RULE SHIPS WITH ITS ENFORCEMENT, DECIDED AT CREATION \u2014 RECITATION IS NOT ENFORCEMENT"
+    },
+    {
+      "home": "jit",
+      "id": "af7de070",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: A PERMISSION-CLASSIFIER BLOCK IS NOT A PERMISSION DENIAL \u2014 RETRY IT ONCE BEFORE EVER\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A PERMISSION-CLASSIFIER BLOCK IS NOT A PERMISSION DENIAL \u2014 RETRY IT ONCE BEFORE EVER HANDING THE COMMAND TO"
+    },
+    {
+      "carrying_control": "stale_count",
+      "home": "gate",
+      "id": "b01edd26",
+      "reason": "Already machine-enforced via control 'stale_count' (ops/stale-count-check.py); binds CI, on any committed source or doc. Failure mode on violation: CI class failure",
+      "title_gist": "No hardcoded counts or blanket self-summaries a later edit can falsify"
+    },
+    {
+      "home": "jit",
+      "id": "b1521526",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Source-truth hierarchy on conflict: Joe live \u2192 the domain's source-of-truth file \u2192 newer\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Source-truth hierarchy on conflict: Joe live \u2192 the domain's source-of-truth file \u2192 newer dated file, flag the"
+    },
+    {
+      "home": "jit",
+      "id": "b3ea627f",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: DO NOT SCRIPT JOE'S LINES. NEVER END A MESSAGE BY TELLING HIM A PHRASE TO SAY BACK",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "DO NOT SCRIPT JOE'S LINES. NEVER END A MESSAGE BY TELLING HIM A PHRASE TO SAY BACK"
+    },
+    {
+      "home": "core",
+      "id": "b42e217e",
+      "reason": "Foundational partner-identity fact: Dell is a full writer and teacher, equal to Joe, not a lesser account. Shapes every session's read of who can direct or receive work.",
+      "title_gist": "DELL IS A FULL WRITER AND A FULL TEACHER, EQUAL TO JOE"
+    },
+    {
+      "detector": {
+        "kind": "bash_family",
+        "pattern": "\\bgit\\s+push\\b|\\bgh\\s+pr\\s+(?:create|merge)\\b"
+      },
+      "home": "jit",
+      "id": "b42f11a0",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: BUILD FOR THE TRAJECTORY, NOT THE SNAPSHOT",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "BUILD FOR THE TRAJECTORY, NOT THE SNAPSHOT"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^Agent$"
+      },
+      "home": "jit",
+      "id": "b587f6c2",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: WHEN TO CONVENE A FRONTIER-MODEL COUNCIL \u2014 the decision procedure, so convening is never\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "WHEN TO CONVENE A FRONTIER-MODEL COUNCIL \u2014 the decision procedure, so convening is never a mood or a ritual"
+    },
+    {
+      "home": "jit",
+      "id": "b7ec8f3b",
+      "jit_trigger_hint": "Deliver with surface-doctrine when building or reviewing a DoctorCRE surface.",
+      "reason": "The site-wide DoctorCRE surface grammar binds during surface work; the existing production load tag names surface-doctrine.",
+      "title_gist": "DOCTORCRE SURFACE GRAMMAR"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "(?=.*\\b(?:prepare-conversation|log-outreach)\\b)(?=.*\\bvendor\\b)"
+      },
+      "home": "jit",
+      "id": "ba5730c5",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "The rule states its own conditions explicitly (live/likely shared project, complementary territory, no existing loyalty) \u2014 situational judgment every time, not a fixed predicate. (No planned_control named; conditions are too situational for a machine check.)",
+      "title_gist": "Shared-project overlap between vendors is conditional, not a default block"
+    },
+    {
+      "home": "jit",
+      "id": "bbffc139",
+      "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: THE LEDGER TRIGGERS. Joe's development kit has produced ZERO entries since it was\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'ledger_capture' at ledger trigger, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "THE LEDGER TRIGGERS. Joe's development kit has produced ZERO entries since it was enacted, and the cause is"
+    },
+    {
+      "home": "jit",
+      "id": "bc4145f6",
+      "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Joe's curriculum rule: as sessions observe his working patterns through the development\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Joe's curriculum rule: as sessions observe his working patterns through the development and strength-training"
+    },
+    {
+      "home": "core",
+      "id": "bc9188b4",
+      "reason": "Every session commits its own work, including unattended and background runs. The git-hygiene law every other completion claim in this repo depends on.",
+      "title_gist": "EVERY SESSION COMMITS ITS OWN WORK, INCLUDING UNATTENDED AND BACKGROUND RUNS"
+    },
+    {
+      "detector": {
+        "kind": "bash_family",
+        "pattern": "\\bgit\\s+push\\b|\\bgh\\s+pr\\s+(?:create|merge)\\b"
+      },
+      "home": "jit",
+      "id": "bd4a6d22",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: When Joe chooses a machine or system state permanently, change the check so it reads that\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "When Joe chooses a machine or system state permanently, change the check so it reads that state as accepted"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "(?=.*\\b(?:prepare-conversation|log-outreach)\\b)(?=.*\\bvendor\\b)"
+      },
+      "home": "jit",
+      "id": "bddb0e7b",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "The rule states its own softness \u2014 these are defaults, not blocks \u2014 and requires a specific confirm step no predicate can replace. (No planned_control named; the confirm step is inherently a human-judgment moment.)",
+      "title_gist": "Overlap 'defaults' require confirming the specific pairing before acting"
+    },
+    {
+      "carrying_control": "staged_gate_bless",
+      "home": "gate",
+      "id": "c0b38d80",
+      "reason": "Already machine-enforced via control 'staged_gate_bless' (ops/githooks/staged-gate-bless-check.py, ops/githooks/pre-commit); binds committing a change to a gate. Failure mode on violation: pre-commit refusal",
+      "title_gist": "RE-BLESS THE GATE BASELINE IN THE SAME COMMIT THAT CHANGES A GATE"
+    },
+    {
+      "detector": {
+        "kind": "bash_family",
+        "pattern": "\\bgit\\s+push\\b|\\bgh\\s+pr\\s+(?:create|merge)\\b"
+      },
+      "home": "jit",
+      "id": "c1547ed1",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: The placement test: state WHERE it lives and why \u2014 repo `~/carr-system` vs the Drive\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "The placement test: state WHERE it lives and why \u2014 repo `~/carr-system` vs the Drive vault vs BOTH"
+    },
+    {
+      "home": "jit",
+      "id": "c1db316c",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Complete solutions, not incremental patches",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Complete solutions, not incremental patches"
+    },
+    {
+      "home": "core",
+      "id": "c20dc3d5",
+      "reason": "The escalation/verification contract for any agent hierarchy: evidence travels with a finding, material claims get re-run not re-read, missing information goes down before a human is asked. Binds every delegation exchange.",
+      "title_gist": "THE ESCALATION CONTRACT \u2014 three constraints, each binding at a named moment, that make an agent hierarchy"
+    },
+    {
+      "carrying_control": "chat_lint",
+      "home": "gate",
+      "id": "c315befa",
+      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before a question, interview box, draft or status ask can end without naming its deal. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
+      "title_gist": "NAME THE DEAL IN THE QUESTION ITSELF. Any question, interview box, draft, or status ask presented to a"
+    },
+    {
+      "home": "jit",
+      "id": "c4a284b2",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: FOR A QUESTION PRACTITIONERS HAVE ALREADY SOLVED AT SCALE, START FROM THE OBSERVED\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "FOR A QUESTION PRACTITIONERS HAVE ALREADY SOLVED AT SCALE, START FROM THE OBSERVED CONVENTION AND VERIFY IT"
+    },
+    {
+      "home": "core",
+      "id": "c53beeaa",
+      "reason": "ok:true confirms a call parsed, never that values landed in the right fields. The universal caution needed before trusting any record-verb response, every session, every write.",
+      "title_gist": "AN `ok:true` FROM A RECORD VERB CONFIRMS THE CALL PARSED, NEVER THAT THE VALUES LANDED IN THE RIGHT FIELDS"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(send_message|reply|forward|create_draft|update_draft)$"
+      },
+      "home": "jit",
+      "id": "c66dc739",
+      "jit_trigger_hint": "Delivered by pack(s) joe-comms \u2014 fires on: Mail capture on Joe's side reads the LOCAL mail stores on his Mac \u2014 never a Gmail API\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at mail capture, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Mail capture on Joe's side reads the LOCAL mail stores on his Mac \u2014 never a Gmail API integration, and never"
+    },
+    {
+      "home": "core",
+      "id": "c6f69dee",
+      "reason": "The staffing model \u2014 an agent is a job description made of skills \u2014 is the foundational concept behind delegation and profiles. Needed to make sense of any assign-profile or staffing conversation.",
+      "title_gist": "THE STAFFING MODEL: AN AGENT IS A JOB DESCRIPTION, AND THE JOB DESCRIPTION IS MADE UP OF SKILLS"
+    },
+    {
+      "home": "jit",
+      "id": "c864b8cb",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: When Joe needs to make several calls, ask ONE question at a time using an interview box \u2014\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'conduct_stop' at multi-question request, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "When Joe needs to make several calls, ask ONE question at a time using an interview box \u2014 never batch"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-deal|update-deal|patch-deal-field|reassign-deal|revert-deal-field)$"
+      },
+      "home": "jit",
+      "id": "c8ebeb5b",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: A PRACTICE OWNER SELLING TO A PLATFORM IS A LEAD, AND THE LEAD IS THEIR NEXT STARTUP \u2014\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A PRACTICE OWNER SELLING TO A PLATFORM IS A LEAD, AND THE LEAD IS THEIR NEXT STARTUP \u2014 NOT THE SALE"
+    },
+    {
+      "carrying_control": "record_home",
+      "home": "gate",
+      "id": "ca841807",
+      "reason": "Already machine-enforced via control 'record_home' (hooks/record-home-gate.py, hooks/bash-write-gate.py); binds before a markdown write outside the machine-required manifest. Failure mode on violation: PreToolUse deny",
+      "title_gist": "Findings, enrichment results, and record updates go into the DATABASE, never into a markdown report"
+    },
+    {
+      "home": "jit",
+      "id": "cd84d22a",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: DECLINE THE CLAUDE CODE FEEDBACK-SURVEY TRANSCRIPT SHARE FROM ANY CARR SESSION",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "DECLINE THE CLAUDE CODE FEEDBACK-SURVEY TRANSCRIPT SHARE FROM ANY CARR SESSION"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-document|compare-lease-terms|record-executed-lease)$"
+      },
+      "home": "jit",
+      "id": "ce12c11e",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Lead with the no-conflict tenant/buyer-only model",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Lead with the no-conflict tenant/buyer-only model"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "(?=.*\\b(?:prepare-conversation|log-outreach)\\b)(?=.*\\bvendor\\b)"
+      },
+      "home": "jit",
+      "id": "cf1c13a6",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "A positioning rule about how a draft opens; no predicate can tell whether a draft actually led with the no-conflict framing. (No planned_control named; this is a drafting-quality judgment, not a checkable field.)",
+      "title_gist": "Lead with the no-conflict framing when a counterparty could self-perform"
+    },
+    {
+      "carrying_control": "record_research",
+      "home": "gate",
+      "id": "cff429f5",
+      "reason": "Already machine-enforced via control 'record_research' (mcp-server/src/tools.js); binds every reachable new contact creation path before party insertion. Failure mode on violation: record verb refuses an unsourced intake",
+      "title_gist": "A THIN CONTACT RECORD IS A RESEARCH TASK, NOT A QUESTION FOR JOE"
+    },
+    {
+      "home": "jit",
+      "id": "d26d63b0",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires on: When ANY new contact enters the system \u2014 lead, client, vendor, or a party met in passing\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "When ANY new contact enters the system \u2014 lead, client, vendor, or a party met in passing \u2014 run a deep"
+    },
+    {
+      "home": "jit",
+      "id": "d3774a28",
+      "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Concept coherence is his edge: when the conceptual model and file reality diverge,\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Concept coherence is his edge: when the conceptual model and file reality diverge, surface it explicitly and"
+    },
+    {
+      "home": "jit",
+      "id": "d5dcfe26",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: A DATED DESIGN MEMO IS NOT SELF-UPDATING, AND A DECISION IS FOUND BY WHAT IT DOES, NEVER\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'drift_claim' at asserting a present state is wrong, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "A DATED DESIGN MEMO IS NOT SELF-UPDATING, AND A DECISION IS FOUND BY WHAT IT DOES, NEVER BY ITS LABEL"
+    },
+    {
+      "carrying_control": "calendar_intake",
+      "home": "gate",
+      "id": "d7c69aa6",
+      "reason": "Already machine-enforced via control 'calendar_intake' (tools/calendar-intake-gate.py, bin/calendar-eventkit-capture.sh); binds live calendar capture completion for an unmatched attendee. Failure mode on violation: calendar intake refuses completion without mail, research and record receipts",
+      "title_gist": "A NEW NAME ON THE CALENDAR IS AN INTAKE TRIGGER, NOT A CALENDAR ENTRY"
+    },
+    {
+      "carrying_control": "deal_guard",
+      "home": "gate",
+      "id": "d7e6de46",
+      "reason": "Already machine-enforced via control 'deal_guard' (mcp-server/src/tools.js, migrations/0079_deal_room_api.sql); binds deal value write. Failure mode on violation: transaction refusal",
+      "title_gist": "CLIENT BENEFIT VALUE IS NOT REVENUE, AND THE TWO MUST NEVER MEET IN THE SAME FIELD"
+    },
+    {
+      "carrying_control": "chat_lint",
+      "home": "gate",
+      "id": "d7f74c93",
+      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before an outgoing assistant reply justifies denying a model, provider, or agent access to CARR material because it is confidential, private, or sensitive. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
+      "title_gist": "NEVER JUSTIFY AN AGENT-ACCESS BOUNDARY ON DATA CONFIDENTIALITY"
+    },
+    {
+      "home": "jit",
+      "id": "d8c9b1f0",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: A FINDING THAT ONLY EXISTS IN A RECORD HAS NOT REACHED THE PARTNER",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A FINDING THAT ONLY EXISTS IN A RECORD HAS NOT REACHED THE PARTNER"
+    },
+    {
+      "home": "jit",
+      "id": "d9874334",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: CONSTRAINT, binding at the moment a session is about to name `capability` as a blocker or\u2026",
+      "reason": "Currently only SURFACED (a reminder via 'session_boot' at capability blocker, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "CONSTRAINT, binding at the moment a session is about to name `capability` as a blocker or ask a partner for a"
+    },
+    {
+      "home": "jit",
+      "id": "d9ce2b08",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: SOLVE THE PROBLEM; DO NOT SETTLE FOR REPORTING IT",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "SOLVE THE PROBLEM; DO NOT SETTLE FOR REPORTING IT"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "dcf98880",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds human verification instruction. Failure mode on violation: Stop block",
+      "title_gist": "He executes his human-side steps reliably \u2014 hand him precise verification steps"
+    },
+    {
+      "home": "jit",
+      "id": "def3e84e",
+      "jit_trigger_hint": "Delivered by pack(s) scheduled-automation \u2014 fires on: Artifact tombstones: nothing silently rots",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Artifact tombstones: nothing silently rots"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-vendor|update-vendor|merge-vendor-rows)$"
+      },
+      "home": "jit",
+      "id": "defee176",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "Stage is a vendors.xlsx column with no record-layer representation yet, so nothing can be denied on it mechanically. (planned_control on record: a Stage check at introduction-draft time once vendor Stage moves onto the vendor record.)",
+      "title_gist": "Vendor Stage gates an introduction, but Stage lives in a spreadsheet today"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "(?=.*\\bdata.?class\\b)(?=.*\\b(?:scope|widen|widening)\\b)"
+      },
+      "home": "jit",
+      "id": "df55c398",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: EVERY DELEGATED SWEEP CARRIES A DATA-CLASS BOUNDARY, AND A WIDENED SCOPE RE-STATES IT",
+      "reason": "Currently only SURFACED (a reminder via 'delegation_tripwire' at delegated scope brief, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "EVERY DELEGATED SWEEP CARRIES A DATA-CLASS BOUNDARY, AND A WIDENED SCOPE RE-STATES IT"
+    },
+    {
+      "home": "jit",
+      "id": "df8f1da0",
+      "jit_trigger_hint": "Fires on the specific moment named in the rule: ASSESSMENT VS ACTION: \"examine this\", \"what do you think\", \"is this worth it\" means\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "ASSESSMENT VS ACTION: \"examine this\", \"what do you think\", \"is this worth it\" means DELIVER THE ASSESSMENT"
+    },
+    {
+      "carrying_control": "conduct_stop",
+      "home": "gate",
+      "id": "e313a3ca",
+      "reason": "Already machine-enforced via control 'conduct_stop' (hooks/conduct-stop-gate.py); binds before command handoff. Failure mode on violation: Stop block",
+      "title_gist": "RUN THE COMMAND; DO NOT HAND THE PARTNER A COMMAND TO PASTE"
+    },
+    {
+      "home": "core",
+      "id": "e4d965d9",
+      "reason": "A refusal is a closed route, not a closed problem. Umbrella law for the whole 'try harder before saying can't' cluster (1c42d80c, 1b8e7f43, 5cd8d0f6, af7de070, d9ce2b08 stay JIT as its situational corollaries). Needed every session that hits friction.",
+      "title_gist": "A REFUSAL IS A CLOSED ROUTE, NOT A CLOSED PROBLEM"
+    },
+    {
+      "detector": {
+        "kind": "bash_family",
+        "pattern": "\\bgit\\s+push\\b|\\bgh\\s+pr\\s+(?:create|merge)\\b"
+      },
+      "home": "jit",
+      "id": "e65efc68",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: WRITE THE TEST BEFORE THE THING, AND ESPECIALLY BEFORE A GATE",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "WRITE THE TEST BEFORE THE THING, AND ESPECIALLY BEFORE A GATE"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(who-do-we-know|counterparty-history)$"
+      },
+      "home": "jit",
+      "id": "e6e0b0e7",
+      "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
+      "reason": "No tool call represents 'introduce'; judging whether two vendors are 'the same category' at the relationship level is the rule's whole content. (planned_control on record: a draft-time pairing check reading both parties' Category off the vendor record, once vendor Category is carried there.)",
+      "title_gist": "Same-category vendor pairing is judgment, not a machine check"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "e8868cbe",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds system acceptance claim. Failure mode on violation: Stop block",
+      "title_gist": "THE 48-HOUR TEST IS THE SYSTEM'S ACCEPTANCE CRITERION"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "eaa31ac5",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds before delivery claim. Failure mode on violation: Stop block",
+      "title_gist": "CONSTRAINT, binding at the moment a session is about to say it HANDED OFF, SENT, DELIVERED, NOTIFIED or"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "^(?:Agent|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$"
+      },
+      "home": "jit",
+      "id": "ede4b241",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session dispatches work to another model or launches a Claude Code cloud session (the Agent tool, or create_session / create_trigger on the Claude Code Remote server).",
+      "reason": "Fires on an occasion, not at every boot: the choice of model for a dispatched job is made at the moment of dispatch, so the rule is delivered by pack and moment. No gate can judge whether a job is well-scoped with a checkable done-condition; the delivery puts the routing rule in front of the session at that decision.",
+      "title_gist": "CLOUD MODEL CHOICE: pick the model by the work's shape; Sonnet 5.5 for well-scoped checkable work, Opus 5.5 for design, gates, eval design and reviews"
+    },
+    {
+      "home": "jit",
+      "id": "ede4c735",
+      "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: WRITING-RULES BINDS PROSPECT-VISIBLE SURFACES ONLY",
+      "reason": "Currently only SURFACED (a reminder via 'writing_lint' at at each write, when the surface is classified, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "WRITING-RULES BINDS PROSPECT-VISIBLE SURFACES ONLY"
+    },
+    {
+      "home": "jit",
+      "id": "eeb3d106",
+      "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: CONSTRAINT, binding at the moment a session BUILDS OR REVIEWS ANY CARR WORKSTATION\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "CONSTRAINT, binding at the moment a session BUILDS OR REVIEWS ANY CARR WORKSTATION SURFACE - the command"
+    },
+    {
+      "home": "jit",
+      "id": "efbdfb1a",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: KNOWING EVERYTHING I KNOW NOW \u2014 THE DELIBERATE SECOND PASS",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "KNOWING EVERYTHING I KNOW NOW \u2014 THE DELIBERATE SECOND PASS"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "f04a05aa",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds autonomous-run completion. Failure mode on violation: Stop block",
+      "title_gist": "Autonomous runs: every scheduled task/trigger/subagent gets at creation"
+    },
+    {
+      "home": "jit",
+      "id": "f0f9156e",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: OPTIMIZE FOR MOBILITY; PRIVACY IS A PRESENTED CONCERN, NOT A SILENT DEFAULT",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "OPTIMIZE FOR MOBILITY; PRIVACY IS A PRESENTED CONCERN, NOT A SILENT DEFAULT"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(prepare-document|compare-lease-terms|record-executed-lease)$"
+      },
+      "home": "jit",
+      "id": "f2d58a30",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: EVERY CLIENT-FACING RECOMMENDATION NAMES AT LEAST ONE THING WE WOULD NOT DO, AND WHY",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "EVERY CLIENT-FACING RECOMMENDATION NAMES AT LEAST ONE THING WE WOULD NOT DO, AND WHY"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "f47a8fe9",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds verification report. Failure mode on violation: Stop block",
+      "title_gist": "THE FOUR VERIFICATION FAILURES, each of which produced a wrong claim on 2026-08-02, and the one habit that"
+    },
+    {
+      "detector": {
+        "kind": "verb",
+        "pattern": "__(new-deal|update-deal|patch-deal-field|reassign-deal|revert-deal-field)$"
+      },
+      "home": "jit",
+      "id": "f5bac101",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: Joe & Dell are early-stage: prioritize prospecting/pipeline over polish on low-impact\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Joe & Dell are early-stage: prioritize prospecting/pipeline over polish on low-impact areas"
+    },
+    {
+      "home": "jit",
+      "id": "f5beac20",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Expansion posture: never dismiss useful-but-not-today knowledge \u2014 capture it in its\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Expansion posture: never dismiss useful-but-not-today knowledge \u2014 capture it in its durable home AND propose"
+    },
+    {
+      "carrying_control": "costar_lane",
+      "home": "gate",
+      "id": "f5d97b4a",
+      "reason": "Already machine-enforced via control 'costar_lane' (hooks/costar-lane-gate.py); binds a Chrome-extension tool call whose target host is costar.com. Failure mode on violation: PreToolUse deny",
+      "title_gist": "CoStar is driven ONLY in the Claude desktop app's own Browser pane"
+    },
+    {
+      "carrying_control": "client_asset_packet",
+      "home": "gate",
+      "id": "f92dfab2",
+      "reason": "Already machine-enforced via control 'client_asset_packet' (lib/client_asset_controls.py, pipelines/build-space-search.py); binds client search-packet render. Failure mode on violation: renderer refusal",
+      "title_gist": "Every client search packet includes market commentary, not just a property list"
+    },
+    {
+      "carrying_control": "completion_evidence",
+      "home": "gate",
+      "id": "fa217e48",
+      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds completion after changed work, and any claim about what a file does. Failure mode on violation: Stop block",
+      "title_gist": "Verify the artifact, not the summary: confirming any work means checking the actual file/record/output"
+    },
+    {
+      "carrying_control": "egress_guard",
+      "home": "gate",
+      "id": "faae6748",
+      "reason": "Already machine-enforced via control 'egress_guard' (hooks/guard-unattended.py); binds before destructive filesystem action. Failure mode on violation: PreToolUse deny",
+      "title_gist": "Never tell Joe to delete a file \u2014 always MOVE candidate deletions into a _to_delete staging folder yourself"
+    },
+    {
+      "home": "jit",
+      "id": "faf1b643",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires on: Vendor relationship levels are defined by countable events, never by impression",
+      "reason": "Currently only SURFACED (a reminder via 'vendor_level_drift' at nightly, over every active vendor, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "Vendor relationship levels are defined by countable events, never by impression"
+    },
+    {
+      "detector": {
+        "kind": "content_regex",
+        "pattern": "\\bfable\\b"
+      },
+      "home": "jit",
+      "id": "fb110a39",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: FABLE IS RESERVED FOR ITS BEST USE CASES",
+      "reason": "Reclassified 2026-08-27 (WR-000019 slice S4): hooks/delegation-gate.py stopped denying anything and now only records a per-session ledger, with a Stop ANNOUNCE for a materially under-delegated session \u2014 never a hard deny. Currently only SURFACED (a reminder via 'delegation_tripwire' at fan-out brief, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core, matching this map's other delegation_tripwire rules (2b66211d, df55c398).",
+      "title_gist": "FABLE IS RESERVED FOR ITS BEST USE CASES"
+    },
+    {
+      "home": "jit",
+      "id": "fb2b263d",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Cross-references at the point of change: anything decided/built \u2192 immediately check other\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Cross-references at the point of change: anything decided/built \u2192 immediately check other INDEX/context files"
+    },
+    {
+      "home": "jit",
+      "id": "fc21a431",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: CORRECTION \u2192 RULE, ON ANY CORRECTION, NOT JUST A DRAFT EDIT",
+      "reason": "Currently only SURFACED (a reminder via 'ledger_capture' at partner correction, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
+      "title_gist": "CORRECTION \u2192 RULE, ON ANY CORRECTION, NOT JUST A DRAFT EDIT"
+    },
+    {
+      "home": "jit",
+      "id": "fc4d7753",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Merit tests: real need not hypothetical \u00b7 smallest structure that works \u00b7 output as\u2026",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Merit tests: real need not hypothetical \u00b7 smallest structure that works \u00b7 output as tiebreaker \u00b7"
+    }
+  ],
+  "schema_version": 1,
+  "slice": "s7",
+  "work_request": "WR-000019"
+}

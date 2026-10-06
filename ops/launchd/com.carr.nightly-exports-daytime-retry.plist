@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- doctrine: nightly-exports-onedrive-wake -->
+<dict>
+  <key>Label</key><string>com.carr.nightly-exports-daytime-retry</string>
+
+  <!-- SAME SCRIPT AS THE MANUAL PATH (rule a8c55a47): bin/nightly-exports-retry.sh
+       is the one implementation; this job is only a second RUNNER of it, on a
+       fixed daytime clock.
+
+       WHY IT EXISTS. bin/nightly.sh's "exports (6 targets -> OneDrive)" step
+       failed 9/22, 9/23 and 9/24, every time around 07:05 UTC (~2am local); on
+       9/24 it consumed the entire 1800s step wall-clock with no partial output
+       at all. A by-hand run the same day at ~4pm local published all 6 targets
+       in 18s. Jev at 0.71: the OneDrive File Provider idling overnight. The
+       nightly chain now runs that step under caffeinate and behind a bounded
+       pre-publish wake (see bin/nightly.sh and ops/onedrive-prepublish-wake.py),
+       but the 2am window is inherently the worst time to reach a provider that
+       only wakes on real activity — working hours are the PROVEN fallback.
+
+       WHY StartCalendarInterval AND NOT StartInterval. StartInterval jobs have
+       been observed to never fire on this Mac; a fixed daily time is the
+       reliable primitive (see CLAUDE.md).
+
+       bin/nightly-exports-retry.sh reads tonight's own archived outcome out of
+       out/nightly-runs/ and is a no-op if the night's export already landed
+       OK, so a healthy night costs this job nothing beyond the read. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/nightly-exports-retry.sh</string>
+  </array>
+
+  <!-- StartCalendarInterval's Hour/Minute are LOCAL time, not UTC (the prior
+       draft of this plist got that backwards and set Hour 16, firing at 4pm
+       local instead of the intended mid-morning window). 11:00 local is
+       mid-morning, well inside working hours, with several hours of buffer
+       after the ~07:05 UTC (~2am local) nightly run for its own archive to
+       have already landed. -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>11</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>RunAtLoad</key><false/>
+
+  <key>StandardOutPath</key><string>{{REPO}}/out/nightly-exports-retry-launchd.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/nightly-exports-retry-launchd.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>

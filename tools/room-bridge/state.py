@@ -61,6 +61,7 @@ SHAPE, persisted as JSON:
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 DELIVERED_CAP = 4000  # per desk; oldest dropped first — a dedup memory, not an audit log
@@ -198,6 +199,24 @@ def is_echo(turn: dict, desk_seat: str) -> bool:
     return str(turn.get("seat") or "") == str(desk_seat or "")
 
 
+def is_unaddressed_desk_turn(turn: dict, desk_seat: str, desk_seats: dict[str, str]) -> bool:
+    """For a desk registered room_listen="mention": a turn spoken by ANOTHER
+    desk is unaddressed unless it names this desk's seat as a whole-word
+    @-mention. Turns from people are never unaddressed. Desks on the default
+    ("all") keep hearing other desks — desk-to-desk conversation is by design.
+
+    WHY, found live 2026-09-24: with flash and codex both seated and both
+    auto-answering, each desk's reply was routed to the other and answered,
+    about once a minute, until a seat was stopped. is_echo only stops a desk
+    hearing itself; a mention-only desk cannot be one half of such a loop.
+    """
+    speaker = str(turn.get("seat") or "")
+    if speaker not in set(desk_seats.values()):
+        return False
+    mention = re.compile(r"(?<![\w@])@" + re.escape(str(desk_seat)) + r"(?![\w-])")
+    return not mention.search(str(turn.get("body") or ""))
+
+
 def already_delivered(state: dict, desk_name: str, msg_id: str) -> bool:
     return msg_id in _desk_slot(state, desk_name)["delivered"]
 
@@ -211,7 +230,8 @@ def mark_delivered(state: dict, desk_name: str, msg_id: str) -> None:
         slot["delivered"] = slot["delivered"][-DELIVERED_CAP:]
 
 
-def route_turn(state: dict, turn: dict, desk_seats: dict[str, str]) -> list[str]:
+def route_turn(state: dict, turn: dict, desk_seats: dict[str, str], *,
+               mention_only: frozenset[str] | set[str] = frozenset()) -> list[str]:
     """Queue one new room turn onto every desk it is eligible for.
 
     desk_seats maps desk name -> the room seat that desk speaks for. A turn is
@@ -242,6 +262,10 @@ def route_turn(state: dict, turn: dict, desk_seats: dict[str, str]) -> list[str]
     queued_onto: list[str] = []
     for name, seat in desk_seats.items():
         if is_echo(turn, seat):
+            continue
+        if seat == "flash" and not re.search(r"(?<![\w@])@flash(?![\w-])", str(turn.get("body") or ""), re.I):
+            continue
+        if name in mention_only and is_unaddressed_desk_turn(turn, seat, desk_seats):
             continue
         if already_delivered(state, name, msg_id):
             continue
@@ -276,7 +300,9 @@ def set_pending(state: dict, desk_name: str, *, dispatch_msg_id: str,
                  log_offset: int, injected_at: str, source_msg_id: str,
                  source_seq, origin_kind: str = "room",
                  kanban_task_id: str | None = None, target: str | None = None,
-                 finish: str | None = None, cap: str | None = None) -> None:
+                 finish: str | None = None, cap: str | None = None,
+                 transport: str | None = None,
+                 session_id: str | None = None) -> None:
     slot = _desk_slot(state, desk_name)
     slot["pending"] = {
         "dispatch_msg_id": dispatch_msg_id,
@@ -293,6 +319,10 @@ def set_pending(state: dict, desk_name: str, *, dispatch_msg_id: str,
             "finish": finish,
             "cap": cap,
         })
+    if transport:
+        slot["pending"]["transport"] = transport
+    if session_id:
+        slot["pending"]["session_id"] = session_id
 
 
 def clear_pending(state: dict, desk_name: str) -> None:

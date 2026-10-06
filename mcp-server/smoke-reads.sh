@@ -9,31 +9,29 @@
 #
 # RUN THIS AFTER EVERY WORKER DEPLOY.
 #   ./mcp-server/smoke-reads.sh
-# Exit 0 = all read verbs healthy. Non-zero = at least one check failed.
+# Exit 0 = all enabled checks healthy. Non-zero = at least one check failed.
 #
-# NOT read-only any more, and deliberately so (ORDER 18 addendum, 2026-07-31).
-# Every verb here is write:false EXCEPT the last two checks, which use FIXED
-# idempotency keys: they wrote once, on the first run in history, and replay for
-# ever after. Those few rows are the price of covering the write path, and a
-# twelve-hour production outage is what not covering it cost.
+# Read-only under CARR_MCP_PROBE_TOKEN. SIEP-11 binds every mutation receipt to
+# its server-derived principal, so a frozen key created by a partner is not a
+# capability the probe identity can replay. Under a partner's full OAuth
+# session, the fixed-key write, completion, auto-edge and analysis checks still
+# run and retain the production write-path coverage added after ORDER 18.
 # FORTY-EIGHT checks as of the 2026-08-23 incident-verb pass: seventeen plumbing
 # checks (ORDER 36's analysis write path was the seventeenth), EIGHTEEN
 # negative-answer probes, TEN 0066 marketing probes, and THREE incident-ledger
 # reads at the very bottom.
-# Twenty-seven of them sit behind SEVEN capability gates (org visibility, the
+# Thirty of them sit behind capability gates (org visibility, the
 # merge-split response shape, the unwalkable-edge report, the 0063 contract,
-# 0066's two-stage worker/migration gate, — added 2026-08-14 — the auto-edge
-# path's 'probe' profile gate, and — added 2026-08-23 — the incident verbs'
-# deploy gate) and print SKIP rather than FAIL when the Worker, the schema or the
-# credential's profile predates or excludes the thing they cover, so a healthy
-# run is anywhere from 21 to 48 — the script says which gate is closed and why.
+# 0066's two-stage worker/migration gate, the read-only probe profile, the
+# auto-edge path's profile gate, and the incident verbs' deploy gate) and print
+# SKIP rather than FAIL when the Worker, schema or credential profile predates
+# or excludes the thing they cover. The script says which gate is closed and why.
 # The count had been stale at "eleven as of ORDER 19" since ORDER 27 — ORDERS 27,
 # 33, 34 and 36 each added a check without moving it. Recount when you add one.
 #
-# MEASURED 2026-08-14 under CARR_MCP_PROBE_TOKEN against production:
-# passed 33 · failed 0, with three SKIP blocks (auto-edge, record-counter 0063,
-# 0066 marketing) — all three profile-locked rather than broken. That is the
-# baseline a scheduled run is expected to reproduce; a drop below it is real.
+# EXPECTED under CARR_MCP_PROBE_TOKEN against the current Worker:
+# passed 33 · failed 0, with six profile SKIP blocks (fixed-key write,
+# completion, auto-edge, analysis, record-counter 0063 and 0066 marketing).
 #
 # THE 0066 SECTION IS ALL REFUSALS, and that is not a shortcut — it is the only
 # safe shape for those verbs (a success probe would mint a permanent fake
@@ -53,12 +51,10 @@
 # THE FIX IS A NEW, NARROWER CREDENTIAL, NOT A REBUILT OLD ONE. `PROBE_TOKENS`
 # (mcp-server/src/index.js) is a bearer, checked before the OAuthProvider ever
 # sees the request, that maps to ONE actor ('smoke-probe') pinned server-side to
-# a 'probe' capability profile (mcp-server/src/mcp.js) — reads, plus EXACTLY the
-# three write verbs this file replays under a frozen idempotency key
-# (log-activity, set-next-action, complete-action). ?profile= cannot widen it;
-# every other write verb refuses with not_in_profile. It is not a second copy of
-# the retired bearer: that one authenticated as a full human actor on the full
-# profile, and this one cannot.
+# a read-only 'probe' capability profile (mcp-server/src/mcp.js). ?profile=
+# cannot widen it; every write verb refuses with not_in_profile. It is not a
+# second copy of the retired bearer: that one authenticated as a full human
+# actor on the full profile, and this one cannot.
 #
 # PROVISIONING (JOE ONLY — an agent is blocked from production writes and from
 # ever holding a secret value):
@@ -74,8 +70,8 @@
 #      run, as pipelines/provision-smoke-probe.sql. Apply it through db-tap
 #      (never a raw psql command substitution — see that tool's own docstring):
 #        cd ~/carr-system && .venv/bin/python tools/db-tap.py sql pipelines/provision-smoke-probe.sql
-#      Without this row, every one of the three probe write verbs refuses with
-#      actor_not_provisioned even though the token authenticates fine.
+#      The row preserves the probe identity in the shared actor catalog even
+#      though this smoke profile currently performs no mutations.
 #   4. Add the SAME token from step 1 to this suite's env file:
 #        # ~/.config/carr/mcp-tokens.env (600, outside the repo)
 #        CARR_MCP_PROBE_TOKEN=<the token from step 1>
@@ -108,11 +104,17 @@ if [ -z "$TOKEN" ]; then
   exit 2
 fi
 
+# Keep the bearer out of curl's argv, where a process listing can expose it.
+# curl reads this one config line from stdin; all request bodies use -d.
+curl_auth() {
+  printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl --config - "$@"
+}
+
 # Prove the token is ACCEPTED before running 44 checks, under whichever role it
 # authenticates as. A rejected token would otherwise print dozens of phantom
 # FAILs that look exactly like a broken deploy.
-_pf=$(curl -sS "$API" -X POST \
-    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+_pf=$(curl_auth -sS "$API" -X POST \
+    -H 'content-type: application/json' \
     -d '{"jsonrpc":"2.0","id":0,"method":"tools/list"}' 2>/dev/null)
 if printf '%s' "$_pf" | grep -q '"invalid_token"'; then
   if [ "$PROBE_MODE" -eq 1 ]; then
@@ -122,8 +124,8 @@ if printf '%s' "$_pf" | grep -q '"invalid_token"'; then
     echo "match the Worker's PROBE_TOKENS secret — re-check step 2 of the provisioning"
     echo "runbook above; (2) the Worker has not been deployed with the probe-token check in"
     echo "mcp-server/src/index.js yet. Note this failure is auth, not provisioning — even a"
-    echo "correctly-authenticating token still needs the 'smoke-probe' actor row (step 3,"
-    echo "pipelines/provision-smoke-probe.sql) before any write check below will pass."
+    echo "correctly-authenticating token should retain the 'smoke-probe' actor row (step 3,"
+    echo "pipelines/provision-smoke-probe.sql) as its catalog identity."
     exit 3
   fi
   echo "RETIRED AUTH — this token is no longer accepted by the Worker (PARTNER_TOKENS"
@@ -135,10 +137,9 @@ if printf '%s' "$_pf" | grep -q '"invalid_token"'; then
   exit 3
 fi
 if [ "$PROBE_MODE" -eq 1 ]; then
-  echo "probe token accepted — running under the locked 'probe' profile: reads, plus"
-  echo "log-activity / set-next-action / complete-action only. Checks needing any other"
-  echo "write verb are expected to print SKIP (profile: probe), not FAIL — that is the"
-  echo "server-side lock working, not a regression."
+  echo "probe token accepted — running under the locked, read-only 'probe' profile."
+  echo "Every write-path check is expected to print SKIP (profile: probe), not FAIL —"
+  echo "that is the server-side lock working, not a regression."
   echo
 fi
 
@@ -157,8 +158,8 @@ _id=0
 #
 # THE COST, measured: the 2026-08-14 nightly chain reported FAIL on the golden
 # workflow suite (out/nightly.log, run 13:03-13:08) for two checks —
-# retired_aliases-reads-0 at rep 3 of 3 and Musicologie-role_refs at rep 1 of 3.
-# Both detail lines were empty. The same suite passed 33/33 twice in the two
+# retired_aliases-reads-0 at rep 3 of 3 and the merged-org fixture's
+# role_refs check at rep 1 of 3. Both detail lines were empty. The same suite passed 33/33 twice in the two
 # chain runs that followed, 13 and 35 minutes later. Nothing was wrong with the
 # answers; two HTTP calls came back with no body, and the chain went red under a
 # heading that says "answer correctness".
@@ -179,8 +180,8 @@ call() {
   _id=$((_id+1))
   local _attempt _curl_exit
   for _attempt in $(seq 1 "$CALL_ATTEMPTS"); do
-    RESULT=$(curl -s --max-time 30 -X POST "$API" \
-      -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+    RESULT=$(curl_auth -s --max-time 30 -X POST "$API" \
+      -H 'content-type: application/json' \
       -d "{\"jsonrpc\":\"2.0\",\"id\":$_id,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}")
     _curl_exit=$?
     [ "$_curl_exit" -eq 0 ] && [ -n "$RESULT" ] && return
@@ -199,6 +200,41 @@ call() {
 # exactly the false pass this script exists to prevent.
 REPS="${SMOKE_REPS:-3}"
 REP_SLEEP="${SMOKE_REP_SLEEP:-3}"
+
+# ---------------------------------------------------------------------------
+# CLIENT-IDENTIFYING FIXTURE VALUES, EXTERNALIZED (WR-000049, 2026-09-24).
+#
+# This script used to hardcode real client names as smoke-test fixtures
+# (Joe's own real clients: a dental practice and a merged-alias client org).
+# That worked, but it put a client roster in a repository Joe ruled public.
+# The plumbing checks ("does `find` return a non-error result for a name that
+# exists") never needed a REAL client — any live record does, so those now
+# default to a vendor: `V-CPA-006` and a `CPA` search both match real,
+# non-client organizations already in production (accounting firms CARR pays,
+# not practices CARR represents).
+#
+# The MERGE/TOMBSTONE regression checks further down are different: they
+# assert exact historical counts (N aliases retired into one survivor) that
+# only exist for the specific real clients that were actually merged, and
+# faking an equivalent scenario would mean fabricating production data change
+# for a repo-hygiene goal — worse than the problem it solves. Renaming the
+# production records was considered and rejected the same way: it would touch
+# real deal history to satisfy a rule about what the TRACKED TREE carries,
+# not what the database holds. So those checks stay real-data checks, and the
+# real names move to `mcp-server/smoke-reads.local.env` (gitignored, sourced
+# below if present) instead of living in this tracked file. Missing the file
+# is not an error — the merge/tombstone checks SKIP, same convention as the
+# capability-gate SKIPs elsewhere in this script, so a clone with no local
+# fixture still runs every check that does not need one.
+SMOKE_FIND_QUERY="${SMOKE_FIND_QUERY:-CPA}"
+SMOKE_FIND_PATTERN="${SMOKE_FIND_PATTERN:-CPA}"
+SMOKE_CATCHUP_REF="${SMOKE_CATCHUP_REF:-V-CPA-006}"
+
+LOCAL_FIXTURES="${SMOKE_LOCAL_FIXTURES:-$(dirname "$0")/smoke-reads.local.env}"
+if [ -f "$LOCAL_FIXTURES" ]; then
+  # shellcheck disable=SC1090
+  . "$LOCAL_FIXTURES"
+fi
 
 # check <label> <verb> <args> [grep-pattern] [second-grep-pattern]
 # Passes when every rep is non-error, not isError, and (if given) matches the
@@ -228,8 +264,10 @@ echo "read-verb smoke test -> $API"
 echo
 
 # --- the seven read verbs, all must be non-error -------------------------------
-check "find (real name: Hughes)"      find             '{"query":"Hughes"}'   'Hughes'
-check "catch-me-up (real record C-112)" catch-me-up    '{"ref":"C-112","limit":5}' '"'
+check "find (non-client vendor: $SMOKE_FIND_QUERY)" find \
+      "{\"query\":\"$SMOKE_FIND_QUERY\"}"   "$SMOKE_FIND_PATTERN"
+check "catch-me-up (non-client vendor: $SMOKE_CATCHUP_REF)" catch-me-up \
+      "{\"ref\":\"$SMOKE_CATCHUP_REF\",\"limit\":5}" '"'
 check "today-triage"                  today-triage     '{}'
 check "deal-board"                    deal-board       '{}'
 check "lead-hot"                      lead-hot         '{}'
@@ -252,26 +290,43 @@ else
 fi
 
 # --- ORDER 18: the intro graph is reachable under the READER role ---------------
-# 'Jon Shaw' is a real vendor (V-BNK-013) who introduced C-155 Dr. James Allen
-# Tyrer. The name 'Tyrer' cannot appear in the parties block (that block matches
-# the query name) nor in the deals block (no deal is named Jon Shaw), so a
-# response to query 'Jon Shaw' that contains Tyrer can only have come from the
-# connections block reading v_party_graph. The chain is the probe.
+# The probe queries a real vendor (V-BNK-013) who introduced C-155, a real
+# client. WR-000049: both names are externalized to smoke-reads.local.env
+# (SMOKE_GRAPH_VENDOR_QUERY, SMOKE_GRAPH_CLIENT_SURNAME; see the fixture note
+# near the top) — a counterparty person's name is a client-side record too, and
+# the refs stay because a ref is opaque. The surname cannot appear in the
+# parties block (that block matches the query name) nor in the deals block (no
+# deal carries the vendor's name), so a response to the vendor query that
+# contains it can only have come from the connections block reading
+# v_party_graph. The chain is the probe.
 echo
 # (the result arrives as a JSON string inside the MCP envelope, so the keys are
 #  backslash-escaped on the wire — match them that way, not as bare quotes)
-check "graph probe: find surfaces the Shaw -> Tyrer intro" \
-      find '{"query":"Jon Shaw"}' '\\"connections\\"' 'Tyrer'
+if [ -n "${SMOKE_GRAPH_CLIENT_SURNAME:-}" ] && [ -n "${SMOKE_GRAPH_VENDOR_QUERY:-}" ]; then
+  check "graph probe: find surfaces the V-BNK-013 -> client intro" \
+        find "{\"query\":\"$SMOKE_GRAPH_VENDOR_QUERY\"}" '\\"connections\\"' "$SMOKE_GRAPH_CLIENT_SURNAME"
+else
+  echo
+  echo "  SKIP  graph probe (find) — no smoke-reads.local.env (or SMOKE_GRAPH_VENDOR_QUERY /"
+  echo "        SMOKE_GRAPH_CLIENT_SURNAME); needs a real vendor and client."
+fi
 
 # --- ORDER 32: the multi-hop half, and the probe is a REAL two-hop chain --------
-# V-ATT-009 Dion Moniz's Links names Jon Shaw; V-BNK-013 Jon Shaw's Links names
-# C-155 Dr. James Allen Tyrer. Neither row names the other end, so a response to
-# target C-155 containing 'Dion Moniz' can only have come from the recursive walk
-# joining two separate edges. If the traversal ever breaks, this goes red.
-check "who-do-we-know: the two-hop Moniz -> Shaw -> Tyrer path" \
-      who-do-we-know '{"target":"C-155"}' 'Dion Moniz' '\\"hops\\":2'
-# The refuse-to-guess half. 'Ric' matches more than one graph node (V-BNK-030 Ric
-# McClanahan and V-BNK-034 Ric Nickelsen), and the verb must hand back candidates
+# V-ATT-009's Links names V-BNK-013; V-BNK-013's Links names C-155, the same
+# real client as above. Neither row names the other end, so a response to
+# target C-155 containing V-ATT-009's name (SMOKE_GRAPH_TWO_HOP_NAME, local
+# fixture) can only have come from the recursive walk joining two separate
+# edges. If the traversal ever breaks, this goes red. (The refs stay tracked.)
+if [ -n "${SMOKE_GRAPH_CLIENT_SURNAME:-}" ] && [ -n "${SMOKE_GRAPH_TWO_HOP_NAME:-}" ]; then
+  check "who-do-we-know: the two-hop V-ATT-009 -> V-BNK-013 -> client path" \
+        who-do-we-know '{"target":"C-155"}' "$SMOKE_GRAPH_TWO_HOP_NAME" '\\"hops\\":2'
+else
+  echo
+  echo "  SKIP  graph probe (who-do-we-know two-hop) — no smoke-reads.local.env"
+  echo "        (or SMOKE_GRAPH_TWO_HOP_NAME / SMOKE_GRAPH_CLIENT_SURNAME)."
+fi
+# The refuse-to-guess half. 'Ric' matches more than one graph node (V-BNK-030 and
+# V-BNK-034 share that first name), and the verb must hand back candidates
 # rather than pick one (amendment 7). needs_disambiguation travels as isError by
 # the ToolError convention, so `check` cannot express this — same bespoke loop the
 # catch-me-up ambiguity probe above uses, and for the same reason.
@@ -303,6 +358,10 @@ fi
 # catching. kind is 'note' on purpose: is_contact=false since 0017, so the probe
 # cannot move a Last Touch value in the exports.
 echo
+if [ "$PROBE_MODE" -eq 1 ]; then
+  echo "  SKIP  write path — log-activity is outside the read-only 'probe' profile."
+  echo "        Run under a partner's OAuth session to exercise the fixed-key write path."
+else
 _w_ok=1; _w_why=""
 for i in $(seq 1 "$REPS"); do
   call log-activity '{"idempotency_key":"smoke-write-probe-permanent","ref":"V-CPA-006","kind":"note","summary":"smoke write probe — replayed, never duplicated"}'
@@ -321,6 +380,7 @@ else
   echo "  FAIL  write path — $_w_why"
   echo "        $(echo "$RESULT" | head -c 220)"; fail=$((fail+1))
 fi
+fi
 
 # --- ORDER 19: the completion path, the same fixed-key replay pattern ----------
 # WHY THIS EXISTS. Until 2026-07-31 NOTHING in this system could mark a ball
@@ -331,22 +391,34 @@ fi
 #
 # SAFE TO RUN FOR EVER, for the same reason the write probe is: both keys below
 # are FIXED and the arguments never change, so the pair inserted exactly once in
-# history and replays on every run after. The subject is deliberate too —
-# 'AMA Law Office' is a CLOSED/LOST deal that carried zero next_action rows, and
-# no seeded cadence rule fires on a deal subject, so completing this fixture
-# spawns nothing and displaces no real ball. If a deal-lane on_complete rule is
-# ever seeded, move the fixture rather than deleting this probe.
+# history and replays on every run after. The subject is deliberate too — a
+# CLOSED/LOST deal that carried zero next_action rows, and no seeded cadence
+# rule fires on a deal subject, so completing this fixture spawns nothing and
+# displaces no real ball. If a deal-lane on_complete rule is ever seeded, move
+# the fixture rather than deleting this probe.
+#
+# THE DEAL'S NAME IS A LOCAL FIXTURE (SMOKE_BALL_PROBE_REF in
+# smoke-reads.local.env, WR-000049): it is a real client's deal. The value is
+# spliced into the SAME bytes the frozen strings always carried, so the replay
+# keys still match; with no fixture the path SKIPs rather than guessing.
 #
 # THE TWO ARGUMENT STRINGS BELOW ARE FROZEN. The envelope hashes the arguments
 # with the key, so editing a single character of either JSON body makes every
 # future run return `key_reuse` instead of a replay, and the probe fails for
 # ever after on a typo. Change the key too, or leave them alone.
 echo
+if [ "$PROBE_MODE" -eq 1 ]; then
+  echo "  SKIP  completion path — set-next-action and complete-action are outside the"
+  echo "        read-only 'probe' profile. Run under a partner's OAuth session to exercise it."
+elif [ -z "${SMOKE_BALL_PROBE_REF:-}" ]; then
+  echo "  SKIP  completion path — no smoke-reads.local.env (or SMOKE_BALL_PROBE_REF);"
+  echo "        the fixture deal is a real client record and is not tracked."
+else
 _c_ok=1; _c_why=""
 for i in $(seq 1 "$REPS"); do
-  call set-next-action '{"idempotency_key":"smoke-ball-probe-permanent","ref":"AMA Law Office","description":"smoke probe fixture — permanent, replayed, never a real ball"}'
+  call set-next-action '{"idempotency_key":"smoke-ball-probe-permanent","ref":"'"$SMOKE_BALL_PROBE_REF"'","description":"smoke probe fixture — permanent, replayed, never a real ball"}'
   if ! echo "$RESULT" | grep -q '\\"ok\\":true'; then _c_ok=0; _c_why="the probe fixture ball could not be set"; break; fi
-  call complete-action '{"idempotency_key":"smoke-complete-probe-permanent","ref":"AMA Law Office","outcome":"smoke probe — completed once, replayed for ever after"}'
+  call complete-action '{"idempotency_key":"smoke-complete-probe-permanent","ref":"'"$SMOKE_BALL_PROBE_REF"'","outcome":"smoke probe — completed once, replayed for ever after"}'
   if echo "$RESULT" | grep -q '"error"'; then _c_ok=0; _c_why="transport/protocol error"; break; fi
   if echo "$RESULT" | grep -q '"isError":true'; then _c_ok=0; _c_why="verb returned isError (deployed? resolveSubject under carr_writer?)"; break; fi
   if ! echo "$RESULT" | grep -q '\\"ok\\":true'; then _c_ok=0; _c_why="no ok:true in the envelope response"; break; fi
@@ -361,6 +433,7 @@ if [ "$_c_ok" -eq 1 ]; then
 else
   echo "  FAIL  completion path — $_c_why"
   echo "        $(echo "$RESULT" | head -c 220)"; fail=$((fail+1))
+fi
 fi
 
 # --- ORDER 27 EXT / ORDER 33: the counterparty + attribution views are live ----
@@ -383,14 +456,11 @@ check "source-attribution: lanes answer incl. the unattributed reconciler" \
 # graph. Rep 1 may insert the one fixture activity row; every later rep replays.
 #
 # PROFILE-GATED 2026-08-14 (Program 3 triage). This was the SIXTH gate and it was
-# missing: the locked 'probe' profile (mcp-server/src/mcp.js) admits log-activity
-# but NOT log-activity carrying links[], which the server refuses as
-# not_in_profile — correctly, since an edge write is exactly what the narrow
-# profile exists to withhold. The check had no gate, so it printed a hard FAIL on
-# every probe-token run and read as a broken auto-edge path when nothing was
-# broken at all. It is a SKIP under 'probe' for the same reason the other five
-# gates are: the suite must not report a deliberate server-side lock as a
-# regression. Under a partner's OAuth session PROBE_MODE is 0 and it runs for real.
+# missing: the locked 'probe' profile (mcp-server/src/mcp.js) admits no mutation,
+# including log-activity carrying links[], which the server refuses as
+# not_in_profile. The check had no gate, so it printed a hard FAIL on every
+# probe-token run and read as a broken auto-edge path when nothing was broken at
+# all. Under a partner's OAuth session PROBE_MODE is 0 and it runs for real.
 echo
 if [ "$PROBE_MODE" -eq 1 ]; then
   echo "  SKIP  auto-edge path — log-activity links[] is outside the locked 'probe' profile"
@@ -437,6 +507,10 @@ fi
 # is_contact=false in 0028, so like the note probe above it cannot move a Last
 # Touch value in the exports.
 echo
+if [ "$PROBE_MODE" -eq 1 ]; then
+  echo "  SKIP  analysis path — log-activity kind:analysis is outside the read-only"
+  echo "        'probe' profile. Run under a partner's OAuth session to exercise it."
+else
 _a_ok=1; _a_why=""
 for i in $(seq 1 "$REPS"); do
   call log-activity '{"idempotency_key":"smoke-analysis-probe-permanent","ref":"V-CPA-006","kind":"analysis","summary":"smoke analysis probe — replayed, never duplicated","detail":"ORDER 36 probe: proves the analysis slug clears both the Worker enum and the activity_kind ref table."}'
@@ -456,6 +530,7 @@ else
   echo "  FAIL  analysis path — $_a_why"
   echo "        $(echo "$RESULT" | head -c 220)"; fail=$((fail+1))
 fi
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # NEGATIVE-ANSWER PROBES (2026-08-02 cold-session audit)
@@ -465,7 +540,7 @@ fi
 # plumbing check, not a data assertion." That is a reasonable contract and it is
 # also exactly how a real bug survived roughly forty migrations.
 #
-# THE BUG. Ask `find` for "Henry Schein" and it answered "Henry Pruett" — a
+# THE BUG. Ask `find` for "Henry Schein" and it answered a lead named Henry — a
 # trigram hit on one word of the query — while 17 real Henry Schein party rows
 # sat in the table untouched. `who-do-we-know "Henry Schein"` went further and
 # replied "No record and no graph node matches that name", which is not a miss,
@@ -490,9 +565,11 @@ fi
 # FIXTURE DURABILITY. Nothing here depends on a count that grows, a date, a
 # stage, or a row anybody edits in the normal course of work:
 #   · 'Henry Schein' — the reported defect itself, a supplier org nobody owns.
-#   · 'Mia Arafa' C-036/C-046 — a completed merge. A merge is permanent and the
-#     tombstone is kept on purpose (the 0016 posture, so a search for a merged
-#     name learns where it went), so this pair cannot rot back.
+#   · the merged-client fixture (SMOKE_MERGED_* in smoke-reads.local.env,
+#     WR-000049 — real name/refs are not tracked) — a completed merge. A merge
+#     is permanent and the tombstone is kept on purpose (the 0016 posture, so a
+#     search for a merged name learns where it went), so this pair cannot rot
+#     back.
 #   · 'Qwertzuiop Vraxmandel' — deliberate nonsense that will never be a record.
 # If a fixture ever does rot, MOVE THE FIXTURE. Do not delete the probe.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -581,17 +658,27 @@ check "who-do-we-know DOES claim absence for a name nobody carries" \
 check "find returns EMPTY for a name nobody carries (no trigram near-miss)" \
       find '{"query":"Qwertzuiop Vraxmandel"}' '\\"parties\\":\[\]' '\\"organizations\\":\[\]'
 
-# MERGED RECORDS SURFACE AS TOMBSTONES RATHER THAN VANISHING. C-036 and C-046
-# are both 'Mia Arafa'; C-046 is the completed merge. Both must come back, and
-# the merged flag must be present — a merge that removes the old ref from `find`
-# silently breaks every note, email and document that still cites C-046, and it
-# does it in the same "the record simply isn't there" way the Henry Schein bug
-# did. Asserting BOTH refs is the point: the survivor alone would pass a lookup
-# while the pointer that makes the merge navigable had been lost.
-check "merged record C-046 surfaces as a tombstone, not a disappearance" \
-      find '{"query":"Mia Arafa"}' 'C-046' '\\"merged\\":true'
-check "…and the surviving record C-036 comes back with it" \
-      find '{"query":"Mia Arafa"}' 'C-036'
+# MERGED RECORDS SURFACE AS TOMBSTONES RATHER THAN VANISHING, asserted against
+# a real merged client (WR-000049: the name and both refs live only in
+# smoke-reads.local.env, gitignored — see the fixture-externalization note
+# near the top of this file). Both the survivor and the tombstone must come
+# back, and the merged flag must be present — a merge that removes the old ref
+# from `find` silently breaks every note, email and document that still cites
+# it, and it does it in the same "the record simply isn't there" way the Henry
+# Schein bug did. Asserting BOTH refs is the point: the survivor alone would
+# pass a lookup while the pointer that makes the merge navigable had been lost.
+if [ -n "${SMOKE_MERGED_CLIENT_QUERY:-}" ] && [ -n "${SMOKE_MERGED_TOMBSTONE_REF:-}" ] \
+    && [ -n "${SMOKE_MERGED_SURVIVOR_REF:-}" ]; then
+  check "merged record surfaces as a tombstone, not a disappearance" \
+        find "{\"query\":\"$SMOKE_MERGED_CLIENT_QUERY\"}" "$SMOKE_MERGED_TOMBSTONE_REF" '\\"merged\\":true'
+  check "…and the surviving record comes back with it" \
+        find "{\"query\":\"$SMOKE_MERGED_CLIENT_QUERY\"}" "$SMOKE_MERGED_SURVIVOR_REF"
+else
+  echo
+  echo "  SKIP  merged-client tombstone pair — no smoke-reads.local.env (or the"
+  echo "        SMOKE_MERGED_* vars); this check needs a real merged client's"
+  echo "        name and refs. Not a failure: see the fixture note near the top."
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LOOP #132 — A TOMBSTONE IS NOT A DUPLICATE, AND IT IS NEVER A TARGET
@@ -605,9 +692,11 @@ check "…and the surviving record C-036 comes back with it" \
 # survivors and 109 tombstones — and `find` went on reporting
 # `duplicate_rows: 17` for a company that now has exactly ONE live row, because
 # the grouping query (b0fda91) landed before 0059 and was never taught about
-# merged_into. The same for Musicologie: 13 reported, 1 live, 12 retired.
-# `who-do-we-know "Musicologie"` was worse — it offered five tombstones as
-# selectable records and never mentioned the survivor at all.
+# merged_into. The same for the merged-org fixture (WR-000049: its real name
+# lives only in smoke-reads.local.env, not this tracked file — see the
+# fixture-externalization note near the top): 13 reported, 1 live, 12
+# retired. `who-do-we-know` on the same name was worse — it offered five
+# tombstones as selectable records and never mentioned the survivor at all.
 #
 # So the probes below assert counts after all, and the difference is that these
 # counts are INVARIANTS rather than inventory. `party_org_identity_uniq` (0059)
@@ -661,36 +750,53 @@ if [ "$CAP_SPLIT" -eq 1 ]; then
   check  "…and retired_aliases really reads 0 for an org that has no tombstones" \
          find '{"query":"1st Med Transitions"}' '\\"retired_aliases\\":0' '1st Med Transitions'
 
-  # Musicologie: 13 party rows, 12 retired, and the survivor NO LONGER HAS A PARTY
-  # REF. This fixture was rewritten 2026-08-02 and the reason is the whole lesson.
-  # 0061 gave org party P-0111 a client record, and v_ref_index indexes SUBJECTS
-  # rather than roles (0056), so P-0111 stopped appearing as a party and started
-  # appearing as client C-161. The verb still filtered its org branch to
-  # subject_type='party', saw only tombstones, reported live_rows:0, and emitted a
-  # note swearing the survivor "carries a DIFFERENT name and is not in this result"
-  # while the survivor sat in the SAME payload under the SAME name. The old fixture
-  # asserted refs:["P-0111"], which is now the WRONG answer — asserting it would
-  # have pinned the verb to a shape the database had already left behind. A fixture
-  # that outlives its data is how a probe starts defending a defect.
-  refute "find 'Musicologie': survivor promoted to a role ref, not a lost merge" \
-         find '{"query":"Musicologie"}' '\\"all_retired\\":true' '\\"role_refs\\":\[\\"C-161\\"\]'
-  # The pair: the tombstones must still be COUNTED, not quietly dropped, or the fix
-  # above could pass by simply forgetting they exist.
-  check  "…and its 12 tombstones are still counted, not dropped" \
-         find '{"query":"Musicologie"}' '\\"retired_aliases\\":12'
+  # The merged-org fixture: 13 party rows, 12 retired, and the survivor NO
+  # LONGER HAS A PARTY REF. WR-000049: real name/refs live only in
+  # smoke-reads.local.env — see the fixture-externalization note near the
+  # top. This fixture was rewritten 2026-08-02 and the reason is the whole
+  # lesson. 0061 gave the org party a client record, and v_ref_index indexes
+  # SUBJECTS rather than roles (0056), so the party stopped appearing as a
+  # party and started appearing as a client. The verb still filtered its org
+  # branch to subject_type='party', saw only tombstones, reported
+  # live_rows:0, and emitted a note swearing the survivor "carries a
+  # DIFFERENT name and is not in this result" while the survivor sat in the
+  # SAME payload under the SAME name. The old fixture asserted the retired
+  # party ref, which is now the WRONG answer — asserting it would have
+  # pinned the verb to a shape the database had already left behind. A
+  # fixture that outlives its data is how a probe starts defending a defect.
+  if [ -n "${SMOKE_ORG_MERGE_NAME:-}" ] && [ -n "${SMOKE_ORG_MERGE_SURVIVOR_REF:-}" ] \
+      && [ -n "${SMOKE_ORG_MERGE_TOMBSTONE_COUNT:-}" ] && [ -n "${SMOKE_ORG_MERGE_TOMBSTONE_SAMPLE_REF:-}" ]; then
+    refute "find merged-org fixture: survivor promoted to a role ref, not a lost merge" \
+           find "{\"query\":\"$SMOKE_ORG_MERGE_NAME\"}" '\\"all_retired\\":true' \
+           '\\"role_refs\\":\[\\"'"$SMOKE_ORG_MERGE_SURVIVOR_REF"'\\"\]'
+    # The pair: the tombstones must still be COUNTED, not quietly dropped, or the
+    # fix above could pass by simply forgetting they exist.
+    check  "…and its tombstones are still counted, not dropped" \
+           find "{\"query\":\"$SMOKE_ORG_MERGE_NAME\"}" \
+           '\\"retired_aliases\\":'"$SMOKE_ORG_MERGE_TOMBSTONE_COUNT"
 
-  # who-do-we-know handed P-0840, P-1044, P-0909 and P-0796 back as candidates and
-  # never named the survivor. A caller that links or writes to one of those defeats
-  # the merge, so a tombstone ref must not appear in this verb's answer AT ALL —
-  # find is where tombstones stay navigable, with their refs; this verb resolves.
-  # It names C-161 now for the same reason as above: that is where the survivor is.
-  refute "who-do-we-know 'Musicologie' names the survivor and never a tombstone" \
-         who-do-we-know '{"target":"Musicologie"}' 'P-0840' 'C-161'
+    # who-do-we-know handed several tombstones back as candidates and never
+    # named the survivor. A caller that links or writes to one of those defeats
+    # the merge, so a tombstone ref must not appear in this verb's answer AT
+    # ALL — find is where tombstones stay navigable, with their refs; this verb
+    # resolves. It names the survivor now for the same reason as above.
+    refute "who-do-we-know merged-org fixture names the survivor and never a tombstone" \
+           who-do-we-know "{\"target\":\"$SMOKE_ORG_MERGE_NAME\"}" \
+           "$SMOKE_ORG_MERGE_TOMBSTONE_SAMPLE_REF" "$SMOKE_ORG_MERGE_SURVIVOR_REF"
+  else
+    echo
+    echo "  SKIP  merged-org fixture (find + who-do-we-know) — no smoke-reads.local.env"
+    echo "        (or the SMOKE_ORG_MERGE_* vars); needs a real merged org's name and"
+    echo "        refs. Not a failure: see the fixture note near the top."
+  fi
   refute "who-do-we-know 'Henry Schein' names the survivor and never a tombstone" \
          who-do-we-know '{"target":"Henry Schein"}' 'P-0099' 'P-0055'
   # Refusing to OFFER a tombstone must not mean pretending it is not there.
-  check  "…and it still says how many retired aliases it declined to offer" \
-         who-do-we-know '{"target":"Musicologie"}' '\\"retired_alias_count\\":12'
+  if [ -n "${SMOKE_ORG_MERGE_NAME:-}" ] && [ -n "${SMOKE_ORG_MERGE_TOMBSTONE_COUNT:-}" ]; then
+    check  "…and it still says how many retired aliases it declined to offer" \
+           who-do-we-know "{\"target\":\"$SMOKE_ORG_MERGE_NAME\"}" \
+           '\\"retired_alias_count\\":'"$SMOKE_ORG_MERGE_TOMBSTONE_COUNT"
+  fi
   # The pair, same shape as the absence-claim pair above: a count that is always
   # nonzero would pass the probe above while telling the caller nothing.
   check  "…and that count reads 0 for a name nobody carries" \
@@ -705,7 +811,7 @@ fi
 # with no client/lead/vendor row and therefore no business ref. WHO_EDGES filters
 # NULL endpoints out of the walk, correctly — the walker keys on refs — but the
 # verb then answered as though the relationship did not exist. Asking who reaches
-# Heather Lavallo returned Chris Kelly and said nothing about Joe, whose offered
+# V-CPA-036 returned V-CPA-006 and said nothing about Joe, whose offered
 # introduction is sitting in the record.
 #
 # THE FIXTURE IS CHOSEN TO SURVIVE THE REAL FIX. specs/party-graph-ref-fallback.md
@@ -733,15 +839,15 @@ if [ "$CAP_UNWALK" -eq 1 ]; then
   # genuinely has nothing blocked.
   #
   # FIXTURE MOVED C-155 -> V-BNK-013, 2026-08-14 (Program 3 triage). C-155 stopped
-  # being a valid zero-side the moment the ternary Joe->Tyrer 'introduced' edge
+  # being a valid zero-side the moment the ternary Joe->client 'introduced' edge
   # was recorded (the shape migration 0051 defined, from = us): Joe is party
   # P-1084 with no business ref, so that edge has from_ref null and lands in
   # C-155's unwalkable_edges. The verb REPORTING it is loop #133 working exactly
   # as designed — the suite was failing on correct behaviour, and the fixture's
   # premise ("C-155 has nothing blocked"), not the system, is what expired.
-  # V-BNK-013 (Jon Shaw) is in_graph with one walkable path and an empty list.
+  # V-BNK-013 is in_graph with one walkable path and an empty list.
   # If this check ever fails, read it as "someone recorded a ref-less edge into
-  # Shaw" and re-verify the premise before touching the verb.
+  # V-BNK-013" and re-verify the premise before touching the verb.
   check "…and the list is EMPTY where nothing is blocked, not a hardcoded fixture" \
         who-do-we-know '{"target":"V-BNK-013"}' '\\"unwalkable_edges\\":\[\]'
 fi
@@ -768,8 +874,8 @@ fi
 echo
 list_call() {
   _id=$((_id+1))
-  RESULT=$(curl -s --max-time 30 -X POST "$API" \
-    -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  RESULT=$(curl_auth -s --max-time 30 -X POST "$API" \
+    -H 'content-type: application/json' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":$_id,\"method\":\"tools/list\",\"params\":{}}")
 }
 

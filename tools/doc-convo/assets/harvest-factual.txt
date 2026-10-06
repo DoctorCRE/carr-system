@@ -10,6 +10,6 @@ That determines whether "Raw HTML" or "Collection of Contents" is the right choi
 Good idea, and it does answer your body-type question — a labeled hyperlink like that only renders correctly with an HTML-capable body, not raw/plain text.
 I can search Drive or the CARR record layer for a matching carr.us piece once I know the lead/project it's for.
 Can you paste the actual field/content you're asking about (or the JSON/config), so I can check it directly?
-From what's in front of me, Elizabeth Hughes stands out at seventeen days since last touch.
+From what's in front of me, Priya Ferris stands out at seventeen days since last touch.
 Three fronts right now — the landlord on Spanish Trail, Erik and Will on Grand Boulevard, and Doctor T on his signature and property details.
 I don't have a commitment logged for Gulf Coast Pelvic in what's in front of me — that's a desk question, pulling their note thread.

@@ -19,6 +19,8 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.machine_prerequisites import openssl_executable  # noqa: E402
 
 MAX_PIPE = 1_048_576
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -136,7 +138,7 @@ def _openssl_with_key(path: Path, args: list[str], payload: bytes, *, key_flag: 
             portable_args = [f"/dev/fd/{payload_fd}" if item == "/dev/stdin" else item for item in portable_args]
             input_data = None
         result = subprocess.run(
-            ["openssl", *portable_args, key_flag, f"/dev/fd/{fd}"], input=input_data,
+            [openssl_executable(), *portable_args, key_flag, f"/dev/fd/{fd}"], input=input_data,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             pass_fds=tuple(item for item in (fd, payload_fd) if item >= 0), timeout=10, check=False,
         )

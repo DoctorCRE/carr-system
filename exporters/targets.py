@@ -21,6 +21,7 @@ from openpyxl.comments import Comment
 from .common import VAULT, coverage_findings, coverage_note_cell, coverage_note_md
 from .partial import splice
 from .dictionary import DICT_REL, build_dictionary
+from .dossier_roster import load_roster
 from .ledger_targets import (HUNT_REL as LEDGER_HUNT_REL, RECIP_REL as LEDGER_RECIP_REL,
                              build_hunt_ledger, build_reciprocity)
 
@@ -834,7 +835,7 @@ INTRO_PROSE_HEAD = [
     "",
     "> **Companion file, different axis:** `vendor-intro-timeline.md` covers vendor →",
     "> **CLIENT** intros (which vendor category to introduce to a client at each deal",
-    "> stage). THIS file is vendor ↔ vendor (which of Dell's vendors can meet each",
+    "> stage). THIS file is vendor ↔ vendor (which vendors in our vendor network can meet each",
     "> other). Both pull from `vendors.xlsx`.",
     "",
 ]
@@ -1156,18 +1157,15 @@ DOSSIER_DIR = "DNA/Clients/prospects"
 #
 # WAS 20. Joe's ruling of 2026-08-01 extended the set by three, closing the gap
 # this order's first pass flagged — three live, hand-maintained dossiers the
-# record did not point at:
-#   Ahlborn-FamilyDental-Loxley.md  C-153 Michael Ahlborn
-#   Finelli-JosephFinelli.md        C-154 Joseph Finelli
-#   VictusDental-Le.md              C-063 Anthony Le — the record existed all
-#     along under the practice owner's name, which is why a name-based sweep
-#     never matched the file; the supervisor found it and set notes_path.
+# record did not point at (C-153, C-154 and C-063; the last existed all along
+# under the practice owner's name, which is why a name-based sweep never matched
+# the file; the supervisor found it and set notes_path).
 #
 # Two files in the same folder stay OUT, each for its own reason:
-#   AltaPointe-enterprise.md — a NATIONAL ACCOUNT, a separate business model with
-#     its own lane, and Joe deferred its roster row on 2026-07-22. Excluded by
+#   the national-account enterprise file — a separate business model with its
+#     own lane, and Joe deferred its roster row on 2026-07-22. Excluded by
 #     ruling, not by oversight. Do not add it.
-#   Beasley-intake.md — an intake, not a dossier (DNA/Clients/INDEX.md:9).
+#   the `<name>-intake.md` files — intakes, not dossiers (DNA/Clients/INDEX.md:9).
 # name -> RENDER MODE. Explicit, stored, never inferred at render time.
 #
 # Joe's ruling, 2026-08-01, after the tie-break fix showed that only FOUR of the
@@ -1180,31 +1178,15 @@ DOSSIER_DIR = "DNA/Clients/prospects"
 #                     Correct where addenda genuinely run down the page.
 #   'flat'          — every section at one level, full text, in DOCUMENT ORDER.
 #                     No section is promoted, because none of them is "current".
-DOSSIER_FILES = {
-    "Ahlborn-FamilyDental-Loxley.md": "flat",
-    "AmericanFamilyCare.md": "flat",
-    "AnointedOT-Sears.md": "flat",
-    "BayAreaOralSurgery.md": "flat",
-    "Beasley.md": "flat",
-    "BlakesEnrickment-Heard.md": "flat",
-    "CosmeticDermatology.md": "flat",
-    "DeepWaters-Pappas.md": "flat",
-    "Finelli-JosephFinelli.md": "flat",
-    "FirstCallDPC-Petersen.md": "chronological",
-    "GulfCoastPelvicFloor.md": "chronological",
-    "HealthcareForKids.md": "flat",
-    "Hughes-DentalStartup-SRB.md": "flat",
-    "LifeDentalGroup.md": "flat",
-    "Lindsey-LighthouseDental.md": "chronological",
-    "OceanWounds-Lerner.md": "flat",
-    "PCB-Jeremiah-relocation.md": "flat",
-    "PremierHealthWellness-RandallMacDonnell.md": "flat",
-    "Renalus.md": "flat",
-    "SerenityCardiology-Brown.md": "flat",
-    "Tyrer-DentalStartup-Moultrie.md": "flat",
-    "VictusDental-Le.md": "flat",
-    "Weiler-Rejuvime.md": "chronological",
-}
+#
+# THE ROSTER ITSELF IS NOT IN THIS FILE (WR-000049). Its keys are dossier
+# filenames, and a dossier filename is a client's name — a live client roster
+# in a public repository. It lives in the gitignored, per-machine
+# exporters/dossier-roster.local.json; exporters/dossier_roster.py is the one
+# reader (hooks/record-home-gate.py loads the same module). No roster file means
+# no dossier targets here, and pipelines/import_dossier_analysis.py refuses to
+# run rather than guess.
+DOSSIER_FILES = load_roster()
 
 # UNLIKE the four loop renders, a dossier DOES carry the generated banner. The
 # loop files open with doctrine prose their readers obey, so a banner above it
@@ -1854,7 +1836,7 @@ TARGETS = {
     # newest-first, so all 27 of the live file's older sections fall outside it —
     # which looks like catastrophic loss and is not. Every one of those entries is
     # IN the store: 211 decision events spanning 2026-06-29 to 2026-08-03, and the
-    # four spot-checked by title ("Life Dental Group onboarded as C-156", "THE RECORD
+    # four spot-checked by title ("<a dental group> onboarded as C-156", "THE RECORD
     # LAYER decided", "practicecre.com registered", the doctorcre ruling) all resolve
     # to real rows. The window drops them from the FILE, not from the record, which
     # is exactly what the byte budget exists to do.
@@ -1898,7 +1880,7 @@ TARGETS = {
     # the same prefix-match convenience `--only compiled-rules` relies on.
     **{f"loop-{name}": (rel, build_loop_file(rel)) for name, rel in LOOP_TARGETS.items()},
     # #13-#35 (one-writer Phase B, ORDER 36). `--only dossier` refreshes all 23;
-    # `--only dossier-Renalus.md` refreshes exactly one, which is what the
+    # `--only dossier-<file>.md` refreshes exactly one, which is what the
     # file-by-file migration gate in step 8 calls per file.
     **{f"dossier-{name}": (f"{DOSSIER_DIR}/{name}",
                            build_dossier(f"{DOSSIER_DIR}/{name}", mode))

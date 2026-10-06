@@ -397,6 +397,16 @@ class WorkflowBoundaryTests(unittest.TestCase):
     def setUp(self):
         self.workflow = WORKFLOW_PATH.read_text()
 
+    def test_pilot_strict_verify_job_has_current_runtime_headroom(self):
+        # The pilot runs the whole strict suite and keeps its 30-minute floor.
+        # CI matrix budgets and their wiring belong to ops/ci-selftest.py.
+        pilot_verify = self.workflow.split(
+            "\n  verify:\n", 1)[1].split("\n    permissions:\n", 1)[0]
+        timeout_line = next(
+            line for line in pilot_verify.splitlines()
+            if "timeout-minutes:" in line)
+        self.assertGreaterEqual(int(timeout_line.split(":", 1)[1]), 30)
+
     def test_untrusted_pull_request_code_never_gets_write_permissions(self):
         verify_block = self.workflow.split("\n  verify:\n", 1)[1].split("\n  merge:\n", 1)[0]
         self.assertIn("contents: read", verify_block)

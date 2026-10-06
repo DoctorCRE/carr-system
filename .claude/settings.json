@@ -1,4 +1,6 @@
 {
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 500000,
   "hooks": {
     "PreToolUse": [
       {
@@ -6,7 +8,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 \"${HOME}/carr-system/hooks/delegation-gate.py\"",
+            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; [ -f \"$r/hooks/delegation-gate.py\" ] || exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; [ -f \"$r/hooks/delegation-gate.py\" ] || exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
             "timeout": 10
           }
         ]
@@ -17,12 +30,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 \"${HOME}/carr-system/hooks/worktree-self-plumb.py\"",
+            "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/worktree-self-plumb.py\"",
             "timeout": 20
           },
           {
             "type": "command",
-            "command": "/usr/bin/env python3 \"${HOME}/carr-system/hooks/machine-converge.py\"",
+            "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/machine-converge.py\"",
             "timeout": 180
           }
         ]
@@ -44,13 +57,20 @@
       "Bash(git status:*)",
       "Bash(git log:*)",
       "Bash(git diff:*)",
+      "Bash(git rm:*)",
+      "Bash(git restore:*)",
+      "Bash(git stash:*)",
       "Bash(gh pr create:*)",
       "Bash(gh pr merge:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr checks:*)",
       "Bash(gh pr list:*)",
+      "Bash(gh pr comment:*)",
       "Bash(gh run view:*)",
       "Bash(gh run watch:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh api repos/jbookout/carr-system/rulesets:*)",
+      "Bash(gh api repos/jbookout/carr-system/branches/main/protection:*)",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__read-loop",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__search-doctrine",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__loop-board",
@@ -60,7 +80,51 @@
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__find",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__read-room",
       "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__capability-program",
-      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__catch-me-up"
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__catch-me-up",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__report-problem",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__record-defect",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__add-loop",
+      "mcp__carr__report-problem",
+      "mcp__carr__record-defect",
+      "mcp__carr__add-loop",
+      "mcp__claude_ai_CARR_Record_Layer__report-problem",
+      "mcp__claude_ai_CARR_Record_Layer__record-defect",
+      "mcp__claude_ai_CARR_Record_Layer__add-loop",
+      "mcp__carr__capability-program",
+      "mcp__carr__catch-me-up",
+      "mcp__carr__find",
+      "mcp__carr__list-verbs",
+      "mcp__carr__loop-board",
+      "mcp__carr__read-doctrine",
+      "mcp__carr__read-loop",
+      "mcp__carr__read-room",
+      "mcp__carr__search-doctrine",
+      "mcp__carr__standing-context",
+      "mcp__claude_ai_CARR_Record_Layer__capability-program",
+      "mcp__claude_ai_CARR_Record_Layer__catch-me-up",
+      "mcp__claude_ai_CARR_Record_Layer__find",
+      "mcp__claude_ai_CARR_Record_Layer__list-verbs",
+      "mcp__claude_ai_CARR_Record_Layer__loop-board",
+      "mcp__claude_ai_CARR_Record_Layer__read-doctrine",
+      "mcp__claude_ai_CARR_Record_Layer__read-loop",
+      "mcp__claude_ai_CARR_Record_Layer__read-room",
+      "mcp__claude_ai_CARR_Record_Layer__search-doctrine",
+      "mcp__claude_ai_CARR_Record_Layer__standing-context",
+      "mcp__carr__deal-room-board",
+      "mcp__carr__get-deal-room",
+      "mcp__carr__lead-board",
+      "mcp__carr__morning-brief",
+      "mcp__carr__today-triage",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__deal-room-board",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__get-deal-room",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__lead-board",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__morning-brief",
+      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__today-triage",
+      "mcp__claude_ai_CARR_Record_Layer__deal-room-board",
+      "mcp__claude_ai_CARR_Record_Layer__get-deal-room",
+      "mcp__claude_ai_CARR_Record_Layer__lead-board",
+      "mcp__claude_ai_CARR_Record_Layer__morning-brief",
+      "mcp__claude_ai_CARR_Record_Layer__today-triage"
     ],
     "deny": [
       "Bash(git push --force:*)",

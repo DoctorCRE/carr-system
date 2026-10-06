@@ -4,13 +4,13 @@
 
 *Joe-personal operating doctrine, created 2026-07-24 (orchestrator migration, the model-tiering lane; Joe's go same day). Task-loaded: read when running a recurring pipeline task, spawning subagents, or designing an automation. The plan behind it: DNA/Deal Management/system-evolution-plan.md. Joe's framing (7/24 handoff, verbatim): "fable is not doing anything except reasoning ... it's a little overkill and expensive for a lot of the task."*
 
-## The tiers (pricing verified 2026-07-24 via the claude-api reference; re-verify before quoting elsewhere)
+## The tiers (pricing verified 2026-09-29 against [Anthropic's Sonnet 5 update](https://www.anthropic.com/news/claude-sonnet-5) and [Sonnet 5.5 announcement](https://www.anthropic.com/claude-sonnet-5-5); re-verify before quoting elsewhere)
 
 | Tier | What runs here | Cost per M tokens in/out |
 |---|---|---|
 | **T0 — Code** | Anything deterministic. The carr-system repo scripts: board renders, feed builds, drift checks, the façade check. | $0, no model |
 | **T1 — Haiku** (`claude-haiku-4-5`) | Mechanical work that needs language but no judgment: extraction from a known format, dedup/matching sweeps, formatting, file-content summaries used internally, classification with clear rules. | $1 / $5 |
-| **T2 — Sonnet** (`claude-sonnet-5`) | Routine reasoning: assembling a digest from structured data, scoring leads against written criteria, internal research summarization, first-pass triage. | $3 / $15 ($2/$10 intro to 2026-08-31) |
+| **T2 — Sonnet** (`claude-sonnet-5-5`, Sonnet 5.5, released 2026-09-28, 1M context; older records may still say `claude-sonnet-5`) | Routine reasoning: assembling a digest from structured data, scoring leads against written criteria, internal research summarization, first-pass triage. | $2 / $10 ($0.20 cache read) for Sonnet 5.5 and Sonnet 5. Sonnet 5's introductory $2 / $10 price became permanent on 2026-08-10. |
 | **T3 — the top seat** (Opus 4.8 `claude-opus-4-8` $5/$25; Fable 5 $10/$50 when it's driving) | Planning, judgment, verification of lower-tier output, negotiation/deal thinking, anything ambiguous, and ALL client-facing voice. The project manager, per Joe's design. | $5/$25 – $10/$50 |
 
 Rule of thumb: T3 decides and verifies; T2 reasons through the routine; T1 does the mechanical; T0 does the repeatable. Moving a step down one tier is a 40–80% cut on that step; T3→T1 is up to 10x.

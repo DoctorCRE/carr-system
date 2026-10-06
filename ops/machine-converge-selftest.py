@@ -36,14 +36,45 @@ SELF_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # directory is ops/, so this reaches the one scrub definition directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env  # noqa: E402
+sys.path.insert(0, SELF_REPO)
+from lib import launchd_calendar  # noqa: E402
+
+
+def fixture_git_env():
+    """Keep Git's automatic maintenance inside the fixture command lifetime.
+
+    Porcelain commands may start `git maintenance run --auto` or `git gc
+    --auto`. Both detach controls default to true, which lets a maintenance
+    child keep writing `.git/objects` after subprocess.run() has returned and
+    race TemporaryDirectory cleanup. The fixture still exercises automatic
+    maintenance; it merely waits for that child like every other subprocess.
+    """
+    env = fixture_env()
+    env.update({
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "maintenance.autoDetach",
+        "GIT_CONFIG_VALUE_0": "false",
+        "GIT_CONFIG_KEY_1": "gc.autoDetach",
+        "GIT_CONFIG_VALUE_1": "false",
+    })
+    return env
 
 # The checkout under test supplies the real hook, the real installer and the
 # real tracked template — a hand-copied template here would let the template
 # and the test drift apart, which is the two-homes disease.
 COPIES = [
     "hooks/machine-converge.py",
+    "hooks/grok_invocation.py",
+    "lib/claude_continuity_config.py",
     "lib/machine_prerequisites.py",
+    "lib/launchd_calendar.py",
+    "lib/machine_role.py",
+    "lib/launchd_scope.py",
+    "lib/launchd_hold.py",
+    "mcp-server/continuity-stdio-proxy.mjs",
+    "ops/claude-continuity-hook.py",
     "ops/config-as-code.py",
+    "ops/config/claude-continuity-hooks.json",
     "ops/git_env.py",
     "ops/githooks/pre-push",
     "ops/config/hooks.json",
@@ -72,11 +103,11 @@ DRIFTED_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 
 def sh(args, cwd=None, env=None):
     # Callers that don't need a special environment (every raw `git` call in
-    # this file) get fixture_env() by default, so a stray fixture git call
-    # can never fall through to the ambient environment. Callers that do need
-    # something specific (run_hook(), below) build on top of fixture_env()
-    # rather than passing os.environ straight through.
-    return subprocess.run(args, cwd=cwd, env=fixture_env() if env is None else env,
+    # this file) get the scrubbed, joined fixture environment by default, so a
+    # stray fixture git call can never fall through to ambient identity or
+    # leave maintenance behind. Callers needing something specific build on
+    # the same environment rather than passing os.environ straight through.
+    return subprocess.run(args, cwd=cwd, env=fixture_git_env() if env is None else env,
                           capture_output=True, text=True)
 
 
@@ -85,6 +116,12 @@ def git(repo, *args, env=None):
     if r.returncode != 0:
         raise RuntimeError(f"fixture git {' '.join(args)} failed: {r.stderr}")
     return r.stdout.strip()
+
+
+def keep_maintenance_joined(repo):
+    """Persist the fixture-only lifetime rule for nested Git subprocesses."""
+    git(repo, "config", "maintenance.autoDetach", "false")
+    git(repo, "config", "gc.autoDetach", "false")
 
 
 def owner_email():
@@ -132,6 +169,7 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
         fh.write("fixture\n")
 
     git(repo, "init", "-q", "-b", "main")
+    keep_maintenance_joined(repo)
     git(repo, "config", "user.email", email)
     git(repo, "config", "user.name", "Fixture")
     git(repo, "add", "-A")
@@ -139,12 +177,14 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
 
     origin = os.path.join(root, "origin.git")
     sh(["git", "clone", "-q", "--bare", repo, origin])
+    keep_maintenance_joined(origin)
     git(repo, "remote", "add", "origin", origin)
     git(repo, "fetch", "-q", "origin")
 
     if behind:
         work = os.path.join(root, "work")
         sh(["git", "clone", "-q", origin, work])
+        keep_maintenance_joined(work)
         git(work, "config", "user.email", email)
         git(work, "config", "user.name", "Fixture")
         with open(os.path.join(work, "README.md"), "a", encoding="utf-8") as fh:
@@ -169,21 +209,49 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
                   "w", encoding="utf-8") as fh:
             fh.write(DRIFTED_PLIST.format(repo=repo))
 
-    write_exec(os.path.join(stubs, "launchctl"),
-               "#!/bin/zsh\necho \"$@\" >> \"$LAUNCHCTL_LOG\"\nexit 0\n")
+    installed = os.path.join(agents, "com.carr.dictation-consent.plist")
+    with open(os.path.join(root, "launchctl-state.json"), "w", encoding="utf-8") as fh:
+        json.dump({"com.carr.dictation-consent": installed} if seed_drifted_plist else {}, fh)
+    write_exec(os.path.join(stubs, "launchctl"), """#!/usr/bin/env python3
+import json, os, plistlib, sys
+from pathlib import Path
+args = sys.argv[1:]
+state_path = Path(os.environ['LAUNCHCTL_STATE'])
+state = json.loads(state_path.read_text())
+with open(os.environ['LAUNCHCTL_LOG'], 'a', encoding='utf-8') as log:
+    log.write(' '.join(args) + '\\n')
+if args[0] == 'print':
+    label = args[1].rsplit('/', 1)[-1]
+    if label in state:
+        print(f'path = {state[label]}')
+        sys.exit(0)
+    print(f'Could not find service "{label}" in domain for user gui: 501', file=sys.stderr)
+    sys.exit(113)
+if args[0] in ('load', 'unload'):
+    dest = args[-1]
+    label = plistlib.loads(Path(dest).read_bytes())['Label']
+    if args[0] == 'load':
+        state[label] = dest
+    else:
+        state.pop(label, None)
+    state_path.write_text(json.dumps(state))
+    sys.exit(0)
+sys.exit(64)
+""")
     return repo, home, stubs
 
 
 def run_hook(repo, home, stubs, root):
-    # fixture_env() is the base rather than a hand-rolled `for var in
+    # fixture_git_env() is the base rather than a hand-rolled `for var in
     # list(env): if var.startswith("GIT_") ...` loop, so this can't drift
     # from ops/git_env.py's list the way the sync-enforcement-map copies did
     # (see the git_env.py docstring). CLAUDE_PROJECT_DIR still has to go by
     # hand — it isn't a git variable, but it's another pointer back at the
     # real checkout that the hook must not be able to discover.
-    env = dict(fixture_env(), HOME=home,
+    env = dict(fixture_git_env(), HOME=home,
                PATH=stubs + os.pathsep + os.environ.get("PATH", ""),
-               LAUNCHCTL_LOG=os.path.join(root, "launchctl.log"))
+               LAUNCHCTL_LOG=os.path.join(root, "launchctl.log"),
+               LAUNCHCTL_STATE=os.path.join(root, "launchctl-state.json"))
     env.pop("CLAUDE_PROJECT_DIR", None)
     return sh([sys.executable, os.path.join(repo, "hooks", "machine-converge.py")],
               cwd=root, env=env)
@@ -198,7 +266,8 @@ def installed_plist(home):
 
 def wrapper_intact(home):
     """The four deliberate wrapper lines of commit 4fb58a8a, in order, plus
-    the still-recording StartInterval PR #328 carried into the template."""
+    the still-recording five-minute tick PR #328 carried into the template
+    (a StartCalendarInterval since macOS 27 stopped firing StartInterval)."""
     try:
         d = installed_plist(home)
     except FileNotFoundError:
@@ -210,7 +279,8 @@ def wrapper_intact(home):
             and args[2] == "dictation-consent"
             and args[3] == "launchd.run"
             and args[4].endswith("/tools/dictation-rig/bin/consent-watch.sh")
-            and d.get("StartInterval") == 300)
+            and "StartInterval" not in d
+            and launchd_calendar.cadence_seconds(d) == 300)
 
 
 def case_secondary_converges(tmp):
@@ -279,12 +349,48 @@ def case_dirty_tree_refuses_ff_but_still_applies(tmp):
     }
 
 
+def write_role(home, role):
+    d = os.path.join(home, ".config", "carr")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "machine-role.json"), "w", encoding="utf-8") as fh:
+        fh.write('{"role": "%s"}' % role)
+
+
+def case_marker_secondary_converges(tmp):
+    """Joe's second Mac: owner email AND joe slug, but marked secondary ->
+    it converges like any secondary (the 2026-09-23 Studio move)."""
+    repo, home, stubs = build_fixture(tmp, owner_email(), actor_slug="joe")
+    write_role(home, "secondary")
+    r = run_hook(repo, home, stubs, tmp)
+    return {
+        "hook exits 0": r.returncode == 0,
+        "checkout fast-forwarded to origin/main":
+            git(repo, "rev-parse", "HEAD") == git(repo, "rev-parse", "origin/main"),
+        "brief line reports the apply": "re-applied" in r.stdout,
+    }
+
+
+def case_marker_primary_noop(tmp):
+    """Marked primary outranks a non-owner slug: nothing moves."""
+    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
+    write_role(home, "primary")
+    before = git(repo, "rev-parse", "HEAD")
+    r = run_hook(repo, home, stubs, tmp)
+    return {
+        "hook exits 0": r.returncode == 0,
+        "prints nothing": r.stdout.strip() == "",
+        "checkout not moved": git(repo, "rev-parse", "HEAD") == before,
+    }
+
+
 def main():
     cases = [
         ("secondary machine converges", case_secondary_converges),
         ("primary machine (actor slug) is a no-op", case_primary_noop),
         ("primary machine (owner-email fallback) is a no-op", case_owner_fallback_noop),
         ("dirty tree refuses ff, keeps the edit, still applies", case_dirty_tree_refuses_ff_but_still_applies),
+        ("marked secondary converges despite owner identity", case_marker_secondary_converges),
+        ("marked primary is a no-op despite non-owner slug", case_marker_primary_noop),
     ]
     passed = failed = 0
     for name, fn in cases:

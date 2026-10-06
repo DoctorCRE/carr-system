@@ -18,7 +18,8 @@ GET  /                       standalone Call Mode control surface
 Security boundary:
 * binds only to 127.0.0.1;
 * state contains no transcript or deal data;
-* state-changing cross-origin requests are accepted only from the Deal Room;
+* state-changing cross-origin requests are accepted only from the Deal Room
+  (app.doctorcre.com or dealroom.doctorcre.com);
 * POST requires a non-simple header, so another site cannot submit a form at it.
 """
 
@@ -49,7 +50,12 @@ CAPTURE_CONFIG = Path.home() / ".config" / "carr-capture" / "config.json"
 LOG_PATH = Path.home() / "Library" / "Logs" / "carr-call-mode.log"
 LOCK_PATH = Path.home() / "Library" / "Application Support" / "CARR Call Mode" / "operation.lock"
 CONTEXT_FILE = "call-context.json"
+# The Deal Room is served from both hosts: partners now open it at
+# app.doctorcre.com (the doctorcre-app Worker, whose CSP already admits
+# connect-src http://127.0.0.1:4682); dealroom.doctorcre.com remains the
+# record layer's own host. Any other origin is refused.
 ALLOWED_ORIGINS = {
+    "https://app.doctorcre.com",
     "https://dealroom.doctorcre.com",
     "http://127.0.0.1:8787",
     "http://localhost:8787",

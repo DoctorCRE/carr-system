@@ -76,8 +76,8 @@ def _vault():
     env = os.environ.get("CARR_VAULT")
     if env and os.path.isdir(env):
         return env
-    joe = ("/Users/booko/Library/CloudStorage/"
-           "GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI")
+    joe = os.path.join(os.path.expanduser("~"), "Library", "CloudStorage",
+                       "GoogleDrive-joe.bookout.carr.us@gmail.com", "My Drive", "CARR AI")
     if os.path.isdir(joe):
         return joe
     for hit in sorted(glob.glob(os.path.expanduser(

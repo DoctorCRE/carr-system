@@ -1,0 +1,602 @@
+{
+  "schema_version": "scac-charter.v1",
+  "contract_id": "carr.scac.charter",
+  "program_key": "carr-system-integrity-elimination-v1",
+  "tenant_scope": "carr-internal",
+  "status": "specification_only",
+  "canonical_binding": {
+    "master_decision_id": "e1e04703-4de6-4947-b2fa-ea0133c6bd74",
+    "embedded_scac_decision_id": "e6ed7449-a149-4969-851c-cb047fbc78d1",
+    "decision_provenance": {
+      "source_kind": "codex_delegation",
+      "source_host_id": "slingshot:env_e_6a7a05fd17a083339f33f6e3ba3bf69f",
+      "source_thread_id": "01a03987-0b24-7052-bc8c-a648dc0e0215",
+      "master_repository_binding": "migrations/0324_siep_program_authority.sql#shape_fixed_surface_ref",
+      "embedded_contract_binding": "ops/config/scac-charter.v1.json#canonical_binding"
+    },
+    "package_key": "10",
+    "package_ref": "WR-SIEP-10",
+    "component_alias": "SCAC-00",
+    "dependency_package_keys": ["B0"],
+    "required_evidence_kinds": ["source", "tests", "readback", "rollback", "independent_review"]
+  },
+  "authority": {
+    "system_authority": "joe",
+    "dell_participation": "permitted_optional_nonblocking",
+    "dell_veto": false,
+    "runtime_self_authority": false,
+    "model_output_authority": false,
+    "caller_labels_authority": false
+  },
+  "core_model": {
+    "current_core_count": 1,
+    "connected_partners_share_current_core": true,
+    "ordinary_business_data_shared_between_joe_and_dell": true,
+    "overlays": "declared_bounded_non_authoritative",
+    "dell_never_freezes_central_or_joe": true,
+    "studio_executor": "optional_non_blocking_capacity_only",
+    "unsupported_macs": "fail_closed",
+    "dell_filesystem_admin_actions": "dell_mpe_runner_only"
+  },
+  "protected_classes": [
+    "scac.protected.admin_authority",
+    "scac.protected.artifact_trust",
+    "scac.protected.credentials",
+    "scac.protected.destructive_authority",
+    "scac.protected.legal_third_party_duties",
+    "scac.protected.model_provider_egress",
+    "scac.protected.personal_roots"
+  ],
+  "protocol_invariants": [
+    "all_authorizing_inputs_are_server_derived",
+    "all_writes_default_deny_until_registered",
+    "authority_never_comes_from_model_or_caller_labels",
+    "closed_operation_manifest_binds_each_request",
+    "current_epoch_and_compatibility_are_required",
+    "current_policy_token_and_per_request_proof_are_required",
+    "kill_switch_and_revocation_dominate",
+    "missing_unknown_ambiguous_stale_future_replayed_untrusted_or_incompatible_refuses",
+    "offline_or_partitioned_mutation_refuses",
+    "one_atomic_database_reference_monitor_owns_write_admission",
+    "one_primary_reason_and_sorted_contributing_reasons",
+    "no_taxonomy_category_can_increase_authority",
+    "secrets_and_raw_payloads_never_enter_safe_projection"
+  ],
+  "identity_contract": {
+    "required_distinct_axes": [
+      "tenant",
+      "actor",
+      "sponsor",
+      "partner",
+      "agent",
+      "runtime",
+      "device",
+      "workload",
+      "session",
+      "capability"
+    ],
+    "derivation": "server_derived_canonical_references_only",
+    "caller_labels": "descriptive_non_authoritative",
+    "collapse_or_inheritance": "forbidden",
+    "capability_semantics": "non_transitive_non_inheritable_session_bound_expiring"
+  },
+  "current_authority_reuse": [
+    {
+      "id": "scac.reuse.human_attribution",
+      "physical_sources": ["public.actor", "mcp-server/src/identity.js", "mcp-server/src/partner-authority.js"],
+      "reuse_mode": "reference_only_no_copy",
+      "authority_limit": "runtime attribution only; OAuth client_name and actor labels are not identity or capability"
+    },
+    {
+      "id": "scac.reuse.engineering_session",
+      "physical_sources": ["ops.capability_agent_session", "ops.capability_verification"],
+      "reuse_mode": "reference_only_no_copy",
+      "authority_limit": "engineering lifecycle and evidence only; not a SCAC token, device, or security session authority"
+    },
+    {
+      "id": "scac.reuse.work_execution",
+      "physical_sources": ["ops.job", "ops.job_attempt", "ops.job_receipt", "ops.engineering_execution_envelope"],
+      "reuse_mode": "reference_only_no_copy",
+      "authority_limit": "canonical execution ledger only; SCAC must not create a workload shadow store"
+    },
+    {
+      "id": "scac.reuse.device_observation",
+      "physical_sources": ["ops.device_evidence_principal", "ops.device_evidence_receipt"],
+      "reuse_mode": "reference_only_no_copy",
+      "authority_limit": "provisioned DB-role observations only; not enrollment, assurance, proof, epoch, or revocation"
+    },
+    {
+      "id": "scac.reuse.rule_delivery",
+      "physical_sources": ["public.rule", "ops.rule_pack", "ops.rule_load_layer", "ops.rule_delivery_policy", "ops.rule_delivery_plan", "ops.rule_pack_index"],
+      "reuse_mode": "reference_only_no_copy",
+      "authority_limit": "current rule delivery authority; SIEP-20 projects it and does not redefine scope, packs, or enforcement"
+    },
+    {
+      "id": "scac.reuse.artifact_precedent",
+      "physical_sources": ["ops.release", "ops.execution_environment_provider", "ops.ingest_renewal_signed_snapshot", "ops.record_calendar_prebrief_verified_envelope"],
+      "reuse_mode": "reference_only_no_copy",
+      "authority_limit": "digest and signature-reference precedent only; hash or signature_ref alone is never artifact or root trust"
+    },
+    {
+      "id": "scac.reuse.action_risk_diagnostic",
+      "physical_sources": ["control-room/contracts/action-risk-registry.v1.json", "ops/action-risk-registry.py"],
+      "reuse_mode": "diagnostic_only_never_authority",
+      "authority_limit": "known stale at review: checked-in 140 verbs versus generated 184; SIEP-11 must establish exact ingress coverage"
+    },
+    {
+      "id": "scac.reuse.siep_lifecycle",
+      "physical_sources": ["ops.work_request", "ops.siep_package_contract", "ops.siep_program_dependency", "ops.siep_component_alias", "ops.siep_evidence_link", "ops.siep_command_receipt"],
+      "reuse_mode": "reference_only_no_copy",
+      "authority_limit": "sole SIEP lifecycle, DAG, alias, command, and evidence authority"
+    }
+  ],
+  "canonical_source_catalog": [
+    {"id": "authenticated_session_principal", "source_class": "current_reused", "owner_package": "18", "implementation_state": "current_limited_nonuniform"},
+    {"id": "siep.package.lifecycle", "source_class": "current_reused", "owner_package": "B0", "implementation_state": "current"},
+    {"id": "scac.charter.taxonomy", "source_class": "specification", "owner_package": "10", "implementation_state": "specification_only"},
+    {"id": "scac.mutation.registry", "source_class": "future_logical", "owner_package": "11", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.policy.epoch", "source_class": "future_logical", "owner_package": "12", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.artifact.registry", "source_class": "future_logical", "owner_package": "13", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.root.trust", "source_class": "future_logical", "owner_package": "14", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.device.enrollment", "source_class": "future_logical", "owner_package": "15", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.pop.verifier", "source_class": "future_logical", "owner_package": "16", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.token.revocation", "source_class": "future_logical", "owner_package": "17", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.db.reference_monitor", "source_class": "future_logical", "owner_package": "18", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.updater.convergence", "source_class": "future_logical", "owner_package": "19", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.core.projection", "source_class": "future_logical", "owner_package": "20", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.workload.identity", "source_class": "future_logical", "owner_package": "21", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.offline.policy", "source_class": "future_logical", "owner_package": "22", "implementation_state": "declared_unimplemented"},
+    {"id": "scac.health.evidence", "source_class": "future_logical", "owner_package": "23", "implementation_state": "declared_unimplemented"}
+  ],
+  "threat_taxonomy": [
+    {"id": "SCAC-TH-01", "threat": "unregistered_or_misclassified_mutation", "owner_package": "11", "workspace_threat_refs": ["T03", "T04", "T09", "T12", "T14"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-02", "threat": "epoch_rollback_or_equivocation", "owner_package": "12", "workspace_threat_refs": ["T02", "T07", "T12", "T14"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-03", "threat": "artifact_tamper_substitution_or_forgery", "owner_package": "13", "workspace_threat_refs": ["T05", "T06", "T10", "T14", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-04", "threat": "root_key_compromise_or_recovery_abuse", "owner_package": "14", "workspace_threat_refs": ["T02", "T06", "T10", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-05", "threat": "device_impersonation_clone_or_stale_enrollment", "owner_package": "15", "workspace_threat_refs": ["T02", "T07", "T16", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-06", "threat": "proof_of_possession_bypass_or_replay", "owner_package": "16", "workspace_threat_refs": ["T02", "T03", "T16", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-07", "threat": "token_challenge_replay_revocation_or_kill_switch_bypass", "owner_package": "17", "workspace_threat_refs": ["T02", "T03", "T11", "T16", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-08", "threat": "reference_monitor_bypass_context_substitution_or_grant_drift", "owner_package": "18", "workspace_threat_refs": ["T01", "T03", "T04", "T12", "T13", "T16"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-09", "threat": "updater_downgrade_split_brain_or_nonconvergence", "owner_package": "19", "workspace_threat_refs": ["T07", "T10", "T12", "T14", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-10", "threat": "rule_projection_drift_undeclared_overlay_or_policy_injection", "owner_package": "20", "workspace_threat_refs": ["T03", "T05", "T12", "T14", "T16"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-11", "threat": "workload_impersonation_confused_deputy_or_sponsor_blur", "owner_package": "21", "workspace_threat_refs": ["T03", "T13", "T16", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-12", "threat": "offline_partition_fail_open_or_stale_write", "owner_package": "22", "workspace_threat_refs": ["T07", "T09", "T17"], "implementation_state": "declared_unimplemented"},
+    {"id": "SCAC-TH-13", "threat": "false_green_stale_missing_or_forged_evidence", "owner_package": "23", "workspace_threat_refs": ["T10", "T11", "T12", "T15", "T17"], "implementation_state": "declared_unimplemented"}
+  ],
+  "taxonomy": {
+    "principal_kinds": [
+      {
+        "id": "scac.principal.device",
+        "definition": "An enrolled hardware and operating-system identity; enrollment and assurance remain downstream.",
+        "canonical_source": "scac.device.enrollment",
+        "owner_package": "15",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.principal.human_interactive",
+        "definition": "An authenticated human authority or partner session classification consumed by the final reference monitor; actor labels alone never establish it.",
+        "canonical_source": "authenticated_session_principal",
+        "owner_package": "18",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.principal.service",
+        "definition": "A registered system service with a bounded workload identity and no inherited human authority.",
+        "canonical_source": "scac.workload.identity",
+        "owner_package": "21",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.principal.workload",
+        "definition": "A registered job or execution workload bound to one operation manifest and request proof.",
+        "canonical_source": "scac.workload.identity",
+        "owner_package": "21",
+        "implementation_state": "declared_unimplemented"
+      }
+    ],
+    "mutation_kinds": [
+      {
+        "id": "scac.mutation.admin",
+        "definition": "A change to authority, identity, grants, enforcement, or system administration.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.artifact_publish",
+        "definition": "Publication, promotion, replacement, or trust-state change of an executable artifact.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "13",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.business_record",
+        "definition": "A typed write to ordinary CARR business data through its existing canonical verb.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.code_change",
+        "definition": "A source, migration, configuration, or generated-code change.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.credential",
+        "definition": "Creation, rotation, use, revocation, or recovery of credential material.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "17",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.deploy",
+        "definition": "A release, rollout, rollback, updater, or runtime activation change.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "19",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.destructive",
+        "definition": "Deletion, purge, quarantine destruction, irreversible replacement, or privilege escalation.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.external_delivery",
+        "definition": "A message, file, publication, provider request, or other effect beyond the CARR record layer.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.model_egress",
+        "definition": "Transfer of governed content or derived context to a model provider.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "20",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.mutation.policy",
+        "definition": "A change to core rules, tools, overlays, epochs, compatibility, or offline posture.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "implementation_state": "declared_unimplemented"
+      }
+    ],
+    "target_surfaces": [
+      {
+        "id": "scac.surface.artifact",
+        "definition": "Signed build, package, image, binary, migration bundle, or provenance record.",
+        "canonical_source": "scac.artifact.registry",
+        "owner_package": "13",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.surface.database",
+        "definition": "The canonical CARR PostgreSQL record and control layer.",
+        "canonical_source": "scac.db.reference_monitor",
+        "owner_package": "18",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.surface.dell_local",
+        "definition": "Dell-local files, applications, quarantine, restore, and administrator operations; SIEP-21 owns workload classification while MPE remains the only executor.",
+        "canonical_source": "scac.workload.identity",
+        "owner_package": "21",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.surface.external",
+        "definition": "Third-party, customer-facing, vendor, communications, or public effects.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.surface.model_provider",
+        "definition": "Governed Model Gateway provider egress and inference routes.",
+        "canonical_source": "scac.core.projection",
+        "owner_package": "20",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.surface.runtime",
+        "definition": "Scheduler, worker, updater, service, or execution runtime.",
+        "canonical_source": "scac.workload.identity",
+        "owner_package": "21",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.surface.shared_core",
+        "definition": "The single current shared rules, tools, source, and policy projection.",
+        "canonical_source": "scac.core.projection",
+        "owner_package": "20",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.surface.studio_executor",
+        "definition": "Optional Joe-side capacity for isolated compute and typed artifact return; never authority or dependency.",
+        "canonical_source": "scac.device.enrollment",
+        "owner_package": "15",
+        "implementation_state": "declared_unimplemented"
+      }
+    ],
+    "refusal_reasons": [
+      {
+        "id": "scac.refusal.kill_switch",
+        "definition": "A current emergency stop or revocation dominates every other fact.",
+        "canonical_source": "scac.token.revocation",
+        "owner_package": "17",
+        "required_evidence": ["current_kill_switch_state", "request_digest"],
+        "safe_projection": ["reason_id", "state_digest", "observed_at"],
+        "precedence": 1000,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.revoked",
+        "definition": "A device, workload, token, challenge, artifact, or root is revoked.",
+        "canonical_source": "scac.token.revocation",
+        "owner_package": "17",
+        "required_evidence": ["revocation_state", "request_digest"],
+        "safe_projection": ["reason_id", "subject_ref_digest", "observed_at"],
+        "precedence": 990,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.offline_mutation",
+        "definition": "Mutation while offline or partitioned is forbidden; draft-only behavior is downstream and non-authorizing.",
+        "canonical_source": "scac.offline.policy",
+        "owner_package": "22",
+        "required_evidence": ["connectivity_state", "operation_manifest"],
+        "safe_projection": ["reason_id", "connectivity_state"],
+        "precedence": 980,
+        "retryable": true,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.untrusted_artifact",
+        "definition": "Artifact signature, transparency, or provenance is absent or untrusted.",
+        "canonical_source": "scac.artifact.registry",
+        "owner_package": "13",
+        "required_evidence": ["artifact_digest", "signature_state", "transparency_state"],
+        "safe_projection": ["reason_id", "artifact_digest", "artifact_trust_state"],
+        "precedence": 970,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.root_untrusted",
+        "definition": "The required current trust root, ceremony, or recovery-custodian state is absent or untrusted.",
+        "canonical_source": "scac.root.trust",
+        "owner_package": "14",
+        "required_evidence": ["root_digest", "root_trust_state", "custodian_state"],
+        "safe_projection": ["reason_id", "root_digest", "root_trust_state"],
+        "precedence": 965,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.epoch_incompatible",
+        "definition": "The request epoch is stale, future, rolled back, or incompatible with the current core.",
+        "canonical_source": "scac.policy.epoch",
+        "owner_package": "12",
+        "required_evidence": ["current_epoch", "request_epoch", "compatibility_state"],
+        "safe_projection": ["reason_id", "current_epoch", "request_epoch", "compatibility_state"],
+        "precedence": 960,
+        "retryable": true,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.proof_invalid",
+        "definition": "Proof-of-possession, per-request proof, or challenge verification is absent or invalid.",
+        "canonical_source": "scac.pop.verifier",
+        "owner_package": "16",
+        "required_evidence": ["proof_state", "challenge_digest", "request_digest"],
+        "safe_projection": ["reason_id", "proof_state", "challenge_digest"],
+        "precedence": 950,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.token_invalid",
+        "definition": "Capability token is missing, expired, replayed, revoked, or not bound to this request.",
+        "canonical_source": "scac.token.revocation",
+        "owner_package": "17",
+        "required_evidence": ["token_state", "request_digest", "idempotency_key"],
+        "safe_projection": ["reason_id", "token_state", "token_digest"],
+        "precedence": 940,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.device_unassured",
+        "definition": "Device enrollment, hardware, OS, assurance, or supported-platform facts are absent or insufficient.",
+        "canonical_source": "scac.device.enrollment",
+        "owner_package": "15",
+        "required_evidence": ["device_ref", "enrollment_state", "assurance_state"],
+        "safe_projection": ["reason_id", "device_ref_digest", "assurance_state"],
+        "precedence": 930,
+        "retryable": true,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.workload_unregistered",
+        "definition": "Workload identity or its exact operation binding is absent, unknown, or stale.",
+        "canonical_source": "scac.workload.identity",
+        "owner_package": "21",
+        "required_evidence": ["workload_ref", "operation_manifest", "request_digest"],
+        "safe_projection": ["reason_id", "workload_ref_digest", "manifest_digest"],
+        "precedence": 920,
+        "retryable": true,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.mutation_unregistered",
+        "definition": "Mutation kind, target, canonical verb, or required proof is not present in the current registry.",
+        "canonical_source": "scac.mutation.registry",
+        "owner_package": "11",
+        "required_evidence": ["mutation_kind", "target_surface", "canonical_verb"],
+        "safe_projection": ["reason_id", "mutation_kind", "target_surface"],
+        "precedence": 910,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.scope_mismatch",
+        "definition": "Tenant, environment, scope, overlay, principal, or target does not match the request binding.",
+        "canonical_source": "scac.db.reference_monitor",
+        "owner_package": "18",
+        "required_evidence": ["tenant", "environment", "scope", "target_surface"],
+        "safe_projection": ["reason_id", "tenant_digest", "environment", "scope_digest"],
+        "precedence": 900,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.reference_monitor_unavailable",
+        "definition": "The atomic database reference monitor or required grant state is unavailable or not current.",
+        "canonical_source": "scac.db.reference_monitor",
+        "owner_package": "18",
+        "required_evidence": ["monitor_state", "grant_digest", "request_digest"],
+        "safe_projection": ["reason_id", "monitor_state", "grant_digest"],
+        "precedence": 890,
+        "retryable": true,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.core_not_converged",
+        "definition": "The signed updater has downgraded, split-brained, or failed to converge the connected node.",
+        "canonical_source": "scac.updater.convergence",
+        "owner_package": "19",
+        "required_evidence": ["core_digest", "updater_state", "convergence_state"],
+        "safe_projection": ["reason_id", "core_digest", "convergence_state"],
+        "precedence": 880,
+        "retryable": true,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.projection_drift",
+        "definition": "The shared rules, tools, source projection, or declared overlay set does not match the current core.",
+        "canonical_source": "scac.core.projection",
+        "owner_package": "20",
+        "required_evidence": ["core_digest", "projection_digest", "overlay_digest"],
+        "safe_projection": ["reason_id", "core_digest", "projection_digest", "overlay_digest"],
+        "precedence": 875,
+        "retryable": true,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      },
+      {
+        "id": "scac.refusal.malformed_or_unknown",
+        "definition": "A required canonical field is missing, malformed, ambiguous, unknown, future, or unsupported.",
+        "canonical_source": "scac.charter.taxonomy",
+        "owner_package": "10",
+        "required_evidence": ["validation_result"],
+        "safe_projection": ["reason_id", "field_ids"],
+        "precedence": 870,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "specification_only"
+      },
+      {
+        "id": "scac.refusal.control_unimplemented",
+        "definition": "A control required by the charter is declared but not operationally implemented and evidenced.",
+        "canonical_source": "siep.package.lifecycle",
+        "owner_package": "23",
+        "required_evidence": ["owner_package", "implementation_state"],
+        "safe_projection": ["reason_id", "owner_package", "implementation_state"],
+        "precedence": 860,
+        "retryable": false,
+        "offline_posture": "deny",
+        "implementation_state": "declared_unimplemented"
+      }
+    ]
+  },
+  "decision_algebra": {
+    "mode": "deny_dominant_specification",
+    "primary_reason": "highest_precedence_then_lexicographic_id",
+    "contributing_reasons": "precedence_desc_then_id",
+    "unknown_category": "deny",
+    "missing_canonical_source": "unavailable_non_authorizing",
+    "permit_before_downstream_completion": false,
+    "caller_or_model_fields_may_escalate": false
+  },
+  "canonical_request_facts": [
+    "artifact_trust_state",
+    "compatibility_state",
+    "connectivity_state",
+    "device_assurance_state",
+    "epoch_state",
+    "kill_switch_state",
+    "mutation_kind",
+    "operation_manifest_digest",
+    "principal_kind",
+    "projection_state",
+    "proof_state",
+    "reference_monitor_state",
+    "request_digest",
+    "revocation_state",
+    "root_trust_state",
+    "target_surface",
+    "tenant_scope",
+    "token_state",
+    "updater_state",
+    "workload_state"
+  ],
+  "package_boundaries": [
+    {"package_key": "11", "control": "mutation_registry_default_deny_ingress", "implementation_state": "declared_unimplemented"},
+    {"package_key": "12", "control": "monotonic_epoch_compatibility", "implementation_state": "declared_unimplemented"},
+    {"package_key": "13", "control": "artifact_registry_signing_transparency", "implementation_state": "declared_unimplemented"},
+    {"package_key": "14", "control": "root_trust_offline_recovery", "implementation_state": "declared_unimplemented"},
+    {"package_key": "15", "control": "device_enrollment_assurance", "implementation_state": "declared_unimplemented"},
+    {"package_key": "16", "control": "proof_of_possession_verifiers", "implementation_state": "declared_unimplemented"},
+    {"package_key": "17", "control": "token_challenge_revocation_kill_switch", "implementation_state": "declared_unimplemented"},
+    {"package_key": "18", "control": "atomic_database_reference_monitor", "implementation_state": "declared_unimplemented"},
+    {"package_key": "19", "control": "signed_updater_convergence", "implementation_state": "declared_unimplemented"},
+    {"package_key": "20", "control": "shared_core_projection_declared_overlays", "implementation_state": "declared_unimplemented"},
+    {"package_key": "21", "control": "workload_identity", "implementation_state": "declared_unimplemented"},
+    {"package_key": "22", "control": "offline_partition_draft_only", "implementation_state": "declared_unimplemented"},
+    {"package_key": "23", "control": "health_slo_alerts_runbooks_completion", "implementation_state": "declared_unimplemented"}
+  ],
+  "forbidden_claims": [
+    "artifact_or_root_trust_operational",
+    "atomic_database_mediation_operational",
+    "default_deny_mutation_coverage_operational",
+    "device_or_workload_identity_operational",
+    "epoch_or_rollback_protection_operational",
+    "health_or_completion_authority_operational",
+    "offline_draft_only_enforcement_operational",
+    "proof_token_challenge_or_revocation_operational",
+    "production_ready_or_enforced",
+    "shared_core_convergence_operational",
+    "updater_operational"
+  ],
+  "delivery_state": {
+    "source": "implemented_declarative_contract",
+    "migration": "not_required",
+    "deploy": "not_active",
+    "enforcement": "not_active",
+    "readback": "local_contract_validation_only",
+    "rollback": "remove_contract_and_validator",
+    "production_effect": "none"
+  }
+}

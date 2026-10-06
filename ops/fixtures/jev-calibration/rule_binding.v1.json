@@ -1,0 +1,20 @@
+{
+  "schema": "carr.jev-calibration-fixture.v1",
+  "family": "rule_binding",
+  "version": "2026-09-29.1",
+  "question_type": "noul",
+  "question": "strict: does this live rule bind the action the turn takes? One noul per (case, rule).",
+  "consequence_classes": ["context_injection"],
+  "default_consequence_class": "context_injection",
+  "note": "Derived, not copied: ops/jev_calibration.py rebuilds the cases from the rule-delivery-eval v2 set, pinned by sha256, so a relabel there refuses here until this version is bumped. Validated = the (case, rule) pair was adjudicated in writing (adjudications.v2.jsonl), which is also its gold source. Every other gold bit came from the labelling pass itself and is unvalidated with no gold source. Split: train -> calibration, test -> held_out, the eval's own seeded split. The recorded probabilities are real first-pass Jev nouls, but the model version that produced them was not recorded, so no band can be proposed from this fixture until it is re-run on a pinned model.",
+  "source": {
+    "kind": "rule-delivery-eval.v2",
+    "cases": "ops/fixtures/rule-delivery-eval/cases.v2.json",
+    "cases_sha256": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
+    "labels": "ops/fixtures/rule-delivery-eval/labels.v2.json",
+    "labels_sha256": "cec5d5053d1eb23e1ddd41924a614be59a93244662af18ae03c3dd7c8e21f8da",
+    "validated_by": "written adjudication (rule-delivery-eval adjudications.v2.jsonl)",
+    "gold_source": "ops/fixtures/rule-delivery-eval/adjudications.v2.jsonl",
+    "model": null
+  }
+}

@@ -72,6 +72,41 @@ AUDIT SIGNAL (the thing the rule-shape gate demands, and the reason the
 development-kit ledgers died silently): every fire appends one JSON line to
 out/conduct-gate.jsonl. Zero fires and zero instrumentation look identical
 without it. `run.sh health` reads the count; the return-brief prints it.
+
+WR-000019 SLICE S8 — THE WRITING SHADOW CHECK (rule 5be2f462). The 47-message
+carry corpus in out/chat-lint-carry/ is chat-lint-gate.py's own post-hoc
+record: it fires at Stop but only ever CARRIES a note to the next turn
+(hooks/chat-lint-carryover.py), because the finding surfaces after the message
+has already reached Joe and "cannot be unsent" — the exact phrase its own
+carried note uses. Of that corpus, 25 of 48 recorded findings are rule
+5be2f462's own vocab / contrast-reframe / contrast-reframe-split
+constructions — the only class in that corpus this gate does not already
+reach some other way (bare ids are conduct's own bare_id_hits() below,
+already blocking; the rest — multi-clause-task, unlinked-file-ask,
+unnamed-deal-question, confidentiality-access-boundary — are rules
+38b15dc6/8c1e6057/c315befa/d7f74c93, out of this slice's DoD).
+
+shadow_writing_check() reuses chat-lint-gate.py's OWN writing_rules() /
+strip_fences() — the identical RULES-table lookup, not a second copy of the
+regex (rule a8c55a47) — so the SAME 5be2f462 detection that carries a note
+post-send there also runs PRE-SEND here, at the Stop boundary this file
+already owns. It is folded into THIS gate rather than given its own Stop
+reopener, because Joe's 2026-08-23 rationing capped Stop reopeners at three
+(core conduct — this file — completion-evidence, drift-assertion) and a
+banned-construction finding on the turn's own final message is a conduct
+shape, not a new one.
+
+BORN SHADOW, LOG-ONLY, NEVER A BLOCKING INPUT. A gate-lifecycle.json entry
+keyed "conduct-stop-gate.py:chat-writing-shadow" carries the mode flag;
+shadow_writing_check() consults it and, only when it reads "shadow", appends
+a finding row to the DEDICATED out/conduct-gate-shadow.jsonl — never to
+out/conduct-gate.jsonl, whose catch_metric for this gate's OWN lifecycle
+entry already treats every row there as "genuine detection" (row_exists);
+mixing an unpromoted, log-only finding into that stream would corrupt the
+existing enforcing metric. The finding never enters `classes`/`findings` and
+never changes whether this turn blocks — Joe promotes it from
+ops/config/gate-lifecycle.json once the shadow window shows an acceptable
+false-positive rate, the same lifecycle every other shadow gate here follows.
 """
 import json
 import os
@@ -80,6 +115,7 @@ import sys
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HOOKS = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(REPO, "out", "conduct-gate.jsonl")
 DEBUG = os.path.join(REPO, "out", "conduct-gate.log")
 
@@ -87,11 +123,25 @@ DEBUG = os.path.join(REPO, "out", "conduct-gate.log")
 # hooks/escalation-gate.py, which catches the same behaviour one moment earlier
 # (as an AskUserQuestion tool call rather than as prose). Two moments, one rule,
 # one copy.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HOOKS)
+sys.path.insert(0, REPO)
 from conduct_patterns import (  # noqa: E402
     OFFLOAD, SOFT_WAIT, FENCE, BARE_FENCE_CMD, HANDOFF_PROSE,
     HUMAN_WANTS_COMMAND, HUMAN_WANTS_CHOICE, PROTECTED, bare_id_hits,
+    CLASSIFIER_DENIAL, denied_commands, handoff_was_denied,
+    handoff_needs_review, HANDOFF_REVIEW_MESSAGE,
 )
+
+# ── WR-000019 S8: the writing shadow check (rule 5be2f462) ─────────────────
+# Overridable by env for the selftest, same convention chat-lint-gate.py's
+# repo_root() and stop_latch.py's CARR_STOP_LATCH_STATE use: a fixture gets its
+# own files so two concurrent runs — or a real session running alongside a
+# selftest — never share, and can never leave a real trace behind.
+GATE_LIFECYCLE_PATH = (os.environ.get("CARR_GATE_LIFECYCLE_PATH")
+                        or os.path.join(REPO, "ops", "config", "gate-lifecycle.json"))
+SHADOW_LOG = (os.environ.get("CARR_CONDUCT_SHADOW_LOG")
+              or os.path.join(REPO, "out", "conduct-gate-shadow.jsonl"))
+SHADOW_GATE_KEY = "conduct-stop-gate.py:chat-writing-shadow"
 
 
 def now():
@@ -280,92 +330,13 @@ def strip_noise(text):
     return text
 
 
-# A tool result carrying one of these is the harness refusing the session
-# permission, not the session declining to act. Matched on the result text the
-# harness itself writes, so a session cannot manufacture the exemption by
-# talking about being denied — it has to actually have been denied.
-CLASSIFIER_DENIAL = re.compile(
-    r"(denied by the Claude Code auto mode classifier"
-    r"|Blocked by classifier"
-    r"|permission[s]? (?:for this action )?(?:was|were) denied"
-    r"|blocked by the CARR unattended guard"
-    r"|PreToolUse:.*hook error)", re.I)
-
-# Shell scaffolding carries no signal about WHICH command was denied.
-_CMD_NOISE = frozenset("""
-sudo the and for with from into then else done true false null echo cat sed awk
-grep find head tail sort uniq wc cut tee xargs bash zsh sh python python3 node
-npm cd ls rm cp mv mkdir chmod chown export local set unset print printf
-""".split())
-
-
-def denied_commands(recs, start):
-    """Commands the harness refused this session permission to run, this turn.
-
-    THE DEADLOCK THIS ENDS (2026-08-22). This gate's command-handoff class says
-    run it, never hand it over. The auto-mode classifier independently refuses
-    some commands. When both fire on the same command the session has no legal
-    move: it cannot run it, and it cannot say so. Joe personally broke that tie
-    twice in one night — which is exactly the babysitting the autonomy rule
-    exists to stop, produced by two controls that were each individually right.
-
-    A denial is only a carve-out for the command it actually denied, so the
-    denied text is returned for matching rather than setting a blanket flag.
-    """
-    out = []
-    pending = {}
-    for rec in recs[start:]:
-        msg = rec.get("message") or rec
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "tool_use":
-                cmd = (block.get("input") or {}).get("command")
-                if isinstance(cmd, str) and cmd.strip():
-                    pending[block.get("id")] = cmd
-            elif block.get("type") == "tool_result":
-                body = block.get("content")
-                if isinstance(body, list):
-                    body = " ".join(b.get("text", "") for b in body if isinstance(b, dict))
-                if not isinstance(body, str) or not CLASSIFIER_DENIAL.search(body):
-                    continue
-                cmd = pending.get(block.get("tool_use_id"))
-                if cmd:
-                    out.append(cmd)
-    return out
-
-
-def _signature(text):
-    """Distinctive tokens, so matching is on the command's substance."""
-    words = re.findall(r"[A-Za-z0-9_./-]{4,}", text or "")
-    return {w.lower() for w in words if w.lower() not in _CMD_NOISE}
-
-
-def handoff_was_denied(assistant, denied):
-    """True when what the session put in front of Joe is a command the harness
-    refused it. Requires real overlap on distinctive tokens, so an unrelated
-    handoff in the same turn is still caught."""
-    shown = "\n".join(re.findall(r"```(?:bash|sh|zsh|shell)?\n(.*?)```", assistant, re.S))
-    if not shown.strip():
-        return False
-    shown_sig = _signature(shown)
-    if not shown_sig:
-        return False
-    for cmd in denied:
-        cmd_sig = _signature(cmd)
-        if not cmd_sig:
-            continue
-        overlap = len(shown_sig & cmd_sig) / max(1, min(len(shown_sig), len(cmd_sig)))
-        if overlap >= 0.5:
-            return True
-    return False
-
-
 def scan(assistant, human_last, denied=()):
-    """Return (fired, findings). findings = list of (klass, name)."""
+    """Return (fired, findings). findings = list of (klass, name).
+
+    Command handoffs are found by the fence and HANDOFF_PROSE patterns only.
+    Prose action cues those patterns miss produce a nonblocking review residual;
+    no observed capability or permission evidence exists here to decide it.
+    """
     findings = []
     prose = strip_noise(assistant)
 
@@ -401,7 +372,98 @@ def scan(assistant, human_last, denied=()):
     for name, ident in bare_id_hits(prose):
         findings.append(("bare_id", f"{name}:{ident}"))
 
-    return (len(findings) > 0), findings
+    if not any(k == "command_handoff" for k, _ in findings) and handoff_needs_review(prose, human_last, denied):
+        findings.append(("handoff_review", "needs_review"))
+    return any(k != "handoff_review" for k, _ in findings), findings
+
+
+def _shadow_mode_enabled():
+    """Read the SHADOW_GATE_KEY's mode from ops/config/gate-lifecycle.json.
+
+    FAILS CLOSED TO "DO NOTHING", the opposite direction from every blocking
+    check in this file. Every other fail-open in this module means "let the
+    turn end" because a wedged session is the worse failure; here the worse
+    failure would be a missing or corrupt config silently turning ON a scan
+    every turn pays for. So unreadable, missing, or malformed config all mean
+    the same thing: the shadow check does not run this turn, same as if the
+    entry did not exist. Never raises.
+    """
+    try:
+        with open(GATE_LIFECYCLE_PATH) as fh:
+            data = json.load(fh)
+        entry = (data.get("gates") or {}).get(SHADOW_GATE_KEY) or {}
+        return entry.get("mode") == "shadow"
+    except Exception:
+        return False
+
+
+def _writing_shadow_findings(assistant):
+    """[(rule_id, quote)] for 5be2f462's vocab / contrast-reframe /
+    contrast-reframe-split constructions, on the SAME final assistant message
+    this gate already scans.
+
+    Imports chat-lint-gate.py's own writing_rules()/strip_fences() through
+    lib.loadpy (the same route loose-work-gate.py uses for delegation-gate.py
+    and ledger-sweep.py) rather than a second copy of writing-lint.py's RULES
+    table — one detector, two moments (rule a8c55a47). A rule added to that
+    table reaches both surfaces with nobody editing this file.
+    """
+    try:
+        from lib.loadpy import load_module_from_path
+        chat_lint = load_module_from_path(
+            "_csg_chat_lint", os.path.join(HOOKS, "chat-lint-gate.py"))
+    except Exception as exc:
+        dlog(f"shadow-writing ALLOW(import-failed) {exc}")
+        return []
+    try:
+        prose = chat_lint.strip_fences(assistant)
+        rules, mask = chat_lint.writing_rules()
+        masked = mask(prose)
+        found = []
+        for rid, pat, what, fix in rules:
+            m = re.search(pat, masked, re.I)
+            if m:
+                quote = prose[max(0, m.start() - 20):m.end() + 20].replace("\n", " ")
+                found.append((rid, quote.strip()[:90]))
+        return found
+    except Exception as exc:
+        dlog(f"shadow-writing ALLOW(scan-failed) {exc}")
+        return []
+
+
+def shadow_writing_check(assistant, session):
+    """Log-only pre-send measurement for rule 5be2f462, born SHADOW this slice
+    (WR-000019 S8). NEVER contributes to `classes`/`findings` and NEVER blocks
+    — it exists so Joe can see the false-positive rate before promoting it
+    from ops/config/gate-lifecycle.json, the same lifecycle every shadow gate
+    in that file follows. Writes to the DEDICATED out/conduct-gate-shadow.jsonl,
+    never to out/conduct-gate.jsonl (see module docstring for why mixing them
+    would be wrong). Fixtures (session 'selftest') are skipped, same convention
+    audit() uses elsewhere in this file — the selftest for this feature
+    redirects CARR_GATE_LIFECYCLE_PATH/CARR_CONDUCT_SHADOW_LOG to its own
+    files and uses a distinct session id instead of relying on this skip.
+    """
+    if session == "selftest":
+        return
+    if not _shadow_mode_enabled():
+        return
+    try:
+        findings = _writing_shadow_findings(assistant)
+        if not findings:
+            return
+        os.makedirs(os.path.dirname(SHADOW_LOG), exist_ok=True)
+        with open(SHADOW_LOG, "a") as fh:
+            fh.write(json.dumps({
+                "ts": now(),
+                "hook": "conduct-stop-gate-shadow",
+                "rule": "5be2f462",
+                "classes": sorted({f[0] for f in findings}),
+                "session": session,
+                "excerpt": findings[0][1][:200],
+                "would_have_blocked": True,
+            }) + "\n")
+    except Exception as exc:
+        dlog(f"shadow-writing ALLOW(log-failed) {exc}")
 
 
 REASON_HEAD = (
@@ -536,6 +598,19 @@ def main():
             sys.exit(0)
 
         fired, findings = scan(assistant, last_human, denied_commands(recs, start))
+
+        # WR-000019 S8: the writing shadow check runs regardless of whether
+        # any OTHER conduct class fired — it is measuring its own catch rate
+        # independently, and it never influences `fired` either way.
+        shadow_writing_check(assistant, payload.get("session_id"))
+
+        review_advisory = ("handoff_review", "needs_review") in findings
+        if review_advisory:
+            audit({"ts": now(), "hook": "conduct-stop-gate", "classes": ["handoff_review"],
+                   "patterns": ["needs_review"], "session": payload.get("session_id")})
+            if not fired:
+                print(json.dumps({"systemMessage": HANDOFF_REVIEW_MESSAGE}))
+            findings = [(k, n) for k, n in findings if k != "handoff_review"]
         if not fired:
             sys.exit(0)
 
@@ -574,7 +649,10 @@ def main():
         remember_blocked(assistant, payload.get("session_id"))
 
         dlog(f"BLOCK {classes} :: {[n for _, n in findings]}")
-        print(json.dumps({"decision": "block", "reason": body}))
+        response = {"decision": "block", "reason": body}
+        if review_advisory:
+            response["systemMessage"] = HANDOFF_REVIEW_MESSAGE
+        print(json.dumps(response))
         sys.exit(0)
 
     except Exception as exc:

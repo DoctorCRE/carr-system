@@ -1,0 +1,62 @@
+{
+  "schema": "carr-headless-tasks/v1",
+  "observed_at": "2026-10-02T01:39:51.290775+00:00",
+  "source": "Claude Desktop native scheduled-tasks.json (read-only); prompts under ~/.claude/scheduled-tasks",
+  "timezone": "America/Chicago",
+  "tasks": {
+    "contact-enrichment-weekly": {
+      "cron": "0 9 * * 4",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "content-fuel-harvest-weekly": {
+      "cron": "30 9 * * 1",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "health-audit-monthly": {
+      "cron": "0 9 6-10 * *",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600,
+      "monthly": true
+    },
+    "idea-resurface-monthly": {
+      "cron": "0 9 5-11 * *",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600,
+      "monthly": true
+    },
+    "loop-drain-weekdays": {
+      "cron": "0 11 * * 1-5",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "npi-sweep-weekly": {
+      "cron": "30 7 * * 1",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "playbook-review-monthly": {
+      "cron": "0 9 15-21 * *",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600,
+      "monthly": true
+    },
+    "radar-weekly": {
+      "cron": "15 8 * * 1",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "social-batch-weekly": {
+      "cron": "0 8 * * 5",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "system-sweep-monthly": {
+      "cron": "30 8 15-21 * *",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600,
+      "monthly": true
+    }
+  }
+}

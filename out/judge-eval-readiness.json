@@ -1,0 +1,16 @@
+{
+  "schema": "carr-judge-eval-readiness/v1",
+  "status": "pending_decisions_contract",
+  "corpus_sha256": "bb086bdaa6981ce01945af10d41938844d21cde7f91e73cf9c04f2236a5023f0",
+  "real_input_receipts": 1,
+  "agreement": null,
+  "calibration": null,
+  "latency_p50_p95": null,
+  "cost_usd": null,
+  "reason": "decisions contract not yet verified / no key",
+  "default_provider": "jev",
+  "runtime_provider": "jev",
+  "promotion_performed": false,
+  "runner": "tools/judge/paired_eval.py:cli",
+  "command": "python3 -c \"from tools.judge.paired_eval import cli; cli()\" ops/fixtures/judge-provider/frozen-receipts.v1.json --output out/judge-paired-report.json"
+}

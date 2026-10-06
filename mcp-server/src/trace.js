@@ -37,7 +37,7 @@
 //      own wrapWithCorrelation produces for an uncaught throw anywhere in the
 //      stack. These are unambiguous: the Worker is telling a caller it failed.
 //
-//   2. rpcInternalErrorFailureClass(code) — the /mcp JSON-RPC transport's own
+//   2. rpcInternalErrorFailureClass(code, context) — the /mcp JSON-RPC transport's own
 //      "internal error" envelope, code -32603. THIS ROUTE NEEDS ITS OWN RULE
 //      because it deliberately returns HTTP 200 for a JSON-RPC-level error (the
 //      MCP spec's isError-in-body convention — see mcp.js's `reply`/`rpcError`,
@@ -52,9 +52,10 @@
 //      version_conflict, key_reuse, actor_not_provisioned, invalid_field_value,
 //      …) — and recording those would flood the ledger with the system doing
 //      its job, not with the system malfunctioning. -32603 is the one code
-//      that can ONLY mean an uncaught exception (dispatch()'s own outer catch
-//      in mcp.js is its sole producer), so it is the one JSON-RPC code this
-//      file records.
+//      considered for this route: dispatch() passes the verb and thrown error
+//      so a narrow, verb-specific allowlist can exclude known raw
+//      policy/admission raises while preserving unexpected exceptions and
+//      runtime/database faults as incidents.
 //
 //   3. actorUnresolvedFailureClass — mcpApiHandler's and protectedApiHandler's
 //      own `if (!actor) return json({error:"unauthorized"},401)` (index.js): a
@@ -90,6 +91,37 @@ const VALID_ENVIRONMENTS = new Set(["local", "rehearsal", "staging", "production
 
 export const RPC_INTERNAL_ERROR_CODE = -32603;
 
+// These are durable policy/admission refusals from stored procedures. They are
+// expected outcomes of the verb's business guard, not failures of the Worker
+// or database runtime. Keep this allowlist narrow and verb-specific: a matching
+// phrase on another verb, a different database error, or an unexpected TypeError
+// must remain an incident.
+const EXPECTED_POLICY_REFUSALS = Object.freeze({
+  "set-work-shape-disposition": [
+    /^sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged or triaged-to-ready transitions$/,
+    /^sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, or triaged-to-ready transitions$/,
+  ],
+  "activate-context-bundle": [
+    /^context compilation tenant must match authenticated tenant context$/,
+  ],
+  "issue-execution-envelope": [
+    /^execution envelope requires an active conformance-passed environment provider binding$/,
+  ],
+  "read-attempt-reliability": [
+    /^attempt reliability is not visible to tenant$/,
+  ],
+  "approve-rule": [
+    /^rule approval refused: exact enforcement is not installed; missing\s+\S/,
+    /^exact registered controls must be implemented before approval$/,
+  ],
+});
+
+/** Pure. A stored-procedure refusal that the named verb is expected to surface. */
+export function isExpectedPolicyRefusal(verb, error) {
+  const message = String(error?.message || "");
+  return (EXPECTED_POLICY_REFUSALS[verb] || []).some((pattern) => pattern.test(message));
+}
+
 /** Pure. status >= 500 is unambiguous Worker-reported failure; everything else
  * (including every 4xx) is out of scope for THIS classifier — see the actor-
  * unresolved 401 case, which is deliberately its own explicit call site rather
@@ -99,10 +131,11 @@ export function httpFailureClass(status) {
   return typeof status === "number" && status >= 500 ? "http_5xx" : null;
 }
 
-/** Pure. See the file header for why -32603 is the one JSON-RPC error code
- * this file ever records. */
-export function rpcInternalErrorFailureClass(code) {
-  return code === RPC_INTERNAL_ERROR_CODE ? "verb_internal_error" : null;
+/** Pure. See the file header for why -32603 is the only JSON-RPC error code
+ * considered here; known expected policy refusals are excluded. */
+export function rpcInternalErrorFailureClass(code, { verb, error } = {}) {
+  if (code !== RPC_INTERNAL_ERROR_CODE) return null;
+  return isExpectedPolicyRefusal(verb, error) ? null : "verb_internal_error";
 }
 
 /** Pure. A provider-validated grant with no resolvable actor — see the file
@@ -371,7 +404,7 @@ export function wrapNeonRows(sqlLike) {
  * mcpApiHandler, exactly the "a recorder must never change a response"
  * failure this whole file exists to prevent. */
 export function scheduleFailureRecord(env, ctx, { routeKey, failureClass, detail }) {
-  if (!env || !env.DATABASE_URL_WRITER || !ctx || typeof ctx.waitUntil !== "function") return;
+  if (!failureClass || !env || !env.DATABASE_URL_WRITER || !ctx || typeof ctx.waitUntil !== "function") return;
   let query;
   try {
     query = wrapNeonRows(neon(env.DATABASE_URL_WRITER));

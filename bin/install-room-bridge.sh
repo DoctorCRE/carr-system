@@ -102,6 +102,10 @@ if ! "$REPO/bin/install-engineering-codex-desk.sh"; then
   print -u2 -- "install-room-bridge: Engineering Codex desk bootstrap refused; LaunchAgent unchanged"
   exit 1
 fi
+if ! "$REPO/bin/install-claude-desktop-desk.sh"; then
+  print -u2 -- "install-room-bridge: Claude Desktop desk bootstrap refused; LaunchAgent unchanged"
+  exit 1
+fi
 
 mkdir -p "$HOME/Library/LaunchAgents" "$REPO/out"
 /usr/bin/install -m 644 "$TMP" "$DEST"

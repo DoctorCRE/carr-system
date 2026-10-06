@@ -13,13 +13,16 @@ one.
 """
 from __future__ import annotations
 
+import contextlib
 import copy
+import io
 import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
+from datetime import date
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
@@ -147,7 +150,8 @@ def case_sync_adds_pending_unbuilt():
 
         entry = synced.get("rule_controls", {}).get("eeeeeeee")
         if not isinstance(entry, dict) or entry.get("enforcement_class") != "unbuilt" \
-                or not (entry.get("planned_control") or "").strip():
+                or not (entry.get("planned_control") or "").strip() \
+                or date.today().isoformat() not in entry.get("planned_control", ""):
             print(f"FAIL  {name}: new rule not labeled unbuilt/pending: {entry!r}")
             return False
 
@@ -357,7 +361,7 @@ def case_sync_prunes_an_already_stranded_rule():
         subprocess.run(["rm", "-rf", repo, vault])
 
 
-def main():
+def _run_cases():
     cases = [
         case("exact coverage: one entry per honest shape", copy.deepcopy(BASE), True),
         case("complete entry per class passes (deny_gate + judgment_ambient + unbuilt)",
@@ -397,6 +401,19 @@ def main():
     ]
     print(f"rule-enforcement-map-selftest: {sum(cases)}/{len(cases)} passed")
     return 0 if all(cases) else 1
+
+
+def main():
+    capture = io.StringIO()
+    with contextlib.redirect_stdout(capture):
+        result = _run_cases()
+    output = capture.getvalue()
+    print(output, end="")
+    if result:
+        for line in output.splitlines():
+            if line.startswith("FAIL  "):
+                print(f"failure-summary: {line}")
+    return result
 
 
 if __name__ == "__main__":

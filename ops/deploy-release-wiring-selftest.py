@@ -111,9 +111,11 @@ def main() -> int:
 
     # 2. Provider promotion is strict, while routine source rehearsal preserves
     # main's credential boundary: only the explicit not-approved result blocks.
-    check("2. provider promotion refuses every non-zero approval result",
+    check("2. provider promotion refuses an unresolved provider identity",
           re.search(r'\[ "\$REQUIRE_RC" -eq 0 \]\s*\\\s*\n\s*\|\| fail '
-                    r'"no live approval binds Production', source) is not None,
+                    r'"no unique recorded candidate binds Production', source) is not None
+          and 'release ready' in source
+          and 'RECONFIRMED_BINDING=' in source,
           "provider-version promotion can proceed without exact release truth")
     check("2b. source rehearsal treats exit 3 as the approval refusal",
           re.search(r'REQUIRE_RC["}]*\s*-eq\s*3', source) is not None
@@ -182,7 +184,10 @@ def main() -> int:
     # 5. one digest decision, not two
     check("5. the manifest comes from tools/release-manifest.py",
           "tools/release-manifest.py" in source
-          and "sha256" not in source,
+          # The wrapper may validate the manifest's declared schema_ledger_sha256
+          # field, but it must not compute a competing digest itself.
+          and "sha256(" not in source
+          and "digest(" not in source,
           "the wrapper appears to compute a digest of its own")
 
     # 6. a source rehearsal still refuses without a SHA, with no DB in sight
@@ -193,6 +198,22 @@ def main() -> int:
     check("6. staging `release require` refuses with no --sha",
           out.returncode == 2 and "needs --sha" in (out.stderr + out.stdout),
           f"rc={out.returncode} err={out.stderr.strip()[:120]}")
+
+    check("6a. one builder binds target and assurance for every deploy rebuild",
+          "build_release_manifest()" in source
+          and source.count("build_release_manifest ") >= 3
+          and 'build --sha "$BUILD_MANIFEST_SHA"' in source
+          and '--environment "$BUILD_MANIFEST_ENVIRONMENT"' in source,
+          "candidate and deploy can recompute different approval preimages")
+    check("6b. standalone staging requires the full assurance preimage",
+          "standalone staging release requires performance/recovery assurance" in source,
+          "staging can still approve a recovery plan the deploy does not rebuild")
+    record_source = RECORD.read_text(encoding="utf-8")
+    check("6c. staging refusal prints an explicit target and assurance build",
+          "--environment staging --performance-budget-ref <immutable-ref>" in record_source
+          and "--performance-budget-ms <milliseconds>" in record_source
+          and "--rollback-plan-ref <immutable-ref>" in record_source,
+          "the recovery instruction can recreate the production-default manifest defect")
 
     check("7. rollback instruction uses immutable provider promotion",
           "bin/deploy-worker.sh --promote-version "
@@ -241,6 +262,85 @@ def main() -> int:
           and "record_staging_restore_only_result" in RECORD.read_text(encoding="utf-8")
           and "structurally outside the three\nreceipt tables" in rollback_runbook,
           "a repair could be routed through current_after and forge a bundle leg")
+
+    check("10. only an exact legacy prior may omit candidate stamps",
+          'LEGACY_PRIOR_WITHOUT_CANDIDATE_STAMP=0' in source
+          and '[ "$VERSION_MODE" = "ordinary" ]' in source
+          and '[ "$TARGET_ENV" = "staging" ]' in source
+          and '[ "$RECOVERY_STEP" = "prior" ]' in source
+          and '[ -n "$EXACT_SOURCE_ROOT" ]' in source
+          and '[ ! -e "$WORKER_DIR/src/build-stamp.js" ]' in source,
+          "a non-prior, non-exact, or stamp-aware source could bypass sealing")
+    check("10b. legacy prior keeps SHA/tag and omits only candidate stamps",
+          'deploy_staging_worker()' in source
+          and 'if [ "$LEGACY_PRIOR_WITHOUT_CANDIDATE_STAMP" = "1" ]; then' in source
+          and '"$WRANGLER" deploy --env "$TARGET_ENV" --var "GIT_SHA:$HEAD_SHA"' in source
+          and '--tag "$DEPLOY_TAG"' in source,
+          "the compatibility route can lose deterministic deployment provenance")
+    stamp_intro = "ab9678a86f427e8f9e5d1f75597a21b920630995"
+    intro_paths = (
+        "mcp-server/src/build-stamp.js",
+        "mcp-server/bin/seal-candidate-manifest.mjs",
+    )
+    intro_has_both = all(subprocess.run(
+        ["git", "cat-file", "-e", f"{stamp_intro}:{path}"], cwd=REPO,
+        capture_output=True, check=False).returncode == 0 for path in intro_paths)
+    parent_has_either = any(subprocess.run(
+        ["git", "cat-file", "-e", f"{stamp_intro}^:{path}"], cwd=REPO,
+        capture_output=True, check=False).returncode == 0 for path in intro_paths)
+    check("10c. both pinned boundaries are their canonical introduction",
+          f'BUILD_STAMP_INTRODUCTION_SHA="{stamp_intro}"' in source
+          and f'CANDIDATE_SEALER_INTRODUCTION_SHA="{stamp_intro}"' in source
+          and intro_has_both and not parent_has_either,
+          "the pinned provenance boundary does not match canonical Git history")
+    provenance_start = source.index("exact_source_predates_candidate_stamps() {")
+    provenance_end = source.index("\n}\n", provenance_start) + 2
+    provenance_gate = source[provenance_start:provenance_end]
+    check("10d. legacy qualification requires strict ancestry to both boundaries",
+          provenance_gate.count('git -C "$SOURCE_ROOT" merge-base --is-ancestor') == 2
+          and '[ "$HEAD_SHA" != "$BUILD_STAMP_INTRODUCTION_SHA" ]' in provenance_gate
+          and '[ "$HEAD_SHA" != "$CANDIDATE_SEALER_INTRODUCTION_SHA" ]' in provenance_gate,
+          "file deletion after stamp introduction could impersonate a legacy source")
+
+    upload_start = source.index('if [ "$VERSION_MODE" = "upload" ]; then',
+                                source.index("== deploy =="))
+    upload_end = source.index("# -- provider-version promotion --", upload_start)
+    upload = source[upload_start:upload_end]
+    staging_view_at = upload.find(
+        'versions view "$FOUNDATION_ASSURANCE_STAGING_PROVIDER" --env staging --json')
+    version_upload_at = upload.find("versions upload")
+    candidate_at = upload.find('"$REPO/tools/ops-record.py" release candidate')
+    sealer_at = upload.find('node "$REPO/mcp-server/bin/seal-foundation-assurance-evidence.mjs"')
+    final_view_at = upload.find('versions view "$PROVIDER_VERSION_ID" --json')
+    check("11. WR95 accepts only a verified staging UUID and refuses caller test evidence",
+          "--foundation-assurance-staging-provider" in source
+          and "--foundation-assurance-staging-candidate-operation" in source
+          and "--foundation-assurance-staging-replacement-receipt" in source
+          and "--foundation-assurance-staging-replacement-source" in source
+          and "WR95 derives --test-evidence from live acquisition; caller evidence is refused." in source,
+          "the final evidence route can accept caller evidence or an unbound target")
+    check("11b. exact staging provider/readback precede final upload",
+          0 <= staging_view_at < version_upload_at
+          and '(live.get("git_sha") or {}).get("value")!=sha' in upload
+          and 'worker_version") or {}).get("id")!=wanted' in upload,
+          "evidence could be acquired from a different staging build")
+    check("11c. candidate commits before synchronous sealer storage",
+          0 <= candidate_at < sealer_at
+          and '--staging-candidate-operation-id "$FOUNDATION_ASSURANCE_STAGING_CANDIDATE_OPERATION"' in upload
+          and '--staging-replacement-receipt-id "$FOUNDATION_ASSURANCE_STAGING_REPLACEMENT_RECEIPT"' in upload
+          and '--staging-replacement-source-sha "$FOUNDATION_ASSURANCE_STAGING_REPLACEMENT_SOURCE"' in upload
+          and 'WR95_SEAL_PID' not in upload
+          and '> "$WR95_SEAL_OUTPUT" &' not in upload,
+          "background acquisition can race the candidate row or survive its failure")
+    check("11d. final provider secret binding is authenticated before candidacy",
+          0 <= version_upload_at < final_view_at < candidate_at
+          and "DATABASE_URL_FOUNDATION_ASSURANCE_WRITER" in upload,
+          "the release row can name a provider whose required secret is absent")
+    check("11e. WR95 temporary artifacts are owned by the cleanup trap",
+          all(name in source[source.index("cleanup_ephemeral() {"):source.index("cleanup_on_signal() {")]
+              for name in ("WR95_STAGING_VERSION_JSON", "WR95_STAGING_RELEASE_JSON",
+                           "WR95_FINAL_VERSION_JSON", "WR95_SEAL_OUTPUT")),
+          "an interrupted upload can strand evidence-bearing temporary files")
 
     print()
     if FAILURES:

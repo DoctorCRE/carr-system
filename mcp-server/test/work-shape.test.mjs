@@ -12,6 +12,52 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");
 const MIGRATION = path.join(REPO, "migrations/0132_work_shape_revision.sql");
 const SOURCED_SHAPE_MIGRATION = path.join(REPO, "migrations/0306_sourced_work_shape_disposition.sql");
+const FORWARD_CORRECTION_MIGRATION = path.join(REPO, "migrations/0492_sourced_shape_forward_correction_and_scac_successor.sql");
+
+const SOURCED_LINEAGE = Object.freeze({
+  status: "corrected",
+  effective: { receipt_kind: "correction", receipt_id: "77777777-7777-4777-8777-777777777777", disposition: "required", fixed_surface_ref: null, rationale: "Heavy work needs a Shape.", decided_by_actor_id: "11111111-1111-4111-8111-111111111111", decided_at: "2026-09-08T00:00:00Z", base_version: 3, result_version: 4 },
+  original: { receipt_id: "66666666-6666-4666-8666-666666666666", disposition: "not_required", fixed_surface_ref: "safe:fixed", rationale: "Mistaken.", decided_by_actor_id: "11111111-1111-4111-8111-111111111111", decided_at: "2026-09-07T00:00:00Z", base_version: 2, result_version: 3 },
+  correction: { receipt_id: "77777777-7777-4777-8777-777777777777", original_receipt_id: "66666666-6666-4666-8666-666666666666", disposition: "required", fixed_surface_ref: null, rationale: "Heavy work needs a Shape.", decided_by_actor_id: "11111111-1111-4111-8111-111111111111", decided_at: "2026-09-08T00:00:00Z", base_version: 3, result_version: 4 },
+  backs_current_version: true,
+});
+
+// A recording fake for the sourced/unsourced disposition branches. `classify`
+// is the classifier wrapper's row list (undefined = the wrapper must not be
+// called); `setter` is the sourced setter's returned row.
+function dispositionFake(work, { classify, setter, lineage } = {}) {
+  const calls = [];
+  const db = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (sql.includes("from ops.work_request") && sql.includes("for update")) return { rows: [work] };
+    if (sql.includes("classify_sourced_work_request_build")) {
+      if (classify === undefined) throw new Error("classifier wrapper must not be consulted on this branch");
+      return { rows: classify };
+    }
+    if (sql.includes("set_sourced_work_request_shape_disposition")) {
+      if (!setter) throw new Error("sourced setter must not be reached on this branch");
+      return { rows: [setter(params)] };
+    }
+    if (sql.includes("read_sourced_work_request_shape_disposition_lineage")) {
+      if (lineage === undefined) throw new Error("sourced lineage projection must not be read on this branch");
+      return { rows: [{ lineage }] };
+    }
+    if (sql.includes("update ops.work_request set shape_disposition")) {
+      if (work.capture_idempotency_key) throw new Error("a sourced request must never take the direct update");
+      return { rows: [{ ...work, version: Number(work.version) + 1, shape_disposition: params[1], shape_fixed_surface_ref: params[2], shape_rationale: params[3], shape_decided_by_actor_id: params[4], shape_decided_at: "now" }] };
+    }
+    throw new Error(`unexpected query: ${sql}`);
+  }};
+  const events = [];
+  const tools = workShapeTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async (...args) => events.push(args), ToolError });
+  return { db, calls, events, tools };
+}
+const SOURCED_WORK = Object.freeze({
+  id: "22222222-2222-4222-8222-222222222222", ref: "WR-000063", title: "Heavy sourced request", state: "triaged", version: 3,
+  capture_idempotency_key: "33333333-3333-4333-8333-333333333333", shape_disposition: null, shape_fixed_surface_ref: null, shape_rationale: null,
+});
+const settled = params => ({ id: SOURCED_WORK.id, ref: SOURCED_WORK.ref, title: SOURCED_WORK.title, state: "triaged", version: Number(params[1]) + 1,
+  shape_disposition: params[2], shape_fixed_surface_ref: params[3], shape_rationale: params[4], shape_decided_by_actor_id: params[5], shape_decided_at: "2026-09-08T00:00:00Z", replayed: false });
 
 class ToolError extends Error {
   constructor(payload) { super(payload.error); this.payload = payload; }
@@ -201,6 +247,173 @@ test("a sourced triaged disposition uses the exact receipt-backed database trans
   assert.deepEqual(transition.params, [base.ref, 2, "required", null, "The implementation surface remains open.", actor.id, "44444444-4444-4444-8444-444444444444"]);
   assert.equal(calls.some(call => call.sql.includes("update ops.work_request set shape_disposition")), false);
   assert.equal(events[0][2], "set-work-shape-disposition");
+});
+
+test("a sourced initial not_required is preflighted: heavy refuses without mutation, standard proceeds, zero rows defers to the setter", async () => {
+  const args = { idempotency_key: "44444444-4444-4444-8444-444444444444", work_request: SOURCED_WORK.ref, base_version: 3, disposition: "not_required", fixed_surface_ref: "safe:fixed", rationale: "The surface is fixed." };
+  const heavy = dispositionFake(SOURCED_WORK, { classify: [{ work_request_id: SOURCED_WORK.id, ref: SOURCED_WORK.ref, tier: "heavy", reasons: ["signal:new_capability"], shape_disposition: null, shape_ready: false }] });
+  await assert.rejects(
+    heavy.tools["set-work-shape-disposition"].handler(heavy.db, actor, args),
+    error => error instanceof ToolError && error.payload.error === "heavy_build_shape_required" && error.payload.classification_reasons[0] === "signal:new_capability",
+  );
+  assert.equal(heavy.calls.some(call => call.sql.includes("set_sourced_work_request_shape_disposition")), false);
+  assert.equal(heavy.calls.some(call => call.sql.includes("update ops.work_request")), false);
+  assert.equal(heavy.events.length, 0);
+  const classify = heavy.calls.find(call => call.sql.includes("classify_sourced_work_request_build"));
+  assert.deepEqual(classify.params, [SOURCED_WORK.ref, 3, "", "[]", "{}"]);
+
+  const standard = dispositionFake(SOURCED_WORK, { classify: [{ tier: "standard", reasons: [] }], setter: settled });
+  const result = await standard.tools["set-work-shape-disposition"].handler(standard.db, actor, args);
+  assert.equal(result.work_request.shape_disposition, "not_required");
+  assert.equal(result.work_request.version, 4);
+  const transition = standard.calls.find(call => call.sql.includes("set_sourced_work_request_shape_disposition"));
+  assert.deepEqual(transition.params, [SOURCED_WORK.ref, 3, "not_required", "safe:fixed", "The surface is fixed.", actor.id, args.idempotency_key]);
+  assert.equal(standard.events.length, 1);
+
+  // A zero-row wrapper answer is not "standard": the sourced setter's own
+  // classifier call decides, so the call still goes to the setter.
+  const deferred = dispositionFake(SOURCED_WORK, { classify: [], setter: settled });
+  await deferred.tools["set-work-shape-disposition"].handler(deferred.db, actor, args);
+  assert.equal(deferred.calls.filter(call => call.sql.includes("set_sourced_work_request_shape_disposition")).length, 1);
+});
+
+test("a sourced initial required and a not_required to required correction never consult the classifier", async () => {
+  const initial = dispositionFake(SOURCED_WORK, { setter: settled });
+  const shaped = await initial.tools["set-work-shape-disposition"].handler(initial.db, actor, { idempotency_key: "55555555-5555-4555-8555-555555555555", work_request: SOURCED_WORK.ref, base_version: 3, disposition: "required", rationale: "The surface is open." });
+  assert.equal(shaped.work_request.shape_disposition, "required");
+  assert.equal(initial.calls.some(call => call.sql.includes("classify_sourced_work_request_build")), false);
+
+  const mistaken = { ...SOURCED_WORK, version: 4, shape_disposition: "not_required", shape_fixed_surface_ref: "safe:fixed", shape_rationale: "Mistaken." };
+  const correction = dispositionFake(mistaken, { setter: settled });
+  const corrected = await correction.tools["set-work-shape-disposition"].handler(correction.db, actor, { idempotency_key: "77777777-7777-4777-8777-777777777777", work_request: mistaken.ref, base_version: 4, disposition: "required", rationale: "Heavy work needs a Shape." });
+  assert.equal(corrected.work_request.shape_disposition, "required");
+  assert.equal(corrected.work_request.version, 5);
+  assert.equal(correction.calls.some(call => call.sql.includes("classify_sourced_work_request_build")), false);
+  const transition = correction.calls.find(call => call.sql.includes("set_sourced_work_request_shape_disposition"));
+  assert.deepEqual(transition.params, [mistaken.ref, 4, "required", null, "Heavy work needs a Shape.", actor.id, "77777777-7777-4777-8777-777777777777"]);
+  assert.equal(correction.events[0][2], "set-work-shape-disposition");
+  assert.deepEqual(correction.events[0][5].old, { disposition: "not_required", fixed_surface_ref: "safe:fixed", rationale: "Mistaken." });
+  assert.deepEqual(correction.events[0][5].new, { disposition: "required", fixed_surface_ref: null, rationale: "Heavy work needs a Shape." });
+});
+
+test("unsourced initial required and not_required keep the direct update and touch no sourced seam", async () => {
+  const unsourced = { id: "22222222-2222-4222-8222-222222222222", ref: "WR-TEST-9", title: "Unsourced", state: "triaged", version: 3, capture_idempotency_key: null, shape_disposition: null, shape_fixed_surface_ref: null, shape_rationale: null };
+  for (const args of [
+    { idempotency_key: "u1", work_request: unsourced.ref, base_version: 3, disposition: "required", rationale: "Open surface." },
+    { idempotency_key: "u2", work_request: unsourced.ref, base_version: 3, disposition: "not_required", fixed_surface_ref: "mcp-server/src/tools.js#verb", rationale: "Fixed surface." },
+  ]) {
+    const fake = dispositionFake(unsourced);
+    const result = await fake.tools["set-work-shape-disposition"].handler(fake.db, actor, args);
+    assert.equal(result.work_request.version, 4);
+    assert.equal(result.work_request.shape_disposition, args.disposition);
+    assert.equal(fake.calls.filter(call => call.sql.includes("update ops.work_request set shape_disposition")).length, 1);
+    assert.equal(fake.calls.some(call => /classify_sourced|set_sourced|read_sourced|_receipt/.test(call.sql)), false);
+    assert.equal(fake.events.length, 1);
+    assert.equal(fake.events[0][2], "set-work-shape-disposition");
+  }
+});
+
+test("read-work-shape exposes sourced lineage through the narrow projection and null for unsourced", async () => {
+  const sourced = { ...SOURCED_WORK, version: 4, shape_disposition: "required" };
+  const calls = [];
+  const db = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (sql.includes("from ops.work_request where")) return { rows: [sourced] };
+    if (sql.includes("from ops.work_shape_revision")) return { rows: [] };
+    if (sql.includes("read_sourced_work_request_shape_disposition_lineage")) return { rows: [{ lineage: SOURCED_LINEAGE }] };
+    throw new Error(`unexpected query: ${sql}`);
+  }};
+  const tools = workShapeTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
+  const result = await tools["read-work-shape"].handler(db, actor, { work_request: sourced.ref });
+  assert.deepEqual(result.disposition_lineage, SOURCED_LINEAGE);
+  assert.equal(result.work_request.shape_disposition, "required");
+  assert.equal(result.current, null);
+  assert.match(calls[0].sql, /capture_idempotency_key/);
+  assert.deepEqual(calls.find(call => call.sql.includes("read_sourced_work_request_shape_disposition_lineage")).params, [sourced.id]);
+  assert.equal(calls.some(call => /_receipt/.test(call.sql)), false, "direct receipt-table reads stay denied");
+
+  const unsourcedCalls = [];
+  const unsourcedDb = { query: async (sql, params = []) => {
+    unsourcedCalls.push(sql);
+    if (sql.includes("from ops.work_request where")) return { rows: [{ ...sourced, capture_idempotency_key: null }] };
+    if (sql.includes("from ops.work_shape_revision")) return { rows: [] };
+    throw new Error(`unexpected query: ${sql}`);
+  }};
+  const plain = await tools["read-work-shape"].handler(unsourcedDb, actor, { work_request: sourced.ref });
+  assert.equal(plain.disposition_lineage, null);
+  assert.equal(plain.work_request.shape_disposition, "required");
+  assert.equal(unsourcedCalls.some(sql => sql.includes("read_sourced")), false);
+});
+
+test("write-work-shape requires the effective receipt-backed required disposition for sourced requests only", async () => {
+  const sourced = { ...SOURCED_WORK, version: 4, shape_disposition: "required", shape_rationale: "Heavy work needs a Shape." };
+  const build = lineage => {
+    const calls = [];
+    const db = { query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (sql.includes("from ops.work_request") && sql.includes("for update")) return { rows: [sourced] };
+      if (sql.includes("read_sourced_work_request_shape_disposition_lineage")) return { rows: [{ lineage }] };
+      if (sql.includes("from ops.work_shape_revision") && sql.includes("limit 1")) return { rows: [] };
+      if (sql.includes("insert into ops.work_shape_revision")) return { rows: [{ id: "44444444-4444-4444-8444-444444444444", work_request_id: sourced.id, work_request_version: 4, version: 1, ...validShape() }] };
+      throw new Error(`unexpected query: ${sql}`);
+    }};
+    const tools = workShapeTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
+    return { db, calls, tools };
+  };
+  const args = { idempotency_key: "s1", work_request: sourced.ref, base_version: 0, work_request_base_version: 4, ...validShape() };
+  const backed = build(SOURCED_LINEAGE);
+  const written = await backed.tools["write-work-shape"].handler(backed.db, actor, args);
+  assert.equal(written.shape.version, 1);
+  assert.match(backed.calls[0].sql, /capture_idempotency_key/);
+
+  const stale = build({ ...SOURCED_LINEAGE, backs_current_version: false });
+  await assert.rejects(
+    stale.tools["write-work-shape"].handler(stale.db, actor, args),
+    error => error instanceof ToolError && error.payload.error === "work_shape_not_required" && error.payload.disposition_lineage.backs_current_version === false,
+  );
+  assert.equal(stale.calls.some(call => call.sql.includes("insert into ops.work_shape_revision")), false);
+
+  const unbacked = build({ status: "none", effective: null, original: null, correction: null, backs_current_version: false });
+  await assert.rejects(unbacked.tools["write-work-shape"].handler(unbacked.db, actor, args),
+    error => error instanceof ToolError && error.payload.error === "work_shape_not_required");
+});
+
+test("migration 0492 admits one linked forward correction behind the exact sourced setter", () => {
+  const sql = fs.readFileSync(FORWARD_CORRECTION_MIGRATION, "utf8");
+  assert.doesNotMatch(sql, /^\s*(begin|commit)\s*;\s*$/im, "0339+ migrations use the runner's single transaction");
+  assert.match(sql, /create table ops\.sourced_work_request_shape_disposition_correction_receipt \(\n  id uuid primary key default gen_random_uuid\(\),\n  work_request_id uuid not null unique references ops\.work_request\(id\),\n  idempotency_key uuid not null unique,\n  original_receipt_id uuid not null unique references ops\.sourced_work_request_shape_disposition_receipt\(id\)/);
+  assert.match(sql, /result_version integer not null check \(result_version = base_version \+ 1\)/);
+  assert.match(sql, /disposition text not null check \(disposition = 'required'\)/);
+  assert.match(sql, /before update or delete on ops\.sourced_work_request_shape_disposition_correction_receipt\nfor each row execute function ops\.sourced_work_shape_receipts_are_immutable\(\)/);
+  assert.equal((sql.match(/create or replace function ops\.set_sourced_work_request_shape_disposition\(/g) || []).length, 1);
+  assert.match(sql, /create or replace function ops\.set_sourced_work_request_shape_disposition\(\n  p_work_request text,\n  p_base_version integer,\n  p_disposition text,\n  p_fixed_surface_ref text,\n  p_rationale text,\n  p_decided_by_actor_id uuid,\n  p_idempotency_key uuid\n\)/);
+  assert.match(sql, /grant execute on function ops\.set_sourced_work_request_shape_disposition\(text,integer,text,text,text,uuid,uuid\)\n  to carr_writer;/);
+  assert.match(sql, /revoke all on function ops\.set_sourced_work_request_shape_disposition\(text,integer,text,text,text,uuid,uuid\)\n  from public,carr_reader,carr_jobs,carr_authority;/);
+  assert.match(sql, /create or replace function ops\.effective_sourced_work_request_shape_disposition\(p_work_request ops\.work_request\)/);
+  assert.match(sql, /revoke all on table ops\.sourced_work_request_shape_disposition_correction_receipt\n  from public,carr_reader,carr_writer,carr_jobs,carr_authority;/);
+  assert.match(sql, /grant execute on function ops\.read_sourced_work_request_shape_disposition_lineage\(uuid\) to carr_reader,carr_writer;/);
+  const setter = sql.slice(sql.indexOf("create or replace function ops.set_sourced_work_request_shape_disposition("), sql.indexOf("CREATE OR REPLACE FUNCTION ops.sourced_work_request_is_immutable()"));
+  const lock = setter.indexOf("pg_advisory_xact_lock(hashtextextended('program6-sourced-shape-disposition:' || p_idempotency_key, 0))");
+  const originalLookup = setter.indexOf("from ops.sourced_work_request_shape_disposition_receipt r\n   where r.idempotency_key = p_idempotency_key");
+  const correctionLookup = setter.indexOf("from ops.sourced_work_request_shape_disposition_correction_receipt c\n   where c.idempotency_key = p_idempotency_key");
+  const rowLock = setter.indexOf("where x.ref = p_work_request\n   for update");
+  const correctionInsert = setter.indexOf("insert into ops.sourced_work_request_shape_disposition_correction_receipt");
+  const classifier = setter.indexOf("ops.heavy_build_classification(w.id, '', '[]'::jsonb, '{}'::jsonb)");
+  assert.ok(lock >= 0 && lock < originalLookup && originalLookup < correctionLookup && correctionLookup < rowLock && rowLock < correctionInsert);
+  assert.equal((setter.match(/ops\.heavy_build_classification\(/g) || []).length, 1);
+  assert.ok(classifier > correctionInsert, "the classifier refusal belongs to the initial not_required branch only");
+  assert.match(setter, /if p_disposition = 'not_required' then\n      classification := ops\.heavy_build_classification/);
+  assert.match(setter, /or w\.program_key is not null or w\.program_ordinal is not null then/);
+  assert.match(setter, /is distinct from \(null::text,null::text,null::text,null::uuid,null::timestamptz\)\n       or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\) then/);
+  assert.match(setter, /or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\)\n       or exists \(select 1 from ops\.sourced_work_request_shape_disposition_correction_receipt c/);
+  // Consumers read the effective lineage, never the bare columns.
+  assert.match(sql, /select 1 from ops\.effective_sourced_work_request_shape_disposition\(new\) e\n        where e\.base_version = old\.version and e\.result_version = new\.version/);
+  assert.equal((sql.match(/ops\.effective_sourced_work_request_shape_disposition\(w\) e where e\.disposition='required'\)/g) || []).length, 2);
+  assert.equal((sql.match(/ops\.effective_sourced_work_request_shape_disposition\(w\) e where e\.disposition='not_required'\)/g) || []).length, 2);
+  assert.equal((sql.match(/select 1 from ops\.sourced_work_request_shape_disposition_lineage\(w\.id\) e/g) || []).length, 2);
+  assert.match(sql, /before insert on ops\.work_shape_revision\nfor each row execute function ops\.sourced_work_shape_revision_requires_effective_required\(\)/);
+  assert.match(sql, /if not found or w\.capture_idempotency_key is null\n     or not exists \(select 1 from ops\.sourced_work_request_shape_disposition_receipt r\n                     where r\.work_request_id = w\.id\) then\n    return new;/);
+  assert.match(sql, /or not exists \(select 1 from ops\.effective_sourced_work_request_shape_disposition\(w\) e\n                     where e\.disposition = 'required'\) then\n    raise exception 'a sourced Work Shape revision requires the exact current receipt-backed required disposition'/);
 });
 
 test("both shape writes serialize identical idempotency keys before replay lookup", () => {

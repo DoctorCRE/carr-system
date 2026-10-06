@@ -163,6 +163,22 @@ Top-level fields:
                        reviewer's CLI call (not a combined budget — Codex
                        timing out does not shorten Grok's own budget).
 
+Optional CARRY-FORWARD fields (engineering-workflow-sop section 15, the
+continuous loop and the findings ledger). ABSENT = the request behaves exactly
+as it did before they existed: same prompt byte-for-byte, same one row per
+reviewer. Their full shape and rules live in pipelines/review_findings_ledger.py
+(validate_carry_forward), not restated here:
+  pr                   object {number, branch} — at least one. Turns
+                       carry-forward on; needs kind="code".
+  prior_commits        array of shas, REQUIRED with pr. Earlier commits of the
+                       same PR; never the commit under review.
+  prior_findings       array, REQUIRED with pr (may be empty). One entry per
+                       earlier finding, naming the record-layer flag_id of the
+                       review row it sits in. Open ones go into every
+                       reviewer's prompt; each reviewer classifies each one and
+                       the runner records one code_review_disposition row per
+                       open finding under that reviewer's own bearer.
+
 A request missing a required field, or with kind/reviewers/evidence shaped
 wrong, fails schema validation — see validate_request(). Malformed requests
 are not guessable-fixed; they fail loud, in the log, in the exit code, and
@@ -193,6 +209,15 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
+
+# The sibling helper must import however this file is loaded: as a script
+# (pipelines/ is already sys.path[0]), by the test suites (which add it), AND
+# by file path through importlib.util.spec_from_file_location, which adds
+# nothing — ops/codex-hook-smoke-selftest.py loads it that way.
+_PIPELINES_DIR = str(Path(__file__).resolve().parent)
+if _PIPELINES_DIR not in sys.path:
+    sys.path.insert(0, _PIPELINES_DIR)
+import review_findings_ledger as ledger  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 REVIEW_COUNCIL_DIR = REPO / "out" / "review-council"
@@ -293,6 +318,13 @@ def validate_request(req: dict) -> None:
 
     if not isinstance(req["timeout_minutes"], (int, float)) or req["timeout_minutes"] <= 0:
         raise RequestError("timeout_minutes must be a positive number")
+
+    # Carry-forward fields are optional; when present, malformed prior data
+    # fails the whole request here, visibly, before any reviewer runs.
+    try:
+        ledger.validate_carry_forward(req)
+    except ledger.CarryForwardError as e:
+        raise RequestError(str(e))
 
 
 def load_request(path: Path) -> dict:
@@ -502,17 +534,22 @@ def find_grok_binary() -> tuple[Optional[str], list[str]]:
 # 4. the review-contract prompt (ONE versioned string, every reviewer)
 # ---------------------------------------------------------------------------
 
-# Paths whose change means the commit touches the trust surface: the Worker's
-# auth doors and verb layer, the hooks that enforce write policy, migrations
-# (grants live there), and the Worker's deploy config. Prefix match on the
-# repo-relative path.
-SECURITY_SENSITIVE_PATHS = (
-    "mcp-server/src/",
-    "mcp-server/wrangler.toml",
-    "hooks/",
-    "migrations/",
-    "bin/",
-)
+# Which paths arm the lens is decided by the one review-tier map
+# (ops/config/review-tiers.v1.json, engineering-workflow-sop section 15), read
+# through lib/review_tiers.py: a commit whose highest tier reaches
+# SECURITY_LENS_TIER (tier 2) touches the trust surface. The map holds every
+# prefix this file used to list (mcp-server/src/, mcp-server/wrangler.toml,
+# hooks/, migrations/, bin/) at tier 2 or above.
+def _review_tiers():
+    import importlib.util  # local: this edit stays inside the lens trigger
+    spec = importlib.util.spec_from_file_location(
+        "review_tiers", str(REPO / "lib" / "review_tiers.py"))
+    if spec is None or spec.loader is None:
+        raise ImportError("lib/review_tiers.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 SECURITY_LENS = (
     "SECURITY (auto-armed: this commit touches auth, grants, hooks, or "
@@ -541,9 +578,19 @@ def security_lens_if_triggered(commit_sha: str) -> Optional[str]:
             log(f"security-lens trigger check failed (git rc={out.returncode}); lens not armed")
             return None
         changed = [l.strip() for l in out.stdout.splitlines() if l.strip()]
-        if any(f.startswith(p) for f in changed for p in SECURITY_SENSITIVE_PATHS):
+        if not changed:
+            return None
+        # A map that cannot be imported, read or validated ARMS the lens: an
+        # unreadable map must never lower review. The fault is logged and the
+        # review keeps running.
+        try:
+            tiers = _review_tiers()
+            armed = tiers.tier_for_paths(changed) >= tiers.SECURITY_LENS_TIER
+        except Exception as e:  # noqa: BLE001 — fail toward more review
+            log(f"review-tier map unreadable ({type(e).__name__}: {str(e)[:200]}); "
+                "security lens ARMED conservatively")
             return SECURITY_LENS
-        return None
+        return SECURITY_LENS if armed else None
     except Exception as e:  # noqa: BLE001 — fail open by design, but say so
         log(f"security-lens trigger check errored ({type(e).__name__}); lens not armed")
         return None
@@ -596,7 +643,7 @@ you could not determine it from what you can see:
 EVIDENCE POINTERS:
 {evidence_block}
 
-OUTPUT CONTRACT — respond with EXACTLY ONE JSON object and nothing else
+{ledger.prompt_prior_block(req)}OUTPUT CONTRACT — respond with EXACTLY ONE JSON object and nothing else
 (no markdown fences, no prose before or after it). Shape:
 {{
   "summary": "one paragraph, plain language",
@@ -617,7 +664,7 @@ OUTPUT CONTRACT — respond with EXACTLY ONE JSON object and nothing else
   ],
   "could_not_assess": [
     "anything you were asked to review but could not reach or evaluate, stated plainly"
-  ]
+  ]{ledger.prompt_contract_field(req)}
 }}
 
 ABSENCE MUST BE VISIBLE. If findings is empty, that means you looked and found
@@ -626,7 +673,7 @@ file outside the checkout, a runtime behavior you cannot execute, a record you
 cannot query), it MUST appear in could_not_assess rather than being silently
 omitted. An empty could_not_assess list is itself a claim — that you assessed
 everything you were asked to — so only leave it empty if that is true.
-"""
+{ledger.prompt_rules(req)}"""
 
 
 # ---- per-backend command builders --------------------------------------
@@ -911,8 +958,15 @@ def post_finding(finding_args: dict, url: str = CARR_MCP_URL,
         body = json.loads(result.stdout)
     except json.JSONDecodeError:
         return False, {"error": "non_json_response", "raw": (result.stdout or "")[:500]}
+    if not isinstance(body, dict):
+        return False, {"error": "non_object_response", "raw": (result.stdout or "")[:500]}
     if "error" in body:
         return False, {"error": "rpc_error", "detail": body["error"]}
+    # An MCP tool error arrives as result.isError with a plain-text message
+    # (e.g. "Denied"), not as a JSON-RPC error. It is a refusal, never a
+    # success, whatever the text parses to.
+    if isinstance(body.get("result"), dict) and body["result"].get("isError"):
+        return False, {"error": "verb_error", "detail": body["result"]}
     content = body.get("result", {}).get("content", [])
     text = content[0]["text"] if content else "{}"
     try:
@@ -964,6 +1018,17 @@ def write_status_sidecar(request_path: Path, status: str, detail: dict) -> None:
 
 def _meta(req: dict, backend: str, binary_path: str, started_at: datetime,
           finished_at: datetime, completion_status: str) -> dict:
+    meta = _base_meta(req, backend, binary_path, started_at, finished_at, completion_status)
+    if ledger.is_active(req):
+        # Only on a carry-forward request, so a no-PR row is unchanged. This is
+        # what lets a later round find this row by PR identity.
+        meta["pr"] = req["pr"]
+        meta["prior_commits"] = req["prior_commits"]
+    return meta
+
+
+def _base_meta(req: dict, backend: str, binary_path: str, started_at: datetime,
+               finished_at: datetime, completion_status: str) -> dict:
     return {
         "reviewer": backend,
         "actor_slug": ACTOR_SLUG_BY_BACKEND.get(backend, f"{backend}-reviewer"),
@@ -1049,7 +1114,83 @@ def run_one_reviewer(backend: str, req: dict, prompt: str, cwd: Path,
 
     log(f"OK    request={request_id} reviewer={backend} — finding recorded "
         f"(flag_id={resp.get('flag_id')}, subject={resp.get('subject_id')})")
-    return {"status": "ok", "finding_response": resp, "meta": meta}
+    if not ledger.is_active(req):
+        return {"status": "ok", "finding_response": resp, "meta": meta}
+    # Contained like every other per-reviewer failure: malformed reviewer
+    # output, or any bug in reconciliation, fails THIS reviewer and never
+    # escapes to stop the next reviewer or the status sidecar.
+    try:
+        return _record_dispositions(req, backend, review_result, resp, meta, post_runner)
+    except Exception as e:  # noqa: BLE001 — per-reviewer boundary, reported, never swallowed
+        log(f"FAIL  request={request_id} reviewer={backend} — carry-forward raised "
+            f"{type(e).__name__}: {e}")
+        return {"status": "failed", "finding_response": resp, "meta": meta,
+                "reason": f"carry-forward raised {type(e).__name__}: {e}",
+                "dispositions": [], "carry_forward_problems": [f"raised {type(e).__name__}: {e}"]}
+
+
+def _valid_finding_receipt(resp) -> bool:
+    """A disposition counts as recorded only on a structurally valid
+    record-finding receipt: ok is literally true and flag_id is a uuid. An
+    error envelope, an empty object, or a partial answer is not a receipt."""
+    if not isinstance(resp, dict) or resp.get("ok") is not True:
+        return False
+    fid = resp.get("flag_id")
+    if not isinstance(fid, str):
+        return False
+    try:
+        uuid.UUID(fid)
+    except ValueError:
+        return False
+    return True
+
+
+def _record_dispositions(req: dict, backend: str, review_result: dict, resp: dict,
+                         meta: dict, post_runner: Callable) -> dict:
+    """CARRY-FORWARD RECORD WRITE. One record-finding row per open prior
+    finding, kind code_review_disposition, under THIS reviewer's own bearer
+    (append-only; see review_findings_ledger's module docstring for why a new
+    row rather than an update). Closed prior findings were never sent and are
+    never re-recorded. Any prior finding this reviewer failed to classify
+    validly, and any refused write, makes the reviewer's outcome "failed" so
+    the request lands in failed/ — the finding stays open for the next round
+    rather than silently vanishing.
+
+    INCIDENT BACK-LINK: no link verb joins an incident to a finding
+    (open-incident's related_kind has no 'finding'), and this runner never
+    files one — it knows nothing about incidents. The link is a MANUAL
+    two-step recipe over existing verbs, with a worked example in
+    build_disposition_payload's docstring: open-incident whose `observed`
+    names "record flag <flag_id> #<index>", then a code_review_disposition
+    row built with incident_ref=..., which stores value.incident_ref."""
+    request_id = req["request_id"]
+    opens = ledger.open_prior_findings(req)
+    accepted, problems = ledger.reconcile_dispositions(opens, review_result)
+    slug = ACTOR_SLUG_BY_BACKEND.get(backend, f"{backend}-reviewer")
+    token = read_review_token(backend)
+    written = []
+    for a in accepted:
+        args = ledger.build_disposition_payload(req, a["prior"], a["disposition"], a["reason"],
+                                                a["evidence"], backend, actor_slug=slug)
+        ok, dresp = post_finding(args, token=token, backend=backend, runner=post_runner)
+        if ok and not _valid_finding_receipt(dresp):
+            ok, dresp = False, {"error": "invalid_receipt", "detail": dresp}
+        written.append({"id": a["id"], "prior_flag_id": a["prior"]["flag_id"],
+                        "prior_index": a["prior"]["index"], "disposition": a["disposition"],
+                        "reason": a["reason"], "commit_sha": req["evidence"]["commit_sha"],
+                        "posted": ok, "flag_id": dresp.get("flag_id") if ok else None,
+                        **({} if ok else {"post_response": dresp})})
+        if not ok:
+            problems.append(f"{a['id']} {a['disposition']} disposition not recorded: {dresp}")
+    for p in problems:
+        log(f"FAIL  request={request_id} reviewer={backend} — carry-forward: {p}")
+    log(f"{'FAIL' if problems else 'OK  '}  request={request_id} reviewer={backend} — "
+        f"{sum(1 for w in written if w['posted'])}/{len(opens)} prior finding dispositions recorded")
+    outcome = {"status": "failed" if problems else "ok", "finding_response": resp, "meta": meta,
+               "dispositions": written, "carry_forward_problems": problems}
+    if problems:
+        outcome["reason"] = "carry-forward incomplete: " + "; ".join(problems)
+    return outcome
 
 
 def process_request(request_path: Path) -> int:
@@ -1124,8 +1265,33 @@ def process_request(request_path: Path) -> int:
     else:
         overall_status, exit_code = "done", EX_OK
 
-    write_status_sidecar(request_path, overall_status, {"reviewers": outcomes})
+    detail: dict = {"reviewers": outcomes}
+    if ledger.is_active(req):
+        detail["carry_forward_resolution"] = _carry_forward_resolution(req, outcomes)
+    write_status_sidecar(request_path, overall_status, detail)
     return exit_code
+
+
+def _carry_forward_resolution(req: dict, outcomes: dict) -> list:
+    """The effective disposition of each prior finding after this request,
+    from the rows every reviewer ACTUALLY recorded, resolved by the ledger's
+    order-independent policy (newest head wins; at one head the most
+    conservative disposition wins). Reviewer order in the request cannot
+    change it. Sorted so the sidecar is byte-stable."""
+    rows = []
+    for outcome in outcomes.values():
+        for d in outcome.get("dispositions") or []:
+            if d.get("posted"):
+                rows.append({"disposition": d["disposition"], "reason": d.get("reason"),
+                             "commit_sha": d["commit_sha"],
+                             "prior": {"flag_id": d["prior_flag_id"], "index": d["prior_index"]}})
+    order = list(req["prior_commits"]) + [req["evidence"]["commit_sha"]]
+    try:
+        resolved = ledger.resolve_ledger_dispositions(rows, order)
+    except ledger.CarryForwardError as e:
+        log(f"FAIL  request={req['request_id']} — carry-forward resolution: {e}")
+        return [{"error": str(e)}]
+    return [{"flag_id": k[0], "index": k[1], **v} for k, v in sorted(resolved.items())]
 
 
 def main(argv=None) -> int:

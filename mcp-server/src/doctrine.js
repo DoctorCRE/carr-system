@@ -15,6 +15,10 @@
 
 import { organizationTenantForActor, personalScopeForActor } from "./identity.js";
 import { searchDoctrineSituations } from "./situation-retrieval.js";
+import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
+import { ruleBootPage } from "./rule-boot.js";
+
+const CORE_RULE_ID_SET = new Set(CORE_RULE_IDS);
 
 /** Read the count banner emitted by the generated personal/shared rule renders. */
 export function generatedRuleCount(rendered) {
@@ -306,6 +310,36 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
   }
 
+  function validateChangeDoctrineItems(items) {
+    if (!Array.isArray(items))
+      throw new ToolError({ error: "change_set_items_invalid",
+        hint: "items must be an array of section changes" });
+
+    const malformed = [];
+    for (const [index, item] of items.entries()) {
+      const fields = [];
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        malformed.push({ item_index: index, fields: ["item"] });
+        continue;
+      }
+      if (typeof item.section_key !== "string" || !item.section_key.trim())
+        fields.push("section_key");
+      if (typeof item.body_text !== "string" || !item.body_text.trim())
+        fields.push("body_text");
+      if (!Number.isInteger(item.base_version) || item.base_version < 0)
+        fields.push("base_version");
+      if (item.title !== undefined && item.title !== null && typeof item.title !== "string")
+        fields.push("title");
+      if (item.ordinal !== undefined && item.ordinal !== null && !Number.isInteger(item.ordinal))
+        fields.push("ordinal");
+      if (fields.length) malformed.push({ item_index: index, fields });
+    }
+    if (malformed.length)
+      throw new ToolError({ error: "change_set_item_invalid", malformed,
+        hint: "each item requires a non-empty section_key, body_text, and non-negative integer base_version" });
+    return items;
+  }
+
   // ------------------------------------------------------------------ verbs
 
   return {
@@ -500,8 +534,10 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
       handler: async (c, actor, args) => {
         await actorId(c, actor);
         const doc = await resolveDoc(c, args.document);
-        if (doc.visibility === "personal" && doc.owner_actor_id !== actor.id)
-          throw new ToolError({ error: "personal_doc_not_owner" });
+        // Personal doctrine is readable by both partners (decision logged
+        // 2026-09-24): "personal" scopes where a rule APPLIES, not who may
+        // see it. Writes stay owner-only; search-doctrine and
+        // resolve-doctrine-rules still apply only the caller's own set.
         const snap = await c.query(
           `select generation, snapshot_json, content_hash, built_at
              from doctrine_snapshot where document_id = $1`, [doc.id]);
@@ -612,13 +648,14 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         const r = await c.query(
           `select s.id, s.section_key, s.title, s.ordinal, s.status, s.current_version,
                   s.review_after, d.slug as doc_slug, d.content_class, d.visibility,
-                  d.owner_actor_id, rev.body, rev.content_hash
+                  d.owner_actor_id, o.slug as owner_slug, rev.body, rev.content_hash
              from doctrine_section s
              join doctrine_document d on d.id = s.document_id
              left join doctrine_revision rev on rev.id = s.current_revision_id
+            left join actor o on o.id = d.owner_actor_id
             where s.id = any($1::uuid[])`, [args.section_ids]);
-        const visible = r.rows.filter(x =>
-          x.visibility !== "personal" || x.owner_actor_id === actor.id);
+        // Both partners may read personal sections; owner_slug says whose.
+        const visible = r.rows;
         const found = new Set(visible.map(x => x.id));
         return { ok: true, sections: visible.map(({ owner_actor_id, ...x }) => x),
                  missing: args.section_ids.filter(id => !found.has(id)) };
@@ -645,15 +682,22 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         await actorId(c, actor);
         const r = await c.query(
           `select d.id, d.slug, d.title, d.content_class, d.visibility, d.updated_at,
+                  d.owner_actor_id,
                   count(s.id) filter (where s.status='active') as sections,
                   bool_or(s.review_after < now()) as any_stale
              from doctrine_document d
              left join doctrine_section s on s.document_id = d.id
-            where (d.visibility <> 'personal' or d.owner_actor_id = $1)
-              and ($2::text[] is null or d.content_class = any($2))
+            where ($1::text[] is null or d.content_class = any($1))
             group by d.id order by d.content_class, d.slug`,
-          [actor.id, args.content_classes || null]);
-        return { ok: true, documents: r.rows };
+          [args.content_classes || null]);
+        // Personal documents are listed for both partners (decision 9c06bf1e),
+        // named by owner. Resolved separately: carr_reader reads actor (id, slug).
+        const ownerIds = [...new Set(r.rows.map(x => x.owner_actor_id).filter(Boolean))];
+        const owners = ownerIds.length ? new Map((await c.query(
+          `select id, slug from actor where id = any($1::uuid[])`, [ownerIds])).rows
+          .map(o => [o.id, o.slug])) : new Map();
+        return { ok: true, documents: r.rows.map(({ owner_actor_id, ...x }) =>
+          ({ ...x, owner_slug: owner_actor_id ? owners.get(owner_actor_id) ?? null : null })) };
       },
     },
 
@@ -720,7 +764,11 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
           ordinal: { type: "integer" } },
           required: ["section_key", "body_text", "base_version"] } } },
         required: ["idempotency_key", "document", "items"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "change-doctrine-sections", args, async () => {
+      handler: async (c, actor, args) => {
+        // Reject malformed nested input before the envelope opens its transaction
+        // or performs the idempotency read; raw items must never reach the sort.
+        validateChangeDoctrineItems(args.items);
+        return withEnvelope(c, actor, "change-doctrine-sections", args, async () => {
         if (!args.items.length) throw new ToolError({ error: "empty_change_set" });
         const doc = await resolveDoc(c, args.document);
         if (doc.visibility === "personal" && doc.owner_actor_id !== actor.id)
@@ -802,7 +850,8 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
           { new: { sections: results.length, keys: results.map(r => r.section_key) },
             idempotency_key: args.idempotency_key });
         return { ok: true, change_set_id: cs.rows[0].id, sections: results, generation };
-      }),
+        });
+      },
     },
 
     "resolve-doctrine-rules": {
@@ -858,7 +907,8 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
     "standing-context": {
       description: "THE SESSION BRIEFING VERB (the #219 design, P6 of the doctrine-store build): everything a session must load before working, served from the store — the taught rules (shared + this partner's personal set, with the counts to recite), pending action-required items, and the doctrine catalog pointer. This replaces file-based rule loading: a session that calls this needs no compiled-rules file, no vault read, no Drive. Call it FIRST in any session; recite the counts back to the partner. DEFAULT detail is `gist` — one line per rule, which is what a boot call can actually hold. Pull full text for the handful you need with rule_ids, or everything with detail=full (large; see the payload note in the handler).",
       inputSchema: { type: "object", properties: {
-        detail: { type: "string", enum: ["gist", "full"], description: "gist (DEFAULT) = one line per rule, no human_quote. full = every rule's complete text; ~180KB at 147 rules, which overflows a tool result on most clients. Prefer gist + rule_ids." },
+        detail: { type: "string", enum: ["gist", "full", "boot"], description: "gist (DEFAULT) = one line per rule, no human_quote. full = every rule's complete text; ~180KB at 147 rules, which overflows a tool result on most clients. Prefer gist + rule_ids. boot = the gated RULE BOOT: the full text of every always-on rule plus a one-line index of every active rule, paged (see `page`); hooks/rule-boot-gate.py denies other tools in a context until it has fetched every page of the current digest." },
+        page: { type: "integer", minimum: 1, description: "detail=boot only: which page of the rule boot to return (1-based, DEFAULT 1). Each response carries pages_total and the exact next call; read every page." },
         rule_ids: { type: "array", items: { type: "string" }, description: "Short ids (the 8-char form the gist prints, e.g. '4e104d4c'). These rules come back in FULL regardless of detail — the lookup path for 'read the binding text before acting on a gist'." },
         workflow: { type: "string", description: "Optional current workflow key used to select applicable typed constraints after registry activation. It is ALSO read as a rule pack name: pass the pack the observed work belongs to and its rules compile into the payload. `rule_delivery.pack_index` lists the names and what triggers each." },
         packs: { type: "array", items: { type: "string" }, description: "Rule packs to compile, when the work spans more than one (git AND a deal, say). Loading is MONOTONIC by design — a pack adds rules and never removes Layer 0. Unknown names come back in rule_delivery.packs_not_found rather than silently loading nothing." },
@@ -866,7 +916,6 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         tier: { type: "string", description: "Optional work tier used to select applicable typed constraints." } },
         },
       handler: async (c, actor, args) => {
-        await actorId(c, actor);
         // Personal rules come only from the verified sponsor embedded in the
         // authenticated actor. `partner` was deliberately removed from this
         // schema: a tool argument must never select another human's brain.
@@ -885,41 +934,143 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
             hint: "this authenticated runtime expected a server-derived sponsoring human. Reconnect through the registered OAuth flow; do not supply a partner argument." });
         }
         const who = scope.sponsor;
+        // THE GATED RULE BOOT (mcp-server/src/rule-boot.js). Its own branch,
+        // ahead of every other read: it needs only the sponsor-scoped rule
+        // rows (same filter as the recitation below) and must stay cheap,
+        // because every session and subagent fetches every page of it.
+        if (args.detail === "boot") {
+          const bootRows = (await c.query(
+            `select id, statement, personal_to
+               from v_compiled_rules
+              where (personal_to is null or ($1::text is not null and personal_to = $1))
+                and coalesce(scope->>'kind','') <> 'intro_politics'
+              /* standing-context:rule-boot */`, [who])).rows;
+          const bootSponsor = scope.status === "personal" ? who : null;
+          const boot = await ruleBootPage(bootRows, bootSponsor, args.page ?? 1);
+          if (boot.error) {
+            throw new ToolError({ error: boot.error, page: args.page,
+              pages_total: boot.pages_total, digest: boot.digest,
+              hint: `pages run 1..${boot.pages_total}; start again at page 1` });
+          }
+          return { ok: true, rule_boot: boot,
+            identity: { sponsoring_human_id: who,
+              personal_brain_scope: bootSponsor ? `${bootSponsor}-personal` : "none" } };
+        }
         const detail = args.detail === "full" ? "full" : "gist";
         const wanted = new Set((args.rule_ids || []).map(s => String(s).trim().toLowerCase()));
+        const requestedPacks = [...new Set(
+          [...(Array.isArray(args.packs) ? args.packs : []),
+           ...(args.workflow ? [args.workflow] : [])]
+            .map(s => String(s || "").trim().toLowerCase()).filter(Boolean))];
         // Same filter set as the compiled-rules exporter (_fetch_rules +
         // _is_intro, ORDER 37): intro-politics rules render to their own intro
         // file and are NOT part of the recited counts — the verb's numbers
         // must match the files' numbers exactly or the recitation audit
         // (rule 4f7c348f) breaks the day a session compares them.
-        const allRules = (await c.query(
-          `select statement, human_quote, taught_by, personal_to, scope, id
-             from v_compiled_rules
-            where (personal_to is null or ($1::text is not null and personal_to = $1))
-              and coalesce(scope->>'kind','') <> 'intro_politics'
-            order by personal_to nulls first, activated_at, statement`, [who])).rows;
+        // These four stable baseline reads used to be sequential network
+        // round trips. Keep the independently fail-soft reads below separate:
+        // carr_reader intentionally cannot read rule, so absorbing the proposed-
+        // rule query into this mandatory batch would turn its safe denial into a
+        // standing-context failure. Take one snapshot only for the core corpus,
+        // action queue, and generation counter.
+        // The three requests below are independent. The Neon HTTP client pays
+        // one public-network round trip per awaited query, so the old serial
+        // path accumulated avoidable waits. Keep the proposed-rule denial in
+        // its own fail-soft request, combine the optional guidance/delivery
+        // reads into one coherent snapshot, and overlap all three requests.
+        const baselinePromise = c.query(
+          `select
+             (select coalesce(jsonb_agg(to_jsonb(r) - 'activated_at'
+                                order by r.personal_to nulls first,r.activated_at,r.statement),
+                              '[]'::jsonb)
+                from (
+                  select statement,human_quote,taught_by,personal_to,scope,id,activated_at
+                    from v_compiled_rules
+                   where (personal_to is null or ($1::text is not null and personal_to = $1))
+                     and coalesce(scope->>'kind','') <> 'intro_politics'
+                ) r) as all_rules,
+             (select coalesce(jsonb_agg(to_jsonb(a) - 'render_seq' order by a.render_seq),
+                              '[]'::jsonb)
+                from (
+                  select number,title,body,owner,render_seq
+                    from loop_item
+                   where kind = 'action_required' and status = 'open'
+                ) a) as action_required,
+             (select generation from doctrine_meta where id=1) as doctrine_generation,
+             (select coalesce(jsonb_agg(to_jsonb(d)
+                                order by d.caught_by_human desc,d.occurrences desc,d.last_seen desc),
+                              '[]'::jsonb)
+                from (
+                  select defect_class,occurrences,caught_by_human,first_seen,last_seen,
+                         sources_unread
+                    from v_defect_class
+                   order by caught_by_human desc,occurrences desc,last_seen desc
+                   limit 5
+                ) d) as defect_classes
+             /* standing-context:baseline-batch */`,
+          [who]);
+        const optionalSnapshotPromise = c.query(
+          `with guidance_registry as (
+             select state,manifest_digest from ops.v_guidance_registry_state limit 1
+           ), delivery_registry as (
+             select count(distinct map_digest)::integer as map_versions,
+                    min(map_digest) as map_digest,
+                    count(*)::integer as tagged_rules
+               from ops.rule_load_layer
+           ), plan as (
+             select coalesce(jsonb_agg(to_jsonb(p) order by p.load_layer,p.short_id),'[]'::jsonb) as rows
+               from ops.rule_delivery_plan($5,$6) p
+           ), packs as (
+             select coalesce(jsonb_agg(to_jsonb(i) order by i.pack),'[]'::jsonb) as rows
+               from ops.rule_pack_index() i
+           )
+           select guidance_registry.state,guidance_registry.manifest_digest,
+                  case when guidance_registry.state = 'active' then
+                    (select coalesce(jsonb_agg(to_jsonb(g)),'[]'::jsonb)
+                       from (
+                         select source_rule_id as id,statement,human_quote,taught_by,personal_to,
+                                scope,guidance_type,is_constitution
+                           from ops.standing_guidance($1,$2,$3,$4)
+                       ) g)
+                  else '[]'::jsonb end as standing_rules,
+                  case when guidance_registry.state = 'active' then
+                    (select coalesce(jsonb_agg(to_jsonb(p) order by p.guidance_type),'[]'::jsonb)
+                       from ops.v_guidance_projection_summary p)
+                  else '[]'::jsonb end as projection_summary,
+                  (select mode from ops.rule_delivery_policy limit 1) as mode,
+                  delivery_registry.map_versions,delivery_registry.map_digest,
+                  delivery_registry.tagged_rules,
+                  plan.rows as delivery_plan,packs.rows as pack_index
+             from guidance_registry cross join delivery_registry cross join plan cross join packs`,
+          [who, args.workflow || null, args.surface || actor.slug, args.tier || null,
+            scope.status === "personal" ? who : null, requestedPacks])
+          .catch(() => ({ rows: [] }));
+        const proposedRulesPromise = c.query(
+          `select id, statement, taught_by, personal_to, created_at
+             from rule
+            where status = 'proposed'
+              and (personal_to is null or ($1::text is not null and personal_to =
+                    retrieval_visibility_actor_id($1)))
+            order by created_at`, [who]).catch(() => ({ rows: [] }));
+        const baselineResult = await baselinePromise;
+        // Existing unit fakes historically return the old rule-row shape for
+        // any SQL containing v_compiled_rules. Falling back keeps those tests
+        // meaningful and also fails safely if an older proxy rewrites the
+        // statement rather than returning the aggregate contract.
+        const baseline = baselineResult.rows[0] || {};
+        const baselineBatched = Array.isArray(baseline.all_rules);
+        const allRules = baselineBatched ? baseline.all_rules : baselineResult.rows;
         // The typed registry deliberately changes what is loaded at boot, not
         // what the recited coverage count means. Until a human activates the
         // registry this path is behavior-identical to the compiled-rule path.
         // A missing migration is also inactive so rolling deploys remain safe.
-        const registryState = (await c.query(
-          `select state,manifest_digest from ops.v_guidance_registry_state limit 1`)
-          .catch(() => ({ rows: [] }))).rows[0];
+        const optionalSnapshot = (await optionalSnapshotPromise).rows[0] || {};
+        const registryState = optionalSnapshot;
         const registryActive = registryState?.state === "active";
-        let standingRules = [];
-        let projectionSummary = [];
-        if (registryActive) {
-          standingRules = (await c.query(
-            `select source_rule_id as id,statement,human_quote,taught_by,personal_to,
-                    scope,guidance_type,is_constitution
-               from ops.standing_guidance($1,$2,$3,$4)`,
-            [who, args.workflow || null, args.surface || actor.slug,
-              args.tier || null])).rows;
-          projectionSummary = (await c.query(
-            `select guidance_type,active_items,projection_digest
-               from ops.v_guidance_projection_summary
-              order by guidance_type`)).rows;
-        }
+        const standingRules = registryActive && Array.isArray(registryState.standing_rules)
+          ? registryState.standing_rules : [];
+        const projectionSummary = registryActive && Array.isArray(registryState.projection_summary)
+          ? registryState.projection_summary : [];
         // Full is an explicit request for the whole corpus. Short-id lookups
         // likewise remain authoritative even when typed boot loading is active.
         const selectedById = new Map((registryActive && detail !== "full"
@@ -930,7 +1081,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
             if (wanted.has(id)) selectedById.set(id, r);
           }
         }
-        // ── THE DELIVERY PLAN (2026-08-23 rules council, migration 0288) ──────
+        // ── THE DELIVERY PLAN (2026-08-23 rules council, migration 0291) ──────
         //
         // Until now this verb had ONE mode: recite every active rule into every
         // session, whatever that session turned out to be doing. Rule 1fddcffb
@@ -951,26 +1102,30 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         // scoped set. No deploy sits between the decision and the behaviour, in
         // either direction.
         //
-        // EVERY QUERY HERE FAILS SOFT. A worker running ahead of migration 0288
+        // EVERY QUERY HERE FAILS SOFT. A worker running ahead of migration 0291
         // must behave exactly as it did before, not error at the one verb every
         // session calls first.
-        const requestedPacks = [...new Set(
-          [...(Array.isArray(args.packs) ? args.packs : []),
-           ...(args.workflow ? [args.workflow] : [])]
-            .map(s => String(s || "").trim().toLowerCase()).filter(Boolean))];
-        const deliveryMode = (await c.query(
-          `select mode from ops.rule_delivery_policy limit 1`)
-          .catch(() => ({ rows: [] }))).rows[0]?.mode || null;
-        const plan = deliveryMode ? (await c.query(
-          `select short_id, load_layer, packs, scope, selected
-             from ops.rule_delivery_plan($1,$2)`,
-          [scope.status === "personal" ? who : null, requestedPacks])
-          .catch(() => ({ rows: [] }))).rows : [];
-        const packIndex = deliveryMode ? (await c.query(
-          `select pack, title, triggers, rule_count from ops.rule_pack_index()`)
-          .catch(() => ({ rows: [] }))).rows : [];
+        // One statement means policy, map digest, selector rows, and pack index
+        // describe the same database snapshot. Four independent reads under
+        // READ COMMITTED could otherwise advertise one map while delivering a
+        // plan compiled from another during a registry sync.
+        const deliverySnapshot = optionalSnapshot;
+        const deliveryMode = deliverySnapshot.mode || null;
+        const deliveryMapVersions = Number(deliverySnapshot.map_versions || 0);
+        const deliveryMapDigest = deliveryMapVersions === 1
+          && /^[0-9a-f]{64}$/i.test(String(deliverySnapshot.map_digest || ""))
+          ? `sha256:${String(deliverySnapshot.map_digest).toLowerCase()}` : null;
+        const deliveryTaggedRules = Number(deliverySnapshot.tagged_rules || 0);
+        const plan = deliveryMode && Array.isArray(deliverySnapshot.delivery_plan)
+          ? deliverySnapshot.delivery_plan : [];
+        const packIndex = deliveryMode && Array.isArray(deliverySnapshot.pack_index)
+          ? deliverySnapshot.pack_index : [];
         const knownPacks = new Set(packIndex.map(p => p.pack));
         const packsNotFound = requestedPacks.filter(p => !knownPacks.has(p));
+        const emptyPacks = requestedPacks.filter(pack => {
+          const row = packIndex.find(item => item.pack === pack);
+          return row && Number(row.rule_count) < 1;
+        });
         const selectedShortIds = new Set(
           plan.filter(r => r.selected).map(r => String(r.short_id).toLowerCase()));
         // "Null workflow returns Layer 0, never all 204 and never nothing" — the
@@ -978,8 +1133,21 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         // are not installed here, and an empty selection means the compiler found
         // nothing to hand over; either way the honest fallback is the full set,
         // said out loud, rather than a session that boots with no rules at all.
-        const deliveryUsable = plan.length > 0 && selectedShortIds.size > 0;
+        const deliveryUsable = plan.length > 0 && selectedShortIds.size > 0
+          && deliveryMapVersions === 1 && deliveryTaggedRules > 0 && deliveryMapDigest !== null
+          && packsNotFound.length === 0 && emptyPacks.length === 0;
         const enforcing = deliveryMode === "enforced" && deliveryUsable;
+        // Intro-politics rules deliberately do not belong to the full boot
+        // corpus above, but they DO make up the vendor-intros pack.  Building
+        // selectedShortIds from 219 rows and then filtering only the 205-row
+        // recitation pool made that pack a phantom: reported selected, never
+        // deliverable.  In enforcement only, widen the candidate pool; the
+        // selected ids still decide whether any intro rule actually arrives.
+        const deliveryRulePool = enforcing ? (await c.query(
+          `select statement, human_quote, taught_by, personal_to, scope, id
+             from v_compiled_rules
+            where (personal_to is null or ($1::text is not null and personal_to = $1))
+            order by personal_to nulls first, activated_at, statement`, [who])).rows : allRules;
 
         // TWO SCOPINGS MUST NOT MULTIPLY. When the typed guidance registry is
         // active, `selectedById` above already holds a NARROWED set — constitution
@@ -990,7 +1158,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         // filtering. Layer 0 is the floor of a boot in both designs, and a floor
         // that two correct mechanisms can quietly sink through is not a floor.
         if (enforcing) {
-          for (const r of allRules) {
+          for (const r of deliveryRulePool) {
             const id = String(r.id).slice(0, 8).toLowerCase();
             if (selectedShortIds.has(id) && !selectedById.has(id)) selectedById.set(id, r);
           }
@@ -1014,7 +1182,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
           ? [...shared, ...personal].filter(r => !deliverable(r))
               .map(r => String(r.id).slice(0, 8))
           : plan.filter(r => !r.selected).map(r => r.short_id);
-        const actionReq = (await c.query(
+        const actionReq = baselineBatched ? baseline.action_required : (await c.query(
           `select number, title, body, owner
              from loop_item
             where kind = 'action_required' and status = 'open'
@@ -1034,12 +1202,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         // the binding text is one standing-context call away with rule_ids, and
         // a wall of unapproved prose at session start would be skimmed like
         // every other wall.
-        const proposedRules = (await c.query(
-          `select id, statement, taught_by, personal_to, created_at
-             from rule
-            where status = 'proposed'
-              and (personal_to is null or ($1::text is not null and personal_to = $1))
-            order by created_at`, [who]).catch(() => ({ rows: [] }))).rows;
+        const proposedRules = (await proposedRulesPromise).rows;
         // THE DEFECT CLASSES (0103, loop #185). Surfaced HERE for the same reason the
         // proposed rules are: this verb is the opening act of every session, and the
         // loop's acceptance criterion is literally "a session can be told at start
@@ -1050,13 +1213,11 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         // catches itself is working as designed; a class a partner keeps finding is the
         // one that should change how this session reads today. Capped at five, because a
         // wall at session start is skimmed like every other wall.
-        const defectClasses = (await c.query(
-          `select defect_class, occurrences, caught_by_human, first_seen, last_seen,
-                  sources_unread
-             from v_defect_class
-            order by caught_by_human desc, occurrences desc, last_seen desc
-            limit 5`).catch(() => ({ rows: [] }))).rows;
-        const gen = (await c.query(`select generation from doctrine_meta where id=1`)).rows[0];
+        const defectClasses = baselineBatched && Array.isArray(baseline.defect_classes)
+          ? baseline.defect_classes : [];
+        const gen = baselineBatched
+          ? { generation: baseline.doctrine_generation }
+          : (await c.query(`select generation from doctrine_meta where id=1`)).rows[0];
         // PAYLOAD NOTE (2026-08-08, Joe's yes): detail=full returned ~183KB at
         // 147 rules and overflowed the tool-result limit on the very first live
         // call — the verb that is the OPENING ACT of every session could not be
@@ -1086,9 +1247,13 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
           }
           return g;
         };
+        // Scoped boot returns short gists for the always-present Layer 0.
+        // Jev and the pack/trigger index fetch binding text when the task needs
+        // it. An explicit detail=full or rule_ids lookup still returns full text.
         const shape = (r, withQuote) => {
           const id = String(r.id).slice(0, 8);
-          if (detail === "full" || wanted.has(id.toLowerCase())) {
+          const idLower = id.toLowerCase();
+          if (detail === "full" || wanted.has(idLower)) {
             return withQuote
               ? { id, statement: r.statement, taught_by: r.taught_by, human_quote: r.human_quote }
               : { id, statement: r.statement, human_quote: r.human_quote };
@@ -1110,17 +1275,30 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
           .map(r => [r.guidance_type,
             Math.max(0, Number(r.active_items) - (constitutionByType.get(r.guidance_type) || 0))])
           .filter(([, count]) => count > 0));
-        const reciteCounts = enforcing
-          ? (scope.status === "personal"
-              ? `Rules loaded: ${deliveredShared.length} of ${allShared.length} shared, `
-                + `${deliveredPersonal.length} of ${allPersonal.length} ${who}-personal `
-                + `(Layer 0${requestedPacks.length ? " + " + requestedPacks.join(", ") : ""})`
-              : `Rules loaded: ${deliveredShared.length} of ${allShared.length} shared, `
-                + `0 personal (unsponsored runtime)`)
-          : (scope.status === "personal"
-              ? `Rules loaded: ${allShared.length} shared, ${allPersonal.length} ${who}-personal`
-              : `Rules loaded: ${allShared.length} shared, 0 personal (unsponsored runtime)`);
+        const countText = (delivered, available) => delivered === available
+          ? String(available) : `${delivered} of ${available}`;
+        const reciteCounts = scope.status === "personal"
+          ? `Rules loaded: ${countText(deliveredShared.length, allShared.length)} shared, `
+            + `${countText(deliveredPersonal.length, allPersonal.length)} ${who}-personal`
+            + (enforcing ? ` (Layer 0${requestedPacks.length ? " + " + requestedPacks.join(", ") : ""})` : "")
+          : `Rules loaded: ${countText(deliveredShared.length, allShared.length)} shared, `
+            + "0 personal (unsponsored runtime)";
+        // Shadow diagnostics stay bounded. Rule text is fetched only when a
+        // task selects it; the former full-text preview dominated boot context.
+        let corePreview;
+        if (deliveryMode === "shadow") {
+          const foundIds = new Set(allRules
+            .filter(r => CORE_RULE_ID_SET.has(String(r.id).slice(0, 8).toLowerCase()))
+            .map(r => String(r.id).slice(0, 8).toLowerCase()));
+          corePreview = {
+            source: CORE_RULE_TRIAGE_SOURCE,
+            core_rule_count: CORE_RULE_COUNT,
+            core_rules_found: foundIds.size,
+            missing_core_ids: CORE_RULE_IDS.filter(id => !foundIds.has(id)),
+          };
+        }
         return { ok: true,
+          ...(corePreview ? { core_preview: corePreview } : {}),
           recite: reciteCounts,
           identity: {
             organization_tenant_id: organizationTenantForActor(actor),
@@ -1150,15 +1328,19 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
                 + "have handed you — if you needed one of those rules this turn, "
                 + "that is the miss the shadow week exists to find.",
             declared_packs: requestedPacks,
+            map_digest: deliveryMapDigest,
+            map_versions: deliveryMapVersions,
+            tagged_rules: deliveryTaggedRules,
             ...(packsNotFound.length ? { packs_not_found: packsNotFound,
               hint: "an unknown pack loads nothing; check pack_index for the name" } : {}),
+            ...(emptyPacks.length ? { empty_packs: emptyPacks } : {}),
             layer0: plan.filter(r => r.load_layer === "layer0").length,
             selected: selectedShortIds.size,
             in_scope: plan.length,
             would_omit_count: omitted.length,
             would_omit: omitted,
             ...(deliveryMode && !deliveryUsable ? { fallback:
-              "no usable delivery plan (the tags are not installed here), so the "
+              "no usable coherent delivery plan (the map, tags, or requested packs are absent), so the "
               + "FULL set was recited — a scoped boot never returns nothing" } : {}),
             pack_index: packIndex.map(p => ({ pack: p.pack, title: p.title,
               triggers: p.triggers, rules: Number(p.rule_count) })),

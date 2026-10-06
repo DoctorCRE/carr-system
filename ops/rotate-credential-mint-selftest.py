@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import ast
 import importlib.util
+import io
 import os
 import stat
 import subprocess
@@ -18,6 +19,7 @@ import tempfile
 import types
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("rotate_credential", REPO / "tools" / "rotate-credential.py")
@@ -74,7 +76,140 @@ class Connection:
         return Result(self.row)
 
 
+def verifier_rotation_cases() -> None:
+    role = "carr_program5_forward_fix_verifier"
+    key = "CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL"
+    existing = PEER.replace("carr_jobs", role)
+    password = "V" * 40
+    events: list[object] = []
+    identity: tuple[str, str, bool] | tuple[str] | None = (role, role, True)
+
+    class Statement:
+        def __init__(self, template):
+            self.template = template
+
+        def format(self, *args):
+            return (self.template, *args)
+
+    class RotationConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *unused):
+            return False
+
+        def execute(self, query):
+            events.append(("execute", query))
+            return Result((identity[1],) if query == "select current_user"
+                          and identity and len(identity) == 3 else identity)
+
+        def commit(self):
+            events.append("commit")
+
+    def connect(dsn):
+        events.append(("connect", dsn))
+        return RotationConnection()
+
+    def write(key, value):
+        events.append(("write", key, value))
+
+    fake_psycopg = types.ModuleType("psycopg")
+    fake_psycopg.connect = connect  # type: ignore[attr-defined]
+    fake_psycopg.sql = types.SimpleNamespace(  # type: ignore[attr-defined]
+        SQL=Statement, Identifier=lambda value: value, Literal=lambda value: value)
+    with patch.dict(os.environ, {"DATABASE_URL": OWNER}, clear=True), \
+            patch.dict(sys.modules, {"psycopg": fake_psycopg}), \
+            patch.object(rc, "credential_env_lock", contextlib.nullcontext), \
+            patch.object(rc, "read_env", return_value={key: existing}), \
+            patch.object(rc, "new_password", return_value=password), \
+            patch.object(rc, "write_env_key", write):
+        # Every rejected URI must stop before opening a connection or generating
+        # a password; the fake records mutations independently of its identity.
+        invalid = {
+            "malformed URI": "not-a-postgres-uri",
+            "wrong host": existing.replace("ep-x-123", "ep-other-456"),
+            "wrong port": existing.replace("/neondb", ":5433/neondb"),
+            "wrong database": existing.replace("/neondb", "/otherdb"),
+            "wrong login": PEER,
+            "query login override": existing + "&user=other",
+            "encoded startup role override": existing + "&options=-c%20role%3D" + role,
+            "duplicate TLS parameter": existing + "&sslmode=require",
+            "malformed port": existing.replace("/neondb", ":bad/neondb"),
+            "zero port": existing.replace("/neondb", ":0/neondb"),
+            "negative port": existing.replace("/neondb", ":-1/neondb"),
+            "out-of-range port": existing.replace("/neondb", ":65536/neondb"),
+        }
+        for label, dsn in invalid.items():
+            events.clear()
+            with patch.object(rc, "read_env", return_value={key: dsn}), \
+                    patch.object(rc, "new_password", side_effect=AssertionError("generation reached")):
+                try:
+                    error = refused(lambda: rc.rotate_role(role, True))
+                except AssertionError:
+                    error = ""
+            check(label + " refuses before all database mutation", bool(error) and events == [])
+        for label, owner in {
+            "malformed owner": "malformed",
+            "zero owner port": OWNER.replace("/neondb", ":0/neondb"),
+            "negative owner port": OWNER.replace("/neondb", ":-1/neondb"),
+            "out-of-range owner port": OWNER.replace("/neondb", ":65536/neondb"),
+        }.items():
+            events.clear()
+            with patch.dict(os.environ, {"DATABASE_URL": owner}), \
+                    patch.object(rc, "new_password", side_effect=AssertionError("generation reached")):
+                try:
+                    error = refused(lambda: rc.rotate_role(role, True))
+                except AssertionError:
+                    error = ""
+            check(label + " refuses before all database mutation", bool(error) and events == [])
+
+        for port in (1, 5432, 65535):
+            _, target = rc._postgres_parts(existing.replace("/neondb", f":{port}/neondb"), key)
+            check(f"valid explicit port {port} is preserved", target[1] == port)
+
+        for identity, label in [
+            (("other_login", role, True), "different session login"),
+            ((role, "other_role", True), "different effective role"),
+            ((role, role, False), "missing verifier membership"),
+            (None, "missing identity row"),
+        ]:
+            events.clear()
+            error = refused(lambda: rc.rotate_role(role, True))
+            check(label + " refuses without publishing", bool(error) and not any(
+                isinstance(event, tuple) and event[0] == "write" for event in events))
+
+        identity = (role, role, True)
+        events.clear()
+        result = rc.rotate_role(role, True)
+        check("verifier rotates and preserves URL options after exact identity verification",
+              result == 0 and events == [
+                  ("connect", OWNER),
+                  ("execute", ("alter role {} with password {}", role, password)),
+                  "commit",
+                  ("connect", existing.replace("oldpw", password)),
+                  ("execute", "select session_user,current_user,pg_has_role(session_user,'carr_program5_forward_fix_verifiers','member')"),
+                  ("write", key, existing.replace("oldpw", password)),
+              ])
+        for prior_role in ("carr_jobs", "app_exporter_local"):
+            events.clear()
+            identity = (prior_role,)
+            prior = PEER.replace("carr_jobs", prior_role)
+            with patch.object(rc, "read_env", return_value={rc.ROLE_ENV[prior_role]: prior}):
+                result = rc.rotate_role(prior_role, True)
+            check(prior_role + " retains rotation and current-user verification",
+                  result == 0 and events[-2:] == [
+                      ("execute", "select current_user"),
+                      ("write", rc.ROLE_ENV[prior_role], prior.replace("oldpw", password)),
+                  ])
+        events.clear()
+        with patch.object(rc, "read_env", return_value={}), \
+                patch.object(rc, "new_password", side_effect=AssertionError("generation reached")):
+            missing = refused(lambda: rc.rotate_role(role, True))
+        check("verifier cannot mint a missing connection", "nothing to rotate" in missing and events == [])
+
+
 def main() -> int:
+    verifier_rotation_cases()
     source = (REPO / "tools" / "rotate-credential.py").read_text(encoding="utf-8")
     workflow = (REPO / ".github" / "workflows" / "backup-nightly.yml").read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -117,10 +252,11 @@ def main() -> int:
     rc.read_env = lambda: (_ for _ in ()).throw(AssertionError("env reached"))
     rc.subprocess.run = lambda *a, **k: (_ for _ in ()).throw(AssertionError("subprocess reached"))
     try:
-        check("rotate_role backup refusal precedes all mutation primitives",
-              "disabled" in refused(lambda: rc.rotate_role("carr_backup", True, True)))
-        check("direct backup entrypoint refusal precedes all mutation primitives",
-              "disabled" in refused(lambda: rc.rotate_backup_role(True)))
+        with patch.dict(os.environ, {"CARR_BREAK_GLASS": "1"}, clear=True):
+            check("rotate_role backup refusal precedes all mutation primitives even with break-glass",
+                  "disabled" in refused(lambda: rc.rotate_role("carr_backup", True, True)))
+            check("direct backup entrypoint refusal precedes all mutation primitives even with break-glass",
+                  "disabled" in refused(lambda: rc.rotate_backup_role(True)))
         check("generic internal helper cannot bypass carr_backup refusal",
               "permitted only" in refused(lambda: rc._rotate_existing_role("carr_backup", True)))
         check("deepest ALTER ROLE helper cannot bypass carr_backup refusal",
@@ -215,6 +351,87 @@ def main() -> int:
               "pg_proc", "aclexplode", "has_table_privilege", "has_sequence_privilege", "is_grantable")))
     check("owner-derived verification fails closed on any missing contract element",
           "least-privilege" in refused(lambda: rc.verify_backup_least_privilege(Connection((True,) * 8 + (False,)))))
+
+    # db.env HAS TWO PARSERS AND ONLY ONE OF THEM IS PYTHON.  These cover the
+    # shell one.  The failure being fenced is real and cost six days: a value
+    # carrying `&channel_binding=require` reached db.env unquoted on 2026-08-20,
+    # zsh aborted the whole `set -a; . db.env` at that line, and every key in the
+    # file — not just the bad one — went missing for every job on the machine.
+    with isolated_state() as raw:
+        broken = raw / "broken.env"
+        broken.write_text(
+            "CARR_X_URL=postgresql://u:pw@h.example/db?sslmode=require&channel_binding=require\n",  # ci-secret-scan: allow — hermetic fixture
+            encoding="utf-8")
+        quoted = raw / "quoted.env"
+        quoted.write_text(
+            "CARR_X_URL='postgresql://u:pw@h.example/db?sslmode=require&channel_binding=require'\n",  # ci-secret-scan: allow — hermetic fixture
+            encoding="utf-8")
+        check("an unquoted ampersand DSN is reported as a shell parse failure",
+              rc.shell_parse_failure(str(broken)) == "1")
+        check("the single-quoted form of the same DSN parses",
+              rc.shell_parse_failure(str(quoted)) is None)
+        check("a shell-unsourceable candidate is refused by name and line",
+              "does not parse as shell at line 1"
+              in refused(lambda: rc._require_shell_sourceable(str(broken))))
+        # A machine without the probe is where this tool already stood; the
+        # guard must not turn "cannot ask" into "must not rotate".
+        real_zsh = rc.ZSH
+        rc.ZSH = str(raw / "no-such-shell")
+        try:
+            check("an unrunnable shell probe never blocks a rotation",
+                  rc.shell_parse_failure(str(broken)) is None
+                  and rc._require_shell_sourceable(str(broken)) is None)
+        finally:
+            rc.ZSH = real_zsh
+
+    with isolated_state() as raw:
+        env_path = Path(rc.ENV_PATH)
+        env_path.write_text("CARR_KEEP_URL='postgresql://k:kp@h.example/db'\n# a comment\n\n",  # ci-secret-scan: allow — hermetic fixture
+                            encoding="utf-8")
+        env_path.chmod(0o600)
+        before = env_path.read_bytes()
+        rc.write_env_key("CARR_X_URL", "postgresql://u:pw@h.example/db?sslmode=require&channel_binding=require")  # ci-secret-scan: allow — hermetic fixture
+        after = env_path.read_text(encoding="utf-8").splitlines()
+        check("a written value is single-quoted and the rest of the file survives",
+              after[-1].startswith("CARR_X_URL='") and after[-1].endswith("'")
+              and after[:3] == ["CARR_KEEP_URL='postgresql://k:kp@h.example/db'",  # ci-secret-scan: allow — hermetic fixture
+                                "# a comment", ""])
+        check("the file rotate-credential just wrote is sourceable",
+              rc.shell_parse_failure(str(env_path)) is None)
+
+        # The quoting and the guard are two claims, and only the second one
+        # survives a future writer that forgets the first.  Disabling the quoting
+        # is the only way to prove write_env_key is actually wired to the guard
+        # rather than merely being correct today.
+        env_path.write_bytes(before)
+        real_quote = rc.shell_quote
+        rc.shell_quote = lambda value: value
+        try:
+            check("write_env_key refuses a value the shell could not source",
+                  "does not parse as shell at line" in refused(
+                      lambda: rc.write_env_key(
+                          "CARR_X_URL",
+                          "postgresql://u:pw@h.example/db?sslmode=require&channel_binding=require")))  # ci-secret-scan: allow — hermetic fixture
+        finally:
+            rc.shell_quote = real_quote
+        check("the refused write left db.env exactly as it was",
+              env_path.read_bytes() == before)
+
+        # The guard must fence the SWAP, not merely report afterwards: a
+        # credential file that fails its contract may not be live for an instant.
+        env_path.write_bytes(before)
+        original = env_path.read_bytes()
+        def _always_bad(_candidate: str) -> None:
+            raise SystemExit("verify refused")
+        try:
+            rc._durable_replace(rc.ENV_PATH, "CARR_X_URL=broken&value\n", prefix=".db.env.",
+                                verify=_always_bad)
+        except SystemExit:
+            pass
+        leftovers = [entry.name for entry in env_path.parent.iterdir()
+                     if entry.name.startswith(".db.env.")]
+        check("a refused write leaves the live file byte-identical and no temp behind",
+              env_path.read_bytes() == original and leftovers == [])
 
     if FAILURES:
         print(f"rotate-credential-mint-selftest: {len(FAILURES)} FAILED")

@@ -51,10 +51,9 @@ import json
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPEC = os.path.join(REPO, "ops", "report-card", "rubric.toml")
-DEFAULT_RECOVERY_VAULT = (
-    "/Users/booko/Library/CloudStorage/"
-    "GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI"
-)
+DEFAULT_RECOVERY_VAULT = os.path.join(
+    os.path.expanduser("~"), "Library", "CloudStorage",
+    "GoogleDrive-joe.bookout.carr.us@gmail.com", "My Drive", "CARR AI")
 
 # How many independent_command rows the integrity sampler re-derives per run.
 # Small on purpose: the point is a spot-check that costs little enough to run

@@ -13,7 +13,27 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any, Protocol
 
-from lib.control_plane_inputs import InputUnavailable
+from lib.control_plane_inputs import InputUnavailable, NoEligibleRecords
+
+# A short week -- fewer than the cap's worth of eligible records -- is the
+# NORMAL end state as the book gets covered (both SKILL.md files: "reports
+# done and stops finding work"). These two builders' queues get shorter over
+# time by design, so an empty result from either is a clean no-work signal,
+# never a refusal. content-fuel/npi/radar are NOT in this set: those always
+# expect a fixed shape (two rotation lanes, etc.), so an empty read there
+# stays a genuine InputUnavailable.
+NO_WORK_WHEN_EMPTY: frozenset[str] = frozenset({
+    "entity-enrichment.next-40",
+    "deal-history.next-slice",
+})
+
+# Bands 1-4 of the enrichment queue (0387) are never-verified profile gaps,
+# not stale record_flag rows -- there is no expired/unstamped_volatile
+# reason to report, so the view marks them 'not_recorded'. Keep this in sync
+# with migrations/0387_control_plane_record_queue_priority_tiers.sql.
+REVERIFICATION_DUE_REASONS: frozenset[str] = frozenset({
+    "expired", "unstamped_volatile", "not_recorded",
+})
 
 
 class ReadOnlyQueryAdapter(Protocol):
@@ -153,6 +173,8 @@ class CanonicalRecordCollector:
         rows = list(self.adapter.fetch_all(
             query_key=builder_key, sql=QUERIES[builder_key], params=params))
         if not rows:
+            if builder_key in NO_WORK_WHEN_EMPTY:
+                raise NoEligibleRecords(builder_key)
             raise InputUnavailable(builder_key, "no canonical record evidence is available")
         if not all(isinstance(row, Mapping) for row in rows):
             raise InputUnavailable(builder_key, "read adapter returned a non-object row")
@@ -179,8 +201,12 @@ class CanonicalRecordCollector:
 
 def _values(builder: str, rows: Sequence[Mapping[str, Any]], *, expected_mode: str) -> dict[str, Any]:
     if builder == "entity-enrichment.next-40":
-        if len(rows) != 40:
-            raise InputUnavailable(builder, "re-verification queue must contain exactly 40 rows")
+        # A short week is normal (0387): accept any queue from 1 up to the
+        # 40-record slice cap. An empty queue never reaches this function --
+        # CanonicalRecordCollector.collect raises NoEligibleRecords for that
+        # builder before _values is called.
+        if not 1 <= len(rows) <= 40:
+            raise InputUnavailable(builder, "re-verification queue must contain between 1 and 40 rows")
         subjects = [{"subject_type": _text(r, "subject_type", builder),
                      "subject_id": _text(r, "subject_id", builder),
                      "reverification_due": _text(r, "reverification_due", builder),
@@ -188,10 +214,13 @@ def _values(builder: str, rows: Sequence[Mapping[str, Any]], *, expected_mode: s
                      "priority": _number(r, "priority", builder),
                      "expired_at": _text(r, "expired_at", builder)} for r in rows]
         if any(s["current_verification_status"] != "not_current"
-               or s["reverification_due"] not in {"expired", "unstamped_volatile"}
+               or s["reverification_due"] not in REVERIFICATION_DUE_REASONS
                for s in subjects):
             raise InputUnavailable(builder, "enrichment queue contains a current or non-due subject")
-        if [s["priority"] for s in subjects] != list(range(1, 41)):
+        # Rows arrive `order by priority asc`, so a genuinely malformed
+        # queue -- a duplicate priority, a gap, or a priority that does not
+        # start at 1 -- fails this equality regardless of row count.
+        if [s["priority"] for s in subjects] != list(range(1, len(subjects) + 1)):
             raise InputUnavailable(builder, "enrichment queue is not in canonical re-verification order")
         return {"subjects": subjects}
     if builder == "deal-history.next-slice":
@@ -206,6 +235,12 @@ def _values(builder: str, rows: Sequence[Mapping[str, Any]], *, expected_mode: s
                      "verification": _text(r, "verification", builder),
                      "priority": _number(r, "priority", builder),
                      "source_class": _text(r, "source_class", builder)} for r in rows]
+        # Rows arrive `order by priority asc`, so a duplicate priority, a
+        # gap, or a priority that does not start at 1 fails this equality
+        # regardless of row count -- same malformed-order guard as
+        # entity-enrichment.next-40.
+        if [s["priority"] for s in subjects] != list(range(1, len(subjects) + 1)):
+            raise InputUnavailable(builder, "deal-history queue is not in canonical priority order")
         if any(s["verification"] != "unverified" for s in subjects):
             raise InputUnavailable(builder, "deal-history queue includes a verified subject")
         if any(s["source_class"] != "canonical_counterparty" for s in subjects):

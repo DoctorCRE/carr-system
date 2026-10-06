@@ -67,8 +67,8 @@ def sha256_of(path: str) -> tuple[str, int]:
 
 def find_deal_folder(names: list[str]) -> str | None:
     """Joe's folder names are how HE thinks of the deal, not the party row's
-    display_name (C-112's folder is 'Gulf Coast Pelvic Health'; the party says
-    'Gulf Coast Pelvic Floor'). Shared-word matching, and a miss returns None."""
+    display_name (C-112's folder is 'Harborline Pelvic Health'; the party says
+    'Harborline Pelvic Therapy'). Shared-word matching, and a miss returns None."""
     if not os.path.isdir(ONEDRIVE_DEALS):
         return None
     tokens = set()

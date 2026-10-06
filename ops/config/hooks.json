@@ -1,11 +1,31 @@
 {
   "PreToolUse": [
     {
+      "matcher": ".*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-boot-gate.py",
+          "timeout": 5
+        }
+      ]
+    },
+    {
+      "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+          "timeout": 20
+        }
+      ]
+    },
+    {
       "matcher": "Bash|WebFetch",
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/guard-unattended.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/guard-unattended.py",
           "timeout": 15
         }
       ]
@@ -15,7 +35,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-shape-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-shape-gate.py",
           "timeout": 10
         }
       ]
@@ -25,28 +45,28 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/record-home-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/record-home-gate.py",
           "timeout": 10
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/gate-edit-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/gate-edit-gate.py",
           "timeout": 10
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/canonical-edit-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/close-before-open-gate.py",
           "timeout": 15
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/close-before-open-gate.py",
-          "timeout": 15
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/one-repo-gate.py",
+          "timeout": 10
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/one-repo-gate.py",
-          "timeout": 10
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/canonical-edit-gate.py",
+          "timeout": 15
         }
       ]
     },
@@ -55,7 +75,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/escalation-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/escalation-gate.py",
           "timeout": 10
         }
       ]
@@ -65,36 +85,26 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/git-writer-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
           "timeout": 20
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-attribution-gate.py",
-          "timeout": 20
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-          "timeout": 20
-        },
-        {
-          "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
-        },
-        {
-          "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/bash-write-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/bash-write-gate.py",
           "timeout": 15
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
           "timeout": 10
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/draft-export-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/draft-export-gate.py",
           "timeout": 10
         }
       ]
@@ -104,7 +114,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/executor-tier-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/executor-tier-gate.py",
           "timeout": 10
         }
       ]
@@ -114,7 +124,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/model-floor-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/model-floor-gate.py",
           "timeout": 10
         }
       ]
@@ -124,7 +134,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/costar-lane-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/costar-lane-gate.py",
           "timeout": 10
         }
       ]
@@ -139,12 +149,12 @@
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/escalation-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/escalation-gate.py",
           "timeout": 10
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/blocker-decider-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/blocker-decider-gate.py",
           "timeout": 10
         }
       ]
@@ -154,7 +164,7 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/weekend-quiet-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/weekend-quiet-gate.py",
           "timeout": 10
         }
       ]
@@ -164,18 +174,27 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/peer-broadcast-gate.py"
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/peer-broadcast-gate.py"
         }
       ]
     }
   ],
   "PostToolUse": [
     {
-      "matcher": "Write|Edit|MultiEdit",
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/lint-gate.py",
+          "command": "CARR_CONTEXT_HOOK_EVENT=PostToolUse {{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/context-handoff-gate.py",
+          "timeout": 20
+        }
+      ]
+    },
+    {
+      "matcher": "Write|Edit|MultiEdit|apply_patch|functions\\.apply_patch",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/lint-gate.py",
           "timeout": 40
         }
       ]
@@ -185,17 +204,60 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
           "timeout": 20
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
           "timeout": 15
+        }
+      ]
+    },
+    {
+      "matcher": "Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/jev-supervisor.py",
+          "timeout": 25
+        }
+      ]
+    },
+    {
+      "matcher": "Bash|mcp__.*__standing-context",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-boot-gate.py",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "PostToolUseFailure": [
+    {
+      "matcher": "Bash|mcp__.*__standing-context",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-boot-gate.py",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "PreCompact": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "CARR_CONTEXT_HOOK_EVENT=PreCompact {{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/context-handoff-gate.py",
+          "timeout": 20
         }
       ]
     }
@@ -205,47 +267,42 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/map-architecture-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/map-architecture-gate.py",
           "timeout": 15
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/conduct-stop-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/conduct-stop-gate.py",
           "timeout": 15
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/completion-evidence-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/completion-evidence-gate.py",
           "timeout": 15
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/ledger-sweep.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/ledger-sweep.py",
           "timeout": 15
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/context-handoff-gate.py",
+          "command": "CARR_CONTEXT_HOOK_EVENT=Stop {{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/context-handoff-gate.py",
           "timeout": 20
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/scheduled-run-record.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/scheduled-run-record.py",
           "timeout": 20
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/chat-lint-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/chat-lint-gate.py",
           "timeout": 15
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/stale-claim-gate.py",
-          "timeout": 20
-        },
-        {
-          "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/loose-work-gate.py"
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/loose-work-gate.py"
         },
         {
           "type": "command",
@@ -254,13 +311,18 @@
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/unread-artifact-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/unread-artifact-gate.py",
           "timeout": 20
         },
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/rule-pack-drift-gate.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-pack-drift-gate.py",
           "timeout": 20
+        },
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/jev-supervisor.py",
+          "timeout": 25
         }
       ]
     }
@@ -270,8 +332,28 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/gate-integrity.py",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/gate-integrity.py",
           "timeout": 15
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/session-presence-hook.py claude",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "SessionEnd": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/session-presence-hook.py claude",
+          "timeout": 5
         }
       ]
     }
@@ -281,7 +363,34 @@
       "hooks": [
         {
           "type": "command",
-          "command": "/usr/bin/env python3 {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/chat-lint-carryover.py"
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/job-watchdog-digest.py",
+          "timeout": 5
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/session-presence-hook.py claude",
+          "timeout": 5
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+          "timeout": 20
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/chat-lint-carryover.py"
         }
       ]
     }

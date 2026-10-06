@@ -1,0 +1,1913 @@
+{
+  "schema_version": "memory-evaluation-s0.v1",
+  "version": "1.0.0",
+  "status": "frozen_contracts_only",
+  "data_class": "synthetic_only",
+  "calls_models": false,
+  "writes_records": false,
+  "production_behavior_changes": false,
+  "binding": {
+    "work_request_ref": "WR-000013",
+    "work_request_version": 3,
+    "accepted_plan_ref": "PLAN-d85ba97ccd46-v1",
+    "accepted_plan_digest": "sha256:d85ba97ccd4686b619fe72eaab80732057327ecbdb9b436fd1af2083960bad2e",
+    "registered_slice_plan_id": "cfc1d210-1069-4994-8145-8ef9b1299e9c",
+    "registered_slice_plan_digest": "sha256:5bb7039f727da6c99d2b7b36a563b12234360bdb23219ab7800e42dbc7ce2149",
+    "runbook_section_id": "0d3a6481-583f-4b3a-893f-505fd98ddcb4",
+    "runbook_revision_id": "0c3ecb3e-ff2f-49ac-8466-60f5f698726a",
+    "runbook_content_digest": "sha256:ad2316cf6c9f28c56f9c19f3033601a78021c3ade5628c2f3ea1d09d4434c718",
+    "slice_ref": "slice:learning-baseline-contracts-v2"
+  },
+  "record_state_binding": {
+    "work_request_id": "wr:7225c61a-324b-46b4-a234-8aff42f831fd",
+    "state_version": 3,
+    "canonical_record_digest": "sha256:7d3e18d350d0241af9e060fa336fb978b97b5053629a4c60b1a04a09e51b680c",
+    "accepted_resource_revisions": [
+      {
+        "resource_ref": "resource:source-lock",
+        "revision_ref": "revision:3",
+        "content_digest": "sha256:a4bd7234feadf4556abc10091a6e7464b96fcb8a293fc0dbfce3ad6171a6996d"
+      },
+      {
+        "resource_ref": "resource:evaluation-contract",
+        "revision_ref": "revision:3",
+        "content_digest": "sha256:9deb92a11ce6e86c96427b26d53d1600163888d69a6ddc8e4950327e11cf471c"
+      },
+      {
+        "resource_ref": "resource:threat-model",
+        "revision_ref": "revision:3",
+        "content_digest": "sha256:f802c5ef05ebb49c64adc28725f544fb2d34c60b4ee63b9cce6ba7c11aefc0ff"
+      },
+      {
+        "resource_ref": "resource:cost-model",
+        "revision_ref": "revision:3",
+        "content_digest": "sha256:39c51c478ceff930a43bdb6846c17515c2a6c236603472866c8ad018c4c7604c"
+      },
+      {
+        "resource_ref": "resource:legacy-inventory",
+        "revision_ref": "revision:3",
+        "content_digest": "sha256:78d122e08129a489f3f14ef850f890c5a7ba276096924f448eb48f7d8103914a"
+      }
+    ]
+  },
+  "resource_bindings": [
+    {
+      "resource_ref": "resource:source-lock",
+      "revision_ref": "revision:3",
+      "content_digest": "sha256:576bb036b0ffb9d8a97fb03775d02dcda0afd4cf9c5cf33642342dfdba3a7d20"
+    },
+    {
+      "resource_ref": "resource:evaluation-contract",
+      "revision_ref": "revision:3",
+      "content_digest": "sha256:ce45097e811710008f3e8391e2e1ba14ccc38f6de8d69298356785383aad8dac"
+    },
+    {
+      "resource_ref": "resource:threat-model",
+      "revision_ref": "revision:3",
+      "content_digest": "sha256:80a192a2acdd8db514153d7f5755f4d7f00a50a81bcdeccaf0e43b58ec9612d5"
+    },
+    {
+      "resource_ref": "resource:cost-model",
+      "revision_ref": "revision:3",
+      "content_digest": "sha256:98c872f10b974c27ca93ee82c02e3045164a2145e97e0290337483a59762f52b"
+    },
+    {
+      "resource_ref": "resource:legacy-inventory",
+      "revision_ref": "revision:3",
+      "content_digest": "sha256:5e0d59d65adbca3fa70f8c25b027f96299df4fc3a77798056d23b011999989ff"
+    }
+  ],
+  "source_lock": {
+    "policy": "Every research statement carries an exact revision and an explicit claim class. Only a source whose local artifact and invariants are rerun by check:S0-1 may be described as reproduced; packet-bound, vendor, practitioner, and inspected-source statements remain claims.",
+    "sources": [
+      {
+        "source_id": "mem0-v3-additive",
+        "family": "mem0",
+        "exact_ref": "https://github.com/mem0ai/mem0/blob/dc82354e143c2581d505d581a00286d6ef8c3605/mem0/configs/prompts.py",
+        "pin": {
+          "value": "git:dc82354e143c2581d505d581a00286d6ef8c3605",
+          "kind": "commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "ADDITIVE_EXTRACTION_PROMPT is ADD-only with linked IDs."
+        ],
+        "verification": {
+          "method": "checked-in public source inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/mem0ai/mem0/blob/dc82354e143c2581d505d581a00286d6ef8c3605/mem0/configs/prompts.py"
+        }
+      },
+      {
+        "source_id": "mem0-legacy-operations",
+        "family": "mem0",
+        "exact_ref": "https://github.com/mem0ai/mem0/blob/dc82354e143c2581d505d581a00286d6ef8c3605/mem0/configs/prompts.py",
+        "pin": {
+          "value": "git:dc82354e143c2581d505d581a00286d6ef8c3605",
+          "kind": "commit"
+        },
+        "behavior_epoch": "legacy",
+        "claim_class": "source_inspected",
+        "claims": [
+          "get_update_memory_messages emits ADD/UPDATE/DELETE/NONE."
+        ],
+        "verification": {
+          "method": "checked-in public source inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/mem0ai/mem0/blob/dc82354e143c2581d505d581a00286d6ef8c3605/mem0/configs/prompts.py"
+        }
+      },
+      {
+        "source_id": "openviking-layers",
+        "family": "openviking",
+        "exact_ref": "https://github.com/volcengine/OpenViking/blob/499995f3ed2e7f551a715179c4053772c51ff819/docs/en/concepts/03-context-layers.md",
+        "pin": {
+          "value": "git:499995f3ed2e7f551a715179c4053772c51ff819",
+          "kind": "commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "Pinned documentation defines L0 as an abstract for vector retrieval and quick filtering, L1 as an overview for rerank and navigation, and L2 as full content loaded on demand."
+        ],
+        "verification": {
+          "method": "checked-in public documentation inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+        "verification_ref": "https://github.com/volcengine/OpenViking/blob/499995f3ed2e7f551a715179c4053772c51ff819/docs/en/concepts/03-context-layers.md"
+        }
+      },
+      {
+        "source_id": "hermes-memory-manager",
+        "family": "hermes",
+        "exact_ref": "https://github.com/NousResearch/hermes-agent/blob/fcbd1076a93841fa88855acce810e342a5b78101/agent/memory_manager.py",
+        "pin": {
+          "value": "git:fcbd1076a93841fa88855acce810e342a5b78101",
+          "kind": "commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "MemoryManager orchestrates registered providers through initialization, prefetch, turn synchronization, and shutdown while limiting the active set to built-in memory plus at most one external provider."
+        ],
+        "verification": {
+          "method": "checked-in public source inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/NousResearch/hermes-agent/blob/fcbd1076a93841fa88855acce810e342a5b78101/agent/memory_manager.py"
+        }
+      },
+      {
+        "source_id": "hermes-memory-provider",
+        "family": "hermes",
+        "exact_ref": "https://github.com/NousResearch/hermes-agent/blob/fcbd1076a93841fa88855acce810e342a5b78101/agent/memory_provider.py",
+        "pin": {
+          "value": "git:fcbd1076a93841fa88855acce810e342a5b78101",
+          "kind": "commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "MemoryProvider defines the provider contract used by MemoryManager, including initialization, prefetch, turn synchronization, tool schemas, tool dispatch, and shutdown; this inspected external design grants CARR no authority."
+        ],
+        "verification": {
+          "method": "checked-in public source inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/NousResearch/hermes-agent/blob/fcbd1076a93841fa88855acce810e342a5b78101/agent/memory_provider.py"
+        }
+      },
+      {
+        "source_id": "neon-official-docs",
+        "family": "neon",
+        "exact_ref": "https://github.com/neondatabase/website/tree/c8c3e4e56d3252b38d9a47461157569890fc8514",
+        "pin": {
+          "value": "git:c8c3e4e56d3252b38d9a47461157569890fc8514",
+          "kind": "official GitHub-doc commit reference"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "vendor_claim",
+        "claims": [
+          "Vendor docs cover connection pooling, row-level security, and vector search optimization; not runtime reproduced."
+        ],
+        "verification": {
+          "method": "official vendor GitHub documentation inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/neondatabase/website/tree/c8c3e4e56d3252b38d9a47461157569890fc8514"
+        }
+      },
+      {
+        "source_id": "neon-connection-pooling",
+        "family": "neon",
+        "exact_ref": "https://github.com/neondatabase/website/blob/c8c3e4e56d3252b38d9a47461157569890fc8514/content/docs/connect/connection-pooling.md",
+        "pin": {
+          "value": "git:c8c3e4e56d3252b38d9a47461157569890fc8514",
+          "kind": "commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "Official connection pooling guidance; not runtime reproduced."
+        ],
+        "verification": {
+          "method": "official vendor GitHub documentation inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/neondatabase/website/blob/c8c3e4e56d3252b38d9a47461157569890fc8514/content/docs/connect/connection-pooling.md"
+        }
+      },
+      {
+        "source_id": "neon-row-level-security",
+        "family": "neon",
+        "exact_ref": "https://github.com/neondatabase/website/blob/c8c3e4e56d3252b38d9a47461157569890fc8514/content/docs/guides/row-level-security.md",
+        "pin": {
+          "value": "git:c8c3e4e56d3252b38d9a47461157569890fc8514",
+          "kind": "commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "Official row-level security guidance; not runtime reproduced."
+        ],
+        "verification": {
+          "method": "official vendor GitHub documentation inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/neondatabase/website/blob/c8c3e4e56d3252b38d9a47461157569890fc8514/content/docs/guides/row-level-security.md"
+        }
+      },
+      {
+        "source_id": "neon-pgvector",
+        "family": "neon",
+        "exact_ref": "https://github.com/neondatabase/website/blob/c8c3e4e56d3252b38d9a47461157569890fc8514/content/docs/extensions/pgvector.md",
+        "pin": {
+          "value": "git:c8c3e4e56d3252b38d9a47461157569890fc8514",
+          "kind": "commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "Official pgvector guidance; not runtime reproduced."
+        ],
+        "verification": {
+          "method": "official vendor GitHub documentation inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/neondatabase/website/blob/c8c3e4e56d3252b38d9a47461157569890fc8514/content/docs/extensions/pgvector.md"
+        }
+      },
+      {
+        "source_id": "postgresql-rls",
+        "family": "postgresql",
+        "exact_ref": "https://github.com/postgres/postgres/blob/4c66f172a09296b08d53526f802ddd2b461bd7e8/doc/src/sgml/ddl.sgml",
+        "pin": {
+          "value": "git:4c66f172a09296b08d53526f802ddd2b461bd7e8",
+          "kind": "REL_18_STABLE commit"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "source_inspected",
+        "claims": [
+          "FORCE ROW LEVEL SECURITY applies policies to table owners; this is a PostgreSQL primary-source claim."
+        ],
+        "verification": {
+          "method": "primary source inspection",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "https://github.com/postgres/postgres/blob/4c66f172a09296b08d53526f802ddd2b461bd7e8/doc/src/sgml/ddl.sgml"
+        }
+      },
+      {
+        "source_id": "carr-memory-kernel",
+        "family": "carr",
+        "exact_ref": "repo:migrations/0299_memory_kernel.sql",
+        "pin": {
+          "value": "sha256:e85bc1182e4adfbac1bde76e68a430c38c893d3eaf6339adbdd4ff306d05f69f",
+          "kind": "repository file content digest"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "locally_reproduced",
+        "claims": [
+          "Migration 0299 contains memory_item and memory_evidence tables, lineage checks, tenant predicates, and deny-by-default grants."
+        ],
+        "verification": {
+          "method": "fresh-worktree SHA-256 plus invariant inspection by check:S0-1",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "check:S0-1"
+        }
+      },
+      {
+        "source_id": "carr-runbook",
+        "family": "carr",
+        "exact_ref": "doctrine:runbook-section/0d3a6481-583f-4b3a-893f-505fd98ddcb4",
+        "pin": {
+          "value": "sha256:ad2316cf6c9f28c56f9c19f3033601a78021c3ade5628c2f3ea1d09d4434c718",
+          "kind": "canonical content digest"
+        },
+        "behavior_epoch": "current",
+        "claim_class": "packet_bound_claim",
+        "claims": [
+          "The controller packet binds this runbook content digest; its body was not reproduced by this executor."
+        ],
+        "verification": {
+          "method": "controller packet digest binding only; no body reproduction",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "doctrine:runbook-section/0d3a6481-583f-4b3a-893f-505fd98ddcb4"
+        }
+      },
+      {
+        "source_id": "practitioner-reading",
+        "family": "practitioner",
+        "exact_ref": "https://www.pinecone.io/learn/vector-search-basics/",
+        "pin": {
+          "value": "sha256:140e7a44489be31acc00abd08b5e50bfa46465cdb36abdfb472a45758202171f",
+          "kind": "curl --fail --silent --location --compressed response-body digest observed 2026-08-27"
+        },
+        "behavior_epoch": "mixed",
+        "claim_class": "source_inspected",
+        "claims": [
+          "Practitioner material is mutable directional context only; no passage is reproduced and no runtime claim is accepted from it."
+        ],
+        "verification": {
+          "method": "curl --fail --silent --location --compressed followed by shasum -a 256; mutable locator remains directional and excluded from reproduced evidence",
+          "observed_at": "2026-08-27T00:00:00Z",
+          "max_age_days": 30,
+          "status": "fresh",
+          "verification_ref": "check:S0-1"
+        }
+      }
+    ],
+    "gate_ref": "gate:S0-1-source-lock"
+  },
+  "memory_evaluation_contract": {
+    "splits": [
+      {
+        "name": "development",
+        "case_set_digest": "sha256:4ae57ea16a379a07f33582099e084d255753a521d9f8e8bddc9ab0372eb76a9a"
+      },
+      {
+        "name": "tuning",
+        "case_set_digest": "sha256:106c8d7c8111ff4d044c2dc0eac4818a8b218949a3709a6f620e7b22451362ff"
+      },
+      {
+        "name": "held_out",
+        "case_set_digest": "sha256:0d180656e7bbd761b5e73ec8f5aa3185810dc6a68ab853bcffb917d07ba55d09"
+      },
+      {
+        "name": "temporal_holdout",
+        "case_set_digest": "sha256:a79525e2c7dc9476676db47b624d9be1a7d795becad767148a151066fcffbf0d"
+      },
+      {
+        "name": "prospective_non_derivation",
+        "case_set_digest": "sha256:ec1fb596e3e5faf2a9a74bd42bb8837a4dccaeaf6558744b5f5cb1d2375c43af"
+      }
+    ],
+    "suites": [
+      {
+        "suite_id": "accumulation"
+      },
+      {
+        "suite_id": "adversarial"
+      },
+      {
+        "suite_id": "exact_vs_ann"
+      },
+      {
+        "suite_id": "held_out_real"
+      },
+      {
+        "suite_id": "lexical_degraded"
+      },
+      {
+        "suite_id": "outage"
+      },
+      {
+        "suite_id": "public_directional"
+      },
+      {
+        "suite_id": "temporal"
+      }
+    ],
+    "labels": {
+      "adjudication": [
+        "supported",
+        "unsupported",
+        "contradictory",
+        "scope_violation",
+        "unresolved"
+      ]
+    },
+    "metrics": [
+      {
+        "metric_id": "recall_at_k",
+        "formula": "relevant retrieved items / relevant items",
+        "bound_action": "block release when held-out recall misses floor",
+        "failure_action": "block_release",
+        "threshold": ">=0.85 on held_out"
+      },
+      {
+        "metric_id": "precision_at_k",
+        "formula": "relevant retrieved items / retrieved items",
+        "bound_action": "pause canary on precision regression",
+        "failure_action": "pause_canary",
+        "threshold": ">=0.80 on held_out"
+      },
+      {
+        "metric_id": "scope_leak_rate",
+        "formula": "cross-scope results / all results",
+        "bound_action": "block release if nonzero",
+        "failure_action": "block_release",
+        "threshold": "=0 on every suite"
+      },
+      {
+        "metric_id": "p95_latency",
+        "formula": "95th percentile end-to-end retrieval latency in milliseconds",
+        "bound_action": "degrade to lexical retrieval at ceiling",
+        "failure_action": "degrade_lexical",
+        "threshold": "<=1500 milliseconds for prefetch"
+      },
+      {
+        "metric_id": "adjudication_agreement",
+        "formula": "matching independent labels / adjudicated labels",
+        "bound_action": "require human review below threshold",
+        "failure_action": "require_review",
+        "threshold": ">=0.80 before promotion"
+      },
+      {
+        "metric_id": "cost_per_case",
+        "formula": "measured usd / evaluated cases",
+        "bound_action": "report starting ceiling variance",
+        "failure_action": "report_only",
+        "threshold": "<=0.05 usd during canary"
+      }
+    ],
+    "confidence": {
+      "method": "bootstrap percentile interval",
+      "bootstrap_iterations": 2000,
+      "threshold": "95% interval must not cross the metric failure threshold",
+      "random_seed": 20260826
+    },
+    "model_versions": {
+      "answerer": "none-s0",
+      "judge": "deterministic-label-v1",
+      "embedding": "embedding-unselected-s0",
+      "reranker": "reranker-unselected-s0",
+      "extractor": "extractor-unselected-s0"
+    },
+    "index_generation": "index:none-s0-frozen",
+    "outcome_horizons": [
+      {
+        "horizon_id": "immediate",
+        "window": "0-24h",
+        "state": "not_measured"
+      },
+      {
+        "horizon_id": "mature",
+        "window": "30d",
+        "state": "not_measured"
+      },
+      {
+        "horizon_id": "operational",
+        "window": "90d",
+        "state": "not_measured"
+      }
+    ],
+    "measurement_units": {
+      "latency": "milliseconds",
+      "cost": "usd",
+      "storage": "bytes",
+      "tokens": "model_tokens"
+    },
+    "cases": [
+      {
+        "case_id": "c01-preference",
+        "split": "development",
+        "suite_ids": [
+          "accumulation"
+        ],
+        "label": "supported_preference",
+        "critical": false,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:12949a3ba478af81bef78747f7f5803231e456a0e7a6d83b8f5a495a7af1a421",
+        "expected_output_digest": "sha256:0becce3e812c8922d71ee1d6b5ea9cb5876f3906ee1609a041991880a875e009",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:sponsor-alpha",
+          "fact:preference-format-docx"
+        ],
+        "expected_fixture": [
+          "decision:include",
+          "label:supported-preference"
+        ]
+      },
+      {
+        "case_id": "c02-fact-entity",
+        "split": "development",
+        "suite_ids": [
+          "accumulation"
+        ],
+        "label": "supported_fact_entity",
+        "critical": false,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:c51b48e5fa6ab06946ef4d177b3a27e5c3c97f6b13876538a8602ba53c6cff6a",
+        "expected_output_digest": "sha256:a75bad99fa60599dd3f2d13527ddfdc427d9d7a9c4129d221f53f60eaa07e026",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "fact:entity-relationship-a"
+        ],
+        "expected_fixture": [
+          "decision:include",
+          "label:supported-fact-entity"
+        ]
+      },
+      {
+        "case_id": "c03-doctrine-ref",
+        "split": "development",
+        "suite_ids": [
+          "public_directional"
+        ],
+        "label": "supported_doctrine_ref",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:c339db522c2a6e6071b2f6528dceed3b3ab7dd807d94178e79bc83081185c638",
+        "expected_output_digest": "sha256:8bfe1edaaae3aacbd7443755756c59765519dda1d5ffcb9adf194fa9b30f57d6",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:shared",
+          "fact:doctrine-reference-a"
+        ],
+        "expected_fixture": [
+          "decision:include",
+          "label:supported-doctrine-ref"
+        ]
+      },
+      {
+        "case_id": "c04-correction",
+        "split": "tuning",
+        "suite_ids": [
+          "adversarial"
+        ],
+        "label": "corrected_superseded",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:d958a8c8ea3ad62f65cdef2b1f8d64579ee99bcfc87c099bbeeacf87354420d3",
+        "expected_output_digest": "sha256:adad94d5e8e7ee51937989aebad9fe6aad364456aa4c642c0220b2456d808ea3",
+        "adjudication_label": "contradictory",
+        "input_fixture": [
+          "scope:sponsor-alpha",
+          "fact:correction-supersedes-a"
+        ],
+        "expected_fixture": [
+          "decision:supersede",
+          "label:corrected-superseded"
+        ]
+      },
+      {
+        "case_id": "c05-forget",
+        "split": "tuning",
+        "suite_ids": [
+          "adversarial"
+        ],
+        "label": "forgotten_not_recalled",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:26f01488777f837e82e413d6bc844ff043c9d216f1e47eead914b8fe8e343280",
+        "expected_output_digest": "sha256:4d5ef7401bb8e0ebbe57b995ff94d5f449f5bbe4be8d0b99635fddf581c97c55",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:sponsor-alpha",
+          "lifecycle:forgotten-a"
+        ],
+        "expected_fixture": [
+          "decision:exclude",
+          "label:forgotten-not-recalled"
+        ]
+      },
+      {
+        "case_id": "c06-temporal",
+        "split": "temporal_holdout",
+        "suite_ids": [
+          "temporal"
+        ],
+        "label": "temporal_validity",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:7b995102b784c1a2e127ed1c555d3c86a4c3acdf5fe42d16bb36476afecd783b",
+        "expected_output_digest": "sha256:aba7e9ffc56fd7c2f53e46e4df2c282793b9d4db544b49cc433e6d66da04d502",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "validity:expired-a"
+        ],
+        "expected_fixture": [
+          "decision:exclude",
+          "label:temporal-validity"
+        ]
+      },
+      {
+        "case_id": "c07-cross-scope",
+        "split": "held_out",
+        "suite_ids": [
+          "adversarial"
+        ],
+        "label": "scope_violation",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:33a22d6693a7c9695731a4d64f97011b0e4ff872ab7cb7c8d4ea5cdafd0c8eec",
+        "expected_output_digest": "sha256:bfe82f3271fb67105d74d8015c8a5b02b973787c0b9af23b92b627ea5e9d0b32",
+        "adjudication_label": "scope_violation",
+        "input_fixture": [
+          "scope:tenant-beta",
+          "request:tenant-alpha"
+        ],
+        "expected_fixture": [
+          "decision:deny",
+          "label:scope-violation"
+        ]
+      },
+      {
+        "case_id": "c08-poisoning",
+        "split": "held_out",
+        "suite_ids": [
+          "adversarial"
+        ],
+        "label": "poisoning_rejected",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:c04c064744770d631e697168d9051cae7a9ea8052c9df5b33eddad7e66002a1a",
+        "expected_output_digest": "sha256:099fabf865695ce405306ae8e53e3f6940129f0da3020357646a0d7ae7cbbb9d",
+        "adjudication_label": "unsupported",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "taint:authority-seeking-a"
+        ],
+        "expected_fixture": [
+          "decision:quarantine",
+          "label:poisoning-rejected"
+        ]
+      },
+      {
+        "case_id": "c09-authority",
+        "split": "held_out",
+        "suite_ids": [
+          "adversarial"
+        ],
+        "label": "model_not_authority",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:70c8e819c42e7f50e2e56810610b5699a2245d04f3b29359642b767b7cc6f419",
+        "expected_output_digest": "sha256:65a33e73132cc250bd927e56cb54248558cc3c5eb3150921375410dbb243a323",
+        "adjudication_label": "unsupported",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "request:model-activation-a"
+        ],
+        "expected_fixture": [
+          "decision:deny",
+          "label:model-not-authority"
+        ]
+      },
+      {
+        "case_id": "c10-accumulation",
+        "split": "development",
+        "suite_ids": [
+          "accumulation"
+        ],
+        "label": "bounded_accumulation",
+        "critical": false,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:fa66fd62583f58a2fb2913157aaffef85c4b20e76bd06bdc6c2d14c194b43746",
+        "expected_output_digest": "sha256:d87378aae71c7711bafb67969c727bd462a7afe2ddec0cd1b4f370470b673c0d",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:sponsor-alpha",
+          "volume:bounded-accumulation-a"
+        ],
+        "expected_fixture": [
+          "decision:cap",
+          "label:bounded-accumulation"
+        ]
+      },
+      {
+        "case_id": "c11-outage-lexical",
+        "split": "held_out",
+        "suite_ids": [
+          "outage",
+          "lexical_degraded"
+        ],
+        "label": "lexical_degrade_on_outage",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:b29b48dea51064610f44af14f91072ffbaa80668c77d8d787a83aab821d83304",
+        "expected_output_digest": "sha256:a1ca24b1a8d033f1c8cebdacd3fb0f64eae6be2fbb00f91cf8194a6087f1f7df",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "outage:embedding-unavailable"
+        ],
+        "expected_fixture": [
+          "decision:degrade-lexical",
+          "label:lexical-degrade-on-outage"
+        ]
+      },
+      {
+        "case_id": "c12-exact-ann",
+        "split": "tuning",
+        "suite_ids": [
+          "exact_vs_ann"
+        ],
+        "label": "exact_ann_comparison",
+        "critical": false,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:5985bdf9437bf8d609508411519d68678469f487d457048ab309168b6fc71868",
+        "expected_output_digest": "sha256:6b394e15efefbb0098adff2dccb97dde74170e5a5ef85dcd24a9c22a4ee9d538",
+        "adjudication_label": "unresolved",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "comparison:exact-versus-ann-a"
+        ],
+        "expected_fixture": [
+          "decision:compare",
+          "label:exact-ann-comparison"
+        ]
+      },
+      {
+        "case_id": "c13-progressive",
+        "split": "held_out",
+        "suite_ids": [
+          "public_directional"
+        ],
+        "label": "progressive_context",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:1dac35f7d2454de87006177330cae4cdfb9941037da43b9f1bdb607572e54241",
+        "expected_output_digest": "sha256:80fec094c38596187e4624f077c94f5b3c63be0797fdb6899cdc7423d1b92e48",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:shared",
+          "context:progressive-l0-l2-a"
+        ],
+        "expected_fixture": [
+          "decision:pack",
+          "label:progressive-context"
+        ]
+      },
+      {
+        "case_id": "c14-procedure",
+        "split": "prospective_non_derivation",
+        "suite_ids": [
+          "held_out_real"
+        ],
+        "label": "procedure_non_derivation",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:0b78753525a0643b6e6ee8c5fbfdae2fc92ffe4501665458b393c3d1607b03df",
+        "expected_output_digest": "sha256:80a8f0e37d17c01ce3c4a95a18373b935c470f4d92d2f18c1913f90d14e8b3af",
+        "adjudication_label": "unresolved",
+        "input_fixture": [
+          "scope:sponsor-alpha",
+          "procedure:prospective-nonderivation-a"
+        ],
+        "expected_fixture": [
+          "decision:holdout",
+          "label:procedure-nonderivation"
+        ]
+      },
+      {
+        "case_id": "c15-entity-temporal",
+        "split": "temporal_holdout",
+        "suite_ids": [
+          "temporal"
+        ],
+        "label": "entity_temporal_supersession",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:7ea4325a0f5290f6f2ad80592a2b4c01bf3cdaa687425738630cc8c4c9074f4e",
+        "expected_output_digest": "sha256:dc8a4c84eaf3ff747e9e2172268c6863d7214ae8d53f1bb14da5949112b3bfe0",
+        "adjudication_label": "contradictory",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "entity:temporal-supersession-a"
+        ],
+        "expected_fixture": [
+          "decision:supersede",
+          "label:entity-temporal-supersession"
+        ]
+      },
+      {
+        "case_id": "c16-cost-bound",
+        "split": "prospective_non_derivation",
+        "suite_ids": [
+          "outage"
+        ],
+        "label": "cost_ceiling",
+        "critical": true,
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:50272a88c274d8daadd516c83c05b2bae3a7efe757428c3cfb7bb3dd516648c8",
+        "expected_output_digest": "sha256:e3e676a7719167ea3ddffcb33b94e81bf68ee11482f28520137bab945ef79fe9",
+        "adjudication_label": "supported",
+        "input_fixture": [
+          "scope:tenant-alpha",
+          "budget:cost-ceiling-a"
+        ],
+        "expected_fixture": [
+          "decision:pause",
+          "label:cost-ceiling"
+        ]
+      }
+    ],
+    "gate_ref": "gate:S0-2-evaluation-contract",
+    "corpus_digest": "sha256:65927be4d4d0421e1858748ee5e6df41250a0c0822f1f29a0f7462ae52194361"
+  },
+  "synthetic_scope_fixtures": {
+    "tenants": [
+      {
+        "id": "tenant-alpha",
+        "synthetic": true
+      },
+      {
+        "id": "tenant-beta",
+        "synthetic": true
+      }
+    ],
+    "sponsors": [
+      {
+        "id": "sponsor-joe",
+        "synthetic": true
+      },
+      {
+        "id": "sponsor-dell",
+        "synthetic": true
+      }
+    ],
+    "agents": [
+      {
+        "id": "agent-alpha",
+        "synthetic": true
+      },
+      {
+        "id": "agent-beta",
+        "synthetic": true
+      }
+    ],
+    "projects": [
+      {
+        "id": "project-alpha",
+        "synthetic": true
+      },
+      {
+        "id": "project-beta",
+        "synthetic": true
+      }
+    ],
+    "sessions": [
+      {
+        "id": "session-alpha",
+        "tenant_id": "tenant-alpha",
+        "synthetic": true
+      },
+      {
+        "id": "session-beta",
+        "tenant_id": "tenant-beta",
+        "synthetic": true
+      }
+    ],
+    "cases": [
+      {
+        "case_id": "case-alpha",
+        "tenant_id": "tenant-alpha",
+        "sponsor_id": "sponsor-joe",
+        "agent_id": "agent-alpha",
+        "project_id": "project-alpha",
+        "session_id": "session-alpha",
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:ec3f4bdc99ea0e12484a41d9f70f985c0e0fbe0b672f7309c178a812543b7cbf",
+        "expected_output_digest": "sha256:67d74f4841303aa95c3d38f0390b382b5e8d60f10c654e13d5688522dd5c5c19",
+        "expected_assertions": [
+          "access:allow-own-scope",
+          "access:deny-other-scope"
+        ]
+      },
+      {
+        "case_id": "case-beta",
+        "tenant_id": "tenant-beta",
+        "sponsor_id": "sponsor-dell",
+        "agent_id": "agent-beta",
+        "project_id": "project-beta",
+        "session_id": "session-beta",
+        "synthetic": true,
+        "contains_business_payload": false,
+        "immutable_input_digest": "sha256:adc1580767365e1d512ad766f8342d26eb828951bce88523783a73eac743e32a",
+        "expected_output_digest": "sha256:67d74f4841303aa95c3d38f0390b382b5e8d60f10c654e13d5688522dd5c5c19",
+        "expected_assertions": [
+          "access:allow-own-scope",
+          "access:deny-other-scope"
+        ]
+      }
+    ]
+  },
+  "threat_model": {
+    "authority": {
+      "memory_is_authority": false,
+      "model_can_activate": false,
+      "neon_is_sole_canonical_store": true
+    },
+    "threats": [
+      {
+        "threat_id": "cross_scope_leak",
+        "controls": [
+          "server tenant and sponsor predicates"
+        ],
+        "test_refs": [
+          "test:S0-scope"
+        ],
+        "release_action": "block_release",
+        "asset_ref": "asset:tenant-isolation",
+        "boundary_ref": "boundary:retrieval-scope",
+        "abuse_case": "A caller replays another tenant or sponsor identifier and receives memory candidates across the server-derived scope boundary.",
+        "severity": "critical",
+        "likelihood": "medium",
+        "owner_ref": "owner:security",
+        "mitigation_refs": [
+          "control:cross-scope-leak"
+        ],
+        "evidence_refs": [
+          "repo:migrations/0299_memory_kernel.sql"
+        ]
+      },
+      {
+        "threat_id": "memory_poisoning",
+        "controls": [
+          "candidate status and human promotion"
+        ],
+        "test_refs": [
+          "test:S0-poison"
+        ],
+        "release_action": "require_review",
+        "asset_ref": "asset:memory-integrity",
+        "boundary_ref": "boundary:capture-promotion",
+        "abuse_case": "Untrusted captured content is promoted into durable memory without attributable evidence or independent human acceptance.",
+        "severity": "high",
+        "likelihood": "medium",
+        "owner_ref": "owner:governance",
+        "mitigation_refs": [
+          "control:memory-poisoning"
+        ],
+        "evidence_refs": [
+          "repo:migrations/0299_memory_kernel.sql"
+        ]
+      },
+      {
+        "threat_id": "secret_capture",
+        "controls": [
+          "synthetic-only boundary and redaction class"
+        ],
+        "test_refs": [
+          "test:S0-redaction"
+        ],
+        "release_action": "block_release",
+        "asset_ref": "asset:restricted-data",
+        "boundary_ref": "boundary:capture-persistence",
+        "abuse_case": "A credential, client payload, or raw transcript crosses the synthetic and redaction boundary into stored memory evidence.",
+        "severity": "critical",
+        "likelihood": "medium",
+        "owner_ref": "owner:security",
+        "mitigation_refs": [
+          "control:secret-capture"
+        ],
+        "evidence_refs": [
+          "repo:control-room/contracts/security-redaction.v1.json"
+        ]
+      },
+      {
+        "threat_id": "stale_publish_race",
+        "controls": [
+          "immutable revision and freshness gate"
+        ],
+        "test_refs": [
+          "test:S0-freshness"
+        ],
+        "release_action": "pause_canary",
+        "asset_ref": "asset:memory-integrity",
+        "boundary_ref": "boundary:revision-publish",
+        "abuse_case": "A stale candidate or superseded plan revision wins a concurrent publish race and becomes visible as current context.",
+        "severity": "high",
+        "likelihood": "medium",
+        "owner_ref": "owner:governance",
+        "mitigation_refs": [
+          "control:stale-publish-race"
+        ],
+        "evidence_refs": [
+          "repo:control-room/contracts/state-machines.v1.json"
+        ]
+      },
+      {
+        "threat_id": "model_self_approval",
+        "controls": [
+          "human acceptance required"
+        ],
+        "test_refs": [
+          "test:S0-authority"
+        ],
+        "release_action": "block_release",
+        "asset_ref": "asset:human-authority",
+        "boundary_ref": "boundary:agent-approval",
+        "abuse_case": "The executing agent supplies or reuses approval evidence and promotes its own proposed memory without a distinct verified human.",
+        "severity": "critical",
+        "likelihood": "medium",
+        "owner_ref": "owner:governance",
+        "mitigation_refs": [
+          "control:model-self-approval"
+        ],
+        "evidence_refs": [
+          "repo:control-room/contracts/authority-risk-matrix.v1.json"
+        ]
+      },
+      {
+        "threat_id": "dual_memory_authority",
+        "controls": [
+          "Neon sole canonical store"
+        ],
+        "test_refs": [
+          "test:S0-authority"
+        ],
+        "release_action": "block_release",
+        "asset_ref": "asset:canonical-memory",
+        "boundary_ref": "boundary:hermes-neon",
+        "abuse_case": "Hermes local memory and Neon both act as writable authorities, producing conflicting current context without a canonical lineage.",
+        "severity": "critical",
+        "likelihood": "low",
+        "owner_ref": "owner:integration",
+        "mitigation_refs": [
+          "control:dual-memory-authority"
+        ],
+        "evidence_refs": [
+          "repo:migrations/0299_memory_kernel.sql"
+        ]
+      },
+      {
+        "threat_id": "shared_postfilter_ann",
+        "controls": [
+          "scope before retrieval"
+        ],
+        "test_refs": [
+          "test:S0-scope"
+        ],
+        "release_action": "block_release",
+        "asset_ref": "asset:tenant-isolation",
+        "boundary_ref": "boundary:ann-retrieval",
+        "abuse_case": "A shared approximate-nearest-neighbor search retrieves foreign-scope vectors before post-filtering and leaks existence or ranking.",
+        "severity": "critical",
+        "likelihood": "medium",
+        "owner_ref": "owner:retrieval",
+        "mitigation_refs": [
+          "control:shared-postfilter-ann"
+        ],
+        "evidence_refs": [
+          "repo:migrations/0299_memory_kernel.sql"
+        ]
+      },
+      {
+        "threat_id": "deletion_restore_revival",
+        "controls": [
+          "append-only lineage and forgotten state"
+        ],
+        "test_refs": [
+          "test:S0-lineage"
+        ],
+        "release_action": "require_review",
+        "asset_ref": "asset:deletion-integrity",
+        "boundary_ref": "boundary:restore-lineage",
+        "abuse_case": "A backup restore or successor replay revives a forgotten memory without preserving the deletion marker and lineage.",
+        "severity": "high",
+        "likelihood": "low",
+        "owner_ref": "owner:database",
+        "mitigation_refs": [
+          "control:deletion-restore-revival"
+        ],
+        "evidence_refs": [
+          "repo:migrations/0299_memory_kernel.sql"
+        ]
+      },
+      {
+        "threat_id": "opaque_ranking",
+        "controls": [
+          "deterministic labels and logged metric formula"
+        ],
+        "test_refs": [
+          "test:S0-evaluation"
+        ],
+        "release_action": "require_review",
+        "asset_ref": "asset:evaluation-integrity",
+        "boundary_ref": "boundary:retrieval-ranking",
+        "abuse_case": "An unpinned or unexplained ranker changes retrieval order without reproducible labels, metrics, or recorded version evidence.",
+        "severity": "medium",
+        "likelihood": "medium",
+        "owner_ref": "owner:evaluation",
+        "mitigation_refs": [
+          "control:opaque-ranking"
+        ],
+        "evidence_refs": [
+          "check:S0-2"
+        ]
+      },
+      {
+        "threat_id": "cost_runaway",
+        "controls": [
+          "starting ceiling and bounded suites"
+        ],
+        "test_refs": [
+          "test:S0-cost"
+        ],
+        "release_action": "pause_canary",
+        "asset_ref": "asset:operating-budget",
+        "boundary_ref": "boundary:retrieval-execution",
+        "abuse_case": "Unbounded retrieval, scoring, token packing, or model jobs exceed the declared tenant cost and latency envelopes.",
+        "severity": "high",
+        "likelihood": "medium",
+        "owner_ref": "owner:operations",
+        "mitigation_refs": [
+          "control:cost-runaway"
+        ],
+        "evidence_refs": [
+          "check:S0-2"
+        ]
+      }
+    ],
+    "human_acceptance": {
+      "status": "contract_only_no_acceptance_recorded",
+      "approver_role": "verified_human",
+      "executor_role": "agent_executor",
+      "distinct_actor_required": true,
+      "acceptance_requires": "fresh_execution_envelope_and_typed_receipt",
+      "binding_fields": [
+        "work_request_ref",
+        "work_request_version",
+        "accepted_plan_ref",
+        "accepted_plan_digest",
+        "slice_ref",
+        "envelope_id",
+        "source_commit",
+        "artifact_digest"
+      ],
+      "evidence_fields": [
+        "human_approver_ref",
+        "executor_ref",
+        "accepted_at",
+        "receipt_ref",
+        "acceptance_digest",
+        "independent_session_ref"
+      ],
+      "failure_action": "block_release"
+    }
+  },
+  "cost_latency_storage_model": {
+    "envelopes": [
+      {
+        "envelope_id": "carr_operating_12_month",
+        "horizon_months": 12,
+        "scope": "synthetic CARR operating envelope",
+        "window": "12_months",
+        "measurement_ref": "measurement:storage"
+      },
+      {
+        "envelope_id": "fleet_stress_12_month",
+        "horizon_months": 12,
+        "scope": "synthetic multi-tenant fleet stress envelope",
+        "window": "12_months",
+        "measurement_ref": "measurement:storage"
+      }
+    ],
+    "ceilings": [
+      {
+        "ceiling_id": "event_bytes",
+        "formula": "each event <= 8 KiB",
+        "bound_action": "reject oversized event",
+        "limit": 8192,
+        "unit": "bytes",
+        "scope": "event",
+        "window": "per_event",
+        "measurement_ref": "measurement:storage"
+      },
+      {
+        "ceiling_id": "events_session",
+        "formula": "events per session <= 200",
+        "bound_action": "stop capture and require review",
+        "limit": 200,
+        "unit": "events",
+        "scope": "session",
+        "window": "per_session",
+        "measurement_ref": "measurement:storage"
+      },
+      {
+        "ceiling_id": "routine_model_jobs",
+        "formula": "routine model jobs per session <= 2",
+        "bound_action": "queue excess jobs",
+        "limit": 2,
+        "unit": "model_jobs",
+        "scope": "session",
+        "window": "per_session",
+        "measurement_ref": "measurement:cost"
+      },
+      {
+        "ceiling_id": "proposed_memories",
+        "formula": "proposed memories per session <= 20",
+        "bound_action": "quarantine excess proposals",
+        "limit": 20,
+        "unit": "memories",
+        "scope": "session",
+        "window": "per_session",
+        "measurement_ref": "measurement:storage"
+      },
+      {
+        "ceiling_id": "neighbors",
+        "formula": "neighbors per retrieval <= 64",
+        "bound_action": "cap retrieval",
+        "limit": 64,
+        "unit": "neighbors",
+        "scope": "retrieval",
+        "window": "per_retrieval",
+        "measurement_ref": "measurement:latency"
+      },
+      {
+        "ceiling_id": "score_rows",
+        "formula": "score rows per retrieval <= 200",
+        "bound_action": "cap scoring and report",
+        "limit": 200,
+        "unit": "score_rows",
+        "scope": "retrieval",
+        "window": "per_retrieval",
+        "measurement_ref": "measurement:latency"
+      },
+      {
+        "ceiling_id": "queue_p95",
+        "formula": "queue p95 <= 5 minutes and hard maximum <= 30 minutes",
+        "bound_action": "pause canary on p95 breach; refuse at hard limit",
+        "limit": 5,
+        "unit": "minutes",
+        "scope": "queue p95",
+        "window": "rolling_24_hours",
+        "measurement_ref": "measurement:latency"
+      },
+      {
+        "ceiling_id": "canary_spend",
+        "formula": "tenant spend <= 5 usd per day in canary",
+        "bound_action": "pause canary and require review",
+        "limit": 5,
+        "unit": "usd_per_day",
+        "scope": "tenant canary",
+        "window": "24_hours",
+        "measurement_ref": "measurement:cost"
+      },
+      {
+        "ceiling_id": "live_spend",
+        "formula": "tenant spend <= 25 usd per day live",
+        "bound_action": "kill switch and require review",
+        "limit": 25,
+        "unit": "usd_per_day",
+        "scope": "tenant live",
+        "window": "24_hours",
+        "measurement_ref": "measurement:cost"
+      },
+      {
+        "ceiling_id": "ann_payload",
+        "formula": "ANN payload <= 2x embedding payload",
+        "bound_action": "disable ANN and degrade lexical",
+        "limit": 2,
+        "unit": "payload_ratio",
+        "scope": "ANN index",
+        "window": "per_index_generation",
+        "measurement_ref": "measurement:storage"
+      },
+      {
+        "ceiling_id": "latency_prefetch",
+        "formula": "p95 prefetch latency <= 1500 milliseconds",
+        "bound_action": "degrade lexical and pause",
+        "limit": 1500,
+        "unit": "milliseconds",
+        "scope": "prefetch p95",
+        "window": "rolling_24_hours",
+        "measurement_ref": "measurement:latency"
+      },
+      {
+        "ceiling_id": "latency_deep",
+        "formula": "p95 deep retrieval latency <= 3000 milliseconds",
+        "bound_action": "degrade lexical and require review",
+        "limit": 3000,
+        "unit": "milliseconds",
+        "scope": "deep retrieval p95",
+        "window": "rolling_24_hours",
+        "measurement_ref": "measurement:latency"
+      },
+      {
+        "ceiling_id": "tokens_prefetch",
+        "formula": "prefetch context <= 1200 model tokens",
+        "bound_action": "pack less context",
+        "limit": 1200,
+        "unit": "model_tokens",
+        "scope": "prefetch context",
+        "window": "per_retrieval",
+        "measurement_ref": "measurement:cost"
+      },
+      {
+        "ceiling_id": "tokens_deep",
+        "formula": "deep context <= 4000 model tokens",
+        "bound_action": "pack less context and require review",
+        "limit": 4000,
+        "unit": "model_tokens",
+        "scope": "deep context",
+        "window": "per_retrieval",
+        "measurement_ref": "measurement:cost"
+      }
+    ],
+    "measurements": [
+      {
+        "measurement_id": "latency",
+        "measurement_status": "estimated",
+        "value": 1500,
+        "unit": "milliseconds",
+        "sample_count": 1,
+        "window": "synthetic_starting_ceiling",
+        "measured_at": "2026-08-27T00:00:00Z",
+        "estimate_basis": "Bounded planning estimate only; no runtime measurement or model call occurred in S0.",
+        "evidence_refs": [
+          "check:S0-2"
+        ]
+      },
+      {
+        "measurement_id": "cost",
+        "measurement_status": "estimated",
+        "value": 5,
+        "unit": "usd",
+        "sample_count": 1,
+        "window": "per_tenant_per_day_canary",
+        "measured_at": "2026-08-27T00:00:00Z",
+        "estimate_basis": "Bounded planning estimate only; no billed model execution occurred in S0.",
+        "evidence_refs": [
+          "check:S0-2"
+        ]
+      },
+      {
+        "measurement_id": "storage",
+        "measurement_status": "estimated",
+        "value": 3670016,
+        "unit": "bytes",
+        "sample_count": 1,
+        "window": "synthetic_operating_baseline",
+        "measured_at": "2026-08-27T00:00:00Z",
+        "estimate_basis": "Deterministic sum of the three synthetic baseline component byte estimates.",
+        "evidence_refs": [
+          "check:S0-2"
+        ]
+      }
+    ],
+    "storage_model": {
+      "components": [
+        {
+          "component_id": "memory_rows",
+          "formula": "row count * encoded row bytes",
+          "bound_action": "apply retention and review growth",
+          "baseline_bytes": 1048576,
+          "growth_bytes_per_window": 262144,
+          "window": "30_days",
+          "retention_days": 365
+        },
+        {
+          "component_id": "evidence_rows",
+          "formula": "evidence count * encoded evidence bytes",
+          "bound_action": "apply hot-window retention",
+          "baseline_bytes": 2097152,
+          "growth_bytes_per_window": 524288,
+          "window": "30_days",
+          "retention_days": 365
+        },
+        {
+          "component_id": "indexes",
+          "formula": "indexed bytes plus vector bytes",
+          "bound_action": "disable optional index at ceiling",
+          "baseline_bytes": 524288,
+          "growth_bytes_per_window": 131072,
+          "window": "30_days",
+          "retention_days": 365
+        }
+      ],
+      "starting_envelopes": [
+        {
+          "envelope_id": "carr_operating_12_month",
+          "window": "12_months",
+          "scale_multiplier": 1,
+          "sponsor_count": 2,
+          "agent_count": 8,
+          "session_count": 2400,
+          "event_count": 480000,
+          "retrieval_count": 240000,
+          "baseline_bytes": 3670016,
+          "growth_bytes": 11010048,
+          "retention_days": 365,
+          "measurement_ref": "measurement:storage"
+        },
+        {
+          "envelope_id": "fleet_stress_12_month",
+          "window": "12_months",
+          "scale_multiplier": 25,
+          "sponsor_count": 50,
+          "agent_count": 200,
+          "session_count": 60000,
+          "event_count": 12000000,
+          "retrieval_count": 6000000,
+          "baseline_bytes": 91750400,
+          "growth_bytes": 275251200,
+          "retention_days": 365,
+          "measurement_ref": "measurement:storage"
+        }
+      ]
+    }
+  },
+  "current_gap_legacy_inventory": [
+    {
+      "inventory_id": "migration-0299",
+      "status": "partial",
+      "truthful_current_behavior": "Checked-in migration defines candidate memory/evidence rows and basic lineage, but not bitemporal fields, quarantine, provenance digest, policy/model/conflict fields, FORCE RLS, or function-only writes.",
+      "evidence_refs": [
+        "repo:migrations/0299_memory_kernel.sql",
+        "repo:mcp-server/test/memory-kernel.test.mjs"
+      ],
+      "gap": "Those controls require later slices.",
+      "owning_slice_ref": "slice:learning-schema-safety-v2",
+      "executable_gate_ref": "check:S1-1",
+      "authority_class": "canonical",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "human-acceptance-runtime",
+      "status": "missing",
+      "truthful_current_behavior": "Current memory routes preserve actor identifiers and timestamps, but the retired humanOnly dispatcher is a no-op and the memory-kernel regression explicitly treats the legacy human_only field as absent.",
+      "evidence_refs": [
+        "repo:mcp-server/src/tools.js",
+        "repo:mcp-server/src/memory.js",
+        "repo:mcp-server/test/memory-kernel.test.mjs"
+      ],
+      "gap": "A future slice must enforce distinct verified-human approver and agent executor identities through a fresh envelope, typed receipt, immutable plan and artifact bindings, and independent-session evidence; S0 records only that fail-closed contract.",
+      "owning_slice_ref": "slice:learning-schema-safety-v2",
+      "executable_gate_ref": "check:S1-3",
+      "authority_class": "not_implemented",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "context-bundle-v1",
+      "status": "current",
+      "truthful_current_behavior": "Context bundle schema and its database-backed plan, digest, mode, expiry, item, activation, and receipt path are current.",
+      "evidence_refs": [
+        "repo:control-room/contracts/context-bundle.v1.schema.json",
+        "repo:migrations/0303_evidence_activation_reliability.sql"
+      ],
+      "gap": "v2 needs progressive memory-specific levels, immutable source links, compatibility, and retirement evidence without a parallel compiler.",
+      "owning_slice_ref": "slice:learning-context-bundle-v2",
+      "executable_gate_ref": "check:S4-1",
+      "authority_class": "canonical",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "security-redaction-v1",
+      "status": "partial",
+      "truthful_current_behavior": "Security contract defines O4 never-store classes and server-derived scope but explicitly leaves production sinks unproven.",
+      "evidence_refs": [
+        "repo:control-room/contracts/security-redaction.v1.json",
+        "repo:control-room/test/contracts.test.mjs"
+      ],
+      "gap": "Runtime persistence, typed responses, exports, model packets, DOM canaries, and telemetry remain unproven.",
+      "owning_slice_ref": "slice:learning-hardening-v2",
+      "executable_gate_ref": "check:S12-2",
+      "authority_class": "canonical",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "policy-learning-v1",
+      "status": "partial",
+      "truthful_current_behavior": "The offline contract and validator deny production learning, automatic promotion, and policy application; the path is observational only and not deployed.",
+      "evidence_refs": [
+        "repo:control-room/contracts/policy-learning-envelope.v1.schema.json",
+        "repo:tools/test-policy-learning-envelope.py"
+      ],
+      "gap": "No real trajectory learner, accepted declarative procedure, runtime policy change, or prospective proof is implemented.",
+      "owning_slice_ref": "slice:learning-procedure-compiler-v2",
+      "executable_gate_ref": "check:S11-1",
+      "authority_class": "not_implemented",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "memory-evaluation",
+      "status": "partial",
+      "truthful_current_behavior": "This artifact freezes synthetic splits, labels, metrics, source pins, threats, starting ceilings, gaps, and evidence ownership; no feature is measured.",
+      "evidence_refs": [
+        "repo:control-room/test/contracts.test.mjs",
+        "repo:control-room/contracts/fixtures/memory-evaluation-s0.synthetic.v1.json"
+      ],
+      "gap": "No model calls, live records, measured outcomes, or production behavior changes occur in S0.",
+      "owning_slice_ref": "slice:learning-baseline-contracts-v2",
+      "executable_gate_ref": "check:S0-2",
+      "authority_class": "canonical",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "hermes-native-memory",
+      "status": "legacy",
+      "truthful_current_behavior": "Current bot assembly leaves Hermes native memory enabled as non-authoritative, and the checked-in drift predicate can detect its second-store steering risk but cannot neutralize it.",
+      "evidence_refs": [
+        "repo:mcp-server/src/bot-brief.js",
+        "repo:ops/hermes-memory-check.py"
+      ],
+      "gap": "Native memory and CARR's Neon-backed memory are not yet mutually exclusive, and the CARR MemoryProvider bridge is not implemented.",
+      "owning_slice_ref": "slice:learning-hermes-bridge-v2",
+      "executable_gate_ref": "check:S7-2",
+      "authority_class": "legacy_non_authoritative",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "standing-context",
+      "status": "current",
+      "truthful_current_behavior": "Standing context is the canonical governed doctrine opening route; scoped context-bundle activation is the accepted-plan execution route.",
+      "evidence_refs": [
+        "repo:AGENTS.md",
+        "repo:mcp-server/src/bot-brief.js"
+      ],
+      "gap": "The operator surface does not yet explain the complete learning loop or replace either canonical route.",
+      "owning_slice_ref": "slice:learning-control-room-v2",
+      "executable_gate_ref": "check:S10-1",
+      "authority_class": "canonical",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "inventory_id": "situation-retrieval",
+      "status": "current",
+      "truthful_current_behavior": "Situation retrieval is derived advisory context with database-backed retrieval behavior; it is not the memory kernel or an authority source.",
+      "evidence_refs": [
+        "repo:mcp-server/src/situation-retrieval.js",
+        "repo:control-room/contracts/context-bundle.v1.schema.json"
+      ],
+      "gap": "Authorization-first hybrid progressive recall, reconstructible fusion, isolated ANN, frozen gates, and lexical outage behavior require later implementation.",
+      "owning_slice_ref": "slice:learning-hybrid-retrieval-v2",
+      "executable_gate_ref": "check:S5-3",
+      "authority_class": "advisory",
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    }
+  ],
+  "acceptance_evidence_matrix": [
+    {
+      "criterion_id": "RESEARCH-SOURCE-LOCK",
+      "producing_slice_refs": [
+        "slice:learning-baseline-contracts-v2"
+      ],
+      "check_refs": [
+        "check:S0-1",
+        "check:S0-3"
+      ],
+      "evidence_owner_refs": [
+        "owner:research",
+        "owner:architecture"
+      ],
+      "executable_gate_refs": [
+        "test:memory-evaluation-contract"
+      ],
+      "evidence_refs": [
+        "resource:source-lock",
+        "resource:legacy-inventory"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "SINGLE-NEON-AUTHORITY",
+      "producing_slice_refs": [
+        "slice:learning-schema-safety-v2",
+        "slice:learning-context-bundle-v2"
+      ],
+      "check_refs": [
+        "check:S1-2",
+        "check:S4-1"
+      ],
+      "evidence_owner_refs": [
+        "owner:platform",
+        "owner:database"
+      ],
+      "executable_gate_refs": [
+        "test:authority-separation"
+      ],
+      "evidence_refs": [
+        "resource:threat-model"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "IMMUTABLE-BITEMPORAL-LINEAGE",
+      "producing_slice_refs": [
+        "slice:learning-schema-safety-v2",
+        "slice:learning-extraction-consolidation-v2",
+        "slice:learning-temporal-entity-v2"
+      ],
+      "check_refs": [
+        "check:S1-1",
+        "check:S3-2",
+        "check:S9-1"
+      ],
+      "evidence_owner_refs": [
+        "owner:database",
+        "owner:memory"
+      ],
+      "executable_gate_refs": [
+        "test:lineage-invariants"
+      ],
+      "evidence_refs": [
+        "repo:migrations/0299_memory_kernel.sql"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "ATTESTED-CONCURRENT-CAPTURE",
+      "producing_slice_refs": [
+        "slice:learning-capture-delete-v2"
+      ],
+      "check_refs": [
+        "check:S2-1",
+        "check:S2-2",
+        "check:S2-3"
+      ],
+      "evidence_owner_refs": [
+        "owner:security",
+        "owner:runtime"
+      ],
+      "executable_gate_refs": [
+        "test:capture-attestation"
+      ],
+      "evidence_refs": [
+        "resource:threat-model"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "SCOPE-DATABASE-ISOLATION",
+      "producing_slice_refs": [
+        "slice:learning-schema-safety-v2",
+        "slice:learning-hybrid-retrieval-v2"
+      ],
+      "check_refs": [
+        "check:S1-2",
+        "check:S5-1"
+      ],
+      "evidence_owner_refs": [
+        "owner:database",
+        "owner:retrieval"
+      ],
+      "executable_gate_refs": [
+        "test:scope-isolation"
+      ],
+      "evidence_refs": [
+        "repo:migrations/0299_memory_kernel.sql"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "NONFORGEABLE-HUMAN-ACCEPTANCE",
+      "producing_slice_refs": [
+        "slice:learning-schema-safety-v2",
+        "slice:learning-extraction-consolidation-v2",
+        "slice:learning-control-room-v2"
+      ],
+      "check_refs": [
+        "check:S1-3",
+        "check:S3-3",
+        "check:S10-2"
+      ],
+      "evidence_owner_refs": [
+        "owner:governance",
+        "owner:security"
+      ],
+      "executable_gate_refs": [
+        "test:human-acceptance"
+      ],
+      "evidence_refs": [
+        "resource:threat-model",
+        "check:S0-3"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "SAFE-HERMES-CONTEXT",
+      "producing_slice_refs": [
+        "slice:learning-hermes-bridge-v2"
+      ],
+      "check_refs": [
+        "check:S7-1",
+        "check:S7-2",
+        "check:S7-3"
+      ],
+      "evidence_owner_refs": [
+        "owner:context",
+        "owner:integration"
+      ],
+      "executable_gate_refs": [
+        "test:hermes-authority-separation"
+      ],
+      "evidence_refs": [
+        "repo:mcp-server/src/bot-brief.js"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "HYBRID-PROGRESSIVE-RECALL",
+      "producing_slice_refs": [
+        "slice:learning-context-bundle-v2",
+        "slice:learning-hybrid-retrieval-v2",
+        "slice:learning-context-packer-v2"
+      ],
+      "check_refs": [
+        "check:S4-2",
+        "check:S5-1",
+        "check:S5-2",
+        "check:S5-3",
+        "check:S6-1",
+        "check:S6-2",
+        "check:S6-3"
+      ],
+      "evidence_owner_refs": [
+        "owner:retrieval",
+        "owner:context"
+      ],
+      "executable_gate_refs": [
+        "test:hybrid-retrieval"
+      ],
+      "evidence_refs": [
+        "repo:control-room/contracts/context-bundle.v1.schema.json"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "POISONING-PRIVACY-DELETION",
+      "producing_slice_refs": [
+        "slice:learning-schema-safety-v2",
+        "slice:learning-capture-delete-v2",
+        "slice:learning-extraction-consolidation-v2",
+        "slice:learning-hardening-v2"
+      ],
+      "check_refs": [
+        "check:S1-3",
+        "check:S2-1",
+        "check:S2-3",
+        "check:S3-3",
+        "check:S12-2"
+      ],
+      "evidence_owner_refs": [
+        "owner:security",
+        "owner:database"
+      ],
+      "executable_gate_refs": [
+        "test:poisoning-deletion"
+      ],
+      "evidence_refs": [
+        "resource:threat-model"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "EXECUTABLE-EVALUATION",
+      "producing_slice_refs": [
+        "slice:learning-baseline-contracts-v2",
+        "slice:learning-hybrid-retrieval-v2",
+        "slice:learning-hardening-v2"
+      ],
+      "check_refs": [
+        "check:S0-2",
+        "check:S5-3",
+        "check:S12-3"
+      ],
+      "evidence_owner_refs": [
+        "owner:evaluation"
+      ],
+      "executable_gate_refs": [
+        "test:memory-evaluation-contract"
+      ],
+      "evidence_refs": [
+        "resource:evaluation-contract",
+        "resource:cost-model"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "DEMONSTRATED-PROCEDURAL-LEARNING",
+      "producing_slice_refs": [
+        "slice:learning-procedure-compiler-v2"
+      ],
+      "check_refs": [
+        "check:S11-1",
+        "check:S11-2",
+        "check:S11-3"
+      ],
+      "evidence_owner_refs": [
+        "owner:evaluation",
+        "owner:governance"
+      ],
+      "executable_gate_refs": [
+        "test:procedural-non-derivation"
+      ],
+      "evidence_refs": [
+        "resource:evaluation-contract"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    },
+    {
+      "criterion_id": "OPERATED-RECOVERED-FIRST-USE",
+      "producing_slice_refs": [
+        "slice:learning-control-room-v2",
+        "slice:learning-hardening-v2",
+        "slice:learning-release-canary-v2"
+      ],
+      "check_refs": [
+        "check:S10-3",
+        "check:S12-1",
+        "check:S12-2",
+        "check:S12-3",
+        "check:S13-1",
+        "check:S13-2",
+        "check:S13-3"
+      ],
+      "evidence_owner_refs": [
+        "owner:operations",
+        "owner:release"
+      ],
+      "executable_gate_refs": [
+        "test:recovery-first-use"
+      ],
+      "evidence_refs": [
+        "resource:cost-model"
+      ],
+      "baseline_gate_ref": "gate:S0-3-evidence-ownership"
+    }
+  ],
+  "forbidden_changes": [
+    "forbid:implicit-policy-override",
+    "forbid:model-self-approval",
+    "forbid:mutable-history",
+    "forbid:parallel-context-authority",
+    "forbid:raw-transcript-mirror",
+    "forbid:shared-postfilter-ann",
+    "forbid:simultaneous-hermes-neon-authority"
+  ],
+  "gate_registry": [
+    {
+      "gate_ref": "gate:S0-1-source-lock",
+      "check_ref": "check:S0-1",
+      "owner_ref": "owner:research",
+      "command": "node --test --test-name-pattern='check:S0-1' control-room/test/contracts.test.mjs",
+      "evidence_requirement": "redacted_evidence_required"
+    },
+    {
+      "gate_ref": "gate:S0-2-evaluation-contract",
+      "check_ref": "check:S0-2",
+      "owner_ref": "owner:evaluation",
+      "command": "node --test --test-name-pattern='check:S0-2' control-room/test/contracts.test.mjs",
+      "evidence_requirement": "redacted_evidence_required"
+    },
+    {
+      "gate_ref": "gate:S0-3-evidence-ownership",
+      "check_ref": "check:S0-3",
+      "owner_ref": "owner:architecture",
+      "command": "node --test --test-name-pattern='check:S0-3' control-room/test/contracts.test.mjs",
+      "evidence_requirement": "redacted_evidence_required"
+    }
+  ],
+  "artifact_digest": "sha256:2e5e535a4d9671b6efb4482b017b36e844e4721b6c0cbf48a0e3f4d0a6a0a542"
+}

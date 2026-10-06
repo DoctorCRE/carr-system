@@ -31,7 +31,42 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO" || exit 2
 
+if [ "$#" -gt 0 ]; then
+  if [ "$1" != "--files" ] || [ "$#" -lt 2 ]; then
+    echo "usage: type-check.sh [--files <path> ...]" >&2
+    exit 2
+  fi
+  shift
+else
+  set -- pipelines tools exporters lib generators shared fill-engine bin hooks ops
+fi
+
 MYPY="$REPO/.venv/bin/mypy"
+# A WORKTREE HAS NO .venv OF ITS OWN, and worktrees are now the normal way to
+# push here: hooks/git-writer-gate.py refuses a branch change while the shared
+# canonical checkout carries another session's uncommitted work, which it almost
+# always does. So the second place to look is the COMMON checkout's virtualenv --
+# the same repository, the same pinned mypy, one directory up from the shared
+# .git that `git rev-parse --git-common-dir` names.
+#
+# WHY THIS MATTERED. On 2026-08-27 a push from a worktree printed "mypy absent"
+# and skipped, the hosted run then failed two classes on one missing annotation,
+# and eight minutes of CI caught what a local second would have. Exit 78 is the
+# right answer for a bare runner with no toolchain; it was the wrong answer for a
+# worktree of a checkout that has one.
+if [ ! -x "$MYPY" ]; then
+  COMMON_DIR="$(git -C "$REPO" rev-parse --git-common-dir 2>/dev/null || true)"
+  case "$COMMON_DIR" in
+    "") ;;
+    /*) CANONICAL="$(dirname "$COMMON_DIR")" ;;
+    *)  CANONICAL="$(cd "$REPO/$(dirname "$COMMON_DIR")" 2>/dev/null && pwd || true)" ;;
+  esac
+  if [ -n "${CANONICAL:-}" ] && [ "$CANONICAL" != "$REPO" ] && [ -x "$CANONICAL/.venv/bin/mypy" ]; then
+    MYPY="$CANONICAL/.venv/bin/mypy"
+  fi
+fi
+# A GitHub runner has neither: no .venv anywhere, and its git common dir is the
+# repository itself, so this falls through to PATH exactly as it always did.
 if [ ! -x "$MYPY" ]; then
   MYPY="$(command -v mypy 2>/dev/null || true)"
 fi
@@ -40,4 +75,4 @@ if [ -z "$MYPY" ] || [ ! -x "$MYPY" ]; then
   exit 78
 fi
 
-exec "$MYPY" pipelines tools exporters lib generators shared fill-engine bin hooks ops
+exec "$MYPY" "$@"

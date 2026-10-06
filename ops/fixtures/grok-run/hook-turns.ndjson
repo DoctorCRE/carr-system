@@ -1,0 +1,25 @@
+{"type":"text","data":"I will fetch the post."}
+{"type":"usage"}
+{"type":"usage","messageId":"empty-tool-response"}
+{"type":"text","data":"Fetched post: the announced skill is example-pro.\n"}
+{"type":"text","data":"Source: https://example.com/post"}
+{"type":"usage"}
+{"type":"text","data":"The rule boot stopped after page 1. I'll load the remaining pages now."}
+{"type":"usage"}
+{"type":"text","data":"The rule gate's state folder cannot be written. CARR rule boot pages are loaded. The post from the previous turn is unchanged."}
+{"type":"usage"}
+{"type":"text","data":"The lifecycle warning is noted. Native behavior continues, and the earlier answer still stands."}
+{"type":"usage"}
+{"type":"text","data":"Noted. No new request in that warning, so nothing else to run."}
+{"type":"usage"}
+{"type":"text","data":"Noted. Standing by."}
+{"type":"usage"}
+{"type":"text","data":"Noted. Standing by."}
+{"type":"usage"}
+{"type":"text","data":"Noted. Standing by."}
+{"type":"usage"}
+{"type":"text","data":"Noted. Standing by."}
+{"type":"usage"}
+{"type":"text","data":"Noted. Standing by."}
+{"type":"usage"}
+{"type":"end","stopReason":"end_turn","sessionId":"fixture-session","requestId":"fixture-request","num_turns":12,"total_cost_usd":0.16366968,"modelUsage":{"grok-4.7-build":{"modelCalls":12}}}

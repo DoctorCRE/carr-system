@@ -1,0 +1,5 @@
+{
+  "schema": "carr.jev-calibrated-bands.v1",
+  "note": "Entropy bands ops/jev_judge.py route() acts inside, one per question family AND consequence class, each measured on one pinned model. Empty on purpose: no family has a held-out calibration on a pinned model yet, so every route() call goes to review. A band enters only from ops/jev-calibration-report.py --emit-bands, copied here in a reviewed commit. Never a pooled '*' entry, never an outside cutoff.",
+  "bands": {}
+}

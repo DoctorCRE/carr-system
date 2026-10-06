@@ -1,0 +1,191 @@
+# carr-system disposable-Postgres acceptance — the lane nothing hosted was running.
+#
+# WHY THIS FILE EXISTS. ops/local-pg-ci.py and the ~40 db acceptance programs it
+# drives had ZERO hosted coverage until this workflow. Nothing in
+# .github/workflows invoked them, so `./run.sh local-db-ci` was exercised only by
+# a developer who happened to run it by hand. That is not a theoretical gap: the
+# rule-delivery cutover acceptance sat RED on main across at least four separate
+# re-pins of ops/config/rule-enforcement-map.json, through a stale activation
+# digest and a retired rule's leftover delivery row, while the required
+# `ops/ci.sh --strict` context stayed green on every one of those commits —
+# because that context does not run this lane and never did. Filed as defect
+# fa03017b, class gate-with-no-hosted-coverage. Fixed on main by migration 0363
+# only because a person went looking.
+#
+# NO CHECK LOGIC LIVES HERE, the same rule ci.yml states for itself (a8c55a47):
+# the logic is ops/local-pg-ci.py, which is byte-for-byte what a developer runs
+# as `./run.sh local-db-ci --class migration`. This workflow installs a database
+# and calls that entry point. If a check were written here it would run hosted
+# and not locally, and the two would drift.
+#
+# WHY THIS IS A SEPARATE FILE AND NOT A JOB IN ci.yml. ci.yml's `checks` job is a
+# REQUIRED status check (ruleset "main: CI must be green", id 20824501), and its
+# own header explains why path filters are a trap there: a required context that
+# never reports blocks the merge instead of speeding it. This workflow is NOT a
+# required context, so it is free to use path filters — which is the only way to
+# get pre-merge cover on the changes that can break this lane without adding a
+# multi-minute job to every documentation PR. Registering this as required is a
+# deliberate later decision, not something to do by accident; the honest order is
+# to let it run for a while and see its false-positive rate first.
+#
+# COST. ci.yml records that spend has to come out of run COUNT, not duration.
+# This adds roughly one run per DB-touching PR plus one daily, against a lane
+# that was previously never checked at all.
+
+name: DB acceptance
+
+on:
+  pull_request:
+    # Only the paths that can actually break the disposable-Postgres lane: the
+    # migrations themselves, the committed snapshot they apply onto, the CI
+    # entry points, and the libraries/tools the acceptance programs import.
+    paths:
+      - "migrations/**"
+      - "db/**"
+      - "bin/schema-snapshot.sh"
+      - "ops/**"
+      - "lib/**"
+      - "tools/**"
+      - "mcp-server/src/**"
+      - "mcp-server/test/codex-continuity.test.mjs"
+      - "mcp-server/test/codex-continuity-migration.test.mjs"
+      - "mcp-server/test/codex-continuity-postgres.sql"
+      - "mcp-server/package.json"
+      - "mcp-server/package-lock.json"
+      - "run.sh"
+      - ".github/workflows/db-acceptance.yml"
+  schedule:
+    # 06:45 UTC daily — after ci.yml's 06:20 backstop, so a quiet-period failure
+    # here lands next to that run rather than racing it.
+    - cron: "45 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # PR validation supersedes by workflow + PR. Non-PR verdicts are independent:
+  # sharing a non-cancelling group would still replace older pending runs.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    name: local-db-ci --class migration
+    runs-on: ubuntu-latest
+    # The canonical migration class plus this lane's own acceptance programs
+    # routinely took 22-24 minutes by 2026-10-04, and a slow runner pushed six
+    # all-green runs past a 25-minute cap. ci.yml's migration budget must stay
+    # at least this one (ops/ci-selftest.py checks both).
+    timeout-minutes: 35
+
+    steps:
+      # Actions are pinned to commit SHAs, not tags, for the supply-chain reason
+      # ci.yml states: a tag is mutable by whoever controls the action repo.
+      # These are the same two pins ci.yml uses; keep them in step.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # FULL HISTORY, for the same reason ci.yml gives: checkout defaults to
+          # depth 1, and gates that read history cannot work without it. Here it
+          # is ops/atomic-rule-compat-migration-gate.py, which resolves a pinned
+          # pre-0228 snapshot blob by commit sha — on a shallow clone that sha is
+          # simply not present and the gate fails as "snapshot blob is
+          # unavailable", which reads like a missing file rather than a missing
+          # clone.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install Node dependencies from the lock
+        run: npm --prefix mcp-server ci
+
+      - name: Install zsh
+        # ops/gate-zero-scheduler-canary-gate.py runs the Gate Zero canary
+        # LaunchAgent's own ProgramArguments, and both the wrapper
+        # (bin/run-scheduled.sh) and the canary carry a #!/bin/zsh shebang. A
+        # runner without zsh would fail that gate for the environment rather
+        # than for the code — the same three seconds of apt ci.yml already
+        # spends for bin/review-council-runner.sh.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+
+      - name: Install Python dependencies from the lock
+        # The lock, not requirements.txt — same reasoning as ci.yml. The
+        # acceptance programs need psycopg; ops/local-pg-ci.py runs them with
+        # .venv/bin/python when it exists and the interpreter running it
+        # otherwise, which on a runner is this one.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+
+      - name: Install PostgreSQL 17
+        # ops/local-pg-ci.py builds its OWN throwaway cluster with initdb/pg_ctl
+        # rather than talking to a service container — that is the whole point of
+        # the lane, and it is why this cannot reuse ci.yml's `services:` block.
+        # Ubuntu runners ship 16; the local lane is 17, and matching it is what
+        # makes a hosted red mean the same thing as a local red. The preinstalled
+        # 16 cluster on 5432 is left alone: our cluster gets its own port and
+        # data directory.
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-17
+          /usr/lib/postgresql/17/bin/initdb --version
+          # THE SERVER IS 17; THE DUMP CLIENT IS 18, AND THEY ARE NOT THE SAME
+          # DECISION. The disposable cluster this lane initdbs stays on 17,
+          # because matching the local lane is what makes a hosted red mean the
+          # same thing as a local red. But bin/schema-snapshot.sh pins the
+          # pg_dump MAJOR (see its PG_DUMP_MAJOR) so db/schema.sql is
+          # reproducible rather than decided by whichever client a machine
+          # happened to resolve first: pg_dump 18 emits every NOT NULL as a
+          # named table constraint and 17 emits a bare one, a 256-line diff with
+          # no schema change behind it. main's committed snapshot is an 18 dump,
+          # so a runner carrying only 17 fails the pin and exits 69 — which is
+          # exactly what happened on run 35375307125. Installing the 18 CLIENT
+          # satisfies the pin without moving the server. The script probes this
+          # absolute path by major, so no PATH change is needed. Same PGDG repo
+          # already configured above; backup-nightly.yml does the same thing.
+          sudo apt-get install -y -qq postgresql-client-18
+          /usr/lib/postgresql/18/bin/pg_dump --version
+          # THE SOCKET DIRECTORY IS THE ONE REAL PLATFORM DIFFERENCE.
+          # ops/local-pg-ci.py starts the server with only -h/-p and leaves
+          # unix_socket_directories at the build default. Homebrew compiles that
+          # default to /tmp, which any user can write, so the lane has always
+          # worked on a developer Mac. Debian's PGDG build compiles it to
+          # /var/run/postgresql, which exists only for the `postgres` user — so
+          # the postmaster could not create its socket and pg_ctl failed with
+          # "could not start server". Creating it for the runner user fixes the
+          # environment rather than teaching the shared module about Debian,
+          # which would put a platform quirk in the code path a developer runs.
+          sudo install -d -m 0775 -o "$USER" -g "$(id -gn)" /var/run/postgresql
+
+      - name: Run the disposable-Postgres migration lane
+        env:
+          # ops/local-pg-ci.py refuses hosted runners by DEFAULT and still does.
+          # This is the declared opt-in — the module additionally requires the
+          # repository to be jbookout/carr-system and a real run id, so a fork
+          # running this same file is still refused. See its
+          # hosted_execution_is_declared() and the selftest cases that drop each
+          # clause in turn.
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          # ops/local-pg-ci.py checks this override before its Homebrew paths,
+          # which is how the macOS-shaped discovery list is satisfied on Linux.
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          # The lane initdbs its own cluster; C is what the local runs use and
+          # what the collation-sensitive assertions were written against.
+          LC_ALL: C
+        # Not ./run.sh: that resolves a repo root and a .venv that a runner has
+        # no reason to carry. This is the same module run.sh dispatches to, with
+        # the same arguments. The default port 55432 is contended on a developer
+        # Mac and free on a fresh runner.
+        run: python ops/local-pg-ci.py --class migration

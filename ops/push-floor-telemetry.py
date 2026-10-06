@@ -111,7 +111,10 @@ def main(argv):
     # max_runs and REPORTS how many red runs it did not open. A bound nobody is
     # told about reads as "I looked at everything and found this", which is the
     # failure mode this whole telemetry exists to avoid.
-    max_runs = 25
+    # 100 covers a full week at the observed red rate (97 in the 2026-08-19..27
+    # window); the 25 default understated that week's verdict count by more than
+    # half (33 vs 77) for any caller who missed --max-runs.
+    max_runs = 100
     if "--max-runs" in argv:
         try:
             max_runs = int(argv[argv.index("--max-runs") + 1])

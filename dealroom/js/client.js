@@ -93,6 +93,8 @@
  * @property {(args:{deal_ids:string[]}) => Promise<{deals:Object[]}>} [getCallContext] exact active agenda records and participants
  * @property {(args:{proposal_id:string, accept:boolean, idempotency_key:string}) => Promise<WriteResult>} [resolveConfirm]
  * @property {(args:{candidate_id:string, accept:boolean, idempotency_key:string}) => Promise<WriteResult>} [resolvePostCallCandidate]
+ * @property {() => Promise<Object>} [getHealth] the truthful health projection (V5-A01), once deployed
+ * @property {(dealId:string) => Promise<Object>} [getRecordHome] the canonical record-home read (V5-F01), once deployed
  * @property {() => Promise<void>} [simulatePartnerCall] fixture-only demo of presence + distill
  *
  * @typedef {Object} ConfirmProposal

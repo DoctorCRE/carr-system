@@ -35,6 +35,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import json
+import re
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BRIEF = os.path.join(os.path.dirname(HERE), "hooks", "session-brief.py")
@@ -77,6 +80,8 @@ assert spec is not None and spec.loader is not None, f"cannot load {BRIEF}"
 sb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sb)
 
+REPO = Path(HERE).parent
+
 CASES: list[tuple] = []
 
 
@@ -92,6 +97,35 @@ def write_log(text):
     with os.fdopen(fd, "w") as fh:
         fh.write(text)
     return path
+
+
+@case("Claude and connector-held Codex receive the same actionable pack protocol")
+def _(assert_):
+    rail = getattr(sb, "PACK_DELIVERY_RAIL", "")
+    assert_("canonical pack names" in rail and "packs_not_found" in rail,
+            f"session brief lacks exact-name refusal protocol: {rail!r}")
+    assert_("call standing-context again" in rail and "shadow" in rail.lower(),
+            f"session brief lacks drift remedy/shadow boundary: {rail!r}")
+
+    mcp = (REPO / "mcp-server/src/mcp.js").read_text(encoding="utf-8")
+    match = re.search(r"const RULE_DELIVERY_RAIL = `([^`]*)`;", mcp)
+    assert_(match is not None and match.group(1) == rail,
+            "MCP initialize rail does not exactly match the Claude session brief")
+    assert_("+ RULE_DELIVERY_RAIL" in mcp,
+            "shared connector instructions do not install the rule-delivery rail")
+
+    commands = []
+    for relative in ("claude-tree/settings/carr-ai-project.settings.json",
+                     "claude-tree/settings/my-drive-root.settings.json"):
+        document = json.loads((REPO / relative).read_text(encoding="utf-8"))
+        commands.append([
+            hook["command"]
+            for group in document["hooks"]["SessionStart"]
+            for hook in group["hooks"]
+            if "session-brief.py" in hook.get("command", "")
+        ])
+    assert_(commands[0] == commands[1] and len(commands[0]) == 1,
+            f"Claude session-brief install differs across managed roots: {commands!r}")
 
 
 # One failing run, then a second run that failed on ONE different step. This is

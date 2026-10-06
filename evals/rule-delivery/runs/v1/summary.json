@@ -1,0 +1,8 @@
+{
+ "description": "path_rule routes do not fire on read-only tools (Read/Grep/Glob/LS)",
+ "label": "v1",
+ "target": "code",
+ "goal": "tokens",
+ "decision": "kept",
+ "gate": "KEEP "
+}

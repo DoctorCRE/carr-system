@@ -45,15 +45,12 @@ import tempfile
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "bin", "sync-enforcement-map.py")
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 def load_module_for(repo):
@@ -268,8 +265,4 @@ check("the unrelated file is still modified and left alone",
       "unrelated.txt" in git(repo, "status", "--porcelain").stdout,
       "restoring the owned pair reached beyond the two paths it owns")
 
-print()
-if failures:
-    print(f"FAIL {len(failures)} check(s): {', '.join(failures)}")
-    sys.exit(1)
-print("OK all checks passed")
+sys.exit(CHECKER.summary())

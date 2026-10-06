@@ -342,44 +342,8 @@ test("pgConstraintError: redacts a connection string if one ever showed up in a 
     "a connection string must never reach the caller, even defensively");
 });
 
-test("executeRegisteredTool: an uncaught class-23 error from a handler surfaces as a clean ToolError, not a raw driver error", async () => {
-  const fakeHandlerTool = {
-    write: true,
-    handler: async () => {
-      throw Object.assign(new Error('violates foreign key constraint "loop_item_domain_fkey"'),
-        { code: "23503", constraint: "loop_item_domain_fkey", table: "loop_item", column: "domain" });
-    },
-  };
-  TOOLS.__test_only_constraint_violator__ = fakeHandlerTool;
-  try {
-    await assert.rejects(
-      () => executeRegisteredTool({}, joe, "__test_only_constraint_violator__", {}),
-      (err) => {
-        assert.ok(err instanceof ToolError);
-        assert.equal(err.payload.error, "invalid_field_value");
-        assert.equal(err.payload.violation, "foreign_key_violation");
-        return true;
-      });
-  } finally {
-    delete TOOLS.__test_only_constraint_violator__;
-  }
-});
-
-test("executeRegisteredTool: a ToolError a handler threw on purpose passes through unchanged", async () => {
-  const fakeHandlerTool = {
-    write: true,
-    handler: async () => { throw new ToolError({ error: "on_purpose", hint: "not a DB error" }); },
-  };
-  TOOLS.__test_only_deliberate_refusal__ = fakeHandlerTool;
-  try {
-    await assert.rejects(
-      () => executeRegisteredTool({}, joe, "__test_only_deliberate_refusal__", {}),
-      (err) => {
-        assert.ok(err instanceof ToolError);
-        assert.equal(err.payload.error, "on_purpose");
-        return true;
-      });
-  } finally {
-    delete TOOLS.__test_only_deliberate_refusal__;
-  }
+test("the assembled tool registry refuses unreviewed runtime handler injection", () => {
+  assert.equal(Object.isFrozen(TOOLS), true);
+  assert.throws(() => { TOOLS.__test_only_constraint_violator__ = { write: true, handler: async () => null }; }, TypeError);
+  assert.equal(TOOLS.__test_only_constraint_violator__, undefined);
 });

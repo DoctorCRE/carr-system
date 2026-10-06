@@ -1,0 +1,16 @@
+#!/bin/sh
+# session-presence — find and reach any live session through the Model Room.
+#
+#   bin/session-presence list
+#   bin/session-presence lookup <handle|alias|title words>
+#   bin/session-presence send <handle|alias> "<message>" [--seat claude|codex|grok|...]
+#   bin/session-presence announce --runtime <slug> --session-id <id> [--name <alias>] \
+#       [--title ...] [--address-kind claude-socket|codex-thread|none] [--address ...] [--pid N]
+#
+# `announce` is the launcher door: a runtime with no SessionStart hook calls it
+# once when it starts a session. Hooked runtimes announce themselves through
+# hooks/session-presence-hook.py. Both run tools/room-bridge/session_presence.py.
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+PY="$REPO/.venv/bin/python"
+[ -x "$PY" ] || PY="python3"
+exec "$PY" "$REPO/tools/room-bridge/session_presence.py" "$@"

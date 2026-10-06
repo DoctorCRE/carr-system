@@ -1,0 +1,3687 @@
+{
+ "schema": "rule-routes/v1",
+ "note": "One entry per active rule id: its delivery routes and the moment they serve. Ids and matchers only, never rule text. Read by lib/rule_routes.py; the trigger and path_rule routes are delivered by hooks/rule-pack-preuse-reselection.py and checked by ops/rule-route-coverage.py.",
+ "rules": {
+  "015183f5": {
+   "moment": "any turn: classifying, defining terms, or planning multi-step work",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "0156e9fa": {
+   "moment": "closing any message to Joe",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "018ce972": {
+   "moment": "presenting a structural change to Joe",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "0c1bac27": {
+   "moment": "Monday brief / partnership-fit summary content",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "morning-brief"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "0e22e34a": {
+   "moment": "creating or naming files/folders (pre-commit path check)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Write"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bmkdir\\b",
+      "\\bgit\\s+mv\\b",
+      "\\bmv\\s",
+      "\\btouch\\s"
+     ]
+    }
+   ]
+  },
+  "0f38532e": {
+   "moment": "duplicate of 14181e60 (single source of truth / DB-first)",
+   "routes": [
+    {
+     "kind": "duplicate",
+     "survivor": "14181e60"
+    }
+   ]
+  },
+  "1021fa84": {
+   "moment": "any turn - assessing Joe's work patterns/history",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "113b3833": {
+   "moment": "run.sh retrieve lookup beyond standing core",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "find-precedent",
+      "search-doctrine"
+     ],
+     "bash_patterns": [
+      "\\brun\\.sh\\s+retrieve\\b"
+     ]
+    }
+   ]
+  },
+  "11b2b73b": {
+   "moment": "Joe shares UI/UX or web-design content",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__get_page_text"
+     ],
+     "verbs": [
+      "record-source-observation",
+      "write-doctrine-section"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "14181e60": {
+   "moment": "record_home gate (record-home-gate.py), before vault record write",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/record-home-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "152ceb65": {
+   "moment": "any turn explaining something with a shape",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "173119a8": {
+   "moment": "before claiming who owns uncommitted/dirty-tree work",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "179be4b8": {
+   "moment": "wrapping up an agreed deliverable",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "17ffd587": {
+   "moment": "rendering open-loops, heartbeat, or Monday brief",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-loop",
+      "bot-brief",
+      "loop-board",
+      "morning-brief",
+      "today-triage",
+      "update-loop"
+     ],
+     "bash_patterns": [
+      "\\brun_exports\\.py\\b",
+      "\\brun\\.sh\\s+export\\b",
+      "\\bheartbeat\\b",
+      "\\bmonday\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*exporters/*.py",
+      "*ops/scheduled-tasks/*heartbeat*",
+      "*ops/scheduled-tasks/*monday*"
+     ]
+    }
+   ]
+  },
+  "185013c6": {
+   "moment": "spawning a subagent/workflow or sizing 30+min work (model selection)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route",
+      "issue-execution-envelope"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "19304882": {
+   "moment": "Joe's decision/timing reviews and order-writing ramp",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "log-decision",
+      "update-decision"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "1b8e7f43": {
+   "moment": "add-loop verb, when a capability/verb call is blocked",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-loop"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "1c21263c": {
+   "moment": "same-shape fix recurring about four times in one session",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "1c42d80c": {
+   "moment": "hitting unexpected friction (refusal, error, workaround)",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "1d50a3bb": {
+   "moment": "conduct_stop gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/conduct-stop-gate.py"
+    },
+    {
+     "kind": "boot"
+    }
+   ],
+   "no_trigger_reason": "binds on the reply after a Stop gate reopens the turn; no tool call marks it"
+  },
+  "1f3a7372": {
+   "moment": "completion_evidence gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_scheduled_task",
+      "mcp__*__update_scheduled_task"
+     ],
+     "verbs": [
+      "record-cadence-receipt",
+      "record-finding"
+     ],
+     "bash_patterns": [
+      "\\blaunchctl\\b",
+      "\\bcrontab\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/scheduled-tasks/*",
+      "*ops/launchd/*",
+      "*.plist"
+     ]
+    }
+   ]
+  },
+  "1f750181": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "1fcaa63a": {
+   "moment": "heavy build protocol invoked",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "begin-capability-project",
+      "start-capability-project"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "1fddcffb": {
+   "moment": "deciding what belongs in always-read core vs task-loaded files",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "204391be": {
+   "moment": "discovering a missing record-layer verb while building",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "call-verb",
+      "list-verbs"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "20d106f1": {
+   "moment": "Joe's development: new builds, predictions, confident direction",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "begin-capability-project",
+      "log-decision",
+      "review-heavy-build-plan",
+      "update-loop",
+      "write-work-shape"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "2271e684": {
+   "moment": "completion_evidence gate, terminal technical claim",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "236ca227": {
+   "moment": "weekend_quiet deny_gate - before a partner-facing send",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/weekend-quiet-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__create_scheduled_task",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft",
+      "mcp__*__update_scheduled_task"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "23ea0607": {
+   "moment": "deal_guard schema (Salesforce reconciliation)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "migrations/0091_deal_reconciliation_read.sql"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "link-salesforce-reference",
+      "read-deal-reconciliation"
+     ],
+     "bash_patterns": [
+      "\\bsalesforce\\b"
+     ]
+    }
+   ]
+  },
+  "24e10ee8": {
+   "moment": "writing a commit message or close-out claiming an act",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "close-loop",
+      "complete-action"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/ci.sh"
+     ]
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [],
+     "bash_patterns": [
+      "\\bgit\\b(?:\\s+[^\\n;]+)?\\s+commit\\b"
+     ]
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "25fab860": {
+   "moment": "weekly social batch proposal validation",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_scheduled_task"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bsocial-batch-candidates\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*social-batch-candidates.py"
+     ]
+    }
+   ]
+  },
+  "25fcddee": {
+   "moment": "first attempt in new/unfamiliar-territory work",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "begin-capability-project",
+      "prepare-capability-project",
+      "start-capability-project",
+      "write-work-shape"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "27277539": {
+   "moment": "any turn discussing technical topics with Joe",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "2a3ff869": {
+   "moment": "update-document-status verb (outbound_format check)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [
+      "update-document-status"
+     ],
+     "tools": [],
+     "bash_patterns": []
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "2b66211d": {
+   "moment": "fan-out brief / delegating tasks to agents",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route",
+      "issue-execution-envelope",
+      "record-dispatch-link"
+     ],
+     "bash_patterns": [
+      "\\bdispatch\\.py\\s+send\\b",
+      "\\bcodex\\s+exec\\b",
+      "\\bgrok\\b",
+      "\\brun-engineering-dispatch\\b",
+      "\\bclaude\\s+-p\\b"
+     ]
+    }
+   ]
+  },
+  "2b889e80": {
+   "moment": "any turn - before asserting a negative finding",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "2ca2add2": {
+   "moment": "pulling records from any source platform",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "append-tour-source-evidence",
+      "link-salesforce-reference",
+      "record-source-observation",
+      "register-tour-property",
+      "search-tour-properties"
+     ],
+     "bash_patterns": [
+      "\\bsalesforce\\b",
+      "\\bcostar\\b",
+      "\\bimport_candidate_pool\\b"
+     ]
+    }
+   ]
+  },
+  "2e362970": {
+   "moment": "standing up a new capability, tool, or first-of-kind work",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebSearch"
+     ],
+     "verbs": [
+      "begin-capability-project",
+      "prepare-capability-project",
+      "start-capability-project"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "2e8b4840": {
+   "moment": "confirm-merge verb",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "confirm-merge",
+      "decline-candidate",
+      "merge-vendor-rows",
+      "promote-pool",
+      "resolve-candidate"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "308ef1de": {
+   "moment": "pr_only_main_ruleset (GitHub server ruleset) - before a change reaches main",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "github-ruleset:main-pr-only"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+(?:checkout|switch|branch|worktree)\\b"
+     ]
+    }
+   ]
+  },
+  "30a189fb": {
+   "moment": "non-CARR task detected",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "347a9ca6": {
+   "moment": "any turn reasoning from a session's own or another's name",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "3578d799": {
+   "moment": "naming a new verb or system noun",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "call-verb",
+      "list-verbs"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "388cc81e": {
+   "moment": "candidate_match schema check - candidate-pool duplicate classification",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "pipelines/import_candidate_pool.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "confirm-merge",
+      "decline-candidate",
+      "merge-vendor-rows",
+      "promote-pool",
+      "resolve-candidate"
+     ],
+     "bash_patterns": [
+      "\\bimport_candidate_pool\\b"
+     ]
+    }
+   ]
+  },
+  "38b15dc6": {
+   "moment": "chat_lint gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/chat-lint-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "add-loop",
+      "answer-work-request-for-joe"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "3a9dbafd": {
+   "moment": "conduct_stop (conduct-stop-gate.py Stop)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/conduct-stop-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "add-loop",
+      "answer-work-request-for-joe",
+      "update-loop"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "3b0cd546": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "3d185f2b": {
+   "moment": "system-design builds (personas, tools, app surfaces)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "issue-tour-share-grant",
+      "map-architecture"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*control-room/public/*"
+     ]
+    }
+   ]
+  },
+  "3fa17fa0": {
+   "moment": "drafting re-engagement off notes older than ~60 days",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "prepare-conversation"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "4039b9b5": {
+   "moment": "versioned_record schema (doctrine section write)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "change-doctrine-sections",
+      "new-doctrine-doc",
+      "retire-doctrine-section",
+      "set-doctrine-refs",
+      "write-doctrine-section"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "412d37d3": {
+   "moment": "client/compliance writing mentioning HIPAA",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "424ba0cc": {
+   "moment": "cold or paused client cadence",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "log-outreach",
+      "set-next-action",
+      "set-next-step",
+      "stale-records",
+      "update-deal"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "4399df76": {
+   "moment": "working with LOI template terms",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "compare-lease-terms",
+      "patch-deal-field",
+      "prepare-document",
+      "record-loi-submission",
+      "register-template"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "43e2ef76": {
+   "moment": "completion_evidence gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "accept-ready-plan",
+      "admit-engineering-slice",
+      "propose-ready-plan",
+      "register-engineering-slice-plan",
+      "review-heavy-build-plan",
+      "set-work-shape-disposition",
+      "write-work-shape"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*hooks/*.py",
+      "*ops/*.py",
+      "*lib/*.py",
+      "*tools/*.py",
+      "*bin/*",
+      "*mcp-server/src/*.js",
+      "*migrations/*.sql"
+     ]
+    }
+   ]
+  },
+  "4402973a": {
+   "moment": "healing/regenerating detected drifted vault content",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Write"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bvault-drift-watch\\b"
+     ]
+    }
+   ]
+  },
+  "466a545a": {
+   "moment": "grading a fed source against the system",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation"
+     ],
+     "bash_patterns": [
+      "\\bcurl\\b",
+      "\\bwget\\b",
+      "\\byt-dlp\\b",
+      "\\bgrok\\b",
+      "\\bpdftotext\\b"
+     ]
+    }
+   ]
+  },
+  "48083552": {
+   "moment": "client or prospect meeting, before recommending",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "start-meeting"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "49533583": {
+   "moment": "reading Joe's calendar or mail",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__get_draft",
+      "mcp__*__get_message",
+      "mcp__*__get_thread",
+      "mcp__*__search_threads"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bcalendar-eventkit-capture\\b"
+     ]
+    }
+   ]
+  },
+  "49c627cc": {
+   "moment": "claiming the record layer or verbs cannot do something",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "4a53ff82": {
+   "moment": "canonical_edit gate, first write to tracked canonical files",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/canonical-edit-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit"
+     ],
+     "bash_patterns": []
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "4a9188f3": {
+   "moment": "the teach verb, at a partner-correction/decision trigger",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "teach"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "4c21d86b": {
+   "moment": "merge_survivor verb check (confirm-merge)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "confirm-merge",
+      "decline-candidate",
+      "merge-vendor-rows",
+      "promote-pool",
+      "resolve-candidate"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "4dd44fd7": {
+   "moment": "update-document-status verb (outbound_format split)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [
+      "update-document-status"
+     ],
+     "tools": [],
+     "bash_patterns": []
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "4e104d4c": {
+   "moment": "completion_evidence gate, new-verb deployment claim",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "call-verb",
+      "list-verbs"
+     ],
+     "bash_patterns": [
+      "\\bwrangler\\s+deploy\\b",
+      "\\brelease-pipeline\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*mcp-server/src/tools.js"
+     ]
+    }
+   ]
+  },
+  "4f7c348f": {
+   "moment": "session start",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "4fae20f4": {
+   "moment": "before stating a rate/average as a baseline",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "51d9f05f": {
+   "moment": "prospect-facing communications",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "log-activity",
+      "log-outreach",
+      "prepare-conversation",
+      "prepare-document",
+      "update-document-status"
+     ],
+     "bash_patterns": [
+      "\\boutlook-draft\\b",
+      "\\brun\\.sh\\s+lint\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*/Marketing/*",
+      "*deliverables/*",
+      "*DNA/writing-rules.md"
+     ]
+    }
+   ]
+  },
+  "5409731b": {
+   "moment": "trigger_grant check, migration adding/modifying a trigger",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "ops/trigger-grant-check.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*migrations/*.sql"
+     ]
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "54e2bcb9": {
+   "moment": "versioned_record schema (tools.js+db) - contact fact promotion",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-party",
+      "new-client",
+      "promote-pool",
+      "update-party-contact"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "557838a5": {
+   "moment": "Joe posts an x.com link",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgrok\\b",
+      "\\bx\\.com\\b",
+      "\\btwitter\\.com\\b"
+     ]
+    }
+   ]
+  },
+  "5697071b": {
+   "moment": "an Alabama lead or deal arriving",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "new-client",
+      "new-deal",
+      "new-lead",
+      "prepare-document",
+      "set-market-agent",
+      "update-deal"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "57d13061": {
+   "moment": "any X/x.com retrieval",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgrok\\b",
+      "\\bx\\.com\\b",
+      "\\btwitter\\.com\\b"
+     ]
+    }
+   ]
+  },
+  "57d83b75": {
+   "moment": "record_research deny_gate (tools.js) - new-client creation",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-party",
+      "new-client"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "58b44ccb": {
+   "moment": "one_repo gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/one-repo-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+clone\\b"
+     ]
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
+     ],
+     "bash_patterns": []
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "58cef3a1": {
+   "moment": "correcting one of Joe's mislabeled statements",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "590b11e1": {
+   "moment": "completion_evidence gate, metric completion claim",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*tools/health-check.py",
+      "*ops/*-check.py"
+     ]
+    }
+   ]
+  },
+  "596f7549": {
+   "moment": "any turn - diagnosing a tool error that blames a subsystem",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "5be2f462": {
+   "moment": "chat_lint gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/chat-lint-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "add-loop",
+      "answer-work-request-for-joe"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "5cd8d0f6": {
+   "moment": "a blocked terminal command with a self-serve fix available",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "record-defect"
+     ],
+     "bash_patterns": [
+      "\\brun\\.sh\\s+call\\b",
+      "\\brun\\.sh\\s+worktree\\b",
+      "\\bgit\\s+worktree\\b"
+     ]
+    }
+   ]
+  },
+  "5d44d3f3": {
+   "moment": "new-client or bulk record intake",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-party",
+      "link-parties",
+      "new-client",
+      "new-lead",
+      "new-vendor",
+      "promote-pool",
+      "record-finding",
+      "resolve-candidate",
+      "update-party-contact",
+      "update-vendor"
+     ],
+     "bash_patterns": [
+      "\\bimport_candidate_pool\\b"
+     ]
+    }
+   ]
+  },
+  "5e896ed6": {
+   "moment": "Joe feeds a link (article/video/thread)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation",
+      "write-doctrine-section"
+     ],
+     "bash_patterns": [
+      "\\bpdftotext\\b",
+      "\\bwget\\b",
+      "\\bcurl\\b",
+      "\\byt-dlp\\b"
+     ]
+    }
+   ]
+  },
+  "5e89c211": {
+   "moment": "registering or dispatching a cognition workflow",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent",
+      "mcp__*__create_scheduled_task"
+     ],
+     "verbs": [
+      "accept-workflow",
+      "advance-workflow-cutover-stage",
+      "assign-execution-route",
+      "issue-execution-envelope",
+      "open-workflow-cutover-plan",
+      "record-workflow-caller"
+     ],
+     "bash_patterns": [
+      "\\bdispatch\\.py\\s+send\\b",
+      "\\bgrok\\b",
+      "\\bcodex\\s+exec\\b",
+      "\\blaunchctl\\b",
+      "\\bcontrol[-_]plane\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/scheduled-tasks/*",
+      "*lib/control_plane_runner.py"
+     ]
+    }
+   ]
+  },
+  "5f8c661d": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "614c1209": {
+   "moment": "assessing deal staleness or follow-up status",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "log-outreach",
+      "prepare-conversation",
+      "set-next-action",
+      "set-next-step",
+      "stale-records",
+      "today-triage",
+      "update-deal"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "6172e7d5": {
+   "moment": "video/image source retrieval (watch-video skill)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\byt-dlp\\b",
+      "\\bffmpeg\\b",
+      "\\bgrok\\b",
+      "\\bwatch-video\\b"
+     ]
+    }
+   ]
+  },
+  "61c64d91": {
+   "moment": "creating any new asset (shared vs personal tier)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "register-template"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "6330bec8": {
+   "moment": "any non-trivial problem or decision",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "6437ae15": {
+   "moment": "Joe shares an article, video, or source",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation"
+     ],
+     "bash_patterns": [
+      "\\bcurl\\b",
+      "\\bwget\\b",
+      "\\byt-dlp\\b",
+      "\\bgrok\\b",
+      "\\bpdftotext\\b"
+     ]
+    }
+   ]
+  },
+  "647f843d": {
+   "moment": "add-loop / opening an open_loop",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-loop",
+      "update-loop"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "67580c28": {
+   "moment": "building, restyling, or reviewing any CARR surface",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "seal-tour-public-projection"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "read_only": true,
+     "path_globs": [
+      "*.html",
+      "*dealroom/*",
+      "*control-room/public/*",
+      "*design/*",
+      "*.css",
+      "*workspace/public/*"
+     ]
+    }
+   ]
+  },
+  "6901cc3b": {
+   "moment": "building or evaluating Dr. CRE (Doc) features",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "map-architecture"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "6a4e6283": {
+   "moment": "completion_evidence gate (shipping claim)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact",
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "compare-lease-terms",
+      "prepare-document",
+      "record-executed-lease",
+      "request-tour-pdf-render",
+      "update-document-status"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "6cfb67f5": {
+   "moment": "dispatching a task to another seat",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route",
+      "issue-execution-envelope",
+      "record-dispatch-link"
+     ],
+     "bash_patterns": [
+      "\\bdispatch\\.py\\s+send\\b",
+      "\\bcodex\\s+exec\\b",
+      "\\bgrok\\b",
+      "\\brun-engineering-dispatch\\b",
+      "\\bclaude\\s+-p\\b"
+     ]
+    }
+   ]
+  },
+  "6ec7312d": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "70e372f0": {
+   "moment": "calibrating to Dell's working style",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "correct-memory",
+      "record-defect",
+      "report-problem",
+      "teach"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "7105955b": {
+   "moment": "loop_successor schema (close-loop verb)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "amend-closed-loop",
+      "close-loop",
+      "update-loop"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "725dff46": {
+   "moment": "writing prospect-visible content",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "prepare-conversation"
+     ],
+     "bash_patterns": [
+      "\\brun\\.sh\\s+lint\\b"
+     ]
+    }
+   ]
+  },
+  "72e06bdf": {
+   "moment": "lead board presentation",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "lead-board",
+      "lead-hot",
+      "new-lead",
+      "set-lead",
+      "update-lead"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*dealroom/leads.html"
+     ]
+    }
+   ]
+  },
+  "73381d78": {
+   "moment": "completion_evidence stop_gate - config-file change completion",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bset\\s+-a\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*bin/nightly.sh"
+     ]
+    }
+   ]
+  },
+  "737a68d6": {
+   "moment": "duplicate of 204391be",
+   "routes": [
+    {
+     "kind": "duplicate",
+     "survivor": "204391be"
+    }
+   ]
+  },
+  "740bb505": {
+   "moment": "projecting a long-running job's completion time",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bnohup\\b"
+     ]
+    }
+   ]
+  },
+  "767f9b41": {
+   "moment": "completion_evidence gate, confirmation response",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "boot"
+    }
+   ],
+   "no_trigger_reason": "binds on answering a partner's confirmation question; message text, no tool call"
+  },
+  "76a1ae2b": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "76a53dfe": {
+   "moment": "record_home deny_gate - blocked markdown write workaround",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/record-home-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      ">\\s*\\S+\\.md\\b",
+      "\\btee\\b.*\\.md\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
+    }
+   ]
+  },
+  "7b4ba3aa": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "7e4ca905": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "7e9739f2": {
+   "moment": "any turn replying to Joe",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "80def9d2": {
+   "moment": "building a human-facing surface or choice for Joe/Dell",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "create-tour-public-projection-draft",
+      "request-tour-pdf-render",
+      "seal-tour-public-projection"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*dealroom/*",
+      "*workspace/public/*",
+      "*.css",
+      "*control-room/public/*",
+      "*design/*",
+      "*.html"
+     ]
+    }
+   ]
+  },
+  "81709f57": {
+   "moment": "convening a red team/review panel",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "83b9a362": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "847f9995": {
+   "moment": "completion_evidence stop_gate - unattended-path credential verification",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_scheduled_task",
+      "mcp__*__update_scheduled_task"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\blaunchctl\\b",
+      "\\bcrontab\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/scheduled-tasks/*",
+      "*ops/launchd/*",
+      "*.plist"
+     ]
+    }
+   ]
+  },
+  "86647daf": {
+   "moment": "finishing a substantive build/change/decision (posting to shared files)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-loop",
+      "amend-rule",
+      "close-loop",
+      "complete-action",
+      "log-decision",
+      "report-problem",
+      "teach",
+      "update-decision",
+      "update-loop"
+     ],
+     "bash_patterns": [
+      "\\bgit\\s+push\\b",
+      "\\bgh\\s+pr\\s+(?:create|merge)\\b",
+      "\\bgit\\s+commit\\b",
+      "\\bgit\\s+(?:checkout|switch|worktree|branch)\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/ci.sh",
+      "*ops/*-selftest.py",
+      "*ops/*-check.py",
+      "*ops/githooks/*",
+      "*ops/*-gate.py",
+      "*hooks/*.py"
+     ]
+    }
+   ]
+  },
+  "88e9b5eb": {
+   "moment": "blocker_decider gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/blocker-decider-gate.py"
+    }
+   ]
+  },
+  "893aeec5": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "8aefcdce": {
+   "moment": "choosing Copilot vs Claude for a task",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route",
+      "issue-execution-envelope"
+     ],
+     "bash_patterns": [
+      "\\bclaude\\s+-p\\b"
+     ]
+    }
+   ]
+  },
+  "8c1e6057": {
+   "moment": "chat_lint stop_gate - asking a partner to open/edit/review a file",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/chat-lint-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "add-loop",
+      "answer-work-request-for-joe"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "8c812bed": {
+   "moment": "publishing a partnership-fit summary",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "morning-brief"
+     ],
+     "bash_patterns": [
+      "\\bmonday\\b"
+     ]
+    }
+   ]
+  },
+  "8cddc6ad": {
+   "moment": "renaming a shared-by-design row (party.org_id, vendor_category.slug)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "update-vendor"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "9293d609": {
+   "moment": "building or reviewing any CARR surface",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "issue-tour-share-grant"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "read_only": true,
+     "path_globs": [
+      "*control-room/public/*",
+      "*workspace/public/*",
+      "*dealroom/*",
+      "*design/*",
+      "*.css",
+      "*.html"
+     ]
+    }
+   ]
+  },
+  "9310827b": {
+   "moment": "any turn - a partner asks for something risky or mistaken",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "94806da2": {
+   "moment": "fetching a source feeding doctrine/rules/records",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation",
+      "teach",
+      "write-doctrine-section"
+     ],
+     "bash_patterns": [
+      "\\bcurl\\b",
+      "\\bwget\\b",
+      "\\byt-dlp\\b",
+      "\\bgrok\\b",
+      "\\bpdftotext\\b"
+     ]
+    }
+   ]
+  },
+  "9530fb1c": {
+   "moment": "the moment a session says 'the right fix is X'",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "95e76c1f": {
+   "moment": "any turn (register/tone toward Joe)",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "9730f565": {
+   "moment": "any turn asserting a date or time",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "97326357": {
+   "moment": "completion_evidence gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "change-doctrine-sections",
+      "new-doctrine-doc",
+      "retire-doctrine-section",
+      "set-doctrine-refs",
+      "teach",
+      "write-doctrine-section"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "9873a0d2": {
+   "moment": "a partner re-explains the same how-to twice",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "teach"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
+    }
+   ]
+  },
+  "98e74e7c": {
+   "moment": "reviewing a fed link or source",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation"
+     ],
+     "bash_patterns": [
+      "\\bcurl\\b",
+      "\\bwget\\b",
+      "\\byt-dlp\\b",
+      "\\bgrok\\b",
+      "\\bpdftotext\\b"
+     ]
+    }
+   ]
+  },
+  "99e951b9": {
+   "moment": "index_upkeep pre-commit - content added under indexed multi-folder category",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "ops/githooks/index-upkeep-check.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "Write"
+     ],
+     "bash_patterns": []
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "9b081605": {
+   "moment": "no_send_worker check (outbound send)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/mcp.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgmail-handover\\b"
+     ]
+    }
+   ]
+  },
+  "9d80fd2d": {
+   "moment": "planning prospect outreach cadence",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "attach-to-campaign",
+      "log-outreach",
+      "new-deal",
+      "open-campaign",
+      "prepare-conversation",
+      "score-campaign",
+      "set-next-action",
+      "update-deal"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "9e3fb6d0": {
+   "moment": "industry content shared from a colleague/competitor",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation",
+      "write-doctrine-section"
+     ],
+     "bash_patterns": [
+      "\\bpdftotext\\b"
+     ]
+    }
+   ]
+  },
+  "9f15f21a": {
+   "moment": "deal_guard schema (tools.js+sql) - national-account deal assignment",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "migrations/0079_deal_room_api.sql"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "create-national-account",
+      "create-national-market-deal",
+      "new-deal",
+      "reassign-deal",
+      "set-national-account-owner"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "9ff56260": {
+   "moment": "egress_guard gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/guard-unattended.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\b(?:ssh|scp|sftp)\\b"
+     ]
+    }
+   ]
+  },
+  "a2e78f48": {
+   "moment": "detecting a known broken thing with a known fix",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "open-incident",
+      "record-defect",
+      "report-problem"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "a3f6c7f9": {
+   "moment": "proposing a restructuring",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "a6e6ab4e": {
+   "moment": "completion_evidence stop_gate - changed-system completion",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+push\\b",
+      "\\bgh\\s+pr\\s+(?:create|merge)\\b",
+      "\\bci\\.sh\\b"
+     ]
+    }
+   ]
+  },
+  "a7784a18": {
+   "moment": "starting a coding session through delivery completion",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\brun\\.sh\\s+worktree\\b",
+      "\\bgit\\s+push\\b|\\bgh\\s+pr\\s+(?:create|merge)\\b",
+      "\\bgit\\s+(?:checkout|switch|worktree|branch)\\b",
+      "\\bgh\\s+pr\\s+(?:create|merge)\\b",
+      "\\bgit\\s+push\\b",
+      "\\bgit\\s+commit\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/*-selftest.py",
+      "*ops/*-check.py",
+      "*ops/ci.sh",
+      "*ops/githooks/*",
+      "*hooks/*.py",
+      "*ops/*-gate.py"
+     ]
+    }
+   ]
+  },
+  "a8c55a47": {
+   "moment": "writing a command into a doc, SOP, or instruction",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Write"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*runbooks/*",
+      "*.md",
+      "*SKILL.md",
+      "*INDEX.md"
+     ]
+    }
+   ]
+  },
+  "a8f159ad": {
+   "moment": "building or reviewing a structured CARR surface",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "a9ecd5b4": {
+   "moment": "completion_evidence stop_gate - check-result reporting",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*hooks/*.py",
+      "*ops/*-gate.py",
+      "*ops/*-check.py",
+      "*ops/githooks/*",
+      "*ops/*-selftest.py",
+      "*ops/ci.sh",
+      "*ops/config/hooks.json"
+     ]
+    }
+   ]
+  },
+  "ab814a26": {
+   "moment": "rule_shape gate (approve-rule)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/rule-shape-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "approve-rule"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "af7de070": {
+   "moment": "a tool call blocked by a permission classifier",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\brun\\.sh\\s+call\\b"
+     ]
+    },
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "b01edd26": {
+   "moment": "committing any source or doc file",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+commit\\b"
+     ]
+    }
+   ]
+  },
+  "b1521526": {
+   "moment": "any source conflict",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "b3ea627f": {
+   "moment": "closing a message to Joe",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "b42e217e": {
+   "moment": "humanOnly verb call gate (versioned_record schema)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "assign-profile",
+      "read-profiles"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*mcp-server/src/agent-profiles.js",
+      "*mcp-server/src/partner-authority.js"
+     ]
+    }
+   ]
+  },
+  "b42f11a0": {
+   "moment": "sizing a system build or architecture choice",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "accept-ready-plan",
+      "begin-capability-project",
+      "propose-ready-plan",
+      "register-engineering-slice-plan",
+      "review-heavy-build-plan",
+      "set-work-shape-disposition"
+     ],
+     "bash_patterns": [
+      "\\bgh\\s+pr\\s+(?:create|merge)\\b"
+     ]
+    }
+   ]
+  },
+  "b587f6c2": {
+   "moment": "architecture/mechanism-class design fork with no deterministic verifier",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "propose-ready-plan",
+      "write-work-shape"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "b7ec8f3b": {
+   "moment": "designing or reviewing the Doc app surface",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "read_only": true,
+     "path_globs": [
+      "*control-room/public/*",
+      "*.html",
+      "*.css",
+      "*design/*",
+      "*workspace/public/*",
+      "*dealroom/*"
+     ]
+    }
+   ]
+  },
+  "ba5730c5": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "bbffc139": {
+   "moment": "Joe overrules, predicts, compresses, rules, or corrects within CARR work",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "log-decision"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "bc4145f6": {
+   "moment": "monthly review or recurring behavior pattern",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "morning-brief"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "bc9188b4": {
+   "moment": "loose_work stop_gate - session Stop",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/loose-work-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+commit\\b",
+      "\\bgit\\s+push\\b",
+      "\\bgh\\s+pr\\s+(?:create|merge)\\b"
+     ]
+    }
+   ]
+  },
+  "bd4a6d22": {
+   "moment": "updating a CI check after Joe accepts a permanent state",
+   "routes": [
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/config/ci-check-scope.json",
+      "*ops/*-check.py",
+      "*ops/ci.sh",
+      "*ops/*-gate.py"
+     ]
+    }
+   ]
+  },
+  "bddb0e7b": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "c0b38d80": {
+   "moment": "committing a change to a gate script or enforcement map",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgit\\s+commit\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/config/rule-enforcement-map.json",
+      "*ops/*-gate.py",
+      "*ops/config/gate-baseline.json",
+      "*hooks/*.py",
+      "*ops/*-check.py",
+      "*ops/githooks/*"
+     ]
+    }
+   ]
+  },
+  "c1547ed1": {
+   "moment": "creating a new workflow/system/asset",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_scheduled_task"
+     ],
+     "verbs": [
+      "begin-capability-project",
+      "propose-ready-plan",
+      "register-engineering-slice-plan",
+      "review-heavy-build-plan",
+      "start-capability-project",
+      "write-work-shape"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*Management/system-evolution-plan.md",
+      "*ops/scheduled-tasks/*",
+      "*ops/launchd/*"
+     ]
+    }
+   ]
+  },
+  "c1db316c": {
+   "moment": "any turn - choosing a solution approach",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "c20dc3d5": {
+   "moment": "handing up or acting on a subagent finding",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "issue-execution-envelope",
+      "record-finding"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "c315befa": {
+   "moment": "chat_lint gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/chat-lint-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "add-loop",
+      "answer-work-request-for-joe"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "c4a284b2": {
+   "moment": "a compliance or convention question",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "find-precedent",
+      "search-doctrine"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "c53beeaa": {
+   "moment": "versioned_record schema (tools.js+db) - record mutation acknowledgement",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-deal-note",
+      "add-loop",
+      "log-decision",
+      "teach",
+      "update-loop",
+      "write-doctrine-section"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "c66dc739": {
+   "moment": "reading/capturing Joe's mail",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__get_message",
+      "mcp__*__get_thread",
+      "mcp__*__search_threads"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bgmail-handover\\b"
+     ]
+    }
+   ]
+  },
+  "c6f69dee": {
+   "moment": "staffing or naming a delegated Agent",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route"
+     ],
+     "bash_patterns": [
+      "\\bclaude\\s+-p\\b"
+     ]
+    }
+   ]
+  },
+  "c864b8cb": {
+   "moment": "asking Joe multiple things",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "c8ebeb5b": {
+   "moment": "a finding surfaces a practice-acquisition exit",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "new-lead",
+      "next-signals",
+      "record-finding",
+      "record-signal"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "ca841807": {
+   "moment": "record_home gate (markdown write outside manifest)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/record-home-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
+    }
+   ]
+  },
+  "cd84d22a": {
+   "moment": "the Claude Code feedback-survey prompt appearing",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "ce12c11e": {
+   "moment": "framing a sales pitch to a client/lead",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "prepare-conversation"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "cf1c13a6": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "cff429f5": {
+   "moment": "record_research deny_gate (tools.js) - new party creation with blank field",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-party",
+      "new-client",
+      "new-lead",
+      "new-vendor",
+      "update-party-contact",
+      "update-vendor"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "d26d63b0": {
+   "moment": "a new contact enters the system",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-party",
+      "new-client",
+      "new-lead",
+      "new-vendor"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "d3774a28": {
+   "moment": "brand copy review / conceptual-model vs file-reality divergence",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "read_only": true,
+     "path_globs": [
+      "*/Marketing/*",
+      "*.css"
+     ]
+    }
+   ]
+  },
+  "d5dcfe26": {
+   "moment": "asserting a decision or memo state is stale or unruled",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "d7c69aa6": {
+   "moment": "calendar ingest surfaces an unmatched attendee",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "new-lead",
+      "new-vendor"
+     ],
+     "bash_patterns": [
+      "\\bcalendar-intake-gate\\b",
+      "\\bcalendar-eventkit-capture\\b",
+      "\\bfetch-calendar\\.sh\\b"
+     ]
+    }
+   ]
+  },
+  "d7e6de46": {
+   "moment": "deal_guard schema (deal value write)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "migrations/0079_deal_room_api.sql"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "patch-deal-field",
+      "record-deal-closing",
+      "update-deal"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "d7f74c93": {
+   "moment": "chat_lint gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/chat-lint-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route",
+      "issue-execution-envelope",
+      "record-dispatch-link"
+     ],
+     "bash_patterns": [
+      "\\bdispatch\\.py\\s+send\\b",
+      "\\bcodex\\s+exec\\b",
+      "\\bgrok\\b",
+      "\\brun-engineering-dispatch\\b",
+      "\\bclaude\\s+-p\\b"
+     ]
+    }
+   ]
+  },
+  "d8c9b1f0": {
+   "moment": "raising a loop/finding to Joe or Dell",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "add-loop",
+      "answer-work-request-for-joe",
+      "update-loop"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "d9874334": {
+   "moment": "about to name capability as a blocker or request a permission",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "AskUserQuestion"
+     ],
+     "verbs": [
+      "add-loop",
+      "report-problem"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "d9ce2b08": {
+   "moment": "before reporting work as blocked or parked",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "dcf98880": {
+   "moment": "completion_evidence gate (human verification instruction)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "boot"
+    }
+   ],
+   "no_trigger_reason": "binds on writing verification steps for the partner in chat; no tool call"
+  },
+  "def3e84e": {
+   "moment": "superseding an artifact",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "add-loop",
+      "evaluate-artifact-deletion"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "defee176": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "df55c398": {
+   "moment": "writing a delegated subagent scope brief",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "df8f1da0": {
+   "moment": "answering an opinion request from Joe",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "e313a3ca": {
+   "moment": "conduct_stop gate (before command handoff)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/conduct-stop-gate.py"
+    },
+    {
+     "kind": "boot"
+    }
+   ],
+   "no_trigger_reason": "binds on the absence of a tool call (a command pasted into chat instead of run)"
+  },
+  "e4d965d9": {
+   "moment": "telling a partner something cannot be done",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "e65efc68": {
+   "moment": "building any gate, hook, linter, or CI validator",
+   "routes": [
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/ci.sh",
+      "*ops/*-gate.py",
+      "*ops/githooks/*",
+      "*hooks/*.py",
+      "*ops/*-check.py",
+      "*ops/config/hooks.json",
+      "*ops/*-selftest.py"
+     ]
+    }
+   ]
+  },
+  "e6e0b0e7": {
+   "moment": "vendor introduction work (intro_politics scope)",
+   "note": "active intro_politics rule of the vendor-intros pack; not in the classification CSV because standing-context recitation excludes that scope by design",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "counterparty-history",
+      "log-outreach",
+      "merge-vendor-rows",
+      "new-vendor",
+      "prepare-conversation",
+      "update-vendor",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "e8868cbe": {
+   "moment": "completion_evidence gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_scheduled_task",
+      "mcp__*__update_scheduled_task"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\blaunchctl\\b",
+      "\\bcrontab\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/scheduled-tasks/*",
+      "*ops/launchd/*",
+      "*.plist"
+     ]
+    }
+   ]
+  },
+  "eaa31ac5": {
+   "moment": "completion_evidence gate (delivery claim)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "add-loop",
+      "close-loop",
+      "log-decision",
+      "record-finding"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "ede4b241": {
+   "moment": "dispatching work to another model or launching a cloud session (model choice)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent",
+      "mcp__*__create_session",
+      "mcp__*__create_trigger"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*--(?:remote|cloud)(?=[\\s=;&|)<>]|$)",
+      "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*--environment(?:[ \\t]+|=)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)"
+     ]
+    }
+   ]
+  },
+  "ede4c735": {
+   "moment": "writing any prospect-visible draft",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__create_draft",
+      "mcp__*__forward",
+      "mcp__*__reply",
+      "mcp__*__send_message",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "prepare-conversation"
+     ],
+     "bash_patterns": [
+      "\\boutlook-draft\\b"
+     ]
+    }
+   ]
+  },
+  "eeb3d106": {
+   "moment": "building or reviewing any CARR workstation surface",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "read_only": true,
+     "path_globs": [
+      "*dealroom/*",
+      "*design/*",
+      "*.css",
+      "*control-room/public/*",
+      "*.html",
+      "*workspace/public/*"
+     ]
+    }
+   ]
+  },
+  "efbdfb1a": {
+   "moment": "after a non-trivial build works, before shipping",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "f04a05aa": {
+   "moment": "completion_evidence gate (autonomous-run completion)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent",
+      "mcp__*__create_scheduled_task",
+      "mcp__*__update_scheduled_task"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\blaunchctl\\b",
+      "\\bcrontab\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*ops/scheduled-tasks/*",
+      "*ops/launchd/*",
+      "*.plist"
+     ]
+    }
+   ]
+  },
+  "f0f9156e": {
+   "moment": "an architecture fork with a local-vs-cloud dimension",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "propose-ready-plan",
+      "register-engineering-slice-plan"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "f2d58a30": {
+   "moment": "drafting any client-facing recommendation document",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact",
+      "mcp__*__create_draft",
+      "mcp__*__update_draft"
+     ],
+     "verbs": [
+      "prepare-document"
+     ],
+     "bash_patterns": [
+      "\\bbuild-space-search\\b"
+     ]
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*deliverables/*",
+      "*/Marketing/*"
+     ]
+    }
+   ]
+  },
+  "f47a8fe9": {
+   "moment": "completion_evidence gate",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "confirm-merge",
+      "find",
+      "merge-vendor-rows",
+      "stale-records",
+      "who-do-we-know"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "f5bac101": {
+   "moment": "deciding where to spend effort (prospecting vs polish)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "lead-hot",
+      "new-deal"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "f5beac20": {
+   "moment": "encountering useful-but-not-today knowledge",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  },
+  "f5d97b4a": {
+   "moment": "costar_lane deny_gate - Chrome-extension tool call targeting costar.com",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/costar-lane-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "mcp__*__navigate",
+      "mcp__*__get_page_text",
+      "mcp__*__computer"
+     ],
+     "bash_patterns": [
+      "\\bcostar\\.com\\b"
+     ]
+    }
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
+  },
+  "f92dfab2": {
+   "moment": "client_asset_packet render (search-packet)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "lib/client_asset_controls.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "prepare-document",
+      "request-tour-pdf-render"
+     ],
+     "bash_patterns": [
+      "\\bbuild-space-search\\b"
+     ]
+    }
+   ]
+  },
+  "fa217e48": {
+   "moment": "completion_evidence gate (completion/file claims)",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/completion-evidence-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "close-loop",
+      "complete-action",
+      "log-decision",
+      "mark-slice-completion",
+      "propose-slice-completion",
+      "update-loop"
+     ],
+     "bash_patterns": [
+      "\\bgit\\s+push\\b",
+      "\\bgh\\s+pr\\s+(?:create|merge)\\b"
+     ]
+    }
+   ]
+  },
+  "faae6748": {
+   "moment": "egress_guard gate, before destructive filesystem action",
+   "routes": [
+    {
+     "kind": "gate",
+     "gate": "hooks/guard-unattended.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\brm\\s",
+      "\\bgit\\s+rm\\b",
+      "\\btrash\\b"
+     ]
+    }
+   ]
+  },
+  "faf1b643": {
+   "moment": "nightly vendor-level-drift check over active vendors",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bvendor-level-drift-check\\b",
+      "\\bnightly\\.sh\\b"
+     ]
+    }
+   ]
+  },
+  "fb110a39": {
+   "moment": "starting a task or fan-out brief (model choice)",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route",
+      "issue-execution-envelope",
+      "record-dispatch-link"
+     ],
+     "bash_patterns": [
+      "\\bdispatch\\.py\\s+send\\b",
+      "\\bcodex\\s+exec\\b",
+      "\\bgrok\\b",
+      "\\brun-engineering-dispatch\\b",
+      "\\bclaude\\s+-p\\b"
+     ]
+    }
+   ]
+  },
+  "fb2b263d": {
+   "moment": "after deciding or building, checking other index/context files",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "log-decision"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*INDEX.md",
+      "*.md"
+     ]
+    }
+   ]
+  },
+  "fc21a431": {
+   "moment": "any partner correction",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "correct-memory",
+      "teach"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "fc4d7753": {
+   "moment": "any turn - evaluating whether to add structure or ideas",
+   "routes": [
+    {
+     "kind": "boot"
+    }
+   ]
+  }
+ }
+}

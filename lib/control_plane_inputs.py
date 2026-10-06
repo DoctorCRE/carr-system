@@ -8,6 +8,8 @@ untraceable evidence is a refusal rather than a reason to make an input up.
 """
 from __future__ import annotations
 
+from lib.secret_redaction import redact_text
+
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
@@ -21,6 +23,26 @@ class InputUnavailable(RuntimeError):
         self.builder_key = builder_key
         self.reason = reason
         super().__init__(f"input unavailable for {builder_key}: {reason}")
+
+
+class NoEligibleRecords(RuntimeError):
+    """The named builder's canonical queue is genuinely empty right now.
+
+    Distinct from InputUnavailable: this is not malformed, missing, or
+    contradictory evidence -- it is the queue's honest "no eligible records"
+    state. contact-enrichment-weekly.SKILL.md and
+    deal-history-research-weekly.SKILL.md both name this as the normal end
+    state once the book is covered ("reports done and stops finding work"),
+    not a failure. A caller must route this to a clean skip, the same
+    terminal outcome EntrypointNotConfigured gets, never to ops.fail_job or
+    a dead letter (rule 88e9b5eb: "not authorized" and "not possible" are
+    different findings and must never be reported as the same one -- this is
+    a third, equally distinct finding: "not needed right now").
+    """
+
+    def __init__(self, builder_key: str):
+        self.builder_key = builder_key
+        super().__init__(f"no eligible records for {builder_key}: queue is empty")
 
 
 class EvidenceCollector(Protocol):
@@ -187,10 +209,22 @@ def build_input(manifest: Mapping[str, Any], builder_key: str, collector: Eviden
     workflow, contract = _registered_workflow(manifest, builder_key, workflow_key)
     try:
         raw_evidence = list(collector.collect(builder_key=builder_key, workflow_key=workflow["key"]))
-    except InputUnavailable:
+    except (InputUnavailable, NoEligibleRecords):
         raise
     except Exception as exc:
-        raise InputUnavailable(builder_key, f"read-only collector failed: {type(exc).__name__}") from exc
+        # NAME THE REASON, NOT JUST THE EXCEPTION CLASS. Until 2026-08-28 this
+        # recorded only the type, so a dead-lettered social-batch run said
+        # "read-only collector failed: CollectorUnavailable" and a session had
+        # to re-derive the cause by reading the collector by hand. The
+        # collectors already raise messages that say exactly which query or
+        # policy was wrong; carrying that message costs nothing and is the same
+        # lesson the entrypoint failure receipts learned a day earlier. Bounded
+        # and redacted, because a collector message can quote a row it read.
+        detail = redact_text(str(exc))[:500]
+        raise InputUnavailable(
+            builder_key,
+            f"read-only collector failed: {type(exc).__name__}" + (f": {detail}" if detail else ""),
+        ) from exc
     if not raw_evidence:
         raise InputUnavailable(builder_key, "no canonical/read-only/device evidence is available")
 

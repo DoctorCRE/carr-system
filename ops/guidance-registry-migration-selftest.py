@@ -12,6 +12,9 @@ MIGRATION = os.path.join(REPO, "migrations", "0168_guidance_registry.sql")
 STANDING_CONTEXT_BOUNDARY_MIGRATION = os.path.join(
     REPO, "migrations", "0199_guidance_standing_context_boundary.sql"
 )
+READER_BOUNDARY_MIGRATION = os.path.join(
+    REPO, "migrations", "0382_standing_guidance_reader_boundary.sql"
+)
 
 
 def main() -> int:
@@ -22,6 +25,11 @@ def main() -> int:
     compact = re.sub(r"\s+", " ", sql)
     boundary_sql = open(STANDING_CONTEXT_BOUNDARY_MIGRATION, encoding="utf-8").read().lower()
     boundary_compact = re.sub(r"\s+", " ", boundary_sql)
+    if not os.path.exists(READER_BOUNDARY_MIGRATION):
+        print("guidance-registry-migration-selftest: FAIL — migration 0382 is missing", file=sys.stderr)
+        return 1
+    reader_sql = open(READER_BOUNDARY_MIGRATION, encoding="utf-8").read().lower()
+    reader_compact = re.sub(r"\s+", " ", reader_sql)
     checks = {
         "canonical item spine": "create table ops.guidance_item" in compact,
         "append-only revisions": "create table ops.guidance_revision" in compact
@@ -58,6 +66,25 @@ def main() -> int:
         "precedent projection": "v_guidance_precedent" in compact,
         "example projection": "v_guidance_example" in compact,
         "standing-context projection": "standing_guidance" in compact,
+        "standing-guidance reader boundary is pinned security definer":
+            "create or replace function ops.standing_guidance" in reader_compact
+            and "security definer" in reader_compact
+            and "set search_path = pg_catalog, ops, public, pg_temp" in reader_compact,
+        "standing-guidance reader boundary fully qualifies dependencies": all(
+            dependency in reader_compact for dependency in (
+                "from ops.v_guidance_current",
+                "join public.rule",
+                "join public.actor teacher",
+                "left join public.actor owner",
+                "from ops.v_guidance_registry_state",
+                "join ops.guidance_registry",
+                "from ops.applicable_rules",
+            )),
+        "standing-guidance reader boundary preserves narrow execute grants":
+            "revoke all on function ops.standing_guidance(text,text,text,text) from public"
+            in reader_compact
+            and "grant execute on function ops.standing_guidance(text,text,text,text) to carr_reader,carr_writer"
+            in reader_compact,
         "coverage gate": "assert_guidance_registry_coverage" in compact,
         "standing corpus excludes intro-politics surface":
             boundary_compact.count(

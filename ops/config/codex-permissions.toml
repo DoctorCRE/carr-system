@@ -1,4 +1,14 @@
-default_permissions = "carr_drive_readonly"
+default_permissions = "carr_unattended"
+
+[permissions.carr_unattended]
+description = "Unattended CARR repo work with command network access; other local files stay sandboxed."
+extends = ":workspace"
+
+[permissions.carr_unattended.workspace_roots]
+"{{REPO}}" = true
+
+[permissions.carr_unattended.network]
+enabled = true
 
 [permissions.carr_drive_readonly]
 description = "CARR Drive is read-only; versioned code and machine config live in carr-system."

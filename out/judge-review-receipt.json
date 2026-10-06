@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "receipt_id": "53a901a8-1c1f-4a98-b7f1-f1518a631b48",
+  "recorded_at": "2026-09-30T01:49:02.654304+00:00",
+  "purpose": "call",
+  "session_id": "01a0eff0-0077-7d80-8bc0-1053def67f02",
+  "model": "jev-1.13.0",
+  "answers": {
+    "semantic_creation": {
+      "type": "noul",
+      "noul": 0.93
+    },
+    "architecture_or_design": {
+      "type": "noul",
+      "noul": 0.69
+    },
+    "verification_selection": {
+      "type": "noul",
+      "noul": 0.79
+    },
+    "evidence_matching": {
+      "type": "noul",
+      "noul": 0.88
+    },
+    "next_action_priority": {
+      "type": "noul",
+      "noul": 0.77
+    }
+  },
+  "usage": {
+    "input_tokens": 5980,
+    "output_tokens": 93
+  },
+  "cache_hit": false,
+  "state_sha256": "865a8258c3e037fc9e8be5db6eae6ca77b37dbc8c5ddd33cdb177d8a2853450a",
+  "prompt_sha256": null
+}

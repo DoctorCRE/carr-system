@@ -129,9 +129,26 @@ struct Transcriber {
     /// same way for both the cli path's --prompt flag and the server path's
     /// "prompt" form field, so a degraded vocab bias on one path can never
     /// silently diverge from the other.
+    ///
+    /// vocab-prompt.txt is tracked and carries only generic industry terms
+    /// and place names (WR-000049: this repo is public, no client roster in
+    /// the tracked tree). vocab-local.txt, gitignored, sits beside it as the
+    /// per-machine layer with real client/practice/person names — loaded and
+    /// appended when present, same as transcribe_session.py's load_prompt(),
+    /// so both engines can never silently diverge on vocab bias. Absent is
+    /// not an error: a fresh clone has no local vocab file yet.
     private var vocabPrompt: String? {
         guard let prompt = try? String(contentsOfFile: config.vocabPromptPath, encoding: .utf8) else { return nil }
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let localPath = (config.vocabPromptPath as NSString)
+            .deletingLastPathComponent
+            .appending("/vocab-local.txt")
+        if let local = try? String(contentsOfFile: localPath, encoding: .utf8) {
+            let localTrimmed = local.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !localTrimmed.isEmpty {
+                trimmed = trimmed.isEmpty ? localTrimmed : "\(trimmed) \(localTrimmed)"
+            }
+        }
         return trimmed.isEmpty ? nil : trimmed
     }
 

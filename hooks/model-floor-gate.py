@@ -105,7 +105,7 @@ def tier_of(model_string, ranks):
     """Rank a model string by the tier word it contains. Returns (name, rank).
 
     Substring matching on purpose: the exact ids churn (claude-opus-4-8,
-    claude-opus-5, claude-sonnet-5, claude-haiku-4-5-20251001, claude-fable-5)
+    claude-opus-5, claude-sonnet-5, claude-sonnet-5-5, claude-haiku-4-5-20251001, claude-fable-5)
     and a gate that has to be edited every time a model ships is a gate that
     silently stops matching. Unknown strings return rank 0, which is treated as
     unknown rather than as failing the floor.

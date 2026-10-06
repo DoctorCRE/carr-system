@@ -49,14 +49,29 @@ def _default_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, capture_output=True, check=False)
 
 
+# TWO VOCABULARIES, AND ONLY ONE OF THEM EXISTS ON THIS MAC. `launchctl
+# print-disabled` prints a boolean on older macOS and the words disabled/enabled
+# on macOS 26: measured 2026-08-27 on 26.5.2, 0 lines matched `=> true|false`
+# and 59 matched `=> disabled|enabled`. Reading only the boolean form made every
+# genuinely disabled job read back as ENABLED, and because a disable readback
+# requires an enabled-then-disabled pair, the last step of the whole scheduler
+# cutover could never be evidenced on this machine. Accept both spellings and
+# refuse anything else rather than guessing a default, because "unrecognised"
+# and "not disabled" are different findings (rule 88e9b5eb).
+_OVERRIDE_WORDS = {"true": True, "disabled": True, "false": False, "enabled": False}
+
+
 def _disabled_override(text: str, locator: str) -> bool:
-    pattern = re.compile(rf'"?{re.escape(locator)}"?\s*=>\s*(true|false)\b')
+    pattern = re.compile(rf'"?{re.escape(locator)}"?\s*=>\s*([A-Za-z]+)\b')
     matches = pattern.findall(text)
     if len(matches) > 1:
         raise CutoverRefusal("launchd disabled-state registry contains an ambiguous duplicate label")
     if not matches:
         return False
-    return matches[0] == "true"
+    word = matches[0].lower()
+    if word not in _OVERRIDE_WORDS:
+        raise CutoverRefusal("launchd disabled-state registry uses an unrecognised state word")
+    return _OVERRIDE_WORDS[word]
 
 
 def read_native_launchd(

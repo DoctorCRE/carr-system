@@ -1,0 +1,38 @@
+{
+  "_note": "Approved untracked roots for ops/untracked-anomaly-report.py (Repo Hygiene Program R02). A path under an approved root is EXPECTED to be untracked and is not an anomaly. Everything else untracked-but-not-ignored in the canonical checkout appears in the weekly report. The report pages nobody and blocks nothing.",
+  "_two_lists_on_purpose": "structural roots are plumbing this repo creates for itself and are approved by their own existing doctrine. ruled roots are debris families the R01 settlement has actually ruled keep-and-ignore; the list starts EMPTY because on 2026-09-01 the R01 worksheet's dispositions are all advisory ('owner self-identifies in the landing window') and an advisory disposition is not a ruling. Adding a root here without a recorded ruling is how a debris family disappears from review by accident.",
+  "_adding_a_ruled_root": "one entry per ruling, with the ruling reference and the date. No wildcards beyond a trailing slash, so nobody can silence a family with a broad pattern.",
+  "structural": [
+    {
+      "root": "out/",
+      "why": "receipts, run records and program artifacts; load-bearing and written by design. Also in .gitignore.",
+      "authority": "canonical-edit-gate allowance 2; .gitignore"
+    },
+    {
+      "root": ".venv/",
+      "why": "python virtualenv, symlinked into every worktree by run.sh worktree. Never source. Also in .gitignore.",
+      "authority": ".gitignore; bin/worktree.sh plumbing"
+    },
+    {
+      "root": "mcp-server/node_modules/",
+      "why": "installed dependencies, symlinked into every worktree by run.sh worktree. Also in .gitignore.",
+      "authority": ".gitignore; bin/worktree.sh plumbing"
+    },
+    {
+      "root": ".claude/worktrees/",
+      "why": "registered worktrees — each is a live CHECKOUT of this repo carrying its own .git file, not content of it. Also in .gitignore.",
+      "authority": ".gitignore; rule 308ef1de (nested-checkout sweep hazard)"
+    },
+    {
+      "root": ".codex-worktrees/",
+      "why": "registered worktrees for Codex seats; same nested-checkout reasoning as .claude/worktrees/.",
+      "authority": "git worktree registry; rule 308ef1de"
+    },
+    {
+      "root": "__pycache__/",
+      "why": "bytecode cache, regenerated. Also in .gitignore.",
+      "authority": ".gitignore"
+    }
+  ],
+  "ruled": []
+}

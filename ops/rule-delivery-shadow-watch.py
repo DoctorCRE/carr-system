@@ -50,6 +50,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib.rule_delivery_shadow import current_identity  # noqa:E402
 LOG = REPO / "out" / "rule-delivery-shadow.jsonl"
 EX_CONFIG = 78
 STALE_HOURS = 48
@@ -60,6 +62,16 @@ def load_audit():
     spec = importlib.util.spec_from_file_location("rule_delivery_audit", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load the delivery audit from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_eligibility():
+    path = REPO / "ops" / "rule-delivery-shadow-eligibility.py"
+    spec = importlib.util.spec_from_file_location("rule_delivery_shadow_eligibility", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load the shadow eligibility check from {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -96,6 +108,8 @@ def summarize(rows: list[dict], now: datetime | None = None) -> dict:
     errors = 0
     newest: datetime | None = None
     for row in rows:
+        if row.get("record_type") not in {None, "observation"}:
+            continue
         if row.get("error"):
             errors += 1
         for pack in row.get("needed", []) or []:
@@ -117,7 +131,8 @@ def summarize(rows: list[dict], now: datetime | None = None) -> dict:
                 newest = seen
     age_hours = None if newest is None else (now - newest).total_seconds() / 3600
     stale = age_hours is None or age_hours > STALE_HOURS
-    return {"turns": len(rows), "misses": misses, "miss_count": len(misses),
+    turns = sum(1 for row in rows if row.get("record_type") in {None, "observation"})
+    return {"turns": turns, "misses": misses, "miss_count": len(misses),
             "packs_seen": dict(packs.most_common()), "modes": dict(modes),
             "gate_errors": errors, "newest": newest.strftime("%Y-%m-%dT%H:%M:%SZ")
             if newest else None, "age_hours": age_hours, "stale": stale}
@@ -138,7 +153,7 @@ def routine_dsn() -> str | None:
     return value
 
 
-def report(summary: dict) -> None:
+def report(summary: dict, eligibility: dict | None = None) -> None:
     if summary["stale"]:
         # THE FINDING THAT LOOKS LIKE A PASS IF NOBODY PRINTS IT.
         if summary["newest"] is None:
@@ -177,6 +192,25 @@ def report(summary: dict) -> None:
     if summary["modes"]:
         print("  delivery modes seen: "
               + ", ".join(f"{k}={v}" for k, v in summary["modes"].items()))
+    if eligibility is None:
+        print("rule-delivery-shadow-watch: ENFORCEMENT BLOCKED — current live "
+              "policy/map/source identity was not available")
+    elif eligibility["eligible"]:
+        print("rule-delivery-shadow-watch: ENFORCEMENT ELIGIBLE — "
+              f"epoch={eligibility['epoch_id']} "
+              f"scoped={eligibility['qualifying_observations']} "
+              f"closed_findings={eligibility['closed_findings']}")
+    else:
+        print("rule-delivery-shadow-watch: ENFORCEMENT BLOCKED")
+        for reason in eligibility["reasons"]:
+            print("  " + reason)
+        for item in eligibility["open"]:
+            print(f"  OPEN {item['kind']} event={item['event_id']} owner=UNASSIGNED "
+                  "remedy=UNRECORDED")
+        for item in eligibility["closed"]:
+            print(f"  CLOSED {item['kind']} event={item['event_id']} "
+                  f"disposition={item['disposition']} owner={item['owner']} "
+                  f"remedy={item['remedy_ref']}")
 
 
 def main() -> int:
@@ -191,6 +225,7 @@ def main() -> int:
         summary["unreadable_lines"] = unreadable
 
     counts = None
+    identity = None
     dsn = routine_dsn()
     if dsn:
         import psycopg
@@ -206,21 +241,30 @@ def main() -> int:
                 return 1
             try:
                 counts = audit.counts(cur)
+                cur.execute("""select mode,changed_by,reason,changed_at
+                                 from ops.rule_delivery_policy where singleton""")
+                identity = current_identity(REPO, cur.fetchone())
             except psycopg.errors.InsufficientPrivilege as exc:
                 print("rule-delivery-shadow-watch: the jobs role cannot read the delivery "
-                      f"tags — migration 0288 may not be applied here ({exc})",
+                      f"tags — migration 0291 may not be applied here ({exc})",
                       file=sys.stderr)
                 return 1
             except psycopg.errors.UndefinedTable:
                 print("rule-delivery-shadow-watch: the delivery tables are absent — "
-                      "migration 0288 has not been applied here", file=sys.stderr)
+                      "migration 0291 has not been applied here", file=sys.stderr)
                 return 1
 
+    eligibility = load_eligibility().evaluate(rows, identity=identity)
+    if unreadable:
+        eligibility["eligible"] = False
+        eligibility["reasons"].append(f"{unreadable} unreadable telemetry line(s)")
+
     if args.json:
-        print(json.dumps({"log": summary, "database": counts}, sort_keys=True, default=str))
+        print(json.dumps({"log": summary, "database": counts,
+                          "eligibility": eligibility}, sort_keys=True, default=str))
         return 0
 
-    report(summary)
+    report(summary, eligibility)
     if counts is not None:
         audit = load_audit()
         prefix = ("PRODUCTION'S DELIVERY TAGS ARE INCOMPLETE — "

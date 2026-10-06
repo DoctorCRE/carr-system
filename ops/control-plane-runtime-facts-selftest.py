@@ -31,7 +31,11 @@ calendar=cp._workflow_fact_collector(by['calendar-fetch-daily'],weekday_payload,
 check('calendar shadow derives weekday+registered EventKit bundle routing without payload facts',evaluate_stage(by['calendar-fetch-daily'],'routing',calendar))
 notes=cp._workflow_fact_collector(by['notes-sweep-hourly'],weekday_payload,execution={'entrypoint':'bin/notes-sweep-post.sh','mode':'shadow','args':['--dry-run'],'exit_code':0,'stdout_tail':'notes-sweep shadow: scanned=1 unposted=1 writes=0 posts=0'},mode='shadow')
 check('notes filtering derives from subprocess evidence',evaluate_stage(by['notes-sweep-hourly'],'filtering',notes))
-input_payload={'subjects':[{'reverification_due':'expired','current_verification_status':'not_current','priority':1,'expired_at':'2026-01-01T00:00:00Z'}],'source_policy':{}}
+# Priority 7 with no 1..6 ahead of it: a real queue slice is contiguous from 1,
+# so this is precisely the unproved ordering filtering must still refuse. It used
+# to be expressed as 'fewer than 40 rows', which stopped meaning that once a short
+# week became valid work (0387).
+input_payload={'subjects':[{'reverification_due':'expired','current_verification_status':'not_current','priority':7,'expired_at':'2026-01-01T00:00:00Z'}],'source_policy':{}}
 cognition=cp._workflow_fact_collector(by['contact-enrichment-weekly'],weekday_payload,input_payload=input_payload,mode='shadow')
 check('cognition routing derives queue existence but not unproved ordering',evaluate_stage(by['contact-enrichment-weekly'],'routing',cognition) and not evaluate_stage(by['contact-enrichment-weekly'],'filtering',cognition))
 completion=cp._workflow_fact_collector(by['calendar-fetch-daily'],weekday_payload,execution={'exit_code':0,'stdout_tail':'summary failed=0'},receipt_ref='job:fixture:attempt:1',mode='shadow')

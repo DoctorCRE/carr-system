@@ -95,6 +95,89 @@ with tempfile.TemporaryDirectory(prefix="drive-reader-slice2-") as td:
           p.returncode == 1 and "MISSING DUE execution" in p.stdout and
           "CANONICAL_FINDING job_missing_due" in p.stdout, p.stdout + p.stderr)
 
+    # LOOP #536: a definition whose LEGACY scheduler still owns execution has
+    # no Control Plane ledger row by design, and calling that a missed window
+    # made the drift check unreadable — every uncut job read MISSING DUE for
+    # days while out/nightly.log proved the chain had run. The carried state
+    # must stay visible (rule bd4a6d22), never become silence, and the default
+    # stays fail-closed: a definition that does not say it is still on its
+    # legacy scheduler is still held to its due windows.
+    legacy_live_due = tmp / "legacy-live-due.json"
+    legacy_live_due.write_text(json.dumps({
+        "observed_at": fixed_now, "exports": None, "errors": [],
+        "job_definitions": [{"key": "daily", "version": 1,
+                             "recurrence": {"cron": "0 7 * * *",
+                                            "timezone": "America/Chicago",
+                                            "source": "tracked definition"},
+                             "legacy_live": True,
+                             "registered_at": "2026-08-16T00:00:00+00:00"}],
+        "jobs": [],
+    }))
+    p = run(str(PY), "tools/health-check.py", "--section", "jobs",
+            "--fixture", str(legacy_live_due))
+    check("a definition still run by its legacy scheduler is carried, not MISSING DUE",
+          p.returncode == 0 and "MISSING DUE" not in p.stdout and
+          "1 definition(s) still on a legacy scheduler" in p.stdout,
+          p.stdout + p.stderr)
+
+    legacy_live_broken = tmp / "legacy-live-broken.json"
+    legacy_live_broken.write_text(json.dumps({
+        "observed_at": fixed_now, "exports": None, "errors": [],
+        "job_definitions": [{"key": "daily", "version": 1,
+                             "recurrence": {"cron": "0 7 * * *",
+                                            "timezone": "America/Chicago",
+                                            "source": "tracked definition"},
+                             "legacy_live": True,
+                             "registered_at": "2026-08-16T00:00:00+00:00"}],
+        "jobs": [{"id": "dead", "definition_key": "daily",
+                  "definition_version": 1, "state": "dead_lettered", "mode": "live",
+                  "attempt": 2, "max_attempts": 2,
+                  "scheduled_for": "2026-08-17T12:00:00+00:00",
+                  "created_at": "2026-08-17T12:00:00+00:00",
+                  "completion_receipt_count": 0}],
+    }))
+    p = run(str(PY), "tools/health-check.py", "--section", "jobs",
+            "--fixture", str(legacy_live_broken))
+    check("carrying a legacy-scheduled definition never hides a real terminal failure",
+          p.returncode == 1 and "CANONICAL_FINDING job_terminal_failure" in p.stdout,
+          p.stdout + p.stderr)
+
+    cutover_due = tmp / "cutover-due.json"
+    cutover_due.write_text(json.dumps({
+        "observed_at": fixed_now, "exports": None, "errors": [],
+        "job_definitions": [{"key": "daily", "version": 1,
+                             "recurrence": {"cron": "0 7 * * *",
+                                            "timezone": "America/Chicago",
+                                            "source": "tracked definition"},
+                             "legacy_live": False,
+                             "legacy_disabled_at": "2026-08-17T13:00:00+00:00",
+                             "registered_at": "2026-08-12T00:00:00+00:00"}],
+        "jobs": [],
+    }))
+    p = run(str(PY), "tools/health-check.py", "--section", "jobs",
+            "--fixture", str(cutover_due))
+    check("windows before the legacy schedule was disabled are not the ledger's to answer",
+          p.returncode == 0 and "MISSING DUE" not in p.stdout, p.stdout + p.stderr)
+
+    post_cutover_due = tmp / "post-cutover-due.json"
+    post_cutover_due.write_text(json.dumps({
+        "observed_at": fixed_now, "exports": None, "errors": [],
+        "job_definitions": [{"key": "daily", "version": 1,
+                             "recurrence": {"cron": "0 7 * * *",
+                                            "timezone": "America/Chicago",
+                                            "source": "tracked definition"},
+                             "legacy_live": False,
+                             "legacy_disabled_at": "2026-08-15T13:00:00+00:00",
+                             "registered_at": "2026-08-12T00:00:00+00:00"}],
+        "jobs": [],
+    }))
+    p = run(str(PY), "tools/health-check.py", "--section", "jobs",
+            "--fixture", str(post_cutover_due))
+    check("a due window AFTER the cutover instant is still MISSING DUE",
+          p.returncode == 1 and
+          "MISSING DUE execution for 2026-08-17 07:00" in p.stdout,
+          p.stdout + p.stderr)
+
     matched_due = tmp / "matched-due.json"
     matched_due.write_text(json.dumps({
         "observed_at": fixed_now, "errors": [],

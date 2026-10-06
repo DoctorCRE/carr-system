@@ -1,0 +1,47 @@
+{"id": "02c975a2f703", "tool_input": {"file_path": "{{REPO}}/tools/dictation-rig/bin/post_call.py", "limit": 40, "offset": 1}, "tool_name": "Read"}
+{"id": "0869e795c36e", "tool_input": {"file_path": "{{REPO}}/ops/inherited-from-main.py", "limit": 45, "offset": 375}, "tool_name": "Read"}
+{"id": "089380787c1a", "tool_input": {"file_path": "{{REPO}}/hooks/hook-meter-run.py", "limit": 18, "offset": 76}, "tool_name": "Read"}
+{"id": "0f17f5e14cd0", "tool_input": {"file_path": "{{REPO}}/bin/schema-snapshot.sh", "limit": 30, "offset": 685}, "tool_name": "Read"}
+{"id": "13dd876c3feb", "tool_input": {"file_path": "{{REPO}}/lib/rule_delivery_preuse.py", "limit": 100, "offset": 60}, "tool_name": "Read"}
+{"id": "1a35ae50bc08", "tool_input": {"file_path": "{{REPO}}/migrations/0556_meeting_mode_store.sql", "limit": 450, "offset": 55}, "tool_name": "Read"}
+{"id": "24883105c858", "tool_input": {"file_path": "{{REPO}}/hooks/completion-evidence-gate.py", "limit": 200, "offset": 1030}, "tool_name": "Read"}
+{"id": "2888657a01d8", "tool_input": {"file_path": "{{REPO}}/bin/fleet-sync.sh"}, "tool_name": "Read"}
+{"id": "2f2199176329", "tool_input": {"file_path": "{{REPO}}/mcp-server/test/siep-11-mutation-registry.test.mjs", "limit": 17, "offset": 1505}, "tool_name": "Read"}
+{"id": "2f8cdc1462aa", "tool_input": {"file_path": "{{REPO}}/hooks/executor-tier-gate.py", "limit": 30, "offset": 186}, "tool_name": "Read"}
+{"id": "3e1e0756fbf3", "tool_input": {"file_path": "{{REPO}}/bin/schema-snapshot.sh", "limit": 14, "offset": 2025}, "tool_name": "Read"}
+{"id": "48f51fe1c24c", "tool_input": {"file_path": "{{REPO}}/ops/scac-mutation-inventory.mjs", "limit": 220, "offset": 1780}, "tool_name": "Read"}
+{"id": "4e612882f052", "tool_input": {"file_path": "{{REPO}}/bin/schema-snapshot.sh", "limit": 20, "offset": 1996}, "tool_name": "Read"}
+{"id": "53268620a4d2", "tool_input": {"file_path": "{{REPO}}/migrations/0548_b09_atomic_migration_repair_scac_successor.sql"}, "tool_name": "Read"}
+{"id": "58ee0a9d91e0", "tool_input": {"file_path": "{{REPO}}/db/schema.sql", "limit": 220, "offset": 23810}, "tool_name": "Read"}
+{"id": "5a9c5373c27e", "tool_input": {"file_path": "{{REPO}}/tools/room-bridge/dispatch.py", "limit": 100, "offset": 400}, "tool_name": "Read"}
+{"id": "5c2546a38d57", "tool_input": {"file_path": "{{REPO}}/mcp-server/src/work-request-intake.js", "limit": 20, "offset": 1145}, "tool_name": "Read"}
+{"id": "5ca3833cf310", "tool_input": {"file_path": "{{REPO}}/migrations/0580_resource_observation.sql"}, "tool_name": "Read"}
+{"id": "5db764a00b08", "tool_input": {"file_path": "{{REPO}}/bin/schema-snapshot.sh", "limit": 35, "offset": 1940}, "tool_name": "Read"}
+{"id": "5e9a9fcc29bb", "tool_input": {"file_path": "{{REPO}}/tools/room-bridge/test_queue_dispatch_unit.py", "limit": 60, "offset": 1}, "tool_name": "Read"}
+{"id": "5e9efd30d945", "tool_input": {"file_path": "{{REPO}}/hooks/completion-evidence-gate.py", "limit": 14, "offset": 1150}, "tool_name": "Read"}
+{"id": "6477230263f7", "tool_input": {"file_path": "{{REPO}}/specs/post-call-workflow-2026-08-10.md", "limit": 46, "offset": 40}, "tool_name": "Read"}
+{"id": "648eb0c11a26", "tool_input": {"file_path": "{{REPO}}/ops/ci-selftest.py", "limit": 60, "offset": 380}, "tool_name": "Read"}
+{"id": "6a49917e6e51", "tool_input": {"file_path": "{{REPO}}/tools/health-check.py", "limit": 30, "offset": 960}, "tool_name": "Read"}
+{"id": "6c2c31840126", "tool_input": {"file_path": "{{REPO}}/.gitignore", "limit": 10, "offset": 28}, "tool_name": "Read"}
+{"id": "7248b9382f9e", "tool_input": {"file_path": "{{REPO}}/control-room/test/contracts.test.mjs"}, "tool_name": "Read"}
+{"id": "729c41c8ca72", "tool_input": {"file_path": "{{REPO}}/hooks/executor-tier-gate.py", "limit": 30, "offset": 220}, "tool_name": "Read"}
+{"id": "775a943c0edd", "tool_input": {"file_path": "{{REPO}}/tools/dictation-rig/tests/test_call_mode.py", "limit": 240, "offset": 348}, "tool_name": "Read"}
+{"id": "87e16ff8c9c3", "tool_input": {"file_path": "{{REPO}}/db/schema.sql", "limit": 100, "offset": 2707}, "tool_name": "Read"}
+{"id": "8ae1decfd95c", "tool_input": {"file_path": "{{REPO}}/hooks/rule-pack-preuse-reselection.py", "limit": 130, "offset": 370}, "tool_name": "Read"}
+{"id": "9707eb2387ed", "tool_input": {"file_path": "{{REPO}}/lib/machine_role.py"}, "tool_name": "Read"}
+{"id": "9c1d40470d43", "tool_input": {"file_path": "{{REPO}}/secrets-inventory.md"}, "tool_name": "Read"}
+{"id": "9e9bea17dcac", "tool_input": {"file_path": "{{REPO}}/specs/post-call-workflow-2026-08-10.md", "limit": 26, "offset": 60}, "tool_name": "Read"}
+{"id": "a037ceddd24e", "tool_input": {"file_path": "{{REPO}}/mcp-server/src/tour-internal-web.js", "offset": 40}, "tool_name": "Read"}
+{"id": "b8ee0d8bbf41", "tool_input": {"file_path": "{{REPO}}/ops/scac-mutation-inventory.mjs", "limit": 15, "offset": 15790}, "tool_name": "Read"}
+{"id": "bdf5a9398fd6", "tool_input": {"file_path": "{{REPO}}/migrations/0556_meeting_mode_store.sql", "limit": 452, "offset": 504}, "tool_name": "Read"}
+{"id": "c13469956ba1", "tool_input": {"file_path": "{{REPO}}/migrations/0546_read_doc_outcome_cards_successor.sql"}, "tool_name": "Read"}
+{"id": "c68def4a42cb", "tool_input": {"file_path": "{{REPO}}/ops/schema-snapshot-registry-seed-selftest.py", "limit": 40, "offset": 515}, "tool_name": "Read"}
+{"id": "ca72ecdc9577", "tool_input": {"file_path": "{{REPO}}/mcp-server/src/identity.js", "limit": 25, "offset": 55}, "tool_name": "Read"}
+{"id": "cb94519aa94d", "tool_input": {"file_path": "{{REPO}}/mcp-server/test/resource-observation.test.mjs"}, "tool_name": "Read"}
+{"id": "cf9940a2e704", "tool_input": {"file_path": "{{REPO}}/tools/fleet_sync_sibling_safety.py"}, "tool_name": "Read"}
+{"id": "cfc86eab6d67", "tool_input": {"file_path": "{{REPO}}/ops/credential-health.py", "limit": 10, "offset": 763}, "tool_name": "Read"}
+{"id": "d226439d9855", "tool_input": {"file_path": "{{REPO}}/migrations/0580_resource_observation.sql", "limit": 65, "offset": 200}, "tool_name": "Read"}
+{"id": "ddfa17f8c707", "tool_input": {"file_path": "{{REPO}}/specs/post-call-workflow-2026-08-10.md", "limit": 10, "offset": 24}, "tool_name": "Read"}
+{"id": "e57a1086cc5c", "tool_input": {"file_path": "{{REPO}}/control-room/contracts/fixtures/memory-evaluation-s0.synthetic.v1.json", "limit": 60, "offset": 1}, "tool_name": "Read"}
+{"id": "e633860c4cae", "tool_input": {"file_path": "{{REPO}}/mcp-server/src/mcp.js", "limit": 50, "offset": 818}, "tool_name": "Read"}
+{"id": "f83b0bd614da", "tool_input": {"file_path": "{{REPO}}/bin/install-notes-sweep.sh"}, "tool_name": "Read"}

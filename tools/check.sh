@@ -126,10 +126,13 @@ else
 fi
 
 echo "== Output drift (vault output vs committed baseline) =="
-# PII-bearing baselines (lead-board.html, deal-room-panhandle.html) moved to hash-only
-# tracking under ORDER 42b (2026-08-06): the full HTML stays LOCAL and untracked
-# (.gitignore); only its sha256 is committed, in baselines/SHA256SUMS. Everything else
-# (renewal-radar.json) has no PII and still tracks the full file, diffed as before.
+# PII-bearing baselines (lead-board.html, deal-room-panhandle.html, renewal-radar.json)
+# moved to hash-only tracking under ORDER 42b (2026-08-06; renewal-radar.json added
+# 2026-09-26): the full file stays LOCAL and untracked (.gitignore); only its sha256
+# is committed, in baselines/SHA256SUMS. All three entries in $OUT below are now
+# hash-only, so this loop's non-hash-only branch is currently unused for them.
+# writing-lint.txt has no PII; it is not in $OUT and is checked separately below,
+# still full-file-tracked.
 typeset -A BASEHASH
 if [ -f "$REPO/baselines/SHA256SUMS" ]; then
   while IFS= read -r line; do

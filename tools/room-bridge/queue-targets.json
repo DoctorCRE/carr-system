@@ -6,8 +6,16 @@
       "adapter": "desk",
       "assignee": "desk:codex-desk",
       "desk": "codex-desk",
-      "effective_model": "gpt-5.6-sol",
+      "effective_model": "gpt-6.1-sol",
       "capabilities": ["read"]
+    },
+    "flash": {
+      "enabled": true,
+      "adapter": "desk",
+      "assignee": "desk:flash-model",
+      "desk": "flash-model",
+      "effective_model": "flash (local, thinking off)",
+      "capabilities": ["read", "repo-write"]
     },
     "claude": {
       "enabled": true,
@@ -15,6 +23,14 @@
       "assignee": "desk:joe-desk",
       "desk": "joe-desk",
       "effective_model": "claude",
+      "capabilities": ["read", "repo-write", "record-write"]
+    },
+    "claude-desktop": {
+      "enabled": true,
+      "adapter": "desk",
+      "assignee": "desk:claude-desktop",
+      "desk": "claude-desktop",
+      "effective_model": "Claude Opus 5 High (background to Desktop)",
       "capabilities": ["read", "repo-write", "record-write"]
     },
     "ox-alpha": {
@@ -29,9 +45,10 @@
     },
     "grok": {
       "enabled": true,
-      "adapter": "hermes",
-      "assignee": "default",
-      "effective_model": "Grok 4.6",
+      "adapter": "desk",
+      "assignee": "desk:grok-desk",
+      "desk": "grok-desk",
+      "effective_model": "Grok 4.7",
       "capabilities": ["read"]
     },
     "kimi": {

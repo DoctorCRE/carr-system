@@ -33,7 +33,7 @@ Lane truth: Salesforce's own "Out of Market Deal" checkbox (the `oom` column,
 N/T), NOT a city-string heuristic. A deal's lane decides the economics:
   T (territory)  — CARR represents:            Dell 70% / Joe 30%
   N (out-of-market) — referred to a local CARR agent: agent 70% / Dell 21% / Joe 9%
-(verified 2026-07-25 against Salesforce Deal Splits on Trambadia and Nikki Cottis)
+(verified 2026-07-25 against Salesforce Deal Splits on Deshmukh and Nina Calloway)
 
 Usage:
   python3 diff-salesforce-deals.py [CARR_ROOT]                       # report only, records mode
@@ -143,9 +143,9 @@ new, changed, unmatched, sf_pairs, held = [], [], [], [], []
 # A Deal Room record that some Salesforce row already matches BY NAME is spoken for, and
 # must not be handed to a different row by one of the weaker fallbacks below. Claim them
 # all up front, before any fallback runs, so the outcome cannot depend on row order.
-# (Added 2026-08-07, after the company fallback matched Salesforce's "Trambadia - Marrietta
-# Smyrna GA" onto the JSON's "Chee Yap – Charlotte NC" — both carry company Musicologie,
-# which 13 Deal Room records share — and reported Trambadia's city as a change to Chee Yap.)
+# (Added 2026-08-07, after the company fallback matched Salesforce's "Deshmukh - Marrietta
+# Smyrna GA" onto the JSON's "Lin Hao – Charlotte NC" — both carry company Cadence Studio,
+# which 13 Deal Room records share — and reported Deshmukh's city as a change to Lin Hao.)
 claimed = {id(by_name[norm(r["deal_name"])]) for r in rows if norm(r["deal_name"]) in by_name}
 claimed |= {id(by_sfid[r["sf_id"]]) for r in rows if r.get("sf_id") in by_sfid}
 
@@ -199,9 +199,9 @@ for r in rows:
     diffs = []
     # A CLOSED deal that Salesforce shows in an earlier phase is an INVOICING ARTIFACT,
     # not a reopening: CARR back-office moves a closed deal back to "Legal" while it is
-    # still awaiting invoicing. Joe, 2026-08-07, on the second occurrence: "bhate is
+    # still awaiting invoicing. Joe, 2026-08-07, on the second occurrence: "kestrel is
     # closed. we just havn'et invoiced yet. i think our backoffice moves it to legal when
-    # they havne't invoiced yet." Applying one of these reopened Bhate and had to be
+    # they havne't invoiced yet." Applying one of these reopened Kestrel Geotech and had to be
     # reverted, so the guard lives here rather than in a session's memory. Forward moves
     # are untouched. Held rows are PRINTED — a fired guard must be visible in the output.
     if (d.get("phase") or "").strip().lower() in CLOSED_PHASES \

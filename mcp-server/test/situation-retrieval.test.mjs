@@ -91,8 +91,12 @@ test("registry exposes machine proposals and human-only approval/retirement", ()
     assert.equal(tools[name].write, true, name);
     assert.notEqual(tools[name].humanOnly, true, name);
   }
+  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): dead since
+  // executeRegisteredTool stopped reading it 2026-08-26 (decision dc57f62d);
+  // this slice drops the stale declaration from situation-retrieval.js. Both
+  // verbs are still write:true, human-governed approval/retirement acts.
   for (const name of ["approve-retrieval-proposals", "retire-retrieval-curation"])
-    assert.equal(tools[name].humanOnly, true, name);
+    assert.equal(tools[name].humanOnly, undefined, name);
 });
 
 

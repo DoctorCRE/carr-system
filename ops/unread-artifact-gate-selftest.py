@@ -57,15 +57,12 @@ import tempfile
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GATE = os.path.join(REPO, "hooks", "unread-artifact-gate.py")
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 def transcript(tmp, tool_calls, assistant_text, name=None):
@@ -86,15 +83,37 @@ def transcript(tmp, tool_calls, assistant_text, name=None):
     return path
 
 
-def run(tmp, path, state=None, stop_active=False, event="Stop"):
-    payload = json.dumps({"session_id": "s1", "transcript_path": path,
+def spoken(stdout):
+    """What the gate SAID, or "" for silence.
+
+    DEMOTED 2026-08-23 (the gates-audit council's Stop-gate rationing). This
+    gate used to exit 2, which reopens the turn; it now announces into context
+    instead. "Caught" therefore means an announcement was emitted, and an exit 2
+    is itself the regression. A payload carrying `decision` would be a block
+    wearing an announce's clothes and reads here as silence, deliberately, so
+    the shape cannot regress quietly.
+    """
+    try:
+        emitted = json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return ""
+    if "decision" in emitted:
+        return ""
+    return (emitted.get("hookSpecificOutput") or {}).get("additionalContext") or ""
+
+
+def run(tmp, path, state=None, stop_active=False, event="Stop", session="s1"):
+    payload = json.dumps({"session_id": session, "transcript_path": path,
                           "hook_event_name": event,
                           "stop_hook_active": stop_active})
     env = {**os.environ,
-           "CARR_UNREAD_ARTIFACT_STATE": state or os.path.join(tmp, "state")}
+           "CARR_UNREAD_ARTIFACT_STATE": state or os.path.join(tmp, "state"),
+           "CARR_STOP_LATCH_STATE": state or os.path.join(tmp, "state")}
     p = subprocess.run([sys.executable, GATE], input=payload, capture_output=True,
                        text=True, env=env)
-    return p.returncode, p.stderr
+    # rc is the COST (0 announce, 2 would be a reopened turn); the second value
+    # is what it said, in whichever register it reached for.
+    return p.returncode, (spoken(p.stdout) + p.stderr)
 
 
 def main():
@@ -111,8 +130,9 @@ def main():
             ("Bash", {"command": "grep -rn 'radar-digest' tools/ | head"}),
         ], CLAIM)
         rc, err = run(tmp, t)
-        check("a behavioural claim about a GREPPED-only file BLOCKS", rc == 2,
-              f"exit {rc}")
+        check("a behavioural claim about a GREPPED-only file IS ANNOUNCED",
+              bool(err), f"exit {rc}, said nothing")
+        check("...and it does not reopen the turn to say so", rc == 0, f"exit {rc}")
         check("the block names the file", "health-check.py" in err, err[:200])
         check("the block says grep is not a read",
               "grep" in err.lower(), err[:250])
@@ -159,11 +179,40 @@ def main():
                   rc5 == 0 and err5.strip() == "", f"exit {rc5}: {err5[:140]}")
 
         # 6. FIRE ONCE, or the session cannot end.
-        rc6a, _ = run(tmp, t, state=os.path.join(tmp, "s6"))
-        rc6b, _ = run(tmp, t, state=os.path.join(tmp, "s6"))
-        check("first pass blocks", rc6a == 2, f"exit {rc6a}")
-        check("the SAME claim a second time is allowed through", rc6b == 0,
-              f"exit {rc6b} — this gate would wedge the session")
+        rc6a, a6a = run(tmp, t, state=os.path.join(tmp, "s6"))
+        rc6b, a6b = run(tmp, t, state=os.path.join(tmp, "s6"))
+        check("first pass speaks", bool(a6a), f"exit {rc6a}, said nothing")
+        check("the SAME claim a second time is silent", not a6b,
+              f"exit {rc6b}: {a6b[:140]} — this gate would nag every turn")
+
+        # 6b. THE LATCH IS ON THE CLAIM-SET, NOT ON THE WORDING, and that is the
+        # defect the 2026-08-23 council found one gate over: drift-assertion
+        # keyed its "speak once" memory on a sha256 of the exact prose, so a
+        # single changed word minted a fresh identity for an identical finding
+        # and held the same reading twice. Same claim, different sentence: silent.
+        reworded = transcript(tmp, [
+            ("Bash", {"command": "grep -rn 'radar-digest' tools/ | head"}),
+        ], "Re-pointing is cheapest because `tools/health-check.py` writes the "
+           "radar digest on a weekly cadence, upstream of the exporter.",
+           name="reworded.jsonl")
+        rc6c, a6c = run(tmp, reworded, state=os.path.join(tmp, "s6"))
+        check("a REWORDED restatement of the same unread file is silent",
+              not a6c, f"exit {rc6c}: {a6c[:140]}")
+
+        # ...but a DIFFERENT unread file is a different finding and must speak.
+        another = transcript(tmp, [
+            ("Bash", {"command": "grep -rn 'digest' exporters/ | head"}),
+        ], "The scheduling lives further up: `exporters/targets.py` writes the "
+           "weekly digest rows before anything renders them.",
+           name="another.jsonl")
+        rc6d, a6d = run(tmp, another, state=os.path.join(tmp, "s6"))
+        check("a DIFFERENT unread file still speaks", bool(a6d),
+              f"exit {rc6d}, said nothing — the latch became a mute")
+
+        # ...and another SESSION hears it, because latch state is per session.
+        rc6e, a6e = run(tmp, t, state=os.path.join(tmp, "s6"), session="other")
+        check("a second session is not silenced by the first", bool(a6e),
+              f"exit {rc6e}, said nothing")
 
         # 7. FAIL OPEN, every path.
         rc7, _ = run(tmp, t, state=os.path.join(tmp, "s7"), stop_active=True)
@@ -178,15 +227,15 @@ def main():
         check("a malformed payload fails OPEN", p10.returncode == 0,
               f"exit {p10.returncode}")
     finally:
-        subprocess.run(["rm", "-rf", tmp])
+        __import__("shutil").rmtree(tmp)
 
-    print()
-    if failures:
-        print(f"FAIL {len(failures)} check(s): {', '.join(failures)}")
-        return 1
-    print("OK all checks passed")
-    return 0
+    return CHECKER.summary()
 
+
+
+# Independently reproduced Dot cases share the offline behavioral fixtures.
+import runpy as _dot_runpy
+_dot_runpy.run_path(str(__import__("pathlib").Path(__file__).with_name("dot-review-selftest.py")))["run_regressions"](['test_b23'])
 
 if __name__ == "__main__":
     raise SystemExit(main())

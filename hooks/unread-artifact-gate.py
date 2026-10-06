@@ -46,15 +46,36 @@ report and be muted inside a day. Only a path standing as the SUBJECT OF A
 BEHAVIOURAL VERB is checked — writes, reads, watches, generates, returns, owns,
 contains, handles, and their kin.
 
-IT FIRES ONCE PER CLAIM. A Stop hook that blocks the same reply forever is a
-session that cannot end. The first block names the unread files; if the same
-words come back, the session has been told and the call is its own.
+IT FIRES ONCE PER CLAIM-SET, AND THE CLAIM-SET IS THE FILES (2026-08-23). It
+used to fire once per exact wording — a sha256 of the prose — and that is the
+defect the gates-audit council caught next door in hooks/drift-assertion-gate.py,
+live, during its own sitting: one changed word ("regression") minted a fresh
+identity for an identical finding and the chair was held twice for the same
+reading. The identity is now the set of UNREAD FILES the claim names, through
+hooks/stop_latch.py, so a reworded restatement is the same finding and stays
+quiet while a claim about a different file still speaks.
+
+IT ANNOUNCES, IT NO LONGER REOPENS (2026-08-23, Joe's Stop-gate rationing off
+the gates-audit council). It used to exit 2, forcing a whole extra assistant
+message. Eleven Stop hooks could do that; one measured shipped session paid nine
+such reopens for findings that changed nothing, against a standing constraint of
+no steady-state token ceremony. Three keep the power: core conduct,
+completion-evidence, drift-assertion.
+
+WHY THIS ONE LOST IT, honestly. The four defects that birthed this gate were
+real and it still catches their shape. But a reopen only helps when the next
+message is the RESULT OF WORK rather than a restatement, which is the split
+hooks/chat-lint-carryover.py drew on 2026-08-16 — and by Stop the sentence has
+already reached Joe. Reopening buys a second copy of a message he has read, plus
+the read the gate wanted; announcing buys the read alone. The finding still
+arrives, in context, at the same moment. If a week of hook telemetry shows
+announced unread-artifact findings being ignored where reopened ones were acted
+on, the register goes back and this paragraph is why it was tried.
 
 FAILS OPEN ON EVERYTHING ELSE — no transcript, an unreadable record, a parse
 error. None may strand a turn.
 """
 
-import hashlib
 import json
 import os
 import re
@@ -62,7 +83,9 @@ import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 HOOKS = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, HOOKS)
+
+from stop_latch import announce, claim_identity, latched, record_fire  # noqa: E402
 try:                                    # telemetry only — never load-bearing
     import hook_meter
     LOG = hook_meter.guard_log_path(REPO)
@@ -120,12 +143,12 @@ def asserted_paths(prose):
     return found
 
 
-def known_paths(records):
-    """Every path this session READ or WROTE. Basenames, for loose matching:
-    a reply usually writes a repo-relative path while a tool call carries an
-    absolute one, and a basename comparison is the honest common denominator."""
+def known_paths(records, cwd=None):
+    """Every repository-relative identity this session READ or WROTE."""
     known = set()
+    cwd = cwd or os.getcwd()
     for rec in records:
+        record_cwd = rec.get('cwd') or cwd
         message = rec.get("message") or {}
         content = message.get("content")
         if not isinstance(content, list):
@@ -140,27 +163,39 @@ def known_paths(records):
             if name in READ_TOOLS or name in WRITE_TOOLS:
                 path = ti.get("file_path") or ti.get("filePath") or ""
                 if path:
-                    known.add(os.path.basename(path))
+                    known.add(artifact_path(path, ti.get('cwd') or record_cwd))
             elif name == "Bash":
                 command = ti.get("command") or ""
                 if SHELL_READ.search(command):
-                    for hit in PATH.finditer(command):
-                        known.add(os.path.basename(hit.group(1)))
+                    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
+                    try:
+                        words, _ = shell_operands(shell_tokens(command))
+                    except ValueError:
+                        continue
+                    shell_cwd = ti.get('workdir') or ti.get('cwd') or record_cwd
+                    segments, segment = [], []
+                    for token in words + [';']:
+                        if token in SHELL_BOUNDARIES:
+                            segments.append(segment)
+                            segment = []
+                        else:
+                            segment.append(token)
+                    for words in segments:
+                        if not words:
+                            continue
+                        if words[0] == 'cd' and len(words) == 2:
+                            shell_cwd = artifact_path(words[1], shell_cwd)
+                        elif SHELL_READ.search(' '.join(words)):
+                            for word in words[1:]:
+                                if not word.startswith('-') and (PATH.fullmatch(word) or PATH.fullmatch('local/' + word)):
+                                    known.add(artifact_path(word, shell_cwd))
     return known
 
 
-def already_raised(text):
-    digest = hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:20]
-    marker = os.path.join(STATE, f"{digest}.seen")
-    if os.path.exists(marker):
-        return True
-    try:
-        os.makedirs(STATE, exist_ok=True)
-        with open(marker, "w") as fh:
-            fh.write("1")
-    except Exception:
-        pass
-    return False
+def artifact_path(path, cwd=None):
+    return os.path.normpath(os.path.join(cwd or os.getcwd(), path))
+
+
 
 
 def main():
@@ -197,16 +232,23 @@ def main():
         if not claims:
             sys.exit(0)
 
-        known = known_paths(records)
-        unread = [c for c in claims if os.path.basename(c) not in known]
+        cwd = payload.get('cwd') or payload.get('working_directory') or os.getcwd()
+        known = known_paths(records, cwd)
+        unread = [c for c in claims if artifact_path(c, cwd) not in known]
         if not unread:
             sys.exit(0)
-        if already_raised(prose):
+
+        # ONE FINDING PER SET OF UNREAD FILES, per session. See the docstring:
+        # the identity is what was claimed, never how it was phrased.
+        session = payload.get("session_id") or payload.get("sessionId")
+        identity = claim_identity("unread-artifact-gate", "unread", unread)
+        if latched(session, identity):
             sys.exit(0)
+        record_fire(session, identity)
 
         listed = "\n".join(f"  · {p}" for p in unread[:8])
-        log(f"BLOCK unread={unread[:5]}")
-        print(
+        log(f"ANNOUNCE unread={unread[:5]}")
+        raise SystemExit(announce(
             "UNREAD ARTIFACT — you are describing what a file DOES, and this "
             f"session never opened it:\n{listed}\n\n"
             "On 2026-08-14 this exact shape produced four self-filed defects in "
@@ -221,11 +263,11 @@ def main():
             "a string occurs; it cannot tell a write from a watch, a comment, a "
             "docstring or a test fixture — which is the exact distinction that "
             "was got wrong.\n\n"
-            "Open the file, then say what it does. If you have already read it "
-            "another way and the claim is sound, send it again — this will not "
-            "stop you twice on the same words.",
-            file=sys.stderr)
-        sys.exit(2)
+            "Open the file, then say what it does — or, if you have already read "
+            "it another way and the claim is sound, let it stand. This is said "
+            "once per set of unread files and it does not reopen your turn, so "
+            "acting on it is the next thing you do rather than a redo of the "
+            "last thing you said."))
     except Exception as exc:
         log(f"ALLOW(internal-error) {exc}")
         sys.exit(0)

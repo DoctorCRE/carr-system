@@ -1,0 +1,48 @@
+{
+  "schema_version": "carr.settlement-run-token-registration.v1",
+  "capability_key": "R03C.settlement-capability.v1",
+  "registration_state": "registered_on_merge_via_gate_edit_pr_review",
+  "registration_route": "ops/config CODEOWNERS plus main PR-only required-CI rail",
+  "consumer": "R03.stage5.settlement-sweep",
+  "entrypoint": "ops/settlement-run-token.py",
+  "selftest": "ops/settlement-run-token-selftest.py",
+  "fail_closed": true,
+  "bindings": [
+    "operator_session",
+    "approved_run_manifest_digest",
+    "repository_identity",
+    "starting_object_id",
+    "command_pathspec_allowlist_digest"
+  ],
+  "ttl_seconds": {"minimum": 1, "maximum": 300},
+  "runner_protocol": {
+    "schema_version": "carr.settlement-command-pathspec-allowlist.v1",
+    "required_runner_placeholders": [
+      "{manifest_fd}",
+      "{allowlist_fd}",
+      "{capability_receipt_fd}"
+    ],
+    "execution": "direct argv only; no shell; the reviewed R03 stage-5 runner is the sole consumer"
+  },
+  "revocation": {
+    "run_finally": true,
+    "signals": ["SIGHUP", "SIGINT", "SIGTERM"],
+    "reviewer_abort": "An AO reviewer holding the token file may revoke it but cannot run it from a different native operator session."
+  },
+  "refusal_reason_ids": [
+    "settlement_capability.refusal.already_consumed",
+    "settlement_capability.refusal.operator_mismatch",
+    "settlement_capability.refusal.manifest_digest_mismatch",
+    "settlement_capability.refusal.expired",
+    "settlement_capability.refusal.revoked",
+    "settlement_capability.refusal.allowlist_digest_mismatch",
+    "settlement_capability.refusal.repository_mismatch",
+    "settlement_capability.refusal.starting_object_mismatch",
+    "settlement_capability.refusal.clock_invalid",
+    "settlement_capability.refusal.store_unavailable",
+    "settlement_capability.refusal.binding_ambiguous",
+    "settlement_capability.refusal.runner_digest_mismatch"
+  ],
+  "runner_executable_binding": "Beyond the five declared bindings, issuance also hashes the runner executable's bytes into the record and redemption re-hashes and compares them, refusing runner_digest_mismatch on drift. This binds the runner's CODE, which starting_object_id (HEAD) does not, since a working-tree edit leaves HEAD unchanged. Redemption then executes a private mode-0500 snapshot of exactly those verified bytes rather than the original path, so what runs cannot be raced by a same-inode rewrite between check and exec.",
+  "coverage_boundary": "This capability proves one admitted runner invocation, its five bindings plus the runner executable's bytes, one-use consumption, TTL, and revocation. It does not approve the manifest, make backups, fingerprint the dirty tree, validate never-cleanable paths, authenticate GitHub, or prove that the separately reviewed R03 stage-5 runner correctly implements every command in its bound allowlist. Two limits R03's operator must not misread: (1) the single-use record is integrity-checked against corruption but NOT against the token holder — the HMAC key is the token itself, and under one uid whoever can write the store can read the token and rewrite their own record, so the guarantee is against accidental replay, not against an operator editing their store; (2) revocation covers the token, not a run already admitted — an AO reviewer abort revokes an issued, unconsumed token and refuses its pre-consumption redemption but cannot stop a spawned runner, and a SIGKILL of the parent orphans that runner (reparented to init, still executing) while the record stays consumed and unreplayable. THREAT MODEL. Defends against: post-verification substitution of the runner's bytes (redemption executes a private mode-0500 snapshot of exactly the verified bytes, not the live path), external-inode rewrite of the manifest/allowlist/receipt the runner reads (read-only unlinked fd copies), replay, a wrong operator, a drifted manifest/allowlist/repository/starting-object/runner digest, and an expired token; every uncertain state fails closed. Does NOT defend against a co-UID adversary: a process under the operator's own UID is already inside the trust boundary — it can rewrite the store, the manifest, or the record directly, and could chmod and substitute the 0500 snapshot in the pre-exec window, so same-UID substitution gives it nothing it does not already have. Defending against the operator's own UID would need a privilege-separation model this capability does not have and does not need; same-UID substitution is accepted, not mitigated, by design."
+}

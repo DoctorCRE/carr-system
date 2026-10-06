@@ -1,7 +1,7 @@
 // confirm-merge-lead-client.test.mjs — the gate for Joe's ruling that a lead
 // record and a client record for the same person are NOT a duplicate.
 //
-// HIS WORDS, and they are the whole rule: "Tyrer is a client now duh. everyone
+// HIS WORDS, and they are the whole rule: "Okafor is a client now duh. everyone
 // starts as a lead." Every party enters as a lead and converts to a client;
 // both refs coexist by design. An L- and a C- ref for one person is the system
 // working, not a mess to tidy up.
@@ -14,12 +14,12 @@
 // hand. Undoing a wrong merge is not a delete.
 //
 // WHAT IT MUST NOT BREAK. The legitimate case is real and this verb's own
-// comments record it: Petersen was TWO party rows for one human, one carrying
+// comments record it: Whitfield was TWO party rows for one human, one carrying
 // the lead and one carrying the client, and merging them was right — the point
 // of that merge was one person holding BOTH roles. So the gate cannot be a flat
 // refusal. It refuses the merge whose only stated basis is that the names match,
 // and takes `same_person_because` as the human's evidence that it is the
-// Petersen shape.
+// Whitfield shape.
 //
 // THE SHAPE IT WATCHES FOR is narrow on purpose: one side holding ONLY a lead
 // row, the other holding ONLY a client row. Two leads, two clients, anything
@@ -57,6 +57,9 @@ class Fake {
     const sql = text.replace(/\s+/g, " ").trim();
 
     if (sql.startsWith("select request_hash, response")) return { rows: [] };
+
+    if (sql.includes("merge_live_endpoints"))
+      return { rows: params[0].map(id => ({ id, merged_into: null })) };
 
     // ref resolution — both inputs arrive as uuids in these tests
     if (sql.includes("v_ref_index")) return { rows: [] };
@@ -132,7 +135,7 @@ test("the refusal explains the rule in Joe's terms, not as a code", async () => 
   });
 });
 
-test("the Petersen case still merges when the human states the basis", async () => {
+test("the Whitfield case still merges when the human states the basis", async () => {
   const fake = new Fake({ [ids.leadSide]: ["lead"], [ids.clientSide]: ["client"] });
   const out = await merge(fake, {
     same_person_because: "Two party rows for one human — same NPI, same practice address, "

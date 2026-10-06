@@ -1,0 +1,248 @@
+{
+ "entries": {
+  "db/schema.sql#96689eb9124e9ed8": {
+   "hash": "96689eb9124e9ed8",
+   "path": "db/schema.sql",
+   "reason": "intentional predates_gate marker (compares created_at to the fixed gate-cutover timestamp on purpose, in a generated view)",
+   "seeded_line": 64212,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "hooks/gate-edit-gate.py#b9c5bcf4c71e604e": {
+   "hash": "b9c5bcf4c71e604e",
+   "path": "hooks/gate-edit-gate.py",
+   "reason": "docstring narrative citing past decision dates, not a runtime bound",
+   "seeded_line": 75,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "hooks/md_manifest.py#007df2a06b4dc572": {
+   "hash": "007df2a06b4dc572",
+   "path": "hooks/md_manifest.py",
+   "reason": "both rollout dates (CLOSED_EARLY and its pair) have passed; steady state, not a live bound",
+   "seeded_line": 71,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "hooks/md_manifest.py#3982c0f5bb813cbd": {
+   "hash": "3982c0f5bb813cbd",
+   "path": "hooks/md_manifest.py",
+   "reason": "intentional sunset: CUTOFF is the date temporary .md allowances retire, and denying after it is the designed behaviour (the cutoff fired 2026-08-19/21 as planned); tools/test-record-home-gate.py pins today= explicitly (27/27 pass)",
+   "seeded_line": 40,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "mcp-server/src/doctrine.js#ab9ffd48ecb0df22": {
+   "hash": "ab9ffd48ecb0df22",
+   "path": "mcp-server/src/doctrine.js",
+   "reason": "ops.rule_delivery_policy is a singleton table (PRIMARY KEY (singleton) plus CHECK (singleton)), so LIMIT 1 without ORDER BY can only ever see one row",
+   "seeded_line": 1016,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/automerge_pilot.py#1bd781dac30badad": {
+   "hash": "1bd781dac30badad",
+   "path": "ops/automerge_pilot.py",
+   "reason": "expiry is read from config and the code raises loudly when it lapses, rather than failing silently",
+   "seeded_line": 129,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/control-plane-db-gate.py#710865ccae2e7760": {
+   "hash": "710865ccae2e7760",
+   "path": "ops/control-plane-db-gate.py",
+   "reason": "relative now() fixture used only in a test/gate context",
+   "seeded_line": 1688,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/control-plane-scheduler-cutover-selftest.py#dc8c335673fb5ebe": {
+   "hash": "dc8c335673fb5ebe",
+   "path": "ops/control-plane-scheduler-cutover-selftest.py",
+   "reason": "NOW is a pinned test clock passed as now= to every cutover call; no wall-clock comparison, so the literal never ages (32/32 pass)",
+   "seeded_line": 22,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/delegation-gate-selftest.py#385536efa3e04839": {
+   "hash": "385536efa3e04839",
+   "path": "ops/delegation-gate-selftest.py",
+   "reason": "'git log --oneline -5' is a command string fed to the delegation gate as test input, never executed against the repo; no window to outgrow",
+   "seeded_line": 371,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/draft-export-gate-selftest.py#069e79ad86871c81": {
+   "hash": "069e79ad86871c81",
+   "path": "ops/draft-export-gate-selftest.py",
+   "reason": "'git log --oneline -40' is a command string in a gate-classification fixture table (expected: not a draft read), never executed; no window to outgrow",
+   "seeded_line": 89,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/edge-liveness-selftest.py#48dabb8a10861d92": {
+   "hash": "48dabb8a10861d92",
+   "path": "ops/edge-liveness-selftest.py",
+   "reason": "synthetic NOW constant pinned for deterministic selftest fixtures",
+   "seeded_line": 40,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/incident-resolve-selftest.py#2463e66364a2f61e": {
+   "hash": "2463e66364a2f61e",
+   "path": "ops/incident-resolve-selftest.py",
+   "reason": "synthetic NOW constant pinned for deterministic selftest fixtures",
+   "seeded_line": 45,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/incident-sweep-selftest.py#09f08551fb73f36a": {
+   "hash": "09f08551fb73f36a",
+   "path": "ops/incident-sweep-selftest.py",
+   "reason": "NOW is a pinned test clock passed to every sweep_decision() call; no wall-clock comparison, so the literal never ages (7/7 pass)",
+   "seeded_line": 49,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/release-manifest-selftest.py#ad21baf689c0c174": {
+   "hash": "ad21baf689c0c174",
+   "path": "ops/release-manifest-selftest.py",
+   "reason": "the -40 window is path-limited (mcp-server, dealroom) and wants the NEAREST commit whose deployed tree differs from HEAD; it slides with HEAD, so repo velocity cannot empty it (only 40 consecutive self-reverting changes could). The [:12] is a SHA display slice. Selftest passes in full today",
+   "seeded_line": 187,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/release-schema-provenance-canary.sql#403d280a7202ecc6": {
+   "hash": "403d280a7202ecc6",
+   "path": "ops/release-schema-provenance-canary.sql",
+   "reason": "LIMIT 1 without ORDER BY picks ANY completed release to prove UPDATE is refused; every completed row is equally valid, so row order is irrelevant",
+   "seeded_line": 130,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit-selftest.py#06dc99e996ef1eb1": {
+   "hash": "06dc99e996ef1eb1",
+   "path": "ops/timebomb-audit-selftest.py",
+   "reason": "fixture/input string inside the time-bomb audit's own selftest; the git window is test data fed to the scanner, not a query run against this repo, and every run() call pins now=2026-09-24 (31/31 pass)",
+   "seeded_line": 325,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit-selftest.py#2799adfca6b08dca": {
+   "hash": "2799adfca6b08dca",
+   "path": "ops/timebomb-audit-selftest.py",
+   "reason": "fixture/input string inside the time-bomb audit's own selftest; the git window is test data fed to the scanner, not a query run against this repo, and every run() call pins now=2026-09-24 (31/31 pass)",
+   "seeded_line": 115,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit-selftest.py#4a43a8d911fa8730": {
+   "hash": "4a43a8d911fa8730",
+   "path": "ops/timebomb-audit-selftest.py",
+   "reason": "fixture/input string inside the time-bomb audit's own selftest; the git window is test data fed to the scanner, not a query run against this repo, and every run() call pins now=2026-09-24 (31/31 pass)",
+   "seeded_line": 156,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit-selftest.py#a113e81c03a77495": {
+   "hash": "a113e81c03a77495",
+   "path": "ops/timebomb-audit-selftest.py",
+   "reason": "fixture/input string inside the time-bomb audit's own selftest; the git window is test data fed to the scanner, not a query run against this repo, and every run() call pins now=2026-09-24 (31/31 pass)",
+   "seeded_line": 379,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit-selftest.py#a71309fe35605a1c": {
+   "hash": "a71309fe35605a1c",
+   "path": "ops/timebomb-audit-selftest.py",
+   "reason": "fixture/input string inside the time-bomb audit's own selftest; the git window is test data fed to the scanner, not a query run against this repo, and every run() call pins now=2026-09-24 (31/31 pass)",
+   "seeded_line": 251,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit-selftest.py#cd1076d11656797c": {
+   "hash": "cd1076d11656797c",
+   "path": "ops/timebomb-audit-selftest.py",
+   "reason": "fixture/input string inside the time-bomb audit's own selftest; the git window is test data fed to the scanner, not a query run against this repo, and every run() call pins now=2026-09-24 (31/31 pass)",
+   "seeded_line": 352,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit.py#65c4c8176e1c4082": {
+   "hash": "65c4c8176e1c4082",
+   "path": "ops/timebomb-audit.py",
+   "reason": "_commit_velocity: rev-list --count HEAD and --since='90 days ago' are a total count and a date-bounded count, not a commit window; the other matches are the headroom regex's docstring/pattern text",
+   "seeded_line": 360,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit.py#a9442a0a1b1b4d65": {
+   "hash": "a9442a0a1b1b4d65",
+   "path": "ops/timebomb-audit.py",
+   "reason": "known-bad example code string inside the reader sanity check, sent to Jev as a probe; never executed",
+   "seeded_line": 564,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "ops/timebomb-audit.py#bec45a34198b143e": {
+   "hash": "bec45a34198b143e",
+   "path": "ops/timebomb-audit.py",
+   "reason": "the audit's own signature table and its comment describing the git(\"log\", \"-160\") shape it hunts; pattern text, not a query",
+   "seeded_line": 173,
+   "triaged_by": "timebomb-triage-2026-09-24",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "pipelines/order29b-death-sentences.sql#5049694e72c6bf58": {
+   "hash": "5049694e72c6bf58",
+   "path": "pipelines/order29b-death-sentences.sql",
+   "reason": "one-shot ratified script; already executed, never re-runs",
+   "seeded_line": 31,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "tools/prove-order40-windowing.py#d1ef0949fd1f3deb": {
+   "hash": "d1ef0949fd1f3deb",
+   "path": "tools/prove-order40-windowing.py",
+   "reason": "one-off demo script, not a recurring/scheduled path",
+   "seeded_line": 61,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  },
+  "tools/staging-siep-0324-replay.py#8a9286debdfc046a": {
+   "hash": "8a9286debdfc046a",
+   "path": "tools/staging-siep-0324-replay.py",
+   "reason": "one-time repair script; already executed, never re-runs",
+   "seeded_line": 111,
+   "triaged_by": "timebomb-audit-seed",
+   "triaged_on": "2026-09-24",
+   "verdict": "false_positive"
+  }
+ },
+ "schema": "timebomb-triage/v1"
+}

@@ -92,6 +92,17 @@ for label, line in [
     ("a plain number with no countable noun", 'TIMEOUT = 60  # seconds'),
     ("quoted history documenting its own correction",
      '# This file carried "11 occurrences" and the ledger moved to twelve the same week.'),
+    # A QUANTITY IS NOT A TALLY, and this one is real: it is a clause from the
+    # red-team rule, reached on 2026-09-18 when the rule corpus brought rule
+    # statements under this scan for the first time. "three instances" there
+    # counts COPIES OF A MODEL, not events that accumulate -- the sentence is
+    # about redundancy being correlated, and no later edit can falsify it. The
+    # bare alternative had no open-window marker, so it fired on every use of
+    # the phrase. It failed CI on run 35393298340 before it was tightened.
+    ("a quantity of things rather than a running tally",
+     '# Three instances of the same model family reviewing one claim are CORRELATED, not independent.'),
+    ("a quantity with the countable noun but no counting verb",
+     '# The reviewer sees two instances of the same argument and must judge them separately.'),
 ]:
     rc, out = scan(line)
     check(f"silent on: {label}", rc == 0, out[:200])

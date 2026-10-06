@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "procedure": "evals/README.md",
+  "receipt_path": "evals/<surface>/receipt.json",
+  "no_eval_line": "no-eval: <surface>: <reason a measurement is impossible>",
+  "about": "Every file in this repository whose text or configuration changes what a model reads or which model runs. A pull request that changes a file matched here carries evals/<surface>/receipt.json (changed in the same pull request) or a reasoned no-eval line in its body. ops/check-eval-receipt.py enforces it; evals/README.md is the procedure.",
+  "exclude_globs": [
+    "**/*-selftest.py",
+    "**/test-*.py",
+    "**/test_*.py",
+    "**/*.test.mjs",
+    "**/*.test.js",
+    "**/__pycache__/**",
+    "**/fixtures/**",
+    "**/testdata/**"
+  ],
+  "surfaces": [
+    {
+      "id": "jev-judgments",
+      "description": "Jev question families, typed-judgment prompts and the TypeSafe client that carries them.",
+      "globs": [
+        "jevlint.json",
+        "ops/jevlint_review.py",
+        "ops/jev_*.py",
+        "ops/typesafe_client.py",
+        "tools/judge/interface.py",
+        "mcp-server/src/judge-providers.v1.json",
+        "mcp-server/src/judge-provider.js",
+        "mcp-server/src/jev-*.js",
+        "hooks/jev-supervisor.py",
+        "lib/jev_required_actions.py",
+        "ops/config/rule-jev-triggers.v1.json",
+        "ops/config/jev-cost-guard.v1.json",
+        "ops/config/jev-call-sites.v1.json",
+        "ops/command_precheck.py"
+      ]
+    },
+    {
+      "id": "rule-delivery",
+      "description": "Rule text carried in the repository and the routing that decides which rules reach a session and when.",
+      "globs": [
+        "ops/rule_trigger_delivery.py",
+        "ops/rule_trigger_compile.py",
+        "lib/rule_delivery_*.py",
+        "lib/rule_routes.py",
+        "lib/rule_boot_gate.py",
+        "lib/claude_rule_delivery_dedupe.py",
+        "lib/guidance_registry.py",
+        "hooks/rule-boot-gate.py",
+        "hooks/rule-pack-preuse-reselection.py",
+        "hooks/rule-pack-drift-gate.py",
+        "mcp-server/src/rule-*.js",
+        "mcp-server/src/core-rule-ids.js",
+        "ops/config/rule-routes.v1.json",
+        "ops/config/rule-jit-triggers.v1.json",
+        "ops/config/rule-classes.v1.json",
+        "ops/config/rule-triage.v1.json",
+        "ops/config/rule-delivery-activation-overlay.v1.json",
+        "tools/flash-prompt-rules.py"
+      ]
+    },
+    {
+      "id": "context-hooks",
+      "description": "Hooks that inject text into a session (additionalContext, systemMessage, SessionStart stdout) and the configuration that wires them. ops/check-eval-receipt.py fails when a hook that emits context is not matched here.",
+      "globs": [
+        "hooks/session-brief.py",
+        "hooks/bash-write-gate.py",
+        "hooks/blocker-decider-gate.py",
+        "hooks/canonical-edit-gate.py",
+        "hooks/chat-lint-carryover.py",
+        "hooks/job-watchdog-digest.py",
+        "hooks/completion-evidence-gate.py",
+        "hooks/delegation-gate.py",
+        "hooks/draft-export-gate.py",
+        "hooks/drift-claim-gate.py",
+        "hooks/executor-tier-gate.py",
+        "hooks/gate-edit-gate.py",
+        "hooks/guard-unattended.py",
+        "hooks/hook-meter-run.py",
+        "hooks/ledger-sweep.py",
+        "hooks/lint-gate.py",
+        "hooks/model-floor-gate.py",
+        "hooks/rule-shape-gate.py",
+        "hooks/stop_latch.py",
+        "hooks/conduct-stop-gate.py",
+        "hooks/escalation-gate.py",
+        "hooks/conduct_patterns.py",
+        "ops/config/hooks.json",
+        "ops/config/codex-hooks.json",
+        "ops/config/claude-continuity-hooks.json",
+        "ops/config/delegation-gate-hook.json",
+        ".claude/settings.json"
+      ]
+    },
+    {
+      "id": "session-instructions",
+      "description": "Instruction files and skills a session loads as standing guidance.",
+      "globs": [
+        "CLAUDE.md",
+        "AGENTS.md",
+        "**/CLAUDE.md",
+        "**/AGENTS.md",
+        ".claude/skills/**",
+        ".claude/agents/**",
+        ".claude/commands/**",
+        "claude-tree/skills/**",
+        "claude-tree/agents/**",
+        "ops/scheduled-tasks/**/*.SKILL.md"
+      ]
+    },
+    {
+      "id": "review-and-brief-templates",
+      "description": "Builder and reviewer brief templates, review-contract prompts and grader rubrics kept in the repository.",
+      "globs": [
+        "pipelines/run_codex_review.py",
+        "bin/council-lib.sh",
+        "bin/council.sh",
+        "bin/precheck.sh",
+        "mcp-server/src/bot-brief.js",
+        "tools/room-bridge/engineering_dispatch_adapter.py",
+        "tools/room-bridge/evaluation_kernel.py",
+        "tools/doc-convo/prompt",
+        "tools/doc-convo/prompt/**",
+        "ops/config/job-watchdog.json",
+        "tools/dictation-rig/vocab-prompt.txt"
+      ]
+    },
+    {
+      "id": "model-routing",
+      "description": "Which model and which effort level a piece of work runs on.",
+      "globs": [
+        "ops/config/model-routes.v1.json",
+        "ops/config/model-floors.json",
+        "ops/config/engineering-codex-desk.v1.json",
+        "ops/config/codex-permissions.toml",
+        "mcp-server/src/model-routing.v5.js",
+        "mcp-server/src/model-role-store.v5.js",
+        "tools/room-bridge/desks.py"
+      ]
+    }
+  ],
+  "unsure": [
+    {
+      "path": "store: rule text and doctrine sections",
+      "why": "Most rule text lives in the CARR Record Layer and changes through verbs (amend-rule, write-doctrine-section), not pull requests. This gate cannot see those edits. Registered here only as the repository mirror; a store-side receipt needs its own verb."
+    },
+    {
+      "path": "corpus/_home/.claude/skills/**",
+      "why": "A snapshot of home-directory skills. Not registered because it reads as an archive copy rather than something a session loads from this path; register it if anything installs from here."
+    },
+    {
+      "path": "mcp-server/src/doctrine.js",
+      "why": "Serves doctrine and standing-context text to sessions, but is mostly transport and authorization. Rule-selection parts are covered by rule-delivery; left out to avoid gating every server change."
+    },
+    {
+      "path": "hooks/*.py that only deny with a reason",
+      "why": "A deny reason is text the model reads. Only hooks that emit additionalContext, systemMessage or hookSpecificOutput are registered; plain exit-2 stderr reasons are not."
+    },
+    {
+      "path": "ops/jev-*-selftest.py and evals/ai/*.json",
+      "why": "Test and fixture files steer nothing at runtime and are excluded, but they are where an eval's cases live. Changing them changes what a receipt measured; the receipt, not this gate, has to say so."
+    },
+    {
+      "path": "pipelines/brief_pack.py, pipelines/session_crm_brief.py, mcp-server/src/work-shape.js",
+      "why": "Build briefs whose text a model later reads. Unclear whether the wording is a steering template or data assembly; not registered pending a look by the owner."
+    },
+    {
+      "path": "bin/nightly.sh, tools/room-bridge/dispatch.py, tools/room-bridge/claude_desktop_wire.py",
+      "why": "Invoke models with model and effort flags. Registered through model-routing only where the pin lives; the call sites are transport."
+    }
+  ]
+}

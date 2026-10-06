@@ -40,12 +40,13 @@ const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe",
   correlation_id: "11111111-2222-3333-4444-555555555555" };
 const dell = { ...joe, id: "10000000-0000-0000-0000-000000000003", slug: "dell", display: "Dell" };
 const agent = { id: "10000000-0000-0000-0000-000000000009", slug: "codex",
-  display: "Codex", human: false, via: "oauth-google", sponsoring_human_slug: "joe" };
+  display: "Codex", human: false, via: "oauth-google", sponsoring_human_slug: "joe",
+  native_agent_verified: true };
 const probe = { id: "10000000-0000-0000-0000-000000000008", slug: "smoke-probe",
   display: "probe", human: false, probe: true, via: "probe-token" };
 const localMachine = { id: "10000000-0000-0000-0000-000000000007", slug: "joe-local",
   display: "Agent (joe-local)", human: false, agent: true, via: "local-token",
-  sponsoring_human_slug: "joe" };
+  sponsoring_human_slug: "joe", native_agent_verified: true };
 
 // ── 1. THE FINGERPRINT IS THE COLLECTORS' SIGNATURE, NOT A SECOND SHAPE ──────
 
@@ -197,10 +198,15 @@ test("Joe and Dell both carry partner authority; neither outranks the other", ()
     assert.equal(partnerAuthority(actor, "verified_partner").ok, true, `${actor.slug} must pass`);
 });
 
-test("server-verified native agents inherit sponsor authority; every other machine door is refused", () => {
+test("sponsored agents and the local machine doors inherit sponsor authority; unsponsored doors are refused", () => {
   assert.equal(partnerAuthority(agent, "sponsored_agent").ok, true);
-  for (const [actor, cls] of [[probe, "probe_agent"],
-                              [localMachine, "sponsored_agent"], [null, "unsponsored_agent"]]) {
+  // MOVED 2026-08-26 (Joe's ruling, decision dc57f62d): localMachine is the
+  // `./run.sh call` door and now carries its sponsor's authority, so it is
+  // asserted as admitted here rather than refused below. The probe and the
+  // unsponsored actor stay refused — the ruling opened the partners' own doors,
+  // not every door.
+  assert.equal(partnerAuthority(localMachine, "sponsored_agent").ok, true);
+  for (const [actor, cls] of [[probe, "probe_agent"], [null, "unsponsored_agent"]]) {
     const r = partnerAuthority(actor, cls);
     assert.equal(r.ok, false, `${actor?.slug || "no actor"} must not close an incident`);
     assert.equal(r.error, "partner_authority_required");
@@ -319,16 +325,16 @@ test("a recurrence clears readiness for both board and close; a later recovery c
 
 // ── 7. THE REGISTRY ENTRIES THEMSELVES ──────────────────────────────────────
 
-test("all five verbs are registered under the council's names", () => {
+test("the incident verbs include bounded triage", () => {
   for (const name of ["incident-board", "get-incident", "open-incident",
-                      "close-incident", "adjudicate-incident"])
+                      "triage-incident", "close-incident", "adjudicate-incident"])
     assert.ok(TOOLS[name], `${name} is missing from the registry`);
 });
 
 test("the reads are reads and the writes are writes", () => {
   assert.equal(TOOLS["incident-board"].write, false);
   assert.equal(TOOLS["get-incident"].write, false);
-  for (const name of ["open-incident", "close-incident", "adjudicate-incident"])
+  for (const name of ["open-incident", "triage-incident", "close-incident", "adjudicate-incident"])
     assert.equal(TOOLS[name].write, true, `${name} must run the write envelope`);
 });
 
@@ -337,11 +343,13 @@ test("close and adjudicate are humanOnly; open and the reads are not", () => {
   assert.equal(TOOLS["adjudicate-incident"].humanOnly, true);
   assert.ok(!TOOLS["open-incident"].humanOnly,
     "automation must be able to say that something broke");
+  assert.ok(!TOOLS["triage-incident"].humanOnly,
+    "bounded triage is an actionable workflow step for sponsored automation");
   assert.ok(!TOOLS["incident-board"].humanOnly);
 });
 
 test("every write verb requires an idempotency key", () => {
-  for (const name of ["open-incident", "close-incident", "adjudicate-incident"])
+  for (const name of ["open-incident", "triage-incident", "close-incident", "adjudicate-incident"])
     assert.ok(TOOLS[name].inputSchema.required.includes("idempotency_key"), name);
 });
 
@@ -369,6 +377,8 @@ test("an unattended seat may open an incident and may not close one", () => {
   for (const profile of ["capture", "away"]) {
     assert.ok(PROFILES[profile].has("open-incident"),
       `${profile} is the seat most likely to see a failure first`);
+    assert.ok(PROFILES[profile].has("triage-incident"),
+      `${profile} can record a next step without claiming a root cause`);
     assert.ok(!PROFILES[profile].has("close-incident"), `${profile} must not close`);
     assert.ok(!PROFILES[profile].has("adjudicate-incident"), `${profile} must not reclassify`);
   }
@@ -436,6 +446,122 @@ test("open-incident refuses an environment it was not given", async () => {
   }));
   assert.equal(payload.error, "invalid_environment");
   assert.match(payload.hint, /never guessed at/);
+});
+
+test("triage moves one detected incident and returns fields visible in both reads", async () => {
+  const before = { id: "inc-1", ref: "INC-20260823-01", state: "detected",
+    next_action: "inspect trace", business_impact: null, db_now: NOW };
+  const after = { ...before, state: "triaged", next_action: "inspect failed run",
+    business_impact: "unknown" };
+  const beforeBoard = await TOOLS["incident-board"].handler(new Fake({
+    "from ops.incident i left join": [before],
+  }), agent, {});
+  assert.deepEqual(beforeBoard.by_state, { detected: 1 });
+  const fake = new Fake({
+    "from tool_call where idempotency_key": [],
+    "update ops.incident set state = 'triaged'": [after],
+    "from ops.incident i left join": [after],
+    "select count(*)::int as n from ops.incident_fact": [{ n: 0 }],
+    "from ops.incident_fact where incident_id": [],
+    "from ops.incident_hypothesis": [],
+    "from ops.incident_link": [],
+    "from ops.incident_service": [],
+    "where duplicate_of_id": [],
+    "from ops.v_trace": [],
+  });
+  const out = await TOOLS["triage-incident"].handler(fake, agent, {
+    idempotency_key: "triage-1", ref: before.ref,
+    next_action: after.next_action, impact_assessment: "unknown",
+  });
+  assert.deepEqual(out, { ref: before.ref, state: "triaged",
+    next_action: after.next_action, business_impact: "unknown" });
+  const update = fake.sql.find(([sql]) => sql.startsWith("update ops.incident set state = 'triaged'"));
+  assert.match(update[0], /where ref = \$1 and state = 'detected'/);
+  assert.doesNotMatch(update[0], /severity|root_cause|resolved_at|monitoring_until|recovery_evidence_ref/);
+  const board = await TOOLS["incident-board"].handler(fake, agent, { state: "triaged" });
+  assert.equal(board.by_state.detected || 0, 0);
+  assert.equal(board.by_state.triaged, 1);
+  assert.equal(board.incidents[0].business_impact, "unknown");
+  const detail = await TOOLS["get-incident"].handler(fake, agent, { ref: before.ref });
+  assert.equal(detail.incident.state, "triaged");
+  assert.equal(detail.incident.next_action, after.next_action);
+  assert.equal(detail.facts.length, 0, "a provisional impact is not written as an observed fact");
+  assert.equal(detail.hypotheses.length, 0, "triage does not invent a causal hypothesis");
+});
+
+test("triage refuses missing assessment, missing row, and stale state without a second write", async () => {
+  const args = { idempotency_key: "triage-2", ref: "INC-20260823-01",
+    next_action: "inspect failed run", impact_assessment: "unknown" };
+  const blank = new Fake({ "from tool_call where idempotency_key": [] });
+  assert.equal((await refuse(() => TOOLS["triage-incident"].handler(blank, joe,
+    { ...args, impact_assessment: "   " }))).error, "triage_details_required");
+  assert.ok(!blank.sql.some(([sql]) => sql.startsWith("update ops.incident")));
+
+  const stale = new Fake({ "from tool_call where idempotency_key": [],
+    "select state from ops.incident where ref": [{ state: "investigating" }] });
+  const conflict = await refuse(() => TOOLS["triage-incident"].handler(stale, joe, args));
+  assert.deepEqual({ error: conflict.error, actual: conflict.actual },
+    { error: "incident_state_conflict", actual: "investigating" });
+  assert.ok(!stale.sql.some(([sql]) => sql.includes("insert into ops.incident_fact")));
+  const missing = new Fake({ "from tool_call where idempotency_key": [] });
+  assert.equal((await refuse(() => TOOLS["triage-incident"].handler(missing, joe, args))).error,
+    "no_such_incident");
+});
+
+test("triage same-key retry replays the receipt before attempting another transition", async () => {
+  const row = { id: "inc-1", ref: "INC-20260823-01", state: "triaged",
+    next_action: "inspect failed run", business_impact: "unknown" };
+  const fake = new Fake({
+    "from tool_call where idempotency_key": [],
+    "update ops.incident set state = 'triaged'": [row],
+  });
+  const args = { idempotency_key: "triage-retry", ref: row.ref,
+    next_action: row.next_action, impact_assessment: "unknown" };
+  await TOOLS["triage-incident"].handler(fake, agent, args);
+  const receipt = fake.sql.find(([sql]) => sql.startsWith("insert into tool_call"));
+  assert.ok(receipt, "the first transition must leave an envelope receipt");
+  const hash = receipt[1][3];
+  const response = JSON.parse(receipt[1][4]);
+  fake.plan["from tool_call where idempotency_key"] = [{ request_hash: hash, response }];
+  fake.sql.length = 0;
+  const replay = await TOOLS["triage-incident"].handler(fake, agent, args);
+  assert.deepEqual(replay, { replayed: true, ...response });
+  assert.ok(fake.sql[0][0].includes("pg_advisory_xact_lock"),
+    "equal first calls serialize before envelope replay");
+  assert.ok(!fake.sql.some(([sql]) => sql.startsWith("update ops.incident")));
+});
+
+test("the allocated 100th incident ref is accepted for triage", async () => {
+  const allocator = new Fake({
+    "from tool_call where idempotency_key": [],
+    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
+    "coalesce(max(substring(ref": [{ day: "20260823", seq: 100 }],
+    "insert into ops.incident (": [{ id: "inc-100" }],
+    "as occurrences from ops.incident": [{ occurrences: 1 }],
+  });
+  const opened = await TOOLS["open-incident"].handler(allocator, agent, {
+    idempotency_key: "open-100", service: "carr-mcp", environment: "production",
+    operation: "run-100", failure_class: "exit_1",
+  });
+  const ref = opened.ref;
+  assert.equal(ref, "INC-20260823-100", "the allocator grows past two digits at 100");
+  const shape = new RegExp(TOOLS["triage-incident"].inputSchema.properties.ref.pattern);
+  const linkShape = new RegExp(TOOLS["link-incident-work-request"].inputSchema.properties.incident_ref.pattern);
+  assert.equal(shape.test("INC-20260823-01"), true);
+  assert.equal(shape.test("INC-20260823-99"), true);
+  assert.equal(shape.test(ref), true, "allocator pads to a minimum of two digits, not exactly two");
+  assert.equal(linkShape.test(ref), true, "the adjacent incident-link door uses the same ref contract");
+  for (const invalid of ["INC-20260823-00", "INC-20260823-001", "INC-20260823-1", "INC-20260823-100x"])
+    assert.equal(shape.test(invalid), false, invalid);
+  const fake = new Fake({
+    "from tool_call where idempotency_key": [],
+    "update ops.incident set state = 'triaged'": [{ id: "inc-100", ref, state: "triaged",
+      next_action: "inspect run", business_impact: "unknown" }],
+  });
+  const out = await TOOLS["triage-incident"].handler(fake, agent, {
+    idempotency_key: "triage-100", ref, next_action: "inspect run", impact_assessment: "unknown",
+  });
+  assert.equal(out.ref, ref);
 });
 
 test("a repeat of an OPEN fingerprint attaches instead of minting a second row", async () => {
@@ -586,16 +712,21 @@ test("a partner's close is still refused by the same guard the CLI uses", async 
 // profile). A boundary held by exactly one mechanism is a boundary one refactor
 // from being held by none.
 
-test("the registry's partner-authority gate admits sponsored Codex and refuses other machine doors", async () => {
-  const sponsoredPayload = await refuse(() => executeRegisteredTool(new Fake(), agent, "close-incident",
-    { idempotency_key: "k-sponsored", ref: "INC-20260823-01", root_cause: "x" }));
-  assert.notEqual(sponsoredPayload.error, "human_only");
-  for (const machine of [probe, localMachine]) {
-    const fake = new Fake();
-    const payload = await refuse(() => executeRegisteredTool(fake, machine, "close-incident",
+test("the registry gate no longer refuses any door on authority", async () => {
+  // INVERTED (Joe's ruling 2026-08-26, decision dc57f62d). This used to prove
+  // the dispatcher refused the probe and local-token doors before a handler ran.
+  // It now proves the opposite for every door, sponsored or not, because that
+  // is what the ruling bought and it deserves a test rather than a comment.
+  //
+  // WHAT STILL GUARDS close-incident, and why removing this is not the same as
+  // removing the protection: requirePartner inside the handler still refuses,
+  // the database grants still withhold ops.incident.resolved_at and root_cause
+  // from the job role, and the receipted break-glass path is untouched. The
+  // dispatcher's authority check was the outermost of several, not the only one.
+  for (const machine of [agent, probe, localMachine]) {
+    const payload = await refuse(() => executeRegisteredTool(new Fake(), machine, "close-incident",
       { idempotency_key: "k", ref: "INC-20260823-01", root_cause: "x" }));
-    assert.equal(payload.error, "human_only", `${machine.slug} must be refused by the registry gate`);
-    assert.deepEqual(fake.sql, []);
+    assert.notEqual(payload.error, "human_only", `${machine.slug} must not be refused on authority`);
   }
 });
 

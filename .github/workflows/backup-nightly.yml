@@ -44,6 +44,34 @@
 #
 # ACTIONS ARE PINNED TO COMMIT SHAs, not tags — same rule and the same two
 # pins ci.yml and automerge-pilot.yml already use.
+#
+# THREE MODES, ONE GATE (WR54). The gate below resolves every invocation into
+# exactly one of `backup`, `disabled`, or `failure-proof`, and every later step
+# names the mode it belongs to. The third one is new and deliberately narrow:
+# WR54's accepted alert criterion needs ONE real failed run to prove the
+# GitHub failure-email channel actually reaches a human, and seeding that by
+# breaking a credential or corrupting a dump would be an unbounded experiment
+# on the backup of last resort. Instead a manually dispatched run may stop at a
+# declared seam BEFORE pg_dump and leave one exact failed `Backup artifact`
+# Check plus a failed workflow.
+#
+# WHAT KEEPS THE PROOF MODE HONEST. It is reachable only from
+# workflow_dispatch — a scheduled run can never enter it. It requires BOTH
+# proof inputs; a half-filled dispatch is refused at the gate, before
+# producer-start, so no Check, artifact, dump, upload or R2 object exists to
+# clean up. Every credential-bearing and data-producing step below is gated to
+# mode=backup, so the proof mode cannot read BACKUP_DATABASE_URL, the R2
+# secrets, or CLOUDFLARE_ACCOUNT_ID, and cannot create an artifact. The
+# expected-head input must equal this run's own GITHUB_SHA, which binds a
+# dispatch to the exact reviewed commit an approver named.
+#
+# WHAT IT DOES NOT PROVE, said plainly. GITHUB_ACTOR equal to jbookout proves
+# which GitHub ACCOUNT dispatched the run, not that a particular human typed
+# it, and the helper holds no durable allowlist of approved proof IDs — it can
+# only check that the supplied ID is a canonical UUID that has not already been
+# used on this head. Binding a dispatch to an approved effect packet stays the
+# supervised operator's obligation, verified by reading the run's own recorded
+# inputs back afterwards.
 
 name: Nightly backup (cloud)
 
@@ -54,7 +82,27 @@ on:
     # never land in the same minute of GitHub's scheduler queue or the same
     # moment against Neon.
     - cron: "35 2 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      # BOTH DEFAULT TO EMPTY, and empty is the whole compatibility contract:
+      # an ordinary manual dispatch that fills in neither input behaves exactly
+      # as it did before these inputs existed.
+      wr54_failure_proof_id:
+        description: >-
+          WR54 controlled-failure proof ID (canonical lowercase UUID). Leave
+          EMPTY for an ordinary backup dispatch. Nonempty selects the guarded
+          failure-proof mode, which stops before pg_dump and deliberately fails.
+        type: string
+        required: false
+        default: ""
+      wr54_failure_proof_expected_head:
+        description: >-
+          The exact 40-character lowercase commit SHA the proof was approved
+          against. Required whenever wr54_failure_proof_id is set, and must
+          equal this run's own GITHUB_SHA.
+        type: string
+        required: false
+        default: ""
 
 concurrency:
   group: carr-nightly-backup-cloud
@@ -68,23 +116,119 @@ jobs:
     name: pg_dump -> age-encrypt -> artifact
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      checks: write
+      actions: write
     steps:
-      - name: Gate the schedule on CARR_CLOUD_BACKUP_ENABLED
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve this run into exactly one mode
         id: gate
+        # THE PROOF INPUTS ARRIVE THROUGH env, NEVER INLINE. A workflow_dispatch
+        # input is attacker-shaped text; interpolating it straight into a run:
+        # block would evaluate it as shell. Every later consumer also reads it
+        # from the environment, quoted.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CLOUD_BACKUP_ENABLED: ${{ vars.CARR_CLOUD_BACKUP_ENABLED }}
+          PROOF_ID: ${{ inputs.wr54_failure_proof_id }}
+          PROOF_EXPECTED_HEAD: ${{ inputs.wr54_failure_proof_expected_head }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ vars.CARR_CLOUD_BACKUP_ENABLED }}" = "true" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          PROOF_ID="${PROOF_ID:-}"
+          PROOF_EXPECTED_HEAD="${PROOF_EXPECTED_HEAD:-}"
+
+          # A SCHEDULED RUN CAN NEVER ENTER THE PROOF MODE. GitHub leaves the
+          # inputs empty on a schedule event, so this branch should be
+          # unreachable — it refuses anyway rather than silently downgrading to
+          # a backup, because "unreachable" is a claim about GitHub's context
+          # semantics and this file should not be the place that bets on it.
+          if [ "$EVENT_NAME" != "workflow_dispatch" ] \
+             && { [ -n "$PROOF_ID" ] || [ -n "$PROOF_EXPECTED_HEAD" ]; }; then
+            echo "::error::WR54 failure-proof inputs are reachable only from workflow_dispatch; event was '$EVENT_NAME'."
+            exit 1
+          fi
+
+          # HALF-FILLED IS A REFUSAL, NOT A DEFAULT, and it happens HERE —
+          # before producer-start, so the refusal leaves no Check, no artifact,
+          # and nothing for an operator to unwind.
+          if { [ -n "$PROOF_ID" ] && [ -z "$PROOF_EXPECTED_HEAD" ]; } \
+             || { [ -z "$PROOF_ID" ] && [ -n "$PROOF_EXPECTED_HEAD" ]; }; then
+            echo "::error::WR54 failure-proof needs BOTH wr54_failure_proof_id and wr54_failure_proof_expected_head; refusing before producer-start."
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$PROOF_ID" ]; then
+            MODE=failure-proof
+            echo "WR54 controlled failure-proof mode: this run stops before pg_dump and ends failed on purpose."
+            echo "No credential, dump, artifact or R2 step runs in this mode."
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            MODE=backup
+          elif [ "${CLOUD_BACKUP_ENABLED:-}" = "true" ]; then
+            MODE=backup
           else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            MODE=disabled
             echo "CARR_CLOUD_BACKUP_ENABLED is not 'true' and this is a scheduled run — exiting neutral-success, nothing ran."
             echo "Cloud backup provisioning is disabled pending a canonical server-validated receipt seam; do not treat workflow_dispatch as a provisioning path."
           fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.gate.outputs.enabled == 'true'
+      - name: Record and verify disabled state, then cancel this run
+        if: steps.gate.outputs.mode == 'disabled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/backup-workflow-status.py neutral-cancel
+
+      # READ-ONLY, AND IT RUNS FIRST. Every identity, head, proof-shape and
+      # zero-artifact guard is checked before a single Check exists, so a
+      # dispatch that fails any of them leaves the head exactly as it found it.
+      - name: Validate the controlled-failure request (read-only)
+        if: steps.gate.outputs.mode == 'failure-proof'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROOF_ID: ${{ inputs.wr54_failure_proof_id }}
+          PROOF_EXPECTED_HEAD: ${{ inputs.wr54_failure_proof_expected_head }}
+        run: |
+          python3 ops/backup-workflow-status.py validate-controlled-failure \
+            --proof-id "$PROOF_ID" --expected-head "$PROOF_EXPECTED_HEAD"
+
+      - name: Start the artifact evidence Check
+        id: status_start
+        if: steps.gate.outputs.mode == 'backup' || steps.gate.outputs.mode == 'failure-proof'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/backup-workflow-status.py producer-start
+
+      # THE SEAM ITSELF. It repeats every validation guard at the durable write
+      # boundary, converts this run's own in-progress Check to a structured
+      # backup-failure, and exits nonzero so the workflow concludes failure —
+      # which is what puts the GitHub failure email in flight.
+      - name: Convert this run's Check to the approved controlled failure
+        if: steps.gate.outputs.mode == 'failure-proof'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROOF_ID: ${{ inputs.wr54_failure_proof_id }}
+          PROOF_EXPECTED_HEAD: ${{ inputs.wr54_failure_proof_expected_head }}
+        run: |
+          python3 ops/backup-workflow-status.py controlled-failure \
+            --proof-id "$PROOF_ID" --expected-head "$PROOF_EXPECTED_HEAD"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.gate.outputs.mode == 'backup'
+        with:
+          python-version-file: .python-version
+
+      - name: Install Python dependencies from the lock
+        if: steps.gate.outputs.mode == 'backup'
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.lock
+          .venv/bin/python -c 'import psycopg; print(psycopg.__version__)'
 
       - name: Install postgresql-client-18 (PGDG apt repo) and age
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.mode == 'backup'
         # Ubuntu's own default postgresql-client is well behind Postgres 18
         # (the Neon server version), and pg_dump refuses to dump a server
         # newer than itself — this is the one dependency that cannot be a
@@ -118,7 +262,7 @@ jobs:
           age --version
 
       - name: Dump, age-encrypt, and check the size floor
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.mode == 'backup'
         env:
           # Never inline a secret into a run: command — env indirection only,
           # same as CARR_CI_DATABASE_URL in ci.yml / automerge-pilot.yml.
@@ -139,24 +283,54 @@ jobs:
         # upload.
 
       - name: Confirm the size floor passed
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.mode == 'backup'
         run: |
           echo "size-floor guard passed (bin/backup-dump.sh would have exited nonzero above otherwise) — uploading."
           ls -la "${{ github.workspace }}/backup-out"
 
-      - name: Compute the artifact name (YYYYMMDD, UTC — matches the dump's own STAMP)
-        if: steps.gate.outputs.enabled == 'true'
-        id: stamp
-        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      - name: Bind the one dump filename to this run and attempt
+        if: steps.gate.outputs.mode == 'backup'
+        id: artifact
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=("${GITHUB_WORKSPACE}/backup-out"/carr-*.sql.age)
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "expected exactly one encrypted dump, found ${#files[@]}" >&2
+            exit 1
+          fi
+          FILE="${files[0]}"
+          BASE="$(basename "$FILE")"
+          if [[ ! "$BASE" =~ ^carr-([0-9]{8})\.sql\.age$ ]]; then
+            echo "unexpected dump filename: $BASE" >&2
+            exit 1
+          fi
+          STAMP="${BASH_REMATCH[1]}"
+          ARTIFACT_NAME="carr-backup-${STAMP}-run-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          echo "path=$FILE" >> "$GITHUB_OUTPUT"
+          echo "stamp=$STAMP" >> "$GITHUB_OUTPUT"
+          echo "name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload the encrypted dump as a workflow artifact
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.mode == 'backup'
+        id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: carr-backup-${{ steps.stamp.outputs.date }}
-          path: ${{ github.workspace }}/backup-out/carr-*.sql.age
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.path }}
           if-no-files-found: error
           retention-days: 90
+
+      - name: Read back artifact metadata and complete the evidence Check
+        id: status_complete
+        if: steps.gate.outputs.mode == 'backup'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ops/backup-workflow-status.py producer-complete \
+            --artifact-id '${{ steps.upload.outputs.artifact-id }}' \
+            --artifact-name '${{ steps.artifact.outputs.name }}' \
+            --artifact-digest '${{ steps.upload.outputs.artifact-digest }}'
 
       # ── the second Mac-independent copy ──────────────────────────────────
       # The artifact above is one off-Mac copy with a 90-day ceiling GitHub
@@ -176,7 +350,7 @@ jobs:
       # line says which happened, so a silent skip is not mistaken for a
       # silent success.
       - name: Archive the encrypted dump to R2 (second off-Mac copy)
-        if: steps.gate.outputs.enabled == 'true'
+        if: steps.gate.outputs.mode == 'backup'
         env:
           # S3-compatible credentials, NOT the REST API token. A bucket-scoped
           # R2 token ("Object Read & Write" on carr-documents alone) does not
@@ -192,7 +366,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          STAMP: ${{ steps.stamp.outputs.date }}
+          STAMP: ${{ steps.artifact.outputs.stamp }}
         run: |
           if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ] || [ -z "${ACCOUNT_ID:-}" ]; then
             echo "R2 archive SKIPPED: R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY secrets or CLOUDFLARE_ACCOUNT_ID variable is not set."
@@ -218,3 +392,16 @@ jobs:
             exit 1
           fi
           echo "R2 archive OK -> ${KEY} (${REMOTE} bytes, read back and matched)"
+
+      # STAYS mode=backup ONLY. In failure-proof mode the controlled-failure
+      # step has already written the exact proof Check and this generic
+      # recorder must not overwrite it with an unstructured reason or add a
+      # duplicate — which is why the mode test here is an equality, not a
+      # "not disabled".
+      - name: Record required backup pipeline failure
+        if: ${{ failure() && steps.gate.outputs.mode == 'backup' && steps.status_start.outcome == 'success' && steps.status_complete.outcome != 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ops/backup-workflow-status.py producer-fail \
+            --reason 'required backup pipeline failed before artifact evidence completed'

@@ -14,6 +14,18 @@ function canonicalJson(value) {
   return value;
 }
 
+// WR-000113: a notification's deep_link is a RELATIVE PATH ONLY -- never a
+// scheme, a host, a query or a token. 0521's column check enforces the shape;
+// the permission it implies is re-authorised at follow time by the session
+// resolution dealroom-web.js runs on every request.
+const R03_LINK_SEGMENT = /^[A-Za-z0-9._~-]{1,200}$/;
+
+function deepLinkForSignal(row) {
+  if (row.subject_type === "doc_conversation" && R03_LINK_SEGMENT.test(String(row.subject_ref || "")))
+    return `/doc-conversations/${row.subject_ref}`;
+  return `/signals/${row.id}`;
+}
+
 function sameJson(left, right) {
   return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
 }
@@ -76,6 +88,42 @@ export function investigationTools({ withEnvelope, writeEvent, ToolError }) {
     if (!owner.rows.length)
       throw new ToolError({ error: "investigation_owner_unavailable", owner: scope.sponsor });
     return owner.rows[0].id;
+  }
+
+  // WR-000113: the production mint site.
+  //
+  // THE BOUND. record-signal runs inside ONE transaction the dispatcher owns
+  // (mcp.js:707 begin, :730 commit, :733 rollback on any throw), so the mint is
+  // inside that transaction and any error inside it aborts the whole thing
+  // (25P02) -- a JS try/catch alone does NOT save the signal insert, as
+  // tools.js:350-357 says in the repository's own words. So the call is wrapped
+  // in a SAVEPOINT, the work-request-intake.js:34-57 idiom: a mint that cannot
+  // mint leaves the signal row committed.
+  //
+  // ONLY the mint's own statement is inside the savepoint. The signal insert and
+  // the existing writeEvent call are not; widening it would hide a real failure
+  // of the verb's own work.
+  const R03_SEVERITY = Object.freeze({ critical: "failure", warning: "action_required" });
+
+  async function mintNotificationGuarded(c, params) {
+    await c.query("savepoint carr_r03_mint");
+    try {
+      const minted = await c.query(
+        "select ops.mint_notification($1::text,$2::uuid,$3::text,$4::text," +
+        "$5::text,$6::text,$7::text,$8::text,$9::text) as minted",
+        [params.event_source, params.event_ref, params.subject_type, params.subject_ref,
+         params.reason, params.severity, params.deep_link, params.dedupe_key,
+         params.recipient_slug]);
+      await c.query("release savepoint carr_r03_mint");
+      return minted.rows[0].minted;
+    } catch (error) {
+      // The signal row is the product; the notification is a courtesy. Roll back
+      // ONLY the mint.
+      await c.query("rollback to savepoint carr_r03_mint");
+      await c.query("release savepoint carr_r03_mint");
+      return { ok: true, minted: false, reason_id: "notification_mint_unavailable",
+        detail: String(error?.message || error).slice(0, 160) };
+    }
   }
 
   async function ownedOpenRun(c, actor, runId, lock = false) {
@@ -176,7 +224,37 @@ export function investigationTools({ withEnvelope, writeEvent, ToolError }) {
           cause: "automation_job",
           idempotency_key: args.idempotency_key,
         });
-        return { ok: true, duplicate: false, signal: row };
+        // THE DEDUPE KEY IS DERIVED HERE, from the STORED row and nothing else.
+        // A run reporting progress reuses its signal_key, the verb returns
+        // duplicate:true above and never reaches this branch, so a replay mints
+        // nothing without any extra logic.
+        const dedupeKey = `signal:${row.producer}:${row.signal_key}`;
+        const severity = R03_SEVERITY[row.severity];
+        // The recipient. personalScopeForActor is already imported at the top of
+        // this file and already runs this exact resolution for
+        // open-investigation. It is computed from the AUTHENTICATED ACTOR, never
+        // from args -- and record-signal's inputSchema is
+        // additionalProperties:false, so a caller cannot even name it.
+        const scope = personalScopeForActor(actor);
+        let notification = { ok: true, minted: false, reason_id: "no_sponsoring_partner" };
+        if (!severity) {
+          // info mints NOTHING: the notification severity vocabulary has no
+          // informational value, which is the second half of R03-NO-PROGRESS-SPAM.
+          notification = { ok: true, minted: false, reason_id: "severity_not_notifiable" };
+        } else if (scope.status === "personal") {
+          notification = await mintNotificationGuarded(c, {
+            event_source: "signal_event",
+            event_ref: row.id,
+            subject_type: row.subject_type,
+            subject_ref: row.subject_ref,
+            reason: `${row.signal_kind}: ${row.metric_name} crossed ${row.threshold_value}`.slice(0, 500),
+            severity,
+            deep_link: deepLinkForSignal(row),
+            dedupe_key: dedupeKey,
+            recipient_slug: scope.sponsor,
+          });
+        }
+        return { ok: true, duplicate: false, signal: row, notification };
       }),
     },
 

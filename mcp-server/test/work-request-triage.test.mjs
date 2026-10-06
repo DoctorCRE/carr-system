@@ -47,12 +47,32 @@ test("review-and-triage performs only captured-to-triaged and writes one audit e
   assert.equal(JSON.parse(event.params[7]).classification, "operational");
 });
 
-test("review-and-triage refuses nonhuman, extras, stale versions, and same-key mutation", async () => {
-  const nonhuman = await rejected(() => executeRegisteredTool(new TriageFake(), BOT, "review-and-triage", structuredClone(ARGS)));
-  assert.equal(nonhuman.error, "human_only");
+test("review-and-triage refuses a machine actor, and still refuses extras, stale versions, and same-key mutation", async () => {
+  // RE-INVERTED 2026-09-11 (WR-000021). This assertion has now been flipped
+  // twice, and that is the point of it: on 2026-08-26 Joe's ruling dc57f62d
+  // retired the humanOnly refusal and the assertion became "admits", written
+  // that way rather than deleted so that restoring the gate would fail here
+  // loudly instead of passing quietly. Restoring the gate is exactly what
+  // happened — the release review of 5b5f5ff8 found that a sponsored agent
+  // could accept the DoctorCRE v5 constitution through its sponsor's authority
+  // connection and the ledger would name the sponsor — so it fires, and it is
+  // flipped back rather than deleted for the same reason as before.
+  //
+  // WHAT THE 2026-08-26 RULING KEEPS: it was about a verb answering differently
+  // through two doors, and partner-authority.js still fixes that. Nothing here
+  // narrows authorityOnly, and the 220 verbs without the flag are untouched.
+  // Everything else this test pins is unchanged: the caller-authority,
+  // field-validation and optimistic-concurrency refusals are NOT authority
+  // checks and must keep firing for every actor.
+  const db = new TriageFake();
+  const machine = await rejected(() => executeRegisteredTool(db, BOT, "review-and-triage", structuredClone(ARGS)));
+  assert.equal(machine.error, "human_only_verb_requires_verified_partner");
+  assert.equal(machine.verb, "review-and-triage");
+  assert.equal(machine.actor_class, "unsponsored_agent");
+  assert.equal(db.calls.length, 0, "an agent must not reach the database on a human-only verb");
   for (const extra of [{ state: "ready" }, { executor: "codex" }, { approval: "yes" }]) {
     const db = new TriageFake(); const out = await rejected(() => executeRegisteredTool(db, JOE, "review-and-triage", { ...ARGS, ...extra }));
-    assert.ok(["caller_authority_field_forbidden", "invalid_triage_fields"].includes(out.error)); assert.equal(db.calls.length, 0);
+    assert.ok(["caller_authority_field_forbidden", "invalid_triage_fields", "unregistered_operation_fields"].includes(out.error)); assert.equal(db.calls.length, 0);
   }
   const stale = await rejected(() => executeRegisteredTool(new TriageFake(), JOE, "review-and-triage", { ...ARGS, base_version: 99 }));
   assert.equal(stale.error, "version_conflict");

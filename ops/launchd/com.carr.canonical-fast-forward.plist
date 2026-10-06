@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- doctrine: repo-hygiene-program-build-plan -->
+  <!-- WR-000040 AC-FRESH, first of two agents. This one MOVES the branch; its
+       sibling com.carr.canonical-dirty-watchdog watches the repository and
+       never calls this job. Two agents rather than one on purpose: if this
+       agent stops firing, the watchdog is still loaded and still pages, which
+       is the single failure a freshness machine most needs covered.
+
+       Cadence: daily, per Joe's AC-FRESH ruling (decision
+       fa8ae14b-e6fe-4e1b-ae98-0b6eb5a255f8, 2026-09-11). The bar is "within one
+       day of origin/main", so the job that closes the gap runs once a day and
+       the alarm that measures the gap runs hourly. -->
+  <key>Label</key><string>com.carr.canonical-fast-forward</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>canonical-fast-forward</string>
+    <string>launchd.run</string>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/tools/repo-hygiene-janitor.py</string>
+    <!-- The freshness modes run BEFORE and INSTEAD OF the hygiene census and
+         take no maintenance mutex; the execute flag is absent and no effect
+         packet is named, so no branch, worktree or cache is ever deleted from
+         here. The only branch-moving command the mode can reach is a
+         fast-forward-only merge against a tree with no tracked modification.
+         NOTE FOR ANYONE EDITING THIS COMMENT: XML forbids a double hyphen
+         inside a comment. plutil accepts one anyway; plistlib does not, and
+         launchd-plist-portable-selftest.py is what catches the difference. -->
+    <string>--canonical-freshness</string>
+    <string>fast-forward</string>
+    <!-- Pinned to the canonical checkout by absolute path. AC-FRESH is a
+         statement about ~/carr-system on main; a relative repository would let
+         whatever directory launchd happened to start in answer a different
+         question and call the answer freshness. -->
+    <string>--repository</string>
+    <string>{{REPO}}</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>20</integer></dict>
+  </array>
+  <key>RunAtLoad</key><false/>
+  <!-- Both streams share one file so a reader can see which output preceded a
+       failure. launchd discards output when neither path is set, and a
+       fast-forward that quietly never ran looks exactly like one that ran and
+       found nothing to do. -->
+  <key>StandardOutPath</key><string>{{REPO}}/out/canonical-fast-forward.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/canonical-fast-forward.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/local/opt/node@22/bin:/opt/homebrew/opt/libpq/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

@@ -2,11 +2,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError, canExercisePartnerAuthority } from "../src/tools.js";
 import { authorityDsnForActor, callTool } from "../src/mcp.js";
+import { authenticatedIdentity, agentActorForToken } from "../src/identity.js";
+// `actorFromProps` is module-private under amendment 8 (PR 1013). The exported
+// grant door is `authenticatedIdentity.connectionForGrant`; called without the
+// server's witness it returns exactly the same actor, unbranded, which is what
+// every case in this file is about.
+const actorFromProps = (props, bindings = null) =>
+  authenticatedIdentity.connectionForGrant(props, bindings);
+
 
 const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: "Joe", human: true, via: "test" };
 const dell = { id: "10000000-0000-0000-0000-000000000003", slug: "dell", display: "Dell", human: true, via: "test" };
-const codexForJoe = { id: "10000000-0000-0000-0000-000000000004", slug: "codex", display: "Codex", human: false, sponsoring_human_slug: "joe", via: "oauth-agent" };
-const claudeForDell = { id: "10000000-0000-0000-0000-000000000005", slug: "claude", display: "Claude", human: false, sponsoring_human_slug: "dell", via: "oauth-agent" };
+const NATIVE_BINDINGS = JSON.stringify({ "codex-client": "codex", "claude-client": "claude" });
+const codexForJoe = { id: "10000000-0000-0000-0000-000000000004", slug: "codex", display: "Codex", human: false, sponsoring_human_slug: "joe", native_agent_verified: true, via: "oauth-agent", client_id: "codex-client" };
+const claudeForDell = { id: "10000000-0000-0000-0000-000000000005", slug: "claude", display: "Claude", human: false, sponsoring_human_slug: "dell", native_agent_verified: true, via: "oauth-agent", client_id: "claude-client" };
+
+const FALLBACK_UUID = "11111111-2222-4333-8444-555555555555";
+const ACCEPTANCE_UUIDS = {
+  "joe-shadow": "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+  "joe-canary": "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb",
+  "dell-shadow": "cccccccc-3333-4333-8333-cccccccccccc",
+};
 
 class AcceptanceAuthorityFake {
   constructor(sessionSlug) {
@@ -15,6 +31,8 @@ class AcceptanceAuthorityFake {
     this.disableCalls = [];
     this.envelopeWrites = 0;
     this.eventWrites = 0;
+    this.receiptLookups = [];
+    this.acceptanceIds = [];
   }
 
   async query(text, params = []) {
@@ -23,7 +41,10 @@ class AcceptanceAuthorityFake {
       this.acceptanceCalls.push(params);
       if (params[1] === "canary" && this.sessionSlug !== "joe")
         throw new Error("canary workflow acceptance requires Joe authority session");
-      return { rows: [{ id: `acceptance-${this.sessionSlug}-${params[1]}` }] };
+      // A real acceptance returns a uuid; the fixture must too, or the event
+      // assertion below is testing a shape production never produces.
+      this.acceptanceIds.push(`${this.sessionSlug}-${params[1]}`);
+      return { rows: [{ id: ACCEPTANCE_UUIDS[`${this.sessionSlug}-${params[1]}`] || FALLBACK_UUID }] };
     }
     if (text.includes("ops.disable_legacy_schedule")) {
       this.disableCalls.push(params);
@@ -34,8 +55,19 @@ class AcceptanceAuthorityFake {
       this.envelopeWrites += 1;
       return { rows: [] };
     }
+    if (text.includes("from ops.legacy_schedule_disable_receipt where receipt_ref")) {
+      this.receiptLookups.push(params[0]);
+      return { rows: [{ id: "8f14e45f-ceea-467a-9a5f-6a1b2c3d4e5f" }] };
+    }
     if (text.includes("insert into event")) {
       this.eventWrites += 1;
+      // THE SUBJECT OF AN EVENT IS A UUID. This fake used to accept anything,
+      // which is why the suite stayed green for months while every real call
+      // died on `invalid input syntax for type uuid` and rolled its receipt
+      // back. Assert the shape the database actually enforces.
+      const subject = params[4];
+      if (subject != null && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(String(subject)))
+        throw new Error(`invalid input syntax for type uuid: "${subject}"`);
       return { rows: [] };
     }
     throw new Error(`unexpected SQL: ${text}`);
@@ -43,9 +75,13 @@ class AcceptanceAuthorityFake {
 }
 
 test("control-plane authority operations are explicit human authority verbs", () => {
+  // humanOnly LABEL RETIRED, authorityOnly UNCHANGED (WR-000019 slice S1,
+  // 2026-08-27): the label was dead since executeRegisteredTool stopped
+  // reading it 2026-08-26 (decision dc57f62d); this slice drops the stale
+  // declarations from tools.js. authorityOnly is the live gate here.
   for (const name of ["accept-workflow", "disable-legacy-schedule", "activate-guidance-registry",
     "decide-guidance-import-batch", "deactivate-guidance-registry"]) {
-    assert.equal(TOOLS[name].humanOnly, true);
+    assert.equal(TOOLS[name].humanOnly, undefined);
     assert.equal(TOOLS[name].authorityOnly, true);
   }
 });
@@ -55,22 +91,48 @@ test("authority DSNs follow verified partners and their sponsored Codex or Claud
   assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_URL: "fallback" }, joe), "fallback");
   assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_DELL_URL: "dell-dsn" }, dell), "dell-dsn");
   assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_URL: "joe-fallback" }, dell), null);
-  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_JOE_URL: "joe-dsn" }, codexForJoe), "joe-dsn");
-  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_DELL_URL: "dell-dsn" }, claudeForDell), "dell-dsn");
-  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_URL: "fallback" }, codexForJoe), "fallback");
-  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_URL: "fallback" }, claudeForDell), null);
+  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_JOE_URL: "joe-dsn", CARR_NATIVE_AGENT_OAUTH_CLIENTS: NATIVE_BINDINGS }, codexForJoe), "joe-dsn");
+  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_DELL_URL: "dell-dsn", CARR_NATIVE_AGENT_OAUTH_CLIENTS: NATIVE_BINDINGS }, claudeForDell), "dell-dsn");
+  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_URL: "fallback", CARR_NATIVE_AGENT_OAUTH_CLIENTS: NATIVE_BINDINGS }, codexForJoe), "fallback");
+  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_URL: "fallback", CARR_NATIVE_AGENT_OAUTH_CLIENTS: NATIVE_BINDINGS }, claudeForDell), null);
   assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_URL: "fallback" }, { slug: "codex", human: false }), null);
   assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_JOE_URL: "joe-dsn" }, { slug: "grok", human: false, sponsoring_human_slug: "joe" }), null);
 });
 
-test("only verified partners and sponsored Codex or Claude agents cross the partner boundary", () => {
+test("partners, sponsored native agents, and the local machine doors cross the partner boundary", () => {
   assert.equal(canExercisePartnerAuthority(joe), true);
   assert.equal(canExercisePartnerAuthority(dell), true);
   assert.equal(canExercisePartnerAuthority(codexForJoe), true);
   assert.equal(canExercisePartnerAuthority(claudeForDell), true);
+  // ADDED 2026-08-26 (Joe's ruling, decision dc57f62d): the `./run.sh call`
+  // doors. Their sponsor is server-derived through LOCAL_SPONSOR, never
+  // asserted by the Mac, which is why admitting them is safe.
+  const joeLocal = agentActorForToken("Bearer joe-secret", '{"joe-local":"joe-secret"}', "local-token");
+  const dellLocal = agentActorForToken("Bearer dell-secret", '{"dell-local":"dell-secret"}', "local-token");
+  assert.equal(canExercisePartnerAuthority(joeLocal), true);
+  assert.equal(canExercisePartnerAuthority(dellLocal), true);
+  // STILL REFUSED, and these are the ones that matter: a slug with no sponsor
+  // at all, and a sponsored slug that is not an admitted door. The ruling
+  // removed a human-only gate; it did not make the boundary meaningless.
+  assert.equal(canExercisePartnerAuthority({ ...codexForJoe, native_agent_verified: false }), false);
   assert.equal(canExercisePartnerAuthority({ slug: "codex", human: false }), false);
   assert.equal(canExercisePartnerAuthority({ slug: "grok", human: false, sponsoring_human_slug: "joe" }), false);
-  assert.equal(canExercisePartnerAuthority({ slug: "joe-local", human: false, sponsoring_human_slug: "joe" }), false);
+  assert.equal(canExercisePartnerAuthority({ slug: "joe-local", human: false }), false);
+});
+
+test("native OAuth authority is recomputed from current client bindings on every request", () => {
+  const storedGrant = { slug: "codex", human: false, human_slug: "joe", via: "oauth-agent",
+    client_id: "codex-client", native_agent_verified: true };
+  const current = actorFromProps(storedGrant, NATIVE_BINDINGS);
+  assert.equal(current.native_agent_verified, true);
+  assert.equal(canExercisePartnerAuthority(current), true);
+  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_JOE_URL: "joe-dsn",
+    CARR_NATIVE_AGENT_OAUTH_CLIENTS: NATIVE_BINDINGS }, current), "joe-dsn");
+  const removed = actorFromProps(storedGrant, "{}");
+  assert.equal(removed.native_agent_verified, undefined);
+  assert.equal(canExercisePartnerAuthority(removed), false);
+  assert.equal(authorityDsnForActor({ CARR_DB_AUTHORITY_JOE_URL: "joe-dsn",
+    CARR_NATIVE_AGENT_OAUTH_CLIENTS: "{}" }, storedGrant), null);
 });
 
 test("authority operation fails closed instead of falling back to writer credentials", async () => {
@@ -126,6 +188,9 @@ test("legacy disable emits a distinct Joe-bound surface receipt", async () => {
     pre_observation_ref: "native:enabled", post_observation_ref: "native:disabled",
   });
   assert.equal(result.receipt_ref, "legacy-disable:disable-fixture");
+  // The audit event must name the receipt's uuid, never the workflow key.
+  assert.deepEqual(c.receiptLookups, ["legacy-disable:disable-fixture"]);
+  assert.equal(c.eventWrites, 1);
   assert.deepEqual(c.disableCalls, [["cc-update-audit", "cc-update-audit.claude-code.v1",
     "cc-update-audit", "accepted evidence", "native:enabled", "native:disabled",
     null, null, null, null, "disable-fixture"]]);

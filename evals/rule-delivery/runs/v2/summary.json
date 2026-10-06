@@ -1,0 +1,8 @@
+{
+ "description": "prompt cue: a brief that opens with an Executor: line delivers c20dc3d5",
+ "label": "v2",
+ "target": "code",
+ "goal": "recall",
+ "decision": "reverted",
+ "gate": "REVERT test recall_micro delta +0.0162 [+0.0000, +0.0375] not clear of zero"
+}

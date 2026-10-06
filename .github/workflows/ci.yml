@@ -10,6 +10,17 @@
 # ruleset "main: CI must be green" (id 20824501) targets refs/heads/main and
 # requires the context `ops/ci.sh --strict`. A red result blocks the merge.
 #
+# SINCE 2026-09-23 THE CLASSES RUN IN PARALLEL (Joe's ruling, audit item 3 of
+# 8). One job ran all eleven ci.sh classes in sequence and the last 15 main runs
+# took 11 to 17 minutes, median 13, of which gates was 252s and migration 268s.
+# The `classes` job below is a matrix of class groups, each running
+# `ops/ci.sh --strict --only <its classes>`, so a PR waits for the slowest
+# group rather than the sum. The `checks` job keeps the required context NAME
+# and is now a gate: it needs every class job, runs even when one is red, and
+# fails unless all of them succeeded. Nothing that pins the context (the
+# ruleset, the automerge pilot, the backup workflow) had to move.
+# ops/ci-selftest.py proves every CLASS_ORDER class runs in exactly one group.
+#
 # The paragraph that stood here until 2026-08-20 said the opposite — that CI
 # "cannot REQUIRE a green result before a merge, because this repo is private on
 # a free GitHub plan" and that both the branch-protection and rulesets APIs
@@ -51,23 +62,37 @@ name: CI
 #
 # WHAT STILL CATCHES A BROKEN main, on a weekday, within minutes: the
 # pull_request event builds refs/pull/N/merge, which is the PR head merged into
-# CURRENT main. Main's content is inside every PR run. At the ~44 merges a day
-# this repo sees, a broken main turns the next PR red almost immediately — the
-# same way the one 2026-08-18 break surfaced and was fixed 88 minutes later by
-# the next merge.
+# CURRENT main. Main's content is inside every PR run. When this trigger was cut
+# (PR #379, 2026-08-20, at ~44 merges a day) that was the only weekday cover: strict mode
+# was off, so a PR tested against an older main could still merge and break it,
+# and the next PR turned red instead — the one 2026-08-18 break surfaced that way
+# and was fixed 88 minutes later by the next merge.
 #
-# THE SCHEDULE IS THE BACKSTOP FOR QUIET PERIODS ONLY — overnight and weekends,
-# when no PR is opening and nothing else would look. Weekends are not workdays
-# for either partner, so that is exactly the window with no other cover.
+# STRICT MODE IS NOW ON, and it is load-bearing rather than optional. The ruleset
+# "main: CI must be green" (id 20824501) has
+# strict_required_status_checks_policy=true; check it with
+#   gh api repos/jbookout/carr-system/rulesets/20824501
+# PR #833 (2026-09-01, governed automatic source merge) made it a precondition:
+# the merge endpoint conditionally binds only the PR head SHA, so strict mode is
+# the protected-main half of that transaction — if main moves after the checks
+# ran, GitHub marks the PR out of date and refuses the merge. The source-merge
+# controller (mcp-server/src/source-merge-policy.js) and the automerge pilot
+# (ops/automerge_pilot.py) both refuse with ruleset_strict_update_missing if it
+# is ever switched off. Do not turn it off to save CI minutes.
 #
-# WHAT WOULD REOPEN THIS: turning on strict_required_status_checks_policy (it is
-# false today, which is why a PR tested against an older main can merge and break
-# it). Strict mode would remove the breakage at its source but forces a re-run of
-# every open PR each time main moves — at 44 merges a day that costs far more
-# than it saves. The cheap ordering is this schedule now, strict mode only if the
-# break rate climbs well above one a week.
+# THE COST IT CARRIES, which PR #379 predicted correctly: every open PR has to be
+# brought up to date and re-run CI each time main moves before it can merge. That
+# is paid deliberately; a stale-base merge breaking main is now refused at the
+# source instead of discovered by the next PR.
+#
+# THE SCHEDULE IS STILL THE BACKSTOP FOR QUIET PERIODS — overnight and weekends,
+# when no PR is opening and nothing else would look. Strict mode stops a stale
+# PR from breaking main; it does not catch main going red on its own (a moved
+# dependency, a date-sensitive test) while nobody is opening PRs. Weekends are not
+# workdays for either partner, so that is exactly the window with no other cover.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   schedule:
     # 06:20 UTC daily. Sits after the nightly backup (02:35 UTC) and the 05:10
     # edge-liveness slot, and before the automerge pilot (08:30 UTC weekdays), so
@@ -75,20 +100,36 @@ on:
     - cron: "20 6 * * *"
   workflow_dispatch:
 
-# A second push to the same branch cancels the first. Two runs of the same branch
-# racing tells you nothing extra and just delays the answer that matters.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # PR validation supersedes by workflow + PR. Non-PR verdicts are independent:
+  # sharing a non-cancelling group would still replace older pending runs.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  checks:
-    name: ops/ci.sh --strict
+  classes:
+    name: ops/ci.sh --strict --only ${{ matrix.classes }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # 2026-10-01 run 36928008916: this combined group took 310s (unit
+        # 228s, types 36s, secret 33s, other classes 13s), below ten minutes.
+        # Keep gates, real-fixture replay and migration in separate jobs. Every class
+        # must appear in exactly one group (ops/ci-selftest.py verifies this).
+        classes:
+          - "pushfloor unit types contract secret dependency binding artifact freshness"
+          - "gates"
+          - "replay"
+          - "migration"
+    # Both PR 1121 and PR 1406 exhausted a 20-minute migration job while
+    # their separate database acceptance passed. Preserve measured headroom
+    # and cover that lane's declared budget without extending other groups.
+    # zsh setup retains its own short deadline below.
+    timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
 
     services:
       # The migration class needs a database to apply 130 forward migrations to.
@@ -118,9 +159,10 @@ jobs:
           # other class reads the tree as it stands and does not care.
           fetch-depth: 0
 
-      # DO NOT ADD `cache:` TO THE TWO SETUP ACTIONS BELOW. It was tried on this
-      # branch on 2026-08-20, measured end to end against a real cache hit, and
-      # it makes the job SLOWER. Numbers, baseline against cache-hit run:
+      # DO NOT ADD `cache:` TO THE TWO SETUP ACTIONS BELOW without re-measuring.
+      # It was tried on this branch on 2026-08-20, when a whole run took about
+      # four minutes, measured end to end against a real cache hit, and it made
+      # the job SLOWER. Numbers, baseline against cache-hit run (2026-08-20):
       #
       #   setup-python      0s -> 5s    (restoring the cache)
       #   setup-node        7s -> 10s   (restoring the cache)
@@ -132,13 +174,16 @@ jobs:
       # still unpacks and installs every package, and `npm ci` still builds
       # node_modules from scratch. Downloading was never the expensive half.
       #
-      # The billing mechanic that made this look attractive is real and worth
-      # keeping in mind for other work: GitHub bills each JOB rounded UP to the
-      # whole minute, so only crossing a 60-second line saves anything. Measured
-      # over 18 successful runs the job ran 203s to 275s, median 249s, with the
-      # line at 240s. But the dependency steps cannot deliver a crossing, and
-      # 61% of the run is ops/ci.sh doing genuine work. Spend has to come out of
-      # run COUNT, not run duration.
+      # The billing mechanic that made this look attractive is real: GitHub
+      # bills each JOB rounded UP to the whole minute, so only crossing a
+      # 60-second line saves anything. The 2026-08-20 reasoning (18 runs, 203s
+      # to 275s, median 249s, a 240s line in reach) no longer describes the job:
+      # in the week of 2026-09-23 the last 15 hosted runs took 14 to 18 minutes
+      # each, against the then-current ceiling, and almost all of that was
+      # ops/ci.sh --strict doing genuine work. The dependency-cache conclusion
+      # above was measured on the four-minute job and has not been re-measured
+      # at this length. Spend still has to come out of run COUNT, not from
+      # trimming seconds off setup.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
@@ -157,13 +202,58 @@ jobs:
           python -m pip install -r requirements.lock
 
       - name: Install Node dependencies
-        run: npm --prefix mcp-server ci
+        run: |
+          npm --prefix mcp-server ci
+          npm --prefix practice-plugin ci
 
       - name: Install zsh
         # bin/review-council-runner.sh has a #!/bin/zsh shebang and its test
-        # invokes it by that interpreter. Installing zsh keeps that suite in CI
-        # rather than excluding it — the coverage is worth 3 seconds of apt.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+        # invokes it by that interpreter. The runner already carries apt
+        # indexes: try the required install first. Only stale/missing indexes
+        # need a refresh. Bound both network waits and the entire setup step;
+        # an unavailable package still fails the job, never skips its tests.
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)
+          if ! sudo apt-get "${apt_options[@]}" install -y -qq zsh; then
+            sudo apt-get "${apt_options[@]}" update -qq
+            sudo apt-get "${apt_options[@]}" install -y -qq zsh
+          fi
+
+      - name: Install PostgreSQL 17
+        # Role-migration fixtures own clusters so roles cannot leak into the
+        # service container used by the migration class.
+        if: contains(matrix.classes, 'gates') || matrix.classes == 'migration'
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-17
+          /usr/lib/postgresql/17/bin/initdb --version
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Install PostgreSQL 18 server for the migration shadow
+        # ops/migration-shadow.py builds its own loopback cluster on production's
+        # major (18) from the base branch's db/schema.sql and applies this
+        # change's migrations to it. No main cluster is created, so nothing
+        # competes with the service container's port.
+        if: contains(matrix.classes, 'migration')
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common/createcluster.d
+          echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-18
+          /usr/lib/postgresql/18/bin/initdb --version
 
       - name: Create the Neon admin role the migrations expect
         # Migration 0005 grants the privilege bundles to neondb_owner, which
@@ -181,7 +271,7 @@ jobs:
                end if;
              end \$\$;"
 
-      - name: Run every check class
+      - name: Run this group's check classes
         env:
           # ops/ci.sh refuses any DSN that is not loopback. This one is the
           # service container above.
@@ -190,4 +280,55 @@ jobs:
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
           CARR_CI_PORTABLE_ONLY: "1"
-        run: ops/ci.sh --strict
+          # The migration shadow drops its regenerated db/schema.sql here; the
+          # next step uploads it when the class fails, so a stale snapshot is
+          # one download and one commit away from fixed.
+          CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
+        run: ops/ci.sh --strict --only "${{ matrix.classes }}"
+      - name: Upload the migration shadow's regenerated db/schema.sql
+        if: ${{ failure() && contains(matrix.classes, 'migration') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: migration-shadow-schema-${{ github.sha }}
+          path: ${{ runner.temp }}/migration-shadow/schema.sql
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Require a written pull request description
+        if: ${{ github.event_name == 'pull_request' && matrix.classes == 'gates' }}
+        run: python3 ops/pr-description-check.py
+
+  checks:
+    # THE REQUIRED CONTEXT. Its name is what the ruleset requires, so it must
+    # report whatever the class jobs do: `always()` makes it run when
+    # a group is red or cancelled, and the step below turns anything but
+    # success into a red context. Without `always()` a failed group would
+    # leave this job skipped, and a required check that never reports blocks
+    # the merge silently instead of saying why.
+    name: ops/ci.sh --strict
+    runs-on: ubuntu-latest
+    needs: classes
+    if: ${{ always() }}
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every class group succeeded
+        env:
+          CLASSES_RESULT: ${{ needs.classes.result }}
+        run: |
+          echo "class groups: $CLASSES_RESULT"
+          if [ "$CLASSES_RESULT" != "success" ]; then
+            echo "ops/ci.sh --strict: a class group did not succeed (result: $CLASSES_RESULT)"
+            exit 1
+          fi
+          echo "ops/ci.sh --strict: every class group green"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Record the tested tree and class contract
+        run: python3 ops/ci-evidence.py record --output ci-evidence.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-tree-evidence
+          path: ci-evidence.json
+          if-no-files-found: error
+          overwrite: true

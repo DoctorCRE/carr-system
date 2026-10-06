@@ -57,6 +57,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAP = os.path.join(REPO, "ops", "config", "rule-enforcement-map.json")
 
 LAYERS = {"layer0", "control", "pack"}
+SCOPES = {"shared", "joe", "dell"}
 # The enforcement classes that actually refuse or interrupt. `surfacing` is
 # deliberately absent: a rail surfaces context, it does not deliver a rule at the
 # moment the rule binds, so a surfacing rule tagged `control` would be scoped out
@@ -91,9 +92,18 @@ def validate(data: dict) -> list[str]:
             if not str(pack.get(field, "")).strip():
                 errors.append(f"{name}: pack needs a {field}")
 
-    scope_by_id = {rid: scope
-                   for scope, ids in data.get("active_rule_ids", {}).items()
-                   for rid in ids}
+    scope_by_id: dict[str, str] = {}
+    for scope, ids in data.get("active_rule_ids", {}).items():
+        if scope not in SCOPES:
+            errors.append(f"active_rule_ids: unknown scope {scope!r}")
+        if not isinstance(ids, list):
+            errors.append(f"active_rule_ids.{scope}: must be a list")
+            continue
+        for rid in ids:
+            if rid in scope_by_id:
+                errors.append(
+                    f"{rid}: appears in both {scope_by_id[rid]!r} and {scope!r} scopes")
+            scope_by_id[rid] = scope
     controls = data.get("rule_controls", {})
 
     for rid in sorted(scope_by_id):

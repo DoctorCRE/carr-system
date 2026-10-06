@@ -1,0 +1,75 @@
+WR-000044 / decision 11376c54 — backup RLS fix: reproducible safety evidence
+============================================================================
+
+WHAT THIS IS. A captured run of ops/backup-role-rls-coverage-selftest.py with
+CARR_LOCAL_PG_DSN set to a disposable PostgreSQL 17 cluster, committed so a
+reviewer who cannot stand up Postgres can see the numbers, and so anyone can
+re-run it and reproduce the INVARIANTS (the absolute digests below are
+environment-specific — a disposable cluster holds fewer objects than production
+— but the invariance, the contrast, the refusal, and the row parity are
+deterministic).
+
+The proof lives in the *-selftest.py (not a *-local-pg-acceptance.py) on purpose:
+a selftest is excluded from the SCAC script-entrypoint census
+(ops/scac-mutation-inventory.mjs isScriptEntrypoint), so this proof harness adds
+nothing to the sealed mutation registry and needs no reseal. Without a DSN the
+same file runs only the source contract (and passes) in ci.sh.
+
+HOW TO REPRODUCE (LC_ALL=C, disposable cluster, never port 55432):
+  1. initdb a throwaway PG17 cluster as superuser carr_ci; create role neondb_owner.
+  2. Create db carr_proof; load db/schema.sql; DATABASE_URL=...carr_proof \
+       .venv/bin/python tools/migrate.py --apply --yes    # applies through 0475
+  3. CARR_LOCAL_PG_DSN=...carr_proof \
+       .venv/bin/python ops/backup-role-rls-coverage-selftest.py
+The selftest creates carr_backup (mirroring migration 0119) because
+db/schema.sql deliberately omits it — that omission was the original false-green.
+
+THE PROOF, IN TWO HALVES (both required):
+  * INVARIANCE — the FULL sealed SCAC v10 census 4th block (roles + memberships
+    + ownership_rows, migration 0471's count=52 / sha256:345871 block, copied
+    verbatim) is byte-identical before and after migration 0475's policy.
+  * CONTRAST  — on the SAME cluster, ALTER ROLE carr_backup BYPASSRLS moves that
+    same block's digest; ALTER ROLE ... NOBYPASSRLS returns it. So the census is
+    bypass-sensitive but policy-insensitive: the policy path is safe precisely
+    where the naive BYPASSRLS path was not.
+
+CAPTURED RUN:
+  $ date -u: 2026-09-02T00:32:18Z
+  $ pg: pg_dump (PostgreSQL) 17.11 (Homebrew)
+
+  ok    at least one public/ops table has RLS (sanity: ops.work_request)
+  ok    RLS table ops.work_request has a permissive carr_backup read-all policy in migrations
+  ok    bin/backup-dump.sh dumps with --enable-row-security
+  ok    the pg_dump invocation itself carries --enable-row-security
+  --    CARR_LOCAL_PG_DSN present: running live disposable-Postgres proof
+  ..    full v10 census block BEFORE policy: count=27 digest=sha256:e5dcfea5551a9ff1f78d8b079c8340103b173505207bb63b7ab14ac28c4efdbb
+  ..    full v10 census block AFTER  policy: count=27 digest=sha256:e5dcfea5551a9ff1f78d8b079c8340103b173505207bb63b7ab14ac28c4efdbb
+  ok    migration 0475 creates carr_backup_full_read on ops.work_request
+  ok    FULL SCAC v10 census block (roles+memberships+ownership) is byte-IDENTICAL across the policy
+  ok    carr_backup did NOT gain BYPASSRLS (fix is a policy, not a role attribute)
+  ..    full v10 census block WITH BYPASSRLS: count=27 digest=sha256:dd24020836ebc44b57be6cbbe9bb845e274685e4f44f1f141d2cb813d1dff474
+  ok    CONTRAST: flipping carr_backup to BYPASSRLS MOVES the same census block digest
+  ok    CONTRAST: the count is unchanged by BYPASSRLS (only the attribute bit moves the hash)
+  ok    CONTRAST: restoring NOBYPASSRLS returns the census block to the identical digest
+  ..    row_security=off as carr_backup -> REFUSED: query would be affected by row-level security policy for table "work_request"
+  ok    row_security=off: carr_backup read of ops.work_request is REFUSED (the nightly failure)
+  ..    row_security=on  as carr_backup -> read 40 rows; true count=40; SIEP-keyed rows=40
+  ok    row_security=on: carr_backup reads ops.work_request without error
+  ok    row_security=on: carr_backup sees EVERY work_request row (parity, no silent omission)
+  ok    parity is non-vacuous: work_request has rows to omit
+  ok    SIEP-program rows are visible to the backup too
+  ok    scope sanity: ops.work_request is among the RLS tables
+  ok    coverage: carr_backup (row_security on) sees all rows of ops.work_request
+  ok    carr_backup is NOSUPERUSER
+  ok    carr_backup is NOCREATEDB
+  ok    carr_backup is NOCREATEROLE
+  ok    carr_backup is NOREPLICATION
+  ok    carr_backup is NOBYPASSRLS
+  ok    carr_backup can log in (unchanged)
+  ok    carr_backup is in no privilege bundle
+  ok    carr_backup holds zero write/DDL-adjacent table grants
+  ok    no '^carr_' app role carries BYPASSRLS (fix introduced none anywhere)
+
+backup-role-rls-coverage-selftest: all 26 checks passed
+
+exit=0 (all checks passed)

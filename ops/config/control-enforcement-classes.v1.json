@@ -1,7 +1,4 @@
 {
-  "schema_version": "carr-control-enforcement-classes-v1",
-  "why_this_file_exists": "ops.enforcement_control_catalog needs an enforcement_class per control, and rule-enforcement-map.json does not carry one. It is NOT added there because audits/guidance-situation-curation-review.v1.json pins that file by sha256 as the base inventory of a curation review that is still in review_state 'proposed'. Editing the map would invalidate a pending human review, and updating the recorded digest to match would assert a review that never happened. So the class lives here, beside the map rather than inside it, until that review is settled and the two can merge.",
-  "enforcement_class_is_a_property_of_the_control": "Deriving the class from the rules that cite a control was tried first and rejected: deal_guard and loop_guard both fail as 'transaction refusal' yet their rules were tagged differently, because a rule's enforcement_class describes what the RULE does while this describes how the CONTROL fires.",
   "control_enforcement_class": {
     "artifact_read": "stop_gate",
     "blocker_decider": "deny_gate",
@@ -11,11 +8,11 @@
     "chat_lint": "surfacing",
     "client_asset_packet": "deny_gate",
     "close_before_open": "deny_gate",
-    "cognition_token_admission": "transactional_schema",
     "commit_claims": "deny_gate",
     "completion_evidence": "stop_gate",
     "conduct_stop": "stop_gate",
     "context_rail": "stop_gate",
+    "control-plane-workflow-manifest": "deny_gate",
     "costar_lane": "deny_gate",
     "deal_guard": "transactional_schema",
     "delegation_names_model_and_effort": "deny_gate",
@@ -27,7 +24,6 @@
     "executor_tier": "deny_gate",
     "gate_edit": "deny_gate",
     "gate_integrity": "stop_gate",
-    "git_writer": "deny_gate",
     "glanceable_lead": "schema",
     "index_upkeep": "deny_gate",
     "lead_client_pair": "transactional_schema",
@@ -44,6 +40,7 @@
     "pack_delivery": "stop_gate",
     "path_hygiene": "deny_gate",
     "peer_broadcast": "deny_gate",
+    "pr_only_main_ruleset": "deny_gate",
     "record_home": "deny_gate",
     "record_research": "transactional_schema",
     "rule_shape": "transactional_schema",
@@ -52,7 +49,6 @@
     "settings_change": "deny_gate",
     "shared_rename_absence": "schema",
     "staged_gate_bless": "deny_gate",
-    "stale_claim": "stop_gate",
     "stale_count": "schema",
     "trigger_grant": "schema",
     "vault_salvage": "judgment_ambient",
@@ -66,7 +62,20 @@
   },
   "controls_absent_from_the_map": {
     "_note": "Live in ops.enforcement_control_catalog since migration 0194 and declared in no inventory until the parity gate caught them on its first run. Declared here so the catalog has one complete source; fold them into the map when the pending curation review is settled.",
+    "ci_gates": {
+      "_note": "Reconciled 2026-08-22: Production and staging carried implementation_ref 'ops/ci.sh gates class', prose naming a class inside a file rather than a path, so the reference could not resolve or be verified as tracked. Both databases now carry 'ops/ci.sh'; the class is named in test_ref and in the enforcement map already. The control was not locked by any active approved rule.",
+      "enforcement_class": "surfacing",
+      "failure_mode": "CI class failure \u2014 the gates class surfaces an enforcement-layer regression on every proposed change",
+      "implementation": [
+        "ops/ci.sh"
+      ],
+      "test": [
+        "ops/hermes-autonomy-check-selftest.py"
+      ]
+    },
     "human_authority_runtime": {
+      "enforcement_class": "transactional_schema",
+      "failure_mode": "transaction refusal \u2014 an authority-only verb reached by a non-authority runtime is refused at the boundary",
       "implementation": [
         "migrations/0161_control_plane_authority_boundary.sql",
         "mcp-server/src/mcp.js"
@@ -74,11 +83,11 @@
       "test": [
         "mcp-server/test/control-plane-authority-boundary.test.mjs",
         "ops/control-plane-authority-runtime-preflight-selftest.py"
-      ],
-      "failure_mode": "transaction refusal — an authority-only verb reached by a non-authority runtime is refused at the boundary",
-      "enforcement_class": "transactional_schema"
+      ]
     },
     "platform_metering_pre_dispatch": {
+      "enforcement_class": "deny_gate",
+      "failure_mode": "PreToolUse deny",
       "implementation": [
         "lib/platform_metering.py",
         "ops/platform-metering-gate.py",
@@ -88,31 +97,43 @@
         "ops/platform-metering-gate-selftest.py",
         "ops/platform-metering-policy-selftest.py",
         "ops/guard-selftest.py"
-      ],
-      "failure_mode": "PreToolUse deny",
-      "enforcement_class": "deny_gate"
+      ]
     },
-    "ci_gates": {
-      "implementation": [
-        "ops/ci.sh"
-      ],
-      "test": [
-        "ops/hermes-autonomy-check-selftest.py"
-      ],
-      "failure_mode": "CI class failure — the gates class surfaces an enforcement-layer regression on every proposed change",
-      "enforcement_class": "surfacing",
-      "_note": "Reconciled 2026-08-22: Production and staging carried implementation_ref 'ops/ci.sh gates class', prose naming a class inside a file rather than a path, so the reference could not resolve or be verified as tracked. Both databases now carry 'ops/ci.sh'; the class is named in test_ref and in the enforcement map already. The control was not locked by any active approved rule."
-    },
-    "control-plane-workflow-manifest": {
-      "implementation": [
-        "ops/config/control-plane-workflows.v1.json"
-      ],
-      "test": [
-        "ops/control-plane-selftest.py"
-      ],
-      "failure_mode": "Admission refusal — the manifest is the declared set of control-plane workflows, each naming a deterministic entrypoint and mode. A workflow that is not in it, or one that would reach for a model where the manifest declares a tested predicate, is refused rather than surfaced.",
+    "source_merge_eligibility": {
       "enforcement_class": "deny_gate",
-      "_note": "Declared 2026-08-22 after ops/control-catalog-parity-gate.py reported it live in Production and present in no inventory — the second control to be found this way, after ci_gates. Unlike that one, nothing needed reconciling: Production's row already carries both refs as real tracked paths, so this declaration matches the live row exactly (implementation_ref ops/config/control-plane-workflows.v1.json, test_ref ops/control-plane-selftest.py, class deny_gate, installed true, verified 2026-08-16). Seeded by migration 0148 alongside the active rule it backs, the one forbidding a cognition token to be spent on state, recurrence, routing, validation or any decision already expressible as a tested predicate. That rule is the code-first design test in force, and this control is how it is enforced rather than recited."
+      "failure_mode": "controller refuses merge and exposes no merge action",
+      "implementation": [
+        ".github/workflows/source-merge-controller.yml",
+        "mcp-server/src/engineering-runtime.js",
+        "mcp-server/src/work-request-intake.js",
+        "mcp-server/src/source-merge-policy.js",
+        "mcp-server/bin/run-source-merge.mjs",
+        "migrations/0470_source_merge_authority_projection.sql",
+        "ops/source-merge-authority-local-pg-gate.py"
+      ],
+      "test": [
+        "mcp-server/test/engineering-runtime.test.mjs",
+        "mcp-server/test/source-merge-policy.test.mjs",
+        "mcp-server/test/source-merge-migration.test.mjs",
+        "mcp-server/test/work-request-ready-plan.test.mjs",
+        "ops/local-pg-ci-selftest.py"
+      ]
+    },
+    "eval_receipt": {
+      "_note": "Carrying control for rule 6cbaa63a-be57-4c2e-955f-4ea7b5c0405d (every LLM-steering change ships an eval receipt), taught with enforcement_home=gate and carrying_control 'eval_receipt CI check'. Declared here rather than in rule-enforcement-map.json because audits/guidance-situation-curation-review.v1.json still pins the map by sha256 (review_state proposed). Fold it into the map with the other extras once that review settles.",
+      "enforcement_class": "deny_gate",
+      "failure_mode": "required CI check refuses the merge: a pull request that changes a surface in evals/surfaces.json without a valid evals/<surface>/receipt.json changed in the same PR, or a reasoned no-eval line in its body, turns ops/ci.sh --strict (gates class) red, and the main ruleset will not merge a red head",
+      "implementation": [
+        "ops/check-eval-receipt.py",
+        "ops/ci.sh",
+        "evals/surfaces.json"
+      ],
+      "test": [
+        "ops/check-eval-receipt-selftest.py"
+      ]
     }
-  }
+  },
+  "enforcement_class_is_a_property_of_the_control": "Deriving the class from the rules that cite a control was tried first and rejected: deal_guard and loop_guard both fail as 'transaction refusal' yet their rules were tagged differently, because a rule's enforcement_class describes what the RULE does while this describes how the CONTROL fires.",
+  "schema_version": "carr-control-enforcement-classes-v1",
+  "why_this_file_exists": "ops.enforcement_control_catalog needs an enforcement_class per control, while rule-enforcement-map.json binds active rules to controls. This separate catalog records control classes. When the active map changes, the proposed guidance curation review must bind the new map and manifest bytes without claiming approval of the proposal."
 }

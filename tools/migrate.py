@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """carr-system migrations runner (record layer, scaffolded 2026-07-30).
 
-Applies migrations/NNNN_*.sql in filename order, each in its own transaction,
-tracked in schema_migrations. Forward-only by design: a bad migration is
+Applies migrations/NNNN_*.sql in filename order, normally one transaction per
+file, tracked in schema_migrations. A small reviewed group may share one outer
+transaction when an authority-surface migration and its registry successor
+must become visible atomically. Forward-only by design: a bad migration is
 fixed by a NEW migration, never by editing an applied file (applied files'
 sha256 is recorded and re-checked, so drift is caught).
 
@@ -86,6 +88,30 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
     ),
 }
 
+# ── MIGRATIONS WHOSE INTERMEDIATE CATALOG MUST NEVER COMMIT ────────────────
+#
+# 0480 adds the Codex continuity writer surface. That correctly makes the
+# sealed SCAC v10 live catalog cease to be current; 0481 installs and activates
+# the exact v11 successor. ops.scac_policy_epoch_refresh() is a DEFERRABLE
+# constraint trigger on schema_migrations, so committing 0480 by itself asks
+# the old v10 snapshot to bless the intentionally-new surface and must fail.
+# The two reviewed files therefore share ONE runner-owned transaction: both
+# SQL bodies and both immutable ledger rows commit together, and the deferred
+# trigger observes only the final v11 state. A caller may not cut this group in
+# half with --through.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
+from registry_chain import registry_chain
+
+REGISTRY_CHAIN = registry_chain()
+ATOMIC_MIGRATION_GROUPS = tuple(tuple(group) for group in REGISTRY_CHAIN["atomic_groups"])
+STRICT_ATOMIC_MIGRATION_GROUPS = tuple(tuple(group) for group in REGISTRY_CHAIN["strict_atomic_groups"])
+
+
+FORBIDDEN_MIGRATION_FILENAMES = frozenset({
+    "0535_ready_plan_amendment.sql",
+    "0536_ready_plan_amendment_scac_successor.sql",
+})
+
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 # NNNN_name.sql, plus an OPTIONAL single lowercase letter after the number:
 # 0013a_name.sql. Widened 2026-08-13 for a defect that could not be fixed inside
@@ -108,6 +134,137 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 # and mcp-server/src/release.js store and display the string without extracting
 # a number from it, so widening here cannot desync a second reader.
 NAME_RE = re.compile(r"^\d{4}[a-z]?_[a-z0-9_]+\.sql$")
+OUTER_TRANSACTION_MIGRATION = "0339_"
+# Production's immutable ledger and the canonical schema snapshot already bind
+# these historical artifacts byte-for-byte. They predate enforcement of the
+# outer-transaction scanner on their merge lanes; allow only their exact
+# recorded digests so the scanner cannot become a general bypass.
+HISTORICAL_TRANSACTION_CONTROL_ARTIFACTS = {
+    "0344_demote_evidence_activation_bookkeeping.sql":
+        "50e2b885db6b92e0a24f0a90fad7b48449f347007d8683c27adf0a4be1a75def",
+    "0345_governance_queue_projection.sql":
+        "c1788dd8ee23d7a7a6dfc88b17d4a11c67a9ad5057c8bb97e3112035863be3ba",
+    "0348_pr_only_main_ruleset_control.sql":
+        "ab901c8e528109bb56375403f0ebb350758678079d7727c9ba24042b0d0bbcdb",
+    "0349_versioned_rule_amendment.sql":
+        "4fb76045cf8ce46ba793a90d0582e6b095a17ba63edf57e91c548e7850ba37f0",
+    "0351_legacy_rule_lifecycle_admission.sql":
+        "59439e1a12c035e61578b85c765d7bbd131bf555b95bbecd49c6d675b5c4d808",
+}
+# Reviewed migrations merged after the original SIEP branch was cut deliberately
+# keep explicit transactions around atomic control-plane changes and receipt
+# readbacks. Preserve those independently reviewed source artifacts exactly
+# rather than rewriting them during SIEP integration. These are separate from
+# the five Production-applied historical artifacts above: an unreviewed filename
+# or one-byte change still refuses before any SQL executes.
+REVIEWED_TRANSACTION_CONTROL_ARTIFACTS = {
+    "0363_rule_delivery_activation_digest_repin.sql":
+        "03133d0627cf63d2a0a2a7dd8a392065bc19ba17d56d0b2cfabd3dbccafdcb65",
+    "0382_standing_guidance_reader_boundary.sql":
+        "a6ffe5f29e9224f263b0c6a90c414b4828915a5ed3265e52e8fadbe31ef8c2bc",
+    "0383_control_plane_not_configured_state.sql":
+        "f0cb86f97fcd87db8412be1f4c36544fe40f1ba9e524182bb3cb3b9ad3148bfa",
+    "0387_control_plane_record_queue_priority_tiers.sql":
+        "ba2f9ce18e54f8ceca330a5478ad66d72b76bbc832aba9c20734ebe8a701310e",
+    "0425_disable_legacy_schedule_readback_grant.sql":
+        "f1b0f6677363c3a0463a30660b379544b9a7093867c8847c3453b149da17aaed",
+    "0426_withdraw_a_work_request_captured_in_error.sql":
+        "151eddaae36b60fd1a6f0ad43f9577c03381ebd11b17b9a9741269d93bd2d395",
+    "0427_tour_rights_projection_hardening.sql":
+        "00dd241ccf86bf379cc20aec22dfd0b852754bc30224bae39cb707d8e66729a2",
+    "0428_tour_property_identity_jurisdiction.sql":
+        "3c32933288ecf780ee3ea54bffeddb1df0a22bdf862c1487eea0f021bd682975",
+    "0429_tour_domain_route_cheat_sheet.sql":
+        "6b217caf48ce0742045a1d3093c5bd85727a4511dabe4e739d9d271a61bcc8e4",
+    "0430_tour_delivery_data_plane.sql":
+        "f04d685a6ae2ba124694ff11f6d88695bed25774290e6b2997c59ad9fd9049be",
+    "0431_completion_register_schema.sql":
+        "7886498e34f7874aa1f1ac2df931aefbe036eb73e013eb4e81fd02112f145f70",
+    "0450_canonical_ownership_lease_kernel.sql":
+        "2130de773f09f5dd8621cfe5add3f8939ddd1d48f06c5d9a6908e19375a57847",
+    "0451_assurance_evidence_acceptance_persistence.sql":
+        "f17f538bafd602c9d90b3b46fe3cc377b746b03b1d5fe070a5fb597af4d2013c",
+}
+TRANSACTION_CONTROL_RE = re.compile(
+    r"(?is)^\s*(?:(?:begin|commit|end|rollback|abort)\b|"
+    r"(?:start|prepare)\s+transaction\b)"
+)
+
+
+def contains_transaction_control(sql: str) -> bool:
+    """Detect top-level SQL transaction statements, ignoring quoted bodies.
+
+    Migrations contain PL/pgSQL ``begin``/``end`` inside dollar-quoted bodies;
+    those are not transaction control.  Conversely, psycopg accepts several
+    top-level statements on one line, so a line-oriented regex is unsafe.
+    This small lexer splits only on top-level semicolons after removing SQL
+    comments and quoted strings/identifiers.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    i = 0
+    block_depth = 0
+    quote: str | None = None
+    dollar_tag: str | None = None
+    while i < len(sql):
+        if dollar_tag is not None:
+            if sql.startswith(dollar_tag, i):
+                i += len(dollar_tag)
+                dollar_tag = None
+            else:
+                i += 1
+            continue
+        if block_depth:
+            if sql.startswith("/*", i):
+                block_depth += 1
+                i += 2
+            elif sql.startswith("*/", i):
+                block_depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if quote is not None:
+            if sql[i] == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:
+                    i += 2
+                else:
+                    quote = None
+                    i += 1
+            else:
+                i += 1
+            continue
+        if sql.startswith("--", i):
+            newline = sql.find("\n", i + 2)
+            i = len(sql) if newline < 0 else newline + 1
+            current.append(" ")
+            continue
+        if sql.startswith("/*", i):
+            block_depth = 1
+            i += 2
+            current.append(" ")
+            continue
+        if sql[i] in ("'", '"'):
+            quote = sql[i]
+            i += 1
+            current.append(" ")
+            continue
+        if sql[i] == "$":
+            match = re.match(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$", sql[i:])
+            if match:
+                dollar_tag = match.group(0)
+                i += len(dollar_tag)
+                current.append(" ")
+                continue
+        if sql[i] == ";":
+            statements.append("".join(current))
+            current = []
+            i += 1
+            continue
+        current.append(sql[i])
+        i += 1
+    statements.append("".join(current))
+    return any(TRANSACTION_CONTROL_RE.match(statement) for statement in statements)
 
 # ── DDL TIMEOUTS (added 2026-08-02, cold-session audit) ──────────────────────
 # WHY. Migrations are applied by hand against production Neon while a Cloudflare
@@ -165,10 +322,27 @@ def load_migrations() -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
     for p in sorted(MIGRATIONS_DIR.iterdir()):
         if p.suffix == ".sql":
+            if p.name in FORBIDDEN_MIGRATION_FILENAMES:
+                fail(f"stale WR122 migration filename is permanently refused: {p.name}")
             if not NAME_RE.match(p.name):
                 fail(f"bad migration filename (want NNNN_name.sql): {p.name}")
             sql = p.read_text()
-            out.append((p.name, sql, hashlib.sha256(sql.encode()).hexdigest()))
+            digest = hashlib.sha256(sql.encode()).hexdigest()
+            # SIEP-12 makes the migration file, its immutable ledger row, the
+            # sealed mutation-registry successor, and the resulting policy
+            # epoch one transaction. An internal COMMIT would expose schema
+            # with the old epoch before the runner records the file hash.
+            reviewed_transaction_digest = (
+                HISTORICAL_TRANSACTION_CONTROL_ARTIFACTS.get(p.name)
+                or REVIEWED_TRANSACTION_CONTROL_ARTIFACTS.get(p.name)
+            )
+            if p.name >= OUTER_TRANSACTION_MIGRATION and contains_transaction_control(sql) \
+                    and reviewed_transaction_digest != digest:
+                fail(
+                    f"{p.name} contains explicit transaction control; migrations from "
+                    f"{OUTER_TRANSACTION_MIGRATION} onward must use the runner's single transaction"
+                )
+            out.append((p.name, sql, digest))
     if not out:
         fail("no .sql files in migrations/")
     try:
@@ -209,7 +383,42 @@ def migrations_through(
         )
     selected = [item for item in pending if item[0] <= through]
     held_back = [item for item in pending if item[0] > through]
+    selected_names = {item[0] for item in selected}
+    held_names = {item[0] for item in held_back}
+    for group in ATOMIC_MIGRATION_GROUPS:
+        if selected_names.intersection(group) and held_names.intersection(group):
+            raise ValueError(
+                "--through target cuts reviewed atomic migration group: "
+                + ", ".join(group)
+                + ". Select through the final file so the intermediate authority "
+                  "catalog can never commit."
+            )
     return selected, held_back
+
+
+def migration_batches(
+    pending: list[tuple[str, str, str]],
+) -> list[list[tuple[str, str, str]]]:
+    """Return ordered transaction batches for an already-authorized prefix.
+
+    A complete pending reviewed group is one batch. A suffix whose earlier
+    member is already in the immutable ledger remains individually resumable;
+    this is the recovery shape for a database that predated the group rule.
+    """
+    by_first = {group[0]: group for group in ATOMIC_MIGRATION_GROUPS}
+    batches: list[list[tuple[str, str, str]]] = []
+    i = 0
+    while i < len(pending):
+        group = by_first.get(pending[i][0])
+        if group is not None:
+            candidate = pending[i:i + len(group)]
+            if tuple(item[0] for item in candidate) == group:
+                batches.append(candidate)
+                i += len(group)
+                continue
+        batches.append([pending[i]])
+        i += 1
+    return batches
 
 
 class AppliedMigrationLedgerError(ValueError):
@@ -256,6 +465,13 @@ def validate_applied_ledger(
         for name in applied
         if name in LEGACY_APPLIED_ALIASES
     )
+    for group in STRICT_ATOMIC_MIGRATION_GROUPS:
+        present = tuple(name for name in group if name in effective_applied)
+        if present and present != group:
+            raise AppliedMigrationLedgerError(
+                "partial strict atomic migration group is forbidden: expected "
+                + ", ".join(group) + "; found " + ", ".join(present)
+            )
     first_hole: str | None = None
     later_applied: list[str] = []
     for name, _sql, _digest in migrations:
@@ -350,62 +566,76 @@ def main() -> None:
                 fail("confirmation did not match host; nothing applied")
 
         print(f"lock_timeout: {LOCK_TIMEOUT}   statement_timeout: {STATEMENT_TIMEOUT}")
-        for name, sql, digest in pending:
+        for batch in migration_batches(pending):
+            staged: list[tuple[str, str]] = []
             with conn.cursor() as cur:
-                precondition = DATA_DEPENDENT_MIGRATIONS.get(name)
-                if precondition is not None:
-                    probe, inert_because = precondition
-                    cur.execute(probe)
-                    if cur.fetchone() is None:
-                        # RECORDED AS DISCHARGED, NOT SILENTLY SKIPPED. The row it
-                        # binds does not exist here, so the file has nothing to do
-                        # and its own proof would raise. The reason it is safe is
-                        # stated in the table beside it and is checkable, not
-                        # asserted.
-                        cur.execute(
-                            "insert into schema_migrations (filename, sha256) values (%s, %s)",
-                            (name, digest),
-                        )
-                        conn.commit()
-                        print(f"discharged (precondition absent) — {inert_because}")
-                        continue
-                print(f"applying {name} ...", end=" ", flush=True)
-                # SET LOCAL, not SET: scoped to THIS migration's transaction and
-                # reverted at commit, so one migration can never leak a timeout
-                # onto the next. It is re-issued per migration on purpose — a
-                # migration that resets the session must not silently disarm the
-                # guard for everything that follows it.
-                cur.execute(f"set local lock_timeout = '{LOCK_TIMEOUT}'")
-                cur.execute(f"set local statement_timeout = '{STATEMENT_TIMEOUT}'")
-                try:
-                    cur.execute(sql)
-                except psycopg.errors.LockNotAvailable:
-                    # Named explicitly so nobody debugs the migration. Nothing is
-                    # applied: this migration's transaction rolls back whole, and
-                    # every migration before it is already committed and recorded,
-                    # so a re-run picks up exactly here. Forward-only is intact.
-                    conn.rollback()
-                    fail(f"{name} could not acquire its lock within {LOCK_TIMEOUT} and was "
-                         "ABANDONED (nothing applied from this file).\n"
-                         "  This is the guard working, not a broken migration. Something else "
-                         "is holding a lock on the tables it touches — usually a long-running "
-                         "read from the Worker.\n"
-                         "  Check pg_stat_activity for the blocker, then just re-run: earlier "
-                         "migrations are already committed and will be skipped.\n"
-                         f"  To wait longer on purpose: CARR_MIGRATE_LOCK_TIMEOUT=30s")
-                except psycopg.errors.QueryCanceled:
-                    conn.rollback()
-                    fail(f"{name} exceeded statement_timeout ({STATEMENT_TIMEOUT}) and was "
-                         "ABANDONED (nothing applied from this file).\n"
-                         "  If this migration genuinely needs longer, raise the ceiling "
-                         "deliberately rather than removing it:\n"
-                         f"  CARR_MIGRATE_STATEMENT_TIMEOUT=30min python3 tools/migrate.py --apply")
-                cur.execute(
-                    "insert into schema_migrations (filename, sha256) values (%s, %s)",
-                    (name, digest),
+                for name, sql, digest in batch:
+                    precondition = DATA_DEPENDENT_MIGRATIONS.get(name)
+                    if precondition is not None:
+                        probe, inert_because = precondition
+                        cur.execute(probe)
+                        if cur.fetchone() is None:
+                            # RECORDED AS DISCHARGED, NOT SILENTLY SKIPPED. The
+                            # row it binds does not exist here, so the file has
+                            # nothing to do and its own proof would raise.
+                            cur.execute(
+                                "insert into schema_migrations (filename, sha256) values (%s, %s)",
+                                (name, digest),
+                            )
+                            staged.append((
+                                name,
+                                f"discharged (precondition absent) — {inert_because}",
+                            ))
+                            continue
+                    print(f"applying {name} ...", end=" ", flush=True)
+                    # SET LOCAL is scoped to the current batch transaction. It
+                    # is re-issued per file so a migration cannot disarm the
+                    # guard for its successor inside an atomic group.
+                    cur.execute(f"set local lock_timeout = '{LOCK_TIMEOUT}'")
+                    cur.execute(f"set local statement_timeout = '{STATEMENT_TIMEOUT}'")
+                    try:
+                        cur.execute(sql)
+                    except psycopg.errors.LockNotAvailable:
+                        conn.rollback()
+                        fail(f"{name} could not acquire its lock within {LOCK_TIMEOUT} and was "
+                             "ABANDONED (its whole transaction batch was rolled back).\n"
+                             "  This is the guard working, not a broken migration. Something else "
+                             "is holding a lock on the tables it touches — usually a long-running "
+                             "read from the Worker.\n"
+                             "  Check pg_stat_activity for the blocker, then just re-run: earlier "
+                             "batches are already committed and will be skipped.\n"
+                             f"  To wait longer on purpose: CARR_MIGRATE_LOCK_TIMEOUT=30s")
+                    except psycopg.errors.QueryCanceled:
+                        conn.rollback()
+                        fail(f"{name} exceeded statement_timeout ({STATEMENT_TIMEOUT}) and was "
+                             "ABANDONED (its whole transaction batch was rolled back).\n"
+                             "  If this migration genuinely needs longer, raise the ceiling "
+                             "deliberately rather than removing it:\n"
+                             f"  CARR_MIGRATE_STATEMENT_TIMEOUT=30min python3 tools/migrate.py --apply")
+                    cur.execute(
+                        "insert into schema_migrations (filename, sha256) values (%s, %s)",
+                        (name, digest),
+                    )
+                    staged.append((name, "ok"))
+                    if len(batch) > 1:
+                        print("staged")
+            try:
+                conn.commit()
+            except psycopg.Error as exc:
+                conn.rollback()
+                names = ", ".join(name for name, _sql, _digest in batch)
+                fail(
+                    f"commit refused for migration batch [{names}] and the whole batch was "
+                    f"rolled back: {exc}"
                 )
-            conn.commit()
-            print("ok")
+            for _name, outcome in staged:
+                if len(batch) == 1 and outcome == "ok":
+                    print("ok")
+                elif outcome != "ok":
+                    print(outcome)
+            if len(batch) > 1:
+                print("atomic migration group committed: "
+                      + ", ".join(name for name, _sql, _digest in batch))
         print("done")
 
 

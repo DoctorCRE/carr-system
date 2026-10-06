@@ -1,9 +1,9 @@
+import { escapeHtml as esc } from "./esc.js";
 import { createLeadBoardClient } from "./leads-client.js";
 
 const client = createLeadBoardClient();
 const state = { board: null, density: false, view: "board", filters: { search: "", owner: "", lane: "", stage: "" } };
 const $ = (id) => document.getElementById(id);
-const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 const stageKey = (stage) => stage?.slug || stage?.stage || "unassigned";
 
 // The server owns the stage order. This small fallback makes an unexpected
@@ -84,7 +84,7 @@ function leadCard(lead) {
   return `<article class="lead-card" id="lead-${esc(lead.id)}" data-freshness="${fresh.key}" tabindex="-1">
     <div class="lead-card-head"><div><h2 class="lead-name">${label(lead.name, "Unnamed lead")}</h2><p class="lead-place">${label(lead.specialty, "Specialty not captured")} · ${label([lead.city, lead.state].filter(Boolean).join(", "), "Place not captured")}</p></div><span class="lead-ref">${esc(identity)}</span></div>
     <div class="lead-signals"><span class="signal freshness"><i class="freshness-dot" aria-hidden="true"></i><strong>${esc(fresh.text)}</strong></span><span class="signal"><strong>Score ${label(lead.score, "—")}</strong></span><span class="signal${confidence.verify ? " verify" : ""}"><strong>${esc(confidence.text)}</strong></span><span class="signal stage-label"><strong>${esc(lead.stage_label || title(lead.stage))}</strong></span>${lead.suppressed ? '<span class="signal suppressed"><strong>Suppressed</strong></span>' : ""}${confidence.verify ? '<span class="signal verify"><strong>Verify</strong></span>' : ""}</div>
-    <div class="lead-meta"><span>Lane<b>${label(lead.lane)}</b></span><span>Owner<b>${label(lead.owner_label || lead.owner)}</b></span><span>Lease event<b>${label(lead.est_lease_event)}</b></span><span>Last touch<b>${dateLabel(lead.last_touch)}</b></span><span>Next action<b>${dateLabel(lead.next_action_date)}</b></span><span>Segment<b>${label(lead.segment)}</b></span></div>
+    <div class="lead-meta"><span>Lane<b>${label(lead.lane)}</b></span><span>Owner<b>${label(lead.owner_label || lead.owner)}</b></span><span>Lease event<b>${label(lead.est_lease_event)}</b></span><span>Last touch<b>${esc(dateLabel(lead.last_touch))}</b></span><span>Next action<b>${esc(dateLabel(lead.next_action_date))}</b></span><span>Segment<b>${label(lead.segment)}</b></span></div>
     <div class="lead-move"><label class="sr-only" for="stage-${esc(lead.id)}">Move ${esc(lead.name || identity)} to stage</label><select id="stage-${esc(lead.id)}" data-stage-select="${esc(lead.id)}"${locked ? " disabled" : ""}>${stageOptions}</select><button type="button" data-move-lead="${esc(lead.id)}" aria-label="Move ${esc(lead.name || identity)} to selected stage"${locked ? " disabled" : ""}>Move</button></div>${locked ? '<p class="stage-locked">Stage locked by suppression instruction. Review the record before changing it.</p>' : ""}
   </article>`;
 }

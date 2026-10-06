@@ -63,6 +63,20 @@ def turn(body, *, msg_id="11111111-1111-4111-8111-111111111111", seat="codex", s
             "origin_channel": origin_channel, "origin_actor": origin_actor}
 
 
+def test_room_writer_binds_nondefault_room_without_overriding_explicit_calls():
+    calls = []
+
+    def writer(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True}
+
+    bound = bridge.bind_room_writer(writer, "model-room")
+    bound(body="nonce", seat="claude")
+    bound(body="legacy", seat="claude", room="partner-line")
+    assert calls[0]["room"] == "model-room"
+    assert calls[1]["room"] == "partner-line"
+
+
 def test_strict_enqueue_and_bounds():
     parsed = queue_grammar.parse(turn(
         "@queue enqueue target=sol cap=read priority=P1 runtime=45m key=attest finish=review :: Attest PR 514\n"
@@ -80,6 +94,7 @@ def test_strict_enqueue_and_bounds():
         ("@queue enqueue target=sol cap=production :: nope", "capability_human_only"),
         ("@queue enqueue target=retired cap=read :: nope", "target_disabled"),
         ("@queue enqueue target=sol cap=read :: " + ("x" * 201), "title_invalid"),
+        ("@queue enqueue target=sol :: no capability", "field_required"),
     ]:
         outcome = queue_grammar.parse(turn(body), CATALOG)
         assert outcome.kind == "rejected", (body, outcome)
@@ -92,6 +107,16 @@ def test_shared_key_converges_and_source_id_deduplicates():
     replay = queue_grammar.parse(turn("@queue enqueue target=sol cap=read :: One"), CATALOG)
     assert first.value["idempotency_key"] == second.value["idempotency_key"] == "room:partner-line:same"
     assert replay.value["idempotency_key"] == "room:partner-line:11111111-1111-4111-8111-111111111111"
+
+
+def test_no_target_means_auto_and_a_named_target_is_kept():
+    routed = queue_grammar.parse(turn("@queue enqueue cap=read :: Shorten this"), CATALOG)
+    assert routed.kind == "enqueue" and routed.value["target"] == queue_grammar.AUTO_TARGET, routed
+    pinned = queue_grammar.parse(turn("@queue enqueue target=sol cap=read :: Attest PR 514"), CATALOG)
+    assert pinned.value["target"] == "sol", pinned
+    # Routing never widens authority: a human-only capability is refused before any target is picked.
+    human = queue_grammar.parse(turn("@queue enqueue cap=merge-approve :: Approve the merge"), CATALOG)
+    assert human.kind == "rejected", human
 
 
 def test_targets_and_status_parse_without_model():
@@ -147,6 +172,19 @@ def test_adapter_constructs_fixed_canonical_create_and_idempotency():
     assert "--parent" in argv and argv[argv.index("--parent") + 1] == "t_parent"
     body = argv[argv.index("--body") + 1]
     assert body.startswith("[CARR_QUEUE_META ") and '"cap":"read"' in body
+
+
+def test_adapter_normalizes_worker_bigint_sequence_to_integer_metadata():
+    seen = []
+    command = queue_grammar.parse(
+        turn("@queue enqueue target=sol cap=read :: Verify queue"), CATALOG).value
+    adapter = kanban_adapter.KanbanAdapter(
+        runner=lambda argv: seen.append(argv) or {"id": "t_queue0002", "created": True})
+    adapter.create(command, turn("ignored", seq="8522"), CATALOG["targets"]["sol"])
+    body = seen[0][seen[0].index("--body") + 1]
+    meta = json.loads(body.split("]", 1)[0][len("[CARR_QUEUE_META "):])
+    assert meta["source_seq"] == 8522
+    assert isinstance(meta["source_seq"], int)
 
 
 def test_catalog_exactly_allowlists_yellow_and_human_capabilities():
@@ -572,12 +610,14 @@ def test_disabled_target_reconciliation_is_idempotent_and_mutation_narrow():
 
 
 def main():
+    check("bridge writers stay on the room being polled", test_room_writer_binds_nondefault_room_without_overriding_explicit_calls)
     check("strict enqueue grammar and bounds", test_strict_enqueue_and_bounds)
     check("shared key and delivery idempotency", test_shared_key_converges_and_source_id_deduplicates)
     check("targets and status are model-free reads", test_targets_and_status_parse_without_model)
     check("server origin beats claimed human seat", test_server_origin_not_claimed_human_seat_governs_human_only_enqueue)
     check("browser humans use only the manual human lane", test_browser_human_can_create_only_manual_human_lane_work)
     check("adapter fixed canonical create", test_adapter_constructs_fixed_canonical_create_and_idempotency)
+    check("Worker bigint sequence normalizes to integer metadata", test_adapter_normalizes_worker_bigint_sequence_to_integer_metadata)
     check("catalog explicitly denies unreviewed capability grants", test_catalog_exactly_allowlists_yellow_and_human_capabilities)
     check("manual create is atomically blocked", test_manual_create_is_atomically_blocked_before_dispatch_can_see_it)
     check("retry reclaim uses only the canonical Hermes transition", test_adapter_reclaims_only_through_the_supported_hermes_transition)

@@ -36,6 +36,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 # Seconds between the polite TERM and the unconditional KILL. A process blocked
 # on a dead socket often will not act on TERM at all, and the chain cannot wait
@@ -91,12 +92,78 @@ def main(argv: list[str]) -> int:
     return 128 - rc if rc < 0 else rc
 
 
+def _descendants(root_pid: int) -> list[int]:
+    """Every live descendant of root_pid, found by walking the ps ppid tree.
+
+    WHY THE GROUP KILL BELOW IS NOT ENOUGH (2026-09-02, canary run
+    33634323225). A descendant that itself calls start_new_session — which
+    every NESTED with-timeout.py does, including the ones ops/ci.sh starts
+    for each gate selftest — leaves this child's process group, so killpg
+    never reaches it. When the gates pool timed out ci-selftest.py on a
+    starved hosted runner, its nested ci.sh runs survived the group kill,
+    kept writing to the run's shared throwaway Postgres, and broke the
+    migration class that ran next. The tree walk reaches what the group
+    cannot; the group kill stays because the tree is a snapshot and the
+    group also catches children forked between snapshot and signal.
+    ps is POSIX, present on the Mac and the ubuntu runners, and stdlib-only
+    is this file's standing constraint.
+    """
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,ppid="],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    children: dict[int, list[int]] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        try:
+            pid, ppid = int(parts[0]), int(parts[1])
+        except ValueError:
+            continue
+        children.setdefault(ppid, []).append(pid)
+    found: list[int] = []
+    frontier = [root_pid]
+    while frontier:
+        for kid in children.get(frontier.pop(), []):
+            found.append(kid)
+            frontier.append(kid)
+    return found
+
+
+def _descendants_alive(pids: list[int]) -> list[int]:
+    alive = []
+    for pid in pids:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            continue
+        alive.append(pid)
+    return alive
+
+
+def _signal_tree(pids: list[int], sig: int) -> None:
+    me = os.getpid()
+    for pid in pids:
+        if pid == me:
+            continue
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            continue
+
+
 def _terminate_group(proc: subprocess.Popen) -> None:
-    """TERM the child's process group, then KILL whatever is left."""
+    """TERM the child's group and descendant tree, then KILL whatever is left."""
+    tree = _descendants(proc.pid)
     try:
         pgid = os.getpgid(proc.pid)
     except OSError:
-        # Already reaped between the timeout firing and this call.
+        # The direct child is already reaped; escaped descendants may not be.
+        _signal_tree(tree, signal.SIGTERM)
+        time.sleep(min(GRACE_SECONDS, 2))
+        _signal_tree(_descendants_alive(tree), signal.SIGKILL)
         return
 
     # Refuse to signal our own group. This cannot happen while the Popen above
@@ -112,7 +179,8 @@ def _terminate_group(proc: subprocess.Popen) -> None:
     try:
         os.killpg(pgid, signal.SIGTERM)
     except OSError:
-        return  # group is already gone
+        pass  # group is already gone; the tree below may still hold escapees
+    _signal_tree(tree, signal.SIGTERM)
 
     try:
         proc.wait(timeout=GRACE_SECONDS)
@@ -133,7 +201,8 @@ def _terminate_group(proc: subprocess.Popen) -> None:
     try:
         os.killpg(pgid, signal.SIGKILL)
     except OSError:
-        return
+        pass
+    _signal_tree(_descendants(proc.pid) or tree, signal.SIGKILL)
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:

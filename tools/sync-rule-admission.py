@@ -8,6 +8,7 @@ import psycopg
 REPO=Path(__file__).resolve().parent.parent
 sys.path.insert(0,str(REPO))
 from lib.rule_admission import admission_contract, backfill_owns_row  # noqa:E402
+from lib.rule_delivery_activation import effective_map  # noqa:E402
 
 MAP=REPO/"ops"/"config"/"rule-enforcement-map.json"
 
@@ -19,10 +20,15 @@ def main()->int:
     args=parser.parse_args()
     dsn=os.environ.get("DATABASE_URL")
     if not dsn: raise SystemExit("DATABASE_URL is required")
-    data=json.loads(MAP.read_text(encoding="utf-8"))
-    scope_by_id={rid:scope for scope,ids in data["active_rule_ids"].items() for rid in ids}
     counts={"admitted":0,"needs_revision":0,"kept_approved":0,"kept_hand_authored":0}
     with psycopg.connect(dsn) as conn,conn.cursor() as cur:
+        cur.execute("select mode from ops.rule_delivery_policy where singleton")
+        policy=cur.fetchone()
+        if not policy:
+            raise RuntimeError("rule-delivery policy singleton is absent")
+        delivery_mode=str(policy[0])
+        data=effective_map(delivery_mode, MAP)
+        scope_by_id={rid:scope for scope,ids in data["active_rule_ids"].items() for rid in ids}
         # A RULE THAT ALREADY CARRIES A CONTRACT SOMEONE ELSE WROTE IS NOT THIS
         # TOOL'S TO REWRITE. Two shapes, learned against Production 2026-08-23:
         #
@@ -115,7 +121,8 @@ def main()->int:
         if set(matched)!=set(scope_by_id):
             raise RuntimeError(f"map/store active parity differs missing={sorted(set(scope_by_id)-set(matched))}")
         conn.commit()
-    print(json.dumps({"active_rules":len(rules),**counts},sort_keys=True))
+    print(json.dumps({"active_rules":len(rules),"rule_delivery_mode":delivery_mode,
+                      **counts},sort_keys=True))
     return 0
 
 if __name__=="__main__": raise SystemExit(main())

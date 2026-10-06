@@ -33,6 +33,7 @@ SUITES = (
     "tools/room-bridge/test_dispatch_unit.py",
     "tools/room-bridge/test_desk_start_unit.py",
     "tools/room-bridge/test_codex_live_unit.py",
+    "tools/room-bridge/test_claude_desktop_wire_unit.py",
     "tools/room-bridge/test_queue_unit.py",
     "tools/room-bridge/test_queue_projection_unit.py",
     "tools/room-bridge/test_queue_dispatch_unit.py",

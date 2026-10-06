@@ -1,0 +1,207 @@
+{
+  "schema_version": 2,
+  "control": "session_context_lifecycle_gate_v2",
+  "state_directory": "out/session-context-lifecycle",
+  "audit_log": "out/context-handoff.jsonl",
+  "dispatcher": {
+    "snapshot_schema": "session_context_dispatcher_snapshot_v1",
+    "freshness_seconds": 120,
+    "future_skew_seconds": 0,
+    "heartbeat_max_seconds": 60,
+    "recovery_history": "each applied source event is published as an immutable digest-linked record; the mutable task state must name the complete chain, and an event identity is permanently consumed after first apply",
+    "normalized_states": [
+      "RUNNING",
+      "IDLE",
+      "WAITING_ATTENTION",
+      "CAPACITY_EXHAUSTED",
+      "ERROR",
+      "TERMINAL"
+    ],
+    "waiting_attention_kinds": [
+      "AUTHORITY",
+      "APPROVAL",
+      "CREDENTIAL",
+      "EXTERNAL"
+    ],
+    "recoverable_capacity_codes": [
+      "CONTEXT_EXHAUSTED",
+      "TOKEN_BUDGET_EXHAUSTED",
+      "MODEL_CAPACITY_EXHAUSTED"
+    ]
+  },
+  "ownership_registry": {
+    "scope": "surface plus native identity",
+    "binding": "an atomic immutable registry claim binds each Claude session or Codex thread to exactly one task and activation-evidence digest before admission",
+    "lookup": "callbacks resolve exactly one O(1) identity-binding entry and validate only its bound task; unrelated task files are never scanned on a hook path",
+    "terminal_policy": "claims are permanent tombstones and are never released or reusable after terminal state"
+  },
+  "actions": [
+    "NOOP",
+    "ANNOUNCE",
+    "RECOVER_SAME_TASK",
+    "REFUSE"
+  ],
+  "reasons": [
+    "CONTEXT_HANDOFF_REQUIRED",
+    "CONTEXT_SIGNAL_UNAVAILABLE",
+    "CONTEXT_SIGNAL_AMBIGUOUS",
+    "CONTEXT_SIGNAL_INVALID",
+    "WINDOW_CONFIG_INVALID",
+    "HANDOFF_RECEIPT_MISSING",
+    "HANDOFF_RECEIPT_INVALID",
+    "SUCCESSOR_SURFACE_INVALID",
+    "SUCCESSOR_NOT_ACTIVE",
+    "SUCCESSOR_NOT_PINNED",
+    "TAKEOVER_NOT_VERIFIED",
+    "OWNERSHIP_MISMATCH",
+    "OWNERSHIP_MISSING",
+    "OWNERSHIP_DUPLICATE",
+    "LIFECYCLE_INVALID",
+    "RECOVERY_CAPACITY",
+    "RECOVERY_ERROR",
+    "RECOVERY_IDLE",
+    "RECOVERY_ACTIVE",
+    "RECOVERY_TERMINAL",
+    "RECOVERY_SNAPSHOT_STALE",
+    "RECOVERY_SNAPSHOT_INVALID",
+    "RECOVERY_WAITING"
+  ],
+  "surface_contracts": {
+    "claude": {
+      "events": [
+        "PostToolUse",
+        "PreCompact",
+        "Stop"
+      ],
+      "evidence_trust_boundary": "controller_callback",
+      "evidence_binding": "every nonterminal hook callback verifies logical session identity and a live readable transcript path; controller_callback_id is the native controller trust boundary; a provenance-verified historical terminal callback may no-op after its transcript is archived",
+      "native_evidence_fields": [
+        "session_id",
+        "transcript_path",
+        "controller_callback_id"
+      ],
+      "advisory_events": [
+        "PostToolUse",
+        "Stop"
+      ],
+      "receipt_only_event": "PreCompact",
+      "prose_injection_event": "SessionStart",
+      "context_stop_policy": "announce_only"
+    },
+    "codex": {
+      "adapter": "bare_cli",
+      "native_stop_hook": false,
+      "evidence_trust_boundary": "controller_capture",
+      "evidence_binding": "the CLI canonicalizes cwd to an absolute resolved path before immutable publication and verifies it against the invoking checkout at live admission; historical reads compare the immutable admitted bytes without reinterpreting them against a different reader worktree; logical thread identity, recorded owner surface, declaration-to-acceptance equality, and immutable digest linkage remain mandatory; the controller that invokes the bare CLI remains responsible for capturing status and pinnedIndex from the native Codex surface",
+      "native_evidence_fields": [
+        "thread_id",
+        "project_id",
+        "cwd",
+        "status",
+        "pinnedIndex",
+        "event_id"
+      ]
+    }
+  },
+  "surface_policies": {
+    "codex": {
+      "thresholds_percent": {
+        "dense_soft": 50,
+        "normal_soft": 55,
+        "hard": 70
+      },
+      "density": {
+        "risk_levels": [
+          "R3",
+          "R4",
+          "R5",
+          "R6"
+        ],
+        "generation_tool_calls": 20,
+        "distinct_mutated_paths": 8,
+        "worker_starts": 3
+      },
+      "model_windows": {
+        "gpt-6.1-sol": 258400,
+        "gpt-5.6-sol": 258400,
+        "gpt-5.6-terra": 258400,
+        "gpt-5.6-luna": 258400
+      },
+      "fallback_caps": {
+        "dense_soft": {
+          "invocations": 20,
+          "active_minutes": 75,
+          "cycles": 6
+        },
+        "normal_soft": {
+          "invocations": 24,
+          "active_minutes": 90,
+          "cycles": 8
+        },
+        "hard": {
+          "invocations": 40,
+          "active_minutes": 120,
+          "cycles": 12
+        },
+        "adjacent_activity_cap_seconds": 300
+      },
+      "stop_outcome": "verified_handoff"
+    },
+    "claude": {
+      "thresholds_percent": {
+        "dense_soft": 50,
+        "normal_soft": 55,
+        "hard": 70
+      },
+      "density": {
+        "risk_levels": [
+          "R3",
+          "R4",
+          "R5",
+          "R6"
+        ],
+        "generation_tool_calls": 20,
+        "distinct_mutated_paths": 8,
+        "worker_starts": 3
+      },
+      "model_windows": {
+        "claude-opus-4-1": 1000000,
+        "claude-opus-4-1-20250805": 1000000,
+        "claude-opus-5": 1000000,
+        "claude-sonnet-5": 1000000,
+        "claude-sonnet-5-5": 1000000,
+        "claude-haiku-4-5-20251001": 200000,
+        "claude-fable-5": 1000000,
+        "claude-fable-5-1": 1000000
+      },
+      "fallback_caps": {
+        "dense_soft": {
+          "invocations": 20,
+          "active_minutes": 75,
+          "cycles": 6
+        },
+        "normal_soft": {
+          "invocations": 24,
+          "active_minutes": 90,
+          "cycles": 8
+        },
+        "hard": {
+          "invocations": 40,
+          "active_minutes": 120,
+          "cycles": 12
+        },
+        "adjacent_activity_cap_seconds": 300
+      },
+      "stop_outcome": "announce_only",
+      "signal_failures": "announce_only",
+      "fallback_caps_outcome": "announce_only",
+      "control_errors": "announce_only",
+      "native_auto_compaction": true,
+      "headroom_notice": {
+        "basis": "absolute_measured_tokens",
+        "reserve": "p95_next_tool_burst_plus_maximum_response",
+        "outcome": "announce_only"
+      }
+    }
+  }
+}

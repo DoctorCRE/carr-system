@@ -1,0 +1,77 @@
+diff --git a/ops/config/rule-jit-triggers.v1.json b/ops/config/rule-jit-triggers.v1.json
+index f6ca1649..204591e6 100644
+--- a/ops/config/rule-jit-triggers.v1.json
++++ b/ops/config/rule-jit-triggers.v1.json
+@@ -5,7 +5,7 @@
+   "seeded_detector_rule_ids": 50,
+   "seeded_detector_triggers": 14,
+   "structural_extra_triggers": 2,
+-  "triggers": 146
++  "triggers": 147
+  },
+  "generated_from": {
+   "jev_triggers_sha256": "fe5a1593d9c602327ecd986158c5f77c31d704f8695f0952e81d15552a20ca9d",
+@@ -385,6 +385,18 @@
+    "source": "prompt_cue",
+    "trigger_id": "695e75487299"
+   },
++  {
++   "kind": "prompt_regex",
++   "packs": [
++    "delegation-council"
++   ],
++   "pattern": "\\b(?:independent|adversarial)\\s+(?:read-only\\s+)?(?:review(?:er)?|verif\\w+|check|pass)\\b|\\b(?:codex|grok)\\s+review\\b",
++   "rule_ids": [
++    "2b66211d"
++   ],
++   "source": "prompt_cue",
++   "trigger_id": "c1817ffc6b1e"
++  },
+   {
+    "kind": "prompt_regex",
+    "negative_pattern": "(?m)^[ \\t]*Last login:[^\\n]*",
+diff --git a/ops/rule-jit-compile.py b/ops/rule-jit-compile.py
+index 958f5eff..5be5004b 100644
+--- a/ops/rule-jit-compile.py
++++ b/ops/rule-jit-compile.py
+@@ -202,6 +202,16 @@ PROMPT_CUE_TRIGGERS: tuple[dict[str, Any], ...] = (
+         "packs": ["joe-comms"],
+         "rule_ids": ["49533583", "c66dc739"],
+     },
++    # A request for a verifier: "independent review", "adversarial review",
++    # "a Codex review". Rule 2b66211d binds the moment a checker is asked for
++    # (it must get fresh context, not the maker's conversation).
++    # evals/rule-delivery round 3.
++    {
++        "pattern": (r"\b(?:independent|adversarial)\s+(?:read-only\s+)?(?:review(?:er)?|"
++                    r"verif\w+|check|pass)\b|\b(?:codex|grok)\s+review\b"),
++        "packs": ["delegation-council"],
++        "rule_ids": ["2b66211d"],
++    },
+ )
+ 
+ 
+diff --git a/ops/rule-trigger-compile-selftest.py b/ops/rule-trigger-compile-selftest.py
+index 5bee1978..05ec174f 100644
+--- a/ops/rule-trigger-compile-selftest.py
++++ b/ops/rule-trigger-compile-selftest.py
+@@ -760,9 +760,18 @@ for prompt, rule_id in (
+         ("Just click my Carr.us@gmail account. The password is autofilled", "c66dc739"),
+         ("It appears that flash got stuck on test 6", "d9ce2b08"),
+         ("it didnt ask, it just said no such file", "d9ce2b08"),
+-        ("look in my email folder for sapala", "49533583")):
++        ("look in my email folder for sapala", "49533583"),
++        ("Give the already-merged two-line change an independent review.", "2b66211d"),
++        ("Adversarial read-only review of the PR that strips names from the tree.", "2b66211d"),
++        ("Get a Codex review on this PR before it goes to the orchestrator.", "2b66211d")):
+     check(f"committed cue delivers {rule_id} on its logged prompt",
+           rule_id in rtd.match(prompt, committed_rows or [], human=True), prompt[:40])
++for prompt in ("Review the doc for typos.", "Please review my calendar for Tuesday.",
++               "The independent contractor signed the lease."):
++    check("the verifier cue does not fire on an ordinary review or an unrelated 'independent'",
++          "2b66211d" not in [r for r, sources in rtd.match(
++              prompt, committed_rows or [], human=True).items() if "prompt_cue" in sources],
++          prompt[:40])
+ for banner in ("Last login: Thu Sep 24 11:01:21 on ttys001\nbooko@Joes-MacBook-Pro ~ % ls",
+                "the file to dells computer? or the command\n\n"
+                "Last login: Wed Sep 23 21:20:47 on ttys001\nbooko@J"):

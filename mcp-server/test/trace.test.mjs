@@ -26,6 +26,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   httpFailureClass,
+  isExpectedPolicyRefusal,
   rpcInternalErrorFailureClass,
   actorUnresolvedFailureClass,
   RPC_INTERNAL_ERROR_CODE,
@@ -98,6 +99,46 @@ test("rpcInternalErrorFailureClass: every ToolError-shaped JSON-RPC code is null
   // because it is the ONE code an uncaught exception can produce.
   for (const code of [-32601, -32600, -32602, 1, 0]) {
     assert.equal(rpcInternalErrorFailureClass(code), null);
+  }
+});
+
+test("policy/admission refusals do not become incidents, while same-verb runtime faults still do", () => {
+  const expected = [
+    ["set-work-shape-disposition", "sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged or triaged-to-ready transitions"],
+    ["set-work-shape-disposition", "sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, or triaged-to-ready transitions"],
+    ["activate-context-bundle", "context compilation tenant must match authenticated tenant context"],
+    ["issue-execution-envelope", "execution envelope requires an active conformance-passed environment provider binding"],
+    ["read-attempt-reliability", "attempt reliability is not visible to tenant"],
+    ["approve-rule", "rule approval refused: exact enforcement is not installed; missing {delegation_names_model_and_effort}"],
+    ["approve-rule", "exact registered controls must be implemented before approval"],
+  ];
+  for (const [verb, message] of expected) {
+    const error = new Error(message);
+    assert.equal(isExpectedPolicyRefusal(verb, error), true, `${verb} refusal must be recognized`);
+    assert.equal(rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, { verb, error }), null,
+      `${verb} refusal must not produce an incident class`);
+  }
+
+  const unexpected = [
+    ["set-work-shape-disposition", "sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape disposition, or triaged-to-ready transitions"],
+    ["set-work-shape-disposition", "sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, and triaged-to-ready transitions"],
+    ["approve-rule", "TypeError: Invalid URL string."],
+    ["complete-capability-project", "permission denied for table capability_verification"],
+    ["activate-context-bundle", "connection terminated unexpectedly"],
+    ["activate-context-bundle", "attempt reliability is not visible to tenant"],
+    ["read-attempt-reliability", "attempt reliability is not visible to tenant for attempt 123"],
+    ["read-attempt-reliability", "attempt reliability is not visible to tenant\npermission denied for table attempt"],
+    ["read-attempt-reliability", "permission denied for table attempt_reliability"],
+    ["read-attempt-reliability", "relation attempt_reliability does not exist"],
+    ["read-attempt-reliability", "malformed attempt id: expected UUID"],
+    ["read-attempt-reliability", "missing attempt id"],
+    ["approve-rule", "rule approval refused: exact enforcement is not installed; missing"],
+  ];
+  for (const [verb, message] of unexpected) {
+    const error = new Error(message);
+    assert.equal(isExpectedPolicyRefusal(verb, error), false, `${verb} unexpected fault must not match`);
+    assert.equal(rpcInternalErrorFailureClass(RPC_INTERNAL_ERROR_CODE, { verb, error }), "verb_internal_error",
+      `${verb} unexpected fault must remain an incident`);
   }
 });
 
@@ -607,6 +648,14 @@ test("scheduleFailureRecord: never schedules anything when DATABASE_URL_WRITER i
   const waited = [];
   scheduleFailureRecord({ CARR_ENV: "staging", CORRELATION_ID: A_CORR }, { waitUntil: (p) => waited.push(p) },
     { routeKey: "/mcp", failureClass: "http_5xx", detail: null });
+  assert.equal(waited.length, 0);
+});
+
+test("scheduleFailureRecord: a classifier-suppressed refusal does not even schedule a recorder promise", () => {
+  const waited = [];
+  scheduleFailureRecord({ DATABASE_URL_WRITER: "postgres://fake:fake@localhost.invalid/fake", CARR_ENV: "production" },
+    { waitUntil: (p) => waited.push(p) },
+    { routeKey: "mcp:tools/call:approve-rule", failureClass: null, detail: "expected control refusal" });
   assert.equal(waited.length, 0);
 });
 

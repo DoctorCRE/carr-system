@@ -14,13 +14,13 @@ edges:
 
 | from | kind | to |
 |---|---|---|
-| Joe Bookout *(no ref)* | can_introduce | Heather Lavallo V-CPA-036 |
-| Joe Bookout *(no ref)* | can_introduce | Josh Durst V-CPA-039 |
-| Joe Bookout *(no ref)* | can_introduce | Bruce Pardington V-ATT-015 |
-| Joe Bookout *(no ref)* | can_introduce | Justin Gay V-CPA-037 |
-| Joe Bookout *(no ref)* | can_introduce | Katherine Wilborn V-CPA-040 |
-| Joe Bookout *(no ref)* | can_introduce | Gary Tringas V-CPA-038 |
-| Joe Ed Jackson V-SUP-051 | knows | Dr. James Allen Tyrer *(no ref)* |
+| Joe Bookout *(no ref)* | can_introduce | Heather Lavigne V-CPA-036 |
+| Joe Bookout *(no ref)* | can_introduce | Josh Dunmore V-CPA-039 |
+| Joe Bookout *(no ref)* | can_introduce | Bruce Partridge V-ATT-015 |
+| Joe Bookout *(no ref)* | can_introduce | Justin Gale V-CPA-037 |
+| Joe Bookout *(no ref)* | can_introduce | Katherine Welby V-CPA-040 |
+| Joe Bookout *(no ref)* | can_introduce | Gary Trellis V-CPA-038 |
+| Joe Earl Jenkins V-SUP-051 | knows | Dr. James Allen Okafor *(no ref)* |
 
 "Joe can introduce you to X" is the highest-value edge class in the referral engine, and 100% of it
 was invisible on the one surface built to show relationships.
@@ -32,7 +32,7 @@ Two different causes produce the same NULL, and they want different fixes:
    `client.roster_ref`, `vendor.vendor_ref` and `lead.registry_ref`, so a party with no role has no
    ref and cannot be an endpoint. Dell is `P-1083` and is in the same position.
 2. **A link still pointing at a tombstone.** `party_link` `4aecf3b0-62ce-40d5-b23e-cf35e67e9514`
-   points at `P-0365`, which was merged into `P-0384` (Dr. James Allen Tyrer). The survivor carries
+   points at `P-0365`, which was merged into `P-0384` (Dr. James Allen Okafor). The survivor carries
    BOTH `C-155` and `L-208`; the loser carries no role at all, hence the NULL. Note that
    `v_party_graph` does not follow `merged_into` on either endpoint.
 
@@ -92,7 +92,7 @@ measured from this seat. They are the whole risk surface; do not apply the view 
    `from_party = to_party`. `build-graph-notes.py` already drops self-links silently, but
    `who-do-we-know`'s recursive walk should not be asked to hold a self-loop. Count them; consider
    filtering `where e.from_party <> e.to_party` in the view.
-3. **Duplicate edges created by resolution.** The Tyrer case is exactly this: after resolution,
+3. **Duplicate edges created by resolution.** The Okafor case is exactly this: after resolution,
    `V-SUP-051 knows P-0384` exists twice (once from the live link, once from the tombstone link).
    The graph pipeline dedups with `set()` and `find` shows both. Decide whether the view should
    `distinct` them, and remember `find`'s CONNECTIONS_CAP is a budget those duplicates spend.
@@ -120,11 +120,11 @@ migration and no deploy:
   `merged` flag, so a consumer can identify a NULL endpoint.
 - `pipelines/build-graph-notes.py` mints **partner nodes** for Joe and Dell into `Graph/partners/`
   and resolves a NULL endpoint by EXACT full name against the live half of `v_ref_index`, requiring
-  the name to map to exactly one live PARTY (not one row — Tyrer's two refs are one party, which is
+  the name to map to exactly one live PARTY (not one row — Okafor's two refs are one party, which is
   what makes that seventh edge resolvable). Tombstones are excluded from the index, so a link
   pointing at `P-0365` resolves to the survivor's `C-155`.
 
-Measured after the change: 31 edges in, 30 rendered (the Tyrer duplicate dedups), 0 unmapped,
+Measured after the change: 31 edges in, 30 rendered (the Okafor duplicate dedups), 0 unmapped,
 2 partner nodes, 7 endpoints recovered by name. Byte-diffed against the vault's existing `Graph/`
 tree: the ONLY difference is the new `partners/` folder.
 
@@ -138,9 +138,7 @@ name and the exact-match guard is a mitigation, not a preference. The partner no
 - **Palette.** Partner notes carry `#partner` (plus `#owner-joe` / `#owner-dell`).
   `.obsidian/graph.json` has no colour group for `partner`, so the two nodes render in the default
   colour. That is a vault file, not a repo file.
-- **Files-mode parity.** `tools/parity-records.py` diffs the whole `Graph/` tree between
-  `--files` and `--records` and requires it byte-identical. It is already MISMATCH before this
-  change, by design: the intro graph is records-only, so every vendor note carrying an edge already
-  differs between modes. `partners/` adds two more records-only paths to that existing set. If
-  graph parity is meant to be enforceable again, the gate needs to exclude the records-only intro
-  surface explicitly rather than pretend it does not exist.
+- **Files-mode parity.** Whole-tree equality between `--files` and `--records` is not
+  an acceptance criterion: the intro graph is records-only, so vendor notes carrying an edge
+  differ between modes. `partners/` adds records-only paths to that set. Any future parity
+  check must compare shared surfaces separately from the records-only intro surface.

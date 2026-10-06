@@ -23,7 +23,7 @@ Two notes on the mapping:
 ## Operating procedure
 1. When a prospect/client advances a deal stage, run the timeline for that stage.
 2. **Get the candidate vendors:** local Claude Code runs the repo copy against the record layer: `~/carr-system/.venv/bin/python ~/carr-system/shared/vendor_intro_for_stage.py "<CARR_ROOT>" "<stage>" [STATE]` (records mode by default, `--files` for the xlsx read; ORDER 29b repoint, 2026-08-05). Cloud/Dell sessions keep the vault copy's original form: `python3 vendor_intro_for_stage.py <path>/vendors.xlsx "<stage>" [STATE]` — returns the stage's categories with real candidates, **referral-active ones first (★)**, state-matched, excluding "Avoid", "Target — not yet met", and "Prospect (uncontacted)" (never introduce a vendor you or Dell haven't actually built a relationship with — untouched/hunt-found prospects don't qualify until promoted). Run in the cloud workspace against a fresh export of the sheet.
-3. **Match on top of that:** honor `introduction-rules.md` — vertical fit and state split (e.g., BofA vet lending Diehl=AL / Nieto=FL), and skip anyone the client already has (from the intake "Key players").
+3. **Match on top of that:** honor `introduction-rules.md` — vertical fit and state split (e.g., BofA vet lending Dahl=AL / Navarro=FL), and skip anyone the client already has (from the intake "Key players").
 4. **Log every intro** via the record layer — `link-parties` (or `links[]` on the touch's `log-activity`) — so the two-way referral relationship is tracked; deals.md's referral/reciprocity ledger renders from those rows (ORDER 39, 2026-08-01).
 
 ## Referral ethics — how to present multiple vendors (founder Q&A, Nov 2024)
@@ -37,7 +37,7 @@ Two notes on the mapping:
 ## How it wires into the rest of the system
 - **Intake** (`DNA/Clients/intake/`): the "Key players" section captures which vendors the client *already has* vs. *needs*. This timeline says *when* to fill each gap. A blank slot + the matching deal stage = an intro to make.
 - **Deal stages**: the four stages here track the deal's progression (roughly: engagement → touring → LOI/negotiation → closing), sitting under the pipeline status in the operator's own `DNA/Clients/clients-active.md`.
-- **The network (yours + Dell's, plus shared)**: the actual people come from `vendors.xlsx`; this only sequences the categories.
+- **Our vendor network**: the actual people come from `vendors.xlsx`; this only sequences the categories.
 - **Referral revenue**: every well-timed intro is a two-way referral relationship — the reason the network exists.
 
 ## Files

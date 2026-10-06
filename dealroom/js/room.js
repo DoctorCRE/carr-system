@@ -71,6 +71,20 @@ export const OUTER_RING_WINDOW_S = 24 * 60 * 60;
 export const SESSION_WINDOW_S = 2 * 60 * 60;
 export const SESSION_FADE_S = 45 * 60;
 
+// Doc's staff are moons, not peers (Joe, 2026-08-25, loop 528). Doc SUMMONS the
+// Hermes seats, so the sky has to say so: Doc, Claude and Codex are lead desks
+// on full inner discs, and every other named profile is drawn small and orbits
+// DOC'S NODE rather than the wire. What does not change: the wire stays the
+// centre of the sky, Joe keeps the left hemisphere and Dell the right. Putting
+// Doc in the middle would erase the partnership picture, which is the one thing
+// this stage exists to show.
+export const LEAD_PROFILE_KEYS = ["doc"];
+
+export function isDocStaffProfile(profileKey) {
+  const key = String(profileKey || "").toLowerCase();
+  return Boolean(key) && !LEAD_PROFILE_KEYS.includes(key);
+}
+
 export function seatColor(seat) {
   return SEAT_COLORS[String(seat || "").toLowerCase()] || SEAT_FALLBACK;
 }
@@ -598,6 +612,59 @@ export function authState(signedIn, known, total) {
  *  its controls are hidden there, and a hidden control that still filters is
  *  how the default view ends up saying "no conversation" over a suppressed
  *  one (the verifier reproduced exactly that). Seats and text still apply. */
+/* --------------------------------------------------- the stage's node list */
+
+// Pure, and deliberately so: the sky's hierarchy is the part most worth proving
+// without a browser, because a picture that says the wrong thing about who
+// summons whom is wrong silently (loop 528).
+export function stageNodes(model) {
+  const nodes = [];
+  const boundKeys = new Set();
+  for (const desk of model.desks) {
+    if (!desk.seat) continue;
+    // Named agent profiles (loop 520): where a profile is bound to a desk,
+    // the PROFILE NAME is the primary label and the model staffing it is
+    // the sub-line — the name persists, the model is visible detail.
+    const profile = desk.profile || null;
+    if (profile) boundKeys.add(profile.key);
+    // A desk staffed by one of Doc's staff profiles is a MOON, however it got
+    // its runtime: the hierarchy follows the profile, not the desk row.
+    const moon = Boolean(profile) && isDocStaffProfile(profile.key);
+    nodes.push({ id: `desk:${desk.name}`, ring: moon ? "moon" : "inner",
+      profileKey: profile ? profile.key : null, seat: desk.seat, partner: desk.partner,
+      label: profile ? profile.name : desk.name, state: desk.state, worker: false, seenAt: desk.seenAt,
+      auth: desk.auth,
+      sub: profile && profile.model
+        ? (desk.auth === false ? `${profile.model} · signed out` : profile.model)
+        : (desk.auth === false ? "signed out" : (desk.live ? "live wire" : "no live wire")) });
+  }
+  for (const orbiter of model.orbiters) {
+    nodes.push({ id: `seat:${orbiter.seat}`, ring: "outer", profileKey: null,
+      seat: orbiter.seat, partner: orbiter.partner,
+      label: orbiter.worker ? `${orbiter.seat} · worker` : orbiter.seat, state: orbiter.state,
+      worker: Boolean(orbiter.worker), seenAt: orbiter.seenAt, auth: null,
+      sub: orbiter.worker
+        ? (orbiter.worker.completedAt ? "worker · finished" : "worker · running")
+        : "seen on the wire" });
+  }
+  // Identities without a desk still exist — that is the point of a persistent
+  // name (Doc stays visible while parked, months before its runtime), and they
+  // keep their place in the hierarchy while parked: Doc on the inner ring with
+  // the lead desks, its staff as moons around it. Only the staffing state,
+  // carried in the sub-line, says the runtime is not there yet.
+  for (const profile of model.profiles || []) {
+    if (boundKeys.has(profile.key)) continue;
+    nodes.push({ id: `profile:${profile.key}`,
+      ring: isDocStaffProfile(profile.key) ? "moon" : "inner",
+      profileKey: profile.key, seat: profile.key,
+      partner: model.viewer, label: profile.name,
+      state: profile.status === "active" ? "healthy" : "dormant",
+      worker: false, seenAt: profile.at || 0, auth: null,
+      sub: profile.model || profile.status });
+  }
+  return nodes;
+}
+
 export function turnPasses(turn, filters) {
   if (filters.conversation) {
     if (!isSubstantiveTurn(turn)) return false;
@@ -632,6 +699,7 @@ function boot() {
     pending: new Map(),
     cursor: 0,
     oldestSeq: null,
+    latestSeqHint: null,
     model: null,
     viewer: "joe",
     csrf: null,
@@ -780,6 +848,16 @@ function boot() {
   // same connectors, same code: only the radii and the window change.
   const RINGS_WIDE = { inner: { rx: 250, ry: 70 }, outer: { rx: 470, ry: 100 } };
   const RINGS_TIGHT = { inner: { rx: 105, ry: 42 }, outer: { rx: 185, ry: 66 } };
+  // The moon orbit is measured from DOC'S node, not from the wire, so it is a
+  // small local ellipse rather than a third ring. Wide enough that a moon's
+  // pulse (r 11) clears Doc's (r 22) on the vertical, which is the tight axis.
+  const MOONS_WIDE = { rx: 58, ry: 36 };
+  const MOONS_TIGHT = { rx: 46, ry: 32 };
+  // A moon is drawn smaller again on the phone stage, because the tight orbit
+  // has to clear Doc's own pulse ring in a band a third the height.
+  const MOON_R = { pulse: 11, disc: 8, label: 19, badge: 7 };
+  const MOON_R_TIGHT = { pulse: 8, disc: 6, label: 15, badge: 5 };
+  const moonRadii = () => (isCompact() ? MOON_R_TIGHT : MOON_R);
   const VIEWBOX_WIDE = "0 6 1200 232";
   const VIEWBOX_TIGHT = "376 36 448 188";
   const nodeIndex = new Map();
@@ -796,9 +874,22 @@ function boot() {
     return { x: CENTER.x + ring.rx * Math.cos(angle), y: CENTER.y + ring.ry * Math.sin(angle) };
   }
 
+  function moonPoint(anchor, index, total) {
+    // A full sweep, starting above the node, so seven staff sit evenly around
+    // Doc instead of stacking on one side the way a 120° hemisphere slice would.
+    const moons = isCompact() ? MOONS_TIGHT : MOONS_WIDE;
+    const angle = (-90 + (360 * index) / Math.max(total, 1)) * (Math.PI / 180);
+    return { x: anchor.x + moons.rx * Math.cos(angle), y: anchor.y + moons.ry * Math.sin(angle) };
+  }
+
   function connectorPath(point) {
     const midX = (CENTER.x + point.x) / 2;
     return `M ${CENTER.x} ${CENTER.y} C ${midX} ${CENTER.y}, ${midX} ${point.y}, ${point.x} ${point.y}`;
+  }
+
+  function moonConnectorPath(anchor, point) {
+    // A tether to Doc, not to the wire — the whole point of the change.
+    return `M ${anchor.x.toFixed(1)} ${anchor.y.toFixed(1)} L ${point.x.toFixed(1)} ${point.y.toFixed(1)}`;
   }
 
   function drawCore() {
@@ -835,45 +926,6 @@ function boot() {
     }
   }
 
-  function stageNodes(model) {
-    const nodes = [];
-    const boundKeys = new Set();
-    for (const desk of model.desks) {
-      if (!desk.seat) continue;
-      // Named agent profiles (loop 520): where a profile is bound to a desk,
-      // the PROFILE NAME is the primary label and the model staffing it is
-      // the sub-line — the name persists, the model is visible detail.
-      const profile = desk.profile || null;
-      if (profile) boundKeys.add(profile.key);
-      nodes.push({ id: `desk:${desk.name}`, ring: "inner", seat: desk.seat, partner: desk.partner,
-        label: profile ? profile.name : desk.name, state: desk.state, worker: false, seenAt: desk.seenAt,
-        auth: desk.auth,
-        sub: profile && profile.model
-          ? (desk.auth === false ? `${profile.model} · signed out` : profile.model)
-          : (desk.auth === false ? "signed out" : (desk.live ? "live wire" : "no live wire")) });
-    }
-    for (const orbiter of model.orbiters) {
-      nodes.push({ id: `seat:${orbiter.seat}`, ring: "outer", seat: orbiter.seat, partner: orbiter.partner,
-        label: orbiter.worker ? `${orbiter.seat} · worker` : orbiter.seat, state: orbiter.state,
-        worker: Boolean(orbiter.worker), seenAt: orbiter.seenAt, auth: null,
-        sub: orbiter.worker
-          ? (orbiter.worker.completedAt ? "worker · finished" : "worker · running")
-          : "seen on the wire" });
-    }
-    // Identities without a desk still exist — that is the point of a persistent
-    // name (Doc stays visible while parked, months before its runtime). They
-    // ride the outer ring, dormant, with their staffing state as the sub-line.
-    for (const profile of model.profiles || []) {
-      if (boundKeys.has(profile.key)) continue;
-      nodes.push({ id: `profile:${profile.key}`, ring: "outer", seat: profile.key,
-        partner: model.viewer, label: profile.name,
-        state: profile.status === "active" ? "healthy" : "dormant",
-        worker: false, seenAt: profile.at || 0, auth: null,
-        sub: profile.model || profile.status });
-    }
-    return nodes;
-  }
-
   let stageLayout = "";
 
   function renderStage(model) {
@@ -903,8 +955,12 @@ function boot() {
     nodeLayer.replaceChildren();
     nodeIndex.clear();
 
+    // Moons are placed LAST and separately, because their orbit is measured from
+    // Doc's node — which does not have a position until the rings are laid out.
+    const moons = nodes.filter((node) => node.ring === "moon");
     const buckets = { "left:inner": [], "left:outer": [], "right:inner": [], "right:outer": [] };
     for (const node of nodes) {
+      if (node.ring === "moon") continue;
       const hemisphere = String(node.partner).toLowerCase() === "dell" ? "right" : "left";
       buckets[`${hemisphere}:${node.ring}`].push({ ...node, hemisphere });
     }
@@ -925,6 +981,28 @@ function boot() {
         nodeIndex.set(node.id, { node, point, path });
       });
     }
+
+    // Doc's anchor: whichever node currently carries the doc profile, desk-bound
+    // or parked. If Doc is not on the sky at all its staff would have nothing to
+    // orbit, so they fall back to the wire's outer ring — visible and honest,
+    // rather than silently dropped.
+    const docAnchor = [...nodeIndex.values()].find((entry) => entry.node.profileKey === "doc") || null;
+    moons.forEach((node, index) => {
+      const point = docAnchor
+        ? moonPoint(docAnchor.point, index, moons.length)
+        : ringPoint(String(node.partner).toLowerCase() === "dell" ? "right" : "left",
+            rings().outer, index, moons.length);
+      const path = svg("path", { class: `stage-connector${docAnchor ? " is-moon" : " is-outer"}`,
+        d: docAnchor ? moonConnectorPath(docAnchor.point, point) : connectorPath(point),
+        "data-node": node.id });
+      // Moons ride the INNER depth group with Doc: parallax must move a moon and
+      // the node it orbits by the same amount, or the staff drift off their star.
+      const ring = docAnchor ? "inner" : "outer";
+      groups[ring].connectors.appendChild(path);
+      groups[ring].nodes.appendChild(nodeElement(node, point));
+      nodeIndex.set(node.id, { node, point, path });
+    });
+
     connectors.append(groups.inner.connectors, groups.outer.connectors);
     nodeLayer.append(groups.inner.nodes, groups.outer.nodes);
   }
@@ -938,15 +1016,25 @@ function boot() {
     drift.style.setProperty("--drift-period", `${45 + (hash % 31)}s`);
     drift.style.setProperty("--drift-delay", `-${hash % 40}s`);
 
-    const group = svg("g", { class: `stage-node${node.ring === "outer" ? " is-outer" : ""}`,
+    const moon = node.ring === "moon";
+    const group = svg("g", { class: `stage-node${node.ring === "outer" ? " is-outer" : ""}${moon ? " is-moon" : ""}`,
       tabindex: "0", role: "button", "data-node": node.id });
     group.style.setProperty("--node-seat", seatColor(node.seat));
     group.style.setProperty("--node-halo", partnerHalo(node.partner));
 
-    group.appendChild(svg("circle", { class: "stage-node-pulse", r: 22, "data-state": node.state }));
-    group.appendChild(svg("circle", { class: "stage-node-disc", r: 17 }));
+    // Size carries the hierarchy: a lead desk is a full disc, a staff seat Doc
+    // summons is a moon. Eight same-size discs was the lie this replaces.
+    const mr = moonRadii();
+    group.appendChild(svg("circle", { class: "stage-node-pulse", r: moon ? mr.pulse : 22, "data-state": node.state }));
+    group.appendChild(svg("circle", { class: "stage-node-disc", r: moon ? mr.disc : 17 }));
     if (node.worker) {
       group.appendChild(svg("rect", { class: "stage-node-worker", x: -5, y: -5, width: 10, height: 10, rx: 1 }));
+    } else if (moon) {
+      // A moon's disc is too small to hold text, but colour is never the only
+      // channel — the name goes UNDER the moon instead of inside it.
+      const label = svg("text", { class: "stage-node-glyph stage-moon-name", y: mr.label });
+      label.textContent = String(node.label || node.seat || "?").slice(0, 14).toLowerCase();
+      group.appendChild(label);
     } else {
       // The full seat name, not an initial: claude and codex were both a "C",
       // and a picture that needs prior knowledge to disambiguate is not a
@@ -955,7 +1043,8 @@ function boot() {
       glyph.textContent = String(node.seat || "?").slice(0, 7).toLowerCase();
       group.appendChild(glyph);
     }
-    group.appendChild(svg("circle", { class: "stage-node-badge", cx: 14, cy: -13, r: 4 }));
+    group.appendChild(svg("circle", { class: "stage-node-badge",
+      cx: moon ? mr.badge : 14, cy: moon ? -mr.badge : -13, r: moon ? 2.5 : 4 }));
     if (node.auth === false) {
       const badge = svg("text", { class: "stage-node-glyph", y: 30 });
       badge.textContent = "⛓";
@@ -1872,7 +1961,26 @@ function boot() {
 
   async function poll() {
     try {
-      const payload = await fetchTurns(state.cursor, PAGE_SIZE);
+      // Loop #521: the first poll used to fetch from seq 0 (the OLDEST page),
+      // so the health strip derived its cycle-age tile from a stale window and
+      // showed red for minutes after every page load. When the cursor is still
+      // at the initial value, jump straight to the present: read the newest
+      // full page instead of the oldest one. History stays reachable through
+      // Load earlier.
+      const initialFetch = state.cursor === 0;
+      const from = initialFetch
+        ? Math.max(0, (state.latestSeqHint ?? 0) - PAGE_SIZE)
+        : state.cursor;
+      const payload = await fetchTurns(from, PAGE_SIZE);
+      if (Number.isFinite(Number(payload.latest_seq))) {
+        state.latestSeqHint = Number(payload.latest_seq);
+        if (initialFetch) {
+          // First response arrived with the present: drop any turns below the
+          // window we actually wanted so the panel never renders the old span.
+          const cutoff = Math.max(0, Number(payload.latest_seq) - PAGE_SIZE);
+          payload.turns = (payload.turns || []).filter((t) => Number(t.seq) > cutoff);
+        }
+      }
       if (payload.actor?.slug) state.viewer = String(payload.actor.slug).toLowerCase();
       if (payload.csrf_token) state.csrf = payload.csrf_token;
       $("composerInput").placeholder = `Speak into the room as ${PARTNER_LABEL[state.viewer] || "a partner"}…`;

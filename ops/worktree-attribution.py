@@ -53,6 +53,16 @@ import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "ops"))
+from git_env import scrubbed_env                               # noqa: E402
+
+# EVERY git call here runs with the location variables scrubbed. Git exports
+# GIT_DIR to every hook, and this runs inside ops/githooks/pre-push. Inherited,
+# GIT_DIR makes `git -C <peer> status` read the PUSHING tree's index and HEAD
+# against the PEER's working directory, so every file the push adds reads as
+# " D" in whichever peer is listed first. That is how a brand-new
+# ops/hook-interpreter-pin-selftest.py was pinned on carr-system-wt-headroom
+# ("uncommitted there (D)"), a tree that never had it.
 
 
 def main_worktree():
@@ -68,7 +78,8 @@ def main_worktree():
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            cwd=REPO, capture_output=True, text=True, timeout=20)
+            cwd=REPO, env=scrubbed_env(), capture_output=True, text=True,
+            timeout=20)
         if out.returncode == 0 and out.stdout.strip():
             return pathlib.Path(out.stdout.strip()).parent
     except (OSError, subprocess.SubprocessError):
@@ -83,7 +94,8 @@ MAX_HASH_BYTES = 2 * 1024 * 1024
 
 
 def _run(args, cwd=None):
-    return subprocess.run(args, cwd=str(cwd or REPO), capture_output=True,
+    return subprocess.run(args, cwd=str(cwd or REPO), env=scrubbed_env(),
+                          capture_output=True,
                           text=True, timeout=20)
 
 
@@ -141,7 +153,7 @@ def dirty_paths(tree, paths):
         out = subprocess.run(
             ["git", "-C", tree, "status", "--porcelain", "-z",
              "--untracked-files=all", "--"] + list(paths),
-            capture_output=True, text=True, timeout=20)
+            env=scrubbed_env(), capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         return {}
     if out.returncode != 0:

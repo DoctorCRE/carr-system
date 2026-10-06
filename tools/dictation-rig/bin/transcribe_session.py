@@ -22,8 +22,11 @@ For each track present, this script:
   1. Converts CAF -> 16kHz mono WAV via /usr/bin/afconvert into a temp dir.
   2. Runs /opt/homebrew/bin/whisper-cli against the WAV with the CARR
      vocabulary prompt (tools/dictation-rig/vocab-prompt.txt) and JSON output.
-  3. Shifts every segment's offsets by that track's start_offset_ms so both
-     tracks land on one shared clock, and tags the track's speaker.
+  3. Asks the on-device diarizer (speaker_split.py) who spoke when within the
+     track, so several voices on one channel get separate per-recording
+     labels. Any diarizer failure leaves the channel label in place.
+  4. Shifts every segment's offsets by that track's start_offset_ms so both
+     tracks land on one shared clock, and tags each segment's speaker.
 Segments from both tracks are then merged, sorted by start time, and written
 to the session directory only as private transcript.json. The JSON retains
 speaker labels, timestamps, consent metadata, and every transcribed segment.
@@ -52,6 +55,7 @@ from pathlib import Path
 from typing import Any, Callable, TypedDict
 
 import post_call
+import speaker_split
 
 # --- constants ---------------------------------------------------------
 
@@ -222,8 +226,20 @@ def resolve_model(log: LogFunc) -> Path:
 
 
 def load_prompt() -> str:
+    # vocab-prompt.txt is tracked and carries only generic industry terms and
+    # place names (WR-000049: this repo is public, so no client roster in the
+    # tracked tree). vocab-local.txt, gitignored, is the per-machine layer
+    # with real client/practice/person names — same directory, loaded and
+    # appended when present so dictation quality is unchanged; absent when
+    # missing rather than an error, since a fresh clone has no local vocab yet.
     prompt_path = Path(__file__).resolve().parent.parent / "vocab-prompt.txt"
-    return prompt_path.read_text(encoding="utf-8").strip()
+    text = prompt_path.read_text(encoding="utf-8").strip()
+    local_path = prompt_path.with_name("vocab-local.txt")
+    if local_path.exists():
+        local_text = local_path.read_text(encoding="utf-8").strip()
+        if local_text:
+            text = f"{text} {local_text}" if text else local_text
+    return text
 
 
 # --- audio pipeline ------------------------------------------------------
@@ -300,7 +316,7 @@ def run_whisper(
 
 
 def shift_and_tag(
-    raw_segments: list[RawSegment], offset_ms: int, speaker: str
+    raw_segments: list[RawSegment], offset_ms: int, speakers: list[str]
 ) -> list[Segment]:
     return [
         {
@@ -309,7 +325,7 @@ def shift_and_tag(
             "speaker": speaker,
             "text": raw.text,
         }
-        for raw in raw_segments
+        for raw, speaker in zip(raw_segments, speakers)
     ]
 
 
@@ -338,6 +354,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
 
     all_segments: list[Segment] = []
     missing_tracks: list[str] = []
+    split_tracks: list[str] = []
 
     with tempfile.TemporaryDirectory(prefix="carr-transcribe-") as tmp_str:
         tmp_dir = Path(tmp_str)
@@ -360,11 +377,22 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
                 missing_tracks.append(label)
                 continue
 
-            tagged = shift_and_tag(raw_segments, offset_ms, speaker)
-            log(f"OK track {label}: {len(tagged)} segment(s), offset_ms={offset_ms}")
+            turns = speaker_split.run_diarizer(wav_path, tmp_dir, log)
+            speakers = speaker_split.label_segments(raw_segments, turns, speaker, label)
+            distinct = len(set(speakers))
+            if distinct > 1:
+                split_tracks.append(label)
+            tagged = shift_and_tag(raw_segments, offset_ms, speakers)
+            log(
+                f"OK track {label}: {len(tagged)} segment(s), offset_ms={offset_ms}, "
+                f"speakers={distinct}"
+            )
             all_segments.extend(tagged)
 
     merged_segments = sorted(all_segments, key=lambda seg: seg["start_ms"])
+    speaker_method = "separate audio channels; no third-party voiceprint"
+    if split_tracks:
+        speaker_method += f"; {'+'.join(split_tracks)}: {speaker_split.METHOD_NOTE}"
 
     transcript: TranscriptJson = {
         "engine": ENGINE_LABEL,
@@ -373,7 +401,7 @@ def process_session(session_dir: Path, log: LogFunc) -> None:
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "consent": consent,
         "speaker_labels": speaker_labels,
-        "speaker_method": "separate audio channels; no third-party voiceprint",
+        "speaker_method": speaker_method,
         "segments": merged_segments,
     }
     write_outputs(session_dir, transcript)

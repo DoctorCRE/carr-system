@@ -70,7 +70,7 @@ OUTREACH = (r"send|call|calling|email|e-mail|follow[ -]?up|following up|nudge|"
 #
 # THE WINDOW ALLOWS PERIODS, and that is not laziness. The first version excluded
 # them to stop a match running across a sentence boundary, which silently missed
-# the live case this check was written for: "Send Dr. Randy Ramsey (L-221) the
+# the live case this check was written for: "Send Dr. Randall Kessler (L-221) the
 # buyer advisory" — the period in the honorific ended the clause four characters
 # in. Real loop rows are full of "Dr.", and no punctuation rule separates an
 # abbreviation from a sentence end. The distance cap does the clause-locality
@@ -90,7 +90,7 @@ BENIGN = re.compile(
 
 
 # The person's name as written immediately before the ref, which is how these
-# rows read: "Send Dr. Randy Ramsey (L-221, Jackson MS surgeon...)". Needed
+# rows read: "Send Dr. Randall Kessler (L-221, Jackson MS surgeon...)". Needed
 # because `find` searches by NAME and returns nothing for a bare ref — the first
 # version of this lookup asked it for "L-221", got an empty answer, and read that
 # emptiness as "no client link", which is how the false positive survived.
@@ -113,9 +113,9 @@ def is_carve_out(ref: str, repo: str, line: str = "") -> bool | None:
     """Does this lead ref belong to somebody who is ALSO a client with a deal?
 
     THE FALSE POSITIVE THIS EXISTS FOR, 2026-08-15. The first version of this
-    check flagged loop 338 — "Send Dr. Randy Ramsey (L-221) the buyer advisory" —
+    check flagged loop 338 — "Send Dr. Randall Kessler (L-221) the buyer advisory" —
     and a session baselined it as a known violation. Opening the RECORD showed
-    Ramsey holds both a lead row and a client row (C-199) with a live deal, The
+    Kessler holds both a lead row and a client row (C-199) with a live deal, The
     Enclave Investment Purchase, phase research, owner joe. That makes the row a
     dated follow-up on a real deal, which is precisely the carve-out rule
     17ffd587 writes into itself. The render said "lead"; the record said

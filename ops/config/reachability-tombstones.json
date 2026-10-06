@@ -15,6 +15,20 @@
       "marked_on": "2026-08-23",
       "reason": "The PR #529 shape. Nothing outside ops/calendar-prebrief-activation-selftest.py names it, and that selftest reads the script as TEXT to assert on its contents rather than running it — coverage of the file, not of the installation. The job it installs is running, so the installer did run once by hand; there is no door that would run it again on a second machine.",
       "reopen_when": "a runbook, a bin/ door or a scheduled task names it as the way this job gets installed — the same correction bin/sync-rule-admission-prod.sh was for tools/sync-rule-admission.py."
-  }
-]
+    },
+    {
+      "lane": "launchd",
+      "entry": "ops/launchd/com.carr.repo-hygiene-janitor.plist",
+      "marked_on": "2026-09-09",
+      "reason": "R07 deliberately ships this LaunchAgent as a disabled, uninstalled, triggerless definition for later review; the accepted source scope forbids adding it to the intended-loaded services manifest or installing/enabling it without a separate exact live-effect packet.",
+      "reopen_when": "a separately reviewed and explicitly authorized R07 live-effect packet permits scheduler installation/activation; in that same source change, declare the plist in ops/config/services.json and remove this tombstone."
+    },
+    {
+      "lane": "launchd",
+      "entry": "ops/launchd/com.carr.resource-collector.plist",
+      "marked_on": "2026-09-24",
+      "reason": "DoctorCRE V5-UX-C06's local capacity/model-route collector ships this LaunchAgent as a disabled, uninstalled, definition-only file, the same posture ops/launchd/com.carr.repo-hygiene-janitor.plist already carries: no StartInterval/RunAtLoad trigger key, and no ops/config/services.json entry, because registering the recurring cadence and its ops.service mapping is a separate, later decision this slice does not make.",
+      "reopen_when": "a separately reviewed and explicitly authorized live-effect packet registers the recurring cadence; in that same source change, declare the plist in ops/config/services.json and remove this tombstone."
+    }
+  ]
 }

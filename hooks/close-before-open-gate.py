@@ -212,6 +212,13 @@ def _is_side_quest(path, cwd):
 
 def check(tool, ti, cwd):
     """Return a denial reason string, or None to allow."""
+    if tool in ("apply_patch", "functions.apply_patch"):
+        body = ti if isinstance(ti, str) else (ti.get("patch") or ti.get("input") or "")
+        for path in re.findall(r"^\*\*\* Add File: (.+)$", body, re.M):
+            reason = check("Write", {"file_path": path}, cwd)
+            if reason:
+                return reason
+        return None
     path = ti.get("file_path") or ti.get("filePath") or ""
     if not path:
         return None

@@ -58,6 +58,56 @@ carr_load_routine_db_env() {
   done < "$env_file"
 }
 
+# carr_require_sourceable_db_env CALLER [FILE]
+# Refuse to let a caller `source` a credential file the shell cannot parse.
+#
+# THIS IS FOR THE CALLERS THAT STILL DO `set -a; . db.env`.  They do not want
+# carr_load_routine_db_env above — that one is deliberately narrow and loads only
+# the keys a routine names, which is the right shape for an unattended job and
+# the wrong shape for a script that needs whatever happens to be in the file.
+# What those callers DO need is the failure to be legible.
+#
+# On 2026-08-20 CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL was written into
+# db.env unquoted, from outside tools/rotate-credential.py and its quoting.  Its
+# `&channel_binding=require` is a background operator to zsh, so the source died
+# on a parse error and took all five keys in the file with it.  Under `set -eu`
+# that aborts the caller at rc=126 before it can log anything.  All a session saw
+# was `.../db.env:10: parse error near `&'` — text that names neither the script
+# it killed nor what that file is for, so bin/migrate-prod.sh, the one sanctioned
+# door to production migrations, read as a broken script.
+#
+# It read as INTERMITTENT too: every one of those callers guards the source on
+# NEON_API_KEY being unset, so a caller that already had it exported skipped the
+# file and worked.  Aug 26 has both clean applies and a session stuck at the
+# source line.
+#
+# ONE COPY, because of the rule that a manual path and an automated path doing
+# the same job must be the same code (a8c55a47) — seven inlined copies of this
+# is six chances for the wording to drift.  That rule was itself taught off this
+# very file: db.env is named in its body as the config with two parsers and two
+# opposite quoting contracts, which cost two days of silent outage in August.
+#
+# `zsh -n` parses and runs NOTHING: no connection, no expansion, no value
+# printed.  The probe output is captured and never echoed — zsh quotes a token
+# from the offending line and every value in that file is a credential — so only
+# the line number is reported.  78 is EX_CONFIG: ran, found no usable credential,
+# changed nothing, said so.
+carr_require_sourceable_db_env() {
+  local caller="$1" env_file="${2:-$HOME/.config/carr/db.env}" probe line
+  [ -f "$env_file" ] || return 0
+  probe="$(zsh -n "$env_file" 2>&1)" && return 0
+  line="$(print -r -- "$probe" | sed -n '1s/^[^:]*:\([0-9][0-9]*\):.*/\1/p')"
+  print -ru2 -- "$caller: STOPPED. Nothing was read and nothing was changed."
+  print -ru2 -- "$caller: $env_file — the credential file this script sources —"
+  print -ru2 -- "$caller: does not parse as shell at line ${line:-?}. zsh aborts the whole file"
+  print -ru2 -- "$caller: at the first bad line, so EVERY key in it is lost, not just that one."
+  print -ru2 -- "$caller: Almost always an unquoted connection string: the '&' before"
+  print -ru2 -- "$caller: channel_binding is a background operator to the shell."
+  print -ru2 -- "$caller: Fix: single-quote the whole value, as the other keys are."
+  print -ru2 -- "$caller: Then: zsh -n $env_file   (silence means fixed)"
+  return 78
+}
+
 # Runs a routine child with only the declared database capabilities.  Other
 # credentials must be loaded by that child's own narrow adapter, never inherited
 # from a broad db.env source.

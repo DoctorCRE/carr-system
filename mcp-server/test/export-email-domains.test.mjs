@@ -51,14 +51,14 @@ test("the verb exists and is READ-ONLY — a write here would defeat its purpose
 
 test("returns domains only — an email address cannot leave through this verb", async () => {
   const out = await verb.handler(conn({
-    v_export_clients: ["gulfcoastpelvichealth.com", "example-dental.com"],
-    v_export_leads: ["baysidefamilymed.com"],
+    v_export_clients: ["example-pelvichealth.com", "example-dental.com"],
+    v_export_leads: ["example-familymed.com"],
   }));
   assert.equal(out.ok, true);
   for (const d of out.domains)
     assert.ok(!d.includes("@"), `"${d}" looks like an address, not a domain`);
   assert.deepEqual(out.domains,
-    ["baysidefamilymed.com", "example-dental.com", "gulfcoastpelvichealth.com"]);
+    ["example-dental.com", "example-familymed.com", "example-pelvichealth.com"]);
 });
 
 test("the union is deduplicated across both books", async () => {

@@ -19,7 +19,7 @@ FOR EACH RECORD, run the deep-dive research the standing rule requires (it is in
 CONTACT INFO — GET THE REACHABLE ONES. Joe: "you need to get contact info where it is available too (email and cell phone, not office phone)." A direct email and a CELL number are what let him actually reach someone; an office line reaches a front desk and is close to useless for this business. Record office numbers only when nothing better exists, and LABEL them as office so nobody mistakes one for a direct line. If a cell or personal email cannot be found from open sources, say so plainly rather than filling the field with the switchboard.
 
 HARD RULES:
-- NEVER edit an identity field on research alone. Propose corrections with evidence; Joe applies them. This system merged the wrong Beasley once — an import welded Jenna Beasley to Jeff Beasley DMD, two different people.
+- NEVER edit an identity field on research alone. Propose corrections with evidence; Joe applies them. This system merged the wrong Castillo once — an import welded Jenna Castillo to Jeff Castillo DMD, two different people.
 - A near-match on a similar name is CONTAMINATION, not confirmation. When two candidates are plausible, report both and pick neither.
 - Vendor category: if the right type is not already in `vendor_category`, propose a NEW category rather than forcing a fit. Joe: "vendor type should never be misc. if they are a rare type they deserve their own new category so we can recall that data in the future without missing anyone." There is deliberately no catch-all.
 - Record WHEN each field was verified. Title and company change (promotions, job moves), so an old verification is unverified, not fact.

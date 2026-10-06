@@ -10,9 +10,37 @@ from __future__ import annotations
 from typing import Any
 
 import execution_contract as contract
-from evaluation_rubrics import rubric_for
 import design_kernel
 import policy_learning
+
+
+WORKFLOW_RUBRICS = {
+    "workflow:job-passport": {
+        "rubric_id": "rubric:job-passport-visual",
+        "stages": {"typed_receipt_ingestion", "freshness_cas_selection", "projection", "visual_interaction_accessibility", "evidence_promotion_display"},
+        "critical_dimensions": {"receipt_integrity", "freshness_integrity", "visual_accessibility", "visual_comprehension", "telemetry_truth", "layout_authority_separation"},
+    },
+    "workflow:claude-desktop-readonly": {
+        "rubric_id": "rubric:claude-desktop-readonly",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"native_hook_attribution", "receipt_integrity"},
+    },
+    "workflow:codex-desktop-readonly": {
+        "rubric_id": "rubric:codex-desktop-readonly",
+        "stages": {"typed_receipt_ingestion", "freshness_cas_selection", "projection"},
+        "critical_dimensions": {"adapter_configuration_binding", "freshness_integrity"},
+    },
+    "workflow:hermes-orchestration": {
+        "rubric_id": "rubric:hermes-orchestration",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"profile_staffing_separation", "handoff_checkpoint"},
+    },
+    "workflow:grok-x-native-retrieval": {
+        "rubric_id": "rubric:grok-x-native-retrieval",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"x_native_provenance", "retrieval_evidence_binding"},
+    },
+}
 
 
 class EvalPortfolioError(contract.ContractError):
@@ -133,7 +161,7 @@ def validate_eval_portfolio(raw: Any, projection: Any | None = None) -> dict[str
     workflow = _exact(value["workflow"], WORKFLOW_FIELDS, "evaluation workflow rubric")
     for field in ("workflow_id", "rubric_id", "rubric_version"):_id(workflow[field], f"evaluation workflow {field}")
     for field in ("rubric_digest", "case_set_digest"): _digest(workflow[field], f"evaluation workflow {field}")
-    rubric = rubric_for(workflow["workflow_id"])
+    rubric = WORKFLOW_RUBRICS.get(workflow["workflow_id"])
     if rubric is None or rubric["rubric_id"] != workflow["rubric_id"]:
         raise EvalPortfolioError("evaluation workflow/rubric is not registered")
     policy = _exact(value["policy"], POLICY_FIELDS, "evaluation policy")
@@ -363,6 +391,30 @@ def cost_curve_gate(portfolio: Any) -> list[dict[str, Any]]:
         output.append({"comparison_id": comparison["comparison_id"], "promotion_state": state, "blocked_dimensions": blockers,
                        "baseline": baseline["telemetry"], "candidate": candidate["telemetry"]})
     return output
+
+
+def critical_dimension_blockers(dimension_results: Any) -> list[str]:
+    """Name every critical dimension that blocks, whatever any overall score did.
+
+    The same no-aggregate rule the portfolio applies, exposed for callers that
+    hold dimension rows but not a whole portfolio (ops/check-eval-receipt.py,
+    the LLM-steering eval receipt). A critical dimension blocks when it failed,
+    was blocked, or regressed against baseline. Rows are validated against
+    DIMENSION_FIELDS; extra measurement fields are the caller's to strip.
+    """
+    if not isinstance(dimension_results, list) or not dimension_results:
+        raise EvalPortfolioError("eval result needs named dimensions, not an aggregate")
+    blockers, seen = [], set()
+    for raw in dimension_results:
+        row = _exact(raw, DIMENSION_FIELDS, "eval dimension result"); _id(row["dimension_id"], "eval dimension id")
+        if row["dimension_id"] in seen: raise EvalPortfolioError("eval dimensions cannot duplicate")
+        seen.add(row["dimension_id"]); _outcome(row["status"], "eval dimension status")
+        if not isinstance(row["critical"], bool): raise EvalPortfolioError("eval dimension critical flag is invalid")
+        if row["direction_vs_baseline"] not in DIRECTIONS: raise EvalPortfolioError("eval dimension direction is invalid")
+        _refs(row["evidence_refs"], "eval dimension evidence_refs")
+        if row["critical"] and (row["status"] in {"failed", "blocked"} or row["direction_vs_baseline"] == "regressed"):
+            blockers.append(row["dimension_id"])
+    return blockers
 
 
 def _active_case(value: dict[str, Any], case: dict[str, Any]) -> bool:

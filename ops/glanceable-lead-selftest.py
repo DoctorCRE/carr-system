@@ -78,7 +78,7 @@ for label, line in [
     # because the period in "Dr." is what the first version of the clause window
     # broke on.
     ("send a document to a lead, honorific and all",
-     "| 338 | joe | Send Dr. Randy Ramsey (L-902) the buyer advisory on The Enclave."),
+     "| 338 | joe | Send Dr. Randall Kessler (L-902) the buyer advisory on The Palisade."),
     ("call a lead", "| 12 | joe | Call L-98 about the Milton startup this week."),
     ("follow up with a lead", "| 40 | joe | Follow up with L-77, no answer last time."),
     ("email a lead", "| 41 | joe | Email L-55 the intro packet."),
@@ -94,16 +94,16 @@ for label, line, fname in [
      "| 83 | joe | Registry L-004 stamp (7/30) owed to the next guarded writer.",
      "open-loops.md"),
     ("THE CARVE-OUT: a dated follow-up on a real DEAL",
-     "| 83 | joe | 2026-08-12 Gulf Coast Pelvic Floor (C-112) — follow up on the draft lease.",
+     "| 83 | joe | 2026-08-12 Harborline Pelvic Therapy (C-112) — follow up on the draft lease.",
      "open-loops.md"),
     ("a client follow-up with no lead reference at all",
-     "| 90 | joe | Call Dr. Stokes about the Oxford markup before the 20th.",
+     "| 90 | joe | Call Dr. Stroud about the Oxford markup before the 20th.",
      "open-loops.md"),
     ("the same outreach row on the BACKLOG, which is read on cadence",
-     "| 338 | joe | Send Dr. Randy Ramsey (L-221) the buyer advisory.",
+     "| 338 | joe | Send Dr. Randall Kessler (L-221) the buyer advisory.",
      "open-loops-backlog.md"),
     ("a lead mentioned as the SOURCE of something, not a task",
-     "| 44 | joe | The Enclave advisory came out of the L-221 intake, filed for reuse.",
+     "| 44 | joe | The Palisade advisory came out of the L-221 intake, filed for reuse.",
      "open-loops.md"),
     ("a superseded row naming a lead",
      "| 45 | joe | Renumbered from L-19; the row it replaced is closed, not abandoned.",
@@ -113,14 +113,14 @@ for label, line, fname in [
     check(f"silent on: {label}", rc == 0, out[:260])
 
 # ── THE CARVE-OUT, and the false positive that produced it ─────────────────
-# On 2026-08-15 this check flagged loop 338 — "Send Dr. Randy Ramsey (L-221) the
+# On 2026-08-15 this check flagged loop 338 — "Send Dr. Randall Kessler (L-221) the
 # buyer advisory" — and a session baselined it as a known violation. The RECORD
-# said Ramsey holds a client row (C-199) and a live deal, The Enclave Investment
+# said Kessler holds a client row (C-199) and a live deal, The Palisade Investment
 # Purchase. That makes the row a dated follow-up on a real deal, which rule
 # 17ffd587 writes into itself as permitted. The render said lead; the record said
 # client with a deal; only one of those is the answer.
-LIVE_ROW = ("| 338 | joe | 2026-08-13 Send Dr. Randy Ramsey (L-221, Jackson MS "
-            "surgeon) the buyer advisory on The Enclave.")
+LIVE_ROW = ("| 338 | joe | 2026-08-13 Send Dr. Randall Kessler (L-221, Jackson MS "
+            "surgeon) the buyer advisory on The Palisade.")
 
 rc, out = scan(LIVE_ROW, assume="carveout")
 check("a lead who ALSO holds a client record or live deal is the carve-out",
@@ -148,7 +148,7 @@ _mod = _ilu.module_from_spec(_spec)
 sys.modules["glanceable_lead_check"] = _mod
 _spec.loader.exec_module(_mod)
 check("the person's name is extracted from the row, since a bare ref finds nothing",
-      _mod.person_for(LIVE_ROW) == "Dr. Randy Ramsey",
+      _mod.person_for(LIVE_ROW) == "Dr. Randall Kessler",
       repr(_mod.person_for(LIVE_ROW)))
 check("...and the outreach verb is not mistaken for part of the name",
       "Send" not in (_mod.person_for(LIVE_ROW) or ""),

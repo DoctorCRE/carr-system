@@ -53,7 +53,8 @@ CORPUS = os.path.join(REPO, "corpus")
 SET_FILE = os.path.join(CORPUS, "corpus-set.tsv")
 MANIFEST = os.path.join(CORPUS, "manifest.json")
 
-VAULT = os.environ.get("CARR_VAULT") or "/Users/booko/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI"
+VAULT = os.environ.get("CARR_VAULT") or os.path.join(
+    os.path.expanduser("~"), "Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI")
 
 # Stop rules from the order: this is a TEXT corpus.
 MAX_BYTES = 5 * 1024 * 1024

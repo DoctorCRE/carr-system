@@ -72,7 +72,7 @@ def fixture(tombstones=None):
     # alpha is registered globally, beta is registered by the project file,
     # orphan is registered nowhere. helper_mod is imported by alpha; stray_mod
     # is imported by nothing.
-    write(root, "hooks/alpha-gate.py", "import helper_mod\nprint('alpha')\n")
+    write(root, "hooks/alpha-gate.py", "import helper_mod\nfrom hooks.qualified_mod import VALUE\nprint('alpha')\n")
     write(root, "hooks/beta-gate.py", "print('beta')\n")
     write(root, "hooks/orphan-gate.py", "print('orphan')\n")
     # THE DISPATCHER SHAPE, and it is here because the check's first draft
@@ -82,6 +82,7 @@ def fixture(tombstones=None):
     write(root, "hooks/dispatched-gate.py", "print('dispatched')\n")
     write(root, "hooks/runner-gate.py", "print('runner')\n")
     write(root, "hooks/helper_mod.py", "VALUE = 1\n")
+    write(root, "hooks/qualified_mod.py", "VALUE = 1\n")
     write(root, "hooks/stray_mod.py", "VALUE = 2\n")
     write(root, "ops/config/hooks.json", json.dumps({"hooks": {"PreToolUse": [
         {"matcher": "Bash", "hooks": [
@@ -214,6 +215,8 @@ def main():
               "hooks/stray_mod.py" in entries(payload, "hook"), repr(found))
         check("an imported helper module is not a finding",
               "hooks/helper_mod.py" not in found, repr(found))
+        check("a qualified hook import reaches its helper module",
+              "hooks/qualified_mod.py" not in found, repr(found))
         check("undeclared plist is a finding",
               "ops/launchd/com.carr.undeclared.plist" in entries(payload, "launchd"),
               repr(found))

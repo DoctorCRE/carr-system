@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="DoctorCRE clients and vendors">
+  <title>Clients · DoctorCRE</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/dealroom-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/css/workspace.css">
+  <link rel="stylesheet" href="/css/workspace-business.css">
+  <link rel="stylesheet" href="/css/doc-panel.css">
+</head>
+<body>
+  <!-- data-panel-background marks everything the record panel COVERS when the
+       phone layout takes it full screen. The script makes exactly these regions
+       inert while it is a dialog, so keyboard and screen-reader focus cannot
+       walk underneath it; on a desktop the panel sits beside them and none of
+       this applies. -->
+  <a class="skip" href="#main" data-panel-background>Skip to records</a>
+  <header class="topbar" data-panel-background>
+    <a class="brand" href="/" aria-label="DoctorCRE Home"><span class="brand-mark">C</span><span>DoctorCRE <small>workspace</small></span></a>
+    <nav class="primary-nav" aria-label="Primary navigation">
+      <a href="/">Home</a>
+      <a href="/leads">Leads</a>
+      <a href="/deals">Deals</a>
+      <a id="navClients" href="/clients">Clients</a>
+      <a id="navVendors" href="/vendors">Vendors</a>
+    </nav>
+    <details class="nav-more">
+      <summary aria-label="More, including operations">More</summary>
+      <div class="nav-more-panel">
+        <p class="nav-more-heading">Operations</p>
+        <a href="/system-work.html">System work</a>
+        <a href="/room.html">Observatory</a>
+      </div>
+    </details>
+  </header>
+
+  <main id="main" class="shell business-shell">
+    <section class="hero business-hero" aria-labelledby="pageTitle" data-panel-background>
+      <div>
+        <p class="eyebrow"><a class="back-home" href="/">&larr; Home</a> · <span id="viewerWorkspace">Partner workspace</span></p>
+        <h1 id="pageTitle">Clients</h1>
+        <p class="intro" id="pageIntro">Everyone the team works with. Search, filter, and open one to see what is on the record.</p>
+      </div>
+      <div class="hero-meta" aria-label="Status">
+        <span class="status-pill"><span id="healthOrb" class="status-orb loading" aria-hidden="true"></span> <span id="healthLabel">Checking…</span></span>
+        <span id="observedAt" class="observed">Checking…</span>
+      </div>
+    </section>
+
+    <section class="business-controls" aria-labelledby="controlsTitle" data-panel-background>
+      <h2 class="visually-hidden" id="controlsTitle">Search and filter</h2>
+      <form id="filterForm" class="filter-form glass" novalidate>
+        <div class="filter-row">
+          <div class="field field-search">
+            <label for="searchInput">Search</label>
+            <input id="searchInput" name="q" type="search" autocomplete="off" spellcheck="false" maxlength="80" placeholder="Name or reference" aria-describedby="searchHint">
+            <p class="field-hint" id="searchHint">Looks through names and reference codes. Up to 80 characters.</p>
+          </div>
+          <div class="field" data-field="a">
+            <label for="filterA" id="filterALabel">Status</label>
+            <select id="filterA" name="a"><option value="">Any status</option></select>
+          </div>
+          <div class="field" data-field="b">
+            <label for="filterB" id="filterBLabel">Client type</label>
+            <select id="filterB" name="b"><option value="">Any client type</option></select>
+          </div>
+          <div class="field" data-field="c">
+            <label for="filterC" id="filterCLabel">Pipeline</label>
+            <select id="filterC" name="c"><option value="any">Any status</option></select>
+          </div>
+          <div class="field">
+            <label for="sortSelect">Sort</label>
+            <select id="sortSelect" name="sort">
+              <option value="name">Name (A–Z)</option>
+              <option value="recent">Recently updated</option>
+            </select>
+          </div>
+        </div>
+        <div class="filter-row filter-row-actions">
+          <div class="scope-switch" id="scopeSwitch" role="group" aria-label="Record scope">
+            <button type="button" class="scope-option on" data-scope="team" aria-pressed="true"><span>Team</span><small>Joe and Dell</small></button>
+            <button type="button" class="scope-option" data-scope="mine" aria-pressed="false"><span>My work</span><small>Recorded as mine</small></button>
+          </div>
+          <p class="scope-note" id="scopeNote">Showing everyone's. Switch to My work for the ones recorded as yours.</p>
+          <div class="filter-actions">
+            <button type="submit" class="action primary-action" id="applyFilters">Apply</button>
+            <button type="button" class="action secondary-action" id="resetFilters">Reset</button>
+          </div>
+        </div>
+      </form>
+      <div id="chipBar" class="chip-bar" aria-label="Active filters"></div>
+    </section>
+
+    <div id="noticeRegion" class="notice-region" role="status" aria-live="polite" data-panel-background></div>
+
+    <section class="business-body" aria-labelledby="resultsTitle">
+      <div class="result-column" data-panel-background>
+        <div class="result-heading">
+          <h2 id="resultsTitle">Results</h2>
+          <p class="result-summary" id="resultSummary" tabindex="-1">Checking…</p>
+        </div>
+        <div id="listRegion" class="list-region" aria-busy="true" aria-describedby="resultSummary">
+          <ol class="record-list" id="recordList">
+            <li class="record-skeleton"><span class="skeleton-line"></span><span class="skeleton-line short"></span></li>
+            <li class="record-skeleton"><span class="skeleton-line"></span><span class="skeleton-line short"></span></li>
+            <li class="record-skeleton"><span class="skeleton-line"></span><span class="skeleton-line short"></span></li>
+          </ol>
+        </div>
+        <nav class="pager" id="pager" aria-label="Pages" hidden>
+          <a class="action secondary-action" id="pagerPrevious" href="/clients" rel="prev">Previous</a>
+          <span class="pager-position" id="pagerPosition"></span>
+          <a class="action secondary-action" id="pagerNext" href="/clients" rel="next">Next</a>
+        </nav>
+        <p class="source" id="listSource">Checking…</p>
+      </div>
+
+      <aside class="record-panel glass" id="recordPanel" role="complementary" aria-labelledby="recordTitle" hidden>
+        <div class="record-panel-head">
+          <div>
+            <p class="eyebrow" id="recordEyebrow">Client</p>
+            <h2 id="recordTitle" tabindex="-1">Opening…</h2>
+          </div>
+          <button type="button" class="panel-close" id="recordClose" aria-label="Close record">Close</button>
+        </div>
+        <div class="record-panel-body" id="recordBody">
+          <p class="attention-copy">Opening this record.</p>
+        </div>
+      </aside>
+    </section>
+
+    <section class="business-footnote glass" aria-labelledby="footnoteTitle" data-panel-background>
+      <h2 id="footnoteTitle">About this list</h2>
+      <p>These come straight from the client and vendor records. Merged and deleted records are left out, and anything nobody filled in reads "Not recorded" rather than being guessed at. Status and ETL are what someone entered on the record — they are not proof that an agreement was signed or that anyone was put on the work.</p>
+      <p class="inert-note">Not available yet: <span class="inert-entry" aria-disabled="true">Calls</span> <span class="inert-entry" aria-disabled="true">Tours</span></p>
+    </section>
+  </main>
+
+  <footer class="footer" data-panel-background><span>DoctorCRE · Clients and Vendors</span><span>Every list says where it came from and when.</span></footer>
+  <nav class="mobile-nav" aria-label="Workspace shortcuts" data-panel-background>
+    <a href="/" aria-label="Home"><span aria-hidden="true">⌂</span>Home</a>
+    <a href="/leads" aria-label="Leads"><span aria-hidden="true">⌁</span>Leads</a>
+    <a href="/deals" aria-label="Deals"><span aria-hidden="true">◈</span>Deals</a>
+    <a href="/clients" aria-label="Clients"><span aria-hidden="true">◍</span>Clients</a>
+    <a href="/vendors" aria-label="Vendors"><span aria-hidden="true">◇</span>Vendors</a>
+  </nav>
+  <script type="module" src="/js/workspace-business.js"></script>
+  <script type="module" src="/js/doc-panel.js"></script>
+</body>
+</html>

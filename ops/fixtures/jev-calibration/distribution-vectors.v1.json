@@ -1,0 +1,120 @@
+{
+  "schema": "carr.jev-distribution-vectors.v1",
+  "note": "Shared vectors for the full-distribution and entropy readers in ops/typesafe_client.py (answer_distribution) and mcp-server/src/jev-call-receipt.js (answerDistribution). Both suites load this file, so the Python client and the Worker receipt cannot drift apart. Entropy is in bits over the renormalized distribution and is null whenever the distribution is missing or its probabilities do not sum to one within the tolerance. Expected entropies were computed by hand from -sum(p log2 p).",
+  "probability_sum_tolerance": 0.02,
+  "vectors": [
+    {
+      "name": "noul is a two-point distribution",
+      "question": {"type": "noul", "instructions": "?"},
+      "answer": {"type": "noul", "noul": 0.8},
+      "expected": {"type": "noul", "distribution": {"true": 0.8, "false": 0.19999999999999996},
+        "distribution_complete": true, "entropy_bits": 0.7219280948873623,
+        "top": "true", "top_probability": 0.8}
+    },
+    {
+      "name": "noul at even odds is one full bit and breaks the tie toward true",
+      "question": {"type": "noul", "instructions": "?"},
+      "answer": {"type": "noul", "noul": 0.5},
+      "expected": {"type": "noul", "distribution": {"true": 0.5, "false": 0.5},
+        "distribution_complete": true, "entropy_bits": 1.0,
+        "top": "true", "top_probability": 0.5}
+    },
+    {
+      "name": "noul certain no is zero bits",
+      "question": {"type": "noul", "instructions": "?"},
+      "answer": {"type": "noul", "noul": 0},
+      "expected": {"type": "noul", "distribution": {"true": 0, "false": 1},
+        "distribution_complete": true, "entropy_bits": 0.0,
+        "top": "false", "top_probability": 1}
+    },
+    {
+      "name": "choice over criteria options",
+      "question": {"type": "choice", "instructions": "?", "criteria": {"a": "A", "b": "B", "c": "C"}},
+      "answer": {"type": "choice", "choice": "a", "confidence": 0.7, "probabilities": {"a": 0.7, "b": 0.2, "c": 0.1}},
+      "expected": {"type": "choice", "distribution": {"a": 0.7, "b": 0.2, "c": 0.1},
+        "distribution_complete": true, "entropy_bits": 1.1567796494470395,
+        "top": "a", "top_probability": 0.7}
+    },
+    {
+      "name": "choice omitting a zero-probability option fills it with zero",
+      "question": {"type": "choice", "instructions": "?", "criteria": {"a": "A", "b": "B", "c": "C"}},
+      "answer": {"type": "choice", "choice": "a", "confidence": 0.9, "probabilities": {"a": 0.9, "b": 0.1}},
+      "expected": {"type": "choice", "distribution": {"a": 0.9, "b": 0.1, "c": 0},
+        "distribution_complete": true, "entropy_bits": 0.4689955935892812,
+        "top": "a", "top_probability": 0.9}
+    },
+    {
+      "name": "choice with only a pick and a confidence has no distribution",
+      "question": {"type": "choice", "instructions": "?", "criteria": {"a": "A", "b": "B"}},
+      "answer": {"type": "choice", "choice": "b", "confidence": 0.8},
+      "expected": {"type": "choice", "distribution": null,
+        "distribution_complete": false, "entropy_bits": null,
+        "top": "b", "top_probability": null}
+    },
+    {
+      "name": "choice whose probabilities do not sum to one keeps the numbers but has no entropy",
+      "question": {"type": "choice", "instructions": "?", "criteria": {"a": "A", "b": "B"}},
+      "answer": {"type": "choice", "choice": "a", "confidence": 0.4, "probabilities": {"a": 0.4, "b": 0.2}},
+      "expected": {"type": "choice", "distribution": {"a": 0.4, "b": 0.2},
+        "distribution_complete": false, "entropy_bits": null,
+        "top": "a", "top_probability": 0.4}
+    },
+    {
+      "name": "rounded probabilities inside the tolerance are renormalized",
+      "question": {"type": "choice", "instructions": "?", "criteria": {"a": "A", "b": "B", "c": "C"}},
+      "answer": {"type": "choice", "choice": "a", "confidence": 0.34, "probabilities": {"a": 0.34, "b": 0.33, "c": 0.34}},
+      "expected": {"type": "choice", "distribution": {"a": 0.34, "b": 0.33, "c": 0.34},
+        "distribution_complete": true, "entropy_bits": 1.5848206001393983,
+        "top": "a", "top_probability": 0.34}
+    },
+    {
+      "name": "choice question written with a choices array",
+      "question": {"type": "choice", "instructions": "?", "choices": ["a", "b"]},
+      "answer": {"choice": "b", "probabilities": {"a": 0.1, "b": 0.9}},
+      "expected": {"type": "choice", "distribution": {"a": 0.1, "b": 0.9},
+        "distribution_complete": true, "entropy_bits": 0.4689955935892812,
+        "top": "b", "top_probability": 0.9}
+    },
+    {
+      "name": "an option the vendor returned but the question never offered is kept, after the offered ones",
+      "question": {"type": "choice", "instructions": "?", "criteria": {"a": "A", "b": "B"}},
+      "answer": {"type": "choice", "choice": "none", "confidence": 0.6, "probabilities": {"none": 0.6, "a": 0.3, "b": 0.1}},
+      "expected": {"type": "choice", "distribution": {"a": 0.3, "b": 0.1, "none": 0.6},
+        "distribution_complete": true, "entropy_bits": 1.295461844238322,
+        "top": "none", "top_probability": 0.6}
+    },
+    {
+      "name": "an empty probabilities object is recorded as empty, never as a crash",
+      "question": {"type": "choice", "instructions": "?"},
+      "answer": {"type": "choice", "probabilities": {}},
+      "expected": {"type": "choice", "distribution": {},
+        "distribution_complete": false, "entropy_bits": null,
+        "top": null, "top_probability": null}
+    },
+    {
+      "name": "score probabilities keyed by level text are indexed by level position",
+      "question": {"type": "score", "instructions": "?", "criteria": ["low", "mid", "high", "max"]},
+      "answer": {"type": "score", "score": 1.5, "confidence": 0.25,
+        "probabilities": {"low": 0.25, "mid": 0.25, "high": 0.25, "max": 0.25}},
+      "expected": {"type": "score", "distribution": {"0": 0.25, "1": 0.25, "2": 0.25, "3": 0.25},
+        "distribution_complete": true, "entropy_bits": 2.0,
+        "top": "0", "top_probability": 0.25}
+    },
+    {
+      "name": "score probabilities keyed by index",
+      "question": {"type": "score", "instructions": "?", "criteria": ["low", "mid", "high"]},
+      "answer": {"type": "score", "score": 1.2, "confidence": 0.6, "probabilities": {"0": 0.1, "1": 0.6, "2": 0.3}},
+      "expected": {"type": "score", "distribution": {"0": 0.1, "1": 0.6, "2": 0.3},
+        "distribution_complete": true, "entropy_bits": 1.295461844238322,
+        "top": "1", "top_probability": 0.6}
+    },
+    {
+      "name": "score with only a weighted value has no distribution and no top level",
+      "question": {"type": "score", "instructions": "?", "criteria": ["low", "high"]},
+      "answer": {"type": "score", "score": 0.7, "confidence": 0.7},
+      "expected": {"type": "score", "distribution": null,
+        "distribution_complete": false, "entropy_bits": null,
+        "top": null, "top_probability": null}
+    }
+  ]
+}

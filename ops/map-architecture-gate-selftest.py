@@ -81,9 +81,9 @@ def codex_output(value):
 
 
 CASES = [
-    ("build request blocks without architecture",
+    ("build request is caught without architecture",
      [user("Build an interactive property tour map for tomorrow.")], True),
-    ("recommendation request blocks without architecture",
+    ("recommendation request is caught without architecture",
      [user("Which GIS and mapping stack should we use for a broker tour?")], True),
     ("direct live verb after request satisfies gate",
      [user("Create a Google Maps tour."), assistant_tool("mcp__carr__map-architecture"), success()], False),
@@ -138,7 +138,14 @@ def real_hook(records, cwd=REPO):
             capture_output=True, timeout=20,
         )
         body = json.loads(result.stdout or "{}")
-        return body.get("decision") == "block"
+        # DEMOTED 2026-08-23 (the gates-audit council's Stop-gate rationing,
+        # Joe's order): this gate emitted {"decision": "block"}, reopening the
+        # turn. It now announces the same instruction into context. "Spoke"
+        # therefore means an announcement, a surviving `decision` key means the
+        # demotion regressed, and exit 2 would mean the same.
+        if "decision" in body or result.returncode == 2:
+            return False
+        return bool((body.get("hookSpecificOutput") or {}).get("additionalContext"))
     finally:
         os.unlink(transcript)
 
@@ -153,7 +160,7 @@ def main():
 
     structured = real_hook([user("Build an interactive tour map.")])
     outcomes.append(structured)
-    print(f"{'PASS' if structured else 'FAIL'}  structured Stop block")
+    print(f"{'PASS' if structured else 'FAIL'}  structured Stop announcement, no reopen")
 
     non_carr = not real_hook([user("Build an interactive tour map.")], "/private/tmp/other-project")
     outcomes.append(non_carr)

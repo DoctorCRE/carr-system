@@ -29,9 +29,9 @@ almost never conflict textually — they just silently overwrite each other.
 ops/config/gate-baseline.json took THIRTY-SIX commits on main in twenty-four
 hours. A hand-written source file would have conflicted and been noticed.
 
-THE RULE THE CHECK ENFORCES: if your branch modifies one of these files, the
-newest commit on origin/main touching that same file must already be in your
-history. Otherwise you are about to overwrite it.
+THE RULE THE CHECK ENFORCES: if your branch differs from origin/main for one
+of these files, its newest upstream commit must already be in your history.
+An exact committed copy of main is safe without matching commit ancestry.
 
 WHAT IT MUST NOT DO, which is most of this file:
   - never fire on a branch that does not touch a watched file
@@ -59,15 +59,12 @@ CHECK = os.path.join(REPO, "ops", "stale-config-check.py")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env  # noqa: E402
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 def git(repo, *args, must=False):
@@ -152,6 +149,44 @@ with tempfile.TemporaryDirectory() as tmp:
     check("the refusal explains the damage, not just the rule",
           "overwrite" in out.lower(), out[:200])
 
+# Cherry-picking main's exact bytes does not carry its commit ancestry. It
+# cannot overwrite those bytes, but a subsequent local or main edit can.
+with tempfile.TemporaryDirectory() as tmp:
+    origin, repo = make_repo(tmp)
+    git(repo, "checkout", "-q", "-b", "mine", must=True)
+    write(repo, "readme.txt", "branch-only work\n")
+    git(repo, "add", "readme.txt", must=True)
+    git(repo, "commit", "-q", "-m", "branch work", must=True)
+    advance_main(tmp, origin, '{"gates": {"a": "2"}}\n')
+    git(repo, "fetch", "-q", "origin", "main", must=True)
+    git(repo, "cherry-pick", "origin/main", must=True)
+    check("copied source fixture lacks main commit ancestry",
+          git(repo, "merge-base", "--is-ancestor", "origin/main", "HEAD").returncode != 0)
+    rc, out = run(repo)
+    check("byte-identical cherry-picked generated file is allowed", rc == 0,
+          f"rc={rc}: {out[:200]}")
+    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    git(repo, "commit", "-q", "-m", "diverge after copy", must=True)
+    rc, out = run(repo)
+    check("a local difference after copying still refuses unseen ancestry", rc == 2,
+          f"rc={rc}: {out[:200]}")
+
+with tempfile.TemporaryDirectory() as tmp:
+    origin, repo = make_repo(tmp)
+    git(repo, "checkout", "-q", "-b", "mine", must=True)
+    write(repo, "readme.txt", "branch-only work\n")
+    git(repo, "add", "readme.txt", must=True)
+    git(repo, "commit", "-q", "-m", "branch work", must=True)
+    advance_main(tmp, origin, '{"gates": {"a": "2"}}\n')
+    git(repo, "fetch", "-q", "origin", "main", must=True)
+    git(repo, "cherry-pick", "origin/main", must=True)
+    advance_main(tmp, origin, '{"gates": {"a": "4"}}\n')
+    git(repo, "fetch", "-q", "origin", "main", must=True)
+    rc, out = run(repo)
+    check("new upstream bytes after copying are still refused", rc == 2,
+          f"rc={rc}: {out[:200]}")
+
 # 2. UP TO DATE for that file: allowed, even though main moved for OTHER files.
 with tempfile.TemporaryDirectory() as tmp:
     origin, repo = make_repo(tmp)
@@ -210,8 +245,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("with no origin/main to compare it never blocks", rc == 0,
           f"rc={rc}: {out[:200]}")
 
-print()
-if failures:
-    print(f"FAIL {len(failures)} check(s): {', '.join(failures)}")
-    sys.exit(1)
-print("OK all checks passed")
+with tempfile.TemporaryDirectory() as tmp:
+    origin, repo = make_repo(tmp)
+    git(repo, "checkout", "-q", "-b", "mine", must=True)
+    write(repo, "readme.txt", "branch work\n")
+    git(repo, "add", "readme.txt", must=True)
+    git(repo, "commit", "-q", "-m", "branch work", must=True)
+    advance_main(tmp, origin, '{"gates": {"a": "2"}}\n')
+    git(repo, "fetch", "-q", "origin", "main", must=True)
+    git(repo, "cherry-pick", "origin/main", must=True)
+    check("cherry-picked identical generated content is allowed", run(repo)[0] == 0)
+    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    git(repo, "commit", "-q", "-m", "stale overwrite", must=True)
+    check("a differing stale overwrite still refuses after cherry-pick", run(repo)[0] == 2)
+
+sys.exit(CHECKER.summary())

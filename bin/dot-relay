@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Dot relay: Slack channel and allowlisted Mac command relay (no model calls).
+
+SETUP (operator-owned; this script never creates or requests credentials):
+  Reuses Hermes' mode-600, user-owned ~/.hermes/.env OUTSIDE the repository.
+  Put literal dotenv values there, without shell substitutions:
+    SLACK_USER_TOKEN   Slack user OAuth token for channel threads; chat:write
+                      plus channels:history (public) / groups:history (private).
+    SLACK_BOT_TOKEN    Alternative bot OAuth token for DM threads only;
+                      chat:write plus im:history / mpim:history as applicable.
+    SLACK_HOME_CHANNEL Existing destination convention: conversation ID, not
+                      a workspace ID. The token's principal must be a member.
+    DOT_SLACK_SENDER   Exact trusted Dot reply user ID or bot ID. Other senders,
+                      message edits, and deleted messages cannot run commands.
+    DOT_SLACK_MENTION  Optional literal mention prefixed to each brief, if the
+                      agent requires one. Connect the agent to that channel.
+  No app-level token, Socket Mode, model token, or environment token is used.
+  Reuses installed slack_sdk if available; stdlib HTTP otherwise. No installs.
+  Confirm one live Dot reply first: merely connecting Slack in ChatGPT does
+  not establish an agent subscription to channel messages.
+
+USAGE (global options precede the subcommand):
+  bin/dot-relay send-job /path/to/brief.txt
+  bin/dot-relay watch <thread-ts>             # polling only; no commands run
+  bin/dot-relay relay <thread-ts>             # polling + allowlisted execution
+  send-job accepts --cwd <repo-subdir> or --scratch (mktemp owned by this job).
+  watch/relay poll every 30s; errors back off to 300s and honor Retry-After.
+  --max-polls bounds a run (default 720); exit 2 means no final report received.
+
+PROTOCOL:
+  Long briefs post as a root message plus in-thread continuation parts;
+  send-job returns the root timestamp used for Dot replies. Multipart roots
+  say to wait; the final continuation ends with DOT-BRIEF-END. Dot must wait
+  for that final part before requesting commands or reporting completion.
+  Replies at or before the persisted final-part timestamp are ignored.
+  Slack writes are paced at one per second; ambiguous writes are never retried.
+  In the same Slack thread, the trusted sender requests one command per line:
+    ```mac-run
+    git status --short
+    head -n 30 lib/example.py
+    ```
+  Commands use the job cwd (default ~/carr-system); no shell or cd syntax.
+  Narrow argv grammar supports read-only git fetch/log/show/diff/status/
+  ls-files/grep, cat/head/sed -n/grep/rg/ls/wc, python3 -m pytest, named
+  tools/test-*.py or ops/*-selftest.py, and ./ops/ci.sh --only unit. Other
+  options, path traversal, hidden paths, escapes and substitutions are held.
+  Test scripts execute repository code; this is an argv/path boundary, not an
+  OS sandbox. It assumes the checked-out source and git origin are trusted.
+  Git's discovered worktree and administrative directories must stay inside
+  approved roots; an external linked worktree or enclosing repository is held.
+  Output is redacted, limited to 150 lines / 12000 bytes, and posted as plain
+  text in-thread. Each command times out after 60s; exit 124 denotes timeout,
+  125 output limit. Refused/interrupted requests post "held for orchestrator".
+  Outside any fence, DOT-REPORT-END ends the report alone on a stripped line
+  or as a whitespace-separated suffix, optionally followed by one space and
+  a job label matching [A-Za-z0-9._-]{1,48}. Text before the suffix becomes the
+  last report line. Mid-sentence mentions do not finish. Completion saves
+  that reply's report and exits 0.
+  Watch saves a report without consuming commands needed by a later relay.
+  Outgoing message timestamps are persisted and excluded from inbound control.
+
+STATE:
+  ~/.local/state/dot-relay/<thread-ts>/ contains job.json, state.json,
+  ledger.jsonl ({ts, command, cwd, exit, allowed, bytes}), pending.jsonl and
+  report.txt; files are mode 600, directories 700, outside the repository.
+  --state-dir and --credentials override those paths for an operator setup.
+  A lock prevents concurrent execution. Durable claims prevent replay after
+  interruption; inspect pending.jsonl before requesting a NEW command. Posts
+  have no automatic write retry: reconcile an ambiguous send against Slack.
+  A pending root claim in the state directory's send-job.json blocks new jobs
+  and polling until reconciled after the sender releases its lock. Healthy
+  active root sends leave other job watchers running. Continuation claims and
+  the final brief timestamp live in thread state.json.
+  An interrupted result post also stops resume until private state is reconciled.
+  Never commit local state, reports, credentials or live message contents.
+
+API references:
+  https://docs.slack.dev/reference/methods/conversations.replies/
+  https://docs.slack.dev/reference/methods/chat.postMessage/
+"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.dot_relay import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

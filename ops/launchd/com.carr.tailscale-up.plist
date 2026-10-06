@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- doctrine: tailscale-start-at-login -->
+<plist version="1.0">
+<dict>
+  <!--
+    Start Tailscale at login if it is stopped (WR-000178).
+
+    After the 2026-09-30 macOS reboot the Mac Studio's Tailscale stayed
+    "stopped" for about six hours, which cut off SSH to the MacBook. This agent
+    runs bin/tailscale-up.sh once at login. The script is idempotent: a running
+    node is left alone, a logged-out node is reported rather than prompted.
+
+    PRIMARY-ONLY: the Studio is the hub the MacBook reaches over SSH. The
+    health row in tools/health-check.py (ops/tailscale_health.py) is the
+    detector; this agent is its bound fix.
+
+    One-shot, not KeepAlive: a later manual "stop" in the menu is Joe's choice
+    and must not be overridden every few seconds.
+  -->
+  <key>Label</key><string>com.carr.tailscale-up</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/tailscale-up.sh</string>
+  </array>
+
+  <key>RunAtLoad</key><true/>
+
+  <key>StandardOutPath</key><string>{{REPO}}/out/tailscale-up.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/tailscale-up.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>

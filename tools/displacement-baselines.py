@@ -35,6 +35,9 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.carr_session_scope import is_carr_vault_project  # noqa: E402
+
 PROJECTS = Path.home() / ".claude" / "projects"
 
 # THE CARR PROJECT LIVES UNDER TWO TRANSCRIPT ROOTS, NOT ONE, and reading only one
@@ -49,11 +52,18 @@ PROJECTS = Path.home() / ".claude" / "projects"
 # Discovered rather than hard-coded, so a future mount-path change cannot silently
 # shrink the corpus again. Scratchpad projects are excluded: they are throwaway
 # session directories, not the business project.
+#
+# The name test is the vault clause of lib/carr_session_scope.py, the one CARR
+# session-scope predicate the nightly session-trace archive also uses. This
+# reader deliberately takes ONLY the vault clause, not the repo/worktree
+# clauses the archive adds: these baselines measure the partner's business
+# sessions, and folding engineering sessions in would silently change a
+# recorded measurement's corpus (and the corrections sweep's rule sources).
 def _project_roots():
     roots = sorted(
         p
         for p in PROJECTS.iterdir()
-        if p.is_dir() and "CARR-AI" in p.name and "scratchpad" not in p.name
+        if p.is_dir() and is_carr_vault_project(p.name)
     )
     if not roots:
         sys.exit("no CARR project transcript directory found under %s" % PROJECTS)

@@ -341,7 +341,14 @@ try:
             "set -u",
             f'LOG="{ping_home}/wiring.log"', "LEDGER_OFF=1",
             'REPO="."', "RECOVERY=0", "EXPORTS_RC=0", "LAST_STEP_RC=0",
-            'CARR_DB_BACKUP_URL=""', "rc_total=0", "tombstoned=0",
+            # One line per capability the replayed region binds. The portability
+            # mirror moved onto the exporter capability on 2026-09-01, so the
+            # preamble declares it the same way it already declared the backup
+            # one — under `set -u` an undeclared name aborts the replay before
+            # the assertion below can run, and the failure then looks like a
+            # wiring bug rather than a missing fixture line.
+            'CARR_DB_BACKUP_URL=""', 'CARR_DB_EXPORTER_URL=""',
+            "rc_total=0", "tombstoned=0",
             "seam_blocked=0", "timed_out=0",
             shell_func("say"), shell_func("record_run"), shell_func("tombstone"),
             "step() {",

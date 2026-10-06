@@ -16,8 +16,8 @@ import assert from "node:assert/strict";
 import {
   authState, bridgeLagLabel, cycleState, deriveModel, describeReceipt, deskState,
   errorState, humanizeKey, isErrorReceipt, isHeartbeat, isSubstantiveTurn,
-  isWorkerSpawn, lagState, receiptKey, receiptLabel, relativeAgo, relativeTime,
-  seatColor, sessionState, turnPasses,
+  isDocStaffProfile, isWorkerSpawn, lagState, receiptKey, receiptLabel, relativeAgo,
+  relativeTime, seatColor, sessionState, stageNodes, turnPasses,
 } from "../../dealroom/js/room.js";
 
 const NOW = Date.parse("2026-08-22T15:00:00Z");
@@ -474,4 +474,76 @@ test("a profile receipt reads as a sentence, not flattened keys", () => {
   const unstaffed = describeReceipt(JSON.stringify(
     { agent_profile: { key: "reviewer", name: "Reviewer", model: null, desk: null, status: "unstaffed" } }), NOW).join("\n");
   assert.match(unstaffed, /Reviewer unstaffed/);
+});
+
+// ── Doc's staff are moons, not peers (loop 528) ──────────────────────────────
+//
+// Joe, 2026-08-25: "Hermes bots should show as moons orbiting the Doc profile,
+// because Doc summons them." The sky's hierarchy is a claim about who summons
+// whom, and it was wrong for as long as eight named seats were the same disc.
+// These prove the three parts of that claim that do not need a browser: who is
+// a lead, who is a moon, and that the partnership picture is left alone.
+
+function profileRow(key, name, extra = {}) {
+  return { key, name, model: "opus", desk: null, status: "active", ...extra };
+}
+
+function skyModel(profiles, desks = DESK_ROWS) {
+  const hb = { seq: "200", at: at(20), sponsor: "joe", seat: "hermes", kind: "receipt",
+    msg_id: "hb528", body: JSON.stringify({ heartbeat: {
+      desks, cursor: 200, cycle_at: at(20), profiles } }) };
+  return deriveModel([hb], { now: NOW, viewer: "joe" });
+}
+
+test("every named profile except Doc is one of Doc's staff", () => {
+  assert.equal(isDocStaffProfile("doc"), false, "Doc summons; Doc is not summoned");
+  assert.equal(isDocStaffProfile("DOC"), false, "the key is matched case-insensitively");
+  for (const key of ["builder", "reviewer", "designer", "deal-steward",
+                     "intake-clerk", "marketing-ops", "system-watch"]) {
+    assert.equal(isDocStaffProfile(key), true, `${key} is staff Doc summons`);
+  }
+  assert.equal(isDocStaffProfile(null), false, "an unnamed seat is not staff");
+  assert.equal(isDocStaffProfile(""), false, "an unnamed seat is not staff");
+});
+
+test("Doc rides the inner ring with the lead desks and its staff ride the moon tier", () => {
+  const nodes = stageNodes(skyModel([
+    profileRow("doc", "Doc"),
+    profileRow("builder", "Builder"),
+    profileRow("reviewer", "Reviewer"),
+    profileRow("designer", "Designer"),
+    profileRow("deal-steward", "Deal Steward"),
+  ]));
+  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  assert.equal(byId["profile:doc"].ring, "inner", "Doc is a lead, on a full disc");
+  for (const key of ["builder", "reviewer", "designer", "deal-steward"]) {
+    assert.equal(byId[`profile:${key}`].ring, "moon", `${key} orbits Doc, not the wire`);
+  }
+  assert.equal(byId["desk:joe-desk"].ring, "inner", "claude is a lead desk");
+  assert.equal(byId["desk:codex-desk"].ring, "inner", "codex is a lead desk");
+});
+
+test("a desk staffed by one of Doc's staff is a moon, however it got its runtime", () => {
+  const nodes = stageNodes(skyModel(
+    [profileRow("doc", "Doc"), profileRow("builder", "Builder", { desk: "hermes-desktop" })],
+    [...DESK_ROWS, { name: "hermes-desktop", seat: "hermes", live: true, last_seen: at(30), auth: true }]));
+  const byId = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  assert.equal(byId["desk:hermes-desktop"].ring, "moon", "the hierarchy follows the profile, not the desk row");
+  assert.equal(byId["desk:hermes-desktop"].label, "Builder");
+  assert.equal(byId["profile:builder"], undefined, "a bound profile is not also drawn parked");
+});
+
+test("the outer ring and the partnership hemispheres are untouched by the moon tier", () => {
+  const model = deriveModel([
+    { seq: "200", at: at(20), sponsor: "joe", seat: "hermes", kind: "receipt", msg_id: "hb528b",
+      body: JSON.stringify({ heartbeat: { desks: DESK_ROWS, cursor: 200, cycle_at: at(20),
+        profiles: [profileRow("doc", "Doc"), profileRow("system-watch", "System Watch")] } }) },
+    { seq: "201", at: at(60), sponsor: "dell", seat: "grok", kind: "turn", body: "here", msg_id: "g1" },
+  ], { now: NOW, viewer: "joe" });
+  const nodes = stageNodes(model);
+  const grok = nodes.find((n) => n.id === "seat:grok");
+  assert.equal(grok.ring, "outer", "a seat heard on the wire still rides the outer ring");
+  assert.equal(grok.partner, "dell", "and keeps its sponsoring partner's hemisphere");
+  assert.equal(nodes.find((n) => n.id === "profile:doc").partner, "joe",
+    "Doc sits in the viewer's hemisphere — it is never moved to the centre");
 });

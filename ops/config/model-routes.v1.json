@@ -1,0 +1,84 @@
+{
+  "_about": "The Model Room's routing policy, as data (Joe 2026-09-24, decisions 81f6bcf7, 3c5a58e9, 79110363). Jev answers the questions below about a task BEFORE any model runs; ops/jev_model_route.py applies the cutoffs in order and returns the roster entry. Every caller reads this file: flash-run's escalation desks today, the Model Room claim step and the cloud stamp for app requests next. Cutoffs were fitted 2026-09-24 on 37 labelled tasks (37 of 37 held-out right, 10 of 10 on a frozen test set); refit as audited live routes accumulate.",
+  "version": 1,
+  "audit_rate": 0.05,
+  "order": ["code", "beyond", "script", "direct"],
+  "abstain_route": "script",
+  "questions": {
+    "code": {
+      "route": "code",
+      "cutoff": 0.50,
+      "instructions": "The task is to change a software code repository (fix a bug, add a feature, refactor) so that its tests pass.",
+      "true": "It changes code in a repository.",
+      "false": "It answers a question or produces a document; no repository is changed."
+    },
+    "beyond": {
+      "route": "escalate",
+      "cutoff": 0.55,
+      "instructions": "The task needs professional judgment or a recommendation, legal or contract interpretation, drafting a document or outreach longer than a short message, design, weighing trade-offs, or reading long documents closely to interpret or summarise what they mean, where a small fast model's mistakes would be costly. Rewording or shortening a few shown sentences does NOT count. Counting or extracting values, however much data, does NOT count: a program handles that.",
+      "true": "It needs judgment, interpretation, substantial drafting or design.",
+      "false": "It is lookup, arithmetic, extraction, counting or a short rewrite."
+    },
+    "script": {
+      "route": "script",
+      "cutoff": 0.45,
+      "instructions": "Answering needs exact counting, filtering, grouping, joining or arithmetic over data too large to read in full -- a large table, or a folder of many documents where the question is how many or which ones contain something -- so a program must be written and run.",
+      "true": "A program over the data is needed to count, filter or compute.",
+      "false": "No program over large data is needed."
+    },
+    "direct": {
+      "route": "direct",
+      "cutoff": 0.40,
+      "instructions": "A capable assistant could answer this correctly in one reply from the question and the short context shown, with no code and no files to read. Rewording, shortening or summarising a few sentences that are shown, arithmetic on numbers that are shown, and pulling a value out of shown text all count as direct.",
+      "true": "It can be answered in one reply from what is shown.",
+      "false": "It needs files or folders read, code run, or work beyond one reply."
+    }
+  },
+  "routes": {
+    "code": {"model": "flash", "effort": "thinking off first, on for retries", "protocol": "flash-run",
+             "then": {"model": "sol", "effort": "high", "desk": "sol-fixer"}},
+    "escalate": {"model": "opus", "effort": "high", "protocol": "model-room-desk", "desk": "claude-desktop"},
+    "script": {"model": "flash", "effort": "thinking on, capped at 12288 tokens; thinking off after a runaway",
+               "protocol": "flash-script-v3",
+               "then": {"model": "opus", "effort": "high", "desk": "claude-desktop"}},
+    "direct": {"model": "flash", "effort": "thinking off", "protocol": "flash-direct",
+               "then": {"model": "opus", "effort": "high", "desk": "claude-desktop"}}
+  },
+  "handoff_reasons": ["no_answer", "invented", "runaway"],
+  "queue_targets": {
+    "_about": "Where a Model Room task queued with target=auto goes, per route (tools/room-bridge/kanban_adapter.py). Script tasks go to Flash when they name their data with `data: <path>` lines inside script_data_roots (tools/room-bridge/flash_wire.py runs tools/flash-script.py); a script task naming no data, or data outside those folders, falls back. Code tasks go to Flash when their body names `project: <path>` (a git work tree strictly inside code_project_roots, not a link) and one `test: <command>` line in the bounded grammar of flash_wire.test_argv (pytest, python3 <project script>.py, or node --test, plain tokens, no shell); flash_wire runs tools/flash-run.py with --escalate suggest in a throwaway worktree on a new flash/queue-* branch, never the project's own tree, and keeps the branch only when the test passes. A code task naming no project falls back as code_needs_project, a refused project or test as code_project_refused. A route whose target is down, disabled or refuses the task's capability falls back to `fallback`.",
+    "direct": "flash",
+    "escalate": "claude-desktop",
+    "code": "flash",
+    "script": "flash",
+    "fallback": "claude-desktop"
+  },
+  "script_data_roots": ["~/carr-system/out/flash-inputs"],
+  "code_project_roots": ["~/flash-projects"],
+  "code_task_origins": ["browser-human:joe", "browser-human:dell"],
+  "_code_task_origins_about": "A Flash code task runs a model-driven agent and its tests on this host, so it is accepted only from these server-derived origins (queue_grammar._origin's channel:actor, never `seat`). Model-posted (mcp:*) code tasks fall back to the Opus desk with reason code_origin_untrusted. The run is also sandboxed (tools/room-bridge/flash_wire.py, macOS sandbox-exec); the origin gate is defense in depth, not the only control.",
+  "dispatch_targets": {
+    "_about": "What a dispatcher (an orchestrator spawning a subagent or queueing a desk) runs for each queue target, via jev_model_route.dispatch(). subagent_model is the Claude tier for an in-process spawn: a subagent cannot be Flash, so the Flash target spawns on the overflow model. null means the target is a Model Room desk only (use its desk).",
+    "flash": {"subagent_model": "haiku", "effort": "low"},
+    "claude-desktop": {"subagent_model": "opus", "effort": "high"},
+    "sol": {"subagent_model": null, "effort": "high"}
+  },
+  "pins": {
+    "_about": "Explicit dispatch pins skip Jev unless a sampled audit is requested. An unknown pin name is refused, never routed.",
+    "merge_review": {"target": "claude-desktop", "reason": "Independent review before a merge must be Opus (merge rule)."},
+    "gate_authority_code": {"target": "claude-desktop", "reason": "Builders and finishers touching gate, authority or seal code (SECURITY DEFINER functions, hooks/*gate*, SCAC seals, admission kernels) must be Opus."},
+    "sol_allowance": {"target": "sol", "reason": "Joe asked for Sol desks so the Codex allowance is spent; pinned while that directive stands."}
+  },
+  "overflow": {"_about": "Flash runs one job at a time on the Mac. When it is busy or offline, a Flash route runs on this model instead of queueing (Joe 2026-09-24: we don't want to wait in line for Flash).",
+               "model": "haiku", "effort": "low"},
+  "models": {
+    "flash": {"where": "Joe's Mac, 127.0.0.1:8000", "cost": "free", "concurrency": 1},
+    "haiku": {"where": "cloud", "cost": "low", "use": "overflow only"},
+    "luna": {"where": "cloud (Codex)", "like": "sonnet"},
+    "sonnet": {"where": "cloud", "use": "rarely: extra turns often cost as much as opus"},
+    "sol": {"where": "cloud (Codex)", "like": "opus"},
+    "opus": {"where": "cloud"},
+    "astra": {"where": "cloud (Codex)", "like": "fable"},
+    "fable": {"where": "cloud", "use": "deep architecture only"}
+  }
+}

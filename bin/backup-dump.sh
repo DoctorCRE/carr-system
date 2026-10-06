@@ -55,49 +55,11 @@ PUBKEY="$(cat "$REPO/backups-public-key.txt")"
 # credential path.  Explicit manual recovery has a separate entrypoint.
 URL="${CARR_DB_BACKUP_URL:-${BACKUP_DATABASE_URL:-}}"
 [ -n "$URL" ] || { echo "backup-dump: CARR_DB_BACKUP_URL is required for routine backup" >&2; exit 78; }
-case "$URL" in
-  *"://carr_backup:"*|*"user=carr_backup"*) ;;
-  *) echo "backup-dump: routine backup URL must authenticate as carr_backup" >&2; exit 78 ;;
-esac
-
-# KEEPALIVES + CONNECT TIMEOUT, ADDED 2026-08-16, and the reason is a five and
-# a half hour outage rather than tidiness.
-#
-# WHAT HAPPENED. The 02:00 chain began, took its catch-up backup as step 0, and
-# Neon dropped the connection from its side. pg_dump never noticed. libpq's
-# default is to wait forever on a silent peer, so it sat on a half-open socket
-# having written ZERO bytes, and it held the nightly lock the entire time. Every
-# invocation after it printed "another 'nightly' run is in progress" and exited
-# 0 — a green exit code from a lock skip, not from a chain. Nothing past step 0
-# ran for two days: no cadence engine, no matcher, no export, no boards, no
-# Graph, no backup. Found only because the export register still read 28 hours
-# stale while the health check's own row said the chain was fine.
-#
-# WHY THIS FIX AND NOT A SERVER-SIDE ONE. pg_stat_activity on Neon showed NO
-# backend for the dump at all — the server side was already gone. There was
-# nothing to pg_terminate_backend. When the peer has vanished, only the client
-# can end the wait, so this has to be a libpq setting.
-#
-# WHAT THESE DO. keepalives makes libpq probe an idle connection; after
-# roughly idle + (interval x count) of silence, about four minutes here, the
-# socket errors out and the step FAILS instead of wedging. A failed backup
-# leaves the previous one untouched (see the guard below) and, far more
-# importantly, releases the lock so the rest of the chain runs. connect_timeout
-# bounds the handshake the same way. Overridable for a slow link, never
-# unbounded.
-#
-# Appended with the right separator: these connection strings already carry
-# sslmode and channel_binding, so a blind "?" would corrupt them.
-_KEEPALIVE_PARAMS="keepalives=1"
-_KEEPALIVE_PARAMS="$_KEEPALIVE_PARAMS&keepalives_idle=${BACKUP_KEEPALIVE_IDLE:-60}"
-_KEEPALIVE_PARAMS="$_KEEPALIVE_PARAMS&keepalives_interval=${BACKUP_KEEPALIVE_INTERVAL:-15}"
-_KEEPALIVE_PARAMS="$_KEEPALIVE_PARAMS&keepalives_count=${BACKUP_KEEPALIVE_COUNT:-12}"
-_KEEPALIVE_PARAMS="$_KEEPALIVE_PARAMS&connect_timeout=${BACKUP_CONNECT_TIMEOUT:-30}"
-case "$URL" in
-  *keepalives=*) : ;;                       # already carries them; leave it alone
-  *\?*) URL="$URL&$_KEEPALIVE_PARAMS" ;;    # has a query string; append
-  *)    URL="$URL?$_KEEPALIVE_PARAMS" ;;    # no query string; start one
-esac
+# The guard resolves libpq connection parameters, checks the actual principal,
+# and applies finite connection/operation deadlines to this same routine path.
+# A URL substring is not authentication evidence (query parameters override it).
+PYTHON="$REPO/.venv/bin/python"
+[ -x "$PYTHON" ] || PYTHON=python3
 
 STAMP="$(date -u +%Y%m%d)"
 OUTDIR="${BACKUP_OUTPUT_DIR:-$REPO/backups}"
@@ -115,61 +77,29 @@ OUT="$OUTDIR/carr-$STAMP.sql.age"
 # We restore SCHEMA AND DATA, never the source cluster's permission model: roles
 # and grants are rebuilt by the migrations, which are in git. Dropping them from
 # the dump costs nothing and is what makes it portable.
-if ! "$PG_DUMP_BIN" --no-owner --no-acl --schema=public --schema=ops "$URL" \
-     | age -r "$PUBKEY" > "$OUT.tmp"; then
-  echo "DUMP FAILED (pg_dump or age exited non-zero) — aborting, previous backups untouched" >&2
-  rm -f "$OUT.tmp"
-  exit 1
-fi
-
-# SIZE FLOOR ADDED 2026-08-07. The guard here used to be `[ -s "$OUT.tmp" ]`,
-# which asks one question: is this file larger than zero bytes. On 2026-08-07
-# pg_dump lost its Neon connection mid-dump ("server closed the connection
-# unexpectedly"). age wrote its header over the empty stream, producing a
-# 200-byte file. -s passed it, mv promoted it to that day's official backup,
-# the archiver uploaded it to R2 as the durable off-Mac copy, and the dead-man
-# switch was pinged. Every signal said the backup succeeded; none of them
-# looked at the size. This is the same failure class as the --no-owner --no-acl
-# bug above: a backup that looks taken and is not restorable.
 #
-# The floor is the larger of 1 MiB and HALF the most recent previous dump. Half
-# rather than 90%: the database legitimately grows and shrinks night to night,
-# and a guard that cries wolf gets switched off. A truncated dump is not 40%
-# short, it is three orders of magnitude short — 200 bytes against 17 MB.
-#
-# size_bytes() ADDED 2026-08-14 (PROGRAM 4): this used to be inline `stat
-# -f%z`, which is BSD stat and Mac-only. GNU stat (the GitHub Actions
-# runner) takes -f to mean something else entirely ("file system status",
-# not "format") and this would silently do the wrong thing there rather than
-# fail loud. bin/worktree.sh hit the identical BSD-vs-GNU split for a
-# different stat call and settled on shelling out to Python for the one
-# piece of stdlib both platforms carry unmodified; same fix, same reason,
-# here. Bare `python3` rather than "$REPO/.venv/bin/python": the Actions
-# runner never provisions this repo's venv (it only needs postgresql-client
-# and age — see .github/workflows/backup-nightly.yml), and os.path.getsize
-# needs nothing beyond the standard library. Byte counts are identical to
-# the old `stat -f%z` on macOS, so local behavior is unchanged.
-size_bytes() { python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$1"; }
-SIZE="$(size_bytes "$OUT.tmp")"
-FLOOR=1048576
-PREV="$(ls -t "$OUTDIR"/carr-*.sql.age 2>/dev/null | grep -vxF "$OUT" | head -1 || true)"
-PREV_SIZE=0
-if [ -n "${PREV:-}" ]; then
-  PREV_SIZE="$(size_bytes "$PREV")"
-  if [ "$(( PREV_SIZE / 2 ))" -gt "$FLOOR" ]; then
-    FLOOR="$(( PREV_SIZE / 2 ))"
-  fi
-fi
-if [ "$SIZE" -lt "$FLOOR" ]; then
-  echo "SHORT DUMP — $SIZE bytes, floor is $FLOOR bytes." >&2
-  if [ -n "${PREV:-}" ]; then
-    echo "Previous dump for comparison: $PREV ($PREV_SIZE bytes)." >&2
-  fi
-  echo "Aborting: previous backups untouched, nothing archived to R2." >&2
-  rm -f "$OUT.tmp"
+# --enable-row-security ADDED 2026-09-01 (WR-000044, decision 11376c54). 0324
+# enabled RLS on ops.work_request; pg_dump's default row_security=off makes a
+# non-BYPASSRLS role's read of an RLS table a hard ERROR ("query would be
+# affected by row-level security policy"), which is what broke the nightly dump.
+# Turning row_security ON lets the dump read under RLS, where migration 0475's
+# permissive carr_backup SELECT policy (USING (true)) returns every row. This
+# was chosen over ALTER ROLE carr_backup BYPASSRLS specifically to avoid moving
+# the pinned SCAC v10 role-attribute census (see 0475's header). The cost of
+# row_security=on is that a future RLS-enabled table WITHOUT a carr_backup
+# read-all policy would dump short and silent; ops/backup-role-rls-coverage-*
+# make that a loud failure instead. carr_backup stays SELECT-only.
+# The original guard transaction survives pg_dump, encryption, stream/OID
+# verification, the encrypted size floor and the final acknowledgement. Only
+# the helper promotes its private temporary ciphertext; a failure preserves
+# every previous acknowledged artifact and never reaches the archive step.
+RESULT="$("$PYTHON" "$REPO/bin/backup-guard.py" \
+  --output "$OUT" --recipient "$PUBKEY" --pg-dump "$PG_DUMP_BIN")" || {
+  echo "DUMP FAILED — guarded dump refused; previous backups untouched" >&2
   exit 1
-fi
-mv "$OUT.tmp" "$OUT"
+}
+SIZE="$(print -r -- "$RESULT" | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["bytes"])')"
+FLOOR="$(print -r -- "$RESULT" | "$PYTHON" -c 'import json,sys; print(json.load(sys.stdin)["floor"])')"
 # keep 14 dailies in backups/ (local, gitignored); the R2 archive keeps everything forever
 ls -t "$OUTDIR"/carr-*.sql.age 2>/dev/null | tail -n +15 | xargs rm -f 2>/dev/null || true
 

@@ -21,6 +21,20 @@ from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
 
 WRITER_KEY = "CARR_DB_STAGING_WRITER_URL"
 READER_KEY = "CARR_DB_STAGING_READER_URL"
+# The Gate Zero producer seat's own credential file and key. Standing-rule
+# amendment 9 (2026-09-14): seat-only write is enforced by CONNECTION ROLE, so
+# the one verb that records a Gate Zero read-only outcome authenticates as its
+# own login role. Its file is separate from the writer's for the same reason its
+# role is: a credential sharing a file with the writer's would be one edit away
+# from being the writer's.
+# The seat role name is CLUSTER-WIDE and identical in every environment, so the
+# key and the filename are the only things that say WHICH environment's DSN this
+# is. Both name staging out loud, and this module holds no production
+# counterpart: the production credential is Joe's own act at a console he
+# controls (Neon Database SOP `01-connections-and-roles`, then Cloudflare Edge
+# SOP `02-secrets-and-tokens`), and nothing in this repository mints it.
+GATE_ZERO_PRODUCER_KEY = "CARR_DB_STAGING_GATE_ZERO_WRITER_URL"
+FOUNDATION_ASSURANCE_ORACLE_KEY = "CARR_DB_STAGING_FOUNDATION_ASSURANCE_WRITER_URL"
 
 
 class CredentialRefusal(RuntimeError):
@@ -62,11 +76,19 @@ def profile(label: str, *, config_root: pathlib.Path | None = None) -> Credentia
     profiles = {
         "writer": ("app_writer", "carr_writer", WRITER_KEY, "staging-writer.env"),
         "reader": ("app_reader", "carr_reader", READER_KEY, "staging-reader.env"),
+        # A DIRECT-GRANT PROFILE: the seat is one LOGIN role and there is no
+        # bundle behind it, so the bundle column names the role itself.
+        "gate_zero_producer": ("carr_gate_zero_producer", "carr_gate_zero_producer",
+                               GATE_ZERO_PRODUCER_KEY, "staging-gate-zero-writer.env"),
+        "foundation_assurance_oracle": (
+            "carr_foundation_assurance_oracle", "carr_foundation_assurance_oracle",
+            FOUNDATION_ASSURANCE_ORACLE_KEY, "staging-foundation-assurance-writer.env"),
     }
     try:
         role_name, bundle_role, key, filename = profiles[label]
     except KeyError as exc:
-        raise CredentialRefusal("credential profile must be reader or writer") from exc
+        raise CredentialRefusal(
+            "credential profile must be one of: " + ", ".join(sorted(profiles))) from exc
     final = root / filename
     return CredentialProfile(
         label, role_name, bundle_role, key,

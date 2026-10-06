@@ -1,0 +1,672 @@
+{
+  "artifact": "census-reconciliation-matrix.v1",
+  "census_categories": [
+    "secdef_execute",
+    "relation_dml",
+    "column_dml",
+    "role_authority",
+    "runtime_dml_grants"
+  ],
+  "claim_discipline": "This matrix reports what was measured, with the exact provenance beside each figure (plan Section T). It makes no claim of completeness for any enumeration — not the category list, not the row sets, not the command list.",
+  "corrections_verified": {
+    "claim": "r13-frontier-forensics.md (2026-09-01) annotated production's apply-time failure at migration 0454 as '600 vs the migration's pinned baseline (347)'. 0454 is the v1 registry migration; its own secdef_execute pin, read directly from the file at the pinned commit, is 290 — not 347. 347 is v10's pin, from migrations/0471, a different file applied nine successor migrations later.",
+    "conclusion": "Both figures verified directly from the pinned commit's migration text (git show, not memory): v1=290, v10=347, confirming the correction. Production's live secdef_execute count exceeds v10's 347 (the highest pin of any version) both in r13's prior measurement (600, 2026-09-01) and in this session's independent tap measurement (594, this run). The two observed figures are NOT expected to match each other exactly — they were taken roughly a day apart against a live, still-changing production catalog — and this matrix does not claim they do; both are recorded as what was actually measured, each with its own date.",
+    "max_pinned_secdef_execute_count_any_version": 347,
+    "prior_session_observed_secdef_execute_count_r13_2026_09_01": 600,
+    "this_session_observed_secdef_execute_count": 594,
+    "verified_v10_pin": {
+      "file": "migrations/0471_source_merge_catalog_registry_successor.sql",
+      "secdef_execute": {
+        "count": 347,
+        "digest": "sha256:03624b669043c5e2e5a81633837f29ffb096b824a840456b26d7b6f3b405b467"
+      }
+    },
+    "verified_v1_pin": {
+      "file": "migrations/0454_siep11_mutation_registry.sql",
+      "secdef_execute": {
+        "count": 290,
+        "digest": "sha256:92d1347b45ee669c97a8b21712684651ee67aa3a2af363fca7c3f3a25436a0b6"
+      }
+    }
+  },
+  "deltas": {
+    "_note": "Deltas are COUNT-only (observed_count - pinned_count), per version, per category. A true row-level (per-identifier) symmetric difference against v1-v9's pins is not attempted: those pins record only an aggregate count+digest in the frontier files (migrations/0454-0471 at the pinned commit), not an enumerated row/ingress_key list — there is nothing to diff against at the row level for a version other than the one the observed set is compared to at generation time. This is a measurement limit, not an oversight (plan Section T: no completeness claim beyond what was actually measured).",
+    "column_dml": {
+      "v1": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v10": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v2": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v3": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v4": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v5": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v6": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v7": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v8": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      },
+      "v9": {
+        "delta": 0,
+        "expected_count": 12,
+        "observed_count": 12
+      }
+    },
+    "relation_dml": {
+      "v1": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v10": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v2": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v3": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v4": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v5": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v6": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v7": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v8": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      },
+      "v9": {
+        "delta": 1888,
+        "expected_count": 285,
+        "observed_count": 2173
+      }
+    },
+    "role_authority": {
+      "v1": "not_applicable",
+      "v10": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v2": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v3": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v4": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v5": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v6": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v7": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v8": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      },
+      "v9": {
+        "delta": 43,
+        "expected_count": 52,
+        "observed_count": 95
+      }
+    },
+    "runtime_dml_grants": {
+      "v1": "not_applicable",
+      "v10": {
+        "delta": 7752,
+        "expected_count": 297,
+        "observed_count": 8049
+      },
+      "v2": "not_applicable",
+      "v3": "not_applicable",
+      "v4": "not_applicable",
+      "v5": "not_applicable",
+      "v6": "not_applicable",
+      "v7": "not_applicable",
+      "v8": "not_applicable",
+      "v9": {
+        "delta": 7752,
+        "expected_count": 297,
+        "observed_count": 8049
+      }
+    },
+    "secdef_execute": {
+      "v1": {
+        "delta": 304,
+        "expected_count": 290,
+        "observed_count": 594
+      },
+      "v10": {
+        "delta": 247,
+        "expected_count": 347,
+        "observed_count": 594
+      },
+      "v2": {
+        "delta": 300,
+        "expected_count": 294,
+        "observed_count": 594
+      },
+      "v3": {
+        "delta": 296,
+        "expected_count": 298,
+        "observed_count": 594
+      },
+      "v4": {
+        "delta": 292,
+        "expected_count": 302,
+        "observed_count": 594
+      },
+      "v5": {
+        "delta": 287,
+        "expected_count": 307,
+        "observed_count": 594
+      },
+      "v6": {
+        "delta": 283,
+        "expected_count": 311,
+        "observed_count": 594
+      },
+      "v7": {
+        "delta": 279,
+        "expected_count": 315,
+        "observed_count": 594
+      },
+      "v8": {
+        "delta": 266,
+        "expected_count": 328,
+        "observed_count": 594
+      },
+      "v9": {
+        "delta": 252,
+        "expected_count": 342,
+        "observed_count": 594
+      }
+    }
+  },
+  "expected": {
+    "v1": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": "not_applicable",
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 290,
+          "digest": "sha256:92d1347b45ee669c97a8b21712684651ee67aa3a2af363fca7c3f3a25436a0b6"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v1",
+      "source_file": "migrations/0454_siep11_mutation_registry.sql",
+      "source_file_digest": "sha256:a478461eeecacc3a02dd86f3b9c1b98b3c9432953a8f974c9b3d39a08e081d21"
+    },
+    "v10": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": {
+          "count": 297,
+          "digest": "sha256:0f04a50d8bc65e2dcc765b1981ab1d5091c809570f0a773db3f5c6e2b9d43501"
+        },
+        "secdef_execute": {
+          "count": 347,
+          "digest": "sha256:03624b669043c5e2e5a81633837f29ffb096b824a840456b26d7b6f3b405b467"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v10",
+      "source_file": "migrations/0471_source_merge_catalog_registry_successor.sql",
+      "source_file_digest": "sha256:624eadc355304fa4320035b4ed209abcc6f5bc5acade90d8202709d71d4eaea6"
+    },
+    "v2": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 294,
+          "digest": "sha256:8e1f8ed8984bc1f1a627020d1b5b0384124c5e5adba79ac17df0b21702bf6cc5"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v2",
+      "source_file": "migrations/0455_siep12_policy_epoch.sql",
+      "source_file_digest": "sha256:7bf22c704e24ec4d602ac7f9493c200a6d50050369b04c07a71d015a6dbfdd58"
+    },
+    "v3": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 298,
+          "digest": "sha256:d8306fc5bb4bd3348fe5197f0946c251c4f0486ecdf98914ba11a7af6e4682c5"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v3",
+      "source_file": "migrations/0457_siep13_forward_mutation_registry.sql",
+      "source_file_digest": "sha256:e1a08ab506b74a46cc064368537cbd9dc99b8b5486dff38b771a262be887e380"
+    },
+    "v4": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 302,
+          "digest": "sha256:abe2fb9009736fa4ae47270fcf5d2153bbf3e7a8ed01de861cced9a1bb2fee82"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v4",
+      "source_file": "migrations/0459_siep14_forward_mutation_registry.sql",
+      "source_file_digest": "sha256:babbf220826ab12da78505c0eb61b6db3b8890bf17deb09130c7b6508e007935"
+    },
+    "v5": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 307,
+          "digest": "sha256:d4671fbc10a54406acece348dbeaef08b044b8231037bf4ecce8e1d85cd2d24d"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v5",
+      "source_file": "migrations/0461_siep15_forward_mutation_registry.sql",
+      "source_file_digest": "sha256:610aee81147679c4ddf7db23626d21db3b8b8329cc3c725e1c75b9016a26d69d"
+    },
+    "v6": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 311,
+          "digest": "sha256:78771a23004af05b61ea9491ed70248ee8cbbe77aa6ace8c6f0437983624470b"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v6",
+      "source_file": "migrations/0462_siep16_forward_mutation_registry.sql",
+      "source_file_digest": "sha256:02d42584a871b6b2944c5747f76bbd0abb07e1bbf158c4cef30c2213ab14efb3"
+    },
+    "v7": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 315,
+          "digest": "sha256:d47181d79ffb352fdf2c707a6fa265f093a8c7edde76df4358a6805c89651022"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v7",
+      "source_file": "migrations/0464_siep16_integrated_mutation_registry.sql",
+      "source_file_digest": "sha256:1005cb8f13bf5c0c2003a3dca021c3d86c656a4faabfb0e069b416a130ceccb7"
+    },
+    "v8": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": "not_applicable",
+        "secdef_execute": {
+          "count": 328,
+          "digest": "sha256:7c6a54dda8f8c4c6f4fcb6004f2544ba8231f212e1b2d8e5c9cc39651a2a216c"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v8",
+      "source_file": "migrations/0466_siep17_forward_mutation_registry.sql",
+      "source_file_digest": "sha256:20a158f96b287e7ac9c3979138c95803d1da644a5e4918290f092c628d0325d9"
+    },
+    "v9": {
+      "categories": {
+        "column_dml": {
+          "count": 12,
+          "digest": "sha256:607e31d990653776243350d001ca465234e321349b05259751f8231ae3c2c44f"
+        },
+        "relation_dml": {
+          "count": 285,
+          "digest": "sha256:53d12ebf83db4661b0e55eb81f91ab510c34828424a2b945b66c0286134b0b0b"
+        },
+        "role_authority": {
+          "count": 52,
+          "digest": "sha256:345871802aa8f5b57aa87f3edfeac5187d06be0cb1ab5695371bcdfba4a49433"
+        },
+        "runtime_dml_grants": {
+          "count": 297,
+          "digest": "sha256:0f04a50d8bc65e2dcc765b1981ab1d5091c809570f0a773db3f5c6e2b9d43501"
+        },
+        "secdef_execute": {
+          "count": 342,
+          "digest": "sha256:57444b408258e9ec0a0dd8d2b8062cc6f6575e0b97cd0e9faebbb7ca322e17af"
+        }
+      },
+      "projection_version": "scac-db-catalog-projection.v9",
+      "source_file": "migrations/0468_siep18_forward_mutation_registry.sql",
+      "source_file_digest": "sha256:c3dbeabd699e7036e9bdab980f94515243f5ef061bc1992c4ded8acda4ccbfd5"
+    }
+  },
+  "frontier_files": {
+    "migrations/0454_siep11_mutation_registry.sql": "sha256:a478461eeecacc3a02dd86f3b9c1b98b3c9432953a8f974c9b3d39a08e081d21",
+    "migrations/0455_siep12_policy_epoch.sql": "sha256:7bf22c704e24ec4d602ac7f9493c200a6d50050369b04c07a71d015a6dbfdd58",
+    "migrations/0456_siep13_artifact_registry.sql": "sha256:246b170ce9d7ef021b51fba34de391ff7ed4c7c4fd60c03ecd0504f7d220be7e",
+    "migrations/0457_siep13_forward_mutation_registry.sql": "sha256:e1a08ab506b74a46cc064368537cbd9dc99b8b5486dff38b771a262be887e380",
+    "migrations/0458_siep14_root_trust.sql": "sha256:9d76f539908d5d20c7a443f6f51641faafa090024111cf18316a4d3cf0abfe5a",
+    "migrations/0459_siep14_forward_mutation_registry.sql": "sha256:babbf220826ab12da78505c0eb61b6db3b8890bf17deb09130c7b6508e007935",
+    "migrations/0460_siep15_device_enrollment.sql": "sha256:75ad0b6f7853b0dc47d4ada574ebd4f3abaebb2843520d75a56cb0c36851b961",
+    "migrations/0461_siep15_forward_mutation_registry.sql": "sha256:610aee81147679c4ddf7db23626d21db3b8b8329cc3c725e1c75b9016a26d69d",
+    "migrations/0462_siep16_forward_mutation_registry.sql": "sha256:02d42584a871b6b2944c5747f76bbd0abb07e1bbf158c4cef30c2213ab14efb3",
+    "migrations/0463_retired_rule_delivery_cleanup.sql": "sha256:707c41c049174fdde4dfcf488ea100e96aabcb1e7b17a6c554c7bed336c316e5",
+    "migrations/0464_siep16_integrated_mutation_registry.sql": "sha256:1005cb8f13bf5c0c2003a3dca021c3d86c656a4faabfb0e069b416a130ceccb7",
+    "migrations/0465_siep17_token_challenge_authority.sql": "sha256:52a39a7ca51eeb65294635afdf207993f2e98cdde5530884ce9abe51b6e19ec4",
+    "migrations/0466_siep17_forward_mutation_registry.sql": "sha256:20a158f96b287e7ac9c3979138c95803d1da644a5e4918290f092c628d0325d9",
+    "migrations/0467_siep18_atomic_db_monitor_grants.sql": "sha256:ae94885190bb97ada59684be6637417e12277f3ddaa2e1b1251221200b601cca",
+    "migrations/0468_siep18_forward_mutation_registry.sql": "sha256:c3dbeabd699e7036e9bdab980f94515243f5ef061bc1992c4ded8acda4ccbfd5",
+    "migrations/0469_siep18_exact_effects_trusted_principal.sql": "sha256:ab92662d77576f40c21330ac52aa145d861c288c5f64fc71ff52ad1212398ef1",
+    "migrations/0470_source_merge_authority_projection.sql": "sha256:fe43e9d60f66f4a8c28451d4c7792e1d35214328ce7ea8a0aa1806277d728f30",
+    "migrations/0471_source_merge_catalog_registry_successor.sql": "sha256:624eadc355304fa4320035b4ed209abcc6f5bc5acade90d8202709d71d4eaea6"
+  },
+  "observed": {
+    "column_dml": {
+      "error": null,
+      "local_digest": "sha256:e93277615774fabd40d664ec8fab0f0722fba2753f1502e6574d7ab4fe3ae196",
+      "local_digest_algorithm": "sha256 over the sorted list of json.dumps(row, sort_keys=True, separators=(',',':')) — a LOCAL canonicalization, NOT the pinned ops.scac_canonical_json algorithm (absent pre-activation).",
+      "row_count": 12,
+      "sql_provenance": "docs/frontier-finding/census-queries.sql#CATEGORY:column_dml",
+      "status": "ok",
+      "unparseable_lines": 0
+    },
+    "relation_dml": {
+      "error": null,
+      "local_digest": "sha256:aed509bbda08f7667144d8d367ce4df91291e065745520c4b0a36c3a644ffea4",
+      "local_digest_algorithm": "sha256 over the sorted list of json.dumps(row, sort_keys=True, separators=(',',':')) — a LOCAL canonicalization, NOT the pinned ops.scac_canonical_json algorithm (absent pre-activation).",
+      "row_count": 2173,
+      "sql_provenance": "docs/frontier-finding/census-queries.sql#CATEGORY:relation_dml",
+      "status": "ok",
+      "unparseable_lines": 0
+    },
+    "role_authority": {
+      "error": null,
+      "local_digest": "sha256:4a766e939722aa6023d50aa301b33f93884e00f7c8142a95f67c4cb3da980b07",
+      "local_digest_algorithm": "sha256 over the sorted list of json.dumps(row, sort_keys=True, separators=(',',':')) — a LOCAL canonicalization, NOT the pinned ops.scac_canonical_json algorithm (absent pre-activation).",
+      "row_count": 95,
+      "sql_provenance": "docs/frontier-finding/census-queries.sql#CATEGORY:role_authority",
+      "status": "ok",
+      "unparseable_lines": 0
+    },
+    "runtime_dml_grants": {
+      "error": null,
+      "local_digest": "sha256:5db2e9537f768d8cf892caff4552e42c1367b493d3a8ff6e36ce598a7b9aa00b",
+      "local_digest_algorithm": "sha256 over the sorted list of json.dumps(row, sort_keys=True, separators=(',',':')) — a LOCAL canonicalization, NOT the pinned ops.scac_canonical_json algorithm (absent pre-activation).",
+      "row_count": 8049,
+      "sql_provenance": "docs/frontier-finding/census-queries.sql#CATEGORY:runtime_dml_grants",
+      "status": "ok",
+      "unparseable_lines": 0
+    },
+    "secdef_execute": {
+      "error": null,
+      "local_digest": "sha256:96fb0cb0e11a62a7fbe55334efb75e422bbcd629d300a468beb232f8f57a199f",
+      "local_digest_algorithm": "sha256 over the sorted list of json.dumps(row, sort_keys=True, separators=(',',':')) — a LOCAL canonicalization, NOT the pinned ops.scac_canonical_json algorithm (absent pre-activation).",
+      "row_count": 594,
+      "sql_provenance": "docs/frontier-finding/census-queries.sql#CATEGORY:secdef_execute",
+      "status": "ok",
+      "unparseable_lines": 0
+    }
+  },
+  "pinned_commit": "0985dcc70764d888d70004641e210f3730ef9d2a",
+  "rebased_write_commands": {
+    "embedded_constants_source": "Every *_DB_CATALOG_BASELINE constant these commands render into a migration or runtime-projection file is sourced from a DISPOSABLE database reading, never production — the source file's own comments say so at each constant's definition (e.g. 'a disposable database after every ... change', 'disposable-DB readback', 'Exact disposable-DB predecessor receipt'). None of these commands read FROM production.",
+    "migration_commands": {
+      "--write-rebased-migration-v1": "migrations/0454_siep11_mutation_registry.sql",
+      "--write-rebased-migration-v2": "migrations/0455_siep12_policy_epoch.sql",
+      "--write-rebased-migration-v3": "migrations/0457_siep13_forward_mutation_registry.sql",
+      "--write-rebased-migration-v4": "migrations/0459_siep14_forward_mutation_registry.sql",
+      "--write-rebased-migration-v5": "migrations/0461_siep15_forward_mutation_registry.sql",
+      "--write-rebased-migration-v6": "migrations/0462_siep16_forward_mutation_registry.sql",
+      "--write-rebased-migration-v8": "migrations/0466_siep17_forward_mutation_registry.sql",
+      "--write-siep16-integrated-registry-migration": "migrations/0464_siep16_integrated_mutation_registry.sql",
+      "--write-siep18-forward-registry-migration": "migrations/0468_siep18_forward_mutation_registry.sql",
+      "--write-source-merge-forward-registry-migration": "migrations/0471_source_merge_catalog_registry_successor.sql"
+    },
+    "missing_production_measurement_stage": "No command in this file (or anywhere else found in this Work Request's evidence) measures PRODUCTION's live catalog and feeds that measurement into a rebase/re-pin. Every rebased-write command above regenerates a migration or runtime projection from a from-scratch DISPOSABLE database (committed db/schema.sql + applied migrations), which is by definition already at whatever the source files say — it cannot observe production's drift (e.g. this matrix's own observed counts, all of which exceed every pinned version). Building that measurement stage — read production's live catalog, and either (a) feed it into a new rebase of the frontier's source-only registry migrations, or (b) bootstrap out-of-band under the integrity program's own charter/receipts — is the activation program's own work, per the plan's Section 1 point 4 and Section 2 F02 (the bootstrap ordering circle: production's pending migration selection stops at 0454, so no successor after 0471 runs while the frontier is pending). This generator does not attempt to build that stage; it only names the gap.",
+    "refusal_reason_verbatim": "SCAC registry v1-v8 artifacts are sealed historical evidence; create a forward successor instead",
+    "refused_flags_sealed_historical_evidence": [
+      "--write-migration",
+      "--write-runtime",
+      "--write-runtime-v2",
+      "--write-runtime-v3",
+      "--write-runtime-v4",
+      "--write-runtime-v5",
+      "--write-runtime-v6",
+      "--write-runtime-v8",
+      "--write-siep12-migration",
+      "--write-siep13-registry-migration",
+      "--write-siep14-registry-migration",
+      "--write-siep15-registry-migration",
+      "--write-siep16-registry-migration",
+      "--write-siep17-forward-registry-migration"
+    ],
+    "runtime_projection_commands": {
+      "--write-rebased-runtime-v1": "mcp-server/src/scac-mutation-registry.generated.js",
+      "--write-rebased-runtime-v2": "mcp-server/src/scac-mutation-registry.v2.generated.js",
+      "--write-rebased-runtime-v3": "mcp-server/src/scac-mutation-registry.v3.generated.js",
+      "--write-rebased-runtime-v4": "mcp-server/src/scac-mutation-registry.v4.generated.js",
+      "--write-rebased-runtime-v5": "mcp-server/src/scac-mutation-registry.v5.generated.js",
+      "--write-rebased-runtime-v6": "mcp-server/src/scac-mutation-registry.v6.generated.js",
+      "--write-rebased-runtime-v8": "mcp-server/src/scac-mutation-registry.v8.generated.js",
+      "--write-runtime-v10": "mcp-server/src/scac-mutation-registry.v10.generated.js",
+      "--write-runtime-v7": "mcp-server/src/scac-mutation-registry.v7.generated.js",
+      "--write-runtime-v9": "mcp-server/src/scac-mutation-registry.v9.generated.js"
+    },
+    "source_file": "ops/scac-mutation-inventory.mjs",
+    "source_file_digest_at_pinned_commit": "sha256:e2abfcf46a211ded48958f8681604e70ec5d40cd0e916d8234ea17540b578572",
+    "spec_line_range": "1988-2059 (plan Section 1.3's cited range; the writer-mode dispatch block runs to the file's last line, 2064, at the pinned commit)"
+  },
+  "reconciliation_command_sequences": {
+    "disposable": {
+      "available": true,
+      "gap": null,
+      "sequence": [
+        "Build a from-scratch disposable database from the committed db/schema.sql, then apply migrations/0454-0471 in order (clean by construction on disposables, per r13).",
+        "Run the frontier's own validity functions directly on that disposable (e.g. ops.scac_mutation_catalog_v10_current() for v10, or the earlier per-version validity checks embedded in each forward-registry migration) — they are expected to pass, because the disposable IS the source the pins were computed from.",
+        "If a rebase is needed (e.g. after a reviewed source change), run the matching --write-rebased-runtime-vN / --write-rebased-migration-vN command from ops/scac-mutation-inventory.mjs against fresh inventory rows, then re-verify on a new disposable."
+      ]
+    },
+    "production": {
+      "available": false,
+      "gap": "No rebased-write command in ops/scac-mutation-inventory.mjs reads FROM production — every embedded *_DB_CATALOG_BASELINE constant comes from disposable-DB readback (see rebased_write_commands.embedded_constants_source above). Production's own pending migration selection also stops at 0454 (r13), so no successor migration after 0471 can even run while the frontier is pending — this is the bootstrap ordering circle the plan's Section 1 point 4 and Section 2 F02 name as the activation program's own first problem, not something this Work Request's tooling can close. The named gap is exactly rebased_write_commands.missing_production_measurement_stage above.",
+      "sequence": null
+    },
+    "staging": {
+      "available": "partial",
+      "gap": "Staging is a separate Neon project (r13, tools/db-tap.py docstring) — it holds no production data, so a staging census answers 'does staging's catalog match a pin', not 'does production's'. No rebased-write command in ops/scac-mutation-inventory.mjs reads FROM staging either; staging can be a rehearsal target for F01's clone-rehearsal condition, not a source of production measurement.",
+      "sequence": [
+        "Point the read-only tap (or, for an approved rehearsal, the receipted break-glass driver under F01 condition (b)) at the staging project instead of production (tools/db-tap.py --project staging).",
+        "Run census-queries.sql's five category queries against staging the same way this generator runs them against production, to get staging's own observed row sets."
+      ]
+    }
+  },
+  "versioned_shape": {
+    "category_count_by_version": {
+      "v1": 3,
+      "v10": 5,
+      "v2": 4,
+      "v3": 4,
+      "v4": 4,
+      "v5": 4,
+      "v6": 4,
+      "v7": 4,
+      "v8": 4,
+      "v9": 5
+    },
+    "description": "v1: three categories (secdef_execute, relation_dml, column_dml). v2-v8: four (adds role_authority). v9-v10: five (adds runtime_dml_grants). Mechanically derived from which categories each version's catalog_projection JSON actually carries; not hardcoded.",
+    "version_order": [
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "v5",
+      "v6",
+      "v7",
+      "v8",
+      "v9",
+      "v10"
+    ]
+  },
+  "work_request": "WR-000046"
+}

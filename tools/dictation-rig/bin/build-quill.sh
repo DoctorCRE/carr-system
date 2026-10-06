@@ -43,3 +43,12 @@ cd "$QUILL_DIR"
 swift build -c release
 ls -la .build/release/quill
 echo "quill built at $QUILL_DIR/.build/release/quill"
+
+# FluidAudio's own CLI, built from the same pinned checkout quill resolves, is
+# the rig's on-device diarizer (bin/speaker_split.py). Without it transcripts
+# fall back to one label per channel, so a failure here is loud but not fatal.
+if swift build -c release --product fluidaudiocli; then
+    echo "diarizer built at $QUILL_DIR/.build/release/fluidaudiocli"
+else
+    echo "build-quill.sh: WARN fluidaudiocli failed to build; transcripts keep one label per channel" >&2
+fi

@@ -1,5 +1,5 @@
 // add-party-org-identity.test.mjs — regression coverage for defect
-// 18b12fda-b79c-43a1-86c4-51b9623e12fd (2026-08-14, "Ruff House Resort").
+// 18b12fda-b79c-43a1-86c4-51b9623e12fd (2026-08-14, "Wagtail Lodge Resort").
 //
 // THE DEFECT. add-party with kind='org' AND an org_name naming the SAME
 // organisation collided with itself: org_party_id() minted the org inside the
@@ -7,7 +7,7 @@
 // a second time, and party_org_identity_uniq refused — correctly — against the
 // verb's OWN uncommitted row. The rollback then erased every trace, so a
 // read-only tap of production found zero matching rows while the verb kept
-// refusing with "Key (org_identity_key(name))=(ruff house resort) already
+// refusing with "Key (org_identity_key(name))=(wagtail lodge resort) already
 // exists". A write-path-vs-read-path disagreement with nothing wrong in the
 // data, deterministic under fresh idempotency keys.
 //
@@ -108,7 +108,7 @@ class Fake {
         const e = new Error(`duplicate key value violates unique constraint "party_org_identity_uniq"`);
         e.code = "23505";
         e.constraint = "party_org_identity_uniq";
-        e.detail = "Key (org_identity_key(name))=(ruff house resort) already exists.";
+        e.detail = "Key (org_identity_key(name))=(wagtail lodge resort) already exists.";
         throw e;
       }
       return { rows: [{ id: ids.newParty }] };
@@ -154,8 +154,8 @@ const partyEvidence = evidenceFor(PARTY_FIELDS);
 
 test("org with org_name restating itself creates exactly one row (the Ruff House defect)", async () => {
   const c = new Fake();
-  const res = await addParty(c, { name: "Ruff House Resort", kind: "org",
-    org_name: "Ruff House Resort", city: "Panama City Beach", state: "FL" });
+  const res = await addParty(c, { name: "Wagtail Lodge Resort", kind: "org",
+    org_name: "Wagtail Lodge Resort", city: "Panama City Beach", state: "FL" });
   assert.equal(res.ok, true);
   assert.equal(res.party_id, ids.newParty);
   assert.equal(c.orgPartyIdCalls.length, 0, "org_party_id must not mint the org a second time");
@@ -167,8 +167,8 @@ test("org with org_name restating itself creates exactly one row (the Ruff House
 
 test("self-reference is caught by IDENTITY, not string equality", async () => {
   const c = new Fake();
-  const res = await addParty(c, { name: "Ruff House Resort", kind: "org",
-    org_name: "  RUFF  house   RESORT " });
+  const res = await addParty(c, { name: "Wagtail Lodge Resort", kind: "org",
+    org_name: "  WAGTAIL  lodge   RESORT " });
   assert.equal(res.ok, true);
   assert.equal(c.orgPartyIdCalls.length, 0);
   assert.equal(c.partyInserts.length, 1);
@@ -179,7 +179,7 @@ test("self-reference is caught by IDENTITY, not string equality", async () => {
 
 test("org with a genuinely different org_name still links the parent org", async () => {
   const c = new Fake();
-  const res = await addParty(c, { name: "Ruff House Resort", kind: "org",
+  const res = await addParty(c, { name: "Wagtail Lodge Resort", kind: "org",
     org_name: "Ruff House Holdings LLC" });
   assert.equal(res.ok, true);
   assert.equal(c.orgPartyIdCalls.length, 1, "parent/sub-org structure stays expressible");
@@ -199,8 +199,8 @@ test("person with an org_name matching their own name is untouched by the guard"
 });
 
 test("similarity guard still answers needs_confirm before any insert", async () => {
-  const c = new Fake({ similar: [{ id: ids.survivor, name: "Ruff House Resort", email: null, city: "PCB" }] });
-  const res = await addParty(c, { name: "Ruff House Resort", kind: "org" });
+  const c = new Fake({ similar: [{ id: ids.survivor, name: "Wagtail Lodge Resort", email: null, city: "PCB" }] });
+  const res = await addParty(c, { name: "Wagtail Lodge Resort", kind: "org" });
   assert.equal(res.needs_confirm, true);
   assert.equal(c.partyInserts.length, 0);
 });
@@ -208,9 +208,9 @@ test("similarity guard still answers needs_confirm before any insert", async () 
 // ── the residual collision: an existing live org the guard did not catch ─────
 
 test("a genuine identity collision surfaces the surviving row, not a raw unique_violation", async () => {
-  const survivor = { id: ids.survivor, name: "Ruff House Resort", email: null, city: "Panama City Beach" };
+  const survivor = { id: ids.survivor, name: "Wagtail Lodge Resort", email: null, city: "Panama City Beach" };
   const c = new Fake({ insertViolates: true, survivors: [survivor] });
-  const res = await addParty(c, { name: "Ruff House Resort", kind: "org", force_new: true });
+  const res = await addParty(c, { name: "Wagtail Lodge Resort", kind: "org", force_new: true });
   assert.equal(res.needs_confirm, true);
   assert.deepEqual(res.candidates, [survivor]);
   assert.match(res.hint, /disambiguat/i, "the hint teaches the doctrine: fix the NAME, never the key");
@@ -238,7 +238,7 @@ test("add-premises new_party org restating itself in org_name creates one row", 
     building: { address: "123 Front Beach Rd" },
     spaces: [{ suite: "A" }],
     ownership: [{ kind: "owner",
-      new_party: { name: "Ruff House Resort", kind: "org", org_name: "Ruff House Resort",
+      new_party: { name: "Wagtail Lodge Resort", kind: "org", org_name: "Wagtail Lodge Resort",
         research_evidence: partyEvidence } }],
   });
   assert.equal(res.ok, true);
@@ -248,7 +248,7 @@ test("add-premises new_party org restating itself in org_name creates one row", 
 });
 
 test("add-premises new_party org collision surfaces the survivor as needs_confirm", async () => {
-  const survivor = { id: ids.survivor, name: "Ruff House Resort", email: null, city: "PCB" };
+  const survivor = { id: ids.survivor, name: "Wagtail Lodge Resort", email: null, city: "PCB" };
   const c = new Fake({ insertViolates: true, survivors: [survivor] });
   await assert.rejects(
     TOOLS["add-premises"].handler(c, joe, {
@@ -257,12 +257,63 @@ test("add-premises new_party org collision surfaces the survivor as needs_confir
       building: { address: "123 Front Beach Rd" },
       spaces: [{ suite: "A" }],
       ownership: [{ kind: "owner",
-        new_party: { name: "Ruff House Resort", kind: "org", force_new: true,
+        new_party: { name: "Wagtail Lodge Resort", kind: "org", force_new: true,
           research_evidence: partyEvidence } }],
     }),
     (e) => e.payload?.error === "needs_confirm" &&
            Array.isArray(e.payload.candidates) && e.payload.candidates[0].id === ids.survivor);
   assert.equal(c.rollbacks.length, 1, "add-premises' insert is savepoint-guarded too");
+});
+
+// ── decisive needs_confirm auto-resolution (WR-000019 slice S6) ─────────────
+//
+// The ONLY signal strong enough to resolve without a human is an EXACT match
+// on a real identifier (email) — trigram name similarity alone is exactly the
+// ambiguous case this queue exists to catch, so it must never auto-resolve on
+// its own, no matter how high it ranks.
+
+test("a single exact-email candidate auto-resolves without creating a duplicate", async () => {
+  const existing = { id: ids.survivor, name: "Dana Alt", email: "dana@example.test", city: "Mobile",
+    exact_email_match: true };
+  const c = new Fake({ similar: [existing] });
+  const res = await addParty(c, { name: "Dana Altman", email: "Dana@Example.test" });
+  assert.equal(res.ok, true);
+  assert.equal(res.party_id, ids.survivor);
+  assert.equal(res.auto_resolved, true);
+  assert.equal(res.needs_confirm, undefined);
+  assert.equal(c.partyInserts.length, 0, "no duplicate party is created");
+});
+
+test("force_new:true still creates a separate party even over an exact email match", async () => {
+  const existing = { id: ids.survivor, name: "Dana Alt", email: "dana@example.test", city: "Mobile",
+    exact_email_match: true };
+  const c = new Fake({ similar: [existing] });
+  const res = await addParty(c, { name: "Dana Altman", email: "dana@example.test", force_new: true });
+  assert.equal(res.ok, true);
+  assert.equal(res.auto_resolved, undefined);
+  assert.equal(c.partyInserts.length, 1, "force_new bypasses the candidate lookup entirely, as before");
+});
+
+test("multiple candidates never auto-resolve even when one is an exact email match", async () => {
+  const first = { id: ids.survivor, name: "Dana Alt", email: "dana@example.test", city: "Mobile",
+    exact_email_match: true };
+  const second = { id: ids.employerOrg, name: "Dana Altmann", email: null, city: "Mobile",
+    exact_email_match: false };
+  const c = new Fake({ similar: [first, second] });
+  const res = await addParty(c, { name: "Dana Altman", email: "dana@example.test" });
+  assert.equal(res.needs_confirm, true);
+  assert.deepEqual(res.candidates, [first, second]);
+  assert.equal(c.partyInserts.length, 0);
+});
+
+test("a single fuzzy-name-only candidate (no exact email match) still asks — ambiguity is never auto-resolved", async () => {
+  const nameOnly = { id: ids.survivor, name: "Wagtail Lodge Resort", email: null, city: "PCB",
+    exact_email_match: false };
+  const c = new Fake({ similar: [nameOnly] });
+  const res = await addParty(c, { name: "Wagtail Lodge Resort", kind: "org" });
+  assert.equal(res.needs_confirm, true);
+  assert.deepEqual(res.candidates, [nameOnly]);
+  assert.equal(c.partyInserts.length, 0);
 });
 
 test("add-premises refuses a thin new ownership party before its party insert", async () => {

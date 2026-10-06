@@ -68,6 +68,24 @@ def set_seat(name: str, seat: str, *, path: Path = DEFAULT_REGISTRY) -> dict:
     return entry
 
 
+ROOM_LISTEN_MODES = ("all", "mention")
+
+
+def set_room_listen(name: str, mode: str, *, path: Path = DEFAULT_REGISTRY) -> dict:
+    """How much of the room a desk hears: "all" (default) or "mention" — people's
+    turns plus only those desk turns that @-mention its seat (see
+    state.is_unaddressed_desk_turn). Metadata on an existing entry, like set_seat."""
+    if mode not in ROOM_LISTEN_MODES:
+        raise DeskError("bad_room_listen", f"room_listen must be one of {ROOM_LISTEN_MODES}")
+    data = _load(path)
+    entry = data.get("desks", {}).get(name)
+    if entry is None:
+        raise DeskError("unknown_desk", f"no desk named {name!r} — register it first")
+    entry["room_listen"] = mode
+    _save(path, data)
+    return entry
+
+
 def get_seat(name: str, *, path: Path = DEFAULT_REGISTRY) -> str | None:
     data = _load(path)
     entry = data.get("desks", {}).get(name)

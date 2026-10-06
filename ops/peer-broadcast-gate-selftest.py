@@ -15,21 +15,20 @@ import tempfile
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GATE = os.path.join(REPO, "hooks", "peer-broadcast-gate.py")
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
+
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
-
-
-def run(to, state_dir, tool="SendMessage", transcript=None, transcript_key="transcript_path"):
+def run(to, state_dir, tool="SendMessage", transcript=None, transcript_key="transcript_path", session=None):
     """Invoke the gate with an isolated HOME so the real state file is untouched."""
     env = {**os.environ, "HOME": state_dir}
     body = {"tool_name": tool, "tool_input": {"to": to}}
+    if session is not None:
+        body["session_id"] = session
     if transcript is not None:
         body[transcript_key] = transcript
     p = subprocess.run([sys.executable, GATE], input=json.dumps(body),
@@ -262,8 +261,70 @@ with tempfile.TemporaryDirectory() as d:
     rc, _ = run("", d)
     check("an empty recipient is ignored", rc == 0, f"rc={rc}")
 
-print()
-if failures:
-    print(f"FAIL {len(failures)} check(s): {', '.join(failures)}")
-    sys.exit(1)
-print("OK all checks passed")
+# 8. THE BUDGET IS PER SESSION (2026-08-23, this task's phase-2 scoping).
+# The state used to be one shared file, so parallel sessions spent ONE combined
+# budget: session B's first targeted ask was refused because sessions A and C
+# had messaged someone. Two distinct session ids must now hold two independent
+# budgets, and the same peer reached from two sessions must cost each of them
+# one slot — not be deduplicated into a shared ledger entry.
+with tempfile.TemporaryDirectory() as d:
+    run("carr-ai-01 [aaa]", d, session="sess-a")
+    run("carr-ai-02 [bbb]", d, session="sess-a")     # A's budget full
+    rc_a, _ = run("carr-ai-03 [ccc]", d, session="sess-a")
+    rc_b1, _ = run("carr-ai-01 [aaa]", d, session="sess-b")
+    rc_b2, _ = run("carr-ai-02 [bbb]", d, session="sess-b")
+    check("a full budget in session A does not refuse session B's first ask",
+          rc_b1 == 0, f"rc={rc_b1}")
+    check("session B holds its OWN two-peer budget", rc_b2 == 0 and rc_a == 2,
+          f"a3={rc_a} b1={rc_b1} b2={rc_b2}")
+
+# 9. SUBAGENTS SHARE THE PARENT'S SESSION_ID (2026-09-23). A helper's sends
+# were charged to its parent's budget, and a nested helper (spawned by a
+# subagent, so absent from the parent transcript) was never proven own.
+def nested_agent_file(transcript, agent_id):
+    folder = os.path.join(transcript[:-6], "subagents")
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, f"agent-{agent_id}.jsonl"), "w") as fh:
+        fh.write("{}\n")
+
+with tempfile.TemporaryDirectory() as d:
+    t = write_transcript(d, [])
+    run("carr-ai-01 [aaa]", d, transcript=t, session="s9")
+    run("carr-ai-02 [bbb]", d, transcript=t, session="s9")   # budget full
+    rc, _ = run("main", d, transcript=t, session="s9")
+    check("'main' (a subagent's own parent) is exempt even on a full budget", rc == 0, f"rc={rc}")
+
+with tempfile.TemporaryDirectory() as d:
+    t = write_transcript(d, [])
+    run("main", d, transcript=t, session="s9b")
+    run("carr-ai-01 [aaa]", d, transcript=t, session="s9b")
+    rc, _ = run("carr-ai-02 [bbb]", d, transcript=t, session="s9b")
+    check("'main' is never charged to the budget", rc == 0, f"rc={rc}")
+
+with tempfile.TemporaryDirectory() as d:
+    t = write_transcript(d, [])
+    nested_agent_file(t, "a9533e8dd38b052db")
+    run("carr-ai-01 [aaa]", d, transcript=t, session="s9c")
+    run("carr-ai-02 [bbb]", d, transcript=t, session="s9c")
+    rc, _ = run("a9533e8dd38b052db [92e6b3]", d, transcript=t, session="s9c")
+    check("a nested agent proven by the harness's subagents/ file is exempt", rc == 0, f"rc={rc}")
+
+with tempfile.TemporaryDirectory() as d:
+    t = write_transcript(d, [])
+    nested_agent_file(t, "x")
+    run("carr-ai-01 [aaa]", d, transcript=t, session="s9d")
+    run("carr-ai-02 [bbb]", d, transcript=t, session="s9d")
+    rc1, _ = run("../subagents/agent-x", d, transcript=t, session="s9d")
+    rc2, _ = run("sub/x", d, transcript=t, session="s9d")
+    check("a name with '..' or '/' earns no path exemption", rc1 == 2 and rc2 == 2,
+          f"rc1={rc1} rc2={rc2}")
+
+with tempfile.TemporaryDirectory() as d:
+    t = write_transcript(d, [])
+    nested_agent_file(t, "a9533e8dd38b052db")
+    run("carr-ai-01 [aaa]", d, transcript=t, session="s9e")
+    run("carr-ai-02 [bbb]", d, transcript=t, session="s9e")
+    rc, _ = run("carr-ai-03 [ccc]", d, transcript=t, session="s9e")
+    check("a real peer is still charged and refused past the budget", rc == 2, f"rc={rc}")
+
+sys.exit(CHECKER.summary())

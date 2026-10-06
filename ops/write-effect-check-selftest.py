@@ -57,15 +57,12 @@ import time
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 CHECK = os.path.join(REPO, "hooks", "write-effect-check.py")
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 def load():
@@ -191,12 +188,7 @@ def main():
     finally:
         subprocess.run(["rm", "-rf", tmp])
 
-    print()
-    if failures:
-        print(f"FAIL {len(failures)} check(s): {', '.join(failures)}")
-        return 1
-    print("OK all checks passed")
-    return 0
+    return CHECKER.summary()
 
 
 if __name__ == "__main__":

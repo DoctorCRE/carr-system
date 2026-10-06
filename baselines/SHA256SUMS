@@ -1,11 +1,12 @@
-# ORDER 42b — PII baseline conversion (2026-08-06). These two output baselines held real
-# client PII (lead-board.html ~60,687 emails / 218 phones; deal-room-panhandle.html 91/49)
-# and previously lived in git as full HTML files. They now stay LOCAL and untracked
+# ORDER 42b — PII baseline conversion (2026-08-06). These output baselines hold real
+# client PII (lead-board.html ~60,687 emails / 218 phones; deal-room-panhandle.html 91/49;
+# renewal-radar.json added 2026-09-26, ~150 tenant/landlord names, addresses and phones)
+# and previously lived in git as full files. They now stay LOCAL and untracked
 # (see .gitignore) and only their sha256 is committed. tools/check.sh hashes the live
 # vault output and compares against the line below; regen instructions print on mismatch
 # or when the local file is missing. Regenerate this file's lines with:
-#   shasum -a 256 baselines/lead-board.html baselines/deal-room-panhandle.html
-# renewal-radar.json and writing-lint.txt are NOT PII-bearing and stay full-file-tracked;
-# do not add them here.
+#   shasum -a 256 baselines/lead-board.html baselines/deal-room-panhandle.html baselines/renewal-radar.json
+# writing-lint.txt is NOT PII-bearing and stays full-file-tracked; do not add it here.
 69220fca0e93dda18ee221a27b4d5563e77d38b50171682a13e0a70b1fe372ce  lead-board.html
 4da517ce7079b375a5cd625b7c22ab630b23c60a315b35acedb81171670f2d08  deal-room-panhandle.html
+56368fc4773155bb2e7b3da4e1759b38c6b0f2f2930a9e0c0b0af69338f72ff3  renewal-radar.json

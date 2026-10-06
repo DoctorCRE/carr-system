@@ -1,0 +1,77 @@
+{
+  "schema_version": "target-dispositions.v1",
+  "wr": "WR-000046",
+  "purpose": "Disposition ruleset applied by compare_targets.py to the symmetric difference between the OBSERVED effect manifest and the PARSED extraction (both taken AFTER the documented rendering patches in this worktree -- see comparison-report.md section 'Patches applied before comparison'). Every rule below excludes a specific, individually-verified class of target from the symmetric difference, with a concrete justification and a matched count that compare_targets.py recomputes and cross-checks against the number recorded here on every run.",
+  "rules": [
+    {
+      "id": "unresolved_catalog_scan_rows",
+      "direction": "observed_only",
+      "predicate": "target matches ^row:ops\\.scac_mutation_registry_entry:.* AND the observed by_file file that carries this target is one of the 10 files that also carry a parser 'unresolved' entry for a db_function_acl/db_relation_acl/db_column_acl catalog-scan INSERT...SELECT (0454, 0455, 0457, 0459, 0461, 0462, 0464, 0466, 0468, 0471)",
+      "justification": "Attributable to the PARSED extractor's 30 documented 'unresolved' entries (target-identity-contract.md rule 4): three catalog-scan INSERT...SELECT statements (db_function_acl, db_relation_acl, db_column_acl) repeat in each of these 10 files, sourced from live pg_roles/pg_class/pg_proc/pg_attribute/aclexplode introspection that cannot be statically resolved from migration text. File attribution was checked, not assumed by table name alone: every one of these targets' owning file (per the OBSERVED by_file map) is exactly one of the 10 files carrying a matching unresolved entry; no target from an unrelated file was blanket-excluded.",
+      "expected_count": 6104
+    },
+    {
+      "id": "unresolved_dynamic_trigger_install",
+      "direction": "observed_only",
+      "predicate": "target matches ^trigger:[a-z0-9_]+\\.[a-z0-9_]+\\.(scac_reference_monitor_guard_row|scac_reference_monitor_guard_truncate)$ AND the observed by_file file that carries this target is 0467_siep18_atomic_db_monitor_grants.sql",
+      "justification": "Attributable to the PARSED extractor's 31st documented unresolved entry: the second DO $guards$ block in 0467 (line 757) walks pg_class/pg_roles/aclexplode at apply time to decide which tables need the scac_reference_monitor_guard_row/_truncate triggers, installing them via dynamic EXECUTE format(...). The dynamic catalog scan spans both the ops and public schemas (137 tables x 2 triggers = 274), not just ops. File attribution checked directly: all 274 matching targets are attributed to 0467 in the OBSERVED by_file map, and their names match exactly the two trigger name suffixes the DO block's format() template produces.",
+      "expected_count": 274
+    },
+    {
+      "id": "dynamic_trigger_install_table_metadata_side_effect",
+      "direction": "observed_only",
+      "predicate": "target matches ^table:.* , the target is one of the 11 tables listed in comparison-report.md as first receiving a scac_reference_monitor_guard trigger via the 0467 DO block, AND the observed by_file file that carries this target is 0467_siep18_atomic_db_monitor_grants.sql",
+      "justification": "New finding (this comparison seat, cross-checked against real PostgreSQL catalog structure, not asserted from memory): pg_class carries a relhastriggers column; the FIRST trigger ever created on a table flips it from false to true, which the OBSERVED pg_class-family diff correctly reports as an 'altered' table: target even though no ALTER TABLE statement appears anywhere in the migration text. Same root mechanism as unresolved_dynamic_trigger_install (the same 0467 DO $guards$ block), same file attribution.",
+      "expected_count": 11
+    },
+    {
+      "id": "explicit_trigger_table_metadata_side_effect",
+      "direction": "observed_only",
+      "predicate": "target matches ^table:.* , the target is one of {table:ops.rule_pack, table:public.doctrine_meta, table:public.schema_migrations}, AND the observed by_file file that carries this target is 0455_siep12_policy_epoch.sql",
+      "justification": "Same relhastriggers mechanic as dynamic_trigger_install_table_metadata_side_effect, but the triggering statements here ARE explicit and statically parseable (0455's CREATE CONSTRAINT TRIGGER / CREATE TRIGGER on these 3 pre-existing tables, correctly captured by PARSED as trigger: targets). CREATE TRIGGER is not, itself, an ALTER TABLE statement in SQL grammar, so no text-parsing extractor has a principled textual signal that the table's own catalog row also changes. Verified: each of the 3 tables' first-ever trigger in migrations/0454-0471 is exactly the CREATE [CONSTRAINT] TRIGGER statement in 0455 line 447/448/461/466/467/480 (git show, pinned commit).",
+      "expected_count": 3
+    },
+    {
+      "id": "constraint_trigger_pg_constraint_dual_registration",
+      "direction": "observed_only",
+      "predicate": "target matches ^constraint:.* AND its trailing constraint-name segment is one of the 18 known CREATE CONSTRAINT TRIGGER names (scac_epoch_rule_delivery_policy, scac_epoch_rule_load_layer, scac_epoch_rule_pack, scac_epoch_registry_version, scac_epoch_doctrine_concept_mapping, scac_epoch_doctrine_document, scac_epoch_doctrine_edge, scac_epoch_doctrine_edge_type, scac_epoch_doctrine_gate_check, scac_epoch_doctrine_link, scac_epoch_doctrine_generation, scac_epoch_doctrine_review_policy, scac_epoch_doctrine_revision, scac_epoch_doctrine_section, scac_epoch_doctrine_slug_alias, scac_epoch_doctrine_snapshot, scac_epoch_rule, scac_epoch_schema_ledger)",
+      "justification": "New finding: PostgreSQL registers a CONSTRAINT TRIGGER (as opposed to a plain TRIGGER) as BOTH a pg_trigger row and a pg_constraint row (contype='t'), under the same name. PARSED correctly captures all 18 of these as trigger: targets (matched, not in either diff) via its documented CREATE [CONSTRAINT] TRIGGER handler; it has no principled textual signal that the SAME statement also produces a second, independent pg_constraint-family catalog row. Verified by enumerating every CREATE CONSTRAINT TRIGGER statement across all 18 pinned files (git show) and confirming an exact 1:1 name match against these 18 observed-only constraint: targets, plus confirming an 18th entry (doctrine_gate_check) that coincidentally also matches the auto-name suffix pattern '_check' was correctly attributed here and not to auto_named_constraint_scope_decision.",
+      "expected_count": 18
+    },
+    {
+      "id": "auto_named_constraint_scope_decision",
+      "direction": "observed_only",
+      "predicate": "target matches ^constraint:.* , is not matched by constraint_trigger_pg_constraint_dual_registration, and its trailing constraint-name segment matches PostgreSQL's own auto-naming suffixes ^[a-z0-9_]+_(pkey|key|check|fkey|excl)[0-9]*$",
+      "justification": "The PARSED extractor's own documented, deliberate scope decision (parse_extract_targets.py RESULT.md, 'Deliberate scope decisions'): unnamed/auto-generated constraints (inline CHECK/UNIQUE/FOREIGN KEY/PRIMARY KEY clauses inside CREATE TABLE, and unnamed ALTER TABLE ... ADD constraints) are out of scope because reproducing PostgreSQL's internal auto-naming algorithm, including its per-column collision-counter behavior, is not verifiable from text alone without a database connection -- which the parsing seat is forbidden from opening. Verified: every one of these 383 targets' trailing name segment matches the exact Postgres auto-naming suffix family, with zero unexplained residue after removing the 18 constraint-trigger names above.",
+      "expected_count": 383
+    },
+    {
+      "id": "implicit_backing_index",
+      "direction": "observed_only",
+      "predicate": "target matches ^index:.*",
+      "justification": "New finding, same class as implicit_composite_array_types: every PRIMARY KEY or UNIQUE constraint (named or unnamed) implicitly creates a backing btree index carrying the constraint's own name. PARSED emits zero index: targets by design, since an exhaustive grep of migrations/0454-0471 confirmed zero literal CREATE INDEX statements -- but it does not additionally model the implicit index PostgreSQL creates for every PK/UNIQUE constraint. Verified: 83 of 84 targets' index name exactly matches a PARSED-known or auto-named PK/UNIQUE constraint name (_pkey/_key suffix); the 84th (scac_mutation_registry_entry_identity_uq) is the backing index for the ONE explicitly-named unique constraint in this corpus, confirming the mechanic applies uniformly whether the constraint itself is named or auto-named.",
+      "expected_count": 84
+    },
+    {
+      "id": "implicit_composite_array_types",
+      "direction": "observed_only",
+      "predicate": "target matches ^type:ops\\..*",
+      "justification": "The observation seat's documented finding #1 (out/frontier-finding/build-receipts/slice-a/RESULT.md): every CREATE TABLE causes PostgreSQL to auto-create a companion composite row type (typtype='c', same name as the table) and an array type (typtype='b', '_'-prefixed name). No migration file contains an explicit CREATE TYPE for these. Verified: all 52 targets resolve to exactly 26 composite + 26 array types, a 1:1 pairing with the 26 table: targets PARSED and OBSERVED already agree on.",
+      "expected_count": 52
+    },
+    {
+      "id": "owner_materialization_grants",
+      "direction": "observed_only",
+      "predicate": "target matches ^grant:.*:carr_manifest:[A-Z]+$",
+      "justification": "The observation seat's documented finding #2 (slice-a RESULT.md): the first explicit GRANT/REVOKE on a previously-ungranted object causes PostgreSQL to materialize the object's full ACL array, which includes an explicit entry for the object's OWNER -- in this disposable, carr_manifest (the generator's bootstrap role) -- even though no migration statement names that role. In production the owner role would differ (e.g. neondb_owner), but the *fact* of an owner-materialization grant appearing is a genuine, reproducible PostgreSQL mechanic invisible to text parsing regardless of which role happens to be the owner. Verified: all 316 remaining grant: observed-only targets share grantee carr_manifest, with no other grantee appearing. Two sub-populations: 108 function EXECUTE grants, and 208 table grants (26 tables x 8 privileges: select/insert/update/delete/truncate/references/trigger/MAINTAIN -- MAINTAIN is a PostgreSQL 15+ table privilege that PARSED's ALL_PRIVS_BY_KIND table-privilege set does not enumerate, itself a minor, separately-noted scope gap in the ALL-expansion list rather than a coverage miss, since MAINTAIN cannot appear in this corpus's text-visible GRANT/REVOKE ALL statements any more than the owner-materialization grantee can).",
+      "expected_count": 316
+    },
+    {
+      "id": "migration_runner_ledger_bookkeeping_row",
+      "direction": "observed_only",
+      "predicate": "target matches ^row:public\\.schema_migrations:.*",
+      "justification": "New finding: each of the 18 pinned migration files, once applied by the real migration runner (tools/migrate.py, run unmodified from the pinned commit per the observation seat's method), causes the runner itself -- not any statement inside the migration file's own SQL text -- to insert one ledger row into public.schema_migrations recording that file's name/sha256/applied timestamp. The identity contract restricts the PARSED extractor to deriving targets 'ONLY by reading migrations/0454-0471' (rule 1); this row insert is not literal text in any of those 18 files, so it is categorically outside the extractor's permitted read scope, not merely difficult to parse. Verified: exactly 18 targets, one per pinned migration file, each attributed (per the OBSERVED by_file map) to precisely the file it was inserted after.",
+      "expected_count": 18
+    }
+  ]
+}

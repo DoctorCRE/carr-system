@@ -121,9 +121,20 @@ export function evidenceActivationTools({ withEnvelope, ToolError }) {
         return { ok: true, providers };
       },
     },
+    // DEMOTED off the authority gate (WR-000019 slice S6, 2026-08-27). Its own
+    // description already said the true thing: "grants no authority and never
+    // activates the provider" — this only quarantines a digest-pinned manifest
+    // for later conformance testing (attest-execution-environment-conformance,
+    // still authorityOnly) and later activation
+    // (transition-execution-environment-provider, still authorityOnly, the one
+    // that can actually reach 'active'). A registered row cannot execute
+    // anything and cannot skip conformance or activation. Migration 0344 grants
+    // carr_writer EXECUTE and teaches the underlying function to accept a
+    // sponsored non-authority session (identified via carr.acting_actor_slug)
+    // alongside the unchanged carr_authority_* path.
     "register-execution-environment-provider": {
-      description: "HUMAN-ONLY: quarantine a digest-pinned execution-environment plugin manifest for conformance testing. Registration grants no authority and never activates the provider.",
-      write: true, humanOnly: true, authorityOnly: true,
+      description: "Quarantine a digest-pinned execution-environment plugin manifest for conformance testing. Registration grants no authority and never activates the provider; callable by a sponsored non-authority agent.",
+      write: true,
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: { manifest: { type: "object" }, idempotency_key: { type: "string" } },
@@ -132,6 +143,10 @@ export function evidenceActivationTools({ withEnvelope, ToolError }) {
       handler: async (c, actor, args) => withEnvelope(c, actor, "register-execution-environment-provider", args, async () => {
         if (!UUID.test(String(args.idempotency_key || "")) || !args.manifest || typeof args.manifest !== "object" || Array.isArray(args.manifest))
           throw new ToolError({ error: "execution_environment_manifest_invalid" });
+        // Only reached on the writer connection (session_user='carr_writer');
+        // the authority connection resolves its actor from session_user itself
+        // and ignores this. Harmless no-op there.
+        await c.query("select set_config('carr.acting_actor_slug',$1::text,true) /* register-execution-environment-provider:actor */", [actor.slug]);
         const row = (await c.query(
           "select * from ops.register_execution_environment_provider($1::jsonb,$2::uuid) /* register-execution-environment-provider */",
           [JSON.stringify(args.manifest), args.idempotency_key],
@@ -170,6 +185,11 @@ export function evidenceActivationTools({ withEnvelope, ToolError }) {
         return { ok: true, conformance_id: row.conformance_id, replayed: row.replayed };
       }),
     },
+    // LEFT authorityOnly (WR-000019 slice S6 survey, 2026-08-27), unlike its two
+    // siblings above: this is the verb that can actually drive a provider to
+    // 'active' (real execution capability in production) and is also the
+    // rollback path off it. That is exactly "grants authority or executes" —
+    // the opposite of the two demoted verbs' pure bookkeeping.
     "transition-execution-environment-provider": {
       description: "HUMAN-ONLY: perform one compare-and-set provider lifecycle transition. Activation requires passed conformance; disable is the rollback path; no provider can self-promote.",
       write: true, humanOnly: true, authorityOnly: true,
@@ -367,9 +387,18 @@ export function evidenceActivationTools({ withEnvelope, ToolError }) {
         return { ok: true, reliability, ...activationReliabilityWire(reliability) };
       },
     },
+    // DEMOTED off the authority gate (WR-000019 slice S6, 2026-08-27). Its own
+    // description already said the true thing: "This cannot promote a model,
+    // provider, or workflow." The lifecycle here is bookkeeping over the
+    // evaluation-case golden-set catalogue (proposed/triaged/accepted/retired
+    // plus an accepted-membership projection row) — it never deploys, executes,
+    // or grants capability to anything. Migration 0344 grants carr_writer
+    // EXECUTE and teaches the underlying function to accept a sponsored
+    // non-authority session (identified via carr.acting_actor_slug) alongside
+    // the unchanged carr_authority_* path.
     "transition-evaluation-case": {
-      description: "HUMAN-ONLY: advance one proposed evaluation case exactly proposed→triaged→accepted→retired. Acceptance adds a lane/risk/split golden membership projection; retirement leaves its append-only history intact and makes it inactive. This cannot promote a model, provider, or workflow.",
-      write: true, humanOnly: true, authorityOnly: true,
+      description: "Advance one proposed evaluation case exactly proposed→triaged→accepted→retired. Acceptance adds a lane/risk/split golden membership projection; retirement leaves its append-only history intact and makes it inactive. This cannot promote a model, provider, or workflow; callable by a sponsored non-authority agent.",
+      write: true,
       inputSchema: {
         type: "object", additionalProperties: false,
         properties: { human_ref: { type: "string" }, candidate_ref: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9._:-]{2,127}$" }, next_state: { type: "string", enum: ["triaged", "accepted", "retired"] }, decision_basis: { type: "object" }, idempotency_key: { type: "string" } },
@@ -379,6 +408,9 @@ export function evidenceActivationTools({ withEnvelope, ToolError }) {
         if (!WR.test(String(args.human_ref || "")) || !UUID.test(String(args.idempotency_key || "")) || containsRawReceiptContent(args.decision_basis))
           throw new ToolError({ error: "evaluation_case_transition_reference_or_redaction_invalid" });
         await c.query("select set_config('carr.organization_tenant_id',$1::text,true) /* transition-evaluation-case:tenant */", [organizationTenantForActor(actor)]);
+        // Only reached on the writer connection; see register-execution-
+        // environment-provider's identical note above.
+        await c.query("select set_config('carr.acting_actor_slug',$1::text,true) /* transition-evaluation-case:actor */", [actor.slug]);
         const row = (await c.query(
           "select * from ops.transition_proposed_eval_candidate($1::text,$2::text,$3::text,$4::jsonb,$5::uuid) /* transition-evaluation-case */",
           [args.human_ref, args.candidate_ref, args.next_state, JSON.stringify(args.decision_basis), args.idempotency_key],

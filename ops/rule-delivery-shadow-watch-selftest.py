@@ -64,6 +64,12 @@ check("and its age is reported in hours", round(stale["age_hours"]) == 200,
 
 fresh = watch.summarize([row(ts=stamp(3), needed=["engineering-git"])], now=NOW)
 check("a fresh log is not stale", fresh["stale"] is False)
+with_receipt = watch.summarize([
+    row(ts=stamp(3), needed=["engineering-git"]),
+    {"record_type": "epoch", "ts": stamp(1), "record_id": "a" * 64},
+], now=NOW)
+check("ledger receipts are not counted as observed turns", with_receipt["turns"] == 1,
+      str(with_receipt))
 
 # ── the miss is the number the enforcement flip turns on ────────────────────
 missed = watch.summarize([
@@ -101,10 +107,10 @@ check("a missing log reads as empty rather than raising", missing_file == ([], 0
 # ── the printed report says the thing a reader must not miss ────────────────
 import io, contextlib  # noqa: E402
 
-def rendered(summary):
+def rendered(summary, eligibility=None):
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        watch.report(summary)
+        watch.report(summary, eligibility)
     return buffer.getvalue()
 
 check("an empty log prints that nothing was measured",
@@ -119,9 +125,31 @@ check("a clean fresh week prints the turn count and zero misses",
 check("and it does not claim to have counted turns it never saw",
       "with a pack signal" in rendered(fresh), rendered(fresh))
 
+blocked = {"eligible": False, "reasons": ["one unresolved finding"],
+           "open": [{"kind": "miss", "event_id": "a" * 64}], "closed": []}
+check("nightly report surfaces eligibility and missing ownership/remedy",
+      "ENFORCEMENT BLOCKED" in rendered(missed)
+      and "owner=UNASSIGNED" in rendered(missed, blocked),
+      rendered(missed, blocked))
+
+# ── delivery scope is part of the production acceptance signal ─────────────
+audit = watch.load_audit()
+clean_counts = {
+    "total": 4, "untagged": 0, "orphaned": 0, "layer0": 1,
+    "layer0_shared": 1, "layer0_shared_cap": 35, "control": 1, "pack": 2,
+    "packs": 1, "wildcarded": 0, "packless": 0, "emptypack": 0,
+    "scope_mismatch": 0, "mode": "shadow",
+}
+check("a scope-clean delivery audit can pass", audit.failing(clean_counts) is False)
+bad_scope = {**clean_counts, "scope_mismatch": 1}
+check("one personal-scope mismatch fails the delivery audit",
+      audit.failing(bad_scope) is True)
+check("the rendered audit names the scope mismatch",
+      "scope_mismatch=1" in audit.render(bad_scope), audit.render(bad_scope))
+
 if FAILURES:
     print("rule-delivery-shadow-watch-selftest: FAIL", file=sys.stderr)
     for line in FAILURES:
         print(f"  {line}", file=sys.stderr)
     raise SystemExit(1)
-print("rule-delivery-shadow-watch-selftest: 17 cases passed")
+print("rule-delivery-shadow-watch-selftest: 22 cases passed")

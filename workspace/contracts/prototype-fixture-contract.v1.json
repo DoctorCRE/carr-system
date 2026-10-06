@@ -29,7 +29,7 @@
     "refusal",
     "retry"
   ],
-  "fixture_identity_rule": "Every person, client, contact, address, message, ID, and document is synthetic. Myrick is a fictionalized scenario with no production payload.",
+  "fixture_identity_rule": "Every person, client, contact, address, message, ID, and document is synthetic. Marsh is a fictionalized scenario with no production payload.",
   "canonical_twin_rule": "Each surface has one versioned fixture containing all ten authored states. HTML and JavaScript may not embed an alternate data truth.",
   "type": "object",
   "additionalProperties": false,

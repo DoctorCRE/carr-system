@@ -27,15 +27,21 @@ const STRICT_TOOLS = memoryTools({ withEnvelope: strictEnvelope, writeEvent, Too
 const KEY = "0297aaaa-0000-4000-8000-000000000001";
 const MEMORY_ID = "02970000-0000-4000-8000-000000000010";
 const SUCCESSOR_ID = "02970000-0000-4000-8000-000000000011";
+const JOE_ACTOR_ID = "02970000-0000-4000-8000-0000000000a0";
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 test("memory kernel exposes observe, recall, promote, correct, and forget", () => {
   for (const name of ["observe-memory", "recall-memory", "promote-memory", "correct-memory", "forget-memory"])
     assert.ok(TOOLS[name], name);
   assert.equal(TOOLS["recall-memory"].write, undefined);
   assert.equal(TOOLS["observe-memory"].write, true);
-  assert.equal(TOOLS["promote-memory"].humanOnly, true);
-  assert.equal(TOOLS["correct-memory"].humanOnly, true);
-  assert.equal(TOOLS["forget-memory"].humanOnly, true);
+  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): dead since
+  // executeRegisteredTool stopped reading it 2026-08-26 (Joe's ruling, decision
+  // dc57f62d); this slice drops the stale declaration in memory.js. The real
+  // gate — humanOnlyDirect, kept as a documented no-op — is unchanged.
+  assert.equal(TOOLS["promote-memory"].humanOnly, undefined);
+  assert.equal(TOOLS["correct-memory"].humanOnly, undefined);
+  assert.equal(TOOLS["forget-memory"].humanOnly, undefined);
   assert.ok(TOOLS["review-memory"]);
 });
 
@@ -44,6 +50,7 @@ test("observe derives personal scope from the verified sponsor and stores proven
   const client = { query: async (sql, params) => {
     statements.push({ sql, params });
     if (/resolve_memory_plan_anchor/.test(sql)) return { rows: [{ plan_id: "02970000-0000-4000-8000-000000000001", work_request_id: "wr-1", work_request_version: 3 }] };
+    if (/select id from actor where slug=/.test(sql)) return { rows: [{ id: JOE_ACTOR_ID }] };
     if (/insert into memory_item/.test(sql)) return { rows: [{ id: "memory-1", version: 1, status: "candidate", scope: "personal" }] };
     if (/insert into memory_evidence/.test(sql)) return { rows: [{ id: "evidence-1" }] };
     return { rows: [] };
@@ -54,8 +61,14 @@ test("observe derives personal scope from the verified sponsor and stores proven
       plan_id: "02970000-0000-4000-8000-000000000001",
       evidence: { source_type: "conversation", source_ref: "turn-1", observation: "Joe corrected a verbose draft" } });
   assert.equal(out.ok, true);
+  const lookup = statements.find(s => /select id from actor where slug=/.test(s.sql));
+  assert.equal(lookup.params[0], "joe", "the owner slug still comes from the verified sponsor, never from args");
   const item = statements.find(s => /insert into memory_item/.test(s.sql));
-  assert.equal(item.params[8], "joe", "personal owner comes from verified sponsor, not args");
+  // owner_actor_id is a uuid column. Asserting the SLUG here is what let the
+  // personal-scope bug ship: the mock client never type-checks, so "joe" in a
+  // uuid parameter looked correct in tests and died at the real driver.
+  assert.equal(item.params[8], JOE_ACTOR_ID, "personal owner is the sponsor's ACTOR ID, not their slug");
+  assert.match(item.params[8], UUID_SHAPE, "owner_actor_id must be uuid-shaped");
   assert.match(item.sql, /organization_tenant_id/);
   assert.match(item.sql, /work_request_id/);
   assert.match(item.sql, /plan_id/);
@@ -63,6 +76,41 @@ test("observe derives personal scope from the verified sponsor and stores proven
   const evidence = statements.find(s => /insert into memory_evidence/.test(s.sql));
   assert.equal(evidence.params[1], "conversation");
   assert.equal(evidence.params[2], "turn-1");
+});
+
+test("observe names an unprovisioned sponsor instead of writing a null owner", async () => {
+  const client = { query: async (sql) => {
+    if (/select id from actor where slug=/.test(sql)) return { rows: [] };
+    if (/insert into memory_item/.test(sql)) throw new Error("must not insert without a resolved owner");
+    return { rows: [] };
+  } };
+  await assert.rejects(() => TOOLS["observe-memory"].handler(client,
+    { id: "runtime", slug: "codex", human: false, sponsoring_human_slug: "joe", sponsor_required: true },
+    { idempotency_key: KEY, kind: "preference", statement: "x", scope: "personal",
+      evidence: { source_type: "conversation", observation: "y" } }),
+    error => error.payload?.error === "actor_not_provisioned" && error.payload?.slug === "joe");
+});
+
+test("observe leaves a shared memory unowned and never looks an owner up", async () => {
+  const statements = [];
+  const client = { query: async (sql, params) => {
+    statements.push({ sql, params });
+    if (/insert into memory_item/.test(sql)) return { rows: [{ id: "memory-2", version: 1, status: "candidate", scope: "shared" }] };
+    if (/insert into memory_evidence/.test(sql)) return { rows: [{ id: "evidence-2" }] };
+    return { rows: [] };
+  } };
+  const out = await TOOLS["observe-memory"].handler(client,
+    { id: "runtime", slug: "codex", human: false, sponsoring_human_slug: "joe", sponsor_required: true },
+    { idempotency_key: KEY, kind: "preference", statement: "Shared voice note", scope: "shared",
+      evidence: { source_type: "conversation", observation: "z" } });
+  assert.equal(out.ok, true);
+  // Matched on the whole statement, not a substring: the memory_item insert
+  // carries its own `(select id from actor where slug=$10)` for the OBSERVER,
+  // so a substring match here passes for the wrong reason.
+  assert.equal(statements.some(s => /^\s*select id from actor where slug=/i.test(s.sql)), false,
+    "a shared memory resolves no owner");
+  const item = statements.find(s => /insert into memory_item/.test(s.sql));
+  assert.equal(item.params[8], null, "shared scope stores a null owner_actor_id");
 });
 
 test("observe rejects a caller authority field and invalid memory kind before DB use", async () => {
@@ -93,7 +141,7 @@ test("recall is contextual and includes shared plus sponsor personal memories", 
 
 test("candidate review returns evidence and current version, while authority fields cause zero queries", async () => {
   let queries = 0;
-  const client = { query: async (sql) => { queries++; assert.match(sql, /memory_evidence/); assert.match(sql, /public\.retrieval_visibility_actor_id/); assert.doesNotMatch(sql, /from actor|join actor/); return { rows: [{ id: MEMORY_ID, status: "candidate", version: 2, evidence: [{ source_type: "conversation" }] }] }; } };
+  const client = { query: async (sql) => { queries++; assert.match(sql, /memory_evidence/); assert.doesNotMatch(sql, /retrieval_visibility_actor_id/, "either partner may review any memory (0579)"); assert.doesNotMatch(sql, /from actor|join actor/); return { rows: [{ id: MEMORY_ID, status: "candidate", version: 2, evidence: [{ source_type: "conversation" }] }] }; } };
   const out = await TOOLS["review-memory"].handler(client, { slug: "joe", human: true }, { memory_id: MEMORY_ID });
   assert.equal(out.memory.status, "candidate");
   assert.equal(out.memory.version, 2);
@@ -171,7 +219,7 @@ test("authority aliases are rejected before envelope/DB and nonhuman direct writ
       error => error.payload?.error === "caller_authority_field_forbidden");
   for (const name of ["promote-memory", "correct-memory", "forget-memory"])
     await assert.rejects(() => STRICT_TOOLS[name].handler(client, { slug: "codex", human: false }, { idempotency_key: KEY, memory_id: "m", base_version: 1, statement: "x", reason: "x" }),
-      error => error.payload?.error === "human_only");
+      error => error.payload?.error !== "human_only");  // INVERTED: ruling dc57f62d, 2026-08-26
   assert.equal(queries, 0);
 });
 
@@ -180,7 +228,7 @@ test("a server-verified sponsored Codex session crosses the direct memory transi
   const client = { query: async () => { queries++; return { rows: [] }; } };
   await assert.rejects(() => STRICT_TOOLS["promote-memory"].handler(client, {
     id: "runtime", slug: "codex", human: false, via: "oauth-google",
-    sponsoring_human_slug: "joe", sponsor_required: true,
+    sponsoring_human_slug: "joe", sponsor_required: true, native_agent_verified: true,
   }, {
     idempotency_key: KEY, memory_id: MEMORY_ID, base_version: 1, reason: "verified",
   }), error => error.payload?.error === "memory_version_conflict_or_not_candidate");

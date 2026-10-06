@@ -38,6 +38,37 @@ STEP_TIMEOUT_OVERRIDE=(
   # Its own record is 327s and it grows with the verb count, so it gets 5.5x
   # rather than the default's 2.75x.
   "golden workflow suite" 1800
+
+  # THIS ONE IS NOT ABOUT SPEED, IT IS ABOUT A BUDGET DECLARED SOMEWHERE ELSE.
+  # exporters/common.py sets PROVIDER_WAIT_BUDGET_SECONDS (default 1200, env
+  # CARR_PROVIDER_WAIT_SECONDS) and waits that long for OneDrive to hydrate six
+  # dehydrated placeholders before it exports anyway. That budget is LARGER than
+  # the 900s default above, so the step could be killed 300s before its own
+  # fail-open could ever be reached, and the export work had not started.
+  #
+  # It was. The 900s default was measured in #526 when exports completed in 81s,
+  # with no warm-up stage in front of them; the warm-up arrived separately in
+  # #1070 and nothing reconciled the two numbers. Every night from 2026-09-18
+  # onward logged "1200s left before the exports start anyway" and then
+  # "TIMEOUT after 900s ... exit 124" -- 09-18, 09-20 and 09-21 all identical.
+  # The warm-up never once reached the point of giving up and working.
+  #
+  # 1800 is the warm-up budget plus 600s, which is 7.4x the 81s the export work
+  # itself has ever needed. Raising CARR_PROVIDER_WAIT_SECONDS above 1200
+  # WITHOUT raising this re-creates the bug, so keep this strictly greater than
+  # that budget.
+  "exports" 1800
+
+  # ops/onedrive-prepublish-wake.py (defect: nightly.exports failed 9/22-9/24,
+  # hanging the FULL 1800s on 9/24 with no partial output — see
+  # out/nightly-runs/nightly-20260924T080221Z.log). This step's only job is a
+  # single stat+small-read PER TARGET to nudge the File Provider awake before
+  # the exports step's own wait_for_provider() begins; it has no internal
+  # retry loop and no internal budget, so it is bounded ENTIRELY by this
+  # external wall-clock. Short on purpose — six single-attempt probes, and a
+  # provider that is genuinely dark should not cost the chain more than this
+  # before the exports step's own, much larger, wait begins.
+  "onedrive pre-publish wake" 120
 )
 
 # carr_step_timeout_for <label> — seconds this step is allowed.

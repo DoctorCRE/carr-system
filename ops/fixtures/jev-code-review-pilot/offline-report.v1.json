@@ -1,0 +1,104 @@
+{
+ "corpus": "ops/fixtures/jev-code-review-pilot/corpus.v1.json",
+ "corpus_pinned_commit": "c1fb71b",
+ "items": 31,
+ "judged": {
+  "reason": "needs the TypeSafe key; run the live command in ops/jev_code_pilot_eval.py cli()",
+  "status": "not_measured"
+ },
+ "measured_at_commit": "1700f8f0",
+ "measured_with_python": "3.14.7",
+ "note": "Offline partition measurement on measured_at_commit. Judged precision and recall were not measured; rerun the documented command for current source.",
+ "report_at": 0.55,
+ "schema": "carr-jev-code-review-pilot-report.v1",
+ "scope": {
+  "corpus_files": {
+   "files": 27,
+   "regex_scanner": {
+    "coverage": {
+     "coverage_recall": 0.3333333333333333,
+     "gold_positives": 12,
+     "labelled_negatives": 40,
+     "negatives_sent": 13,
+     "positives_never_sent": [
+      "flash-examples:failure_leaves_no_trace",
+      "identity-oracle-lanes:failure_leaves_no_trace",
+      "pdf-page-content:failure_leaves_no_trace",
+      "outlook-as-list:truthy_coercion_bug",
+      "cutover-reason:truthy_coercion_bug",
+      "drift-gate-triggers:truthy_coercion_bug",
+      "lead-board-counties:truthy_coercion_bug",
+      "task-selftest-docstring:comment_no_longer_true"
+     ],
+     "positives_sent": 4
+    },
+    "duplicate_rate": 0.0,
+    "estimate_basis": "4.0 chars per token; an estimate, not a vendor count",
+    "estimated_tokens": 49276,
+    "regions": 48,
+    "request_chars_total": 197105,
+    "requests": 48,
+    "scan_seconds_total": 0.022
+   },
+   "structural_partition": {
+    "coverage": {
+     "coverage_recall": 1.0,
+     "gold_positives": 12,
+     "labelled_negatives": 40,
+     "negatives_sent": 40,
+     "positives_never_sent": [],
+     "positives_sent": 12
+    },
+    "duplicate_rate": 0.0083,
+    "estimate_basis": "4.0 chars per token; an estimate, not a vendor count",
+    "estimated_tokens": 690676,
+    "partition": {
+     "contained": 0,
+     "exact_duplicates": 14,
+     "except_folded": 226,
+     "files": 27,
+     "kept": 993,
+     "raw": 1007,
+     "regions": 599,
+     "trivial": 6
+    },
+    "partition_seconds_p95_per_file": 0.009452208003494889,
+    "regions": 599,
+    "request_chars_total": 2762702,
+    "requests": 599
+   }
+  },
+  "whole_tree": {
+   "files": 1751,
+   "regex_scanner": {
+    "duplicate_rate": 0.0069,
+    "estimate_basis": "4.0 chars per token; an estimate, not a vendor count",
+    "estimated_tokens": 588992,
+    "regions": 579,
+    "request_chars_total": 2355966,
+    "requests": 579,
+    "scan_seconds_total": 1.228
+   },
+   "structural_partition": {
+    "duplicate_rate": 0.0083,
+    "estimate_basis": "4.0 chars per token; an estimate, not a vendor count",
+    "estimated_tokens": 29352546,
+    "partition": {
+     "contained": 0,
+     "exact_duplicates": 4467,
+     "except_folded": 3834,
+     "files": 1751,
+     "kept": 39642,
+     "raw": 44109,
+     "regions": 25202,
+     "trivial": 476
+    },
+    "partition_seconds_p95_per_file": 0.005791416013380513,
+    "regions": 25202,
+    "request_chars_total": 117410183,
+    "requests": 25202
+   }
+  }
+ },
+ "stale_items": []
+}

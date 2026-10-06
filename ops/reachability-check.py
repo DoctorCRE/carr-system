@@ -262,7 +262,7 @@ def hook_findings(repo):
     bodies = {n: (read(repo, f"hooks/{n}") or "") for n in names}
     for name in sorted(modules):
         stem = name[: -len(".py")]
-        pattern = re.compile(rf"^\s*(?:from\s+{re.escape(stem)}\s+import|import\s+{re.escape(stem)})\b", re.M)
+        pattern = re.compile(rf"^\s*(?:from\s+(?:hooks\.)?{re.escape(stem)}\s+import|import\s+(?:hooks\.)?{re.escape(stem)})\b", re.M)
         if not any(pattern.search(body) for other, body in bodies.items() if other != name):
             out.append(finding(
                 "hook", f"hooks/{name}",

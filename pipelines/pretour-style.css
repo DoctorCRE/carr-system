@@ -1,5 +1,5 @@
 /* CARR pre-tour packet stylesheet.
-   Lifted verbatim from the Hughes pre-tour briefing of 2026-08-19, which is the
+   Lifted verbatim from the Ferris pre-tour briefing of 2026-08-19, which is the
    format Dell asked for by name. That deliverable's build2.py was a one-off with
    its content hardcoded and half its CSS appended inline at build time; both halves
    are joined here so the design is one file and the next packet is data, not a fork.
@@ -89,6 +89,12 @@
   .usernote{margin:0 0 11px;font-size:14px;color:#26313f;background:#fbf7ee;border-left:3px solid var(--gold);padding:10px 13px;border-radius:0 6px 6px 0}
   .hero.fw{width:100%;height:280px}
   .cmedia1{margin-bottom:14px}
+  /* Stands in the photograph's slot at its full width, so an option with no
+     picture still reads as a finished card rather than a short one. Quiet, not
+     alarming: this is usually a fact worth having, not a defect. */
+  .nophoto{width:100%;min-height:96px;display:flex;align-items:center;justify-content:center;
+           box-sizing:border-box;padding:18px 26px;border:1px dashed var(--line);border-radius:8px;
+           background:#f7f9fb;color:var(--mute);font-size:13.5px;line-height:1.5;text-align:center}
   @media print{ .noteline{height:26px;border-bottom:1px solid #9aa6b6} .hero.fw{height:230px} }
 
 /* ---- added for the River Bank packet, 2026-08-21 ---- */
@@ -132,7 +138,7 @@ footer{background:var(--navy);color:#fff;padding:26px 44px 30px;margin-top:34px}
 }
 
 /* ---- page-break discipline, 2026-08-21 ----
-   A card is allowed to break across two sheets, which is what the Hughes briefing did.
+   A card is allowed to break across two sheets, which is what the Ferris briefing did.
    Forcing break-inside:avoid on a full-page card is what stranded three headings and
    two paragraphs on sheets of their own: the card could not fit beside them, so it
    jumped and left them behind. The sub-blocks are protected instead, so a break never
@@ -146,4 +152,211 @@ footer{background:var(--navy);color:#fff;padding:26px 44px 30px;margin-top:34px}
   .snap,.fid,.tnote,.lead{break-inside:avoid;page-break-inside:avoid}
   .snap{break-after:avoid;page-break-after:avoid}
   .tk,.dq{break-inside:avoid;page-break-inside:avoid}
+  /* 2026-09-23, Sapala packet: the "To confirm on your side" heading printed alone at the
+     foot of a sheet with its grid overleaf. Chrome ignored break-after:avoid on the h2, so
+     the builder wraps each closing heading with its grid in .closing and that moves as one. */
+  .closing{break-inside:avoid;page-break-inside:avoid}
+}
+
+/* ---- stranded-page fix, 2026-08-25 ----
+   Dell, on the first PDF of the Ferris packet: the format is different on the PDF
+   than the HTML. It was, and the cause was the rule above applied one level too high.
+
+   The 2026-08-21 fix correctly stopped treating a whole CARD as atomic. It then made
+   the fact grid, the comparison table and the intro line atomic instead, which
+   reproduces the same failure one level down: a block that cannot fit in what is left
+   of the sheet jumps whole and leaves the remainder white. On the 22 page render that
+   was page 1 carrying only a heading and half a sentence while the comparison table
+   sat alone on page 2, and card 02 stopping mid-card with half a sheet blank because
+   its 16 cell fact grid would not fit beside the photo.
+
+   The principle the earlier fix was reaching for, stated properly: protect the
+   SMALLEST thing that must not be split, never the container that holds it. A break
+   must not land inside one fact cell, one table row, or one photograph. It may land
+   between them. */
+@media print{
+  .factgrid{break-inside:auto;page-break-inside:auto}
+  .f{break-inside:avoid;page-break-inside:avoid}
+
+  .tblwrap{break-inside:auto;page-break-inside:auto}
+  table{break-inside:auto;page-break-inside:auto}
+  thead{display:table-header-group}   /* column headings repeat on the next sheet */
+  tr{break-inside:avoid;page-break-inside:avoid}
+
+  /* an intro line splitting across sheets orphaned "then back north to Freeport." */
+  .h2sub{break-inside:avoid;page-break-inside:avoid;break-after:avoid;page-break-after:avoid}
+}
+
+/* ---- print geometry matches the screen, 2026-08-25 ----
+   Dell: "check the format on this report. it is differnct on the pdf than the html."
+   It was, and this is why. On screen the packet is a 1040px sheet centred on a tinted
+   background with 44px of padding down each side. The print block threw both away:
+   max-width:none let it run the full width of the paper, and padding-left/right:0 on
+   header and main pushed the navy masthead and every card out to the paper's edge, so
+   the printed document had a different measure and a different margin from the one
+   approved on screen.
+
+   Tried and rejected on the way here: forcing every option onto its own sheet. It
+   reads well in principle and it is what the 18 August packet did, but these cards are
+   taller than a page, so each one spilled onto a second sheet that was mostly white.
+   That took the render to 23 pages at 59% blank, against 20 pages at 36% for simply
+   letting them flow. The measurement is why it is not in this file.
+
+   Print keeps the screen's measure instead: same maximum width, same side padding, so
+   the PDF is the HTML on paper rather than a second layout. */
+@media print{
+  .wrap{max-width:1040px;margin:0 auto}
+  header{padding-left:44px;padding-right:44px}
+  main{padding-left:44px;padding-right:44px}
+}
+
+/* ---- fill the sheet, 2026-08-25 ----
+   Same principle as the block above, applied to everything still treated as atomic.
+   The About and Confirm columns, the notes box and the ruled lines were each jumping
+   whole when they would not fit, which is where the remaining white came from. Protect
+   the list item, the single ruled line, the photograph. Let their containers flow. */
+@media print{
+  .twocol,.mini,.notebox{break-inside:auto;page-break-inside:auto}
+  .mini li,.noteline{break-inside:avoid;page-break-inside:avoid}
+  .mini h4,.notebox h4{break-after:avoid;page-break-after:avoid}
+  .pcopy,.mini li{orphans:2;widows:2}
+  .card{margin:12px 0;padding:18px 20px 16px}
+  .hero.fw{height:180px}
+  h2{margin-top:26px}
+}
+
+/* ---- the PDF is the HTML, sliced, 2026-08-25 ----
+   Dell: "the html is perfect so model that in the pdf." So print stops inventing a
+   layout and simply flows the screen document onto sheets. The only things held
+   together are the ones a break would visibly damage: a photograph, a table row, one
+   fact cell, and a card's opening.
+
+   The opening is why .copen exists. The round number badge is absolutely positioned
+   against the card, so a card beginning in the last inch of a sheet printed an orange
+   crescent alone at the bottom with its address overleaf. Badge, heading, address and
+   photograph now move as one block, so a card either starts properly or starts on the
+   next sheet.
+
+   Tried and rejected, twice, on measurements: forcing one option per sheet. With the
+   original tall cards it gave 23 pages at 59% blank, and after the cards were shortened
+   it still gave 22 at 51%, against 18 at 37% for letting them flow. It is the obvious
+   idea and it loses both times, which is why it is written down here rather than left
+   for someone to try a third time. */
+@media print{
+  .copen{break-inside:avoid;page-break-inside:avoid}
+}
+
+@media print{
+  /* .copen alone did not kill the orphan crescent: the badge is positioned against
+     the CARD, so the card still began at the foot of the sheet to hold it while the
+     opening moved over. In print the badge joins the flow inside .copen instead, so
+     it physically cannot be left behind. */
+  .cnum{position:static;box-shadow:none;margin:0 0 10px}
+  .chead{margin-top:0}
+}
+
+@media print{
+  /* Chrome will not fragment a CSS grid container across sheets. break-inside:auto is
+     honoured by the spec and ignored in practice, so a fact grid that did not fit was
+     still moving whole and leaving the bottom half of a card empty. Printed, the grid
+     becomes inline-blocks, which do fragment, and the 1px rules are drawn as borders
+     instead of as container colour showing through gaps. Two columns at print size,
+     matching the packet Dell approved on 2026-08-18. */
+  .factgrid{display:block;background:#fff;border:1px solid var(--line);border-radius:8px;
+            overflow:visible;font-size:0;margin-bottom:14px}
+  .f{display:inline-block;width:50%;vertical-align:top;box-sizing:border-box;
+     font-size:13.5px;padding:8px 11px;border-top:1px solid var(--line);
+     border-right:1px solid var(--line)}
+  .f:nth-child(2n){border-right:none}
+  .f:nth-child(1),.f:nth-child(2){border-top:none}
+  .fk,.fv{display:block}
+}
+
+/* ---- one option per sheet, 2026-08-27 ----
+   Dell asked for this directly. It failed twice before, at 23 pages and 59% blank
+   with ten tall cards and again at 22 and 51% after a first trim, both times for
+   the same reason: forcing the break does nothing if the card is taller than the
+   sheet, so every option spilled onto a second page that was mostly white.
+
+   So this time the card is made to FIT rather than the break being forced harder.
+   The fact grid goes back to four columns on paper, which halves its height and is
+   the single biggest saving on a card carrying sixteen facts. The photograph, the
+   body type, the cell padding and the ruled lines all come down a step. Nothing is
+   removed from the page; it is set tighter.
+
+   Verified per card rather than in aggregate: every option must START and END on
+   the same sheet. A mean-whitespace figure would hide one card spilling. */
+@media print{
+  .card{break-before:page;page-break-before:always;break-inside:avoid;page-break-inside:avoid;
+        margin:0;padding:10px 16px 8px;border:none}
+  .card:first-of-type{break-before:auto;page-break-before:auto}
+
+  .factgrid{grid-template-columns:repeat(4,1fr)}
+  .f{padding:4px 8px}
+  .fk{font-size:8.5px} .fv{font-size:11px}
+
+  .hero.fw{height:150px}
+  .cnum{width:26px;height:26px;font-size:12px;margin:0 0 5px}
+  .paddr{font-size:17px} .pcity{font-size:12px}
+  .paddrline{font-size:11px;padding:6px 10px}
+  .pcopy{font-size:11.5px;line-height:1.45;margin:2px 0 9px}
+  .mini h4,.notebox h4{font-size:11px;margin-bottom:4px}
+  .mini li{font-size:11px;margin-bottom:2px;line-height:1.35}
+  .twocol{gap:14px;margin-bottom:8px}
+  .notebox{margin-top:4px}
+  .noteline{height:17px}
+  .agent{font-size:10.5px;padding-top:7px}
+  .nophoto{min-height:74px;padding:12px 20px;font-size:11.5px}
+}
+
+/* The one fact that carries the bad news, marked so the eye lands on it. Quiet:
+   a warm tint and a gold rule, not a warning. */
+.f.flim{background:#fffaf4;box-shadow:inset 3px 0 0 var(--gold)}
+.f.flim .fk{color:#a2540f}
+
+@media print{
+  /* Card 01 cleared the sheet by roughly an inch, spilling only its notes box and
+     agent line onto a page that was 97% white. This is that inch. */
+  .hero.fw{height:132px}
+  .noteline{height:15px}
+  .card{padding-top:8px}
+  .twocol{margin-bottom:6px}
+  .paddrline{padding:5px 10px;margin-bottom:2px}
+}
+
+@media print{
+  /* The first card was the only one sharing its sheet with the "The options"
+     heading and its intro line, which is why it alone kept spilling a stray agent
+     line. It now starts on a fresh sheet like every other option. */
+  .card:first-of-type{break-before:page;page-break-before:always}
+}
+
+@media print{
+  /* "The options" carries break-after:avoid so it stays with what follows, but what
+     follows is a card that starts its own sheet, so the heading was marooned alone
+     on a 95% blank page. Let it settle at the foot of the comparison page instead. */
+  h2,.h2sub{break-after:auto;page-break-after:auto}
+}
+
+@media print{
+  /* With one option to a sheet the section heading has nothing to introduce: every
+     card is numbered and titled. Left in, the heading and its intro line took a
+     sheet of their own. On screen they still do their job, so this is print only. */
+  .optshead{display:none}
+}
+
+@media print{
+  /* The footer was carrying a 34px top margin into a page that had room for it,
+     which pushed the sources block onto a sheet of its own. */
+  footer{margin-top:14px;padding-top:18px;padding-bottom:20px}
+}
+
+
+@media print{
+  /* The footer is one navy band carrying the advisor's details, the representation
+     statement and the sources. It was splitting, putting the statement on one sheet
+     and the sources on the next with the band broken between them. It moves whole. */
+  /* Chrome will not honour break-inside on this band, so the split is prevented the
+     only way it can be: the footer takes its own sheet and arrives whole. */
+  footer{break-inside:avoid;page-break-inside:avoid;break-before:page;page-break-before:always}
 }

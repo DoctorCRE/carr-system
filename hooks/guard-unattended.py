@@ -47,6 +47,7 @@ from datetime import datetime, timezone
 import ipaddress
 import os
 import re
+import shlex
 import sys
 from urllib.parse import urlsplit
 
@@ -114,6 +115,8 @@ KNOWN_HOSTS = (
     # verifying a staging deploy toward the production URL instead. That is the
     # confusion the incident was made of, which is why it is listed here.
     "carr-mcp-staging.joe-bookout-carr-us.workers.dev",
+    # Staging app Worker, CARR-owned, no client data.
+    "doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
     # nodejs.org: the official Node.js download host, and node is INFRASTRUCTURE
     # for this repo rather than a research read — mcp-server/local-verb.mjs is the
     # only route from a terminal or an unattended job to the record verbs, and
@@ -130,9 +133,15 @@ KNOWN_HOSTS = (
     # integrity-checked by npm from hashes already committed to this repo — the
     # lockfile is the review, not the network call.
     "nodejs.org", "registry.npmjs.org",
-    "api.practicecre.com", "api.doctorcre.com", "api.anthropic.com", "console.neon.tech",
+    # DoctorCRE's production app is CARR-owned infrastructure; release checks
+    # and the signed-out progress-board check read this exact host.
+    "api.practicecre.com", "api.doctorcre.com", "app.doctorcre.com",
+    "api.anthropic.com", "console.neon.tech",
     "neon.tech", "cloudflareapi.com", "cloudflare.com", "r2.cloudflarestorage.com",
     "googleapis.com", "github.com", "api.github.com", "hc-ping.com",
+    # Dot relay uses the Slack Web API; its user token stays in ~/.hermes/.env.
+    # This host is fixed infrastructure, not a record-derived practice domain.
+    "slack.com",
     "npiregistry.cms.hhs.gov", "download.cms.gov",
     # raw.githubusercontent.com: loop #163 named its absence as the gap forcing
     # the gh-api workaround for plain changelog reads. Added 2026-08-06 with the
@@ -150,6 +159,21 @@ KNOWN_HOSTS = (
     # strip the link, which quietly drops the attribution it exists to give.
     "arxiv.org", "anthropic.com", "claude.com", "humanlayer.dev", "mem0.ai",
     "langchain.com", "emergentmind.com",
+    # TypeSafe, added 2026-09-17 on Joe's ruling. docs.typesafe.ai is the
+    # documentation host and is a plain research read like the row above it;
+    # api.typesafe.ai is the inference endpoint for Jev, a model that takes text
+    # plus typed questions and returns probabilities rather than written text.
+    # Joe ruled the same day that CARR content INCLUDING CLIENT AND DEAL
+    # MATERIAL may be sent there, overruling this session's reading that
+    # third-party client confidentiality was a floor: his reasoning is that the
+    # practice already sends the same material to several model vendors, so
+    # singling this one out protects nothing. That makes api.typesafe.ai a
+    # CONTENT-BEARING host, unlike every research host listed above it, which is
+    # why it is called out here rather than folded into that line. It is listed
+    # in CODE rather than derived from the record because it is fixed
+    # infrastructure somebody decides once, which is what this half of the list
+    # is reserved for.
+    "docs.typesafe.ai", "api.typesafe.ai",
     # blotato.io: the media-upload backend of the ALREADY-SANCTIONED Blotato
     # connector. Its create-post tool takes public mediaUrls, and the only way
     # to get a local PNG there is the presigned PUT its own tool description
@@ -250,7 +274,7 @@ KNOWN_HOSTS = (
     # lookup on chiro.alabama.gov and routes to this portal instead, and it is
     # the one AL board absent from the unified licensesearch.alabama.gov (that
     # path returns HTTP 500). Without this entry a chiropractor's licence cannot
-    # be verified in Alabama at all — the live gap behind the C-130 Nikki Cottis
+    # be verified in Alabama at all — the live gap behind the C-130 Nina Calloway
     # npi:found=false row of 2026-08-07.
     #
     # UNLIKE the igovsolution entry above, this one CANNOT be narrowed: the
@@ -294,6 +318,32 @@ KNOWN_HOSTS = (
     # sign-in is browser OAuth against Joe's own subscription, which runs in his
     # browser rather than through a session's network calls.
     "hermes-agent.nousresearch.com",
+    # tailc8cc93.ts.net: Joe's own private Tailscale tailnet (his MagicDNS
+    # domain), reachable only from devices signed into or shared onto that
+    # tailnet — never public. Added 2026-09-23 so his Mac Studio's local model
+    # server ("flash-next", ds4-server on 127.0.0.1:8000, served tailnet-wide
+    # via `tailscale serve` at http://mac-studio.tailc8cc93.ts.net:8000) is
+    # reachable from his other devices, starting with a test from his MacBook
+    # (joes-macbook-pro.tailc8cc93.ts.net). host_allowlisted does suffix
+    # matching, so this one entry covers every device name on HIS tailnet, and
+    # SSH between his own Macs. Deliberately scoped to this one tailnet, not
+    # the broad `ts.net` suffix: someone else's tailnet must stay blocked.
+    "tailc8cc93.ts.net",
+    # census.gov: the U.S. Census Bureau's own federal domain. Added 2026-09-25
+    # on Joe's explicit in-chat approval to download two public files for the
+    # J302 Safe Harbor census tables behind the heat-map privacy builder: the
+    # 2020 county reference file and the 2020 DHC ZCTA population. The guard
+    # was refusing both www2.census.gov and api.census.gov.
+    #
+    # SCOPE, stated because an allowlist entry is a standing permission: this is
+    # read-only public statistical data from one federal owner, the same trust
+    # class as download.cms.gov and alabama.gov above. It is the whole domain
+    # rather than the two hosts because the job needs two subdomains of the same
+    # owner and the Bureau spreads one dataset across several of them. The
+    # anchored suffix match covers census.gov and *.census.gov only: lookalikes
+    # such as census.gov.<other> and notcensus.gov stay blocked, and
+    # ops/guard-selftest.py asserts both.
+    "census.gov",
 )
 
 # ── render-write protection over Bash (2026-08-06, Joe: "Fix both now") ──────
@@ -312,9 +362,10 @@ def _vault_spellings():
     exists here. Additive on purpose (2026-08-10 audit): the hardcodedは
     pair is kept verbatim so this machine's matching cannot regress, while a second
     machine stops running a vault guard that matches no path it owns."""
+    home = os.path.expanduser("~")
     fixed = (
-        "/Users/booko/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI/",
-        "/Users/booko/My Drive/CARR AI/",
+        home + "/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI/",
+        home + "/My Drive/CARR AI/",
     )
     try:
         from gate_paths import vault_roots
@@ -537,6 +588,16 @@ RULES = [
     (re.compile(r"git\s+reset\s+--hard\b", re.I), "hard reset"),
     (re.compile(r"git\s+(filter-repo|filter-branch)\b", re.I), "history rewrite"),
     (re.compile(r"git\s+clean\s+-[a-zA-Z]*f", re.I), "forced clean"),
+    # 2b. `--no-verify` / core.hooksPath REDESIGNED OUT (2026-09-24, Opus
+    # review, bypass audit C38). These were shell-text regexes over a
+    # locally-run accident-stopper hook (ops/githooks/pre-commit itself says
+    # so: "not a security control: anyone can bypass it with --no-verify").
+    # Jev agreed (0.94) that hosted CI, not this local hook, is what actually
+    # stops a bypass from reaching main — so this file no longer chases every
+    # spelling of a local-only escape hatch. Broad add is different: it is
+    # covered below as a dedicated, argument-aware function rather than a
+    # regex, because AGENTS.md makes a specific, checkable promise about it
+    # (see broad_add_reason()).
     # 3. private key material
     #
     # `\.age\b` REMOVED 2026-08-07, on Joe's ruling: "loosen the gate so the work
@@ -572,8 +633,8 @@ RULES = [
     # 4. destructive SQL
     (re.compile(r"\bdrop\s+(table|schema|database|view|index)\b", re.I), "DROP"),
     (re.compile(r"\btruncate\s+(table\s+)?\w", re.I), "TRUNCATE"),
-    (re.compile(r"\bdelete\s+from\s+\w+\s*(;|$)", re.I), "unqualified DELETE"),
-    (re.compile(r"\bupdate\s+\w+\s+set\b(?![\s\S]*\bwhere\b)", re.I), "unqualified UPDATE"),
+    (re.compile(r'\bdelete\s+from\s+(?:[\w".]+)\s*(;|$)', re.I), "unqualified DELETE"),
+    (re.compile(r'\bupdate\s+[\w".]+\s+set\b(?![^;]*\bwhere\b)', re.I), "unqualified UPDATE"),
 ]
 
 # ── IS THIS COMMAND ACTUALLY SENDING? (loop #283, fixed 2026-08-13) ───────────
@@ -696,7 +757,19 @@ def is_sql_context(cmd):
 
 def hosts_in(cmd):
     """Every host this command could reach: URL hosts plus remote-copy targets."""
-    return URL_RE.findall(cmd) + REMOTE_TARGET_RE.findall(cmd)
+    hosts = []
+    from cmd_text import shell_tokens
+    try:
+        tokens = shell_tokens(cmd)
+    except ValueError:
+        tokens = re.split(r'[\s;&|]', cmd)
+    for token in tokens:
+        for url in re.findall(r'https?://[^\s\'"<>]+', token, re.I):
+            try:
+                hosts.append(urlsplit(url).hostname or "invalid-url")
+            except ValueError:
+                hosts.append("invalid-url")
+    return hosts + REMOTE_TARGET_RE.findall(cmd)
 
 
 def is_send_context(cmd):
@@ -750,7 +823,15 @@ def derived_hosts():
 
 def host_allowlisted(host):
     """True if host is on the code list OR the record-derived list."""
-    host = (host or "").strip(".").lower()
+    host = (host or "").strip().lower()
+    normalized = host.strip(".")
+    # The app host is a single allowed origin. DNS permits one terminal dot;
+    # retaining the raw host here rejects extra dots and subdomains.
+    if normalized == "app.doctorcre.com":
+        return host in ("app.doctorcre.com", "app.doctorcre.com.")
+    if normalized.endswith(".app.doctorcre.com"):
+        return False
+    host = normalized
     if not host:
         return False
     for k in KNOWN_HOSTS:
@@ -881,7 +962,54 @@ def log(msg):
 
 
 def in_safe_zone(cmd):
-    return any(z in cmd for z in SAFE_ZONES)
+    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
+    try:
+        tokens, _ = shell_operands(shell_tokens(cmd))
+    except ValueError:
+        return False
+    targets = []
+    segments, segment = [], []
+    for token in tokens + [';']:
+        if token in SHELL_BOUNDARIES:
+            if segment:
+                segments.append(segment)
+            segment = []
+        else:
+            segment.append(token)
+    for words in segments:
+        while words and (words[0] in {'sudo', 'command', 'env'} or re.match(r'^\w+=', words[0])):
+            words = words[1:]
+        if not words:
+            continue
+        executable = os.path.basename(words[0])
+        if executable in {'rm', 'srm'}:
+            targets.extend(token for token in words[1:] if not token.startswith('-'))
+        elif executable == 'find' and '-delete' in words:
+            if any(token in {'-exec', '-execdir', '-ok', '-okdir'} for token in words):
+                return False  # executable predicates cannot establish a safe cleanup
+            roots = []
+            for token in words[1:]:
+                if token.startswith('-') or token in {'(', '!', ')'}:
+                    break
+                roots.append(token)
+            if not roots:
+                return False  # find defaults to an unbound working directory
+            targets.extend(roots)
+    def safe_target(target):
+        if '$' in target or '`' in target or '..' in target.split('/'):
+            return False
+        parts = target.split("/")
+        for zone in SAFE_ZONES:
+            if zone.startswith("/"):
+                if target.startswith(zone):
+                    return True
+            else:
+                zone_parts = zone.rstrip("/").split("/")
+                if any(parts[i:i + len(zone_parts)] == zone_parts
+                       for i in range(len(parts))):
+                    return True
+        return False
+    return bool(targets) and all(safe_target(target) for target in targets)
 
 
 # ── Rebasing your own branch in place ────────────────────────────────────────
@@ -973,7 +1101,18 @@ def force_push_to_named_side_branch(cmd):
     # Stopping at the boundary is what keeps this honest: only THIS command's
     # arguments are read, so nothing chained after it can dress up its target.
     words = []
-    for token in text[match.end():].split():
+    # shlex separates an IO number from its operator (2, >&, 1). Remove only
+    # unquoted numbers adjacent to a redirect; `2 >` and `'2'>` are arguments.
+    remainder = re.sub(
+        r"'[^']*'|\"(?:\\.|[^\"\\])*\"|\\.|(?<!\S)\d+(?=[<>])",
+        lambda m: "" if m.group(0).isdigit() else m.group(0), text[match.end():])
+    try:
+        lexer = shlex.shlex(remainder, posix=True, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    for token in tokens:
         if _SEPARATOR.match(token) or _REDIRECT.match(token):
             break             # this command's arguments end here
         if token.startswith("-"):
@@ -1041,10 +1180,160 @@ def direct_metered_dispatch(cmd):
     return None
 
 
-def check(cmd):
+# bypass audit C53 / AGENTS.md:225, REDESIGNED (2026-09-24, Opus review). The
+# original version was a single regex over the whole `git add` argument list,
+# which denied `git add -A hooks/x.py` (a NAMED path alongside -A) exactly as
+# hard as a bare `git add -A` — a real false positive the replay against
+# 12,145 real commands caught. This version tokenizes the argument list and
+# denies ONLY the bare broad-add forms: `-A`, `--all`, a standalone `.`, the
+# `:/` pathspec-magic form (matches from the worktree root, same reach as
+# `-A`), or a combined short-flag cluster that includes `A` (`-Av`, `-fA`,
+# …), with NO other pathspec token present. `git add -A <paths>` is
+# explicitly allowed; git add's own semantics make that combination
+# redundant, but redundant is not broad.
+#
+# Captures the segment between `git` and `add` (group 1, may hold `-C <dir>`)
+# separately from the segment after `add` (group 2, the add arguments) — a
+# second Opus re-review (2026-09-24) required resolving `git -C <dir> add`'s
+# own directory, not just the session cwd.
+_GIT_ADD = re.compile(r"\bgit\s+([^|;&\n]*?)\badd\b([^|;&\n]*)")
+
+# A combined short-flag cluster: a single dash followed by one or more
+# single-letter flags with no `=` and no second leading dash — `-Av`, `-fA`,
+# `-vfA` are all this shape; `--all` and `-A` alone are handled as exact
+# tokens above. Bare `-` and long options (`--foo`) never match.
+_SHORT_FLAG_CLUSTER = re.compile(r"^-[A-Za-z]{2,}$")
+
+
+def _bare_broad_add(argtext):
+    """True when argtext's only pathspec-shaped tokens are -A/--all/bare '.'/
+    the ':/' pathspec-magic form, or a combined short-flag cluster containing
+    'A', and nothing else names a path. Flags other than -A/--all (or a
+    cluster containing A) are ignored (git add -v -A is still bare); any
+    other non-flag token is a real pathspec and clears the call."""
+    try:
+        tokens = shlex.split(argtext)
+    except ValueError:
+        return False
+    broad_seen = False
+    for tok in tokens:
+        if tok in ("-A", "--all", ".", ":/"):
+            broad_seen = True
+            continue
+        if _SHORT_FLAG_CLUSTER.match(tok):
+            if "A" in tok[1:]:
+                broad_seen = True
+            continue
+        if tok.startswith("-"):
+            continue
+        return False       # any other bare token is a real pathspec
+    return broad_seen
+
+
+def _in_carr_tree(cwd):
+    """cwd is the canonical carr-system checkout or a path under it (which is
+    where this repo's worktrees live, per bin/worktree.sh convention) —
+    same shape as the functions.exec cwd scoping a few lines below in
+    main()."""
+    if not cwd:
+        return False
+    try:
+        real_cwd = os.path.realpath(os.path.expanduser(cwd))
+    except Exception:
+        return False
+    return real_cwd == REPO or real_cwd.startswith(REPO + os.sep)
+
+
+def _strip_matched_quotes(tok):
+    if len(tok) >= 2 and tok[0] == tok[-1] and tok[0] in ("'", '"'):
+        return tok[1:-1]
+    return tok
+
+
+# A single leading `cd <dir> &&` or `cd <dir>;` — not a general shell
+# interpreter, just the one shape the reported false positives/bypasses were
+# built from (`cd /tmp/x && git add -A` from a carr cwd; `cd ~/carr-system &&
+# git add -A` from /tmp). Anything more elaborate (a second cd, a subshell,
+# `cd "$(...)"`) is out of scope, same as the other reported gaps below.
+_LEADING_CD = re.compile(r"^\s*cd\s+(\"[^\"]*\"|'[^']*'|\S+)\s*(?:&&|;)\s*")
+
+
+def _leading_cd_dir(cmd):
+    """Return the directory named by a single leading `cd <dir> &&`/`;`, or
+    None. Operates on the raw command: this is the command's own structure,
+    not prose inside a quote, so it is read before strip_inert_text runs."""
+    m = _LEADING_CD.match(cmd)
+    if not m:
+        return None
+    return _strip_matched_quotes(m.group(1))
+
+
+def _git_dash_c_dir(pre_add_argtext):
+    """Return the directory named by a `-C <dir>` (or `-C<dir>`) flag found
+    before `add` in the same git invocation, or None. `git -C <dir> add ...`
+    runs against <dir>, not the process cwd — ignoring it both denies
+    legitimate use from elsewhere (`git -C /tmp/x add -A` sent from a carr
+    cwd) and misses a real bypass (`git -C ~/carr-system add -A` sent from
+    /tmp)."""
+    try:
+        tokens = shlex.split(pre_add_argtext)
+    except ValueError:
+        return None
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok == "-C":
+            return tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok.startswith("-C") and len(tok) > 2 and not tok.startswith("--"):
+            return tok[2:]
+        i += 1
+    return None
+
+
+def _resolve_dir(candidate, base):
+    """Resolve `candidate` (from a leading cd or a -C flag) against `base`,
+    the same way a shell would resolve a relative directory argument against
+    the current directory."""
+    expanded = os.path.expanduser(candidate)
+    if os.path.isabs(expanded):
+        return expanded
+    return os.path.join(base, expanded)
+
+
+def broad_add_reason(cmd, cwd=None):
+    """Return a reason string to deny a bare `git add -A`/`--all`/`.`/`:/`
+    with no pathspec, scoped to the carr-system tree; None otherwise. Text
+    inside quotes, heredocs, or a grep/echo argument is never matched for the
+    add-arguments scan: it runs against strip_inert_text(cmd), the same
+    inert-text stripper every other quote-safe rule in this file uses, not
+    the raw command. The EFFECTIVE directory for the carr-tree scope check is
+    resolved from a leading `cd <dir> &&`/`;` and/or a `-C <dir>` flag on the
+    git invocation itself, not just the session's reported cwd — see
+    _leading_cd_dir / _git_dash_c_dir."""
+    session_cwd = cwd if cwd is not None else os.getcwd()
+    leading_cd = _leading_cd_dir(cmd)
+    base_cwd = _resolve_dir(leading_cd, session_cwd) if leading_cd else session_cwd
+    scanned = strip_inert_text(cmd)
+    for m in _GIT_ADD.finditer(scanned):
+        pre_add, post_add = m.group(1), m.group(2)
+        if not _bare_broad_add(post_add):
+            continue
+        c_dir = _git_dash_c_dir(pre_add)
+        effective_cwd = _resolve_dir(c_dir, base_cwd) if c_dir else base_cwd
+        if _in_carr_tree(effective_cwd):
+            return ("broad add (-A/--all/./:/) — blocked by the CARR unattended guard. "
+                    "Add explicit paths instead: `git add <path> [<path>...]`.")
+    return None
+
+
+def check(cmd, cwd=None):
     """Return a reason string to block, or None to allow."""
     if cmd.strip() in ALLOW_EXACT:
         return None
+
+    reason = broad_add_reason(cmd, cwd)
+    if reason:
+        return reason
 
     reason = delegation_control_plane_write(cmd)
     if reason:
@@ -1131,7 +1420,7 @@ def main():
             # where a parser has no single URL to parse).
             try:
                 _p = urlsplit(url if url.startswith(("http://", "https://")) else f"https://{url}")
-                host = (_p.hostname or "").strip(".").lower()
+                host = (_p.hostname or "").lower()
             except Exception:
                 host = ""
             if host and not host_allowlisted(host):
@@ -1147,13 +1436,14 @@ def main():
                 log(f"ALLOW(open-read) {host} :: {url[:200]}")
             sys.exit(0)
 
-        # Codex routes its local shell through functions.exec. Normalise the
-        # name so this remains one command policy across both runtimes.
-        if tool == "functions.exec":
+        # Codex may expose the outer functions.exec wrapper or its nested
+        # exec_command. Apply the same shell policy to the literal command.
+        if tool in {"functions.exec", "exec_command"}:
             # The native Bash guard pre-dates Codex and is intentionally global.
             # This new Codex alias is CARR-only so it cannot change Life AI or
             # another repository's workflow merely because they share Codex.
-            cwd = payload.get("cwd") or ""
+            cwd = ((ti.get("workdir") or payload.get("cwd") or "")
+                   if isinstance(ti, dict) else (payload.get("cwd") or ""))
             try:
                 real_cwd = os.path.realpath(os.path.expanduser(cwd))
             except Exception:
@@ -1163,7 +1453,9 @@ def main():
                 # A task rooted elsewhere can still target CARR by absolute
                 # path.  Scope by the target too, otherwise a non-CARR cwd is
                 # an accidental bypass for the very files this guard protects.
-                raw = ti if isinstance(ti, str) else ""
+                raw = (ti if isinstance(ti, str) else
+                       ((ti.get("cmd") or ti.get("code") or "")
+                        if isinstance(ti, dict) else ""))
                 if REPO not in raw and not raw_targets_carr(raw):
                     sys.exit(0)
             tool = "Bash"
@@ -1172,13 +1464,39 @@ def main():
         # Codex's local-function tool passes freeform JavaScript as a string;
         # its embedded exec_command({cmd: ...}) must receive the same command
         # inspection as a native Bash call. A dict remains the Claude shape.
-        cmd = ti.get("command", "") if isinstance(ti, dict) else ti
+        cmd = (ti.get("command") or ti.get("cmd") or "") if isinstance(ti, dict) else ti
         if not isinstance(cmd, str):
             cmd = ""
         if not cmd:
             sys.exit(0)
 
-        reason = check(cmd)
+        # Effective cwd for the broad-add repo scope: the tool_input's own
+        # workdir (Codex), else the payload's cwd (Claude Code sends this for
+        # every Bash call), else this process's own cwd as a last resort.
+        effective_cwd = (
+            (ti.get("workdir") if isinstance(ti, dict) else None)
+            or payload.get("cwd") or os.getcwd())
+
+        reason = check(cmd, effective_cwd)
+
+        # BYPASS AUDIT C33/C34 (2026-09-24), REDESIGNED (2026-09-24, Opus
+        # review). This hook used to re-run the four client verb gates
+        # client-side against a parsed `./run.sh call <verb> '<json>'`
+        # command (hooks/verb_gate_recheck.py, now deleted). A replay of
+        # 12,145 real Bash commands found the shell-text side of that
+        # approach fundamentally leaky (Jev: 0.93) — 62 legitimate commands
+        # would have been falsely denied (`git add -A <paths>`, a grep for
+        # the pattern text, fixture repos in /tmp…), and several trivial
+        # bypasses (a shell variable holding the verb, `$(cat f)` JSON,
+        # calling tools/call-verb.py or mcp-server/local-verb.mjs directly)
+        # could never be closed from Bash-command-text at all — every one of
+        # those doors recurses through the SAME server-side callTool(), so
+        # the checks now live in the verb handlers themselves
+        # (mcp-server/src/verb-gate-checks.js, wired into add-loop's handler
+        # in tools.js) and this hook no longer duplicates them. Jev agreed
+        # (0.94) that hosted CI is what actually stops a local-hook bypass
+        # from reaching main, which is the other reason a client-side
+        # regex recheck was the wrong enforcement point.
 
         # THE SHELL HALF OF rule 76a53dfe. A record refused at the vault must not
         # simply be written somewhere the gate does not look, and a heredoc into

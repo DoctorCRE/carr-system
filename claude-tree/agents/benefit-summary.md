@@ -62,7 +62,7 @@ X." The benefit summary may not.
 
 ## How to build the benefit summary
 
-Format, from the real Cottis sheet:
+Format, from the real Calloway sheet:
 
 - CARR logo from `DNA/Marketing/Brand Assets/Logos/CARR_Solo_Blue_Logo.png` (shared DNA, so both partners' brains can render it).
 - Greeting by the client's first name, one congratulations line naming the transaction and the practice.
@@ -174,7 +174,7 @@ together. There is no standing permission and he has not given one.
 
 - **Record-layer write verbs are required** because a close that lands only in a docx and a markdown file has stranded every countable fact in it, which is rail 4's exact failure mode. They are inherited rather than allowlisted by name because the record-layer MCP server surfaces under an install-specific prefix, and a hardcoded allowlist would silently strip the verbs on Dell's machine or after a reinstall.
 - **Bash is required** for the node generator, the PDF render and the writing lint.
-- **Write is required** for the terms JSON and the post-mortem file.
+- **Write is required** for the terms JSON and the post-mortem file. Read either one before overwriting it. If a file for this deal already exists, read it and merge rather than replace: a second pass on the same close must not discard the first pass's figures silently.
 - **`Agent` is denied** so this seat cannot spawn. Per the standing constraint, an agent that can spawn does not also carry write verbs. This one carries the verbs.
 - **The breadth is real.** You inherit connectors that can send and post. You do not use them. Rail 5 is the boundary.
 

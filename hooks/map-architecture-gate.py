@@ -1,5 +1,31 @@
 #!/usr/bin/env python3
-"""Block a CARR map task from ending before the live map method is loaded."""
+"""Announce, at the end of a CARR map task, that the live map method was never
+loaded.
+
+IT ANNOUNCES, IT NO LONGER REOPENS (2026-08-23, Joe's Stop-gate rationing off
+the gates-audit council). It emitted {"decision": "block"} — a reopened turn and
+a whole extra assistant message — on both its finding path and its fail-closed
+path. Eleven Stop hooks held that power; the council's rationing leaves it with
+three (core conduct, completion-evidence, drift-assertion) and names this gate
+among the demotions.
+
+WHAT THAT CHANGES, said plainly rather than papered over. Before: a governed
+session could not FINISH a map task without calling the verb. Now: it cannot
+finish one QUIETLY. The instruction still arrives, in context, at the same
+moment, and the fire is still recorded in out/map-architecture-gate.jsonl — but
+a session that ignores it can end.
+
+WHY THIS ONE IS WORTH RE-EXAMINING FIRST, alongside the context-handoff band.
+This is a narrow matcher: it fires only on map work, which is rare, so it
+contributes almost nothing to the reopen count the rationing exists to cut —
+and its bind moment is genuinely the last cheap one, because the map artifact
+reaches Joe or a client immediately after. The council's own advice was not to
+spend the first telemetry week sentencing narrow, rarely-firing gates. Restoring
+the reopen is one line in each of the two emit sites below. The better answer,
+if it comes back, is probably not the reopen but an EARLIER bind: the harm is at
+the map artifact's write, which is a PreToolUse moment, cheaper than Stop and
+ahead of it.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +35,11 @@ import sys
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from stop_latch import announce  # noqa: E402
+sys.path.insert(0, REPO)
+from lib.transcript_read import load_transcript  # noqa: E402
 LOG = os.path.join(REPO, "out", "map-architecture-gate.jsonl")
 CARR_PATH_MARKERS = ("/carr-system/", "/carr-system", "my drive/carr ai")
 SYNTHETIC_PREFIXES = ("The following is the Codex agent history", "<environment_context>",
@@ -257,28 +288,37 @@ def main():
         path = payload.get("transcript_path") or payload.get("transcriptPath")
         if not path or not os.path.exists(path):
             return 0
-        with open(path, errors="replace") as handle:
-            records = [json.loads(line) for line in handle if line.strip()]
+        # One bad line in the session's own transcript must not switch the
+        # gate off (bypass hunt, PR #1224): lib/transcript_read.py skips it
+        # and records a transcript_tamper event instead of raising.
+        records = load_transcript(path, hook="map-architecture-gate",
+                                  session=payload.get("session_id") or payload.get("sessionId"),
+                                  log_path=LOG)
         blocked, reason = evaluate(records)
         if not blocked:
             return 0
         audit({"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "hook": "map-architecture-gate",
+               "hook": "map-architecture-gate", "register": "announce",
                "session": payload.get("session_id") or payload.get("sessionId"),
                "reason": reason})
-        print(json.dumps({"decision": "block", "reason":
+        return announce(
             "MAP ARCHITECTURE GATE — call the live `map-architecture` verb now. "
             "Read its two current doctrine sections and machine-contract pointer, then do the "
-            "map work against carr-map-tour-v1. A prior task's read does not satisfy this one."}))
-        return 0
+            "map work against carr-map-tour-v1. A prior task's read does not satisfy this one. "
+            "This no longer holds your turn open, so make the call before the map "
+            "work goes any further rather than after.")
     except Exception as exc:
         if payload_is_carr(payload):
             audit({"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                    "hook": "map-architecture-gate",
                    "session": payload.get("session_id") or payload.get("sessionId"),
                    "reason": "gate internal failure", "error": type(exc).__name__})
-            print(json.dumps({"decision": "block", "reason":
-                "MAP ARCHITECTURE GATE FAILED CLOSED — the governed map-method check could not be verified. Repair the gate or transcript read before ending this CARR task."}))
+            announce(
+                "MAP ARCHITECTURE GATE COULD NOT RUN — the governed map-method check "
+                "did not complete, so nothing here has confirmed the live method was "
+                "loaded. It used to hold the turn open on this path; it now says so "
+                "instead. Repair the gate or the transcript read, and treat the map "
+                "method as unverified until you have.")
         return 0
 
 

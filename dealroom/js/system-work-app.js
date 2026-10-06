@@ -1,12 +1,10 @@
+import { escapeHtml as esc } from "./esc.js";
 import { createSystemWorkClient } from "./system-work-client.js";
 import { actionForCard, renderCurrentWorkRequests, renderSystemWorkCard, validateHumanRef } from "./system-work-view.js";
 
 const client = createSystemWorkClient();
 const state = { card: null, proposed: null, current: [] };
 const $ = (selector) => document.querySelector(selector);
-const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
-  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-})[char]);
 
 function alert(message, kind = "error") {
   const node = $("#systemWorkAlert");

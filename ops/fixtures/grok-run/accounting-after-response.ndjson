@@ -1,0 +1,5 @@
+{"type":"text","data":"Final answer"}
+{"type":"usage","messageId":"response","stopReason":"end_turn","usage":{"output_tokens":2}}
+{"type":"usage","usage":{"output_tokens":2}}
+{"type":"usage","usage":{"output_tokens":2}}
+{"type":"end","stopReason":"end_turn","requestId":"request","sessionId":"session","modelUsage":{"grok-4.7-build":{"modelCalls":1}}}

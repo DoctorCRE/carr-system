@@ -25,18 +25,18 @@ after the fact, which is the opposite of what a release ledger is for.
 
 WHERE THESE RUN. They need a Postgres carrying the schema and nothing more —
 NOT Neon specifically. CI supplies a disposable loopback PostgreSQL service via
-CARR_CI_DATABASE_URL. A developer push without that explicit fixture DSN does
-not substitute a metered Neon branch: it reports the database cases as not run,
-while hosted CI executes them against its already-running local service.
+CARR_CI_DATABASE_URL admits this fixture, which owns a separate local cluster
+so roles cannot leak into later CI classes. A developer push without that
+explicit fixture DSN reports the database cases as not run. No metered Neon
+branch substitutes for the disposable fixture.
 """
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import subprocess
 import sys
-import time
+import socket
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -45,6 +45,8 @@ import psycopg
 from psycopg import sql
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 
 # The postgres CLIENT lookup, shared with ops/p1-rebuild-gate.py. Loading by path
 # is how every ops gate reaches tools/db-tap.py, whose hyphenated filename cannot
@@ -79,68 +81,151 @@ def psql(dsn, *args):
                           capture_output=True, text=True, timeout=1800)
 
 
+# Every ops-record credential is pinned to this disposable cluster. The tool
+# loads a developer's db.env with setdefault, so an unset jobs credential could
+# otherwise send a candidate fixture to Production. Current candidates use the
+# jobs login; historical approval exercises still use Joe's authority login.
+AUTHORITY_DSN: str | None = None
+JOBS_DSN: str | None = None
+
+
+def credential_names() -> tuple[str, ...]:
+    spec = importlib.util.spec_from_file_location("ops_record", REPO / "tools" / "ops-record.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load ops-record credential inventory")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.credential_names()
+
+
 def record(dsn, *args):
+    isolated = {name: dsn for name in credential_names()}
+    isolated["CARR_DB_AUTHORITY_JOE_URL"] = AUTHORITY_DSN or dsn
+    isolated["CARR_DB_JOBS_URL"] = JOBS_DSN or dsn
     return subprocess.run(
         [sys.executable, str(REPO / "tools" / "ops-record.py"), *args],
         capture_output=True, text=True, timeout=300,
-        env={**os.environ, "DATABASE_URL": dsn})
+        env={**os.environ, **isolated})
+
+
+def provision_authority_principal(dsn: str) -> None:
+    """Give this cluster the human authority and service login roles.
+
+    `ops.authority_actor_slug()` maps `session_user` to a partner slug and admits
+    only carr_authority_joe and carr_authority_dell, and EXECUTE on it is granted
+    to the carr_authority bundle — so the role has to exist, have login, and hold
+    that membership for any authority-connection command to work here. Its
+    password is the base DSN's own, so nothing about the throwaway cluster's
+    credentials is written down here.
+
+    Current candidate inserts use carr_jobs; this authority login remains for
+    historical approval fixture commands. Its grants still come from numbered
+    migrations rather than being fabricated by this test.
+    """
+    global AUTHORITY_DSN, JOBS_DSN
+    params = psycopg.conninfo.conninfo_to_dict(dsn)
+    password = params.get("password")
+    with psycopg.connect(dsn, autocommit=True) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "select 1 from pg_roles where rolname = 'carr_authority_joe'")
+            if cursor.fetchone() is None:
+                cursor.execute(
+                    sql.SQL("create role carr_authority_joe login password {}")
+                       .format(sql.Literal(password)))
+            else:
+                cursor.execute(
+                    sql.SQL("alter role carr_authority_joe login password {}")
+                       .format(sql.Literal(password)))
+            cursor.execute("grant carr_authority to carr_authority_joe")
+            cursor.execute("grant usage on schema ops to carr_authority_joe")
+            cursor.execute(
+                sql.SQL("alter role carr_jobs login password {}")
+                   .format(sql.Literal(password)))
+    AUTHORITY_DSN = psycopg.conninfo.make_conninfo(dsn, user="carr_authority_joe")
+    JOBS_DSN = psycopg.conninfo.make_conninfo(dsn, user="carr_jobs")
 
 
 @contextmanager
 def isolated_ci_database(base_dsn: str) -> Iterator[str]:
-    """Give this stateful fixture its own database on CI's loopback cluster.
+    """Own a fresh cluster: databases alone do not isolate PostgreSQL roles.
 
-    The gates class and migration class intentionally share a PostgreSQL
-    server, but the migration class must receive a *fresh* database.  Loading
-    db/schema.sql directly into CARR_CI_DATABASE_URL contaminated that database
-    before the migration class ran.  A sibling database preserves the cheap
-    local/CI execution path without weakening either test.
+    The gate fixture applies pending role migrations before the migration class.
+    A sibling database leaves those cluster-global roles behind when dropped,
+    causing a later role-creation migration to refuse the unknown login.
+    Keep the CI loopback admission check, but never connect to its shared server.
     """
     params = psycopg.conninfo.conninfo_to_dict(base_dsn)
-    host = str(params.get("host") or "")
-    if host not in {"127.0.0.1", "localhost", "::1"}:
+    if str(params.get("host") or "") not in {"127.0.0.1", "localhost", "::1"}:
         raise RuntimeError("release-abandon isolation requires loopback PostgreSQL")
-    database = f"release_abandon_{os.getpid()}_{time.time_ns()}"[:63]
-    admin = psycopg.conninfo.make_conninfo(base_dsn, dbname="postgres")
-    with psycopg.connect(admin, autocommit=True) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                sql.SQL("create database {} template template0").format(
-                    sql.Identifier(database)
-                )
-            )
-    isolated = psycopg.conninfo.make_conninfo(base_dsn, dbname=database)
-    try:
-        yield isolated
-    finally:
-        with psycopg.connect(admin, autocommit=True) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "select pg_terminate_backend(pid) from pg_stat_activity "
-                    "where datname=%s and pid <> pg_backend_pid()",
-                    (database,),
-                )
-                cursor.execute(
-                    sql.SQL("drop database {}").format(sql.Identifier(database))
-                )
+    spec = importlib.util.spec_from_file_location("release_abandon_local_pg", REPO / "ops/local-pg-ci.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("release-abandon local PostgreSQL helper unavailable")
+    local_pg = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = local_pg
+    spec.loader.exec_module(local_pg)
+    binaries = local_pg.find_postgres_binaries()
+    env = local_pg.scrub_cloud_environment(os.environ)
+
+    def checked(args: list[str | Path]) -> None:
+        result = fixture.run([str(arg) for arg in args], env=env,
+                                capture_output=True, text=True, timeout=60)
+        if result.returncode:
+            raise RuntimeError("release-abandon disposable PostgreSQL step failed: " + Path(str(args[0])).name)
+
+    with postgres_fixture_group(), DisposablePostgres("release-abandon-", binaries.pg_ctl, env=env, directory=None) as fixture:
+        root = fixture.root
+        data = root / "data"
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        checked([binaries.initdb, "-D", data, "-U", "carr_ci", "--auth=trust",
+                 "--encoding=UTF8", "--no-locale"])
+        checked([binaries.pg_ctl, "-D", data, "-l", root / "postgres.log",
+                 "-o", f"-h 127.0.0.1 -p {port} -c unix_socket_directories= -c fsync=off", "-w", "start"])
+        dsn = psycopg.conninfo.make_conninfo(host="127.0.0.1", port=port,
+                                            user="carr_ci", dbname="postgres")
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            connection.execute("create role neondb_owner")
+        yield dsn
 
 
 def _cases(dsn: str) -> None:
+    provision_authority_principal(dsn)
     record(dsn, "sync-registry")
-    # A full manifest supplies the CHECK-constrained artifact fields required
-    # by case 4's synthetic completed-history fixture. A thin manifest once
-    # left that row at `candidate`, letting abandon pass for the wrong reason.
-    manifest = {"service": "carr-mcp", "environment": "staging",
-                "git_sha": "a" * 40, "plan_hash": "plan:selftest",
-                "artifact_digest": "d" * 64,
-                "dependency_lock_digest": "e" * 64, "migration_set": []}
-    mpath = Path(os.environ.get("TMPDIR", "/tmp")) / "abandon-manifest.json"
-    mpath.write_text(json.dumps(manifest))
+    # Candidate intake verifies every environment before opening the database,
+    # so every abandonment fixture uses a real staging manifest rather than a
+    # synthetic shape that the release door must refuse. Each fixture uses a
+    # distinct repository revision so their immutable source evidence differs.
+    staging_manifests: dict[str, Path] = {}
+    staging_error = ""
+    fixture_keys = ("rel-abandon-a", "rel-abandon-b", "rel-malformed", "rel-successor")
+    for offset, key in enumerate(fixture_keys, start=1):
+        staging_built = subprocess.run(
+            [sys.executable, str(REPO / "tools" / "release-manifest.py"),
+             "build", "--sha", f"HEAD~{offset}", "--environment", "staging",
+             "--performance-budget-ref", "runbook:worker-performance-v1",
+             "--performance-budget-ms", "1500",
+             "--recovery-strategy", "rollback",
+             "--rollback-plan-ref", "runbook:rollback-worker-v1"],
+            cwd=REPO, capture_output=True, text=True, timeout=300)
+        if staging_built.returncode != 0:
+            staging_error = (staging_built.stderr or staging_built.stdout).strip()[:160]
+            break
+        manifest_path = (Path(os.environ.get("TMPDIR", "/tmp")) /
+                         f"abandon-manifest-{offset}.json")
+        manifest_path.write_text(staging_built.stdout)
+        staging_manifests[key] = manifest_path
+    check("0. canonical staging source manifests build on distinct revisions",
+          not staging_error and len(staging_manifests) == len(fixture_keys),
+          staging_error)
+    if staging_error or len(staging_manifests) != len(fixture_keys):
+        return
 
-    for k in ("rel-abandon-a", "rel-abandon-b"):
-        record(dsn, "release", "candidate", "--key", k, "--manifest", str(mpath),
+    for k in fixture_keys:
+        record(dsn, "release", "candidate", "--key", k,
+               "--manifest", str(staging_manifests[k]),
                "--service", "carr-mcp", "--environment", "staging",
-               "--maker", "selftest", "--maker-verification", "ref",
                "--test-evidence", "ref", "--security-evidence", "ref")
     # Production candidate intake now rebuilds the manifest before it opens a
     # DB connection. Build and bind the fixture through the canonical tool so
@@ -173,9 +258,9 @@ def _cases(dsn: str) -> None:
     production_mpath.write_text(bound.stdout)
     candidate = record(dsn, "release", "candidate", "--key", "rel-shipped",
                        "--manifest", str(production_mpath), "--service", "carr-mcp",
-                       "--environment", "production", "--maker", "selftest",
+                       "--environment", "production",
                        "--provider", PROVIDER, "--provider-version-id", PROVIDER_VERSION,
-                       "--maker-verification", "ref", "--test-evidence", "ref",
+                       "--test-evidence", "ref",
                        "--security-evidence", "ref")
     check("0ab. verified Production candidate reaches the ledger",
           candidate.returncode == 0,
@@ -216,6 +301,32 @@ def _cases(dsn: str) -> None:
     r = record(dsn, "release", "abandon", "--key", "rel-abandon-b")
     check("2. abandoning without a reason is REFUSED", r.returncode != 0,
           "a terminal state with no recorded reason is the thing this exists to prevent")
+
+    # A malformed immutable candidate is never rewritten into the successor.
+    # The governed path names an already-recorded same-target successor and
+    # terminalizes only the old row, preserving its exact plan as evidence.
+    before = psql(dsn, "-At", "-c",
+                  "select plan_hash from ops.release where release_key='rel-malformed'")
+    r = record(dsn, "release", "abandon", "--key", "rel-malformed",
+               "--superseded-by", "rel-successor")
+    after = psql(dsn, "-At", "-c",
+                 "select state,plan_hash,abandoned_reason "
+                 "from ops.release where release_key='rel-malformed'")
+    fields = after.stdout.strip().split("|", 2)
+    check("2a. named successor abandons the malformed candidate immutably",
+          r.returncode == 0 and len(fields) == 3
+          and fields[0] == "abandoned" and fields[1] == before.stdout.strip()
+          and "rel-successor" in fields[2],
+          (r.stderr or after.stdout).strip()[:200])
+
+    r = record(dsn, "release", "abandon", "--key", "rel-abandon-b",
+               "--superseded-by", "does-not-exist")
+    still_candidate = psql(
+        dsn, "-At", "-c",
+        "select state from ops.release where release_key='rel-abandon-b'",
+    )
+    check("2b. absent successor refuses without changing the old candidate",
+          r.returncode != 0 and still_candidate.stdout.strip() == "candidate")
 
     # ── 3. an APPROVED release can still be abandoned before it ships ──
     # Typed approval and recovery are exercised by staging-release-readback-gate.
@@ -295,7 +406,7 @@ def run_cases(dsn: str) -> None:
 def legacy_approval_receipt_refusal(dsn: str) -> None:
     """Exercise 0205 against a populated 0202-shaped receipt table.
 
-    A regenerated snapshot may already contain 0205.  This disposable sibling
+    A regenerated snapshot may already contain 0205.  This disposable cluster
     explicitly restores only 0205's receipt-table additions before applying the
     migration file directly; its schema_migrations ledger is intentionally not
     consulted, because raw file application is the behavior under test.
@@ -381,14 +492,14 @@ def main() -> int:
     # fixtures actually run on the surface that gates the merge.
     ci_dsn = os.environ.get("CARR_CI_DATABASE_URL")
     if ci_dsn:
-        print("release-abandon-selftest: using an isolated database on CI Postgres")
+        print("release-abandon-selftest: using an owned disposable PostgreSQL cluster")
         try:
             with isolated_ci_database(ci_dsn) as legacy_dsn:
                 legacy_approval_receipt_refusal(legacy_dsn)
             with isolated_ci_database(ci_dsn) as isolated_dsn:
                 run_cases(isolated_dsn)
         except Exception:
-            print("release-abandon-selftest: isolated CI database unavailable",
+            print("release-abandon-selftest: disposable PostgreSQL fixture unavailable",
                   file=sys.stderr)
             return 1
         print(f"\nrelease-abandon-selftest: {PASSED}/{PASSED + len(FAILED)} passed")

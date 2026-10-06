@@ -1,0 +1,1234 @@
+{
+  "corpus_version": "f03-design-contract-parity.v1",
+  "describe": "One shared, bounded, versioned corpus of engineering-slice-plan.v1/v2 whole plans used to prove that the server validator (mcp-server/src/engineering-runtime.js requirePlan) and the portable validator (tools/room-bridge/engineering_passport.py validate_engineering_slice_plan) accept and refuse exactly the same inputs. Every vector is a declarative patch over one named base plan, so neither language reconstructs a fixture and neither restates a validation rule.",
+  "seams_under_test": {
+    "javascript": [
+      "requirePlan(plan, ToolError)",
+      "classifyDesignDepth(slice, ToolError, contractVersion?)",
+      "designDepthInputs(slice, ToolError)",
+      "canonicalDigest(value)",
+      "ENGINEERING_SLICE_PLAN_VERSIONS",
+      "ENGINEERING_DESIGN_CONTRACT_VERSION",
+      "ENGINEERING_DESIGN_DEPTH_PREDICATE_VERSIONS"
+    ],
+    "python": [
+      "engineering_passport.validate_engineering_slice_plan(plan)",
+      "engineering_passport.classify_design_depth(slice, contract_version?)",
+      "engineering_passport.design_depth_inputs(slice)",
+      "execution_contract.canonical_digest(value)",
+      "engineering_passport.ENGINEERING_SLICE_PLAN_VERSIONS",
+      "engineering_passport.DESIGN_CONTRACT_VERSION",
+      "engineering_passport.DESIGN_DEPTH_PREDICATE_VERSIONS"
+    ]
+  },
+  "seam_notes": [
+    "Plan registration is the one seam both validators expose publicly with the same input shape, so equivalence is claimed there and nowhere else.",
+    "The contract-versus-issued-binding refusal is NOT a shared public seam. On the server it lives inside admitEngineeringSlice, which needs a database connection; in the portable validator it lives inside build_engineering_slice_packet, which needs a full execution-envelope fixture of a different shape. Nothing public on either side takes the same two arguments, so this corpus records the three contradictions (read_only true under a write profile, a production environment, an attended_human route) as ACCEPTED BY BOTH plan validators, which is the true shared behavior, instead of inventing a parity claim the exports cannot support.",
+    "Ops are pure data manipulation (set/delete/append/reorder). They never encode a validation rule.",
+    "Identifiers are matched against the closed regex exactly as written. The portable validator (engineering_passport._str with identifier=True) and the SQL validators have always matched the raw value; the server validator matched a trimmed copy while the plan kept, sealed and compared the raw string, so a padded identifier registered on the server alone. engineering-slice-plan.v2 now matches the raw value on the server too, using the SAME regex and the same contract version: this is a bug correction inside the existing identifier rule, not a policy change or a new version. Legacy engineering-slice-plan.v1 keeps its exact previous trimming acceptance, because requirePlan re-runs against the stored append-only plan row on every read path; that legacy behavior is recorded in divergence_vectors rather than omitted. A padded identifier is always refused, never normalised into an accepted identity, on either version.",
+    "The identifier rule reaches identifiers only. Prose fields (objective, definition_of_done, scope_boundary, rationale, measurement note, objective_summary, failure detection and compensation, completion predicate) keep their exact accepted whitespace behavior in both validators; identity.v2.padded-objective-is-still-prose pins that."
+  ],
+  "seal_modes": {
+    "reseal": "recompute plan_digest over the patched plan (the normal producer path)",
+    "as_is": "leave the digest that was computed over the UNPATCHED base, which is genuinely stale once ops change content, and which stays deleted if an op deleted it",
+    "literal": "use the vector's own plan_digest value verbatim"
+  },
+  "intentionally_invalid_digests": [
+    "sha256:not-a-valid-digest",
+    "sha256:not-hexadecimal"
+  ],
+  "constants": {
+    "slice_plan_versions": ["engineering-slice-plan.v1", "engineering-slice-plan.v2"],
+    "design_contract_version": "engineering-design-contract.v1",
+    "design_depth_predicate_versions": ["engineering-design-contract.v1"],
+    "server_execution_binding": {
+      "adapter_ref": "adapter:codex-desktop",
+      "environment": "rehearsal"
+    }
+  },
+  "bases": {
+    "v2-short": {
+      "schema_version": "engineering-slice-plan.v2",
+      "work_request": {
+        "id": "wr-f03-parity-corpus",
+        "state_version": 1,
+        "canonical_record_digest": "sha256:0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd"
+      },
+      "accepted_plan_revision": {
+        "id": "plan-f03-parity-corpus",
+        "revision": 1,
+        "digest": "sha256:fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876"
+      },
+      "plan_digest": "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "slices": [
+        {
+          "slice_ref": "slice:short",
+          "ordinal": 1,
+          "objective": "Deepen the accepted slice contract",
+          "definition_of_done": "Both validators agree on one closed contract",
+          "dependency_refs": [],
+          "declared_resource_refs": ["resource:worktree-a"],
+          "declared_component_refs": ["component:execution-fabric"],
+          "declared_plan_step_refs": ["step:synthetic-read"],
+          "baseline_evidence_refs": [
+            {
+              "ref": "evidence:baseline",
+              "redaction_class": "redacted_evidence",
+              "content_digest": "sha256:0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d"
+            }
+          ],
+          "planned_checks": [
+            {
+              "check_ref": "check:contract",
+              "failure_condition": "an unknown field is accepted",
+              "evidence_requirement": "redacted_evidence_required"
+            }
+          ],
+          "scope_boundary": "the two existing slice-plan validators",
+          "forbidden_change_refs": ["forbidden:new-authority"],
+          "concurrency_posture": "parallel_safe",
+          "manual_qa_required": false,
+          "risk_class": "R1",
+          "release_requirement": "not_required",
+          "design_contract": {
+            "contract_version": "engineering-design-contract.v1",
+            "rationale": "the closed validator owns this behavior end to end",
+            "dependency_rationale": "no accepted predecessor slice is required",
+            "code_model_decision": {
+              "rationale": "stable enforceable behavior stays deterministic code",
+              "selection_basis": ["capability_gain", "quality_gain"],
+              "model_judgment_steps": []
+            },
+            "routing": {
+              "executor_class": "deterministic_code",
+              "adapter_ref": "adapter:codex-desktop",
+              "fresh_session_required": true
+            },
+            "authority": {
+              "capability_profile": "capability:engineering-repository-write",
+              "read_only": false,
+              "environment": "rehearsal"
+            },
+            "isolation": {
+              "worktree_required": true,
+              "branch_required": true,
+              "shared_resource_refs": []
+            },
+            "tests": {
+              "planned_check_refs": ["check:contract"],
+              "verification_lanes": ["contract"]
+            },
+            "review": {
+              "independent_review_required": true,
+              "reviewer_class": "independent_agent"
+            },
+            "failure": {
+              "failure_modes": [
+                {
+                  "failure_ref": "failure:contract-drift",
+                  "detection": "the closed validator refuses the plan",
+                  "compensation": "revise the accepted plan revision before admission"
+                }
+              ]
+            },
+            "evidence": {
+              "redaction_class": "redacted_evidence",
+              "retention": "material_redacted",
+              "evidence_refs": [
+                {
+                  "ref": "evidence:design",
+                  "redaction_class": "redacted_evidence",
+                  "content_digest": "sha256:0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d"
+                }
+              ]
+            },
+            "deployment": {
+              "release_requirement": "not_required",
+              "rollback_ref": null,
+              "confirmation_required": false
+            },
+            "completion": {
+              "completion_predicate": "every accepted planned check passes under independent review",
+              "verified_by": "independent_review"
+            },
+            "seam_decision": {
+              "mode": "extend",
+              "target_seam_ref": "seam:engineering-runtime",
+              "measurement": {
+                "basis": "complexity_reduction",
+                "note": "extending the proven validator is smaller than a new module"
+              },
+              "new_module_justification": null,
+              "replaced_seam_refs": [],
+              "residual_authority_refs": []
+            },
+            "full_design_refs": null,
+            "short_template": {
+              "template_ref": "template:short-governed-v1",
+              "objective_summary": "one bounded parallel-safe change with no dependencies",
+              "verification_ref": "verification:short-governed-v1"
+            }
+          }
+        }
+      ]
+    },
+    "v2-full": {
+      "schema_version": "engineering-slice-plan.v2",
+      "work_request": {
+        "id": "wr-f03-parity-corpus",
+        "state_version": 1,
+        "canonical_record_digest": "sha256:0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd"
+      },
+      "accepted_plan_revision": {
+        "id": "plan-f03-parity-corpus",
+        "revision": 1,
+        "digest": "sha256:fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876"
+      },
+      "plan_digest": "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "slices": [
+        {
+          "slice_ref": "slice:full",
+          "ordinal": 1,
+          "objective": "Carry the full design envelope for higher-risk work",
+          "definition_of_done": "Both validators agree the FULL material is mandatory",
+          "dependency_refs": [],
+          "declared_resource_refs": ["resource:worktree-a"],
+          "declared_component_refs": ["component:execution-fabric"],
+          "declared_plan_step_refs": ["step:synthetic-read"],
+          "baseline_evidence_refs": [
+            {
+              "ref": "evidence:baseline",
+              "redaction_class": "redacted_evidence",
+              "content_digest": "sha256:0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d"
+            }
+          ],
+          "planned_checks": [
+            {
+              "check_ref": "check:contract",
+              "failure_condition": "an unknown field is accepted",
+              "evidence_requirement": "redacted_evidence_required"
+            }
+          ],
+          "scope_boundary": "the two existing slice-plan validators",
+          "forbidden_change_refs": ["forbidden:new-authority"],
+          "concurrency_posture": "parallel_safe",
+          "manual_qa_required": false,
+          "risk_class": "R4",
+          "release_requirement": "not_required",
+          "design_contract": {
+            "contract_version": "engineering-design-contract.v1",
+            "rationale": "the closed validator owns this behavior end to end",
+            "dependency_rationale": "no accepted predecessor slice is required",
+            "code_model_decision": {
+              "rationale": "stable enforceable behavior stays deterministic code",
+              "selection_basis": ["capability_gain", "quality_gain"],
+              "model_judgment_steps": []
+            },
+            "routing": {
+              "executor_class": "deterministic_code",
+              "adapter_ref": "adapter:codex-desktop",
+              "fresh_session_required": true
+            },
+            "authority": {
+              "capability_profile": "capability:engineering-repository-write",
+              "read_only": false,
+              "environment": "rehearsal"
+            },
+            "isolation": {
+              "worktree_required": true,
+              "branch_required": true,
+              "shared_resource_refs": []
+            },
+            "tests": {
+              "planned_check_refs": ["check:contract"],
+              "verification_lanes": ["contract"]
+            },
+            "review": {
+              "independent_review_required": true,
+              "reviewer_class": "independent_agent"
+            },
+            "failure": {
+              "failure_modes": [
+                {
+                  "failure_ref": "failure:contract-drift",
+                  "detection": "the closed validator refuses the plan",
+                  "compensation": "revise the accepted plan revision before admission"
+                }
+              ]
+            },
+            "evidence": {
+              "redaction_class": "redacted_evidence",
+              "retention": "material_redacted",
+              "evidence_refs": [
+                {
+                  "ref": "evidence:design",
+                  "redaction_class": "redacted_evidence",
+                  "content_digest": "sha256:0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d"
+                }
+              ]
+            },
+            "deployment": {
+              "release_requirement": "not_required",
+              "rollback_ref": null,
+              "confirmation_required": true
+            },
+            "completion": {
+              "completion_predicate": "every accepted planned check passes under independent review",
+              "verified_by": "independent_review"
+            },
+            "seam_decision": {
+              "mode": "extend",
+              "target_seam_ref": "seam:engineering-runtime",
+              "measurement": {
+                "basis": "complexity_reduction",
+                "note": "extending the proven validator is smaller than a new module"
+              },
+              "new_module_justification": null,
+              "replaced_seam_refs": [],
+              "residual_authority_refs": []
+            },
+            "full_design_refs": {
+              "design_interview_ref": "interview:v5-f03",
+              "authority_envelope_ref": "envelope:v5-f03",
+              "failure_model_ref": "failure-model:v5-f03",
+              "fixture_refs": ["fixture:v5-f03-boundary"],
+              "oracle_ref": "oracle:doctorcre-v5:Q035.D1"
+            },
+            "short_template": null
+          }
+        }
+      ]
+    },
+    "v2-pair": {
+      "schema_version": "engineering-slice-plan.v2",
+      "work_request": {
+        "id": "wr-f03-parity-corpus",
+        "state_version": 1,
+        "canonical_record_digest": "sha256:0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd"
+      },
+      "accepted_plan_revision": {
+        "id": "plan-f03-parity-corpus",
+        "revision": 1,
+        "digest": "sha256:fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876"
+      },
+      "plan_digest": "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "slices": [
+        {
+          "slice_ref": "slice:one",
+          "ordinal": 1,
+          "objective": "Own the first bounded resource",
+          "definition_of_done": "One closed contract is accepted",
+          "dependency_refs": [],
+          "declared_resource_refs": ["resource:worktree-a"],
+          "declared_component_refs": ["component:execution-fabric"],
+          "declared_plan_step_refs": ["step:synthetic-read"],
+          "baseline_evidence_refs": [],
+          "planned_checks": [
+            {
+              "check_ref": "check:contract-one",
+              "failure_condition": "an unknown field is accepted",
+              "evidence_requirement": "redacted_evidence_required"
+            }
+          ],
+          "scope_boundary": "the first bounded worktree",
+          "forbidden_change_refs": ["forbidden:new-authority"],
+          "concurrency_posture": "parallel_safe",
+          "manual_qa_required": false,
+          "risk_class": "R1",
+          "release_requirement": "not_required",
+          "design_contract": {
+            "contract_version": "engineering-design-contract.v1",
+            "rationale": "the closed validator owns this behavior end to end",
+            "dependency_rationale": "no accepted predecessor slice is required",
+            "code_model_decision": {
+              "rationale": "stable enforceable behavior stays deterministic code",
+              "selection_basis": ["capability_gain", "quality_gain"],
+              "model_judgment_steps": []
+            },
+            "routing": {
+              "executor_class": "deterministic_code",
+              "adapter_ref": "adapter:codex-desktop",
+              "fresh_session_required": true
+            },
+            "authority": {
+              "capability_profile": "capability:engineering-repository-write",
+              "read_only": false,
+              "environment": "rehearsal"
+            },
+            "isolation": {
+              "worktree_required": true,
+              "branch_required": true,
+              "shared_resource_refs": []
+            },
+            "tests": {
+              "planned_check_refs": ["check:contract-one"],
+              "verification_lanes": ["contract"]
+            },
+            "review": {
+              "independent_review_required": true,
+              "reviewer_class": "independent_agent"
+            },
+            "failure": {
+              "failure_modes": [
+                {
+                  "failure_ref": "failure:contract-drift-one",
+                  "detection": "the closed validator refuses the plan",
+                  "compensation": "revise the accepted plan revision before admission"
+                }
+              ]
+            },
+            "evidence": {
+              "redaction_class": "redacted_evidence",
+              "retention": "material_redacted",
+              "evidence_refs": []
+            },
+            "deployment": {
+              "release_requirement": "not_required",
+              "rollback_ref": null,
+              "confirmation_required": false
+            },
+            "completion": {
+              "completion_predicate": "every accepted planned check passes under independent review",
+              "verified_by": "independent_review"
+            },
+            "seam_decision": {
+              "mode": "extend",
+              "target_seam_ref": "seam:engineering-runtime",
+              "measurement": {
+                "basis": "complexity_reduction",
+                "note": "extending the proven validator is smaller than a new module"
+              },
+              "new_module_justification": null,
+              "replaced_seam_refs": [],
+              "residual_authority_refs": []
+            },
+            "full_design_refs": null,
+            "short_template": {
+              "template_ref": "template:short-governed-v1",
+              "objective_summary": "one bounded parallel-safe change with no dependencies",
+              "verification_ref": "verification:short-governed-v1"
+            }
+          }
+        },
+        {
+          "slice_ref": "slice:two",
+          "ordinal": 2,
+          "objective": "Own the second bounded resource",
+          "definition_of_done": "One closed contract is accepted",
+          "dependency_refs": [],
+          "declared_resource_refs": ["resource:worktree-b"],
+          "declared_component_refs": ["component:execution-fabric"],
+          "declared_plan_step_refs": ["step:synthetic-read"],
+          "baseline_evidence_refs": [],
+          "planned_checks": [
+            {
+              "check_ref": "check:contract-two",
+              "failure_condition": "an unknown field is accepted",
+              "evidence_requirement": "redacted_evidence_required"
+            }
+          ],
+          "scope_boundary": "the second bounded worktree",
+          "forbidden_change_refs": ["forbidden:new-authority"],
+          "concurrency_posture": "parallel_safe",
+          "manual_qa_required": false,
+          "risk_class": "R1",
+          "release_requirement": "not_required",
+          "design_contract": {
+            "contract_version": "engineering-design-contract.v1",
+            "rationale": "the closed validator owns this behavior end to end",
+            "dependency_rationale": "no accepted predecessor slice is required",
+            "code_model_decision": {
+              "rationale": "stable enforceable behavior stays deterministic code",
+              "selection_basis": ["capability_gain", "quality_gain"],
+              "model_judgment_steps": []
+            },
+            "routing": {
+              "executor_class": "deterministic_code",
+              "adapter_ref": "adapter:codex-desktop",
+              "fresh_session_required": true
+            },
+            "authority": {
+              "capability_profile": "capability:engineering-repository-write",
+              "read_only": false,
+              "environment": "rehearsal"
+            },
+            "isolation": {
+              "worktree_required": true,
+              "branch_required": true,
+              "shared_resource_refs": []
+            },
+            "tests": {
+              "planned_check_refs": ["check:contract-two"],
+              "verification_lanes": ["contract"]
+            },
+            "review": {
+              "independent_review_required": true,
+              "reviewer_class": "independent_agent"
+            },
+            "failure": {
+              "failure_modes": [
+                {
+                  "failure_ref": "failure:contract-drift-two",
+                  "detection": "the closed validator refuses the plan",
+                  "compensation": "revise the accepted plan revision before admission"
+                }
+              ]
+            },
+            "evidence": {
+              "redaction_class": "redacted_evidence",
+              "retention": "material_redacted",
+              "evidence_refs": []
+            },
+            "deployment": {
+              "release_requirement": "not_required",
+              "rollback_ref": null,
+              "confirmation_required": false
+            },
+            "completion": {
+              "completion_predicate": "every accepted planned check passes under independent review",
+              "verified_by": "independent_review"
+            },
+            "seam_decision": {
+              "mode": "extend",
+              "target_seam_ref": "seam:engineering-runtime",
+              "measurement": {
+                "basis": "complexity_reduction",
+                "note": "extending the proven validator is smaller than a new module"
+              },
+              "new_module_justification": null,
+              "replaced_seam_refs": [],
+              "residual_authority_refs": []
+            },
+            "full_design_refs": null,
+            "short_template": {
+              "template_ref": "template:short-governed-v1",
+              "objective_summary": "one bounded parallel-safe change with no dependencies",
+              "verification_ref": "verification:short-governed-v1"
+            }
+          }
+        }
+      ]
+    },
+    "v1-legacy": {
+      "schema_version": "engineering-slice-plan.v1",
+      "work_request": {
+        "id": "wr-f03-parity-corpus",
+        "state_version": 1,
+        "canonical_record_digest": "sha256:0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd0123abcd"
+      },
+      "accepted_plan_revision": {
+        "id": "plan-f03-parity-corpus",
+        "revision": 1,
+        "digest": "sha256:fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876fedc9876"
+      },
+      "plan_digest": "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "slices": [
+        {
+          "slice_ref": "slice:a",
+          "ordinal": 1,
+          "objective": "Legacy first slice",
+          "definition_of_done": "A typed receipt exists",
+          "dependency_refs": [],
+          "declared_resource_refs": ["resource:worktree-a"],
+          "declared_component_refs": ["component:execution-fabric"],
+          "declared_plan_step_refs": ["step:synthetic-read"],
+          "baseline_evidence_refs": [],
+          "planned_checks": [
+            {
+              "check_ref": "check:legacy-a",
+              "failure_condition": "missing",
+              "evidence_requirement": "metadata_only_sufficient"
+            }
+          ],
+          "scope_boundary": "one bounded legacy slice",
+          "forbidden_change_refs": [],
+          "concurrency_posture": "parallel_safe",
+          "manual_qa_required": false,
+          "risk_class": "R1",
+          "release_requirement": "not_required"
+        },
+        {
+          "slice_ref": "slice:b",
+          "ordinal": 2,
+          "objective": "Legacy second slice",
+          "definition_of_done": "A typed receipt exists",
+          "dependency_refs": [],
+          "declared_resource_refs": ["resource:worktree-a"],
+          "declared_component_refs": ["component:execution-fabric"],
+          "declared_plan_step_refs": ["step:synthetic-read"],
+          "baseline_evidence_refs": [],
+          "planned_checks": [
+            {
+              "check_ref": "check:legacy-b",
+              "failure_condition": "missing",
+              "evidence_requirement": "metadata_only_sufficient"
+            }
+          ],
+          "scope_boundary": "one bounded legacy slice",
+          "forbidden_change_refs": [],
+          "concurrency_posture": "parallel_safe",
+          "manual_qa_required": false,
+          "risk_class": "R1",
+          "release_requirement": "not_required"
+        }
+      ]
+    }
+  },
+  "vectors": [
+    {
+      "id": "positive.v2.short.baseline",
+      "describe": "The SHORT-depth v2 baseline: R1, parallel-safe, no manual QA, no release requirement, one declared resource/component/step, short_template present and full_design_refs null.",
+      "base": "v2-short",
+      "ops": [],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.full.baseline",
+      "describe": "The FULL-depth v2 baseline: R4 forces the full design envelope, so full_design_refs is present, short_template is null and the confirmation gate is explicit.",
+      "base": "v2-full",
+      "ops": [],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.pair.baseline",
+      "describe": "Two parallel-safe SHORT slices owning distinct resources with distinct ordinals and no dependency edge.",
+      "base": "v2-pair",
+      "ops": [],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v1.legacy.baseline",
+      "describe": "A legacy v1 plan with two parallel-safe slices sharing resource:worktree-a keeps its exact accepted behavior in both validators: the parallel-resource rule binds v2 only.",
+      "base": "v1-legacy",
+      "ops": [],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.short.risk-r0",
+      "describe": "R0 is the lower risk boundary of the SHORT predicate and needs no explicit confirmation gate.",
+      "base": "v2-short",
+      "ops": [{ "op": "set", "path": ["slices", 0, "risk_class"], "value": "R0" }],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.short.risk-r3-confirmed",
+      "describe": "R3 is the upper risk boundary of the SHORT predicate, and above R1 the canonical explicit confirmation gate stays mandatory even on the SHORT template.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "risk_class"], "value": "R3" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "deployment", "confirmation_required"], "value": true }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.full.risk-r6",
+      "describe": "R6 is the upper risk boundary of the closed R0-R6 class set and takes the FULL envelope.",
+      "base": "v2-full",
+      "ops": [{ "op": "set", "path": ["slices", 0, "risk_class"], "value": "R6" }],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.short.zero-cardinality",
+      "describe": "Zero declared resources, components and plan steps is the lower cardinality boundary and still qualifies for SHORT.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "declared_resource_refs"], "value": [] },
+        { "op": "set", "path": ["slices", 0, "declared_component_refs"], "value": [] },
+        { "op": "set", "path": ["slices", 0, "declared_plan_step_refs"], "value": [] }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.short.many-planned-checks",
+      "describe": "Four planned checks stay SHORT: the planned check count is never a design-depth classifier input, and tests.planned_check_refs binds every one of them in order.",
+      "base": "v2-short",
+      "ops": [
+        {
+          "op": "set",
+          "path": ["slices", 0, "planned_checks"],
+          "value": [
+            { "check_ref": "check:extra-0", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" },
+            { "check_ref": "check:extra-1", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" },
+            { "check_ref": "check:extra-2", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" },
+            { "check_ref": "check:extra-3", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" }
+          ]
+        },
+        {
+          "op": "set",
+          "path": ["slices", 0, "design_contract", "tests", "planned_check_refs"],
+          "value": ["check:extra-0", "check:extra-1", "check:extra-2", "check:extra-3"]
+        }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.model-assisted-with-typed-step",
+      "describe": "A model_assisted route staffed by one typed model judgment step over a declared plan step, with a typed-uncertainty responsibility class and a selection basis that is more than price.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" },
+        {
+          "op": "set",
+          "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"],
+          "value": [
+            {
+              "step_ref": "step:synthetic-read",
+              "responsibility_class": "classification",
+              "input_contract_ref": "contract:step-input",
+              "output_contract_ref": "contract:step-output",
+              "rationale": "the candidate label is genuinely uncertain and code would reduce quality",
+              "selection_basis": ["typed_uncertainty", "quality_gain"]
+            }
+          ]
+        }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.selection-basis.cost-beside-capability",
+      "describe": "Price may appear beside a capability reason: cost is only refused when it stands alone.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "selection_basis"], "value": ["cost", "capability_gain"] }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.seam.new-module-justified",
+      "describe": "A new module is accepted when it names a real authority/lifecycle/failure-isolation/multi-adapter seam.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "new_module" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:new-authority" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "new_module_justification"], "value": "lifecycle" }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.seam.clean-replacement",
+      "describe": "A replacement that names the seam it retires, is not the seam it retires, and leaves no residual authority.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "replace" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:successor" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:legacy"] }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.pair.dependency-orders-a-shared-resource",
+      "describe": "Two slices may own one declared resource when a dependency edge means they can never be admissible at the same time.",
+      "base": "v2-pair",
+      "ops": [
+        { "op": "set", "path": ["slices", 1, "declared_resource_refs"], "value": ["resource:worktree-a"] },
+        { "op": "set", "path": ["slices", 1, "dependency_refs"], "value": ["slice:one"] },
+        { "op": "set", "path": ["slices", 1, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } },
+        { "op": "set", "path": ["slices", 1, "design_contract", "short_template"], "value": null }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.pair.exclusive-posture-declares-the-contention",
+      "describe": "Declaring the contention with an exclusive_resource posture is the supported route for two slices naming one resource; the posture also moves that slice to FULL depth.",
+      "base": "v2-pair",
+      "ops": [
+        { "op": "set", "path": ["slices", 1, "declared_resource_refs"], "value": ["resource:worktree-a"] },
+        { "op": "set", "path": ["slices", 1, "concurrency_posture"], "value": "exclusive_resource" },
+        { "op": "set", "path": ["slices", 1, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } },
+        { "op": "set", "path": ["slices", 1, "design_contract", "short_template"], "value": null }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.one-slice-repeating-its-own-resource",
+      "describe": "declared_resource_refs need not be unique, and one slice repeating its own resource is not contention with anyone; the repeat raises the declared resource count to two, which takes the slice to FULL depth.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "declared_resource_refs"], "value": ["resource:worktree-a", "resource:worktree-a"] },
+        { "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } },
+        { "op": "set", "path": ["slices", 0, "design_contract", "short_template"], "value": null }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.evidence.metadata-only-lane",
+      "describe": "A metadata-only planned check may retain metadata-only design evidence; the redacted-evidence floor only applies when a planned check requires redacted evidence.",
+      "base": "v2-short",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "planned_checks", 0, "evidence_requirement"], "value": "metadata_only_sufficient" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "evidence", "redaction_class"], "value": "metadata_only" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "evidence", "evidence_refs", 0, "redaction_class"], "value": "metadata_only" }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.evidence.empty-evidence-ref-list",
+      "describe": "An empty design evidence_refs list is the lower boundary of that facet and is accepted by both validators.",
+      "base": "v2-short",
+      "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "evidence", "evidence_refs"], "value": [] }],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.deployment.rollback-ref-present-though-not-required",
+      "describe": "A rollback reference is mandatory when release is required and optional otherwise; stating one anyway is accepted.",
+      "base": "v2-short",
+      "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "deployment", "rollback_ref"], "value": "release:rollback-plan" }],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.full.release-required",
+      "describe": "A required release moves the slice to FULL depth and makes the rollback reference mandatory.",
+      "base": "v2-full",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "release_requirement"], "value": "required" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "deployment", "release_requirement"], "value": "required" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "deployment", "rollback_ref"], "value": "release:rollback-plan" }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.full.manual-qa",
+      "describe": "Manual QA moves the slice to FULL depth, adds the manual_qa verification lane and changes the completion verifier.",
+      "base": "v2-full",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "manual_qa_required"], "value": true },
+        { "op": "set", "path": ["slices", 0, "design_contract", "tests", "verification_lanes"], "value": ["contract", "manual_qa"] },
+        { "op": "set", "path": ["slices", 0, "design_contract", "completion", "verified_by"], "value": "independent_review_and_manual_qa" }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.isolation.shared-resource-under-exclusive-posture",
+      "describe": "Shared resources are accepted when the slice does not claim a parallel_safe posture.",
+      "base": "v2-full",
+      "ops": [
+        { "op": "set", "path": ["slices", 0, "concurrency_posture"], "value": "exclusive_resource" },
+        { "op": "set", "path": ["slices", 0, "design_contract", "isolation", "shared_resource_refs"], "value": ["resource:worktree-a"] }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.failure.several-modes",
+      "describe": "More than one distinct failure mode is accepted.",
+      "base": "v2-short",
+      "ops": [
+        {
+          "op": "append",
+          "path": ["slices", 0, "design_contract", "failure", "failure_modes"],
+          "value": { "failure_ref": "failure:stale-digest", "detection": "the sealed digest no longer binds the content", "compensation": "reseal the accepted plan revision" }
+        }
+      ],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.binding-seam.read-only-authority-under-write-profile",
+      "describe": "NOT a contradiction at this seam. The sealed contract accepts read_only true beside the repository-write capability profile; the contradiction against a server-issued write envelope is refused later, at the admission/packet seam, which neither validator exposes publicly with the same inputs.",
+      "base": "v2-short",
+      "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "authority", "read_only"], "value": true }],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.binding-seam.production-environment",
+      "describe": "NOT a contradiction at this seam. production is a member of the closed authority environment set, so the sealed contract accepts it; the mismatch against the rehearsal binding this runtime issues is an admission-seam refusal.",
+      "base": "v2-short",
+      "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "authority", "environment"], "value": "production" }],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.v2.binding-seam.attended-human-route",
+      "describe": "NOT a contradiction at this seam. attended_human is a member of the closed executor class set, so the sealed contract accepts it; that no adapter packet can execute it is refused at the packet/admission seam.",
+      "base": "v2-short",
+      "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "attended_human" }],
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.digest.resealed-permutation",
+      "describe": "Changing sealed content and resealing produces a different but valid plan_digest, and the resealed permutation is accepted.",
+      "base": "v2-short",
+      "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "rationale"], "value": "a different but equally bounded rationale" }],
+      "seal": "reseal",
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.digest.plan-key-order-permutation",
+      "describe": "The canonical digest is independent of JSON key order, so reversing the plan's top-level key order and resealing yields the same digest and the same acceptance.",
+      "base": "v2-short",
+      "ops": [{ "op": "reorder", "path": [] }],
+      "seal": "reseal",
+      "expect": "accepted"
+    },
+    {
+      "id": "positive.digest.contract-key-order-permutation",
+      "describe": "The same key-order independence holds for a nested design contract object.",
+      "base": "v2-short",
+      "ops": [{ "op": "reorder", "path": ["slices", 0, "design_contract"] }],
+      "seal": "reseal",
+      "expect": "accepted"
+    },
+
+    { "id": "facet.missing.authority", "describe": "A v2 design contract is a closed field set: dropping authority is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "authority"] }], "expect": "rejected" },
+    { "id": "facet.missing.code_model_decision", "describe": "A v2 design contract is a closed field set: dropping code_model_decision is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "code_model_decision"] }], "expect": "rejected" },
+    { "id": "facet.missing.completion", "describe": "A v2 design contract is a closed field set: dropping completion is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "completion"] }], "expect": "rejected" },
+    { "id": "facet.missing.contract_version", "describe": "A v2 design contract is a closed field set: dropping contract_version is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "contract_version"] }], "expect": "rejected" },
+    { "id": "facet.missing.dependency_rationale", "describe": "A v2 design contract is a closed field set: dropping dependency_rationale is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "dependency_rationale"] }], "expect": "rejected" },
+    { "id": "facet.missing.deployment", "describe": "A v2 design contract is a closed field set: dropping deployment is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "deployment"] }], "expect": "rejected" },
+    { "id": "facet.missing.evidence", "describe": "A v2 design contract is a closed field set: dropping evidence is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "evidence"] }], "expect": "rejected" },
+    { "id": "facet.missing.failure", "describe": "A v2 design contract is a closed field set: dropping failure is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "failure"] }], "expect": "rejected" },
+    { "id": "facet.missing.full_design_refs", "describe": "A v2 design contract is a closed field set: dropping full_design_refs is refused even when its accepted value is null.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "full_design_refs"] }], "expect": "rejected" },
+    { "id": "facet.missing.isolation", "describe": "A v2 design contract is a closed field set: dropping isolation is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "isolation"] }], "expect": "rejected" },
+    { "id": "facet.missing.rationale", "describe": "A v2 design contract is a closed field set: dropping rationale is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "rationale"] }], "expect": "rejected" },
+    { "id": "facet.missing.review", "describe": "A v2 design contract is a closed field set: dropping review is refused, so SHORT can never become an ungoverned template.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "review"] }], "expect": "rejected" },
+    { "id": "facet.missing.routing", "describe": "A v2 design contract is a closed field set: dropping routing is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "routing"] }], "expect": "rejected" },
+    { "id": "facet.missing.seam_decision", "describe": "A v2 design contract is a closed field set: dropping seam_decision is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "seam_decision"] }], "expect": "rejected" },
+    { "id": "facet.missing.short_template", "describe": "A v2 design contract is a closed field set: dropping short_template is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "short_template"] }], "expect": "rejected" },
+    { "id": "facet.missing.tests", "describe": "A v2 design contract is a closed field set: dropping tests is refused, so SHORT never drops its verification statement.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract", "tests"] }], "expect": "rejected" },
+    { "id": "facet.unknown-field", "describe": "An unknown design contract field is refused rather than ignored.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "extra_field"], "value": "x" }], "expect": "rejected" },
+
+    { "id": "facet.authority.write-profile-mismatch", "describe": "Write authority requires the engineering repository capability profile.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "authority", "capability_profile"], "value": "capability:read-only" }], "expect": "rejected" },
+    { "id": "facet.authority.unknown-environment", "describe": "The authority environment set is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "authority", "environment"], "value": "orbit" }], "expect": "rejected" },
+    { "id": "facet.authority.non-boolean-read-only", "describe": "read_only is typed: a string is refused, not coerced.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "authority", "read_only"], "value": "false" }], "expect": "rejected" },
+    { "id": "facet.code_model_decision.cost-alone", "describe": "Price alone never selects the code-versus-model decision.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "selection_basis"], "value": ["cost"] }], "expect": "rejected" },
+    { "id": "facet.code_model_decision.empty-selection-basis", "describe": "The code-versus-model decision must record why.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "selection_basis"], "value": [] }], "expect": "rejected" },
+    { "id": "facet.code_model_decision.invented-selection-basis", "describe": "The selection basis vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "selection_basis"], "value": ["invented"] }], "expect": "rejected" },
+    { "id": "facet.code_model_decision.duplicate-selection-basis", "describe": "A duplicated selection basis entry is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "selection_basis"], "value": ["cost", "cost"] }], "expect": "rejected" },
+    { "id": "facet.code_model_decision.blank-rationale", "describe": "A whitespace-only decision rationale is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "rationale"], "value": "   " }], "expect": "rejected" },
+    { "id": "facet.completion.verifier-contradicts-manual-qa", "describe": "The completion verifier must match the accepted manual QA requirement.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "completion", "verified_by"], "value": "independent_review_and_manual_qa" }], "expect": "rejected" },
+    { "id": "facet.completion.blank-predicate", "describe": "A whitespace-only completion predicate is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "completion", "completion_predicate"], "value": "  " }], "expect": "rejected" },
+    { "id": "facet.contract_version.successor", "describe": "A changed design-depth predicate has to ship as an explicit successor contract version; an unrecognised version is refused, not guessed at.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "contract_version"], "value": "engineering-design-contract.v2" }], "expect": "rejected" },
+    { "id": "facet.dependency_rationale.blank", "describe": "An empty dependency rationale is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "dependency_rationale"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.deployment.release-requirement-mismatch", "describe": "The contract's release requirement must match the accepted slice.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "deployment", "release_requirement"], "value": "required" }], "expect": "rejected" },
+    { "id": "facet.deployment.missing-rollback-when-required", "describe": "A required release with no rollback reference is refused.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "release_requirement"], "value": "required" }, { "op": "set", "path": ["slices", 0, "design_contract", "deployment", "release_requirement"], "value": "required" }], "expect": "rejected" },
+    { "id": "facet.deployment.confirmation-dropped-at-r3", "describe": "Above R1 the canonical explicit confirmation gate stays mandatory, and SHORT does not waive it.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "risk_class"], "value": "R3" }], "expect": "rejected" },
+    { "id": "facet.evidence.redaction-below-the-planned-check-floor", "describe": "A planned check requiring redacted evidence forces the design contract to retain redacted evidence.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "evidence", "redaction_class"], "value": "metadata_only" }, { "op": "set", "path": ["slices", 0, "design_contract", "evidence", "evidence_refs", 0, "redaction_class"], "value": "metadata_only" }], "expect": "rejected" },
+    { "id": "facet.evidence.ref-contradicts-declared-class", "describe": "Retained evidence must match the declared redaction class.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "evidence", "evidence_refs", 0, "redaction_class"], "value": "metadata_only" }], "expect": "rejected" },
+    { "id": "facet.evidence.unknown-retention", "describe": "The evidence retention vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "evidence", "retention"], "value": "forever" }], "expect": "rejected" },
+    { "id": "facet.failure.no-modes", "describe": "A slice must model at least one failure mode.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "failure", "failure_modes"], "value": [] }], "expect": "rejected" },
+    { "id": "facet.failure.duplicate-mode-ref", "describe": "A duplicated failure_ref is refused.", "base": "v2-short", "ops": [{ "op": "append", "path": ["slices", 0, "design_contract", "failure", "failure_modes"], "value": { "failure_ref": "failure:contract-drift", "detection": "the same reference twice", "compensation": "use a distinct failure reference" } }], "expect": "rejected" },
+    { "id": "facet.failure.modes-not-a-list", "describe": "failure_modes is typed: a string is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "failure", "failure_modes"], "value": "one mode" }], "expect": "rejected" },
+    { "id": "facet.full_design_refs.present-on-short", "describe": "The SHORT shape is exact: simple work may not also carry the full design envelope.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } }], "expect": "rejected" },
+    { "id": "facet.full_design_refs.blank-interview-ref", "describe": "Every full design reference must be a real identifier.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs", "design_interview_ref"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.full_design_refs.blank-authority-envelope-ref", "describe": "Every full design reference must be a real identifier.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs", "authority_envelope_ref"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.full_design_refs.blank-failure-model-ref", "describe": "Every full design reference must be a real identifier.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs", "failure_model_ref"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.full_design_refs.blank-oracle-ref", "describe": "Every full design reference must be a real identifier.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs", "oracle_ref"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.full_design_refs.no-fixtures", "describe": "Full design depth requires at least one fixture reference.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs", "fixture_refs"], "value": [] }], "expect": "rejected" },
+    { "id": "facet.full_design_refs.absent-on-full", "describe": "High-risk work may not take the shorter template by nulling the full envelope.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs"], "value": null }, { "op": "set", "path": ["slices", 0, "design_contract", "short_template"], "value": { "template_ref": "template:short-governed-v1", "objective_summary": "smuggled", "verification_ref": "verification:short-governed-v1" } }], "expect": "rejected" },
+    { "id": "facet.isolation.no-worktree", "describe": "Isolation is not optional: the worktree requirement cannot be waived.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "isolation", "worktree_required"], "value": false }], "expect": "rejected" },
+    { "id": "facet.isolation.no-branch", "describe": "Isolation is not optional: the branch requirement cannot be waived.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "isolation", "branch_required"], "value": false }], "expect": "rejected" },
+    { "id": "facet.isolation.shared-resource-contradicts-parallel-safe", "describe": "A parallel_safe slice has already stated that nothing it touches is shared.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "isolation", "shared_resource_refs"], "value": ["resource:worktree-a"] }], "expect": "rejected" },
+    { "id": "facet.isolation.shared-resource-never-declared", "describe": "Isolation may not name a resource the slice never declared.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "concurrency_posture"], "value": "exclusive_resource" }, { "op": "set", "path": ["slices", 0, "design_contract", "isolation", "shared_resource_refs"], "value": ["resource:never-declared"] }], "expect": "rejected" },
+    { "id": "facet.rationale.blank", "describe": "A whitespace-only contract rationale is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "rationale"], "value": "   " }], "expect": "rejected" },
+    { "id": "facet.review.waived", "describe": "SHORT is a shorter template, not a bypass: independent review can never be waived.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "review", "independent_review_required"], "value": false }], "expect": "rejected" },
+    { "id": "facet.review.independent-human", "describe": "independent_human is refused until a human-review provider exists; nothing here checks a reviewer is human.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "review", "reviewer_class"], "value": "independent_human" }], "expect": "rejected" },
+    { "id": "facet.review.self-review", "describe": "self_review is not a supported reviewer class.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "review", "reviewer_class"], "value": "self_review" }], "expect": "rejected" },
+    { "id": "facet.review.empty-reviewer-class", "describe": "An empty reviewer class is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "review", "reviewer_class"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.routing.stale-session", "describe": "A fresh native session is mandatory for every accepted route.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "fresh_session_required"], "value": false }], "expect": "rejected" },
+    { "id": "facet.routing.deterministic-route-carrying-model-judgment", "describe": "Routing and the declared seams must agree: a deterministic_code route cannot carry a model judgment step.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "classification", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain and code would reduce quality", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "facet.routing.unstaffed-model-route", "describe": "Routing and the declared seams must agree in both directions: a model_assisted route needs a typed model judgment step.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }], "expect": "rejected" },
+    { "id": "facet.routing.blank-adapter-ref", "describe": "The adapter reference must be a real identifier.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "adapter_ref"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.routing.unknown-executor-class", "describe": "The executor class vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "vibes" }], "expect": "rejected" },
+    { "id": "facet.routing.not-an-object", "describe": "routing is typed: a string is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing"], "value": "codex" }], "expect": "rejected" },
+    { "id": "facet.seam_decision.unjustified-new-module", "describe": "A new module needs a real seam.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "new_module" }], "expect": "rejected" },
+    { "id": "facet.seam_decision.invented-module-justification", "describe": "Convenience is not an accepted module justification.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "new_module" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "new_module_justification"], "value": "convenience" }], "expect": "rejected" },
+    { "id": "facet.seam_decision.justification-without-a-new-module", "describe": "Only a new module may carry a module justification.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "new_module_justification"], "value": "lifecycle" }], "expect": "rejected" },
+    { "id": "facet.seam_decision.unmeasured", "describe": "Reuse, extend and replace must be measured against an accepted basis.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "measurement"], "value": { "basis": "gut_feel", "note": "it felt simpler" } }], "expect": "rejected" },
+    { "id": "facet.seam_decision.blank-measurement-note", "describe": "A measured decision needs the measurement stated, not just named.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "measurement", "note"], "value": "  " }], "expect": "rejected" },
+    { "id": "facet.seam_decision.half-replacement", "describe": "A replacement that leaves residual authority is a half-fix.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "replace" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:legacy"] }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "residual_authority_refs"], "value": ["seam:legacy-residual"] }], "expect": "rejected" },
+    { "id": "facet.seam_decision.replaces-itself", "describe": "A seam cannot replace itself.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "replace" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:engineering-runtime"] }], "expect": "rejected" },
+    { "id": "facet.seam_decision.replacement-names-nothing", "describe": "A replacement must name the seam it retires.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "replace" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:successor" }], "expect": "rejected" },
+    { "id": "facet.seam_decision.extend-retiring-a-seam", "describe": "Only a replacement may retire a seam.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:legacy"] }], "expect": "rejected" },
+    { "id": "facet.seam_decision.extend-leaving-residual-authority", "describe": "Residual authority outside a replacement would create a duplicate authority.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "residual_authority_refs"], "value": ["seam:legacy-residual"] }], "expect": "rejected" },
+    { "id": "facet.seam_decision.unknown-mode", "describe": "The seam mode vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "rewrite" }], "expect": "rejected" },
+    { "id": "facet.short_template.present-on-full", "describe": "High-risk work cannot use the shorter governed template.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "short_template"], "value": { "template_ref": "template:short-governed-v1", "objective_summary": "smuggled", "verification_ref": "verification:short-governed-v1" } }], "expect": "rejected" },
+    { "id": "facet.short_template.blank-template-ref", "describe": "The SHORT template must name the accepted template.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "short_template", "template_ref"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.short_template.blank-objective-summary", "describe": "The SHORT template must still state its objective.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "short_template", "objective_summary"], "value": "  " }], "expect": "rejected" },
+    { "id": "facet.short_template.blank-verification-ref", "describe": "The SHORT template must still name its verification.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "short_template", "verification_ref"], "value": "" }], "expect": "rejected" },
+    { "id": "facet.short_template.unknown-field", "describe": "The SHORT template shape is exact.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "short_template", "extra"], "value": "x" }], "expect": "rejected" },
+    { "id": "facet.tests.drops-a-planned-check", "describe": "tests may not drop a planned check: verification is never optional.", "base": "v2-short", "ops": [{ "op": "append", "path": ["slices", 0, "planned_checks"], "value": { "check_ref": "check:second", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" } }], "expect": "rejected" },
+    { "id": "facet.tests.manual-qa-lane-contradicts-the-slice", "describe": "The manual QA lane must match the accepted slice.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "tests", "verification_lanes"], "value": ["contract", "manual_qa"] }], "expect": "rejected" },
+    { "id": "facet.tests.no-verification-lane", "describe": "A slice must name at least one verification lane.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "tests", "verification_lanes"], "value": [] }], "expect": "rejected" },
+    { "id": "facet.tests.unknown-verification-lane", "describe": "The verification lane vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "tests", "verification_lanes"], "value": ["eyeball"] }], "expect": "rejected" },
+    { "id": "facet.tests.duplicate-planned-check-ref", "describe": "A duplicated planned check reference is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "tests", "planned_check_refs"], "value": ["check:contract", "check:contract"] }], "expect": "rejected" },
+
+    { "id": "model-step.reserved.identity", "describe": "Deterministic code owns identity outright; a model judgment step claiming it is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "identity", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.reserved.policy", "describe": "Deterministic code owns policy outright.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "policy", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.reserved.permissions", "describe": "Deterministic code owns permissions outright.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "permissions", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.reserved.state", "describe": "Deterministic code owns state outright.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "state", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.reserved.validation", "describe": "Deterministic code owns validation outright.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "validation", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.reserved.idempotency", "describe": "Deterministic code owns idempotency outright.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "idempotency", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.reserved.execution", "describe": "Deterministic code owns execution outright.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "execution", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.responsibility-not-a-typed-uncertainty-seam", "describe": "A responsibility class outside the typed-uncertainty set is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "vibes", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.undeclared-plan-step", "describe": "A model judgment step must be a declared plan step of its own slice.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:never-declared", "responsibility_class": "classification", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.blank-input-contract", "describe": "A model judgment step needs a typed input contract.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "classification", "input_contract_ref": "", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.blank-output-contract", "describe": "A model judgment step needs a typed output contract.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "classification", "input_contract_ref": "contract:step-input", "output_contract_ref": "", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.blank-rationale", "describe": "A model judgment step needs a stated rationale.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "classification", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "  ", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+    { "id": "model-step.cost-only-selection", "describe": "A model judgment step may not rest on price alone either.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "classification", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["cost"] }] }], "expect": "rejected" },
+    { "id": "model-step.unknown-field", "describe": "The model judgment step shape is exact.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "classification", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"], "confidence": 0.9 }] }], "expect": "rejected" },
+    { "id": "model-step.duplicate-step-ref", "describe": "One declared plan step may not be claimed twice.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "executor_class"], "value": "model_assisted" }, { "op": "set", "path": ["slices", 0, "design_contract", "code_model_decision", "model_judgment_steps"], "value": [{ "step_ref": "step:synthetic-read", "responsibility_class": "classification", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the candidate label is genuinely uncertain", "selection_basis": ["typed_uncertainty", "quality_gain"] }, { "step_ref": "step:synthetic-read", "responsibility_class": "extraction", "input_contract_ref": "contract:step-input", "output_contract_ref": "contract:step-output", "rationale": "the same declared step claimed twice", "selection_basis": ["typed_uncertainty", "quality_gain"] }] }], "expect": "rejected" },
+
+    { "id": "self-label.slice.design_depth", "describe": "An agent may never hand the classifier its own answer at the slice level.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_depth"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.slice.simple", "describe": "An agent may never hand the classifier its own answer at the slice level.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "simple"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.slice.complexity", "describe": "An agent may never hand the classifier its own answer at the slice level.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "complexity"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.slice.classifier_override", "describe": "An agent may never hand the classifier its own answer at the slice level.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "classifier_override"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.slice.bypass", "describe": "An agent may never hand the classifier its own answer at the slice level.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "bypass"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.contract.design_depth", "describe": "An agent may never hand the classifier its own answer inside the design contract.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "design_depth"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.contract.simple", "describe": "An agent may never hand the classifier its own answer inside the design contract.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "simple"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.contract.complexity", "describe": "An agent may never hand the classifier its own answer inside the design contract.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "complexity"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.contract.classifier_override", "describe": "An agent may never hand the classifier its own answer inside the design contract.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "classifier_override"], "value": "short" }], "expect": "rejected" },
+    { "id": "self-label.contract.bypass", "describe": "An agent may never hand the classifier its own answer inside the design contract.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "bypass"], "value": "short" }], "expect": "rejected" },
+
+    { "id": "version.unknown.v3", "describe": "An unknown plan schema version fails explicitly rather than being read as the nearest known one.", "base": "v2-short", "ops": [{ "op": "set", "path": ["schema_version"], "value": "engineering-slice-plan.v3" }], "expect": "rejected" },
+    { "id": "version.unknown.unversioned", "describe": "An unversioned schema name is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["schema_version"], "value": "engineering-slice-plan" }], "expect": "rejected" },
+    { "id": "version.unknown.empty", "describe": "An empty schema version is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["schema_version"], "value": "" }], "expect": "rejected" },
+    { "id": "version.unknown.null", "describe": "A null schema version is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["schema_version"], "value": null }], "expect": "rejected" },
+    { "id": "version.v1-stays-closed-against-the-successor-field", "describe": "engineering-slice-plan.v1 has no design contract: smuggling one into a v1 slice is refused by both validators.", "base": "v1-legacy", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract"], "value": { "contract_version": "engineering-design-contract.v1" } }], "expect": "rejected" },
+    { "id": "version.v2-not-silently-reinterpreted-as-v1", "describe": "A v2 plan relabelled v1 is refused rather than read under the older closed field set.", "base": "v2-short", "ops": [{ "op": "set", "path": ["schema_version"], "value": "engineering-slice-plan.v1" }], "expect": "rejected" },
+
+    { "id": "plan-shape.missing-plan-digest", "describe": "The plan field set is closed: a plan with no digest is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["plan_digest"] }], "seal": "as_is", "expect": "rejected" },
+    { "id": "plan-shape.missing-slices", "describe": "The plan field set is closed: a plan with no slices key is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices"] }], "expect": "rejected" },
+    { "id": "plan-shape.unknown-plan-field", "describe": "An unknown top-level plan field is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["unexpected"], "value": true }], "expect": "rejected" },
+    { "id": "plan-shape.empty-slices", "describe": "A plan must carry at least one slice.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices"], "value": [] }], "expect": "rejected" },
+    { "id": "plan-shape.slices-not-a-list", "describe": "slices is typed: an object is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices"], "value": {} }], "expect": "rejected" },
+    { "id": "plan-shape.slice-not-an-object", "describe": "A slice is typed: a string is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0], "value": "slice:short" }], "expect": "rejected" },
+    { "id": "plan-shape.work-request-state-version-zero", "describe": "The work request state version must be a positive integer.", "base": "v2-short", "ops": [{ "op": "set", "path": ["work_request", "state_version"], "value": 0 }], "expect": "rejected" },
+    { "id": "plan-shape.work-request-state-version-boolean", "describe": "A boolean is not an integer state version.", "base": "v2-short", "ops": [{ "op": "set", "path": ["work_request", "state_version"], "value": true }], "expect": "rejected" },
+    { "id": "plan-shape.work-request-digest-invalid", "describe": "The canonical record digest must be a sha256 digest.", "base": "v2-short", "ops": [{ "op": "set", "path": ["work_request", "canonical_record_digest"], "value": "sha256:not-hexadecimal" }], "expect": "rejected" },
+    { "id": "plan-shape.work-request-unknown-field", "describe": "The work request binding shape is exact.", "base": "v2-short", "ops": [{ "op": "set", "path": ["work_request", "note"], "value": "x" }], "expect": "rejected" },
+    { "id": "plan-shape.revision-zero", "describe": "The accepted plan revision must be a positive integer.", "base": "v2-short", "ops": [{ "op": "set", "path": ["accepted_plan_revision", "revision"], "value": 0 }], "expect": "rejected" },
+    { "id": "plan-shape.revision-unknown-field", "describe": "The accepted plan revision shape is exact.", "base": "v2-short", "ops": [{ "op": "set", "path": ["accepted_plan_revision", "note"], "value": "x" }], "expect": "rejected" },
+    { "id": "slice-shape.missing-objective", "describe": "The slice field set is closed: a missing objective is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "objective"] }], "expect": "rejected" },
+    { "id": "slice-shape.missing-design-contract", "describe": "A v2 slice without a design contract is refused.", "base": "v2-short", "ops": [{ "op": "delete", "path": ["slices", 0, "design_contract"] }], "expect": "rejected" },
+    { "id": "slice-shape.unknown-slice-field", "describe": "An unknown slice field is refused rather than ignored.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "note"], "value": "x" }], "expect": "rejected" },
+    { "id": "slice-shape.ordinal-zero", "describe": "The ordinal must be a positive integer.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "ordinal"], "value": 0 }], "expect": "rejected" },
+    { "id": "slice-shape.ordinal-boolean", "describe": "A boolean is not an integer ordinal.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "ordinal"], "value": true }], "expect": "rejected" },
+    { "id": "slice-shape.ordinal-fractional", "describe": "A fractional ordinal is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "ordinal"], "value": 1.5 }], "expect": "rejected" },
+    { "id": "slice-shape.blank-definition-of-done", "describe": "A whitespace-only definition of done is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "definition_of_done"], "value": "   " }], "expect": "rejected" },
+    { "id": "slice-shape.risk-class-r7", "describe": "R0-R6 is the closed risk class set; R7 is outside it.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "risk_class"], "value": "R7" }], "expect": "rejected" },
+    { "id": "slice-shape.risk-class-r9", "describe": "An invented risk class is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "risk_class"], "value": "R9" }], "expect": "rejected" },
+    { "id": "slice-shape.unknown-concurrency-posture", "describe": "The concurrency posture vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "concurrency_posture"], "value": "whenever" }], "expect": "rejected" },
+    { "id": "slice-shape.unknown-release-requirement", "describe": "The release requirement vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "release_requirement"], "value": "maybe" }], "expect": "rejected" },
+    { "id": "slice-shape.manual-qa-not-boolean", "describe": "manual_qa_required is typed: a string is refused, not coerced.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "manual_qa_required"], "value": "false" }], "expect": "rejected" },
+    { "id": "slice-shape.baseline-evidence-missing-fields", "describe": "A baseline evidence reference is a closed typed object.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "baseline_evidence_refs"], "value": [{ "ref": "evidence:one" }] }], "expect": "rejected" },
+    { "id": "slice-shape.baseline-evidence-bad-redaction-class", "describe": "A baseline evidence redaction class outside the closed set is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "baseline_evidence_refs", 0, "redaction_class"], "value": "public" }], "expect": "rejected" },
+    { "id": "slice-shape.declared-resource-not-a-string", "describe": "Declared reference arrays are typed: a number is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "declared_resource_refs"], "value": [7] }], "expect": "rejected" },
+    { "id": "slice-shape.declared-resource-empty-string", "describe": "An empty declared reference is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "declared_resource_refs"], "value": [""] }], "expect": "rejected" },
+    { "id": "slice-shape.no-planned-checks", "describe": "A slice must plan at least one check before execution, on the SHORT path too.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "planned_checks"], "value": [] }, { "op": "set", "path": ["slices", 0, "design_contract", "tests", "planned_check_refs"], "value": [] }], "expect": "rejected" },
+    { "id": "slice-shape.duplicate-planned-check-ref", "describe": "Duplicate planned check refs are refused on every producer path.", "base": "v2-short", "ops": [{ "op": "append", "path": ["slices", 0, "planned_checks"], "value": { "check_ref": "check:contract", "failure_condition": "the same reference twice", "evidence_requirement": "redacted_evidence_required" } }, { "op": "set", "path": ["slices", 0, "design_contract", "tests", "planned_check_refs"], "value": ["check:contract", "check:contract"] }], "expect": "rejected" },
+    { "id": "slice-shape.planned-check-unknown-field", "describe": "The planned check shape is exact.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "planned_checks", 0, "extra"], "value": true }], "expect": "rejected" },
+    { "id": "slice-shape.planned-check-unknown-evidence-requirement", "describe": "The evidence requirement vocabulary is closed.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "planned_checks", 0, "evidence_requirement"], "value": "whatever" }], "expect": "rejected" },
+    { "id": "slice-shape.planned-check-not-an-object", "describe": "A planned check is typed: a string is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "planned_checks", 0], "value": "check:contract" }], "expect": "rejected" },
+    { "id": "slice-shape.design-contract-null", "describe": "A null design contract is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract"], "value": null }], "expect": "rejected" },
+    { "id": "slice-shape.design-contract-is-a-list", "describe": "A design contract is typed: a list is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract"], "value": [] }], "expect": "rejected" },
+
+    { "id": "identity.v2.exact-identifier-accepted", "describe": "A v2 identifier using the whole accepted character set, with no surrounding whitespace, stays accepted by both validators: the exact-identifier rule tightens padding only, it does not narrow the closed identifier regex.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "slice:short.v2_1-a" }], "expect": "accepted" },
+    { "id": "identity.v2.padded-objective-is-still-prose", "describe": "Prose is not an identifier: a v2 objective keeps its exact accepted whitespace behavior in both validators, so the exact-identifier rule never reaches free text or a caller's payload.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "objective"], "value": "  Deepen the accepted slice contract  " }], "expect": "accepted" },
+    { "id": "identity.v2.slice-ref-leading-and-trailing-space", "describe": "A v2 slice_ref padded on both sides is refused by both validators. The server previously matched the regex against a trimmed copy while the plan kept, sealed and compared the raw string, so ' slice:short ' registered under an identity the portable and SQL validators reject.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": " slice:short " }], "expect": "rejected" },
+    { "id": "identity.v2.slice-ref-leading-tab", "describe": "A leading ASCII tab is whitespace to a trimmer and not an accepted identifier character, so a v2 slice_ref carrying one is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "\tslice:short" }], "expect": "rejected" },
+    { "id": "identity.v2.slice-ref-trailing-newline", "describe": "A trailing newline on a v2 slice_ref is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "slice:short\n" }], "expect": "rejected" },
+    { "id": "identity.v2.slice-ref-trailing-carriage-return", "describe": "A trailing carriage return on a v2 slice_ref is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "slice:short\r" }], "expect": "rejected" },
+    { "id": "identity.v2.slice-ref-mixed-leading-and-trailing-controls", "describe": "A v2 slice_ref wrapped in mixed ASCII whitespace controls (tab in front, carriage return and newline behind) is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "\t slice:short \r\n" }], "expect": "rejected" },
+    { "id": "identity.v2.slice-ref-repeated-trailing-space", "describe": "More than one trailing space is refused by both validators too: neither trims the value before matching the closed identifier regex, so there is no amount of padding that becomes an accepted identity.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "slice:short  " }], "expect": "rejected" },
+    { "id": "identity.v2.slice-ref-whitespace-only", "describe": "A whitespace-only v2 slice_ref is refused as a missing field by both validators, never as an empty accepted identity.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "   " }], "expect": "rejected" },
+    { "id": "identity.v2.work-request-id-padded", "describe": "A padded work_request.id in a v2 plan is refused by both validators: the plan binding is an identifier, and the sealed digest binds the padded string it was given.", "base": "v2-short", "ops": [{ "op": "set", "path": ["work_request", "id"], "value": " wr-f03-parity-corpus " }], "expect": "rejected" },
+    { "id": "identity.v2.accepted-plan-revision-id-padded", "describe": "A padded accepted_plan_revision.id in a v2 plan is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["accepted_plan_revision", "id"], "value": "plan-f03-parity-corpus\n" }], "expect": "rejected" },
+    { "id": "identity.v2.declared-resource-ref-padded", "describe": "A padded declared_resource_refs entry is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "declared_resource_refs"], "value": [" resource:worktree-a"] }], "expect": "rejected" },
+    { "id": "identity.v2.declared-component-ref-padded", "describe": "A tab-padded declared_component_refs entry is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "declared_component_refs"], "value": ["component:execution-fabric\t"] }], "expect": "rejected" },
+    { "id": "identity.v2.declared-plan-step-ref-padded", "describe": "A newline-padded declared_plan_step_refs entry is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "declared_plan_step_refs"], "value": ["step:synthetic-read\n"] }], "expect": "rejected" },
+    { "id": "identity.v2.forbidden-change-ref-padded", "describe": "A padded forbidden_change_refs entry is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "forbidden_change_refs"], "value": ["forbidden:new-authority "] }], "expect": "rejected" },
+    { "id": "identity.v2.planned-check-ref-padded", "describe": "A padded planned check reference is refused by both validators. The server refuses it at the planned check itself now, rather than only downstream where the contract's planned_check_refs binding failed to match.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "planned_checks", 0, "check_ref"], "value": "check:contract " }, { "op": "set", "path": ["slices", 0, "design_contract", "tests", "planned_check_refs"], "value": ["check:contract "] }], "expect": "rejected" },
+    { "id": "identity.v2.baseline-evidence-ref-padded", "describe": "A padded baseline evidence ref is refused by both validators: nested typed evidence carries an identifier too.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "baseline_evidence_refs", 0, "ref"], "value": " evidence:baseline" }], "expect": "rejected" },
+    { "id": "identity.v2.dependency-ref-padded", "describe": "A padded dependency reference matches no slice in the plan, so both validators refuse it; the server refuses it as an unknown dependency rather than as a padded identifier, which is the same verdict by an earlier route.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 1, "dependency_refs"], "value": [" slice:one "] }], "expect": "rejected" },
+    { "id": "identity.v2.contract-adapter-ref-padded", "describe": "A padded routing.adapter_ref inside the design contract is refused by both validators. The nested contract facets already matched raw identifiers on both sides; this pins that they still do.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "routing", "adapter_ref"], "value": "adapter:codex-desktop " }], "expect": "rejected" },
+    { "id": "identity.v2.contract-capability-profile-padded", "describe": "A padded authority.capability_profile is refused by both validators, and is not trimmed back into the accepted write profile.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "authority", "capability_profile"], "value": "capability:engineering-repository-write " }], "expect": "rejected" },
+    { "id": "identity.v2.contract-target-seam-ref-padded", "describe": "A padded seam_decision.target_seam_ref is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "target_seam_ref"], "value": " seam:engineering-runtime" }], "expect": "rejected" },
+    { "id": "identity.v2.contract-evidence-ref-padded", "describe": "A padded retained evidence ref inside the design contract is refused by both validators.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "evidence", "evidence_refs", 0, "ref"], "value": "evidence:design " }], "expect": "rejected" },
+    { "id": "identity.v2.short-template-ref-padded", "describe": "A padded short_template.template_ref is refused by both validators, so the SHORT design material cannot name a template under a padded identity.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "short_template", "template_ref"], "value": "template:short-governed-v1 " }], "expect": "rejected" },
+    { "id": "identity.v2.full-design-oracle-ref-padded", "describe": "A padded full_design_refs.oracle_ref is refused by both validators on the FULL path too.", "base": "v2-full", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs", "oracle_ref"], "value": "oracle:doctorcre-v5:Q035.D1 " }], "expect": "rejected" },
+    { "id": "identity.v1.dependency-ref-padded", "describe": "A padded legacy v1 dependency reference names no slice, so both validators refuse it. This is NOT one of the documented v1 divergences: the unknown-dependency refusal is shared.", "base": "v1-legacy", "ops": [{ "op": "set", "path": ["slices", 1, "dependency_refs"], "value": [" slice:a "] }], "expect": "rejected" },
+    { "id": "identity.v1.slice-ref-interior-space", "describe": "Interior whitespace is refused by both validators in legacy v1 as well, because trimming never reached it. The documented v1 identifier divergence is therefore confined to leading and trailing whitespace and to nothing else.", "base": "v1-legacy", "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": "slice: a" }], "expect": "rejected" },
+
+    { "id": "graph.v2.duplicate-slice-ref", "describe": "Two slices may not share one slice reference.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 1, "slice_ref"], "value": "slice:one" }], "expect": "rejected" },
+    { "id": "graph.v2.duplicate-ordinal", "describe": "Two v2 slices may not claim one ordinal.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 1, "ordinal"], "value": 1 }], "expect": "rejected" },
+    { "id": "graph.v2.self-dependency", "describe": "A v2 slice cannot depend on itself: the dependency could never be satisfied. Any dependency also moves the slice to FULL depth, so the contract carries the full envelope and the cycle is the only thing left to refuse.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 0, "dependency_refs"], "value": ["slice:one"] }, { "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } }, { "op": "set", "path": ["slices", 0, "design_contract", "short_template"], "value": null }], "expect": "rejected" },
+    { "id": "graph.v2.two-slice-cycle", "describe": "A two-slice v2 cycle can never satisfy either dependency. Both slices carry the full design envelope their dependency implies, so the cycle is the only thing left to refuse.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 0, "dependency_refs"], "value": ["slice:two"] }, { "op": "set", "path": ["slices", 1, "dependency_refs"], "value": ["slice:one"] }, { "op": "set", "path": ["slices", 0, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } }, { "op": "set", "path": ["slices", 0, "design_contract", "short_template"], "value": null }, { "op": "set", "path": ["slices", 1, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } }, { "op": "set", "path": ["slices", 1, "design_contract", "short_template"], "value": null }], "expect": "rejected" },
+    { "id": "graph.v2.unknown-dependency", "describe": "A dependency on a slice this plan does not contain is refused. The depending slice carries the full design envelope its dependency implies, so the missing slice is the only thing left to refuse.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 1, "dependency_refs"], "value": ["slice:nope"] }, { "op": "set", "path": ["slices", 1, "design_contract", "full_design_refs"], "value": { "design_interview_ref": "interview:v5-f03", "authority_envelope_ref": "envelope:v5-f03", "failure_model_ref": "failure-model:v5-f03", "fixture_refs": ["fixture:v5-f03-boundary"], "oracle_ref": "oracle:doctorcre-v5:Q035.D1" } }, { "op": "set", "path": ["slices", 1, "design_contract", "short_template"], "value": null }], "expect": "rejected" },
+    { "id": "graph.v1.unknown-dependency", "describe": "The unknown-dependency refusal is shared by both validators for legacy v1 too.", "base": "v1-legacy", "ops": [{ "op": "set", "path": ["slices", 1, "dependency_refs"], "value": ["slice:nope"] }], "expect": "rejected" },
+    { "id": "graph.v2.parallel-resource-conflict", "describe": "Two parallel-safe slices cannot both own one declared resource while each states that nothing it touches is shared.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 1, "declared_resource_refs"], "value": ["resource:worktree-a"] }], "expect": "rejected" },
+    { "id": "graph.v2.seam-duplicate-authority", "describe": "Two slices may not both claim authority over one seam.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "new_module" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:new-authority" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "new_module_justification"], "value": "authority" }, { "op": "set", "path": ["slices", 1, "design_contract", "seam_decision", "mode"], "value": "replace" }, { "op": "set", "path": ["slices", 1, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:new-authority" }, { "op": "set", "path": ["slices", 1, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:old-authority"] }], "expect": "rejected" },
+    { "id": "graph.v2.seam-half-replacement-across-slices", "describe": "One slice may not extend a seam another slice in the same plan retires.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "replace" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:successor" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:engineering-runtime"] }], "expect": "rejected" },
+    { "id": "graph.v2.seam-retired-twice", "describe": "One seam may not be retired by two slices in the same plan.", "base": "v2-pair", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "mode"], "value": "replace" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:successor-one" }, { "op": "set", "path": ["slices", 0, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:legacy"] }, { "op": "set", "path": ["slices", 1, "design_contract", "seam_decision", "mode"], "value": "replace" }, { "op": "set", "path": ["slices", 1, "design_contract", "seam_decision", "target_seam_ref"], "value": "seam:successor-two" }, { "op": "set", "path": ["slices", 1, "design_contract", "seam_decision", "replaced_seam_refs"], "value": ["seam:legacy"] }], "expect": "rejected" },
+
+    { "id": "digest.stale-after-a-contract-change", "describe": "The sealed digest binds exact content: changing a design contract rationale without resealing is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "rationale"], "value": "a different rationale" }], "seal": "as_is", "expect": "rejected" },
+    { "id": "digest.stale-after-a-slice-change", "describe": "The sealed digest binds the slice body too: changing an objective without resealing is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "objective"], "value": "a different objective" }], "seal": "as_is", "expect": "rejected" },
+    { "id": "digest.stale-after-an-evidence-change", "describe": "The sealed digest binds nested evidence: changing a retained evidence ref without resealing is refused.", "base": "v2-short", "ops": [{ "op": "set", "path": ["slices", 0, "design_contract", "evidence", "evidence_refs", 0, "ref"], "value": "evidence:design-two" }], "seal": "as_is", "expect": "rejected" },
+    { "id": "digest.literal-wrong-digest", "describe": "A plan carrying a well-formed but wrong digest is refused.", "base": "v2-short", "ops": [], "seal": "literal", "plan_digest": "sha256:cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe", "expect": "rejected" },
+    { "id": "digest.malformed-digest", "describe": "A plan digest that is not a sha256 digest is refused before content comparison.", "base": "v2-short", "ops": [], "seal": "literal", "plan_digest": "sha256:not-a-valid-digest", "expect": "rejected" },
+    { "id": "digest.v1.stale-after-a-slice-change", "describe": "The digest binding is version independent: a legacy v1 plan with a stale digest is refused by both validators.", "base": "v1-legacy", "ops": [{ "op": "set", "path": ["slices", 0, "objective"], "value": "a different objective" }], "seal": "as_is", "expect": "rejected" }
+  ],
+  "divergence_vectors": [
+    {
+      "id": "divergence.v1.duplicate-ordinals",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly and deliberately excluded from the equivalence claim. The portable validator has always refused duplicate ordinals for every plan version. The server validator historically accepted them, and requirePlan re-runs against the STORED append-only plan row on every read path, so refusing them for v1 now would strand an already registered passport rather than repair it. The server therefore binds the refusal to engineering-slice-plan.v2 only. See the header comment in mcp-server/src/engineering-runtime.js.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["slices", 1, "ordinal"], "value": 1 }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.self-dependency",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. A v1 slice depending on itself stays readable in the server validator and is refused by the portable one, for the same append-only reason.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["slices", 0, "dependency_refs"], "value": ["slice:a"] }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.two-slice-cycle",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. A legacy v1 two-slice cycle stays readable in the server validator (and every slice on the cycle stays blocked forever, which is the previous behavior unchanged) and is refused by the portable one.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["slices", 0, "dependency_refs"], "value": ["slice:b"] }, { "op": "set", "path": ["slices", 1, "dependency_refs"], "value": ["slice:a"] }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.padded-slice-ref",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly and deliberately excluded from the equivalence claim. The portable validator (engineering_passport._str with identifier=True) and the SQL validators have always matched the closed identifier regex against the RAW value; the server validator matched it against a trimmed copy while the plan kept, sealed and compared the raw string, so a padded legacy v1 slice_ref registered here. requirePlan re-runs against the STORED append-only plan row on every read path, so refusing it for v1 now would strand an already registered passport instead of repairing it. The server therefore binds exact identifiers to engineering-slice-plan.v2 only. THE GATE IS THE DECLARED PLAN VERSION, NOT THE ROW'S AGE: a plan NEWLY registered as engineering-slice-plan.v1 keeps this permissive legacy acceptance too, not only a stored one, because requirePlan is one predicate over one input and cannot tell a fresh registration from a stored row -- refusing new v1 registrations alone would make the same plan registerable and then unreadable, or the reverse. Narrowing what a v1 producer may newly register is a separate policy change with its own producers to migrate and is deliberately out of scope for this corpus, which records the behavior as it is. The vector's expect_javascript therefore states plain acceptance at registration. The v2 counterpart of this shape is identity.v2.slice-ref-leading-and-trailing-space, which BOTH validators refuse. The padded identifier is never trimmed into an accepted identity on either version.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["slices", 0, "slice_ref"], "value": " slice:a " }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.padded-work-request-id",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. The same legacy trimming acceptance applies to the plan's work_request.id binding. The v2 counterpart is identity.v2.work-request-id-padded, which both validators refuse.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["work_request", "id"], "value": " wr-f03-parity-corpus " }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.padded-accepted-plan-revision-id",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. The same legacy trimming acceptance applies to accepted_plan_revision.id. The v2 counterpart is identity.v2.accepted-plan-revision-id-padded, which both validators refuse.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["accepted_plan_revision", "id"], "value": "plan-f03-parity-corpus " }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.padded-declared-resource-ref",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. One vector stands for the whole legacy identifier-array loop: declared_resource_refs, declared_component_refs and declared_plan_step_refs are validated by the same call in both validators, so all three behave identically here. dependency_refs is deliberately NOT in this family, because a padded dependency reference matches no slice and is refused by both (identity.v1.dependency-ref-padded). The v2 counterpart is identity.v2.declared-resource-ref-padded, which both validators refuse.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["slices", 0, "declared_resource_refs"], "value": [" resource:worktree-a"] }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.padded-forbidden-change-ref",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. forbidden_change_refs carries identifiers through the same legacy loop. The v2 counterpart is identity.v2.forbidden-change-ref-padded, which both validators refuse.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["slices", 0, "forbidden_change_refs"], "value": ["forbidden:legacy "] }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.padded-planned-check-ref",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. A legacy v1 planned check reference is an identifier the server trimmed before matching, and v1 has no design contract whose planned_check_refs binding would have caught the mismatch downstream. The v2 counterpart is identity.v2.planned-check-ref-padded, which both validators refuse.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "set", "path": ["slices", 0, "planned_checks", 0, "check_ref"], "value": "check:legacy-a " }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    },
+    {
+      "id": "divergence.v1.padded-baseline-evidence-ref",
+      "describe": "DOCUMENTED LEGACY DIVERGENCE, asserted exactly. Nested typed evidence carries an identifier too, and the legacy server path trimmed it. The v2 counterpart is identity.v2.baseline-evidence-ref-padded, which both validators refuse.",
+      "base": "v1-legacy",
+      "ops": [{ "op": "append", "path": ["slices", 0, "baseline_evidence_refs"], "value": { "ref": " evidence:legacy ", "redaction_class": "metadata_only", "content_digest": "sha256:0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d" } }],
+      "expect_javascript": "accepted",
+      "expect_python": "rejected"
+    }
+  ],
+  "depth_vectors": [
+    { "id": "depth.short.baseline", "describe": "The SHORT baseline satisfies every accepted condition of the frozen predicate.", "base": "v2-short", "slice_index": 0, "ops": [], "expect": "short" },
+    { "id": "depth.full.serial-posture", "describe": "A serial_after_dependencies posture takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["concurrency_posture"], "value": "serial_after_dependencies" }], "expect": "full" },
+    { "id": "depth.full.exclusive-posture", "describe": "An exclusive_resource posture takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["concurrency_posture"], "value": "exclusive_resource" }], "expect": "full" },
+    { "id": "depth.full.manual-qa", "describe": "Manual QA takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["manual_qa_required"], "value": true }], "expect": "full" },
+    { "id": "depth.full.release-required", "describe": "A required release takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["release_requirement"], "value": "required" }], "expect": "full" },
+    { "id": "depth.full.one-dependency", "describe": "Any dependency at all takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["dependency_refs"], "value": ["slice:other"] }], "expect": "full" },
+    { "id": "depth.full.two-resources", "describe": "More than one declared resource takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["declared_resource_refs"], "value": ["resource:a", "resource:b"] }], "expect": "full" },
+    { "id": "depth.full.two-components", "describe": "More than one declared component takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["declared_component_refs"], "value": ["component:a", "component:b"] }], "expect": "full" },
+    { "id": "depth.full.two-plan-steps", "describe": "More than one declared plan step takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["declared_plan_step_refs"], "value": ["step:a", "step:b"] }], "expect": "full" },
+    { "id": "depth.short.risk-r0", "describe": "R0 is the lower SHORT risk boundary and stays on the shorter governed template.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R0" }], "expect": "short" },
+    { "id": "depth.short.risk-r1", "describe": "R1 stays inside the SHORT risk band of the frozen predicate.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R1" }], "expect": "short" },
+    { "id": "depth.short.risk-r2", "describe": "R2 stays inside the SHORT risk band of the frozen predicate.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R2" }], "expect": "short" },
+    { "id": "depth.short.risk-r3", "describe": "R3 is the upper SHORT risk boundary.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R3" }], "expect": "short" },
+    { "id": "depth.full.risk-r4", "describe": "R4 is the lower FULL risk boundary.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R4" }], "expect": "full" },
+    { "id": "depth.full.risk-r5", "describe": "R5 takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R5" }], "expect": "full" },
+    { "id": "depth.full.risk-r6", "describe": "R6 takes the FULL path.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R6" }], "expect": "full" },
+    { "id": "depth.short.zero-cardinality", "describe": "Zero declared resources, components and plan steps still qualifies for SHORT.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["declared_resource_refs"], "value": [] }, { "op": "set", "path": ["declared_component_refs"], "value": [] }, { "op": "set", "path": ["declared_plan_step_refs"], "value": [] }], "expect": "short" },
+    { "id": "depth.short.extra-verification-never-penalised", "describe": "Adding planned checks can never move a slice from SHORT to FULL: the planned check count is not a classifier input.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["planned_checks"], "value": [{ "check_ref": "check:extra-0", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" }, { "check_ref": "check:extra-1", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" }, { "check_ref": "check:extra-2", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" }, { "check_ref": "check:extra-3", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" }] }], "expect": "short" },
+    { "id": "depth.full.declared-full-baseline", "describe": "The FULL baseline slice classifies FULL on its own facets.", "base": "v2-full", "slice_index": 0, "ops": [], "expect": "full" },
+    { "id": "depth.error.self-label", "describe": "The classifier refuses a slice that hands it its own answer.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["design_depth"], "value": "short" }], "expect": "error" },
+    { "id": "depth.error.missing-risk-class", "describe": "The classifier refuses a slice missing a bound input.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "delete", "path": ["risk_class"] }], "expect": "error" },
+    { "id": "depth.error.invalid-risk-class", "describe": "The classifier refuses an out-of-range risk class rather than defaulting it.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["risk_class"], "value": "R7" }], "expect": "error" },
+    { "id": "depth.error.non-identifier-dependency", "describe": "The classifier refuses a counted array that is not an identifier list.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["dependency_refs"], "value": [7] }], "expect": "error" },
+    { "id": "depth.explicit-version.frozen", "describe": "Passing the sealing contract version explicitly selects the same frozen predicate.", "base": "v2-short", "slice_index": 0, "ops": [], "contract_version": "engineering-design-contract.v1", "expect": "short" },
+    { "id": "depth.error.unfrozen-successor-version", "describe": "No predicate is frozen for a successor contract version, so the classifier refuses rather than guessing.", "base": "v2-short", "slice_index": 0, "ops": [], "contract_version": "engineering-design-contract.v2", "expect": "error" },
+    { "id": "depth.error.empty-version", "describe": "An empty contract version has no frozen predicate.", "base": "v2-short", "slice_index": 0, "ops": [], "contract_version": "", "expect": "error" },
+    { "id": "depth.error.null-version", "describe": "A null contract version has no frozen predicate.", "base": "v2-short", "slice_index": 0, "ops": [], "contract_version": null, "expect": "error" }
+  ],
+  "depth_input_vectors": [
+    { "id": "inputs.short-baseline", "describe": "Both validators return the identical bound classifier input record for the SHORT baseline.", "base": "v2-short", "slice_index": 0, "ops": [] },
+    { "id": "inputs.extra-planned-checks-change-nothing", "describe": "Adding planned checks leaves the bound classifier inputs byte-identical in both languages.", "base": "v2-short", "slice_index": 0, "ops": [{ "op": "set", "path": ["planned_checks"], "value": [{ "check_ref": "check:extra-0", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" }, { "check_ref": "check:extra-1", "failure_condition": "verification is missing", "evidence_requirement": "redacted_evidence_required" }] }] },
+    { "id": "inputs.full-baseline", "describe": "Both validators return the identical bound classifier input record for the FULL baseline.", "base": "v2-full", "slice_index": 0, "ops": [] }
+  ],
+  "digest_vectors": [
+    {
+      "id": "digest.known-vector",
+      "describe": "A fixed published vector both canonical digest implementations must reproduce exactly.",
+      "inputs": [{ "a": 1 }],
+      "expect_equal": true,
+      "expect_digest": "sha256:015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
+    },
+    {
+      "id": "digest.key-order-independence",
+      "describe": "Key order does not change the canonical digest.",
+      "inputs": [{ "b": 2, "a": 1 }, { "a": 1, "b": 2 }],
+      "expect_equal": true
+    },
+    {
+      "id": "digest.nested-key-order-independence",
+      "describe": "Nested key order does not change the canonical digest either.",
+      "inputs": [{ "outer": { "z": 1, "a": 2 }, "list": [{ "y": 1, "x": 2 }] }, { "list": [{ "x": 2, "y": 1 }], "outer": { "a": 2, "z": 1 } }],
+      "expect_equal": true
+    },
+    {
+      "id": "digest.array-order-is-content",
+      "describe": "Array order is content, not presentation, so reordering changes the digest.",
+      "inputs": [{ "refs": ["a:one", "b:two"] }, { "refs": ["b:two", "a:one"] }],
+      "expect_equal": false
+    },
+    {
+      "id": "digest.value-change",
+      "describe": "Changing one sealed value changes the digest.",
+      "inputs": [{ "a": 1 }, { "a": 2 }],
+      "expect_equal": false
+    },
+    {
+      "id": "digest.numeric-string-is-not-a-number",
+      "describe": "A number and its string form are distinct sealed content.",
+      "inputs": [{ "a": 1 }, { "a": "1" }],
+      "expect_equal": false
+    },
+    {
+      "id": "digest.null-is-not-absent",
+      "describe": "An explicit null is distinct from a value of false.",
+      "inputs": [{ "a": null }, { "a": false }],
+      "expect_equal": false
+    },
+    {
+      "id": "digest.empty-containers",
+      "describe": "An empty object and an empty list are distinct sealed content.",
+      "inputs": [{ "a": {} }, { "a": [] }],
+      "expect_equal": false
+    }
+  ]
+}

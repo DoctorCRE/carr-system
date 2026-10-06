@@ -17,15 +17,12 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env, scrubbed_env, GIT_LOCATION_VARS  # noqa: E402
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 def make_repo(prefix, email):
@@ -144,5 +141,4 @@ else:
     check("ops/githooks/pre-push is present to check", False,
           f"expected it at {_hook}")
 
-print(f"\n{'OK all checks passed' if not failures else f'FAIL {len(failures)} check(s): ' + ', '.join(failures)}")
-sys.exit(1 if failures else 0)
+sys.exit(CHECKER.summary())

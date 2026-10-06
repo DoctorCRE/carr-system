@@ -1,0 +1,230 @@
+{
+  "languages": {
+    "python": {},
+    "javascript": {},
+    "typescript": {},
+    "tsx": {}
+  },
+  "rules": [
+    {
+      "id": "unnecessary-abstraction",
+      "description": "Fail a project-local helper whose complete implementation only calls another helper with the same caller-supplied arguments and returns its result, adding no policy, validation, transformation or error translation. Calling a canonical validator through a new alias is still forwarding. A function that directly implements a data lookup or validation is implementation, not forwarding, even if short.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Fixing a domain option (such as identifier=True or judge=True) adds policy and passes.",
+        "Injected transport adapters, required framework hooks, and an explicitly documented external compatibility interface pass. Project-local aliases are not automatically compatibility interfaces.",
+        "Direct lookup, field access and validation implement behavior and pass; length alone never proves a wrapper."
+      ]
+    },
+    {
+      "id": "speculative-generalization",
+      "description": "Fail code that introduces configurability, extension points, generic machinery, abstraction layers, or multiple implementation paths without evidence that the flexibility is currently needed. Do not fail normal dependency boundaries, public library APIs, framework-required abstractions, or simple designs that naturally support multiple implementations without significant added complexity.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Current registered contracts and injected test transports pass. Do not infer an unused branch from lack of whole-repository call sites."
+      ]
+    },
+    {
+      "id": "wrapper-without-value",
+      "description": "Fail a project-local helper whose complete implementation only calls another helper with the same caller-supplied arguments and returns its result, adding no policy, validation, transformation or error translation. Calling a canonical validator through a new alias is still forwarding. A function that directly implements a data lookup or validation is implementation, not forwarding, even if short.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Fixing a domain option (such as identifier=True or judge=True) adds policy and passes.",
+        "Injected transport adapters, required framework hooks, and an explicitly documented external compatibility interface pass. Project-local aliases are not automatically compatibility interfaces.",
+        "Direct lookup, field access and validation implement behavior and pass; length alone never proves a wrapper."
+      ]
+    },
+    {
+      "id": "function-name-behavior-mismatch",
+      "description": "Fail functions whose names substantially understate or misrepresent their observable behavior. Query-like names should not unexpectedly mutate state, simple getters should not perform significant unrelated work or I/O, and narrowly named operations should not perform unrelated side effects. Conventional lazy initialization, caching, instrumentation, and framework-required behavior pass when unsurprising in context.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Documented lazy initialization, cache population, admission logging, framework callbacks and async reads pass."
+      ]
+    },
+    {
+      "id": "coincidental-abstraction",
+      "description": "Fail shared abstractions that combine code which is currently structurally similar but represents different domain concepts that may evolve independently. Duplication is preferable when sharing would couple unrelated behavior. Do not fail abstractions built around a genuine shared concept, invariant, protocol, policy, or domain responsibility.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Shared command outcome classification and exact shape/digest validation express the same protocol invariant and pass."
+      ]
+    },
+    {
+      "id": "swallowed-errors",
+      "description": "Fail errors or exceptions that are caught, ignored, discarded, or converted into success without a clear reason. Handling may include recovery, logging with sufficient context, wrapping, propagation, fallback behavior, or an explicitly intentional best-effort operation. Empty catch blocks and discarded errors with no evident justification should fail.",
+      "severity": "error",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0,
+      "exceptions": [
+        "Explicit best-effort telemetry that cannot alter the operation outcome passes. A failed required check or unknown result must remain unavailable."
+      ]
+    },
+    {
+      "id": "invariant-helper",
+      "description": "Fail a project-local forwarding helper that claims domain validation but merely forwards identical arguments without fixing a policy or enforcing an invariant. A helper with a fixed identifier policy or judge-specific billing interpretation passes.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "exceptions": [
+        "Injected transport adapters and required public/framework interfaces pass."
+      ],
+      "minConfidence": 0,
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ]
+    },
+    {
+      "id": "causal-value-evidence",
+      "description": "Fail code that credits a model with a confirmed fix or quantified saving based only on coincident timestamps, matching token counts or a nearby commit. Evidence must bind the verdict to an action/change and a measurement baseline. An explicitly labeled unproven claim or proxy passes.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "exceptions": [
+        "Deterministic literal phrase handling is evaluated by regression tests. Code with no model-value claim passes."
+      ],
+      "minConfidence": 0,
+      "include": [
+        "tools/jev-value-report.py"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ]
+    }
+  ]
+}

@@ -55,9 +55,21 @@ EXCLUDED = {
 }
 
 # role -> why it must be known but absent from the current active preamble.
-# Keep this explicit for the next role-bearing pending migration. There are no
-# pending role bundles after production applied 0249 and regenerated the snapshot.
-PENDING: dict[str, str] = {}
+# Keep this explicit for the next role-bearing pending migration.
+PENDING: dict[str, str] = {
+    "carr_gate_zero_producer": (
+        "the Gate Zero producer seat. It is a LOGIN role, not a NOLOGIN "
+        "capability bundle, so the snapshot's role preamble -- which creates "
+        "bundles -- is the wrong place for it, and 0502 creates it itself. "
+        "Measured on a disposable cluster 2026-09-14: a NOLOGIN bundle here "
+        "would enter the SCAC sealed role_authority projection, and because "
+        "PostgreSQL roles are cluster-wide while db/schema.sql is a database "
+        "artifact, every later schema.sql load in the same cluster would refuse. "
+        "A carr_-prefixed LOGIN role keeps the EXECUTE grant inside the sealed "
+        "function-ACL projection and out of role_authority, which is the whole "
+        "reason for the shape."
+    ),
+}
 
 CREATE_ROLE = re.compile(r"\bcreate\s+role\s+([a-z_][a-z0-9_]*)", re.IGNORECASE)
 
@@ -91,8 +103,37 @@ def main() -> int:
     )
     active_roles = set(re.findall(r"'([a-z_][a-z0-9_]*)'",
                                   preamble_match.group("roles") if preamble_match else ""))
+    conditional = re.search(
+        r"cat >> \"\$TMP\" <<'CANONICAL_OWNERSHIP_ROLES'\n"
+        r"(?P<body>.*?)\nCANONICAL_OWNERSHIP_ROLES",
+        script,
+        re.DOTALL,
+    )
+    conditional_gate = (
+        'if [ "$CANONICAL_OWNERSHIP_ACTIVATION_APPLIED" = t ]; then\n'
+        'cat >> "$TMP" <<\'CANONICAL_OWNERSHIP_ROLES\''
+    ) in script and "filename='0532a_canonical_ownership_lease_activation.sql'" in script
+    if conditional and conditional_gate:
+        body = conditional.group("body")
+        active_roles.update(role.lower() for role in CREATE_ROLE.findall(body))
+        dynamic_roles = re.search(
+            r"foreach r in array array\[(?P<roles>.*?)\] loop", body, re.DOTALL
+        )
+        if dynamic_roles:
+            active_roles.update(re.findall(
+                r"'([a-z_][a-z0-9_]*)'", dynamic_roles.group("roles")
+            ))
     if "'create role %I login password %L', 'carr_jobs'" in script:
         active_roles.add("carr_jobs")
+    dot_conditional = re.search(
+        r"cat >> \"\$TMP\" <<'DOT_READER_ROLES'\n(?P<body>.*?)\nDOT_READER_ROLES",
+        script, re.DOTALL,
+    )
+    if dot_conditional and (
+        'if [ "$DOT_READER_APPLIED" = t ]; then\n'
+        'cat >> "$TMP" <<\'DOT_READER_ROLES\''
+    ) in script and "filename='0756_dot_reader.sql'" in script:
+        active_roles.update(role.lower() for role in CREATE_ROLE.findall(dot_conditional.group("body")))
     results: list[bool] = []
 
     for role, migration in sorted(created.items()):

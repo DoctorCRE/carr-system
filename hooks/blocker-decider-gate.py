@@ -28,6 +28,7 @@ PreToolUse deny (exit 2), same contract as escalation-gate.py beside it.
 Fixtures: ops/blocker-decider-gate-selftest.py.
 """
 import json
+import os
 import re
 import sys
 
@@ -77,11 +78,73 @@ REASON = (
 )
 
 
+def class_advisory(payload):
+    """Show a recorder the defect classes that already exist, before it files.
+
+    A SECOND CONCERN IN THIS FILE, hosted the way ops/command_precheck.py is
+    hosted in delegation-gate.py and for the same reason: a new file under
+    hooks/ carries a shebang, which makes it a sealed script entrypoint and
+    costs a mutation-registry successor — a generated registry, a production
+    migration, a fixture rebuilt from origin/main and a disposable PostgreSQL
+    round trip. This gate is already registered on exactly the record verbs,
+    already reads the same payload, and already runs under the repository
+    interpreter, so hosting the dispatch here costs a re-digest of one row.
+
+    WHY IT HAS TO BE A HOOK AT ALL, which is the whole point. The record-defect
+    verb's own schema text already asks a session to reuse an existing class.
+    The ledger holds 304 singletons across 320 classes. Asking works sometimes;
+    a door that opens on the way past works every time.
+
+    IT CANNOT AFFECT THIS GATE. It runs before the blocker logic, catches
+    everything, and returns on any failure — no credential, no service, no
+    database, bad payload, missing library. The refusal path below is untouched
+    either way, and a session that files a defect while the judgment is down
+    files it exactly as it does today.
+    """
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    if not (tool.startswith("mcp__") and tool.endswith("__record-defect")):
+        return
+    ti = payload.get("tool_input") or payload.get("toolInput") or {}
+    if not isinstance(ti, dict):
+        return
+    # claimed and actual are the verb's own two required fields — a defect row
+    # that states no contradiction is a note, not a defect — and they are what
+    # the ranking reads. It scores a class by the contradiction it describes,
+    # so passing the class name alone would throw away the half that separates
+    # a near-duplicate from a genuine reuse.
+    claimed, actual = ti.get("claimed"), ti.get("actual")
+    # Both must be real, non-empty strings. Not str(): str(None) is "None" and
+    # str(["a"]) is "['a']", each of them truthy, so coercing would send junk
+    # to a paid service and rank a defect class against the word None.
+    if not (isinstance(claimed, str) and claimed.strip()
+            and isinstance(actual, str) and actual.strip()):
+        return
+    proposed = {"claimed": claimed, "actual": actual}
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "jev_defect_class",
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "ops", "jev_defect_class.py"))
+        if spec is None or spec.loader is None:
+            return
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        note = module.advise(proposed)
+        if note:
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "additionalContext": note}}))
+    except Exception:
+        return
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
     except Exception:
         sys.exit(0)
+
+    class_advisory(payload)
 
     try:
         tool = payload.get("tool_name") or payload.get("toolName") or ""

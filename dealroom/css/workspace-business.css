@@ -1,0 +1,155 @@
+/* Clients and Vendors. Loaded AFTER workspace.css and reusing its tokens, glass,
+   topbar, buttons and motion rules — this file adds the list, the filter bar and
+   the record panel, and nothing that already exists. */
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+/* Home links to Clients and Vendors from the same directory, so its card grid
+   stops being a fixed five and simply fits whatever surfaces exist. */
+.workspace-directory .module-grid{grid-template-columns:repeat(auto-fit,minmax(196px,1fr))}
+
+/* Operations stay one keystroke away, in a secondary disclosure rather than as
+   a business tab. Native <details>, so it works with a keyboard and a screen
+   reader without a line of script, and it survives .primary-nav being hidden on
+   a phone — which is the width where operations would otherwise be lost. */
+.nav-more{position:relative;margin-left:auto}
+.nav-more>summary{display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:9px 13px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.035);color:var(--muted);font-size:12px;font-weight:700;list-style:none;cursor:pointer}
+.nav-more>summary::-webkit-details-marker{display:none}
+.nav-more>summary:after{content:"▾";font-size:10px;line-height:1}
+.nav-more>summary:hover,.nav-more[open]>summary{background:rgba(242,138,57,.15);color:var(--text)}
+.nav-more-panel{position:absolute;right:0;top:calc(100% + 8px);z-index:30;display:grid;gap:2px;min-width:210px;padding:10px;border:1px solid var(--line);border-radius:14px;background:rgba(7,17,31,.97);backdrop-filter:blur(18px);box-shadow:0 18px 46px rgba(0,0,0,.4)}
+.nav-more-heading{margin:0 0 4px;padding:0 9px;color:var(--quiet);font-size:9px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+.nav-more-panel a{display:flex;align-items:center;min-height:44px;padding:8px 10px;border-radius:9px;color:var(--muted);font-size:12px;font-weight:700;text-decoration:none}
+.nav-more-panel a:hover,.nav-more-panel a:focus-visible{background:rgba(242,138,57,.14);color:var(--text)}
+.business-shell{padding-top:clamp(26px,4vw,54px)}
+.business-hero{margin-bottom:20px}
+.back-home{color:var(--cyan);text-decoration:none;font-weight:800}
+.back-home:hover{text-decoration:underline}
+.business-hero h1{font-size:clamp(38px,5.5vw,66px)}
+
+/* --- filters ------------------------------------------------------------- */
+.business-controls{display:grid;gap:11px;margin-bottom:14px}
+.filter-form{padding:16px 17px;border-radius:17px;display:grid;gap:13px}
+.filter-row{display:grid;grid-template-columns:minmax(220px,1.6fr) repeat(4,minmax(150px,1fr));gap:11px;align-items:end}
+.filter-row-actions{grid-template-columns:auto minmax(0,1fr) auto;align-items:center}
+.field{display:grid;gap:5px;min-width:0}
+.field label{color:var(--quiet);font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.field input,.field select{min-height:44px;width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:rgba(7,17,31,.65);color:var(--text);font-size:13px}
+.field select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 18px) 20px,calc(100% - 13px) 20px;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:34px}
+.field input:hover,.field select:hover{border-color:rgba(242,138,57,.45)}
+.field-hint{margin:0;color:var(--quiet);font-size:10px;line-height:1.4}
+.filter-actions{display:flex;gap:9px}
+.filter-actions .action{margin-top:0}
+.chip-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:6px 11px;border:1px solid rgba(125,211,252,.35);border-radius:999px;background:rgba(125,211,252,.09);color:var(--text);font-size:11px;font-weight:700;cursor:pointer}
+.chip:hover{border-color:rgba(242,138,57,.6);background:rgba(242,138,57,.14)}
+.chip-label{color:var(--quiet);font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+.chip-remove{color:var(--orange);font-size:14px;line-height:1}
+.chip-reset{border-color:rgba(242,138,57,.5);background:rgba(242,138,57,.12)}
+.chip-empty{margin:0;color:var(--quiet);font-size:11px}
+
+/* --- notices ------------------------------------------------------------- */
+.notice-region{display:grid;gap:9px}
+.notice-region:empty{display:none}
+.notice{padding:12px 14px;border:1px solid var(--line);border-left-width:4px;border-radius:12px;background:rgba(18,39,63,.6)}
+.notice+.notice{margin-top:0}
+.notice-title{margin:0;font-size:12px;font-weight:800}
+.notice-copy{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+.notice .action{margin-top:9px}
+.notice-stale{border-left-color:var(--red)}
+.notice-partial{border-left-color:var(--orange)}
+.notice-refreshing{border-left-color:var(--cyan)}
+.notice-empty{border-left-color:var(--quiet)}
+
+/* --- results ------------------------------------------------------------- */
+.business-body{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(320px,.85fr);gap:16px;align-items:start;margin:14px 0 18px}
+.result-column{display:grid;gap:11px;min-width:0}
+.result-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px}
+.result-heading h2{margin:0;font:600 30px/1 var(--display)}
+.result-summary{margin:0;color:var(--muted);font-size:12px}
+.result-summary:focus-visible{outline:3px solid var(--orange);outline-offset:4px}
+.record-list{display:grid;gap:9px;margin:0;padding:0;list-style:none}
+.record-item{margin:0}
+.record-row{display:grid;gap:9px;min-height:44px;padding:14px 15px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(140deg,rgba(24,51,78,.6),rgba(11,26,44,.6));text-decoration:none;transition:border-color .2s ease,transform .2s ease}
+.record-row:hover{border-color:rgba(242,138,57,.55);transform:translateY(-1px)}
+.record-row.selected{border-color:rgba(242,138,57,.75);background:linear-gradient(140deg,rgba(52,38,26,.7),rgba(20,29,42,.7))}
+.row-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
+.row-name{font:600 21px/1.1 var(--display);letter-spacing:.01em}
+.row-ref{color:var(--cyan);font-size:11px;font-weight:700;letter-spacing:.06em}
+.row-ref.unknown,.row-fact.unknown .fact-value,.row-owner.unknown,.record-field.unknown dd{color:var(--quiet);font-style:italic}
+.tone{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);font-size:10px;font-weight:800;letter-spacing:.04em}
+.tone:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.tone-active{border-color:rgba(121,221,160,.45);background:rgba(121,221,160,.1);color:#b9f2cd}
+.tone-warm{border-color:rgba(242,138,57,.45);background:rgba(242,138,57,.1);color:#ffd1ab}
+.tone-unknown{border-color:rgba(157,190,220,.3);background:rgba(157,190,220,.07);color:var(--muted)}
+.row-facts{display:flex;flex-wrap:wrap;gap:6px 16px}
+.row-fact{display:grid;gap:2px;min-width:0}
+.fact-label{color:var(--quiet);font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.fact-value{color:var(--text);font-size:12px}
+.row-fact.unresolved .fact-value:after{content:" · recorded code, no label";color:var(--orange);font-size:10px}
+.row-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding-top:8px;border-top:1px solid rgba(157,190,220,.13);color:var(--muted);font-size:11px}
+.row-you{margin-left:8px;padding:2px 7px;border:1px solid rgba(242,138,57,.5);border-radius:999px;color:#ffd1ab;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.record-skeleton{display:grid;gap:8px;padding:18px 15px;border:1px solid var(--line);border-radius:14px}
+.record-empty{padding:26px 18px;border:1px dashed var(--line);border-radius:14px;text-align:left}
+.empty-title{margin:0;font:600 24px/1.05 var(--display)}
+.empty-copy{margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.55}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:11px}
+.pager .action{margin-top:0}
+.pager-position{color:var(--muted);font-size:11px}
+.action.disabled{opacity:.4;border-color:var(--line);background:transparent;cursor:not-allowed}
+
+/* --- record panel -------------------------------------------------------- */
+.record-panel{position:sticky;top:88px;max-height:calc(100vh - 108px);overflow:auto;padding:18px;border-radius:18px}
+.record-panel[hidden]{display:none}
+.record-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.record-panel-head h2{margin:0;font:600 30px/1 var(--display)}
+.record-panel-head h2:focus-visible{outline:3px solid var(--orange);outline-offset:4px}
+.panel-close{min-height:44px;min-width:72px;padding:8px 13px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--muted);font-size:11px;font-weight:800;cursor:pointer}
+.panel-close:hover{border-color:rgba(242,138,57,.55);color:var(--text)}
+.record-panel-body{display:grid;gap:12px}
+.record-tone{display:flex;flex-wrap:wrap;gap:8px;margin:0}
+.tone-plain{border-color:rgba(125,211,252,.35);background:rgba(125,211,252,.09);color:#bfe6ff}
+.tone-plain:before{display:none}
+.tone-plain.unknown{color:var(--quiet);font-style:italic}
+.record-owner{margin:0;font-size:12px}
+.record-note{margin:0;color:var(--quiet);font-size:10px;line-height:1.55}
+.record-section{padding-top:10px;border-top:1px solid rgba(157,190,220,.13)}
+.record-section h3{margin:0 0 8px;font:600 17px/1 var(--display);letter-spacing:.03em;color:var(--muted)}
+.record-section dl{display:grid;gap:7px;margin:0}
+.record-field{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(0,1.2fr);gap:10px}
+.record-field dt{margin:0;color:var(--quiet);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.record-field dd{margin:0;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.unresolved-flag{display:block;color:var(--orange);font-size:9px;letter-spacing:.06em;text-transform:uppercase}
+
+/* --- footnote ------------------------------------------------------------ */
+.business-footnote{padding:16px 18px;border-radius:16px}
+.business-footnote h2{margin:0 0 8px;font:600 22px/1 var(--display)}
+.business-footnote p{margin:0 0 7px;color:var(--muted);font-size:11px;line-height:1.6}
+.inert-note{color:var(--quiet)}
+.inert-entry{display:inline-block;margin-left:6px;padding:3px 9px;border:1px dashed var(--line);border-radius:999px;color:var(--quiet);font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+
+/* --- responsive ---------------------------------------------------------- */
+@media(max-width:1180px){.filter-row{grid-template-columns:minmax(200px,1.4fr) repeat(2,minmax(150px,1fr))}}
+@media(max-width:1040px){
+  .business-body{grid-template-columns:1fr}
+  .record-panel{position:static;max-height:none}
+  .filter-row-actions{grid-template-columns:1fr;align-items:stretch}
+  .filter-actions{justify-content:flex-start}
+}
+@media(max-width:767px){
+  .filter-row{grid-template-columns:1fr}
+  .field select,.field input{font-size:16px}
+  .record-field{grid-template-columns:1fr;gap:2px}
+  .row-facts{gap:6px 12px}
+  .pager{flex-direction:column;align-items:stretch}
+  .pager .action,.pager .action.disabled{justify-content:center;text-align:center}
+  .pager-position{order:-1;text-align:center}
+  /* The panel becomes the whole screen on a phone, so a record is readable
+     without pinching, and Close stays reachable by thumb. */
+  .record-panel.open{position:fixed;inset:0;z-index:26;max-height:none;border-radius:0;padding:16px 14px 104px;overflow:auto}
+  .record-panel-head{position:sticky;top:0;padding:8px 0;background:rgba(7,17,31,.96)}
+  .business-footnote{margin-bottom:12px}
+}
+@media(prefers-reduced-motion:reduce){
+  .record-row{transition:none}
+  .record-row:hover{transform:none}
+  .skeleton-line{animation:none!important}
+}

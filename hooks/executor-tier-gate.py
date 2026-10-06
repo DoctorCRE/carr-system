@@ -38,16 +38,29 @@ about to happen and NOTHING has named the tier it will run on.
   · a definition file pinning `model:`    -> allow. The job description names
                                              its own tier, which is the point
                                              of pinning it there.
-  · none of the above                     -> DENY, naming what it would have
-                                             cost and how to fix it.
+  · none of the above, and Jev is
+    confident (>= ACT_AT) in a tier    -> ALLOW WITH JEV'S PICK FILLED IN as
+                                           the call's `model` (updatedInput),
+                                           said in the context line. Jev acts:
+                                           the tier is now a decision, made by
+                                           Jev and visible (Joe, 2026-09-24,
+                                           decision 5ec806a4: every Jev check
+                                           acts).
+  · none of the above, and Jev is
+    unavailable or not confident       -> DENY, naming what it would have
+                                           cost and how to fix it, exactly as
+                                           before Jev acted. An abstaining
+                                           judge never loosens the gate.
 
-IT DENIES RATHER THAN WARNS, which is the opposite of its neighbour
-rule-shape-gate.py, and the difference is deliberate. That gate warns because
-blocking would make `teach` refuse a partner's own words, which it must never
-do. Here the cost of a false stop is one round trip and one extra parameter,
-while the cost of a warning is that it gets clicked past — and prose that gets
-clicked past is precisely the failure being fixed. A gate that only warns would
-be the same aspiration in a new costume.
+IT DENIES RATHER THAN WARNS, which is the opposite of
+its neighbour rule-shape-gate.py, and the difference is deliberate. That gate
+warns because blocking would make `teach` refuse a partner's own words, which
+it must never do. Here the cost of a false stop is one round trip and one
+extra parameter, while the cost of a warning is that it gets clicked past —
+and prose that gets clicked past is precisely the failure being fixed. A gate
+that only warns would be the same aspiration in a new costume. Jev acting
+removes the round trip when it is confident, never the deny when it is not:
+a vendor outage leaves the gate exactly as strict as it was before Jev.
 
 FAILS OPEN on any error, like every other hook here. A gate that crashes must
 never be able to stop work. Logged to out/hook-guard.log.
@@ -66,7 +79,12 @@ try:                                    # telemetry only — never load-bearing
 except Exception:                       # a missing meter must not change a verdict
     LOG = os.path.expanduser("~/carr-system/out/hook-guard.log")
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
+sys.path.insert(0, REPO)
+# Decision c136a8e1-c135-4553-9e50-64c9640d12b7 (Joe, 2026-09-25)
+# narrows 0b11c89b to judgment points. The orchestrator's 2026-10-02 PR 1407
+# ruling retires C07's generated prompt-facet propagation deny in favor of
+# batched boundary checks in hooks/jev-supervisor.py. Executor naming and
+# exact routing-policy pin checks below remain enforced.
 # Where a subagent definition may live. Project scope first: that is where the
 # fifteen CARR agents are, and a project definition wins over a user-level one
 # of the same name.
@@ -79,6 +97,37 @@ AGENT_DIRS = [os.path.join(REPO, "claude-tree", "agents")]
 ALWAYS_INHERITS = {"fork"}
 
 MODEL_FRONTMATTER = re.compile(r"^model\s*:\s*\S+", re.M)
+
+# The routing policy (ops/jev_model_route.py dispatch, config ops/config/model-routes.v1.json) already chose the
+# tier for a spawn whose executor line cites it, e.g. "executor: opus per routing pin merge_review". Advising a
+# cheaper tier on that launch contradicts the policy on the same call, so this hook defers to it.
+ROUTES_PATH = os.path.join(REPO, "ops", "config", "model-routes.v1.json")
+ROUTING_LINE = re.compile(r"executor:\s*`?([\w.-]+)`?\s+per routing (?:pin ([\w-]+)|dispatch)\b", re.I)
+
+
+def routing_decided(prompt, model):
+    """The routing reason when the prompt's executor line cites the routing policy for this same model, else None.
+
+    A pin counts only if it exists in the policy and its target dispatches this model, so a made-up pin name or a
+    line naming a different model than the call leaves the advice in place. Any read failure means no deferral."""
+    m = ROUTING_LINE.search(prompt or "")
+    if not m or m.group(1).lower() != model.strip().lower():
+        return None
+    try:
+        with open(ROUTES_PATH, encoding="utf-8") as fh:
+            policy = json.load(fh)
+        targets = {k: v for k, v in (policy.get("dispatch_targets") or {}).items() if isinstance(v, dict)}
+        models = {str(t["subagent_model"]).lower() for t in targets.values() if t.get("subagent_model")}
+        if m.group(2) is None:
+            return "dispatch" if model.strip().lower() in models else None
+        pin = (policy.get("pins") or {}).get(m.group(2))
+        if not isinstance(pin, dict):
+            return None
+        pinned = (targets.get(pin.get("target")) or {}).get("subagent_model")
+        return f"pin {m.group(2)}" if str(pinned).lower() == model.strip().lower() else None
+    except Exception as exc:
+        log(f"ROUTING(unreadable) {exc}")
+        return None
 
 
 def log(msg):
@@ -119,6 +168,84 @@ def definition_pins_model(subagent_type):
     return False
 
 
+def jev_pick(desc, prompt, subagent_type, chosen):
+    """Jev's cheapest-qualified tier for this spawn, or None. Never raises.
+
+    Loop 615's fifth use (decision 62ceae36). The judgment is logged beside
+    what the session chose, so the acting threshold is calibrated on real
+    spawns before anything enforces on it.
+    """
+    try:
+        # TEST HOOK ONLY (ops/executor-tier-gate-selftest.py), mirroring the
+        # CARR_MIGRATE_PROD_RUN_DOOR precedent: "tier:probability" stands in for
+        # Jev's answer, "none" for an unavailable judge. Never set by a real
+        # session, so the real judge is always the default.
+        stub = os.environ.get("CARR_EXECUTOR_TIER_JEV_STUB")
+        if stub is not None:
+            if stub == "none":
+                return None
+            tier, probability = stub.split(":")
+            order = ("haiku", "sonnet", "opus", "fable")
+            named = next((t for t in order if t in (chosen or "").lower()), None)
+            is_cheaper = named is not None and order.index(tier) < order.index(named)
+            return tier, float(probability), 0.60, is_cheaper
+        # Fixture and CI runs (CARR_HOOK_FIXTURE, set by selftests and the
+        # gates class) never make a live judgment: it would be nondeterministic
+        # and bill every CI run. The gate then behaves exactly as before Jev.
+        if os.environ.get("CARR_HOOK_FIXTURE", "").strip().lower() in ("1", "true", "yes"):
+            return None
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "jev_executor_tier", os.path.join(REPO, "ops", "jev_executor_tier.py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        rec = module.recommend(desc, prompt, subagent_type)
+        if rec is None:
+            return None
+        tier, probability, probabilities = rec
+        try:
+            judge_spec = importlib.util.spec_from_file_location(
+                "jev_judge", os.path.join(REPO, "ops", "jev_judge.py"))
+            judge = importlib.util.module_from_spec(judge_spec)
+            judge_spec.loader.exec_module(judge)
+            judge.record("executor_tier", (desc or "")[:120],
+                         {"answers": {"tier": probabilities}}, chosen or None,
+                         note={"pick": tier, "probability": probability,
+                               "subagent_type": subagent_type})
+        except Exception:
+            pass
+        return tier, probability, module.ACT_AT, module.cheaper(tier, chosen)
+    except Exception as exc:
+        log(f"JEV(unavailable) {exc}")
+        return None
+
+
+def advise(note):
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": note,
+        }
+    }))
+    sys.exit(0)
+
+
+def allow_with_model(tool_input, tier, note):
+    """Let the spawn run with `tier` set as its model: Jev's pick, acting."""
+    updated = dict(tool_input)
+    updated["model"] = tier
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": note,
+            "updatedInput": updated,
+            "additionalContext": note,
+        }
+    }))
+    sys.exit(0)
+
+
 def deny(reason):
     print(json.dumps({
         "hookSpecificOutput": {
@@ -150,8 +277,25 @@ def main():
         subagent_type = ti.get("subagent_type") or ti.get("subagentType") or ""
         desc = ti.get("description") or ""
 
-        # The executor is named on the call. Nothing to do.
+        prompt = ti.get("prompt") or ""
+
+        # The executor is named on the call. Jev may still think it is dearer
+        # than the job needs; that is ADVICE, never a refusal, until the logged
+        # judgments show the threshold can be trusted.
         if isinstance(model, str) and model.strip():
+            routed = routing_decided(prompt, model)
+            if routed:
+                log(f"SKIP(routing {routed}) chosen={model} desc={desc[:80]}")
+                sys.exit(0)
+            pick = jev_pick(desc, prompt, subagent_type, model)
+            if pick and pick[3] and pick[1] >= pick[2]:
+                log(f"ADVISE chosen={model} jev={pick[0]}@{pick[1]:.2f} desc={desc[:80]}")
+                advise(
+                    f"EXECUTOR ADVICE (Jev, loop 615): this spawn names `{model}`, but Jev "
+                    f"puts {pick[1]:.2f} on `{pick[0]}` being the cheapest tier that would still "
+                    "do it correctly. If the task needs the dearer tier for a reason the "
+                    "brief does not show, keep it and say why in the executor line; "
+                    "otherwise respawn on the cheaper tier.")
             sys.exit(0)
 
         if subagent_type in ALWAYS_INHERITS:
@@ -160,8 +304,18 @@ def main():
         if definition_pins_model(subagent_type):
             sys.exit(0)
 
-        log(f"DENY subagent_type={subagent_type or '(none)'} desc={desc[:80]}")
-        deny(
+        # ACTING (Joe, 2026-09-24, decision 5ec806a4: "every jev check in the
+        # system too is not a shadow"). No model was named. When Jev is
+        # confident (>= ACT_AT) in a tier, the gate fills that tier in as the
+        # call's model and lets the spawn run: the executor is then named, by
+        # Jev, and the context line says so. When Jev abstains (unavailable,
+        # erroring, or under ACT_AT) the deterministic deny below stands
+        # unchanged -- an abstaining judge must never loosen the gate (the
+        # first draft of this flip advised instead of denying there, which
+        # would have let every spawn inherit Opus during a Jev outage).
+        pick = jev_pick(desc, prompt, subagent_type, None)
+        confident = bool(pick) and pick[1] >= pick[2]
+        base_text = (
             "EXECUTOR NOT NAMED. This Agent call passes no `model`, and "
             f"`{subagent_type or 'the default type'}` has no model pinned in a definition file, "
             "so it will INHERIT THE PARENT TIER. On this machine the parent is pinned to Opus, "
@@ -178,6 +332,22 @@ def main():
             "is that the tier is a decision someone made, not one nobody noticed. Custom CARR "
             "agents that pin a model in their own frontmatter are exempt and need no parameter."
         )
+        if confident:
+            log(f"ALLOW(jev-picked) subagent_type={subagent_type or '(none)'} "
+                f"jev={pick[0]}@{pick[1]:.2f} desc={desc[:80]}")
+            allow_with_model(ti, pick[0], (
+                f"EXECUTOR NAMED BY JEV: this spawn passed no `model`, so Jev picked `{pick[0]}` "
+                f"at {pick[1]:.2f} (acting threshold {pick[2]:.2f}) as the cheapest tier that "
+                "would still do it correctly, and the gate set it on the call. State it in the "
+                f"executor line (\"executor: {pick[0]} (Jev's pick)\"). To use another tier, "
+                "pass `model` explicitly; an explicit pass is never overridden."))
+        jev_line = ""
+        if pick:
+            jev_line = (f"\n\nJEV'S PICK for this task: `{pick[0]}` at {pick[1]:.2f} "
+                        "(below the acting threshold, so treat it as a hint and use the table).")
+        log(f"DENY subagent_type={subagent_type or '(none)'} "
+            f"jev={pick[0] if pick else '-'} desc={desc[:80]}")
+        deny(base_text + jev_line)
     except Exception as exc:
         log(f"ALLOW(internal-error) {exc}")
         sys.exit(0)

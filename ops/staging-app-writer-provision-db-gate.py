@@ -54,22 +54,32 @@ def main() -> int:
         cur.execute("begin transaction read only")
         state = rebuild_state(cur, provision)
         for profile in provision.PROFILES:
+            # A DIRECT-GRANT PROFILE (bundle_role None) carries its canonical
+            # ACLs on the LOGIN role itself, so the parity question is asked of
+            # that role. On a snapshot-only database the seat role does not
+            # exist yet -- its migration is pending -- and a plan with nothing to
+            # compare it against is not a finding.
+            if profile.bundle_role is None and state == "snapshot-only":
+                continue
             if state == "snapshot-only":
                 grants = provision.snapshot_grants.load_grants_to_role(
-                    provision.SCHEMA, profile.bundle_role
+                    provision.SCHEMA, profile.grant_role
                 )
             else:
                 grants = provision.snapshot_grants.load_current_grants_to_role(
-                    provision.SCHEMA, provision.MIGRATIONS, profile.bundle_role
+                    provision.SCHEMA, provision.MIGRATIONS, profile.grant_role
                 )
-            bundle = provision.collect_role_authority(cur, profile.bundle_role)
+            bundle = provision.collect_role_authority(cur, profile.grant_role)
             expected = set(provision.snapshot_grants.acl_facts(grants))
             if set(bundle.direct_acl_facts) != expected:
-                raise RuntimeError(f"{profile.bundle_role} differs from canonical {state} plan")
-            if (bundle.can_login or not bundle.inherits_privileges or bundle.powerful_attributes
-                    or bundle.role_config or bundle.memberships or bundle.reachable_roles
-                    or bundle.owned_objects):
+                raise RuntimeError(f"{profile.grant_role} differs from canonical {state} plan")
+            if bundle.memberships or bundle.reachable_roles or bundle.owned_objects \
+                    or bundle.powerful_attributes or not bundle.inherits_privileges:
+                raise RuntimeError(f"{profile.grant_role} is not a closed capability role")
+            if profile.bundle_role is not None and (bundle.can_login or bundle.role_config):
                 raise RuntimeError(f"{profile.bundle_role} is not a closed NOLOGIN bundle")
+            if profile.bundle_role is None and not bundle.can_login:
+                raise RuntimeError(f"{profile.grant_role} is not the LOGIN seat it is declared as")
         conn.rollback()
     print(f"PASS: carr_reader/carr_writer exact canonical bundle parity ({state}, read-only)")
     return 0

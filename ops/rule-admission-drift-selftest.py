@@ -7,7 +7,9 @@ same predicate the audit itself uses. Both are checked without a database.
 """
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import os
 import sys
 from pathlib import Path
@@ -70,6 +72,85 @@ def main() -> int:
     check("the rendered line names all five numbers",
           all(k in audit.render(clean) for k in
               ("total=", "admitted=", "needs_revision=", "missing=", "incomplete=")))
+
+    # The installed writer as 0482 ships it; the preflight derives the keys an
+    # admission must carry from whatever body is installed, never a copy.
+    installed = (REPO / "migrations/0482_rule_delivery_binding_writer.sql").read_text()
+    rule_id = "22222222-2222-4222-8222-222222222222"
+    delivery = {"load_layer": "layer0", "packs": [], "why": "always"}
+
+    class PreflightCursor:
+        def __init__(self, definition=installed, admission=None):
+            self.definition, self.admission = definition, admission
+
+        def execute(self, sql, params=()):
+            self.sql = sql
+            if not sql.lstrip().lower().startswith("select"):
+                raise AssertionError("preflight attempted a write")
+
+        def fetchone(self):
+            if "pg_get_functiondef" in self.sql:
+                return (self.definition,)
+            return None if self.admission is None else (self.admission,)
+
+    def admission(delivery):
+        return {"rule_id": rule_id, "state": "admitted", "rule_status": "proposed",
+                "projection": {"delivery": delivery}}
+
+    ready = audit.preflight(PreflightCursor(admission=admission(delivery)), rule_id)
+    check("a prepared admission carrying every key the installed writer reads is ready",
+          ready["status"] == "ready"
+          and ready["delivery_contract"]["required_keys"] == ["load_layer", "packs", "why"]
+          and ready["prepared_admission"]["rule_status"] == "proposed")
+    check("the contract-only read names the required keys and passes",
+          audit.preflight(PreflightCursor())["status"] == "contract_read")
+    check("an uninstalled writer is a failed readback",
+          audit.preflight(PreflightCursor(definition=None))["status"]
+          == "delivery_contract_missing")
+    check("a writer body that never reads projection.delivery is a failed readback",
+          audit.preflight(PreflightCursor(definition="begin return null; end"))["status"]
+          == "delivery_contract_unrecognised")
+    check("a rule with no prepared admission is a failed readback",
+          audit.preflight(PreflightCursor(), rule_id)["status"] == "admission_missing")
+    short = audit.preflight(PreflightCursor(
+        admission=admission({"load_layer": "layer0", "packs": []})), rule_id)
+    check("an admission missing a key the writer reads is named, not inferred ready",
+          short["status"] == "delivery_projection_incomplete"
+          and short["missing_keys"] == ["why"])
+
+    class Conn:
+        def __init__(self, cursor):
+            self.cur, self.statements = cursor, []
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def execute(self, sql): self.statements.append(sql)
+        def cursor(self): return contextlib.nullcontext(self.cur)
+
+    def run_main(argv, cursor):
+        conn = Conn(cursor)
+        saved = (sys.argv, audit.psycopg.connect)
+        sys.argv, audit.psycopg.connect = ["rule-admission-audit.py", *argv], lambda dsn: conn
+        os.environ["DATABASE_URL"] = "postgresql://reader@example/db"
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                code = audit.main()
+        except SystemExit as exc:
+            code = exc.code
+        finally:
+            sys.argv, audit.psycopg.connect = saved[0], saved[1]
+            os.environ.pop("DATABASE_URL", None)
+        return code, conn.statements
+
+    code, statements = run_main(["--preflight", "--rule-id", rule_id], PreflightCursor())
+    check("a failed readback exits nonzero from the command line", code == 1)
+    check("the preflight runs inside a read-only transaction",
+          statements[:1] == ["set transaction read only"])
+    code, _ = run_main(["--preflight", "--rule-id", rule_id],
+                       PreflightCursor(admission=admission(delivery)))
+    check("a ready readback exits zero", code == 0)
+    code, _ = run_main(["--rule-id", rule_id], PreflightCursor())
+    check("--rule-id without --preflight is refused", code == 2)
 
     print(f"\nrule-admission-drift-selftest: {len(ran)-len(failures)}/{len(ran)} passed")
     return 1 if failures else 0

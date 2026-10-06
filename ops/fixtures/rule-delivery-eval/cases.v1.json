@@ -1,0 +1,84 @@
+{
+ "schema": "rule-delivery-eval-cases/v1",
+ "provenance": "synthetic: paraphrased shapes of real situations, no partner words, no client names, no contact details, no deal figures. The real labelled set stays under out/rule-delivery-eval/ (gitignored).",
+ "note": "Gold ids are active rules as of 2026-09-26. A rule retired later simply becomes a known miss or false positive; re-label rather than edit a case to fit a path.",
+ "cases": [
+  {"id": "syn-eng-push", "stratum": "engineering",
+   "prompt": "Push the branch and open the PR, then tell me when CI is green.",
+   "tool_calls": [
+    {"tool_name": "Bash", "tool_input": {"command": "git push -u origin feature-widget"}},
+    {"tool_name": "Bash", "tool_input": {"command": "gh pr create --fill"}}
+   ],
+   "gold": ["fa217e48", "bc9188b4", "4a53ff82"]},
+  {"id": "syn-eng-fix-not-skip", "stratum": "engineering",
+   "prompt": "The hook selftest is failing again. Fix it properly, don't just skip it.",
+   "tool_calls": [
+    {"tool_name": "Edit", "tool_input": {"file_path": "/tmp/checkout/hooks/example-gate.py", "old_string": "a", "new_string": "b"}}
+   ],
+   "gold": ["1c42d80c", "a9ecd5b4", "fa217e48"]},
+  {"id": "syn-eng-fanout", "stratum": "engineering",
+   "prompt": "Fan this out to three sub-agents and have a separate checker verify what they built.",
+   "tool_calls": [
+    {"tool_name": "Agent", "tool_input": {"description": "build part one", "prompt": "Build part one."}}
+   ],
+   "gold": ["2b66211d", "c20dc3d5", "6cfb67f5"]},
+  {"id": "syn-eng-is-it-done", "stratum": "engineering",
+   "prompt": "Is that actually done?",
+   "tool_calls": [],
+   "gold": ["767f9b41", "fa217e48"]},
+  {"id": "syn-eng-correction", "stratum": "engineering",
+   "prompt": "No, that's not what I meant. Use the worktree script for this, not a raw git worktree command.",
+   "tool_calls": [],
+   "gold": ["fc21a431", "4a9188f3", "4a53ff82"]},
+  {"id": "syn-deal-loi", "stratum": "deals_clients",
+   "prompt": "Draft the LOI for the practice using the template rent and improvement allowance.",
+   "tool_calls": [
+    {"tool_name": "mcp__carr__prepare-document", "tool_input": {"kind": "loi"}}
+   ],
+   "gold": ["4399df76", "f2d58a30"]},
+  {"id": "syn-deal-cold-client", "stratum": "deals_clients",
+   "prompt": "This client has gone quiet for months. Set up a monthly check-in cadence so we stay in front of them.",
+   "tool_calls": [],
+   "gold": ["424ba0cc", "9d80fd2d"]},
+  {"id": "syn-deal-options", "stratum": "deals_clients",
+   "prompt": "Put together the property options for the new orthodontist and get them ready to send.",
+   "tool_calls": [],
+   "gold": ["f2d58a30", "48083552"]},
+  {"id": "syn-comms-reply", "stratum": "comms",
+   "prompt": "Reply to the landlord's email and tell him we're passing on the space. Let me know once it's sent.",
+   "tool_calls": [
+    {"tool_name": "mcp__mail__create_draft", "tool_input": {"subject": "Re: the space"}}
+   ],
+   "gold": ["eaa31ac5"]},
+  {"id": "syn-comms-xlink", "stratum": "comms",
+   "prompt": "Read this x.com thread about medical office cap rates and give me the takeaways.",
+   "tool_calls": [
+    {"tool_name": "WebFetch", "tool_input": {"url": "https://x.com/example/status/1", "prompt": "summarise"}}
+   ],
+   "gold": ["557838a5", "57d13061"]},
+  {"id": "syn-sched-nightly", "stratum": "scheduling",
+   "prompt": "Set up a nightly job that refreshes the board at 2am and commits the snapshot.",
+   "tool_calls": [],
+   "gold": ["bc9188b4"]},
+  {"id": "syn-sched-calendar", "stratum": "scheduling",
+   "prompt": "What's on my calendar tomorrow, and who is coming to the first meeting?",
+   "tool_calls": [],
+   "gold": ["49533583"]},
+  {"id": "syn-sched-eta", "stratum": "scheduling",
+   "prompt": "How long until the full backfill finishes? Give me an honest estimate.",
+   "tool_calls": [],
+   "gold": ["740bb505"]},
+  {"id": "syn-notif-agent-done", "stratum": "notifications",
+   "prompt": "<task-notification>\n<task-id>syn0001</task-id>\n<status>completed</status>\n<summary>Agent \"Build part one\" finished</summary>\n</task-notification>",
+   "tool_calls": [],
+   "gold": []},
+  {"id": "syn-notif-command-failed", "stratum": "notifications",
+   "prompt": "<task-notification>\n<task-id>syn0002</task-id>\n<status>failed</status>\n<summary>Background command \"run the unit suite\" failed with exit code 1</summary>\n</task-notification>",
+   "tool_calls": [],
+   "gold": []},
+  {"id": "syn-notif-held-message", "stratum": "notifications",
+   "prompt": "<task-notification>\n<task-id>syn0003</task-id>\n<status>held</status>\n<summary>Message to the other session is waiting for its user's approval and has not been delivered</summary>\n</task-notification>",
+   "tool_calls": [],
+   "gold": ["eaa31ac5"]}
+ ]
+}

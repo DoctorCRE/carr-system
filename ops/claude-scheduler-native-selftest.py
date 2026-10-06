@@ -12,7 +12,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from lib.claude_scheduler_native import discover_snapshot, read_native_task
+from lib.claude_scheduler_native import discover_snapshot, read_native_task, system_timezone
 from lib.control_plane_scheduler_cutover import CutoverRefusal
 
 FAILED: list[str] = []
@@ -32,7 +32,61 @@ def refuses(fn) -> bool:
     return False
 
 
+def value_or_none(fn):
+    """Run fn and return its result, or None on CutoverRefusal -- so a check
+    on the RESULT can fail cleanly with a FAIL line instead of the refusal
+    propagating out of check()'s own argument evaluation and crashing the
+    whole selftest with a traceback. On main's pre-fix code this is exactly
+    what happens to the zoneinfo.default/ case below: system_timezone()
+    raises before check() is ever called."""
+    try:
+        return fn()
+    except CutoverRefusal:
+        return None
+
+
+def check_system_timezone() -> None:
+    """system_timezone() reads the REAL host probe path, unlike every other
+    check in this file, which passes host_timezone= directly and so never
+    exercised it. That gap is exactly how a macOS 27 regression shipped
+    silently: /etc/localtime resolves through /usr/share/zoneinfo/ on macOS
+    26 and earlier, but through /usr/share/zoneinfo.default/ on macOS 27
+    (confirmed on the Studio, BuildVersion 26A425), and the old literal
+    "/zoneinfo/" match refused every macOS 27 host."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for zonedir in ("zoneinfo", "zoneinfo.default"):
+            zone_target = root / zonedir / "America" / "Chicago"
+            zone_target.parent.mkdir(parents=True, exist_ok=True)
+            zone_target.write_text("tzdata", encoding="utf-8")
+            localtime = root / f"localtime-{zonedir}"
+            localtime.symlink_to(zone_target)
+            check(f"system_timezone resolves through {zonedir}/",
+                  value_or_none(lambda localtime=localtime: system_timezone(localtime)) == "America/Chicago")
+        no_zone_target = root / "not-a-zone-dir" / "file"
+        no_zone_target.parent.mkdir(parents=True, exist_ok=True)
+        no_zone_target.write_text("x", encoding="utf-8")
+        no_zone_localtime = root / "localtime-no-zone"
+        no_zone_localtime.symlink_to(no_zone_target)
+        check("system_timezone refuses a resolved path with no zoneinfo component",
+              refuses(lambda: system_timezone(no_zone_localtime)))
+        # Flagged in review: an ancestor directory that happens to be named
+        # zoneinfo.<anything> earlier in the path must not steal the match
+        # from the real zoneinfo directory that owns the tz name.
+        lookalike_target = root / "zoneinfo.bak" / "usr" / "share" / "zoneinfo" / "America" / "Chicago"
+        lookalike_target.parent.mkdir(parents=True, exist_ok=True)
+        lookalike_target.write_text("tzdata", encoding="utf-8")
+        lookalike_localtime = root / "localtime-lookalike-ancestor"
+        lookalike_localtime.symlink_to(lookalike_target)
+        check("system_timezone matches the LAST zoneinfo component, not an earlier lookalike ancestor",
+              value_or_none(lambda: system_timezone(lookalike_localtime)) == "America/Chicago")
+        missing = root / "localtime-missing"
+        check("system_timezone refuses when nothing exists to resolve",
+              refuses(lambda: system_timezone(missing)))
+
+
 def main() -> int:
+    check_system_timezone()
     locator = "cc-update-audit"
     portable = REPO / "ops/scheduled-tasks/cc-update-audit.SKILL.md"
     digest = hashlib.sha256(portable.read_bytes()).hexdigest()

@@ -1,0 +1,2847 @@
+{
+  "baseline": {
+    "case_input_split_and_doctrine_unchanged": true,
+    "deterministic_deliveries_identical_before_after": true,
+    "frozen_probabilities_signals_and_floors_unchanged": true,
+    "gold_pairs": {
+      "after": {
+        "all": 2375,
+        "test": 710,
+        "train": 1665
+      },
+      "before": {
+        "all": 2371,
+        "test": 708,
+        "train": 1663
+      }
+    },
+    "limitation": "No verified sanitized saved Jev report was available in this worktree or the PR. These numbers do not rescore the original Jev-backed baseline.",
+    "mode": "deterministic --jev off; no live selector or doctrine search run",
+    "splits": {
+      "test": {
+        "drift_if_acting": {
+          "after": {
+            "f1": 0.0786,
+            "fn": 133,
+            "fp": 1204,
+            "precision": 0.0452,
+            "recall": 0.3,
+            "tp": 57,
+            "tp_in_universe": 57
+          },
+          "before": {
+            "f1": 0.0786,
+            "fn": 133,
+            "fp": 1204,
+            "precision": 0.0452,
+            "recall": 0.3,
+            "tp": 57,
+            "tp_in_universe": 57
+          }
+        },
+        "jit_pretooluse": {
+          "after": {
+            "f1": 0.0897,
+            "fn": 163,
+            "fp": 40,
+            "precision": 0.2,
+            "recall": 0.0578,
+            "tp": 10,
+            "tp_in_universe": 10
+          },
+          "before": {
+            "f1": 0.0897,
+            "fn": 163,
+            "fp": 40,
+            "precision": 0.2,
+            "recall": 0.0578,
+            "tp": 10,
+            "tp_in_universe": 10
+          }
+        },
+        "system_moment": {
+          "after": {
+            "f1": 0.0504,
+            "fn": 601,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.0306,
+            "tp": 19,
+            "tp_in_universe": 19
+          },
+          "before": {
+            "f1": 0.0505,
+            "fn": 599,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.0307,
+            "tp": 19,
+            "tp_in_universe": 19
+          }
+        },
+        "system_moment_plus_drift": {
+          "after": {
+            "f1": 0.0714,
+            "fn": 550,
+            "fp": 1271,
+            "precision": 0.0522,
+            "recall": 0.1129,
+            "tp": 70,
+            "tp_in_universe": 70
+          },
+          "before": {
+            "f1": 0.0715,
+            "fn": 548,
+            "fp": 1271,
+            "precision": 0.0522,
+            "recall": 0.1133,
+            "tp": 70,
+            "tp_in_universe": 70
+          }
+        },
+        "system_scoped_boot": {
+          "after": {
+            "f1": 0.1492,
+            "fn": 404,
+            "fp": 2060,
+            "precision": 0.0949,
+            "recall": 0.3484,
+            "tp": 216,
+            "tp_in_universe": 216
+          },
+          "before": {
+            "f1": 0.1493,
+            "fn": 402,
+            "fp": 2060,
+            "precision": 0.0949,
+            "recall": 0.3495,
+            "tp": 216,
+            "tp_in_universe": 216
+          }
+        }
+      },
+      "train": {
+        "drift_if_acting": {
+          "after": {
+            "f1": 0.1024,
+            "fn": 239,
+            "fp": 3353,
+            "precision": 0.0576,
+            "recall": 0.4617,
+            "tp": 205,
+            "tp_in_universe": 205
+          },
+          "before": {
+            "f1": 0.1024,
+            "fn": 242,
+            "fp": 3353,
+            "precision": 0.0576,
+            "recall": 0.4586,
+            "tp": 205,
+            "tp_in_universe": 205
+          }
+        },
+        "jit_pretooluse": {
+          "after": {
+            "f1": 0.0795,
+            "fn": 399,
+            "fp": 87,
+            "precision": 0.1944,
+            "recall": 0.05,
+            "tp": 21,
+            "tp_in_universe": 21
+          },
+          "before": {
+            "f1": 0.0792,
+            "fn": 401,
+            "fp": 87,
+            "precision": 0.1944,
+            "recall": 0.0498,
+            "tp": 21,
+            "tp_in_universe": 21
+          }
+        },
+        "system_moment": {
+          "after": {
+            "f1": 0.0443,
+            "fn": 1443,
+            "fp": 281,
+            "precision": 0.1246,
+            "recall": 0.027,
+            "tp": 40,
+            "tp_in_universe": 40
+          },
+          "before": {
+            "f1": 0.0443,
+            "fn": 1443,
+            "fp": 281,
+            "precision": 0.1246,
+            "recall": 0.027,
+            "tp": 40,
+            "tp_in_universe": 40
+          }
+        },
+        "system_moment_plus_drift": {
+          "after": {
+            "f1": 0.0874,
+            "fn": 1256,
+            "fp": 3485,
+            "precision": 0.0612,
+            "recall": 0.1531,
+            "tp": 227,
+            "tp_in_universe": 227
+          },
+          "before": {
+            "f1": 0.0874,
+            "fn": 1256,
+            "fp": 3485,
+            "precision": 0.0612,
+            "recall": 0.1531,
+            "tp": 227,
+            "tp_in_universe": 227
+          }
+        },
+        "system_scoped_boot": {
+          "after": {
+            "f1": 0.1535,
+            "fn": 961,
+            "fp": 4797,
+            "precision": 0.0981,
+            "recall": 0.352,
+            "tp": 522,
+            "tp_in_universe": 522
+          },
+          "before": {
+            "f1": 0.1535,
+            "fn": 961,
+            "fp": 4797,
+            "precision": 0.0981,
+            "recall": 0.352,
+            "tp": 522,
+            "tp_in_universe": 522
+          }
+        }
+      }
+    }
+  },
+  "binding_migration": "Every legacy row receives a mechanically generated case correlation binding from this exact source fixture. This does not certify its reason. Re-adjudicated rows below carry reviewed output; future build inputs must echo their own worklist binding. Original selected decisions are preserved below; the full original fixture remains at source_head.",
+  "column_followup": {
+    "all_column_reasons_scanned_for_no_tool_exclusions": true,
+    "baseline": {
+      "adapter_errors": {},
+      "after_gold_pairs": {
+        "all": 2379,
+        "test": 711,
+        "train": 1668
+      },
+      "case_inputs_splits_and_doctrine_unchanged": true,
+      "deterministic_deliveries_identical_before_after": true,
+      "frozen_probabilities_signals_and_floors_unchanged": true,
+      "limitation": "No verified sanitized saved Jev report was available. Label corrections are not selector improvements, and remaining labels are not certified.",
+      "mode": "deterministic --jev off; no Jev call or doctrine search",
+      "original_gold_pairs": {
+        "all": 2371,
+        "test": 708,
+        "train": 1663
+      },
+      "other_adjudications_unchanged": true,
+      "prior_audit_records_unchanged": true,
+      "splits": {
+        "test": {
+          "drift_if_acting": {
+            "followup": {
+              "f1": 0.0786,
+              "fn": 133,
+              "fp": 1204,
+              "precision": 0.0452,
+              "recall": 0.3,
+              "tp": 57,
+              "tp_in_universe": 57
+            },
+            "original": {
+              "f1": 0.0786,
+              "fn": 133,
+              "fp": 1204,
+              "precision": 0.0452,
+              "recall": 0.3,
+              "tp": 57,
+              "tp_in_universe": 57
+            },
+            "stage_1": {
+              "f1": 0.0786,
+              "fn": 133,
+              "fp": 1204,
+              "precision": 0.0452,
+              "recall": 0.3,
+              "tp": 57,
+              "tp_in_universe": 57
+            }
+          },
+          "jit_pretooluse": {
+            "followup": {
+              "f1": 0.0897,
+              "fn": 163,
+              "fp": 40,
+              "precision": 0.2,
+              "recall": 0.0578,
+              "tp": 10,
+              "tp_in_universe": 10
+            },
+            "original": {
+              "f1": 0.0897,
+              "fn": 163,
+              "fp": 40,
+              "precision": 0.2,
+              "recall": 0.0578,
+              "tp": 10,
+              "tp_in_universe": 10
+            },
+            "stage_1": {
+              "f1": 0.0897,
+              "fn": 163,
+              "fp": 40,
+              "precision": 0.2,
+              "recall": 0.0578,
+              "tp": 10,
+              "tp_in_universe": 10
+            }
+          },
+          "system_moment": {
+            "followup": {
+              "f1": 0.0503,
+              "fn": 602,
+              "fp": 115,
+              "precision": 0.1418,
+              "recall": 0.0306,
+              "tp": 19,
+              "tp_in_universe": 19
+            },
+            "original": {
+              "f1": 0.0505,
+              "fn": 599,
+              "fp": 115,
+              "precision": 0.1418,
+              "recall": 0.0307,
+              "tp": 19,
+              "tp_in_universe": 19
+            },
+            "stage_1": {
+              "f1": 0.0504,
+              "fn": 601,
+              "fp": 115,
+              "precision": 0.1418,
+              "recall": 0.0306,
+              "tp": 19,
+              "tp_in_universe": 19
+            }
+          },
+          "system_moment_plus_drift": {
+            "followup": {
+              "f1": 0.0714,
+              "fn": 551,
+              "fp": 1271,
+              "precision": 0.0522,
+              "recall": 0.1127,
+              "tp": 70,
+              "tp_in_universe": 70
+            },
+            "original": {
+              "f1": 0.0715,
+              "fn": 548,
+              "fp": 1271,
+              "precision": 0.0522,
+              "recall": 0.1133,
+              "tp": 70,
+              "tp_in_universe": 70
+            },
+            "stage_1": {
+              "f1": 0.0714,
+              "fn": 550,
+              "fp": 1271,
+              "precision": 0.0522,
+              "recall": 0.1129,
+              "tp": 70,
+              "tp_in_universe": 70
+            }
+          },
+          "system_scoped_boot": {
+            "followup": {
+              "f1": 0.1491,
+              "fn": 405,
+              "fp": 2060,
+              "precision": 0.0949,
+              "recall": 0.3478,
+              "tp": 216,
+              "tp_in_universe": 216
+            },
+            "original": {
+              "f1": 0.1493,
+              "fn": 402,
+              "fp": 2060,
+              "precision": 0.0949,
+              "recall": 0.3495,
+              "tp": 216,
+              "tp_in_universe": 216
+            },
+            "stage_1": {
+              "f1": 0.1492,
+              "fn": 404,
+              "fp": 2060,
+              "precision": 0.0949,
+              "recall": 0.3484,
+              "tp": 216,
+              "tp_in_universe": 216
+            }
+          }
+        },
+        "train": {
+          "drift_if_acting": {
+            "followup": {
+              "f1": 0.1024,
+              "fn": 239,
+              "fp": 3353,
+              "precision": 0.0576,
+              "recall": 0.4617,
+              "tp": 205,
+              "tp_in_universe": 205
+            },
+            "original": {
+              "f1": 0.1024,
+              "fn": 242,
+              "fp": 3353,
+              "precision": 0.0576,
+              "recall": 0.4586,
+              "tp": 205,
+              "tp_in_universe": 205
+            },
+            "stage_1": {
+              "f1": 0.1024,
+              "fn": 239,
+              "fp": 3353,
+              "precision": 0.0576,
+              "recall": 0.4617,
+              "tp": 205,
+              "tp_in_universe": 205
+            }
+          },
+          "jit_pretooluse": {
+            "followup": {
+              "f1": 0.0795,
+              "fn": 399,
+              "fp": 87,
+              "precision": 0.1944,
+              "recall": 0.05,
+              "tp": 21,
+              "tp_in_universe": 21
+            },
+            "original": {
+              "f1": 0.0792,
+              "fn": 401,
+              "fp": 87,
+              "precision": 0.1944,
+              "recall": 0.0498,
+              "tp": 21,
+              "tp_in_universe": 21
+            },
+            "stage_1": {
+              "f1": 0.0795,
+              "fn": 399,
+              "fp": 87,
+              "precision": 0.1944,
+              "recall": 0.05,
+              "tp": 21,
+              "tp_in_universe": 21
+            }
+          },
+          "system_moment": {
+            "followup": {
+              "f1": 0.0443,
+              "fn": 1446,
+              "fp": 281,
+              "precision": 0.1246,
+              "recall": 0.0269,
+              "tp": 40,
+              "tp_in_universe": 40
+            },
+            "original": {
+              "f1": 0.0443,
+              "fn": 1443,
+              "fp": 281,
+              "precision": 0.1246,
+              "recall": 0.027,
+              "tp": 40,
+              "tp_in_universe": 40
+            },
+            "stage_1": {
+              "f1": 0.0443,
+              "fn": 1443,
+              "fp": 281,
+              "precision": 0.1246,
+              "recall": 0.027,
+              "tp": 40,
+              "tp_in_universe": 40
+            }
+          },
+          "system_moment_plus_drift": {
+            "followup": {
+              "f1": 0.0873,
+              "fn": 1259,
+              "fp": 3485,
+              "precision": 0.0612,
+              "recall": 0.1528,
+              "tp": 227,
+              "tp_in_universe": 227
+            },
+            "original": {
+              "f1": 0.0874,
+              "fn": 1256,
+              "fp": 3485,
+              "precision": 0.0612,
+              "recall": 0.1531,
+              "tp": 227,
+              "tp_in_universe": 227
+            },
+            "stage_1": {
+              "f1": 0.0874,
+              "fn": 1256,
+              "fp": 3485,
+              "precision": 0.0612,
+              "recall": 0.1531,
+              "tp": 227,
+              "tp_in_universe": 227
+            }
+          },
+          "system_scoped_boot": {
+            "followup": {
+              "f1": 0.1534,
+              "fn": 964,
+              "fp": 4797,
+              "precision": 0.0981,
+              "recall": 0.3513,
+              "tp": 522,
+              "tp_in_universe": 522
+            },
+            "original": {
+              "f1": 0.1535,
+              "fn": 961,
+              "fp": 4797,
+              "precision": 0.0981,
+              "recall": 0.352,
+              "tp": 522,
+              "tp_in_universe": 522
+            },
+            "stage_1": {
+              "f1": 0.1535,
+              "fn": 961,
+              "fp": 4797,
+              "precision": 0.0981,
+              "recall": 0.352,
+              "tp": 522,
+              "tp_in_universe": 522
+            }
+          }
+        }
+      },
+      "stage_1_gold_pairs": {
+        "all": 2375,
+        "test": 710,
+        "train": 1665
+      }
+    },
+    "column_size": 240,
+    "criterion": "The turn answers, makes, relays or acts on a count, absence/presence, completion/readiness, populated-record or stale-state claim. Applicability comes from the claim being relied on, not from whether the recorded turn performed its verification. A bare unacted-on notice or prospective task alone is not a verified claim.",
+    "disputed": [
+      {
+        "case": "v2-chat-002",
+        "retained_gold": false,
+        "why": "The partner reports two items switched on and says Go, but the case omits what happens next. Decide whether that unspecified action relies on verified readiness; do not infer it from a neighboring case."
+      },
+      {
+        "case": "v2-chat-025",
+        "retained_gold": false,
+        "why": "The instruction adopts a peer diagnosis, but its substance is absent. It is unclear whether it entails one of the empirical claims covered by this rule."
+      },
+      {
+        "case": "v2-disp-022",
+        "retained_gold": false,
+        "why": "The peer message contains concrete runtime absence and stale-state findings, but no recorded adoption or relay follows. Resolve the received-notice boundary consistently with the other bare notifications."
+      },
+      {
+        "case": "v2-disp-024",
+        "retained_gold": false,
+        "why": "The brief requires reproducing authority-code failures before repair. Resolve whether the general re-execution habit covers this behavior-proof task despite no specific count or absence claim."
+      }
+    ],
+    "next_action": "Continue all remaining cases against this same STORE criterion, especially complete-inventory briefs v2-disp-005/008 versus v2-disp-007/009/014/016/017. Record each decision with its own case binding; do not derive gold from absence of tools, neighboring reasons, probabilities, or evaluation scores.",
+    "remaining_for_full_semantic_audit": [
+      "v2-chat-002",
+      "v2-chat-003",
+      "v2-chat-004",
+      "v2-chat-007",
+      "v2-chat-008",
+      "v2-chat-009",
+      "v2-chat-010",
+      "v2-chat-011",
+      "v2-chat-013",
+      "v2-chat-014",
+      "v2-chat-015",
+      "v2-chat-016",
+      "v2-chat-017",
+      "v2-chat-018",
+      "v2-chat-020",
+      "v2-chat-021",
+      "v2-chat-022",
+      "v2-chat-023",
+      "v2-chat-024",
+      "v2-chat-025",
+      "v2-chat-026",
+      "v2-chat-028",
+      "v2-chat-029",
+      "v2-chat-030",
+      "v2-deal-001",
+      "v2-deal-002",
+      "v2-deal-003",
+      "v2-deal-004",
+      "v2-deal-005",
+      "v2-deal-006",
+      "v2-deal-007",
+      "v2-deal-008",
+      "v2-deal-009",
+      "v2-deal-010",
+      "v2-deal-011",
+      "v2-deal-012",
+      "v2-deal-013",
+      "v2-deal-014",
+      "v2-deal-015",
+      "v2-deal-016",
+      "v2-deal-017",
+      "v2-deal-018",
+      "v2-deal-019",
+      "v2-deal-020",
+      "v2-deal-021",
+      "v2-deal-022",
+      "v2-deal-023",
+      "v2-deal-024",
+      "v2-deal-025",
+      "v2-deal-026",
+      "v2-deal-027",
+      "v2-deal-028",
+      "v2-deal-029",
+      "v2-deal-030",
+      "v2-disp-001",
+      "v2-disp-002",
+      "v2-disp-003",
+      "v2-disp-004",
+      "v2-disp-005",
+      "v2-disp-006",
+      "v2-disp-007",
+      "v2-disp-008",
+      "v2-disp-009",
+      "v2-disp-010",
+      "v2-disp-011",
+      "v2-disp-012",
+      "v2-disp-013",
+      "v2-disp-014",
+      "v2-disp-015",
+      "v2-disp-016",
+      "v2-disp-017",
+      "v2-disp-018",
+      "v2-disp-019",
+      "v2-disp-020",
+      "v2-disp-021",
+      "v2-disp-022",
+      "v2-disp-023",
+      "v2-disp-024",
+      "v2-disp-025",
+      "v2-disp-026",
+      "v2-disp-027",
+      "v2-disp-028",
+      "v2-disp-029",
+      "v2-disp-030",
+      "v2-eng-001",
+      "v2-eng-002",
+      "v2-eng-003",
+      "v2-eng-004",
+      "v2-eng-005",
+      "v2-eng-006",
+      "v2-eng-007",
+      "v2-eng-008",
+      "v2-eng-009",
+      "v2-eng-010",
+      "v2-eng-011",
+      "v2-eng-012",
+      "v2-eng-013",
+      "v2-eng-014",
+      "v2-eng-015",
+      "v2-eng-016",
+      "v2-eng-017",
+      "v2-eng-018",
+      "v2-eng-019",
+      "v2-eng-020",
+      "v2-eng-021",
+      "v2-eng-022",
+      "v2-eng-023",
+      "v2-eng-024",
+      "v2-eng-025",
+      "v2-eng-026",
+      "v2-eng-027",
+      "v2-eng-028",
+      "v2-eng-029",
+      "v2-eng-030",
+      "v2-notif-001",
+      "v2-notif-002",
+      "v2-notif-003",
+      "v2-notif-004",
+      "v2-notif-005",
+      "v2-notif-006",
+      "v2-notif-007",
+      "v2-notif-008",
+      "v2-notif-009",
+      "v2-notif-010",
+      "v2-notif-011",
+      "v2-notif-012",
+      "v2-notif-013",
+      "v2-notif-014",
+      "v2-notif-015",
+      "v2-notif-016",
+      "v2-notif-017",
+      "v2-notif-018",
+      "v2-notif-019",
+      "v2-notif-020",
+      "v2-notif-021",
+      "v2-notif-022",
+      "v2-notif-023",
+      "v2-notif-024",
+      "v2-notif-025",
+      "v2-notif-026",
+      "v2-notif-027",
+      "v2-notif-028",
+      "v2-notif-029",
+      "v2-notif-030",
+      "v2-rel-001",
+      "v2-rel-002",
+      "v2-rel-003",
+      "v2-rel-004",
+      "v2-rel-005",
+      "v2-rel-006",
+      "v2-rel-007",
+      "v2-rel-008",
+      "v2-rel-009",
+      "v2-rel-010",
+      "v2-rel-011",
+      "v2-rel-012",
+      "v2-rel-013",
+      "v2-rel-014",
+      "v2-rel-015",
+      "v2-rel-016",
+      "v2-rel-017",
+      "v2-rel-018",
+      "v2-rel-019",
+      "v2-rel-020",
+      "v2-rel-021",
+      "v2-rel-022",
+      "v2-rel-023",
+      "v2-rel-024",
+      "v2-rel-025",
+      "v2-rel-026",
+      "v2-rel-027",
+      "v2-rel-028",
+      "v2-rel-029",
+      "v2-rel-030",
+      "v2-sfb-001",
+      "v2-sfb-002",
+      "v2-sfb-003",
+      "v2-sfb-004",
+      "v2-sfb-005",
+      "v2-sfb-006",
+      "v2-sfb-007",
+      "v2-sfb-008",
+      "v2-sfb-009",
+      "v2-sfb-010",
+      "v2-sfb-011",
+      "v2-sfb-012",
+      "v2-sfb-013",
+      "v2-sfb-014",
+      "v2-sfb-015",
+      "v2-sfb-016",
+      "v2-sfb-017",
+      "v2-sfb-018",
+      "v2-sfb-019",
+      "v2-sfb-020",
+      "v2-sfb-021",
+      "v2-sfb-022",
+      "v2-sfb-023",
+      "v2-sfb-024",
+      "v2-sfb-025",
+      "v2-sfb-026",
+      "v2-sfb-027",
+      "v2-sfb-028",
+      "v2-sfb-029",
+      "v2-sfb-030",
+      "v2-tour-001",
+      "v2-tour-002",
+      "v2-tour-003",
+      "v2-tour-004",
+      "v2-tour-005",
+      "v2-tour-006",
+      "v2-tour-007",
+      "v2-tour-008",
+      "v2-tour-009",
+      "v2-tour-010",
+      "v2-tour-011",
+      "v2-tour-012",
+      "v2-tour-013",
+      "v2-tour-014",
+      "v2-tour-015",
+      "v2-tour-016",
+      "v2-tour-017",
+      "v2-tour-018",
+      "v2-tour-019",
+      "v2-tour-020",
+      "v2-tour-021",
+      "v2-tour-022",
+      "v2-tour-023",
+      "v2-tour-024",
+      "v2-tour-025",
+      "v2-tour-026",
+      "v2-tour-027",
+      "v2-tour-028",
+      "v2-tour-029",
+      "v2-tour-030"
+    ],
+    "reviewed_on": "2026-09-27",
+    "rows": [
+      {
+        "after": {
+          "case": "v2-chat-001",
+          "case_binding": {
+            "case_id": "v2-chat-001",
+            "input_sha256": "06a86050683c41504ea842c42e0691115b373e2f035af8c057ee588db33951b3"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "v2-chat-001: The open question about remaining work supplies no specific count, absence, completion or stale-state claim and no recorded action adopting one. Do not invent the content of an unseen status reply; tool absence alone is not the criterion.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-chat-001",
+          "case_binding": {
+            "case_id": "v2-chat-001",
+            "input_sha256": "06a86050683c41504ea842c42e0691115b373e2f035af8c057ee588db33951b3"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "no count, absence, stale-record or populated-row claim appears; it is a plain open status question with no tool calls.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-chat-001",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-chat-005",
+          "case_binding": {
+            "case_id": "v2-chat-005",
+            "input_sha256": "d69f3c7c3b659a6ea05767ffdd43cd3cc637784f2d41964b161a517bae470e34"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-chat-005: The partner asks whether the product is live and usable today. Answering adopts or rejects a current readiness claim, requiring re-executed runtime evidence. The absence of recorded tools does not remove that obligation.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-chat-005",
+          "case_binding": {
+            "case_id": "v2-chat-005",
+            "input_sha256": "d69f3c7c3b659a6ea05767ffdd43cd3cc637784f2d41964b161a517bae470e34"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "asking whether something is live has no tool call and states no count, absence, or stale-record claim to verify.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-chat-005",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-chat-006",
+          "case_binding": {
+            "case_id": "v2-chat-006",
+            "input_sha256": "1088660dcd7ff3986e81a1c5112f815bb24659ce656bba5597d11c56de78d878"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "v2-chat-006: Enabling auto-merge after CI becomes green sets a future condition. The command does not assert that CI is green or that merging has completed now. A prospective condition alone does not adopt a current readiness claim.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-chat-006",
+          "case_binding": {
+            "case_id": "v2-chat-006",
+            "input_sha256": "1088660dcd7ff3986e81a1c5112f815bb24659ce656bba5597d11c56de78d878"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "turning on auto-merge is a merge configuration action, not a count, absence, or populated-row claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-chat-006",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-chat-012",
+          "case_binding": {
+            "case_id": "v2-chat-012",
+            "input_sha256": "0e46d9797ae4f6b5964693fd63f83a8b22571e36bce8d618d8024af863e9c312"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-chat-012: The tentative statement that the fix worked is turned into a close-loop write with resolution done. This acts on a completion claim; the rule requires re-executed evidence before recording that verdict.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-chat-012",
+          "case_binding": {
+            "case_id": "v2-chat-012",
+            "input_sha256": "0e46d9797ae4f6b5964693fd63f83a8b22571e36bce8d618d8024af863e9c312"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "closing loop 700 after confirmation is a routine record write, not a count, absence, or populated-row claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-chat-012",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-chat-019",
+          "case_binding": {
+            "case_id": "v2-chat-019",
+            "input_sha256": "c55708e9c148faff9fe0b82bbc99f49e4dd933b501418d6b981bc47f6fd96389"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-chat-019: The status reply reads the PR state and mergedAt. Its answer relies on current completion state, so the verification habit applies. Querying the source is compliance with the rule, not a reason to exclude it.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-chat-019",
+          "case_binding": {
+            "case_id": "v2-chat-019",
+            "input_sha256": "c55708e9c148faff9fe0b82bbc99f49e4dd933b501418d6b981bc47f6fd96389"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "checking one PR's merge state is a routine status read, not a duplicate-count, absence, or stale-verdict claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-chat-019",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-chat-027",
+          "case_binding": {
+            "case_id": "v2-chat-027",
+            "input_sha256": "e94599aba65787cafe9c844f548accfdf38ce0d1c2c78fb7a69c46863ceef55b"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-chat-027: Wrapping up the PRs uses current merge state and CI checks to decide readiness. Those completion and readiness claims require source re-execution; this turn performs that check rather than falling outside the rule.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-chat-027",
+          "case_binding": {
+            "case_id": "v2-chat-027",
+            "input_sha256": "e94599aba65787cafe9c844f548accfdf38ce0d1c2c78fb7a69c46863ceef55b"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "checking one PR's merge status and checks is a routine gate check, not a duplicate-count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-chat-027",
+        "rule": "f47a8fe9"
+      }
+    ],
+    "rule": "f47a8fe9",
+    "rule_statement_sha256": "f481ce9dcd1ab89119e529c6396fe7cb7218cc298f63b26dffa9b673647ef9cc",
+    "scope": "Bounded follow-up after full-column review was interrupted for another blocking CI repair. All 30 chat cases were inspected; six explicit decisions are recorded here. The complete 240-case semantic audit is not finished. These corrections are not a clean-column certification.",
+    "source_adjudications_sha256": "1b32668b32aa58e27ff817533c9ecc4dcfa1b6d0fe0bf9d5dba3596a672fbafa",
+    "source_head": "a3852b09c0178c4475b09ebcbe7a10113139472e",
+    "status": "historical bounded stage; superseded by full_column_review"
+  },
+  "disputed": [
+    {
+      "case": "v2-tour-022",
+      "decision": false,
+      "rule": "c20dc3d5",
+      "why": "The prior review inferred a diagnosis would be passed upward; the fixture supplies no diagnosis content or action. Retain non-gold under the strict actual-turn standard, aligned with v2-sfb-020."
+    }
+  ],
+  "full_column_review": {
+    "changed_count": 26,
+    "changed_rows": [
+      {
+        "after": {
+          "case": "v2-chat-002",
+          "case_binding": {
+            "case_id": "v2-chat-002",
+            "input_sha256": "bd9c05b0ae084f91a4036344a97ac06644a8c550d36c3d4408445059c8b68a68"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-chat-002: The instruction to proceed explicitly relies on both items being switched on now. That readiness claim is the premise for acting, even with no tool call in this recorded turn.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-chat-002",
+          "case_binding": {
+            "case_id": "v2-chat-002",
+            "input_sha256": "bd9c05b0ae084f91a4036344a97ac06644a8c550d36c3d4408445059c8b68a68"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "no tool calls and no count, absence, or stale-record claim is made about the switched-on items.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-chat-002",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-deal-011",
+          "case_binding": {
+            "case_id": "v2-deal-011",
+            "input_sha256": "b4865399e85bda008cc76d59518db74ef9149accd65ec6bf497ac72a2f457027"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-deal-011: The requested fix relies on the contrast between a panel saying not deployed and record homes having merged. That absence-versus-completion state needs a current source and deployment check.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-deal-011",
+          "case_binding": {
+            "case_id": "v2-deal-011",
+            "input_sha256": "b4865399e85bda008cc76d59518db74ef9149accd65ec6bf497ac72a2f457027"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "the brief rewires a panel hook to a live verb with tests, not a count, absence claim or stale verdict, so the trigger is not met.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-deal-011",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-deal-018",
+          "case_binding": {
+            "case_id": "v2-deal-018",
+            "input_sha256": "bf59c037b35d69cafada8ba6b2cb35235adb24e9c1cc33fd59bce3848d305478"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-deal-018: The adapter build is explicitly based on Salesforce reconciliation being merged. That completion claim is a source-state premise to verify against the actual merged revision.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-deal-018",
+          "case_binding": {
+            "case_id": "v2-deal-018",
+            "input_sha256": "bf59c037b35d69cafada8ba6b2cb35235adb24e9c1cc33fd59bce3848d305478"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "rereading the partner's Salesforce ruling before designing an adapter states no count, absence, or stale-record claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-deal-018",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-deal-020",
+          "case_binding": {
+            "case_id": "v2-deal-020",
+            "input_sha256": "7a85cba077b5aaf5b0eaa91ec3f6b8ba9911ea2bfdf4641885b3941ee0ecc4a1"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-deal-020: The turn will post an independent verdict on an already-merged change. Its merged-head claim must be checked against the PR and current source before that verdict is attached.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-deal-020",
+          "case_binding": {
+            "case_id": "v2-deal-020",
+            "input_sha256": "7a85cba077b5aaf5b0eaa91ec3f6b8ba9911ea2bfdf4641885b3941ee0ecc4a1"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "reviewing an already-merged two-line change against an earlier one and running its gate test is logic verification, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-deal-020",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-eng-012",
+          "case_binding": {
+            "case_id": "v2-eng-012",
+            "input_sha256": "c4294b2f39531331b26a0283ad3d4d71d054cc83133c3317c379a3faf48a872a"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-eng-012: The prompt says two models are missing from the model list and the turn searches for them. Answering that bounded absence claim requires checking the full current model inventory.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-eng-012",
+          "case_binding": {
+            "case_id": "v2-eng-012",
+            "input_sha256": "c4294b2f39531331b26a0283ad3d4d71d054cc83133c3317c379a3faf48a872a"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "grepping for two model aliases after the partner's missing-models complaint mirrors the same feedback pattern already ruled not a reported claim, so it is not met.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-eng-012",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-eng-019",
+          "case_binding": {
+            "case_id": "v2-eng-019",
+            "input_sha256": "243c26e9f2609f8524a11d07113c00c5992bf2513de8b5a281450f7f7b9ef5ab"
+          },
+          "gold": true,
+          "jev_misfire": false,
+          "reason": "v2-eng-019: The partner says Jev is integrated in several places that the audit missed. The turn searches code and doctrine to address that presence and prior-omission claim; search coverage matters.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-eng-019",
+          "case_binding": {
+            "case_id": "v2-eng-019",
+            "input_sha256": "243c26e9f2609f8524a11d07113c00c5992bf2513de8b5a281450f7f7b9ef5ab"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "the partner's complaint concerns overlooking a tool's integration during an audit, feedback rather than a count, stale verdict or absence claim being reported, so it is not met.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-eng-019",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-eng-030",
+          "case_binding": {
+            "case_id": "v2-eng-030",
+            "input_sha256": "e4d388eb8f12142253dbf4ab4afb2046c05cd5b6242e9f18591ac32baa6d4648"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-eng-030: The queue is described as stuck, and the turn resends its last envelope on that current-state claim. The need to verify the queue state does not depend on a recorded check.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-eng-030",
+          "case_binding": {
+            "case_id": "v2-eng-030",
+            "input_sha256": "e4d388eb8f12142253dbf4ab4afb2046c05cd5b6242e9f18591ac32baa6d4648"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "resending a stuck dispatch envelope is a direct operational fix, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-eng-030",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-003",
+          "case_binding": {
+            "case_id": "v2-notif-003",
+            "input_sha256": "58942332b0c5d3b1635b4679d041229f428dd4f6609cada6284a214b3ab1812c"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-003: The subagent reports a rebuilt and pushed PR, and the turn dispatches review of that asserted head. Review selection acts on a completion and source-head claim; a later review does not erase the trigger.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-003",
+          "case_binding": {
+            "case_id": "v2-notif-003",
+            "input_sha256": "58942332b0c5d3b1635b4679d041229f428dd4f6609cada6284a214b3ab1812c"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "saving a review brief and dispatching an independent reviewer after a detailed report is arranging future verification, not itself a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-003",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-004",
+          "case_binding": {
+            "case_id": "v2-notif-004",
+            "input_sha256": "6dff4a37162299f343dd5fba4dad4352f60661a02590e2d67ae4ba95835f6f2c"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-004: The turn forwards a reported APPROVE and says the orchestrator will merge. It acts on the subagent review-completion claim; the reporter having run checks does not remove this turn\u2019s verification duty.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-004",
+          "case_binding": {
+            "case_id": "v2-notif-004",
+            "input_sha256": "6dff4a37162299f343dd5fba4dad4352f60661a02590e2d67ae4ba95835f6f2c"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "relaying a detailed, self-verified APPROVE report to the orchestrator states no count, absence, or stale-record claim in this turn.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-004",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-006",
+          "case_binding": {
+            "case_id": "v2-notif-006",
+            "input_sha256": "8abf144cc63b94f71771c99b92b5bd689976aeead0a3520e8052794d22786fe2"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-006: The review reports client data still present in fixtures, and the turn orders removal on that presence claim. The claim must be checked against the actual fixture scope before the finding is relayed as fact.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-006",
+          "case_binding": {
+            "case_id": "v2-notif-006",
+            "input_sha256": "8abf144cc63b94f71771c99b92b5bd689976aeead0a3520e8052794d22786fe2"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "dispatching a fix for client data left in fixtures after a specific finding states no count or absence claim in this turn.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-006",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-014",
+          "case_binding": {
+            "case_id": "v2-notif-014",
+            "input_sha256": "49dc2a9ec5d6200ef4797969bbaaa32631205735d1e85af073e2b022b0ca98ac"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-014: The turn starts the model server after a background fetch reports status zero. Starting the server relies on the download-completion claim, regardless of whether tailing the job output verifies the artifact.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-014",
+          "case_binding": {
+            "case_id": "v2-notif-014",
+            "input_sha256": "49dc2a9ec5d6200ef4797969bbaaa32631205735d1e85af073e2b022b0ca98ac"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "starting a local model server after a background download completes states no count, absence, or stale-record claim about records.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-014",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-015",
+          "case_binding": {
+            "case_id": "v2-notif-015",
+            "input_sha256": "63bee9056270777eb8aa42260ec01bf74660d769e1eb5fb79516f31384e70502"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-015: The turn records follow-up work for a supposedly finished PR slice. Those durable loops rely on the subagent completion claim; the later CI monitor remains a separate pending check.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-015",
+          "case_binding": {
+            "case_id": "v2-notif-015",
+            "input_sha256": "63bee9056270777eb8aa42260ec01bf74660d769e1eb5fb79516f31384e70502"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "adding follow-up loops after a subagent says a monitor will report later states no count or absence claim in this turn.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-015",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-016",
+          "case_binding": {
+            "case_id": "v2-notif-016",
+            "input_sha256": "d0cf1eb407530ceb582db8b1009ef6d7219aeef48744fda65d31ab01e2c633aa"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-016: The turn comments on release verification and keeps the release stopped based on a reported mismatch between merged head and approval. That current mismatch claim binds even if the subagent already checked it.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-016",
+          "case_binding": {
+            "case_id": "v2-notif-016",
+            "input_sha256": "d0cf1eb407530ceb582db8b1009ef6d7219aeef48744fda65d31ab01e2c633aa"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "acknowledging a subagent's own head-versus-approval mismatch finding states no count, absence, or stale-record claim newly made by this turn.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-016",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-018",
+          "case_binding": {
+            "case_id": "v2-notif-018",
+            "input_sha256": "975f8eefd8a07f87d41b9bba13dd54f1c3d79926d08660112d54e9358b7566bc"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-018: The turn posts its own APPROVE at a named head from a subagent report that checks passed. This relays a review-completion claim; the subagent\u2019s gh check does not decide whether this rule binds.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-018",
+          "case_binding": {
+            "case_id": "v2-notif-018",
+            "input_sha256": "975f8eefd8a07f87d41b9bba13dd54f1c3d79926d08660112d54e9358b7566bc"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "posting an APPROVE comment after a subagent reports it already confirmed the state with gh states no unverified claim in this turn.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-018",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-023",
+          "case_binding": {
+            "case_id": "v2-notif-023",
+            "input_sha256": "e5380772f32dd3ae3f0263374cbf71cd0af20191114364475c943828bf071d74"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-023: The turn tells an agent that CI failed after reading a failed job report and CI logs. That failure outcome is relayed as fact and needs a fresh check tied to the PR run.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-023",
+          "case_binding": {
+            "case_id": "v2-notif-023",
+            "input_sha256": "e5380772f32dd3ae3f0263374cbf71cd0af20191114364475c943828bf071d74"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "fetching failed CI logs and relaying them to an agent is failure diagnosis, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-023",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-notif-028",
+          "case_binding": {
+            "case_id": "v2-notif-028",
+            "input_sha256": "b5ae986d33196cc9ccefa85df7b130a2f06f860896ac165f1ea1aa0c364dfadf"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-notif-028: The turn opens a production incident on the monitor\u2019s second failed liveness probe and last-good-time claim. Those count and current-failure facts are adopted in an incident action.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-notif-028",
+          "case_binding": {
+            "case_id": "v2-notif-028",
+            "input_sha256": "b5ae986d33196cc9ccefa85df7b130a2f06f860896ac165f1ea1aa0c364dfadf"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "opening an incident after a monitor alert states a failure count but the turn does not itself verify or re-report that count, so it is not met.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-notif-028",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-rel-002",
+          "case_binding": {
+            "case_id": "v2-rel-002",
+            "input_sha256": "a40e6711d57ad66bd95e3cdf6df1ddcf2125c8b18d317d3a30c437cedee72aeb"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-rel-002: The turn tells the orchestrator the PR passed independent review and requests a merge. That reviewed-ready claim is relayed as fact and must be checked at the cited head.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-rel-002",
+          "case_binding": {
+            "case_id": "v2-rel-002",
+            "input_sha256": "a40e6711d57ad66bd95e3cdf6df1ddcf2125c8b18d317d3a30c437cedee72aeb"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "handing a reviewed PR to the orchestrator for merge states no count, absence, or stale-record claim in this turn.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-rel-002",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-rel-003",
+          "case_binding": {
+            "case_id": "v2-rel-003",
+            "input_sha256": "12d105d44b8f7a0ce2d255224f4192f86592633dd074c18aad21a3bc827cf850"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-rel-003: The turn records the pasted production-deploy refusal as a durable loop. It relays an operation outcome and its present policy implication, so the underlying refusal must be checked rather than copied.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-rel-003",
+          "case_binding": {
+            "case_id": "v2-rel-003",
+            "input_sha256": "12d105d44b8f7a0ce2d255224f4192f86592633dd074c18aad21a3bc827cf850"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "logging a production deploy refusal as a loop is a routine record write, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-rel-003",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-rel-007",
+          "case_binding": {
+            "case_id": "v2-rel-007",
+            "input_sha256": "65e2abf9cc0f0f72a9759f50165409f0e93d31b1e4700b637c29d5935c80a421"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-rel-007: The turn tells the orchestrator that PR 1141 merged and that the seal branch needs rebuilding. That completed-merge claim must be read back from the remote state; executing the merge command alone does not settle the label.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-rel-007",
+          "case_binding": {
+            "case_id": "v2-rel-007",
+            "input_sha256": "65e2abf9cc0f0f72a9759f50165409f0e93d31b1e4700b637c29d5935c80a421"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "squash-merging an approved PR and checking a post-merge tree conflict is mechanical merge work, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-rel-007",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-rel-009",
+          "case_binding": {
+            "case_id": "v2-rel-009",
+            "input_sha256": "471f78a9fc6dc8957820602da07ed22b20489efe9ade2ece504f187686a28ca6"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-rel-009: Resuming from the saved checkpoint relies on its existence and current relation to the queue card. A dated checkpoint is a state claim to reconcile against live source before acting.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-rel-009",
+          "case_binding": {
+            "case_id": "v2-rel-009",
+            "input_sha256": "471f78a9fc6dc8957820602da07ed22b20489efe9ade2ece504f187686a28ca6"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "loading standing context and reconciling a queue card is routine reconciliation, not a reported count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-rel-009",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-rel-026",
+          "case_binding": {
+            "case_id": "v2-rel-026",
+            "input_sha256": "37bae260867d85ae3285c368cf16b2f73989f5723080db4d149a11a9cb8c15e6"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-rel-026: Re-chaining the seal relies on the assertion that main merged two other seals in the meantime. That changed-since-review claim must be checked against current history before acting.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-rel-026",
+          "case_binding": {
+            "case_id": "v2-rel-026",
+            "input_sha256": "37bae260867d85ae3285c368cf16b2f73989f5723080db4d149a11a9cb8c15e6"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "re-chaining a seal version after a mechanical merge is routine seal bookkeeping, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-rel-026",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-sfb-026",
+          "case_binding": {
+            "case_id": "v2-sfb-026",
+            "input_sha256": "dd05ed7e9c075d418734546bbc92f37503fcb408ab1c70d73e59c63432568e99"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-sfb-026: Linking the deal relies on the claim that the Salesforce opportunity now exists. The turn acts on a presence and populated-reference claim, whether or not the tool read validates it.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-sfb-026",
+          "case_binding": {
+            "case_id": "v2-sfb-026",
+            "input_sha256": "dd05ed7e9c075d418734546bbc92f37503fcb408ab1c70d73e59c63432568e99"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "linking a Salesforce opportunity to a deal record is a routine record write, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-sfb-026",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-sfb-028",
+          "case_binding": {
+            "case_id": "v2-sfb-028",
+            "input_sha256": "e8bb14355f331370879ab97e00b2470d188aa366d6fbab36f3624c59f94800ad"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-sfb-028: A table of every medical office listing posted this week asserts a complete collection before fit candidates are saved. The search boundary and negative space must be checked, not inferred from one page.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-sfb-028",
+          "case_binding": {
+            "case_id": "v2-sfb-028",
+            "input_sha256": "e8bb14355f331370879ab97e00b2470d188aa366d6fbab36f3624c59f94800ad"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "the partner asks for this week's listings scraped into a table, a collection task rather than a verified count or absence verdict, so it is not met.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-sfb-028",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-tour-003",
+          "case_binding": {
+            "case_id": "v2-tour-003",
+            "input_sha256": "9d249cbddb1352cae7e53f857eecaeaf45cd2839567821cf7648d891ce481d68"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-tour-003: Answering whether Jev has already reviewed the tour failure is a presence-or-absence claim about review history. Reading judge code alone does not settle that claim.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-tour-003",
+          "case_binding": {
+            "case_id": "v2-tour-003",
+            "input_sha256": "9d249cbddb1352cae7e53f857eecaeaf45cd2839567821cf7648d891ce481d68"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "reading Jev's judge code to see if it could help with a tour failure is code investigation, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-tour-003",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-tour-018",
+          "case_binding": {
+            "case_id": "v2-tour-018",
+            "input_sha256": "9c127cee74ab73212dc169602ee11f3d519868a1cdd07acd7e4a8de3712447b6"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-tour-018: A map of every matching listing in two counties asserts complete search coverage. The rule binds the eventual full-set claim even though only one search call is recorded.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-tour-018",
+          "case_binding": {
+            "case_id": "v2-tour-018",
+            "input_sha256": "9c127cee74ab73212dc169602ee11f3d519868a1cdd07acd7e4a8de3712447b6"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "pulling matching medical office listings for a map is a data-retrieval action, not a verified count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-tour-018",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-tour-029",
+          "case_binding": {
+            "case_id": "v2-tour-029",
+            "input_sha256": "4385aa2bb40343f6d92e47257fe57d55d450d14033da464b8fe5631b70a4ff71"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-tour-029: Issuing a client share grant relies on the tour being finished. The completion claim must be checked in the public projection before the link is sent.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-tour-029",
+          "case_binding": {
+            "case_id": "v2-tour-029",
+            "input_sha256": "4385aa2bb40343f6d92e47257fe57d55d450d14033da464b8fe5631b70a4ff71"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "reading a tour projection before issuing a share grant is a routine create-then-act flow, not a count, absence, or stale-record claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-tour-029",
+        "rule": "f47a8fe9"
+      }
+    ],
+    "criterion": "Ordered test: (1) Is a count, complete-set or absence/presence, operation completion/readiness, or stale-versus-current claim explicit in the prompt or recorded action? (2) Does this turn answer it, relay it as fact, or take a downstream action that presumes it true? If both yes, gold. An investigation that only seeks evidence and a future conditional are not gold. Whether the recorded turn actually re-executed a query does not affect the label.",
+    "followup": "independent_review_followup",
+    "held_out_measurement": {
+      "cases": 72,
+      "delivered_sets_identical": true,
+      "delivered_sets_sha256": "f0d82998ab755b56e8c28dfd6618af58b633b1bc64aaac4a86b82e4abffe0f04",
+      "gold_pairs": {
+        "after": {
+          "all": 2405,
+          "f47_all": 78,
+          "f47_test": 19,
+          "test": 717,
+          "train": 1688
+        },
+        "before": {
+          "all": 2379,
+          "f47_all": 52,
+          "f47_test": 13,
+          "test": 711,
+          "train": 1668
+        }
+      },
+      "limitation": "Gold-label edits alter the denominator; no delivery code or deterministic delivered set changed. No identical saved Jev-backed report was available for external-delivery rescore.",
+      "mode": "deterministic --jev off; --split test; no live selector or doctrine search",
+      "paths": {
+        "boot_layer0": {
+          "after": {
+            "f1": 0.1684,
+            "fn": 0,
+            "fp": 1945,
+            "precision": 0.092,
+            "recall": 1.0,
+            "tp": 197
+          },
+          "before": {
+            "f1": 0.1684,
+            "fn": 0,
+            "fp": 1945,
+            "precision": 0.092,
+            "recall": 1.0,
+            "tp": 197
+          }
+        },
+        "drift_if_acting": {
+          "after": {
+            "f1": 0.0786,
+            "fn": 133,
+            "fp": 1204,
+            "precision": 0.0452,
+            "recall": 0.3,
+            "tp": 57
+          },
+          "before": {
+            "f1": 0.0786,
+            "fn": 133,
+            "fp": 1204,
+            "precision": 0.0452,
+            "recall": 0.3,
+            "tp": 57
+          }
+        },
+        "drift_shadow": {
+          "after": {
+            "f1": null,
+            "fn": 190,
+            "fp": 0,
+            "precision": null,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "before": {
+            "f1": null,
+            "fn": 190,
+            "fp": 0,
+            "precision": null,
+            "recall": 0.0,
+            "tp": 0
+          }
+        },
+        "jit_pretooluse": {
+          "after": {
+            "f1": 0.0897,
+            "fn": 163,
+            "fp": 40,
+            "precision": 0.2,
+            "recall": 0.0578,
+            "tp": 10
+          },
+          "before": {
+            "f1": 0.0897,
+            "fn": 163,
+            "fp": 40,
+            "precision": 0.2,
+            "recall": 0.0578,
+            "tp": 10
+          }
+        },
+        "prompt_compiled": {
+          "after": {
+            "f1": 0.0657,
+            "fn": 181,
+            "fp": 75,
+            "precision": 0.1071,
+            "recall": 0.0474,
+            "tp": 9
+          },
+          "before": {
+            "f1": 0.0657,
+            "fn": 181,
+            "fp": 75,
+            "precision": 0.1071,
+            "recall": 0.0474,
+            "tp": 9
+          }
+        },
+        "system_moment": {
+          "after": {
+            "f1": 0.0501,
+            "fn": 605,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.0304,
+            "tp": 19
+          },
+          "before": {
+            "f1": 0.0503,
+            "fn": 602,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.0306,
+            "tp": 19
+          }
+        },
+        "system_moment_packlayer": {
+          "after": {
+            "f1": 0.1173,
+            "fn": 171,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.1,
+            "tp": 19
+          },
+          "before": {
+            "f1": 0.1173,
+            "fn": 171,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.1,
+            "tp": 19
+          }
+        },
+        "system_moment_plus_drift": {
+          "after": {
+            "f1": 0.0712,
+            "fn": 554,
+            "fp": 1271,
+            "precision": 0.0522,
+            "recall": 0.1122,
+            "tp": 70
+          },
+          "before": {
+            "f1": 0.0714,
+            "fn": 551,
+            "fp": 1271,
+            "precision": 0.0522,
+            "recall": 0.1127,
+            "tp": 70
+          }
+        },
+        "system_scoped_boot": {
+          "after": {
+            "f1": 0.149,
+            "fn": 408,
+            "fp": 2060,
+            "precision": 0.0949,
+            "recall": 0.3462,
+            "tp": 216
+          },
+          "before": {
+            "f1": 0.1491,
+            "fn": 405,
+            "fp": 2060,
+            "precision": 0.0949,
+            "recall": 0.3478,
+            "tp": 216
+          }
+        }
+      }
+    },
+    "review_scope": "All 240 de-identified benchmark case prompts, recorded tool calls, and existing f47a8fe9 adjudication reasons; no raw session turns or external model call.",
+    "reviewed_cases": 240,
+    "rule": "f47a8fe9",
+    "schema": "rule-column-review/v1",
+    "source_adjudications_sha256": "4a20d9d0f5bbd41a12b32a7ad0fd78a8e6723222334b0d273ca07a3eeaffd883",
+    "source_head": "fdd63641797aec943302d0c7b0e3d30b27036bcc",
+    "unchanged_count": 214
+  },
+  "independent_review_followup": {
+    "held_out_measurement": {
+      "cases": 72,
+      "delivered_sets_identical": true,
+      "delivered_sets_sha256": "f0d82998ab755b56e8c28dfd6618af58b633b1bc64aaac4a86b82e4abffe0f04",
+      "gold_pairs": {
+        "after": {
+          "all": 2407,
+          "f47_all": 80,
+          "f47_test": 19,
+          "test": 717,
+          "train": 1690
+        },
+        "before": {
+          "all": 2405,
+          "f47_all": 78,
+          "f47_test": 19,
+          "test": 717,
+          "train": 1688
+        }
+      },
+      "limitation": "Both corrected gold labels are train cases; held-out gold and deterministic deliveries are unchanged. This is label repair, not delivery improvement. No identical saved Jev-backed report was available.",
+      "mode": "deterministic --jev off; --split test; no live selector or doctrine search",
+      "paths": {
+        "boot_layer0": {
+          "after": {
+            "f1": 0.1684,
+            "fn": 0,
+            "fp": 1945,
+            "precision": 0.092,
+            "recall": 1.0,
+            "tp": 197
+          },
+          "before": {
+            "f1": 0.1684,
+            "fn": 0,
+            "fp": 1945,
+            "precision": 0.092,
+            "recall": 1.0,
+            "tp": 197
+          }
+        },
+        "drift_if_acting": {
+          "after": {
+            "f1": 0.0786,
+            "fn": 133,
+            "fp": 1204,
+            "precision": 0.0452,
+            "recall": 0.3,
+            "tp": 57
+          },
+          "before": {
+            "f1": 0.0786,
+            "fn": 133,
+            "fp": 1204,
+            "precision": 0.0452,
+            "recall": 0.3,
+            "tp": 57
+          }
+        },
+        "drift_shadow": {
+          "after": {
+            "f1": null,
+            "fn": 190,
+            "fp": 0,
+            "precision": null,
+            "recall": 0.0,
+            "tp": 0
+          },
+          "before": {
+            "f1": null,
+            "fn": 190,
+            "fp": 0,
+            "precision": null,
+            "recall": 0.0,
+            "tp": 0
+          }
+        },
+        "jit_pretooluse": {
+          "after": {
+            "f1": 0.0897,
+            "fn": 163,
+            "fp": 40,
+            "precision": 0.2,
+            "recall": 0.0578,
+            "tp": 10
+          },
+          "before": {
+            "f1": 0.0897,
+            "fn": 163,
+            "fp": 40,
+            "precision": 0.2,
+            "recall": 0.0578,
+            "tp": 10
+          }
+        },
+        "prompt_compiled": {
+          "after": {
+            "f1": 0.0657,
+            "fn": 181,
+            "fp": 75,
+            "precision": 0.1071,
+            "recall": 0.0474,
+            "tp": 9
+          },
+          "before": {
+            "f1": 0.0657,
+            "fn": 181,
+            "fp": 75,
+            "precision": 0.1071,
+            "recall": 0.0474,
+            "tp": 9
+          }
+        },
+        "system_moment": {
+          "after": {
+            "f1": 0.0501,
+            "fn": 605,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.0304,
+            "tp": 19
+          },
+          "before": {
+            "f1": 0.0501,
+            "fn": 605,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.0304,
+            "tp": 19
+          }
+        },
+        "system_moment_packlayer": {
+          "after": {
+            "f1": 0.1173,
+            "fn": 171,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.1,
+            "tp": 19
+          },
+          "before": {
+            "f1": 0.1173,
+            "fn": 171,
+            "fp": 115,
+            "precision": 0.1418,
+            "recall": 0.1,
+            "tp": 19
+          }
+        },
+        "system_moment_plus_drift": {
+          "after": {
+            "f1": 0.0712,
+            "fn": 554,
+            "fp": 1271,
+            "precision": 0.0522,
+            "recall": 0.1122,
+            "tp": 70
+          },
+          "before": {
+            "f1": 0.0712,
+            "fn": 554,
+            "fp": 1271,
+            "precision": 0.0522,
+            "recall": 0.1122,
+            "tp": 70
+          }
+        },
+        "system_scoped_boot": {
+          "after": {
+            "f1": 0.149,
+            "fn": 408,
+            "fp": 2060,
+            "precision": 0.0949,
+            "recall": 0.3462,
+            "tp": 216
+          },
+          "before": {
+            "f1": 0.149,
+            "fn": 408,
+            "fp": 2060,
+            "precision": 0.0949,
+            "recall": 0.3462,
+            "tp": 216
+          }
+        }
+      }
+    },
+    "ordered_decisions": [
+      "First identify the explicit completed or current-state claim and whether this turn answers, relays, or acts on it.",
+      "Then ignore whether recorded tools performed the verification; that affects correctness of the turn, not whether the rule binds.",
+      "A bare notification without a recorded adoption remains not gold."
+    ],
+    "reviewed_on": "2026-09-27",
+    "rows": [
+      {
+        "after": {
+          "case": "v2-deal-021",
+          "case_binding": {
+            "case_id": "v2-deal-021",
+            "input_sha256": "293acfa2b385e617328fa1ee8c55d08efd13458e8123935aa8929690555c7b60"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "v2-deal-021: The only recorded input is a background notice saying a lease-document wait finished with status zero. With no recorded reply, relay, or downstream action, this turn has not adopted that completion claim; the notice alone is outside the trigger.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-deal-021",
+          "case_binding": {
+            "case_id": "v2-deal-021",
+            "input_sha256": "293acfa2b385e617328fa1ee8c55d08efd13458e8123935aa8929690555c7b60"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "logging an LOI submission and its expiry date is a routine record write, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-deal-021",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-deal-026",
+          "case_binding": {
+            "case_id": "v2-deal-026",
+            "input_sha256": "59e9e25b446a3c1bf51dec5cdecf627bc3478756efeef65b9a47b3c83c742686"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-deal-026: The turn writes a submitted-LOI record and its expiry date on the partner\u2019s claim that the LOI was sent this afternoon. Those durable writes adopt a completion claim; treating them as routine writes does not remove the need to verify the submission and source date.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-deal-026",
+          "case_binding": {
+            "case_id": "v2-deal-026",
+            "input_sha256": "59e9e25b446a3c1bf51dec5cdecf627bc3478756efeef65b9a47b3c83c742686"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "logging an LOI submission and critical date is a routine record write, not a count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-deal-026",
+        "rule": "f47a8fe9"
+      },
+      {
+        "after": {
+          "case": "v2-tour-020",
+          "case_binding": {
+            "case_id": "v2-tour-020",
+            "input_sha256": "b32d6ccbccea94cc512334600324349b3bd45cb8fcf7ef6d57404474b334003a"
+          },
+          "gold": true,
+          "jev_misfire": true,
+          "reason": "v2-tour-020: The requested independent PASS/FAIL verdict relies on the assertion that this commit is already merged and checked out at the intended release head. The turn must re-check that completed source state; running code tests does not remove the claim trigger.",
+          "rule": "f47a8fe9"
+        },
+        "before": {
+          "case": "v2-tour-020",
+          "case_binding": {
+            "case_id": "v2-tour-020",
+            "input_sha256": "b32d6ccbccea94cc512334600324349b3bd45cb8fcf7ef6d57404474b334003a"
+          },
+          "gold": false,
+          "jev_misfire": false,
+          "reason": "verifying an atomic migration group's code changes and running matching tests is logic and test verification, not a record count or absence claim.",
+          "rule": "f47a8fe9"
+        },
+        "case": "v2-tour-020",
+        "rule": "f47a8fe9"
+      }
+    ],
+    "rule": "f47a8fe9",
+    "schema": "rule-column-review-followup/v1",
+    "scope": "Two false-to-true labels plus one false-label rationale corrected; all three retain their original case bindings. No other label or input changed.",
+    "source": "independent strongest review of cd0b3ff6; de-identified bound benchmark case prompts and tool calls",
+    "source_adjudications_sha256": "64fb5c75747a515fd0265952cf62ac4b7debff870f56fd677d7009be4a2895e6",
+    "source_head": "cd0b3ff628e1920cee28f7e7e75ccd69c0ead7d5"
+  },
+  "reviewed_on": "2026-09-27",
+  "reviewer": "Codex gpt-6-astra",
+  "rows": [
+    {
+      "after": {
+        "case": "v2-chat-010",
+        "case_binding": {
+          "case_id": "v2-chat-010",
+          "input_sha256": "63277ca553a0690332db9e17de2e24283195bab9045498eabdb894a36ee0af1c"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-chat-010: Answering whether the laptop is still missing setup items makes an absence and potentially stale-state judgment. The full relevant source must be checked; having no tool call shows an omitted verification, not an absent trigger.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-chat-010",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "asking about missing laptop setup items draws no tool call and states no count or absence claim to verify.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-chat-010",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-chat-015",
+        "case_binding": {
+          "case_id": "v2-chat-015",
+          "input_sha256": "2ee67a67152188324d735f79de9e72a033b83f5595d8df514d9e42fda768012c"
+        },
+        "gold": true,
+        "jev_misfire": false,
+        "reason": "v2-chat-015: Answering that a research report is saved nowhere is an absence claim requiring a complete search and its boundary. The trigger does not depend on whether a search was recorded.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-chat-015",
+        "gold": true,
+        "jev_misfire": false,
+        "reason": "the partner asks to confirm a research report is saved nowhere, an absence claim needing a full search, so it is met.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-chat-015",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-chat-022",
+        "case_binding": {
+          "case_id": "v2-chat-022",
+          "input_sha256": "5a9f8a2b1f98975257a07d8fed66530c318f2fb4566c90aff09cc45bef120686"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-chat-022: Give it another shot plus update-branch is a retry, not a correction, prediction, structural ruling or commit/deploy/handoff boundary. The neighboring case about disabling prompts cannot supply this turn with a ledger trigger.",
+        "rule": "bbffc139"
+      },
+      "before": {
+        "case": "v2-chat-022",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "Quit with the prompts and turn off whatever triggers them rules that the nagging behavior be disabled, settling a structural fork.",
+        "rule": "bbffc139"
+      },
+      "case": "v2-chat-022",
+      "rule": "bbffc139"
+    },
+    {
+      "after": {
+        "case": "v2-chat-023",
+        "case_binding": {
+          "case_id": "v2-chat-023",
+          "input_sha256": "9add508fa6b7f75e444640f7dc8bdbebe5c2a5835968e2219703923556feaaa2"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-chat-023: The partner rejects the waiting-on-you prompts and directs disabling their mechanism; the session then inspects the gate wiring. This in-work correction and structural ruling meets the ledger triggers.",
+        "rule": "bbffc139"
+      },
+      "before": {
+        "case": "v2-chat-023",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "Quit with the prompts and turn off whatever triggers them is a ruling that disables the mechanism outright, settling a structural fork.",
+        "rule": "bbffc139"
+      },
+      "case": "v2-chat-023",
+      "rule": "bbffc139"
+    },
+    {
+      "after": {
+        "case": "v2-disp-007",
+        "case_binding": {
+          "case_id": "v2-disp-007",
+          "input_sha256": "bc8318ee8bc0207c922f36b8ffdf2c524855ecce1012f724417644f387a935ef"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-disp-007: The partner opens a system-wide audit, not already-scoped routine work. It does not yet open a substantial build/design thread, make a major predictive call, or show confident direction outside a known domain; breadth alone does not meet these triggers.",
+        "rule": "20d106f1"
+      },
+      "before": {
+        "case": "v2-disp-007",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "The partner gives a routine instruction or statement here ('Audit the entire system and be extremely thorough...') on already scoped work, not an opening of a substantial new build thread or a major directional call.",
+        "rule": "20d106f1"
+      },
+      "case": "v2-disp-007",
+      "rule": "20d106f1"
+    },
+    {
+      "after": {
+        "case": "v2-disp-012",
+        "case_binding": {
+          "case_id": "v2-disp-012",
+          "input_sha256": "818ca9becf24fa6098279d7b7b414e75363df7319f8f5eae9b2c08c461c22614"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-disp-012: The partner chooses a script over a scheduled model session and the turn dispatches that implementation. This is a real choice, not merely a question, but the case does not establish a substantial new design thread, major call, prediction, or uncalibrated domain confidence. The narrower override/structure trigger is covered by bbffc139.",
+        "rule": "20d106f1"
+      },
+      "before": {
+        "case": "v2-disp-012",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "The partner asks a question here ('A weekly run is fine with me, but...') rather than opening a new build thread, stating a prediction, or directing confidently outside his track record.",
+        "rule": "20d106f1"
+      },
+      "case": "v2-disp-012",
+      "rule": "20d106f1"
+    },
+    {
+      "after": {
+        "case": "v2-disp-029",
+        "case_binding": {
+          "case_id": "v2-disp-029",
+          "input_sha256": "3139ce958099c634d0bad62a0ceb7648321c4879b7cdb8edfabddbcb3d69b06a"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-disp-029: The requested reply would authorize telling the other partner that a hook is live based on an agent self-report. That completion/readiness claim requires independently re-executing its evidence even with no tool call recorded.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-disp-029",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "asking whether it is okay to tell the partner a hook is ready, with no verifying tool call, states no count or absence claim in this turn.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-disp-029",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-eng-015",
+        "case_binding": {
+          "case_id": "v2-eng-015",
+          "input_sha256": "47128d51d3d1a2d27a6576464fdb89d67966d27700b1ac69beb587f42049fbb7"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-eng-015: The requested reply would turn passing unit tests into a claim that a hook is live. Verify the actual runtime state independently; re-running only the unit suite does not establish that completion claim.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-eng-015",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "running the hook-injection unit tests before telling the partner it is live is a test-pass check, not a count, absence, or populated-row claim.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-eng-015",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-eng-025",
+        "case_binding": {
+          "case_id": "v2-eng-025",
+          "input_sha256": "cfdcf72297de4208d6a6487e76c526f0adc10053afc80d5f0a0f589d3aee2024"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-eng-025: Applying the migration relies on the claim that it remains pending. Applied-versus-pending state must be checked against current migration history before acting; an omitted check does not make the rule inapplicable.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-eng-025",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "applying a pending production migration directly is a direct action, not a reported count or absence claim.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-eng-025",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-notif-008",
+        "case_binding": {
+          "case_id": "v2-notif-008",
+          "input_sha256": "7c3b0ebd4edd3451ff116d79b8281f20b7477d3b103aea22bc73ee355926c8b0"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-notif-008: The turn posts APPROVE after a bare zero-status merge-job notice. Relying on that completion claim requires independent execution against the actual source state; tailing the job summary is not that proof.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-notif-008",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "the turn posts an APPROVE comment on the strength of a bare 'returned status 0' claim with no re-check of the actual merge, an unverified completion claim acted on, so it is met.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-notif-008",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-notif-025",
+        "case_binding": {
+          "case_id": "v2-notif-025",
+          "input_sha256": "9174ad40795c70f7cf163b932f11d1edfe13e2ebeb593d85d56168d9e54e8901"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-notif-025: The turn approves a purported client-name-removal PR on the subagent self-report. The absence and completion claims require independently rerunning the relevant source checks before adopting them.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-notif-025",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "the turn approves a client-name-removal PR on the subagent's self-report alone without re-grepping for remaining names, an absence claim acted on unverified, so it is met.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-notif-025",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-notif-026",
+        "case_binding": {
+          "case_id": "v2-notif-026",
+          "input_sha256": "e23b89f3f9345c6b10aa447053389957b0eaceb48c8133e25207c6a648cab9bb"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-notif-026: The turn proceeds from a bare zero-status workflow-merge notice to changing a ruleset. It treats the reported workflow completion as the transition to the next action, so completion must be independently checked; no re-check is recorded.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-notif-026",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "updating an unrelated ruleset after a bare merge success report states no count, absence, or stale-record claim about the merge itself.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-notif-026",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-notif-030",
+        "case_binding": {
+          "case_id": "v2-notif-030",
+          "input_sha256": "badb1931f6fc801d0ae496a3aec448d28bf275be52b59fc63a7d0171641e68f1"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-notif-030: The turn explicitly says it will tell the partner the page is live based on the subagent completion report. Re-reading that detailed report is not re-executing the evidence for live readiness.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-notif-030",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "telling the partner a shipped page is live, based on a subagent's already-detailed check results, states no unverified count or absence claim newly made.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-notif-030",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-rel-030",
+        "case_binding": {
+          "case_id": "v2-rel-030",
+          "input_sha256": "a5d6c20cb4dbe95c03120e9f35c9f737934b6822533b13298702947ad51b8e17"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-rel-030: Rerunning a partially failed migration depends on which changes are now applied versus pending. Re-executing the dry run is compliance with the verification obligation, not the event that creates it.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-rel-030",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "the turn dry-runs the production migration before rerunning it after a failed run, a pending-versus-applied claim re-executed before acting, so it is met.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-rel-030",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-sfb-020",
+        "case_binding": {
+          "case_id": "v2-sfb-020",
+          "input_sha256": "88c04c5fcd071d2982d268ed314a796e4195e15c90b547829541f0f6f0bd76e9"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-sfb-020: The notification says a build finished and a PR is open; no substantive finding or action is shown. A bare completion notice alone does not establish moment two, matching v2-tour-022.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-sfb-020",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "The notification that the Salesforce reconciliation build agent is done and its PR is open carries no finding acted on, with no tool calls.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-sfb-020",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-007",
+        "case_binding": {
+          "case_id": "v2-tour-007",
+          "input_sha256": "ef7f5d3fac200693a23a6421172032f2e225e0c14800498a6b9aa30b4776c0b2"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-tour-007: The partner disputes the claim that a week of pipeline work went nowhere. Answering requires checking existence and later changes before adopting that absence or stale verdict; no recorded tool call does not remove the obligation.",
+        "rule": "f47a8fe9"
+      },
+      "before": {
+        "case": "v2-tour-007",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "the partner disputes that a week of work went nowhere but the turn makes no tool call, so no count, absence, or stale-record claim is verified in this turn.",
+        "rule": "f47a8fe9"
+      },
+      "case": "v2-tour-007",
+      "rule": "f47a8fe9"
+    },
+    {
+      "after": {
+        "case": "v2-tour-014",
+        "case_binding": {
+          "case_id": "v2-tour-014",
+          "input_sha256": "97b914a1c5d42d02164cc8c456eae2c5c1732a1372c24e5546b2a3e993e3fd1a"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-tour-014: The read-only adversarial reviewer must return a head-bound verdict to its orchestrator. Moment one requires the findings to carry source and test evidence.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-014",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "Moment one is met: the read-only adversarial review of the tour field-permissions PR hands its verdict upward with the evidence behind it; the model scored this low as a review subagent, but its whole deliverable is a verdict handed upward.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-014",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-015",
+        "case_binding": {
+          "case_id": "v2-tour-015",
+          "input_sha256": "265078e2e9d72161fcdb728e4775491af339e0dad6a44bab6b5ce53650f50218"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-015: This brief builds the heat-map privacy slice through a PR. It contains no received finding, asks for no diagnostic verdict, and identifies no missing fact to escalate; a build brief alone does not meet the three moments.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-015",
+        "gold": true,
+        "jev_misfire": false,
+        "reason": "Moment one is met: the read-only adversarial review must tell the orchestrator whether anything else can leak, a finding handed upward with concrete evidence.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-015",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-016",
+        "case_binding": {
+          "case_id": "v2-tour-016",
+          "input_sha256": "7d4cded31fac92f364f3fc7278f44bc1cf8ff489a63dd4220e11b7b01f6521af"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-tour-016: The read-only adversarial heat-map review returns findings upward. Moment one binds its verdict and supporting evidence even though its first calls only fetch and read source.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-016",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "Escalation contract needs a finding handed up or received; the brief carries the heat-map privacy slice all the way to a merge-ready PR, a build.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-016",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-017",
+        "case_binding": {
+          "case_id": "v2-tour-017",
+          "input_sha256": "4bb7aa3d5f1dd8de78ae433aad8b05b1eb4868437dbe9903ace525948760d155"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-017: This brief pins two reference tables and requests an evidence judgment while building. No received finding or upward review deliverable is present in the observed turn; invoking a prospective judge is not yet acting on its finding.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-017",
+        "gold": true,
+        "jev_misfire": false,
+        "reason": "Moment one is met: the read-only adversarial review of the heat-map privacy PR hands its verdict upward, which must carry the evidence behind it.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-017",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-018",
+        "case_binding": {
+          "case_id": "v2-tour-018",
+          "input_sha256": "9c127cee74ab73212dc169602ee11f3d519868a1cdd07acd7e4a8de3712447b6"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-018: Searching medical-office listings and putting them on a map is a direct partner task. No subagent finding is handed upward or relied on.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-018",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "Escalation contract needs a finding handed up or received; pinning the two Census reference tables on a fresh branch is construction work, not a report.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-018",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-019",
+        "case_binding": {
+          "case_id": "v2-tour-019",
+          "input_sha256": "15a9c4e470ed2d1500e90f810f759a5a3b57e4e5bf870e9a5194ed8a121f14c1"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-019: Reordering a day trip and accepting its route version acts on the partner instruction, not on a subagent finding.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-019",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "Escalation contract needs another seat's finding; searching tour properties for the client's size range and mapping them is the session's own direct task.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-019",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-020",
+        "case_binding": {
+          "case_id": "v2-tour-020",
+          "input_sha256": "b32d6ccbccea94cc512334600324349b3bd45cb8fcf7ef6d57404474b334003a"
+        },
+        "gold": true,
+        "jev_misfire": false,
+        "reason": "v2-tour-020: The independent verifier must return PASS or FAIL with numbered source and test evidence to its orchestrator. That is moment one, a finding handed upward.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-020",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "Escalation contract needs another seat's finding; reordering tomorrow's day-trip stops on the partner's request is a direct tour write, not a finding.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-020",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-021",
+        "case_binding": {
+          "case_id": "v2-tour-021",
+          "input_sha256": "6872e516970bc095a40b4506ca3fbd44613ba98be77e5f855370f76bd2e2bdce"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-021: The watcher reports only that a background process exited zero. With no finding content or action in this case, no material subagent finding is being acted on or relayed.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-021",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "Moment one is met: the independent verifier of the already-merged registration migration reports back each point with the git and test evidence behind it.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-021",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-022",
+        "case_binding": {
+          "case_id": "v2-tour-022",
+          "input_sha256": "0cde126a790c9fab6a1f7ff9e812a527a9c79694a3182983f603af20f1f12e5f"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-022: The notification says a diagnosis agent finished and gives only Report. PR: ...; it includes no diagnosis content and records no action on it. As with v2-sfb-020, receipt of a bare completion notice does not establish moment two. A later relay or fix would need its own adjudication.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-022",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "The background-watcher notification that the tour PR finished merging or closing carries no result content and no tool call acts on any finding.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-022",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-023",
+        "case_binding": {
+          "case_id": "v2-tour-023",
+          "input_sha256": "160dfecd9ff78fabe7e2586f8c73563b747de3b63d55c6a46175e997b057008c"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-tour-023: The subagent brief asks for a diagnosis of the hosted PDF 503 and web write path. Its report goes upward to the orchestrator, so moment one requires reproducible source evidence.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-023",
+        "gold": true,
+        "jev_misfire": false,
+        "reason": "Moment two is met: a diagnosis subagent's report about why hosted tour PDF rendering breaks arrives and the reply will pass it up to the partner, so it must be re-run first; the model missed that a received diagnosis about to be relayed is exactly moment two.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-023",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-024",
+        "case_binding": {
+          "case_id": "v2-tour-024",
+          "input_sha256": "6ddf539def5b9ea6342ae118033e175c463455fe1e1f40e2fb17f29589f14c4c"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-024: Applying a migration and registering properties is a direct production task. The case contains no subagent or peer finding supplying the action.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-024",
+        "gold": true,
+        "jev_misfire": false,
+        "reason": "Moment one is met: the brief's deliverable is a diagnosis of the render and write-path 503, a finding handed upward that must carry its evidence.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-024",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-025",
+        "case_binding": {
+          "case_id": "v2-tour-025",
+          "input_sha256": "3b7a5451b30a191d1e7fb45ee75823c566270c5f04a29d379851beec0ffb7b53"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-025: Creating a draft tour follows the partner request directly. There is no agent finding to reproduce or escalate.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-025",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "Escalation contract needs another seat's finding; applying the registration migration and registering the client's properties on the partner's request has no finding.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-025",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-026",
+        "case_binding": {
+          "case_id": "v2-tour-026",
+          "input_sha256": "44013ef5338824b492e2680431da437351fa3c1888a0f6804198620ebe5b5960"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-026: Requesting and reading a PDF render follows the partner request directly. No peer finding appears in the case.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-026",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "Creating a draft tour for the dentist client on the partner's instruction is a direct record task, with no subagent or peer finding involved.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-026",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-027",
+        "case_binding": {
+          "case_id": "v2-tour-027",
+          "input_sha256": "5a244600351594f9bbb23fa7c9d18d0570ed0060a1b83d8716cdb3de0dd74e11"
+        },
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "v2-tour-027: The turn edits runtime code because another session diagnosed a timestamp-format failure. Moment two binds before this write: independently reproduce that material finding first, even though the recorded turn skipped that step.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-027",
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "Requesting and reading the tour PDF render for tomorrow's showing is a direct record task, with no subagent or peer finding involved.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-027",
+      "rule": "c20dc3d5"
+    },
+    {
+      "after": {
+        "case": "v2-tour-028",
+        "case_binding": {
+          "case_id": "v2-tour-028",
+          "input_sha256": "1fa8a8671a26c826ba8e864703dcf4c98e3ff19d4bd35fbe3e14d66401023111"
+        },
+        "gold": false,
+        "jev_misfire": false,
+        "reason": "v2-tour-028: Adding and holding route stops follows the partner instruction. There is no timestamp diagnosis or other agent finding in this case.",
+        "rule": "c20dc3d5"
+      },
+      "before": {
+        "case": "v2-tour-028",
+        "gold": true,
+        "jev_misfire": true,
+        "reason": "Moment two is met: the partner says to take another session's diagnosis of the timestamp-format break and fix it, a write resting on that finding.",
+        "rule": "c20dc3d5"
+      },
+      "case": "v2-tour-028",
+      "rule": "c20dc3d5"
+    }
+  ],
+  "rule_statement_sha256": {
+    "20d106f1": "99a78a202c74badeca4a31daf0cd7cae72be430e327d4350ab3ad307ab44aa8b",
+    "bbffc139": "dd60cd601382d047b2bd2e237e5b4eeda47ac65ebbed421779b4e58574503f2c",
+    "c20dc3d5": "e0036776a081b588e8ecb9d660b88791b65c427f6c2f73c33158681446a6b9f3",
+    "f47a8fe9": "f481ce9dcd1ab89119e529c6396fe7cb7218cc298f63b26dffa9b673647ef9cc"
+  },
+  "schema": "rule-adjudication-repair/v1",
+  "scope": "29 concrete rows cited by the round-4 review, plus two unchanged comparison rows. Other labels retain their historical decisions; no fresh semantic review of all 9821 rows is claimed.",
+  "source": "current STORE standing-context rule_ids; public benchmark case prompts and tool inputs only",
+  "source_adjudications_sha256": "2478f0aa576bd9bd09437434976270b581813f58e1dd26916391c54faab54b75",
+  "source_head": "835878f35c39efe744b63d4d718a4bfeee2a8b6b",
+  "trigger_criteria": {
+    "20d106f1": "A substantial new build/design thread, significant prediction/major call, or confident direction outside established expertise. Do not infer those solely from a question, broad audit, or small implementation choice.",
+    "bbffc139": "Inside the work, a named ledger trigger or commit/deploy/handoff/subject-change boundary occurs. A bare retry is not itself a correction.",
+    "c20dc3d5": "A finding goes upward with evidence; a received material agent finding is about to be acted on or relayed; or acting lacks needed facts and requires returning to the producing seat. A bare completion notice with no finding or action does not suffice.",
+    "f47a8fe9": "The turn answers, makes, relays or acts on a count, absence/presence, completion/readiness, populated-record or stale-state claim. Applicability comes from the claim being relied on, not from whether the recorded turn performed its verification. A bare unacted-on notice or prospective task alone is not a verified claim."
+  }
+}

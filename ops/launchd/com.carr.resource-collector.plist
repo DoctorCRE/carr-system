@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- doctrine: resource-collector-mechanism -->
+  <!--
+    DoctorCRE V5-UX-C06's local capacity/model-route collector
+    (tools/resource-collector.py). Uninstalled here, like every other
+    LaunchAgent definition this repo ships: nothing loads, bootstraps, or
+    enables this from the file existing. Do not load, unload, bootstrap, or
+    otherwise alter existing schedules from this definition.
+
+    The interpreter is Xcode's command-line-tools python3, not Homebrew's or
+    the system's — launchd's PATH does not carry Homebrew's bin directory,
+    and this is the one CPython launchd can already reach without a PATH
+    override. See tools/resource-collector.py's own header for why.
+
+    DEFINITION-ONLY, deliberately. This ships with no trigger key
+    (StartCalendarInterval/RunAtLoad/etc): ops/scac-mutation-inventory.mjs's launchd
+    inventory (isDefinitionOnlyLaunchd) requires a registered
+    ops/config/services.json entry for any launchd row that WOULD fire if
+    loaded, and this change does not register one — registering the
+    recurring cadence and its ops.service mapping is a separate, later
+    decision, not this slice's to make. Adding a schedule here without
+    that mapping would fail the live inventory build.
+  -->
+  <key>Label</key><string>com.carr.resource-collector</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Developer/CommandLineTools/usr/bin/python3</string>
+    <string>{{REPO}}/tools/resource-collector.py</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StandardOutPath</key><string>{{REPO}}/out/resource-collector-launchd.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/resource-collector-launchd.log</string>
+</dict>
+</plist>

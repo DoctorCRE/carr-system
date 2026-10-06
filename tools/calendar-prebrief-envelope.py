@@ -4,6 +4,9 @@ from __future__ import annotations
 import base64, hashlib, json, os, subprocess
 from pathlib import Path
 from typing import Any, Callable
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from lib.machine_prerequisites import openssl_executable
 class Refusal(RuntimeError): pass
 REQUIRED={"sponsor","job_id","lease","scheduled_for","allowlist_revision","observed_calendar_keys","raw_capture_digest","raw_capture_count","collector_version","key_fingerprint","signature"}
 def canonical(envelope:dict[str,Any])->bytes:
@@ -31,7 +34,7 @@ def verify(envelope:dict[str,Any],public_key:Path,expected_fingerprint:str,repla
     remaining=remaining[written:]
    os.lseek(payload_fd,0,os.SEEK_SET); os.write(signature_fd,signature); os.lseek(signature_fd,0,os.SEEK_SET); input_path=f"/dev/fd/{payload_fd}"; input_data=None; signature_path=f"/dev/fd/{signature_fd}"
   else: os.write(sig_w,signature)
-  proc=subprocess.Popen(["openssl","pkeyutl","-verify","-pubin","-inkey",str(public_key),"-rawin","-in",input_path,"-sigfile",signature_path],stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,pass_fds=tuple(item for item in (sig_r,payload_fd,signature_fd) if item>=0))
+  proc=subprocess.Popen([openssl_executable(),"pkeyutl","-verify","-pubin","-inkey",str(public_key),"-rawin","-in",input_path,"-sigfile",signature_path],stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,pass_fds=tuple(item for item in (sig_r,payload_fd,signature_fd) if item>=0))
   os.close(sig_r); os.close(sig_w); sig_w=-1
   proc.communicate(input_data,timeout=5)
  except Exception as e: raise Refusal("collector signature verification failed") from e

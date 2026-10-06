@@ -349,7 +349,7 @@ def sentences(text):
             continue
         parts, buf = [], ""
         # The split allows markdown emphasis to sit BETWEEN the full stop and the
-        # space. Without it "…still to be toured.** Joe **emailed Petersen today
+        # space. Without it "…still to be toured.** Joe **emailed Whitfield today
         # (7/21)…" stays one sentence, and the intention in the first half
         # suppresses the real send in the second — the exact way a filter starts
         # eating events it was never aimed at.
@@ -379,7 +379,7 @@ def resolve_email_direction(text, match_start):
       * we are the subject ("Joe emailed…", "Dell emailed…", "we wrote") -> out
       * a named third party is the subject ("Erik emailed 7/22") -> in
       * NO subject at all, the dossier's own shorthand under a label
-        ("**Outreach notes:** Emailed Weiler 1/16/26") -> out, because the record
+        ("**Outreach notes:** Emailed Sorbara 1/16/26") -> out, because the record
         is written from CARR's side and an unattributed send is CARR's send
     None is returned when none of the three reads cleanly, and the sentence goes
     to the review list rather than being assigned a direction it did not state.
@@ -472,7 +472,7 @@ def extract(rows):
             # deliberate. In English an intent marker governs the verb that
             # FOLLOWS it ("plans to email"), so one sitting after the verb is
             # describing what comes next, not cancelling what happened: "Joe
-            # emailed Petersen today (7/21) to schedule a call" is a send that
+            # emailed Whitfield today (7/21) to schedule a call" is a send that
             # happened, and the first pass threw it away. Negation stays
             # whole-sentence, because "the drafted LOI never went out" puts the
             # negation after the noun the pattern anchored on and a positional

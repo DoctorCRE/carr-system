@@ -17,7 +17,7 @@
 // observatory never learns of a staffing change late or not at all.
 
 import { personalScopeForActor } from "./identity.js";
-import { appendRoomTurn } from "./partner-room.js";
+import { appendRoomTurn, OBSERVATORY_ROOM } from "./partner-room.js";
 import { ToolError } from "./tool-error.js";
 
 const PROFILE_STATUSES = ["active", "unstaffed", "parked"];
@@ -122,11 +122,12 @@ export function agentProfileTools({ withEnvelope, writeEvent, ToolError }) {
         // The wire receipt, in the SAME transaction as the change: the
         // observatory's constraint is that profile truth must reach any feed
         // window, and a receipt that can be lost between a commit and a
-        // separate poster is a receipt that will eventually be lost.
+        // separate poster is a receipt that will eventually be lost. It lands in
+        // the room the panel reads (OBSERVATORY_ROOM).
         const scope = personalScopeForActor(actor);
         const sponsor = actor?.human === true ? actor.slug : scope.sponsor;
         const receipt = await appendRoomTurn(c, {
-          room: "partner-line", sponsor, seat: "claude", kind: "receipt",
+          room: OBSERVATORY_ROOM, sponsor, seat: "claude", kind: "receipt",
           body: JSON.stringify({ agent_profile: {
             key: profile.profile_key, name: profile.display_name,
             model: profile.current_model, desk: profile.current_desk,

@@ -165,6 +165,11 @@ def run_turn(
     this returns the actual answer: the app-server hands back item/completed on
     the same connection, so there is nothing asynchronous to reconcile.
     """
+    from desks import DeskError, desk_prompt
+    if approval_policy != "never":
+        raise DeskError("unsafe_approval_policy",
+                        "dispatched Codex desks require never; permission needs go to the orchestrator")
+    task = desk_prompt(task)
     wire = Wire(sock_path, timeout=timeout)
     transcript: list[dict] = []
     wire.upgrade()
@@ -184,7 +189,7 @@ def run_turn(
         wire.send_json({
             "id": "thread-open",
             "method": "thread/resume",
-            "params": {"threadId": thread_id},
+            "params": {"threadId": thread_id, "approvalPolicy": "never"},
         })
     else:
         params = {"approvalPolicy": approval_policy, "sandbox": sandbox}
@@ -196,7 +201,8 @@ def run_turn(
     opened = wait_response(wire, "thread-open", transcript)
     tid = (opened.get("thread") or {}).get("id") or thread_id
 
-    turn_params = {"threadId": tid, "input": [{"type": "text", "text": task}]}
+    turn_params = {"threadId": tid, "input": [{"type": "text", "text": task}],
+                   "approvalPolicy": "never"}
     if model:
         turn_params["model"] = model
     wire.send_json({"id": "turn-start", "method": "turn/start", "params": turn_params})

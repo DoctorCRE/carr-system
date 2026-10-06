@@ -320,3 +320,28 @@ too, surviving only in the two backup artifacts, which stay until Joe deletes
 them deliberately. STILL OPEN, Joe's option: the GitHub GC support ticket
 (server-side unreachable objects until their housekeeping runs; private repo
 bounds the exposure).
+
+## ADDENDUM 2026-09-26 — `baselines/renewal-radar.json` reclassified as PII-bearing
+
+This document's original assessment above, in both "What is currently
+tracked" and step 6's purge notes, called `baselines/renewal-radar.json`
+"NOT PII — stays tracked, do not purge" and required it to survive the purge
+untouched. That assessment was wrong: on inspection the file carries real
+tenant/landlord names, street addresses and phone numbers (about 150 rows,
+same shape of exposure as the two files this document did purge). The
+original sentences above are left unedited, per this document's own practice
+of dated addenda rather than silent rewrites of historical assertions.
+
+Go-forward mechanism only, done in PR #1334: `baselines/renewal-radar.json`
+moved to the same hash-only tracking as `lead-board.html` and
+`deal-room-panhandle.html` (gitignored, `git rm --cached`'d, full file stays
+local, sha256 added to `baselines/SHA256SUMS`). This does **not** purge the
+file from history — no `git filter-repo` ran, no force-push happened. The
+file's git history is exactly the 3 commits `git log --all --oneline --
+baselines/renewal-radar.json` shows (paths, not values, recorded here);
+whether to run a second history purge for it, on this document's same
+mechanism (steps 1-9 above, updated to target `baselines/renewal-radar.json`
+instead of the two HTML files), is Joe's call — flagged for him, not decided
+here. This repo is also now PUBLIC (not private, contrary to this document's
+and the README's private-repo assumption at the time each was written), which
+raises the stakes of leaving this file's history unpurged.

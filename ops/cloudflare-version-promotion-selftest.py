@@ -158,6 +158,36 @@ def main() -> int:
           (missing_candidate.stdout + missing_candidate.stderr),
           f"rc={missing_candidate.returncode}")
 
+    # ── the maker is not a caller field (standing-rule amendment 9) ──────
+    #
+    # The Gate Zero producer reads its SUBJECT MAKER out of the
+    # release-candidate row, so a --maker somebody typed would be
+    # caller-asserted metadata inside a receipt that claims provenance. Both
+    # halves of the pair are refused, before any credential is opened, and the
+    # refusal names where the identity comes from instead: migration 0504's
+    # record of the login role that filed the row.
+    for flag, value in (("--maker", "joe"), ("--maker-verification", "ref:anything")):
+        asserted = run_record(
+            "release", "candidate", "--key", "selftest", "--environment", "production",
+            "--provider", PROVIDER, "--provider-version-id", VERSION, flag, value)
+        check(f"4aa. a candidate asserting {flag} is refused",
+              asserted.returncode == 2
+              and "not a caller field" in (asserted.stdout + asserted.stderr)
+              and "records the filing login role from session_user"
+                  in (asserted.stdout + asserted.stderr),
+              f"rc={asserted.returncode} err={(asserted.stderr or asserted.stdout)[:160]}")
+    filed_at = deploy.find('ops-record.py" release candidate')
+    filed_command = deploy[filed_at:deploy.find("|| fail", filed_at)] if filed_at != -1 else ""
+    check("4ab. the wrapper files the candidate itself instead of printing a command",
+          filed_at != -1
+          and "Record this exact candidate" not in deploy
+          and "--provider-version-id" in filed_command
+          and "--manifest" in filed_command,
+          "the upload path still hands the record to a human to run")
+    check("4ac. and it passes no maker of its own",
+          "--maker" not in filed_command,
+          "the wrapper names a maker the database is supposed to derive")
+
     missing_require = run_record("release", "require", "--environment", "production")
     check("4b. Production approval lookup fails closed without provider identity",
           missing_require.returncode == 2
@@ -260,18 +290,22 @@ def main() -> int:
           (refused_target.stdout + refused_target.stderr),
           f"rc={refused_target.returncode}")
 
+    # A service uploads the candidate and receives its own database-derived
+    # maker identity. Manifest verification still precedes the connection.
     candidate_verify_at = record.find("release-manifest.py")
-    candidate_connect_at = record.find('with connect("write")', candidate_verify_at)
-    check("5e. candidate verification runs before opening the write connection",
+    candidate_connect_at = record.find('connection_kind = ("authority"', candidate_verify_at)
+    check("5e. candidate verification runs before the connection opens",
           candidate_verify_at != -1 and candidate_connect_at > candidate_verify_at)
+    check("5e-i. candidate and readiness use the scoped service connection",
+          'else "routine" if args.action in ("candidate", "ready", "reopen")' in record)
 
     check("5f. Cloudflare UUIDs normalize to lowercase at both boundaries",
           "args.provider_version_id = version_id.lower()" in record
           and "tr 'A-F' 'a-f'" in deploy)
 
     check("6. release candidate persists both provider identity fields",
-          re.search(r"insert into ops\.release.*?provider.*?provider_version_id",
-                    record, re.DOTALL) is not None)
+          re.search(r"CANDIDATE_INSERT,.*?args\.provider, "
+                    r"args\.provider_version_id", record, re.DOTALL) is not None)
     check("6a. Production candidate verifies the manifest carries the exact pair",
           "manifest_identity != requested_identity" in record
           and "approval plan hash" in record)
@@ -283,15 +317,15 @@ def main() -> int:
                     record, re.DOTALL) is not None)
 
     resolve_at = deploy.find("RELEASE_BINDING=")
-    rebuild_at = deploy.find('release-manifest.py" build --sha "$HEAD_SHA"', resolve_at)
+    rebuild_at = deploy.find('build_release_manifest "$HEAD_SHA" production', resolve_at)
     bind_at = deploy.find('release-manifest.py" bind-provider', rebuild_at)
     recheck_at = deploy.find("RECONFIRMED_BINDING=", bind_at)
     promote_at = deploy.find('"$WRANGLER" versions deploy', recheck_at)
-    check("7. promotion resolves SHA, recomputes evidence, then rechecks approval",
+    check("7. promotion resolves SHA, recomputes evidence, then rechecks readiness",
           -1 not in (resolve_at, rebuild_at, bind_at, recheck_at, promote_at)
           and resolve_at < rebuild_at < bind_at < recheck_at < promote_at,
           f"positions={resolve_at,rebuild_at,bind_at,recheck_at,promote_at}")
-    check("7b. final approval check binds SHA, provider UUID, and plan hash",
+    check("7b. final readiness check binds SHA, provider UUID, and plan hash",
           '--sha "$HEAD_SHA" --environment production' in deploy
           and '--provider-version-id "$PROVIDER_VERSION_ID"' in deploy
           and '--plan-hash "$RELEASE_PLAN_HASH"' in deploy)

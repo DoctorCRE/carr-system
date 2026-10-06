@@ -62,7 +62,7 @@ occurrence as a discrepancy with the deal it appeared on. Any other CARR-owned c
 in a client field gets the same treatment, whether or not it is on this list.
 
 **8. Never auto-merge on a name.** Salesforce and the Deal Room drift on spelling ("Erik Peterson"
-against "Erik Petersen, DO, First Call DPC"). The differ surfaces near-matches as confirm-this
+against "Marcus Whitfield, DO, Bayview DPC"). The differ surfaces near-matches as confirm-this
 suggestions with the match basis shown. It never silently joins them, and neither do you. Same
 discipline as the standing lone-surname rule.
 
@@ -149,6 +149,7 @@ denied.
 - **Chrome is granted** because Joe's Salesforce session lives there and the capture script needs the javascript tool against the report iframe. Salesforce has no block on the extension; CoStar's rule does not apply here and must not be confused with it.
 - **The desktop Browser pane is denied** so the two platform surfaces never blur. One agent, one browser.
 - **Write is granted for exactly one file:** `Automation/salesforce-deals-latest.tsv`. Nothing else.
+- **READ THAT FILE AND COUNT ITS ROWS BEFORE YOU OVERWRITE IT, EVERY TIME.** If the capture holds fewer rows than the file already on disk, do not write. Report the shortfall and stop. A short capture that looks complete is worse than no capture.
 - **Bash is granted** to run `salesforce-diff` and to inspect the TSV.
 - **`Agent` is denied and you hold no record-layer write verbs.** Per the standing constraint an agent that can spawn does not carry write verbs; you carry neither, because every write this run implies is either a Joe-gated `--apply` or a confirm-this suggestion that a human has to rule on.
 

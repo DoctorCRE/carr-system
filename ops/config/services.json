@@ -71,6 +71,42 @@
 
   "services": [
     {
+      "key": "flash-idle-stop",
+      "name": "Flash idle shutdown",
+      "purpose": "Every five minutes, stop and disable ds4-server and its Model Room desk after fifteen minutes without a request. Shared request locks protect in-flight work.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "bin/flash-idle-stop",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.flash-idle-stop.plist",
+          "expected_cadence_seconds": 300,
+          "cadence_grace_seconds": 600,
+          "notes": "No credential or model call. Completion means idle decision checked; failures exit nonzero in out/flash-idle-stop.log and surface as flash_residency health findings."
+        }
+      ]
+    },
+    {
+      "key": "tailscale-up",
+      "name": "Tailscale recovery at login",
+      "purpose": "Starts a stopped primary Mac node once at login using its stored preferences and node key. Ordinary health reads the local backend state; logged-out nodes require sign-in.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "bin/tailscale-up.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.tailscale-up.plist",
+          "notes": "Primary-only RunAtLoad, no repeating cadence or KeepAlive. ops/tailscale_health.py reads the backend independently of login frequency."
+        }
+      ]
+    },
+    {
       "key": "carr-mcp",
       "name": "CARR record and doctrine API (Cloudflare Worker)",
       "purpose": "Every record verb, the doctrine store, the Deal Room web host, and OAuth.",
@@ -99,6 +135,20 @@
       ]
     },
     {
+      "key": "migrate-prod",
+      "name": "Production migration door (bin/migrate-prod.sh)",
+      "purpose": "Registered so the door's own WR-000048 prevention wiring can open-incident against a real service key — open-incident refuses an unregistered one rather than inventing it (mcp-server/src/incident.js). This is the WRAPPER SCRIPT ITSELF as a monitored subject, distinct from neon-record-layer above (the data store migrate-prod.sh writes to, which lists bin/migrate-prod.sh only as ITS deploy_mechanism).",
+      "family": "Data",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "bin/migrate-prod.sh",
+      "runtime": "operator-invoked",
+      "environments": [
+        { "environment": "production",
+          "notes": "No cadence: this door is run by hand or by a session, never on a schedule, so absence of activity is not itself an anomaly — same 'a service with no cadence is not an oversight' posture as carr-mcp above." }
+      ]
+    },
+    {
       "key": "nightly-record-layer",
       "name": "Nightly record-layer chain",
       "purpose": "Cadence, matcher, exports, corpus push, consumers, graph, backup — in that order.",
@@ -114,6 +164,25 @@
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 7200,
           "notes": "Daily at 02:05. Two hours of grace covers a long backup."
+        }
+      ]
+    },
+    {
+      "key": "nightly-exports-daytime-retry",
+      "name": "Nightly exports daytime retry",
+      "purpose": "Safety net for nightly-record-layer's exports step (defect: failed 9/22-9/24, the OneDrive File Provider idling overnight — see doctrine 'nightly-exports-onedrive-wake'). Re-runs `./run.sh export` once, only if tonight's own archived nightly log did not report the exports step OK.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "bin/nightly-exports-retry.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.nightly-exports-daytime-retry.plist",
+          "expected_cadence_seconds": 86400,
+          "cadence_grace_seconds": 7200,
+          "notes": "Daily at 11:00 local (StartCalendarInterval Hour/Minute are local time, not UTC), one fixed calendar fire. A no-op most days (exits immediately once tonight's own nightly-record-layer run already landed exports OK), so absence of a RETRY line in out/nightly.log is the expected common case, not an anomaly — same posture as migrate-prod above."
         }
       ]
     },
@@ -214,7 +283,7 @@
     {
       "key": "room-bridge",
       "name": "Partner room bridge",
-      "purpose": "Polls the shared partner room (add-room-turn/read-room, Idea 78) and routes new turns to local desks (claude-session, codex-session), captures each desk's reply and posts it back, and runs the assignment grammar. On the same existing wake, the separate lease-bound Engineering Passport controller may drain one already-admitted engineering-slice job through the fixed fresh Codex desk; it never creates work or exposes its carr_jobs credential to that desk. Queue projection alone uses the locked, shape-checked project-room-queue door; ordinary room traffic remains on the local-machine identity. The live wire between the room and the desks registered in ~/.config/carr/hermes-desks.json.",
+      "purpose": "Polls the shared partner room (add-room-turn/read-room, Idea 78) and routes new turns to local desks (claude-session, codex-session), captures each desk's reply and posts it back, and runs the assignment grammar. The explicit claude-desktop queue target starts a durable Claude background session only after a queue claim, then uses Claude Code's supported /desktop handoff after completion; it is excluded from ordinary conversational fan-out. On the same existing wake, the separate lease-bound Engineering Passport controller may drain one already-admitted engineering-slice job through the fixed fresh Codex desk; it never creates work or exposes its carr_jobs credential to that desk. Queue projection alone uses the locked, shape-checked project-room-queue door; ordinary room traffic remains on the local-machine identity. The live wire between the room and the desks registered in ~/.config/carr/hermes-desks.json.",
       "family": "Local Mac edge",
       "criticality": "medium",
       "owner_actor": "joe",
@@ -250,6 +319,44 @@
       ]
     },
     {
+      "key": "timebomb-audit",
+      "name": "Weekly time-bomb audit",
+      "purpose": "Scans tracked source for time-bomb signatures (code that breaks, or silently changes behaviour, purely because time passes or history/data/counters grow), computes deterministic headroom for repo-history windows and literal dates, asks Jev to rank the rest, and files new findings to the record layer and the partner-room queue. Monday 03:30. See ops/timebomb-audit.py.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "ops/timebomb-audit.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.timebomb-audit.plist",
+          "expected_cadence_seconds": 604800,
+          "cadence_grace_seconds": 259200,
+          "notes": "Weekly, Monday 03:30 local. Grace spans a long weekend / a missed Monday plus buffer to the following run — same reasoning calendar-eventkit and local-briefs use for their own weekend stand-down."
+        }
+      ]
+    },
+    {
+      "key": "delivery-cadence-a05-sweep",
+      "name": "V5-A05 delivery-cadence sweep",
+      "purpose": "Reads cadence-status for the bounded v1 subject (engineering_program/doctorcre-v5) and, only on a detected 14-day miss, raises the replan-on-miss escalation through raise-delivery-cadence-alert. Daily 07:00. See ops/delivery-cadence-a05-sweep.py.",
+      "family": "Local Mac edge",
+      "criticality": "low",
+      "owner_actor": "joe",
+      "repo_path": "ops/delivery-cadence-a05-sweep.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
+          "expected_cadence_seconds": 86400,
+          "cadence_grace_seconds": 172800,
+          "notes": "Daily, 07:00 local, before the working day. Grace spans a missed day plus buffer to the following run, matching timebomb-audit's own weekend-spanning reasoning."
+        }
+      ]
+    },
+    {
       "key": "calendar-prebrief-joe",
       "name": "Joe calendar prebrief projection",
       "purpose": "Runs the sponsor-bound local EventKit prebrief adapter. Its launchd tick may schedule and claim only the existing Joe live jobs lease; activation remains receipt-backed and explicit.",
@@ -281,9 +388,9 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.fleet-sync.plist",
-          "expected_cadence_seconds": 43200,
+          "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 3600,
-          "notes": "Fires daily at 07:45, 11:45, 15:45 and 19:45 local. The longest honest gap is twelve hours overnight, so cadence is 43200s; 3600s grace covers launch delay and the local spool's next-flush delay. The plist routes through bin/run-scheduled.sh as service fleet-sync with run key fleet.sync. This declaration makes the job representable; it does not claim the LaunchAgent is installed or loaded, or that ops.service has been synced."
+          "notes": "Fires hourly (StartCalendarInterval at :31, lib/launchd_calendar.py) and again at RunAtLoad (login/wake), changed 2026-09-23 from four fixed daily fires so a Mac asleep or unused for a stretch catches up immediately instead of reading up to twelve hours stale. Cadence is 3600s; 3600s grace covers launch delay and the local spool's next-flush delay, matching the grace already used by this repo's other hourly local jobs (e.g. notes-sweep). The plist routes through bin/run-scheduled.sh as service fleet-sync with run key fleet.sync, and now also fast-forwards the sibling checkouts declared in ops/config/fleet-sync-siblings.json (doctorcre-app, software-factory) under the same fail-closed contract; a sibling's own outcome is reported but never affects this service's own run status. This declaration makes the job representable; it does not claim the LaunchAgent is installed or loaded, or that ops.service has been synced."
         }
       ]
     },
@@ -343,6 +450,25 @@
       ]
     },
     {
+      "key": "cutover-watch",
+      "name": "Control-plane cutover watch",
+      "purpose": "Unattended report-only watch over the control-plane cutover: completed jobs whose receipts are not yet accepted, jobs newly dead-lettered, and the acceptance table. Writes a loop update to open loop #532 and notifies Joe locally on any change; never accepts, promotes, disables, or dispatches anything (rule 1f3a7372, rule 847f9995). See bin/cutover-watch.sh and tools/cutover-watch.py.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "bin/cutover-watch.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.cutover-watch.plist",
+          "expected_cadence_seconds": 1800,
+          "cadence_grace_seconds": 3600,
+          "notes": "Grace is 2x the 1800s interval, same reasoning as cc-version-sentinel: run rows ride the local spool (tools/ops-spool.py) and land at the next run-spool-flush, so a row can be inserted up to ~1800s after its fire. NOT YET INSTALLED (built in worktree cutover-watch, 2026-08-27) — the orchestrating session installs it after this branch merges to main; see tools/scheduler-truth.py's INSTALL_EXEMPT for the same statement in machine-checkable form."
+        }
+      ]
+    },
+    {
       "key": "recordings-purge",
       "name": "Recording retention purge",
       "purpose": "Deletes call recordings past their retention window.",
@@ -380,10 +506,90 @@
     },
 
     {
+      "key": "canonical-fast-forward",
+      "name": "Canonical checkout fast-forward",
+      "purpose": "WR-000040 AC-FRESH. Keeps the shared checkout at ~/carr-system within one day of origin/main, and never buys that with somebody's edit: it refuses on tracked modifications, refuses off main, refuses when canonical is ahead, and its only branch-moving command is `git merge --ff-only`. No reset, no checkout of a path, no clean, no stash. See lib/canonical_freshness.py, reached through tools/repo-hygiene-janitor.py --canonical-freshness fast-forward.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "lib/canonical_freshness.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.canonical-fast-forward.plist",
+          "expected_cadence_seconds": 86400,
+          "cadence_grace_seconds": 108000,
+          "notes": "Daily at 03:20 local, per Joe's AC-FRESH cadence ruling (decision fa8ae14b-e6fe-4e1b-ae98-0b6eb5a255f8, 2026-09-11). Grace is 1.25x the cadence because a succeeded row rides the local spool (tools/ops-spool.py) and lands at the next run-spool-flush, up to ~1800s after the fire. A REFUSAL IS NOT A FAILURE OF THIS SERVICE: exit 3 (tracked dirt), 4 (ahead of origin) and 7 (wrong branch) mean the job correctly declined to move somebody's tree, and com.carr.canonical-dirty-watchdog is the surface that pages about the condition. This service going quiet is what matters here, which is why it has a cadence at all."
+        }
+      ]
+    },
+
+    {
+      "key": "release-pipeline",
+      "name": "Scripted release pipeline (Worker + DoctorCRE app)",
+      "purpose": "Decisions 17ef11fa/b729859d: release is script-triggered. Every minute compares each lane's origin/main with the last SHA it released and, when the batch touches release paths, runs the sanctioned manual release sequence unattended from a detached worktree at the exact SHA (staging replacement, staging app writer, migrate-prod, deploy-worker upload/staging/promote, live readback, health; credential-free node scripts/prepare-release.mjs, then provider-only node scripts/release-production.mjs for the app). Stops on any nonzero exit, records the step and log, never retries that SHA, and enqueues a repo-write Model Room diagnosis session to fix forward by PR. Kill switch: ops/config/release-pipeline.v1.json enabled, or ~/.config/carr/release-pipeline.off. See ops/release-pipeline.py.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "ops/release-pipeline.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.release-pipeline.plist",
+          "expected_cadence_seconds": 3600,
+          "cadence_grace_seconds": 5400,
+          "notes": "Wakes every 60s; bin/run-scheduled.sh --heartbeat-interval 3600 throttles SUCCEEDED rows to one an hour, and every failure (a stopped release, or exit 3 for a missing unattended credential) is recorded immediately. Grace covers the ops-spool flush delay, as for room-bridge. What shipped, failed or blocked is in out/release-pipeline/releases.jsonl; `ops/release-pipeline.py report --date D` prints it for a daily note."
+        }
+      ]
+    },
+
+    {
+      "key": "canonical-dirty-watchdog",
+      "name": "Canonical checkout dirty/staleness watchdog",
+      "purpose": "WR-000040 AC-FRESH, the alarm half. Observes the canonical checkout ALONE — it never calls the fast-forward and never reads anything the fast-forward wrote — so it still pages when that agent is unloaded, its program is missing, or the machine slept through every window. Pages on an unobservable repository, tracked dirt, a branch other than main, staleness past the 24h bar, canonical holding commits origin/main does not have, and an unverifiable fetch. Untracked paths are counted and named, never alarmed: AC-CLEAN routes those to Joe per path.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "lib/canonical_freshness.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.canonical-dirty-watchdog.plist",
+          "expected_cadence_seconds": 3600,
+          "cadence_grace_seconds": 5400,
+          "notes": "Hourly, per the same AC-FRESH cadence ruling. Criticality HIGH although the job only reads: it is the only surface that reports the fast-forward never having fired, and launchd says nothing when it drops an agent. It pages by two independent routes — a report-problem record through run.sh, and a nonzero exit that this wrapper turns into a failed run row — so an unreachable store cannot silence it. Grace is 1.5x the cadence for the same spool delay as its sibling."
+        }
+      ]
+    },
+
+    {
+      "key": "gate-zero-canary",
+      "name": "Gate Zero scheduler canary",
+      "purpose": "The no-op job whose only product is proof that the scheduler ran it. Gate Zero's fourth predecessor step, step:scheduler-active-receipt, needs an ops.run row bound to a receipt — non-null evidence_ref, written by bin/run-scheduled.sh with source_kind wrapper — plus an observation strictly after that dispatch; mcp-server/src/gate-zero-seam-readers.v5.js is the reader that judges it. Measured 2026-09-11 against production: 28,309 runs, 21,894 of them from the wrapper, and ZERO carrying an evidence_ref, so the clause was unsatisfiable by any row in the ledger's history rather than merely unmet. WHY A DEDICATED JOB: a real job's row conflates 'the scheduler fired' with 'the work succeeded', and a red row cannot be read for the first without knowing the second. This job has no work to fail at, so its row is a clean statement about the scheduler alone.",
+      "family": "Local Mac edge",
+      "criticality": "low",
+      "owner_actor": "joe",
+      "repo_path": "bin/gate-zero-canary.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.gate-zero-canary.plist",
+          "expected_cadence_seconds": 3600,
+          "cadence_grace_seconds": 5400,
+          "notes": "NOT YET ACTIVATED, deliberately: the plist is held in DEFINITION_ONLY in lib/launchd_hold.py, so installing it is Joe's own act and its presence in ~/Library/LaunchAgents is a drift finding until he takes it off that list. Until then this service has no runs and reads unknown — the honest answer for a job nobody has started, and the same posture carr-mcp already takes. CRITICALITY IS LOW because nothing depends on the canary's own work: it has none. What depends on it is one gate's ability to ask a question, and that gate reads a missing canary correctly today. Grace 5400s against a 3600s cadence covers the 30-minute run-spool flush (tools/ops-spool.py) exactly as notes-sweep's and run-spool-flush's graces do: a succeeded row queues locally and lands at the next flush, so the worst honest gap is one interval plus one flush."
+        }
+      ]
+    },
+
+    {
       "key": "npi-sweep-weekly",
       "name": "Weekly NPI new-provider sweep",
       "purpose": "NPPES weekly file to territory lead digest and hot-leads dashboard.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "medium",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/npi-sweep-weekly/SKILL.md",
@@ -393,7 +599,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 30 7 * * 1",
           "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800
+          "cadence_grace_seconds": 172800,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_e02d4dc8-67ed-4b3c-b9be-8ad1aa39cbf2, still 'running', 39 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
         }
       ]
     },
@@ -419,7 +626,7 @@
       "key": "social-batch-weekly",
       "name": "Friday social batch",
       "purpose": "Drafts + graphics for the following week, queued to Blotato as review-drafts.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "medium",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/social-batch-weekly/SKILL.md",
@@ -429,7 +636,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 0 8 * * 5",
           "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800
+          "cadence_grace_seconds": 172800,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending. The proof run (session local_cd8147c6-846b-4abd-ac1c-7b0779fa7644) shows as 'succeeded' only because the coordinator stopped it about 10 seconds in, to keep a test run from queuing real posts to Blotato -- that is not a completed run. Its transcript was read back: it called standing-context and read-loop (both read-only) and one Bash call that was interrupted; no write verb was ever called, and no file under the vault's Marketing/Social Media/ changed. This task's first real run is its next scheduled Friday firing. Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
         }
       ]
     },
@@ -437,7 +645,7 @@
       "key": "health-audit-monthly",
       "name": "Monthly system health audit",
       "purpose": "Re-scores the 12-category report card and appends a trend column.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "medium",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/health-audit-monthly/SKILL.md",
@@ -447,7 +655,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 0 9 6-10 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
           "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400
+          "cadence_grace_seconds": 518400,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_33c8a931-dd0d-403b-b9b8-e9d18466e12e, still 'running', no readback yet). 90-day audit follow-up: no ops.run row in 90 days, and this id never appears in any historical MacBook scheduled-tasks.json this audit examined -- registered on the Studio for the first time, not re-registered. Registry (control-plane-workflows.v1.json) has always marked it enabled with a live cadence, and services.json already tracked its cadence/grace, so the gap looks like a registration that never completed rather than a deliberate pause. Family changed from Local Mac edge to Studio edge."
         }
       ]
     },
@@ -455,7 +664,7 @@
       "key": "idea-resurface-monthly",
       "name": "Monthly idea-bank resurface",
       "purpose": "Resurfaces idea-bank entries worth another look.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "low",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/idea-resurface-monthly/SKILL.md",
@@ -465,7 +674,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 0 9 5-11 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
           "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400
+          "cadence_grace_seconds": 518400,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_e6e64335-a092-462d-9a70-e2511f75e0a4, still 'running', no readback yet). 90-day audit follow-up: no ops.run row in 90 days, and this id never appears in any historical MacBook scheduled-tasks.json this audit examined -- registered on the Studio for the first time, not re-registered. Registry (control-plane-workflows.v1.json) has always marked it enabled with a live cadence, and services.json already tracked its cadence/grace, so the gap looks like a registration that never completed rather than a deliberate pause. Family changed from Local Mac edge to Studio edge."
         }
       ]
     },
@@ -473,7 +683,7 @@
       "key": "system-sweep-monthly",
       "name": "Monthly size/prune sweep",
       "purpose": "Prunes bloat ahead of the playbook review.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "low",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/system-sweep-monthly/SKILL.md",
@@ -483,7 +693,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 30 8 15-21 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
           "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400
+          "cadence_grace_seconds": 518400,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_09173937-4d4e-4c52-bcb8-2d07c2cb1985, still 'running', no readback yet). 90-day audit follow-up: the MacBook's own scheduled-tasks.json showed this disabled since 2026-08-21 (its last real run), independently of and earlier than the 2026-09-23 hub-move incident and not part of the 2026-08-23 usage-crunch pause list (reenable-paused-schedules-0826 names 7 tasks and this is not one). No documented deliberate-retirement decision found for it; registry keeps it enabled with a live cadence. Re-registered on the Studio from the tracked ops/scheduled-tasks/system-sweep-monthly.SKILL.md contract. Family changed from Local Mac edge to Studio edge."
         }
       ]
     },
@@ -491,7 +702,7 @@
       "key": "playbook-review-monthly",
       "name": "Monthly playbook review",
       "purpose": "Reviews the playbooks after the size sweep.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "low",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/playbook-review-monthly/SKILL.md",
@@ -501,7 +712,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 0 9 15-21 * * (fires daily in-window; the task's own ledger gate runs it once per month)",
           "expected_cadence_seconds": 2592000,
-          "cadence_grace_seconds": 518400
+          "cadence_grace_seconds": 518400,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_dab62ffc-bb07-4313-bf5e-52b50edb0926, still 'running', no readback yet). 90-day audit follow-up: same finding as its sibling system-sweep-monthly -- the MacBook's own scheduled-tasks.json showed this disabled since 2026-08-21, independently of and earlier than the 2026-09-23 hub-move incident and not part of the 2026-08-23 usage-crunch pause list (reenable-paused-schedules-0826 names 7 tasks and this is not one). No documented deliberate-retirement decision found; registry keeps it enabled with a live cadence. Re-registered on the Studio from the tracked ops/scheduled-tasks/playbook-review-monthly.SKILL.md contract. Family changed from Local Mac edge to Studio edge."
         }
       ]
     },
@@ -509,7 +721,7 @@
       "key": "contact-enrichment-weekly",
       "name": "Weekly contact enrichment slice",
       "purpose": "Open-source contact enrichment, 40 records/run until the book is covered.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "low",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/contact-enrichment-weekly/SKILL.md",
@@ -519,7 +731,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 0 9 * * 4",
           "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800
+          "cadence_grace_seconds": 172800,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_9ee2bbde-38db-49f3-be02-ae051a04a945, still 'running', 104 messages, real progress -- loaded the briefing and started pulling the enrichment queue -- but no readback yet). Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
         }
       ]
     },
@@ -581,7 +794,7 @@
       "key": "loop-drain-weekdays",
       "name": "Weekday loop drain",
       "purpose": "Works the claude-owned loop queue and closes loops by doing the work.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "medium",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/loop-drain-weekdays/SKILL.md",
@@ -592,7 +805,7 @@
           "deploy_mechanism": "Claude Code scheduled task (native), cron 0 11 * * 1-5",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 172800,
-          "notes": "Weekdays only; the grace spans the weekend stand-down, same as local-briefs."
+          "notes": "Weekdays only; the grace spans the weekend stand-down, same as local-briefs. Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_b7bf275a-0bd8-4587-b746-16ac0f8840ac, still 'running', 63 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
         }
       ]
     },
@@ -600,7 +813,7 @@
       "key": "radar-weekly",
       "name": "Weekly Radar digest",
       "purpose": "Scores the week's lead candidates across all lanes and carries lead-system maintenance.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "medium",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/radar-weekly/SKILL.md",
@@ -610,7 +823,8 @@
           "environment": "production",
           "deploy_mechanism": "Claude Code scheduled task (native), cron 15 8 * * 1",
           "expected_cadence_seconds": 604800,
-          "cadence_grace_seconds": 172800
+          "cadence_grace_seconds": 172800,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_d2af6b2a-7262-43e4-ab37-62c6cea6562a, still 'running', 44 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
         }
       ]
     },
@@ -618,7 +832,7 @@
       "key": "content-fuel-harvest-weekly",
       "name": "Weekly content-fuel harvest",
       "purpose": "Sources cited market material across the four content lanes and banks it, so the Friday social batch has fuel to draw on.",
-      "family": "Local Mac edge",
+      "family": "Studio edge",
       "criticality": "low",
       "owner_actor": "joe",
       "repo_path": "/Users/booko/.claude/scheduled-tasks/content-fuel-harvest-weekly/SKILL.md",
@@ -629,7 +843,7 @@
           "deploy_mechanism": "Claude Code scheduled task (native), cron 30 9 * * 1",
           "expected_cadence_seconds": 604800,
           "cadence_grace_seconds": 172800,
-          "notes": "ENABLED AND UNREGISTERED until 2026-08-15, found by cross-checking list_scheduled_tasks against this file rather than by anything noticing on its own. The registry's own rule above is that only currently-enabled tasks are registered and disabled ones are deliberately left out, so this omission was a gap and not a choice: unregistered it had no cadence, nothing could call it stale, and ops/edge-liveness.py could not see it go quiet from off the Mac. Same 7-day cadence and 2-day grace as every other weekly task, for the reason local-briefs established — a weekly job can miss its one window if the Mac is asleep. Criticality is low because its output feeds the Friday batch rather than any client-facing or recovery path: a missed week costs that batch some fuel and nothing else."
+          "notes": "ENABLED AND UNREGISTERED until 2026-08-15, found by cross-checking list_scheduled_tasks against this file rather than by anything noticing on its own. The registry's own rule above is that only currently-enabled tasks are registered and disabled ones are deliberately left out, so this omission was a gap and not a choice: unregistered it had no cadence, nothing could call it stale, and ops/edge-liveness.py could not see it go quiet from off the Mac. Same 7-day cadence and 2-day grace as every other weekly task, for the reason local-briefs established — a weekly job can miss its one window if the Mac is asleep. Criticality is low because its output feeds the Friday batch rather than any client-facing or recovery path: a missed week costs that batch some fuel and nothing else. Re-registered on the Studio 2026-09-26 after a SECOND registration gap (2026-09-23); verification pending: the first proof run stalled on a tool-approval prompt (session local_7f276c32-2bc0-4484-af4d-08dd24bc5114, still 'running', 36 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but again never called create_scheduled_task, while the MacBook copy was deleted and its scheduled-tasks.json kept the stale enabled row. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH. This is the same failure class as the 2026-08-15 gap above and neither edge-liveness.py nor any other automated check has caught either occurrence -- both were found by a human cross-check."
         }
       ]
     },
@@ -727,6 +941,25 @@
       ]
     },
     {
+      "key": "canary-ingest-sink",
+      "name": "Notes-sweep canary ingest sink",
+      "purpose": "Isolated loopback-only ingest destination that proves the notes-sweep CANARY's whole posting path (auth, body shape, external_id dedup) without touching the live ingest socket.",
+      "family": "Local Mac edge",
+      "criticality": "low",
+      "owner_actor": "joe",
+      "repo_path": "tools/canary-ingest-sink.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.canary-ingest-sink.plist",
+          "expected_cadence_seconds": 1800,
+          "cadence_grace_seconds": 2700,
+          "notes": "KeepAlive server, same shape as doc-engine and call-mode: the health question is 'is it up', never 'did it fire recently', so it is probed by bin/probe-keepalive.py opening a TCP connection to 127.0.0.1:4684 rather than by recent-run freshness — a connect proves it is ACCEPTING. Same wrapper exemption and reason as the other two KeepAlive servers: bin/run-scheduled.sh records on child exit, and a KeepAlive child exiting just means launchd restarted it. Refuses to bind unless a mode-0600 credential file is present, so it will show DOWN until ~/.config/carr/notes-canary.env exists — that is a config precondition, not a service defect."
+        }
+      ]
+    },
+    {
       "key": "capture-watch",
       "name": "Recording capture bridge, claim side",
       "purpose": "Claims new recording sessions as they appear under ~/Recordings.",
@@ -795,10 +1028,88 @@
           "notes": "Wakes every 10 min; cadence declared at 30 min so one missed pass is not an alarm. It is itself wrapped by bin/run-scheduled.sh, because a watcher whose own failure is invisible is the one thing nothing watches. Grace widened 900→2700 on 2026-08-18 for the spool delay (tools/ops-spool.py). It returns EX_CONFIG (78) rather than a failure when NOTHING could be recorded at all — since the spool, that means the local recording path itself is broken (not even the SQLite queue writable), not merely an unreachable database — and a probe that alarmed every 10 minutes on a Mac in that state would be the smoke-suite mistake again."
         }
       ]
+    },
+
+    {
+      "key": "backup-nightly-cloud",
+      "name": "Cloud nightly backup (GitHub Actions)",
+      "purpose": "The GitHub-hosted Nightly backup (cloud) workflow and its exact failure/disabled/artifact evidence contract; registered so supervised observer-qualified failures can be filed under their true service identity rather than nightly-record-layer.",
+      "family": "Cloud operations",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": ".github/workflows/backup-nightly.yml",
+      "runtime": "github-actions",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "GitHub Actions workflow backup-nightly.yml",
+          "notes": "Externally scheduled by GitHub Actions daily at 02:35 UTC. GitHub native failure email reports a failed run; it does not detect a missed or skipped schedule. GitHub runs are not continuously ingested into ops.run, so expected_cadence_seconds is omitted and CARR service-environment health remains unknown. Missed-run freshness is evaluated separately when the Mac-local nightly-record-layer invokes ops/recovery-point.py on its host-local daily 02:05 schedule. recovery-point.py applies RPO_HOURS=24 to the newest qualified artifact; provider/API unreadability remains unknown. nightly-record-layer's cadence_grace_seconds=7200 is service-health grace, not a guaranteed consumer observation or alert-delivery bound. Observation delay depends on host availability and the timestamp of the last qualified artifact. This is consumer observation, not service cadence ingestion."
+        }
+      ]
+    },
+
+    {
+      "key": "job-watchdog",
+      "name": "Job watchdog",
+      "purpose": "Scan registered jobs, head-bound pull requests, merge-queue failures and release logs; report findings to the orchestrator and dispatch deterministic recovery actions.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "tools/job-watchdog.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.job-watchdog.plist",
+          "expected_cadence_seconds": 120,
+          "cadence_grace_seconds": 300,
+          "notes": "Primary-only schedule. Cadence is a checked projection of ops/config/job-watchdog.json. This draft ships source definitions; the orchestrator owns activation and replacement of the scratch auto-enqueue process. Findings and dated scan completion ledger are durable; scanner makes no model judgments."
+        }
+      ]
+    },
+    {
+      "key": "session-trace-archive",
+      "name": "Session trace archive",
+      "purpose": "Nightly local archive of CARR-scoped Claude Code and Codex session transcripts (lib/carr_session_scope.py decides scope; nothing else is archived) as gzip .jsonl.gz into ~/carr-local/session-trace-archive/, so old sessions the clients prune are not lost. Streams bytes only; reads no transcript content beyond a Codex session's cwd metadata line.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "ops/session-trace-archive.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.session-trace-archive.plist",
+          "expected_cadence_seconds": 86400,
+          "cadence_grace_seconds": 7200,
+          "notes": "Daily at 03:10 local, plus RunAtLoad. Per-machine by design (both the source transcripts and the destination archive are local to whichever Mac runs it), so it is neither PRIMARY_ONLY nor SECONDARY_ONLY in ops/config-as-code.py, and it depends on nothing in the record layer — no dependencies entry below."
+        }
+      ]
+    },
+    {
+      "key": "expert-reply-watch",
+      "name": "Expert reply watch",
+      "purpose": "Weekly read-only mining of tracked X accounts replies into queued log-capture records, with URL deduplication and a dated local run ledger.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "tools/expert_reply_watch.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.expert-reply-watch.plist",
+          "expected_cadence_seconds": 604800,
+          "cadence_grace_seconds": 86400,
+          "notes": "Monday 06:00 local. Primary only; Grok stdout proposals pass deterministic validation. CLI failure records one defect and exits nonzero. No X writes."
+        }
+      ]
     }
   ],
 
   "dependencies": [
+    { "service": "expert-reply-watch", "depends_on": "neon-record-layer" },
+    { "service": "job-watchdog", "depends_on": "neon-record-layer" },
     { "service": "carr-mcp", "depends_on": "neon-record-layer" },
     { "service": "nightly-record-layer", "depends_on": "neon-record-layer" },
     { "service": "rules-refresh", "depends_on": "neon-record-layer" },

@@ -1,0 +1,224 @@
+{
+  "schema": "rule-delivery-shadow-adjudication/v1",
+  "created_on": "2026-08-26",
+  "status": "independently-reviewed",
+  "review": {
+    "reviewers": ["sol-orchestration", "independent-cutover-matrix"],
+    "reviewed_at": "2026-08-26",
+    "scope": "classification,evidence-bindings,source-remedies",
+    "verdict": "clean"
+  },
+  "ledger": {
+    "path": "out/rule-delivery-shadow.jsonl",
+    "snapshot": {
+      "line_count": 30,
+      "sha256": "6a7a06e2b032088013090aa97bc34cb668e3a8a3b4809a19cd6938849213853f"
+    },
+    "finding_count": 14,
+    "mutation": "none"
+  },
+  "disposition_boundary": "This artifact proposes classifications but appends no disposition. Explained classifications require independent review of this raw-ledger and transcript-digest-bound adjudication; detector behavior does not itself explain them. Remediated classifications become supportable only after their source remedies are merged and installed; the system remains in shadow, starts a new strict policy/map/source-digest-bound epoch, and any recurrence invalidates eligibility.",
+  "source_remedy": {
+    "generic": [
+      "hooks/session-brief.py",
+      "mcp-server/src/mcp.js",
+      "hooks/rule-pack-drift-gate.py",
+      "ops/session-brief-selftest.py",
+      "ops/rule-pack-drift-gate-selftest.py"
+    ],
+    "nightly": [
+      "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+      "ops/config-as-code.py",
+      "lib/rule_delivery_shadow.py"
+    ],
+    "adjudication": [
+      "audits/rule-delivery-shadow-adjudication-2026-08-26.v1.json",
+      "ops/rule-delivery-shadow-adjudication-selftest.py"
+    ],
+    "validation": "remain shadow; after source merge and exact config installation, start a new strict epoch bound to the new policy/map/source digest; any recurrence invalidates eligibility"
+  },
+  "events": [
+    {
+      "event_id": "ef796a5acc749ddaedf31c2fbe772046283d7a388c30a71299705ec2d5a2caba",
+      "observed_at": "2026-08-26T02:28:34Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "remediated",
+      "reason": "The excerpt begins with a genuine heavy-build rollout request and the session loaded noncanonical aliases alongside only three canonical packs. The task-notification boundary repair cannot explain this mixed finding; the generic exact-pack and drift-recall rail is the controlled runtime remedy.",
+      "remedy_scope": "generic",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 6, "end_line": 228, "sha256": "800a128cc69daa8959ad46df98d9434a8692b29423634d02d926c5c3d4914130"}
+      }
+    },
+    {
+      "event_id": "a76928580de0fddc3231420e6663b3219831b80526d8cabb60b69e4cc85c2028",
+      "observed_at": "2026-08-26T02:28:51Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The only missing canonical domain was records-intake, fired by the word merge in a Git/PR merge status line. That is version-control work already covered by engineering-git, not a record-entity merge; the finding is an explained trigger-polysemy false positive after exact transcript replay.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 233, "end_line": 250, "sha256": "a188dd291f4bbf3b2aa0dd8995e48bb70c7343b7ea26b9fa4b6ae41054554ba0"}
+      }
+    },
+    {
+      "event_id": "46117889922249d1726395fdbe7f79e3ec8451e6ade050360b7a2b5262e83bf1",
+      "observed_at": "2026-08-26T02:36:18Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The missing domains were semantic polysemy: records-intake fired on Git merge, joe-development fired on the deployment/release schema ledger, and delegation-council fired on codex inside an existing release key. None represented record intake, personal-development ledger work, or delegation; exact replay therefore explains the finding.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 261, "end_line": 381, "sha256": "ac6761f8d571d62c6b818839e5a4b87b872fd843d61a78c64a4b6e74e1420de4"}
+      }
+    },
+    {
+      "event_id": "95570890c5594f2196787adbbd0ab5096acc1dace9869f0b04ec7c5819666524",
+      "observed_at": "2026-08-26T02:47:45Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The missing domains were semantic polysemy: joe-development fired on schema/release ledger identifiers and surface-doctrine fired on the phrase design problem in defect-analysis prose. The work was release engineering already covered by loaded packs, not personal-development ledger or surface design; exact replay explains the finding.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 385, "end_line": 597, "sha256": "870e444a0de6304a459cbde320bfee33325d6a4689a8b4027c153e21f916abb7"}
+      }
+    },
+    {
+      "event_id": "c3f85ecea5509e543433d396eaead5ab4181d7dcfd3210d2c96e1727a76c6655",
+      "observed_at": "2026-08-26T02:54:15Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The missing domains were semantic polysemy: records-intake fired on Git merge, joe-development fired on the release ledger, and delegation-council fired on codex inside a prior release key. None represented record intake, personal-development ledger work, or delegation; exact replay explains the finding.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 601, "end_line": 627, "sha256": "9b3e111919ca8c403bc7de1a1b7d2705b6ab2b4b815896abad194031b6dea1f6"}
+      }
+    },
+    {
+      "event_id": "c86bbe2ed62db23a747926008d29eb9ec12b25307e43aa100590f15cf8e48d96",
+      "observed_at": "2026-08-26T03:03:02Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The missing domains were semantic polysemy: records-intake fired on Git merge, joe-development fired on migration/schema ledger text, and joe-comms fired on post-apply in a migration runbook. None represented record intake, personal-development work, or communications posting; exact replay explains the finding.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 631, "end_line": 760, "sha256": "da4e11b6077aef07c2b275d259555888eff043da5cb24b679740b0640eaf377d"}
+      }
+    },
+    {
+      "event_id": "6717fc4071cf00837c4cb7ff3611d45f4f1de40e9af20d610e7d36150036a1e0",
+      "observed_at": "2026-08-26T03:13:32Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The missing domains were semantic polysemy: records-intake fired on Git merge, joe-development fired on the migration ledger, and delegation-council fired on codex inside a release key. None represented record intake, personal-development ledger work, or delegation; exact replay explains the finding.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 772, "end_line": 829, "sha256": "4711d25d965d2d124a1ebf106a37967d7ff9fc5078fa813363e4e62fea538f90"}
+      }
+    },
+    {
+      "event_id": "d2364911e26f0efab8ea0b7ea68331fb32a1842cc7b0e936dbee2c311184d895",
+      "observed_at": "2026-08-26T03:19:06Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The missing domains were semantic polysemy: records-intake fired on Git merge, joe-development fired on schema/migration ledger text, and joe-comms fired on post-apply in migration prose. None represented record intake, personal-development work, or communications posting; exact replay explains the finding.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 841, "end_line": 888, "sha256": "eb2ceb9f8b58b7a5a34ab8d667f252c5c8c135325e6221b35d76230701688ea5"}
+      }
+    },
+    {
+      "event_id": "df7a24c8d2113b609bbe04dd0b49fc96e52cff949503501d24497ca7bd6cd041",
+      "observed_at": "2026-08-26T03:27:51Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "explained",
+      "reason": "The missing domains were semantic polysemy: records-intake fired on Git merge and joe-development fired on the release/schema ledger. Neither represented record-entity intake nor personal-development work; exact replay explains the finding.",
+      "remedy_scope": "adjudication",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 904, "end_line": 935, "sha256": "75cdb6ee49b700f7ee384a3399b6d31fd8c2025e30a8b6c6a217cf768e4934d6"}
+      }
+    },
+    {
+      "event_id": "84b830dc596a702facf39ddd7fa43896a94493fa6943b8ab63f659fcb0ae5e9a",
+      "observed_at": "2026-08-26T03:47:54Z",
+      "session_id": "01a03c2b-6aa8-7883-a72b-9c9ee52d1ffc",
+      "proposed_disposition": "remediated",
+      "reason": "A genuine Codex engineering-passport task loaded only engineering aliases while its workflow named additional canonical domains. The generic exact-pack and drift-recall rail is the controlled runtime remedy.",
+      "remedy_scope": "generic",
+      "transcript": {
+        "path": "/Users/booko/.codex/sessions/2026/08/25/rollout-2026-08-25T22-44-33-01a03c2b-6aa8-7883-a72b-9c9ee52d1ffc.jsonl",
+        "sha256": "6f139d25eeca9162ad1496fc3baf04ec555e1828982d24bece9b3d129891e52f",
+        "excerpt": {"start_line": 9, "end_line": 76, "sha256": "289edd7a8af08ef9462ddb6fb63463138ef0be8a116974041a6cf18708a354aa"}
+      }
+    },
+    {
+      "event_id": "4d2572bbfbf7942ee47c589a4dcc67542fe320539bc58502043327472bc5a98c",
+      "observed_at": "2026-08-26T03:48:03Z",
+      "session_id": "48574aa2-9289-4e90-906c-b4f958806026",
+      "proposed_disposition": "remediated",
+      "reason": "The excerpt begins at a task-notification, but later substantive rollout actions still crossed canonical pack boundaries that were not loaded. Excluding the notification is insufficient; the generic exact-pack and drift-recall rail is the controlled runtime remedy.",
+      "remedy_scope": "generic",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-carr-system/48574aa2-9289-4e90-906c-b4f958806026.jsonl",
+        "sha256": "ba61f8727f228c1b8c4abdafb527593c74797fe60625cd50dba4091cba4373e2",
+        "excerpt": {"start_line": 944, "end_line": 1015, "sha256": "ceb327e1282bca95bbd45a7a223cca787923db0043cd7f6d5313e544aa9ec478"}
+      }
+    },
+    {
+      "event_id": "55590cf93cb601888c34ea70e944561b171819dda59466a550205d25c38e8216",
+      "observed_at": "2026-08-26T03:50:55Z",
+      "session_id": "01a03c2f-8571-7613-b8d3-7061ba83536d",
+      "proposed_disposition": "remediated",
+      "reason": "A genuine Codex engineering-passport task loaded only engineering aliases while its workflow named additional canonical domains. The generic exact-pack and drift-recall rail is the controlled runtime remedy.",
+      "remedy_scope": "generic",
+      "transcript": {
+        "path": "/Users/booko/.codex/sessions/2026/08/25/rollout-2026-08-25T22-49-02-01a03c2f-8571-7613-b8d3-7061ba83536d.jsonl",
+        "sha256": "5f031717cd2091ad07276913570d499522ab2bf8eea32e4ad02de6e4e2f1d1cd",
+        "excerpt": {"start_line": 9, "end_line": 58, "sha256": "f6b550a7f6d330133bd2115d23313cee867568827b320b1161cf537bc03de385"}
+      }
+    },
+    {
+      "event_id": "04bcc76d7f557e4cf7680db48f1f0f7b6ef2b1f5cb359e4e39b043ca87617207",
+      "observed_at": "2026-08-26T07:05:40Z",
+      "session_id": "01a03ce3-3e4d-70d1-974c-8f64d026c1c2",
+      "proposed_disposition": "remediated",
+      "reason": "A genuine automated CI smoke session performed hook and post-shaped work without canonical pack selection. The generic exact-pack and drift-recall rail is the controlled runtime remedy.",
+      "remedy_scope": "generic",
+      "transcript": {
+        "path": "/Users/booko/.codex/sessions/2026/08/26/rollout-2026-08-26T02-05-20-01a03ce3-3e4d-70d1-974c-8f64d026c1c2.jsonl",
+        "sha256": "5ea1c24404f70b29797492c95e622ed67cee60d899f97ae8d64d9f3b455a9a93",
+        "excerpt": {"start_line": 9, "end_line": 27, "sha256": "13b2d24442a7e9ea2a58172037d6765bddc04b78dbccdbe52a0a4dd78d5f9767"}
+      }
+    },
+    {
+      "event_id": "f0c4df3eb2e3d4e8c9843ef62afc587bccd36043a1bbb1aa7a5af00851fef559",
+      "observed_at": "2026-08-26T07:16:54Z",
+      "session_id": "54023ce3-bf25-419a-9ffd-44a87329c280",
+      "proposed_disposition": "remediated",
+      "reason": "The Nightly consumer loaded the unknown alias automation and its long static task body lexically expanded the event to every pack. The source-owned scheduled-automation declaration, first-call/readback refusal protocol, exact-source static exclusion, generic alias refusal, and digest binding are the controlled runtime remedy.",
+      "remedy_scope": "generic+nightly",
+      "transcript": {
+        "path": "/Users/booko/.claude/projects/-Users-booko-My-Drive-CARR-AI/54023ce3-bf25-419a-9ffd-44a87329c280.jsonl",
+        "sha256": "89aa18c9253c433faa49b9dd56d3714cd803cfdb340d23eb135d460da548db4a",
+        "excerpt": {"start_line": 6, "end_line": 243, "sha256": "c317c65ec1ffce0b035d211ab503bc926a3a82066de7b0f274002e834242e2f0"}
+      }
+    }
+  ]
+}

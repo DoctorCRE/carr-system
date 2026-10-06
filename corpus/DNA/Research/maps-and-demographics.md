@@ -22,9 +22,9 @@
 ## ⚠️ Patient-based heat map — HIPAA note (CONFIRMED COMPLIANT)
 The patient heat map plots real patient location data, which is exactly the kind of work CLAUDE.md flags as needing HIPAA compliance. **Joe confirmed (July 2026): CARR's patient-heat-map process IS HIPAA-compliant** — it follows specific required steps for handling the data. So it's usable, but **follow the documented process exactly** (Agent Central, or reach out to the mapping team for the steps); don't improvise the data handling. This is the one map type with compliance steps — the others use public/aggregate data.
 
-### The heat-map process, as actually run (added 2026-07-31 — observed on Ahlborn C-153)
+### The heat-map process, as actually run (added 2026-07-31 — observed on Brandvold C-153)
 
-This section used to say "reach out to the mapping team for the steps." Here are the steps, captured from a live run: Dell → Mike Ahlborn, 2026-07-21, client confirmed signed and sent the same week.
+This section used to say "reach out to the mapping team for the steps." Here are the steps, captured from a live run: Dell → Mike Brandvold, 2026-07-21, client confirmed signed and sent the same week.
 
 1. **CARR sends the HIPAA compliance form to the doctor for e-signature.** Nothing moves before it comes back.
 2. **The doctor prepares the file themselves.** Excel, columns **`ADDRESS | CITY | STATE | ZIP`** in that order. PO boxes removed. Duplicate records removed. **No names, no other personally identifiable data** — addresses only.

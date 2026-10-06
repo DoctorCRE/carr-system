@@ -36,7 +36,11 @@
     <string>--scheduled</string>
   </array>
 
-  <key>StartInterval</key><integer>3600</integer>
+  <!-- carr-launchd-interval-seconds: 3600 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>53</integer></dict>
+  </array>
   <key>RunAtLoad</key><true/>
   <key>ThrottleInterval</key><integer>60</integer>
 

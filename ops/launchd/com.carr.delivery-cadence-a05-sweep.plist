@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  doctrine: doctorcre-v5-design-basis
+
+  com.carr.delivery-cadence-a05-sweep: daily V5-A05 delivery-cadence sweep.
+
+  A LAUNCH AGENT, NOT A SCHEDULED MODEL SESSION (PROP-010's ruling; see
+  com.carr.timebomb-audit.plist's own header). Reading cadence-status and,
+  only on a detected miss, calling raise-delivery-cadence-alert is a fixed
+  predicate pipeline over deterministic record-layer reads and one bounded
+  write, not a judgement call about what to do next.
+
+  07:00 local: before the working day starts, so a miss detected overnight is
+  already in the morning brief's assurance_cadence section when Joe or Dell
+  first opens it.
+
+  RISK: YELLOW. Read-only against ops.v5_a05_cadence_receipt via the
+  cadence-status verb for every run; on a detected miss (status: "missed"),
+  writes exactly one raise-delivery-cadence-alert call per subject, idempotent
+  per (subject, expiry instant) via a deterministic uuid5 key, so a second run
+  before the miss is resolved is a no-op duplicate rather than a repeat alert.
+  Never issues a cadence receipt itself (that stays a human/process action);
+  never touches any other record-layer surface.
+
+  See ops/delivery-cadence-a05-sweep.py's own header for the full pipeline and its
+  bounded v1 subject scope.
+
+  INSTALLING IT IS A DELIBERATE HUMAN ACT, and there is no installer script on
+  purpose: a bin/install-*.sh is an external-admin ingress that would need its
+  own SCAC registry successor. From the canonical checkout:
+    sed "s|{{REPO}}|$PWD|g" ops/launchd/com.carr.delivery-cadence-a05-sweep.plist \
+      > ~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist
+    plutil -lint ~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist
+  Once installed, ops/config-as-code.py check holds the installed body to
+  this file like every other CARR LaunchAgent.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.carr.delivery-cadence-a05-sweep</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>delivery-cadence-a05-sweep</string>
+    <string>launchd.run</string>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/ops/delivery-cadence-a05-sweep.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{REPO}}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>CARR_REPO</key>
+    <string>{{REPO}}</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>7</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>{{REPO}}/out/delivery-cadence-a05-sweep.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{REPO}}/out/delivery-cadence-a05-sweep.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

@@ -1,0 +1,2 @@
+{"type":"text","data":"substituted answer"}
+{"type":"end","stopReason":"end_turn","modelUsage":{"grok-4.7-build":{"modelCalls":1},"grok-4.6":{"modelCalls":1}}}

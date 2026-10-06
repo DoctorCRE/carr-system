@@ -265,6 +265,99 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+
+# --- DERIVED BINDINGS AND THE CANARY FLOOR (added 2026-09-18) -----------------
+#
+# WHY BOTH OF THESE EXIST. An independent review of this file on 2026-09-18
+# found that two of its three acceptance criteria were false, and both failures
+# had the same shape: the evaluator checked that a value LOOKED right instead of
+# checking that it WAS right.
+#
+#   1. route_digest and policy_digest were taken from the caller, validated only
+#      as "sixty-four hex characters", and copied into the replay block. Sixty-
+#      four literal 'a' characters were accepted. A digest the caller chooses
+#      binds nothing, so "every run binds suite, route and policy digests" was
+#      true for the suite digest alone.
+#   2. Canary redaction covered the OUTPUT CONTENT and nothing else, so a canary
+#      planted in attribution.route_id survived into a failed scorecard and onto
+#      stdout. The case the author tested was the only case that held.
+#
+# The fix for each is the same move: compute the thing, then compare, and make
+# the guarantee a property of the emitted artifact rather than of one code path
+# that a later edit can walk around.
+
+
+def derive_policy_digest(suite: dict[str, Any]) -> str:
+    """The policy digest, computed from the suite's own policy surface.
+
+    The policy under evaluation is not a separate document: it is the set of
+    declarations that decide what a run is permitted to be — the normative
+    contract it grades against, its data class, whether it may call a model or
+    write a record, and the actions it may take. Digesting exactly those fields
+    means a change to any of them moves the digest, which is what binding is
+    supposed to mean. A caller cannot supply this value; it can only match it.
+    """
+    return _canonical_digest({
+        "normative_contract": suite["normative_contract"],
+        "data_class": suite["data_class"],
+        "execution": suite["execution"],
+        "calls_models": suite["calls_models"],
+        "writes_records": suite["writes_records"],
+        "allowed_actions": suite["allowed_actions"],
+    })
+
+
+def derive_route_digest(attribution: dict[str, Any]) -> str:
+    """The route digest, computed from the route's own identity.
+
+    A route here is the provider, the model and the named route taken together,
+    plus the execution attribution when the run carries it. Those fields ARE the
+    route: swap the model and it is a different route, and the digest says so.
+    Deriving it from the attribution the run already declares keeps the binding
+    honest without inventing a route artifact this evaluator does not own.
+    """
+    return _canonical_digest({
+        "provider_id": attribution["provider_id"],
+        "model_id": attribution["model_id"],
+        "route_id": attribution["route_id"],
+        **{field: attribution[field]
+           for field in sorted(EXECUTION_ATTRIBUTION_FIELDS) if field in attribution},
+    })
+
+
+def suite_forbidden_substrings(suite: dict[str, Any]) -> list[str]:
+    """Every canary the suite declares, across every case, deduplicated."""
+    seen: set[str] = set()
+    for case in suite["cases"]:
+        for forbidden in case.get("expectations", {}).get("forbidden_substrings", []):
+            if isinstance(forbidden, str) and forbidden.strip():
+                seen.add(forbidden)
+    return sorted(seen)
+
+
+def assert_no_canary_escaped(artifact: Any, suite: dict[str, Any], label: str) -> None:
+    """Refuse to emit an artifact containing any canary the suite declares.
+
+    THIS IS A FLOOR, NOT A FILTER, and the distinction is the point. It reads
+    the FINISHED artifact rather than any particular field, so a field added
+    later is covered the day it is added, with nobody needing to remember. It
+    raises instead of quietly scrubbing, because a canary reaching this point
+    means an upstream path leaked one, and silently cleaning the output would
+    hide exactly the defect worth knowing about.
+
+    Case-insensitive, matching evaluate_response, so a canary that survives a
+    change of case is still caught.
+    """
+    serialized = json.dumps(artifact, sort_keys=True, default=str).casefold()
+    for forbidden in suite_forbidden_substrings(suite):
+        if forbidden.casefold() in serialized:
+            raise SuiteError(
+                f"{label} contains a synthetic canary declared by the suite; a scorecard "
+                "must never carry one. This is an upstream leak, not a formatting problem: "
+                "find the field that copied it through."
+            )
+
+
 def _is_nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
@@ -782,6 +875,27 @@ def evaluate_provider_run(suite: dict[str, Any], observed_run: dict[str, Any]) -
 
     report = evaluate_suite(suite, responses)
     attribution = observed_run["attribution"]
+
+    # The run DECLARES a route and policy digest; this evaluator DERIVES both
+    # and refuses a mismatch. Before 2026-09-18 the declared values were merely
+    # shape-checked and copied, so any sixty-four hex characters were accepted
+    # and the replay block bound nothing but the suite.
+    derived_policy = derive_policy_digest(suite)
+    derived_route = derive_route_digest(attribution)
+    if attribution["policy_digest"] != derived_policy:
+        raise SuiteError(
+            "provider run policy_digest does not match the policy it claims to bind; "
+            f"declared {attribution['policy_digest']}, derived {derived_policy} from the "
+            "suite's normative contract, data class, execution mode, model/record flags "
+            "and allowed actions"
+        )
+    if attribution["route_digest"] != derived_route:
+        raise SuiteError(
+            "provider run route_digest does not match the route it claims to bind; "
+            f"declared {attribution['route_digest']}, derived {derived_route} from the "
+            "provider, model and route identity in this run's own attribution"
+        )
+
     fixture_input = {field: observed_run[field] for field in PROVIDER_RUN_FIELDS}
     fixture_digest = _canonical_digest(fixture_input)
     run_digest = _canonical_digest(
@@ -791,7 +905,7 @@ def evaluate_provider_run(suite: dict[str, Any], observed_run: dict[str, Any]) -
             "attribution": attribution,
         }
     )
-    return {
+    scorecard = {
         "schema_version": 1,
         "artifact_type": "observed_synthetic_scorecard",
         "data_class": "synthetic_only",
@@ -810,13 +924,18 @@ def evaluate_provider_run(suite: dict[str, Any], observed_run: dict[str, Any]) -
         "replay": {
             "suite_digest": suite["_digest"],
             "fixture_digest": fixture_digest,
-            "policy_digest": attribution["policy_digest"],
-            "route_digest": attribution["route_digest"],
+            "policy_digest": derived_policy,
+            "route_digest": derived_route,
             "run_digest": run_digest,
         },
         "summary": report["summary"],
         "results": report["results"],
     }
+    # Last gate before the scorecard leaves this function: no canary the suite
+    # declares may appear anywhere in it. Reads the finished artifact, so a
+    # field added later is covered without anyone remembering to cover it.
+    assert_no_canary_escaped(scorecard, suite, "observed synthetic scorecard")
+    return scorecard
 
 
 def _projected_cases_from_scorecard(scorecard: dict[str, Any]) -> list[dict[str, Any]]:
@@ -875,13 +994,30 @@ def _scorecard_projection(scorecard: Any) -> dict[str, Any]:
             "summary": summary, "cases": cases}
 
 
-def project_scorecard_entry(scorecard: Any, observed_on: str, sequence: int) -> dict[str, Any]:
-    """Create the redacted, immutable projection a baseline history can retain."""
+def project_scorecard_entry(
+    scorecard: Any, observed_on: str, sequence: int, suite: dict[str, Any]
+) -> dict[str, Any]:
+    """Create the redacted, immutable projection a baseline history can retain.
+
+    PASS THE SUITE. This is the SECOND path that emits an artifact carrying the
+    attribution block, and on 2026-09-18 it was the one the canary floor did not
+    cover — the floor sat at the end of evaluate_provider_run only, so a
+    scorecard assembled by a caller rather than produced by that function could
+    be projected into a retained history with a canary still in it. Jev flagged
+    exactly this when asked to name the change's biggest remaining weakness, and
+    it was right: a guarantee enforced at one call site is not a guarantee.
+
+    `suite` IS REQUIRED. It was briefly optional "for compatibility", which was
+    a weak reason — there are no callers outside this repository — and Jev,
+    asked again about the corrected change, put 0.95 on the optional argument
+    still leaving a way to obtain an unchecked artifact. It was right twice.
+    An argument that can be omitted is a check that can be skipped.
+    """
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         raise SuiteError("history entry sequence must be a positive integer")
     projected = _scorecard_projection(scorecard)
     _validate_observed_on(observed_on, "history entry observed_on")
-    return {
+    entry = {
         "sequence": sequence,
         "observed_on": observed_on,
         "run_id": projected["run_id"],
@@ -889,6 +1025,8 @@ def project_scorecard_entry(scorecard: Any, observed_on: str, sequence: int) -> 
         "summary": projected["summary"],
         "cases": projected["cases"],
     }
+    assert_no_canary_escaped(entry, suite, "baseline history entry")
+    return entry
 
 
 def _validate_baseline_history(history: Any) -> dict[str, Any]:

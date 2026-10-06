@@ -14,6 +14,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "room-bridge"))
@@ -66,7 +67,32 @@ class FakeReadRoom:
         return {"turns": self.batches.pop(0) if self.batches else [], "more": False}
 
 
-def fake_dispatch(name, task, *, registry, results_path, fresh=False):
+class OfflineQueueService:
+    """A queue control plane with no targets and no external dependencies."""
+
+    catalog: dict[str, dict] = {"targets": {}}
+
+    @staticmethod
+    def handle(turn, *, room):
+        return {"handled": False}
+
+    @staticmethod
+    def reconcile_disabled_targets():
+        return {"scanned": 0, "blocked": [], "diagnostics": []}
+
+
+def run_offline_cycle(**kwargs):
+    """Run one fully local cycle with deterministic desk and queue status."""
+    with mock.patch.object(bridge, "probe_live", return_value=True):
+        return bridge.run_once(
+            queue_service=OfflineQueueService(),
+            queue_projector=lambda **_kwargs: [],
+            read_profiles=lambda: [],
+            **kwargs,
+        )
+
+
+def fake_dispatch(name, task, *, registry, results_path, fresh=False, live_desktop=False):
     if name == "joe-desk":
         return {"msg_id": "dispatch-claude-1", "desk": name, "kind": "claude-session",
                 "task": task, "dispatched_at": "2026-08-22T00:00:00+00:00",
@@ -91,7 +117,7 @@ def full_cycle_routes_delivers_and_captures_both_reply_shapes():
                       "msg_id": "room-turn-1", "kind": "turn"}
         fake_read = FakeReadRoom([[human_turn], []])
 
-        summary1 = bridge.run_once(
+        summary1 = run_offline_cycle(
             registry=reg, state_path=state_path, results_path=tdp / "results.jsonl",
             read_room=fake_read, add_room_turn=room.add_room_turn,
             dispatch_fn=fake_dispatch, desk_state_dir=desk_state_dir, log=lambda *a: None,
@@ -124,6 +150,8 @@ def full_cycle_routes_delivers_and_captures_both_reply_shapes():
         reg_after = json.loads((tdp / "hermes-desks.json").read_text())
         assert "last_seen" in reg_after["desks"]["joe-desk"], reg_after
         assert "last_seen" in reg_after["desks"]["codex-desk"], reg_after
+        assert reg_after["desks"]["joe-desk"]["last_live"] is True, reg_after
+        assert reg_after["desks"]["codex-desk"]["last_live"] is True, reg_after
 
         # Now the claude desk "answers" — append a stream-json result line to
         # its log, exactly the shape --output-format stream-json produces.
@@ -134,7 +162,7 @@ def full_cycle_routes_delivers_and_captures_both_reply_shapes():
             + json.dumps({"type": "result", "result": "all green, nothing on fire"}) + "\n"
         )
 
-        summary2 = bridge.run_once(
+        summary2 = run_offline_cycle(
             registry=reg, state_path=state_path, results_path=tdp / "results.jsonl",
             read_room=fake_read, add_room_turn=room.add_room_turn,
             dispatch_fn=fake_dispatch, desk_state_dir=desk_state_dir, log=lambda *a: None,
@@ -176,12 +204,12 @@ def a_pending_desk_is_never_offered_a_second_turn_before_it_answers():
 
         delivered_calls = {"n": 0}
 
-        def counting_dispatch(name, task, *, registry, results_path, fresh=False):
+        def counting_dispatch(name, task, *, registry, results_path, fresh=False, live_desktop=False):
             if name == "joe-desk":
                 delivered_calls["n"] += 1
             return fake_dispatch(name, task, registry=registry, results_path=results_path)
 
-        bridge.run_once(
+        run_offline_cycle(
             registry=reg, state_path=state_path, results_path=tdp / "results.jsonl",
             read_room=fake_read, add_room_turn=room.add_room_turn,
             dispatch_fn=counting_dispatch, desk_state_dir=desk_state_dir, log=lambda *a: None,

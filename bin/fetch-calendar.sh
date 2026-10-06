@@ -35,7 +35,7 @@ fi
 
 echo "RECOVERY NONCANONICAL: published Outlook ICS -> Drive; reason=$RECOVERY_REASON" >&2
 URL="https://outlook.office365.com/owa/calendar/ed7aa2ebb2c647a8b5556340251a4ce7@carr.us/bbea9ec4a2c64895ad6559029407f6a05027337759467795791/S-1-8-2301065025-2974764972-3930401816-3405722231/reachcalendar.ics"
-VAULT="${CARR_VAULT:-/Users/booko/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI}"
+VAULT="${CARR_VAULT:-$HOME/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI}"
 DIR="$VAULT/DNA/Team"
 OUT="$DIR/calendar-latest.ics"
 LOG="$DIR/calendar-fetch.log"

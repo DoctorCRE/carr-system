@@ -83,6 +83,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -95,6 +96,50 @@ try:                                    # telemetry only — never load-bearing
 except Exception:                       # a missing meter must not change a verdict
     DEBUG = os.path.join(REPO, "out", "hook-guard.log")
 MAX_PENDING = 200  # defensive cap: a killed session must not leak forever
+
+# ── WHAT THIS TRACKER DID TO THE DISK, 2026-08-27 ────────────────────────────
+# On 2026-08-27 out/staging-observed held 152 orphaned temp files over 1MB
+# apiece — about 3.2GB — beside per-session state files, one of them 110MB. The
+# machine filled up and no new worktree could be created. Three separate
+# mechanisms, each bounded below; the first was the wasted bytes, the second
+# made every one of them large, the third let them accumulate forever.
+#
+# 1. ORPHANED TEMP FILES. write_state_unlocked() writes through
+#    tempfile.mkstemp + os.replace, which is the right way to write a file
+#    atomically. Its `finally` unlinks the temp on the failure path, but a
+#    session KILLED between mkstemp and os.replace runs no finally — SIGKILL,
+#    a panic and a reboot all skip it — and leaves the temp behind under a
+#    name nothing ever looks at again. Every write path now sweeps its own
+#    siblings first (sweep_temp_orphans below).
+#
+# 2. THE PRE-SNAPSHOTS WERE MOSTLY UNTRACKED CHURN. `pending` held up to
+#    MAX_PENDING full `git status --porcelain --untracked-files=all` maps. In
+#    the 4.4MB file measured that day, 6504 of a snapshot's 6506 entries were
+#    "??" — .claude/exec-clones/ and friends — repeated across 23 in-flight
+#    calls. tracked_only() drops them at store time, which is OUTPUT-
+#    EQUIVALENT rather than a tradeoff: the PostToolUse loop consults `before`
+#    only for paths whose AFTER code is not "??", and for such a path a stored
+#    "??" and a missing entry both compare unequal to the after code, so both
+#    credit it identically. The selftest asserts that equivalence directly.
+#
+# 3. NOTHING BOUNDED THE FILE IN BYTES. MAX_PENDING bounds the number of
+#    snapshots, not their size, so a tree with a large dirty set still grows
+#    without limit — which is what a 110MB observation file is. _bound_state()
+#    adds a byte budget, evicting OLDEST pending first and never touching
+#    `observed`, which is the product and stays small (a set of tracked repo
+#    paths, ~1.5KB in that same file).
+#
+# Losing a pending snapshot costs exactly what a missing pre-snapshot already
+# costs in the PostToolUse branch below: credit nothing for that one call. That
+# is the fail-safe direction this file already takes everywhere.
+#
+# The other half of the fix is not here and cannot be: a session that dies
+# leaves its LAST state file behind forever, and no live write path can reap a
+# session that is gone. bin/nightly.sh prunes those (ops/staging-observed-prune.py).
+TEMP_PREFIX = ".staging-observed-"
+TEMP_ORPHAN_MAX_AGE_S = 3600     # an atomic write takes milliseconds; an hour
+                                 # old is abandoned, never in flight
+MAX_STATE_BYTES = 4 * 1024 * 1024
 
 # WHICH TREE THIS SNAPSHOTS, and it was the wrong one for every worktree session.
 # This hook is wired by its absolute CANONICAL path, so `REPO` above is always
@@ -147,12 +192,93 @@ def read_state_unlocked(path):
     return {"observed": [], "pending": {}}
 
 
+def sweep_temp_orphans(dirpath, max_age_s=TEMP_ORPHAN_MAX_AGE_S, now_s=None):
+    """Delete abandoned mkstemp leftovers beside the state files. Returns the
+    number removed.
+
+    Age is the whole safety argument. These temps are siblings of OTHER
+    sessions' in-flight writes, and this hook holds only its own session's
+    lock, so it must never remove one a live write is about to os.replace into
+    place. A write here is a json.dump of a few megabytes at most — under a
+    second. An hour is four orders of magnitude of headroom, and matches the
+    same reasoning bin/nightly.sh applies to its own .nightly-stderr.* captures.
+
+    Never raises: a housekeeping failure must not change what this hook
+    observes, and the caller wraps it besides.
+    """
+    removed = 0
+    cutoff = (time.time() if now_s is None else now_s) - max_age_s
+    try:
+        names = os.listdir(dirpath)
+    except OSError:
+        return 0
+    for name in names:
+        if not name.startswith(TEMP_PREFIX):
+            continue
+        candidate = os.path.join(dirpath, name)
+        try:
+            if os.path.getmtime(candidate) >= cutoff:
+                continue
+            os.unlink(candidate)
+            removed += 1
+        except OSError:
+            continue                    # gone under us, or not ours to remove
+    return removed
+
+
+def tracked_only(status):
+    """The half of a porcelain snapshot the Post-side diff can actually use.
+
+    See mechanism 2 in the block at the top of this file: dropping "??" here is
+    output-equivalent, not a sampling tradeoff.
+    """
+    return {path: code for path, code in status.items() if code != "??"}
+
+
+def _bound_state(data):
+    """Keep one session's state file bounded in COUNT and in BYTES.
+
+    Evicts oldest-inserted pending snapshots first (dicts preserve insertion
+    order), and never evicts `observed` — that is the thing this hook exists to
+    produce, and it is small.
+    """
+    pending = data.get("pending")
+    if not isinstance(pending, dict):
+        return
+    keys = list(pending)
+    if len(keys) > MAX_PENDING:
+        for stale_key in keys[: len(keys) - MAX_PENDING]:
+            pending.pop(stale_key, None)
+        keys = list(pending)
+    sizes = [(key, len(json.dumps(pending[key]))) for key in keys]
+    total = sum(size for _, size in sizes)
+    for key, size in sizes:
+        if total <= MAX_STATE_BYTES:
+            break
+        pending.pop(key, None)
+        total -= size
+
+
 def write_state_unlocked(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=".staging-observed-", dir=os.path.dirname(path))
+    _bound_state(data)
+    try:
+        sweep_temp_orphans(os.path.dirname(path))
+    except Exception as exc:            # housekeeping is never load-bearing
+        dlog(f"temp-orphan sweep failed: {exc}")
+    fd, tmp = tempfile.mkstemp(prefix=TEMP_PREFIX, dir=os.path.dirname(path))
     try:
         with os.fdopen(fd, "w") as fh:
-            json.dump(data, fh, sort_keys=True)
+            # NOT sort_keys=True, and the reason is load-bearing rather than
+            # cosmetic. Both caps below evict OLDEST-FIRST, which they read off
+            # dict insertion order — and insertion order only survives a
+            # round-trip through this file if the file preserves it. Sorting
+            # here re-ordered `pending` by call id, which is random, so after
+            # any reload "oldest" meant "alphabetically first". Caught by the
+            # byte-cap fixture, which read its own three entries back in the
+            # wrong order. `observed` is a sorted list built by the caller, so
+            # the file stays deterministic where determinism was the point.
+            json.dump(data, fh)
             fh.write("\n")
             fh.flush()
             os.fsync(fh.fileno())
@@ -233,13 +359,15 @@ def handle(payload, repo=REPO):
     tree = target_tree(cmd, payload.get("cwd"), repo=repo) or repo
 
     if event == "PreToolUse":
-        snapshot = porcelain_status(tree)
+        # tracked_only: store the half of the snapshot the Post side can use.
+        # The MAX_PENDING trim that used to sit here moved into _bound_state(),
+        # which runs on every write instead of only on this branch — so a
+        # session that is only ever popping entries still gets bounded, and
+        # there is one place to read for "what keeps this file small".
+        snapshot = tracked_only(porcelain_status(tree))
         with locked_state(session_id) as data:
             if call_id:
                 data["pending"][call_id] = snapshot
-            if len(data["pending"]) > MAX_PENDING:
-                for stale_key in list(data["pending"])[: len(data["pending"]) - MAX_PENDING]:
-                    data["pending"].pop(stale_key, None)
         return
 
     if event == "PostToolUse":

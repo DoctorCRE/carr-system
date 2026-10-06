@@ -23,7 +23,11 @@ def check(name: str, value: bool) -> None:
 
 
 claim = {"job_id": "00000000-0000-4000-8000-000000000001", "lease": "00000000-0000-4000-8000-000000000002", "scheduled_for": "2026-07-13T11:30:00Z"}
-result = {"sponsor": "joe", "mode": "live", "attestation_id": "00000000-0000-4000-8000-000000000003", "receipt_id": "00000000-0000-4000-8000-000000000004"}
+result = {"sponsor": "joe", "mode": "live", "attestation_id": "00000000-0000-4000-8000-000000000003", "receipt_id": "00000000-0000-4000-8000-000000000004",
+          "unknown_attendees": {"count": 2, "attendee_keys": ["a" * 64, "b" * 64]}}
+import tempfile  # noqa: E402
+_last_run_dir = tempfile.TemporaryDirectory()
+runtime.LAST_RUN = Path(_last_run_dir.name) / "calendar-prebrief-joe-last-run.json"
 profile = {
     "CARR_CALENDAR_PREBRIEF_ENABLED": "true", "CARR_DB_JOBS_URL": "postgresql://carr_jobs:fixture@db.example/carr",  # ci-secret-scan: allow — inert fixture
     "CARR_CALENDAR_PREBRIEF_CHILD_PROFILE": "/fixture/child.env", "CARR_CALENDAR_PREBRIEF_COLLECTOR_PUBLIC_KEY": "/fixture/public.pem",
@@ -209,6 +213,18 @@ runtime._jobs_call = success_jobs
 success = runtime.run_tick(profile, Path("/fixture/runtime.env"))
 check("success renews both lease phases before exact completion", ["heartbeat_job" in query for query, _ in success_calls] == [True, True, False])
 check("success remains in the dedicated Joe live boundary", success_events == ["child_started"] and success["claimed"] == 1 and success["completion"]["state"] == "succeeded")
+import json  # noqa: E402
+_summary = json.loads(runtime.LAST_RUN.read_text(encoding="utf-8"))
+check("success reports skipped unknown attendees as count plus opaque keys (0735)",
+      success["unknown_attendees"] == result["unknown_attendees"]
+      and _summary["unknown_attendees"] == result["unknown_attendees"]
+      and "@" not in runtime.LAST_RUN.read_text(encoding="utf-8"))
+_missing = dict(result); _missing.pop("unknown_attendees")
+try:
+    runtime.complete("postgresql://carr_jobs:fixture@db.example/carr", claim, _missing)  # ci-secret-scan: allow — inert fixture
+    check("a child result without the unknown-attendee report is refused", False)
+except runtime.Refusal:
+    check("a child result without the unknown-attendee report is refused", True)
 
 print("PASS" if not bad else "FAIL " + ", ".join(bad))
 raise SystemExit(bool(bad))

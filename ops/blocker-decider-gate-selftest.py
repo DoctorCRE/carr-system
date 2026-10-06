@@ -101,6 +101,47 @@ def main():
         print(f"  {passed_or} {name:28} want={'DENY ' if expect else 'allow'} "
               f"got={'DENY' if got else 'allow'}")
 
+    # THE SECOND CONCERN this gate hosts: the defect-class advisory. These
+    # cases never assert what the ranking SAYS — that is measured against
+    # held-out data, not asserted in a gate suite. They assert the only
+    # properties the host relationship depends on: that it cannot deny, and
+    # that it cannot wedge a session when the judgment is unreachable. Both are
+    # checked with no credential in the environment, which is also the state a
+    # scheduled run sees.
+    advisory_env = {k: v for k, v in os.environ.items()
+                    if k not in ("TYPESAFE_API_KEY",)}
+    for name, ti in (
+        ("advisory-never-denies",
+         {"claimed": "the library was finished", "actual": "nothing ever called it"}),
+        ("advisory-tolerates-missing-fields", {"claimed": "only half a defect"}),
+        ("advisory-tolerates-junk", {"claimed": None, "actual": ["not", "a", "string"]}),
+    ):
+        proc = subprocess.run(
+            [sys.executable, HOOK],
+            input=json.dumps({"tool_name": "mcp__carr__record-defect",
+                              "session_id": "selftest", "tool_input": ti}),
+            capture_output=True, text=True, timeout=60, env=advisory_env)
+        if proc.returncode == 0:
+            passed += 1
+            print(f"  ok   {name:28} want=allow got=allow")
+        else:
+            bad.append(name)
+            print(f"  FAIL {name:28} exit={proc.returncode} {proc.stderr[:100]}")
+
+    # A tool this gate is not registered for must fall straight through, or the
+    # advisory becomes a judgment call on every MCP write in the system.
+    proc = subprocess.run(
+        [sys.executable, HOOK],
+        input=json.dumps({"tool_name": "mcp__carr__update-deal", "session_id": "selftest",
+                          "tool_input": {"claimed": "x", "actual": "y"}}),
+        capture_output=True, text=True, timeout=30, env=advisory_env)
+    if proc.returncode == 0 and not proc.stdout.strip():
+        passed += 1
+        print("  ok   advisory-ignores-other-verbs  want=silent got=silent")
+    else:
+        bad.append("advisory-ignores-other-verbs")
+        print(f"  FAIL advisory-ignores-other-verbs — {proc.stdout[:120]}")
+
     got, out = spawn("mcp__carr__add-loop", CASES[0][2])
     if "decider" in out.lower() and ("joe" in out.lower() or "dell" in out.lower()):
         passed += 1

@@ -27,9 +27,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+TOOLS_ROOT = HERE.parent
+sys.path.insert(0, str(TOOLS_ROOT))
 
 import desks  # noqa: E402
 import dispatch  # noqa: E402
+import credential_env  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -55,6 +58,12 @@ for i, a in enumerate(sys.argv):
     if a == "--messaging-socket-path":
         sock = sys.argv[i + 1]
 open(os.environ["STANDIN_ARGV_LOG"], "w").write("\\n".join(sys.argv[1:]))
+# Test-only: dump the one env var this suite checks got merged in, to a file
+# the test reads back. This is a test fixture writing to ITS OWN tmp file, not
+# the launcher logging a credential — desk_start itself never does this.
+dump = os.environ.get("STANDIN_ENV_DUMP")
+if dump:
+    open(dump, "w").write(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""))
 try:
     os.unlink(sock)
 except FileNotFoundError:
@@ -96,6 +105,55 @@ def main() -> int:
 
     check("start binds a labeled socket and registers the desk",
           start_puts_a_desk_on_the_line)
+
+    def start_merges_the_long_lived_login_into_the_child_env_only():
+        tokens_path = root / "tokens.env"
+        tokens_path.write_text("CLAUDE_CODE_OAUTH_TOKEN=sk-not-a-real-secret\n")
+        tokens_path.chmod(0o600)
+        env_dump = root / "env-dump.txt"
+        token_env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}",
+                         STANDIN_ARGV_LOG=str(root / "argv-token.txt"),
+                         STANDIN_ENV_DUMP=str(env_dump))
+        out = dispatch.desk_start(
+            "token-desk", registry=reg, state_dir=state, sock_dir=sock_dir,
+            env=token_env, token_path=tokens_path,
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not env_dump.exists():
+            time.sleep(0.1)
+        assert env_dump.exists(), "the standin never ran (or never dumped its env)"
+        assert env_dump.read_text() == "sk-not-a-real-secret", \
+            "the child process did not receive the long-lived login"
+        assert "CLAUDE_CODE_OAUTH_TOKEN" not in os.environ, \
+            "desk_start leaked the token into this process's own environment"
+        log_text = Path(out["log"]).read_text(errors="replace")
+        assert "sk-not-a-real-secret" not in log_text, \
+            "the token value was printed into the desk's log"
+        dispatch.desk_stop("token-desk", state_dir=state, sock_dir=sock_dir)
+
+    check("desk_start merges CLAUDE_CODE_OAUTH_TOKEN into the child env, "
+          "never into this process's environment, and never logs the value",
+          start_merges_the_long_lived_login_into_the_child_env_only)
+
+    def start_is_absent_safe_when_no_token_is_configured():
+        env_dump = root / "env-dump-absent.txt"
+        no_token_env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}",
+                            STANDIN_ARGV_LOG=str(root / "argv-absent.txt"),
+                            STANDIN_ENV_DUMP=str(env_dump))
+        out = dispatch.desk_start(
+            "no-token-desk", registry=reg, state_dir=state, sock_dir=sock_dir,
+            env=no_token_env, token_path=root / "no-such-tokens.env",
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not env_dump.exists():
+            time.sleep(0.1)
+        assert env_dump.exists(), "the standin never ran (or never dumped its env)"
+        assert env_dump.read_text() == "", \
+            "a token appeared with no tokens file configured"
+        dispatch.desk_stop("no-token-desk", state_dir=state, sock_dir=sock_dir)
+
+    check("with no long-lived login configured, the desk still starts (keychain path unchanged)",
+          start_is_absent_safe_when_no_token_is_configured)
 
     def it_starts_a_session_that_stays():
         argv = argv_log.read_text().splitlines()

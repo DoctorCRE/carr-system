@@ -1,0 +1,61 @@
+{
+  "schema_version": "siep-heavy-build-session-reproduction.v1",
+  "status": "source_test_only_no_production_enforcement_claim",
+  "package": "SIEP-01",
+  "purpose": "Reproduce the difference between generic job success and truthfully verified heavy-build execution without creating a second lifecycle or evidence authority.",
+  "authority": {
+    "work_lifecycle": "ops.work_request",
+    "accepted_plan": "ops.sourced_work_request_plan and its acceptance receipt",
+    "heavy_admission": "ops.heavy_build_admission_revision and ops.heavy_build_plan_review",
+    "execution": "ops.job, ops.job_attempt, and ops.job_receipt",
+    "engineering_evidence": "ops.engineering_slice_receipt and ops.engineering_reviewer_fact",
+    "readback": "ops.engineering_passport_facts",
+    "fixture_oracle_is_authority": false
+  },
+  "closed_top_level_fields": [
+    "schema_version",
+    "synthetic",
+    "case_set_ref",
+    "source_commit_sha",
+    "shared_binding",
+    "observations",
+    "observation_digest"
+  ],
+  "closed_shared_binding_fields": [
+    "work_request",
+    "accepted_plan",
+    "heavy_admission",
+    "heavy_review",
+    "engineering_slice_plan"
+  ],
+  "closed_observation_fields": [
+    "case",
+    "slice_ref",
+    "capability_session_id",
+    "executor_actor_id",
+    "job",
+    "job_attempt",
+    "generic_completion_receipt",
+    "envelope",
+    "engineering_receipt",
+    "reviewer_fact",
+    "passport_slice_state"
+  ],
+  "cases": ["fully_observed", "half_executed"],
+  "invariants": [
+    "Both observations share one accepted heavy-build plan, plan digest, capability session, and executor identity.",
+    "Both generic jobs and attempts are succeeded and have generic completion receipts.",
+    "Only fully_observed has a lease-bound engineering receipt and a distinct passing reviewer fact.",
+    "half_executed remains unresolved even when caller-labelled generic completion evidence says complete.",
+    "Overall Engineering Passport closure remains blocked while either sibling slice is unresolved.",
+    "The reproduction is synthetic, loopback-only, disposable, and transactionally rolled back.",
+    "SIEP-01 does not call containment, reconciliation, recontainment, classifier replacement, dispatch replacement, or Production deployment paths."
+  ],
+  "delivery_state": {
+    "source": "implemented",
+    "migration": "not_required_source_only_reproduction",
+    "deploy": "not_applied",
+    "production_enforcement": "not_activated",
+    "rollback": "rollback_only_database_gate_and_delete_source_artifacts"
+  }
+}

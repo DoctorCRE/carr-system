@@ -9,7 +9,7 @@ first). Run it through db-tap so no DSN reaches a shell command:
     .venv/bin/python tools/db-tap.py run pipelines/import_dossier_analysis.py
     .venv/bin/python tools/db-tap.py run pipelines/import_dossier_analysis.py --apply
     .venv/bin/python tools/db-tap.py --branch rehearse-0028 run \
-        pipelines/import_dossier_analysis.py --apply --only Renalus.md
+        pipelines/import_dossier_analysis.py --apply --only Nephrova.md
 
 WHAT IT DOES NOT DO — the stop rules, in code:
   * It never guesses a date or an author. A section whose date or author cannot
@@ -27,9 +27,9 @@ WHAT IT DOES NOT DO — the stop rules, in code:
     section's bytes.
 
 CHUNKING, and why H2: every one of the 23 files organises itself by `## `
-headings — dated addenda in the deal files (GulfCoastPelvicFloor,
-FirstCallDPC-Petersen) and topical sections in the narrative ones
-(LifeDentalGroup, Tyrer). H3s stay INSIDE their parent section; splitting on
+headings — dated addenda in the deal files (HarborlinePelvicTherapy,
+BayviewDPC-Whitfield) and topical sections in the narrative ones
+(LumoraDentalGroup, Okafor). H3s stay INSIDE their parent section; splitting on
 them would shred a single argument across rows.
 """
 import argparse
@@ -51,7 +51,7 @@ LAST_UPDATED = re.compile(r"^Last updated:\s*(.+?)\s*$", re.M)
 # Authors are only ever read off an explicit stamp the file itself carries.
 AUTHOR = re.compile(r"\((?:by\s+)?(Joe|Dell|Claude)\b", re.I)
 # The WHOLE owner line, not the first token. Joe's dictated stamp for
-# LifeDentalGroup is "Shared, Dell originated" — a \S+ capture would have taken
+# LumoraDentalGroup is "Shared, Dell originated" — a \S+ capture would have taken
 # "Shared," and thrown away both the attribution and the fact that it is shared.
 FM_OWNER = re.compile(r"^owner:\s*(.+?)\s*$", re.M)
 # Which actor a stamp names. A compound stamp still has exactly one party who
@@ -213,6 +213,14 @@ def main():
     ap.add_argument("--only", help="one dossier basename, for the file-by-file gate (step 8)")
     a = ap.parse_args()
 
+    # The roster is a gitignored local file (exporters/dossier_roster.py,
+    # WR-000049). Without it DOSSIER_FILES is empty, and an empty set would
+    # "import" nothing and then fail the notes_path count below with a
+    # misleading "the set moved". Say what is actually missing instead.
+    if not DOSSIER_FILES:
+        from exporters.dossier_roster import missing_message
+        sys.exit(missing_message())
+
     files = [a.only] if a.only else DOSSIER_FILES
     if a.only and a.only not in DOSSIER_FILES:
         sys.exit(f"{a.only} is not one of the {len(DOSSIER_FILES)} dossiers")
@@ -339,7 +347,7 @@ def main():
             # file's single date, and a whole file imports inside ONE
             # transaction, so now() was identical for every row — which dropped
             # the tie onto a random uuid and made "current" arbitrary in 19 of
-            # the 23 files (Tyrer's `Changelog` won rank 1 that way).
+            # the 23 files (Okafor's `Changelog` won rank 1 that way).
             #
             # Stamping recorded_at one microsecond apart in FILE ORDER makes the
             # tie break by position in the source document: the LAST section in

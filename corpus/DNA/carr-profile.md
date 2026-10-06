@@ -35,7 +35,7 @@ Joe and Dell are business partners with a shared goal: to own and dominate the h
 
 **Twin-system plan (stated by Joe, July 6, 2026 — EXECUTED July 9, 2026: the twin is live; how-it-went record in both decision-histories):** Joe builds CARR AI first; Dell then gets a twin on his own Claude account — two individual brains working together as partner systems, with shared workspace assets (the lead registry is the flagship) worked jointly and personal assets cloned as templates. Full transfer playbook, asset classification, and prerequisites: **DNA/Team/twin-system-playbook.md**.
 
-**About Dell:** Dell has over 15 years in the healthcare industry. His primary goal is to empower medical professionals to concentrate on patient care by alleviating their real estate project management burden. He specializes in commercial real estate — understanding market conditions, locating viable options, analyzing data, and negotiating transactions. Dell has cultivated relationships with leading healthcare vendors across the country, with a strong concentration in the Gulf Coast region. *(Usage note, Joe, July 11, 2026: Joe drives Claude as a power user, guiding it toward a vision; Dell is newer to that style, so his brain assumes he needs more guidance for now and keeps his individual work inside the built system. See the guidance posture in twin-system-playbook.md.)*
+**About Dell:** Dell has over 15 years in the healthcare industry. His primary goal is to empower medical professionals to concentrate on patient care by alleviating their real estate project management burden. He specializes in commercial real estate — understanding market conditions, locating viable options, analyzing data, and negotiating transactions. Our vendor network includes leading healthcare vendors across the country, with a strong concentration in the Gulf Coast region. Joe and Dell both work and grow it; Dell's 15+ years of healthcare experience is his differentiator. *(Usage note, Joe, July 11, 2026: Joe drives Claude as a power user, guiding it toward a vision; Dell is newer to that style, so his brain assumes he needs more guidance for now and keeps his individual work inside the built system. See the guidance posture in twin-system-playbook.md.)*
 
 The team's vendor network is a shared, actively-merging asset of the partnership, worked and grown by both partners. It includes:
 
@@ -87,7 +87,7 @@ Healthcare providers of all specialties, including:
 
 Typical clients are independent or small-group practice owners making real estate decisions for the first time or looking to grow. That is the core VOLUME, not the whole book.
 
-CARR also represents **National Accounts**: multi-location and expanding healthcare organizations — groups, DSOs, emerging and franchise operators, and regional systems adding locations — represented portfolio-wide across CARR's national agent network (the Musicologie rollout is one; AltaPointe Health is another). **Standing goal (Joe, 2026-07-22): build a MATURE pipeline of every client type CARR serves, not just the private-practice default.** Client types to track: independent/small-group practice, National Account / multi-location group, owner-occupier (buy), investor, renewal/relocation, and past client. **Scope (widened Jul 22):** the net is wide. Surgical / ambulatory surgery centers (ASCs), acute care, and similar facility types are IN, alongside multi-location groups, DSOs, franchise/emerging operators, and regional systems. **No facility type or size is auto-excluded.** What to pursue at the very high end (e.g., a mega system that builds and owns all its own real estate) is Joe and Dell's judgment call at review, never an automated filter.
+CARR also represents **National Accounts**: multi-location and expanding healthcare organizations — groups, DSOs, emerging and franchise operators, and regional systems adding locations — represented portfolio-wide across CARR's national agent network (the Cadence Studio rollout is one; AltaPointe Health is another). **Standing goal (Joe, 2026-07-22): build a MATURE pipeline of every client type CARR serves, not just the private-practice default.** Client types to track: independent/small-group practice, National Account / multi-location group, owner-occupier (buy), investor, renewal/relocation, and past client. **Scope (widened Jul 22):** the net is wide. Surgical / ambulatory surgery centers (ASCs), acute care, and similar facility types are IN, alongside multi-location groups, DSOs, franchise/emerging operators, and regional systems. **No facility type or size is auto-excluded.** What to pursue at the very high end (e.g., a mega system that builds and owns all its own real estate) is Joe and Dell's judgment call at review, never an automated filter.
 
 ---
 
@@ -114,7 +114,7 @@ All services are provided at **no cost to the tenant/buyer** — CARR is compens
 - Exclusive tenant/buyer representation — no conflicts of interest
 - Specialized expertise in healthcare real estate (not general commercial)
 - Deep knowledge of the Gulf Coast market
-- Extensive, vetted network of healthcare-focused partners (see Dell's vendor list above)
+- Our vendor network: extensive, vetted healthcare-focused partners (see the shared team network above)
 - Educational and consultative approach — we help clients understand the process, not just close deals
 
 ---

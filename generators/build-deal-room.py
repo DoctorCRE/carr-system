@@ -21,7 +21,8 @@ import json, os, sys
 # exporter wrote. The file keeps being generated, and `--files` still builds from
 # it byte for byte, so no other reader loses anything; this only stops the room
 # from deriving today's queue from an export that may have failed hours ago.
-# Parity between the two modes is proven by tools/parity-records.py, not assumed.
+# Both modes use the same template transforms; whole-output parity requires
+# comparing them on the same data.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from lib.drive_recovery import RecoveryArgumentError, parse_recovery_controls
@@ -54,7 +55,58 @@ for d in deals:
         "txn","ptype","etl","created","seg","note","tier","carr_status",
         "activity","next_step","key_dates","docs","outcome","closed","won_value"]})
 
+# ---- what the record says, read by judgment (2026-09-18) ----------------
+# The room already shows every field the record holds. What it could not show
+# is a READING of them: how far a deal has actually moved, who owes the next
+# move, and whether a silence means anything. ops/jev_deal_read.py answers
+# those three, and refuses to answer for a deal whose record is too thin --
+# which, measured on 2026-09-18, is 67 of the 74 live deals. That refusal is
+# the point and it is rendered, not hidden: a reader must be able to see that
+# the room is quiet about a deal because the record is empty.
+#
+# EVERY FAILURE PATH LANDS ON THE SAME FLOOR. No credential, no network, a
+# refused request, a view that moved: READ stays empty and the room builds
+# exactly as it did before this block existed. Set CARR_DEAL_ROOM_NO_READ=1 to
+# skip it deliberately.
+READ, READ_SUMMARY, READ_NOTE = {}, {}, ""
+if MODE == MODE_RECORDS and not os.environ.get("CARR_DEAL_ROOM_NO_READ"):
+    try:
+        from ops import jev_deal_read
+        _results = jev_deal_read.read_deals()
+        READ_SUMMARY = jev_deal_read.summarise(_results)
+        _seen: dict[str, int] = {}
+        for _r in _results:
+            _seen[_r["name"]] = _seen.get(_r["name"], 0) + 1
+        for _r in _results:
+            # A duplicated deal name cannot be matched to one card, so it is
+            # left unread rather than attached to whichever card sorts first.
+            if _seen[_r["name"]] != 1:
+                continue
+            READ[_r["name"]] = {
+                "judged": _r.get("judged"),
+                "reason": _r.get("reason"),
+                "movement": _r.get("movement"),
+                "rung": _r.get("movement_rung"),
+                "rungs": _r.get("movement_rungs"),
+                "level": _r.get("movement_level"),
+                "confidence": _r.get("movement_confidence"),
+                "waiting_on": _r.get("waiting_on"),
+                "waiting_confidence": _r.get("waiting_on_confidence"),
+                "silence_is_bad": _r.get("silence_is_bad"),
+                "quiet_days": _r.get("days_since_record_touched"),
+                "evidence_chars": _r.get("evidence_chars"),
+            }
+    except Exception as _exc:
+        READ, READ_SUMMARY = {}, {}
+        READ_NOTE = f"The reading did not run: {_exc}"
+
+for _d in CLEAN:
+    _d["read"] = READ.get(_d.get("name"))
+
 PAYLOAD = json.dumps(CLEAN, ensure_ascii=False).replace("</", "<\\/")
+READ_PAYLOAD = json.dumps(
+    {"summary": READ_SUMMARY, "note": READ_NOTE}, ensure_ascii=False
+).replace("</", "<\\/")
 
 CSS = r"""
 :root{--bg:#0e2236;--panel:#153350;--panel2:#183b5c;--line:#27506f;--ink:#f4f8fc;--muted:#9db3c8;
@@ -171,6 +223,29 @@ padding-top:12px;margin-top:4px}
 .nextbox .nt{font-size:13px;line-height:1.55}
 .nextbox .nmeta{font-size:11.5px;color:var(--muted);margin-top:6px}
 .nextbox .nmeta b{color:var(--orange-soft)}
+/* What the record says -- the reading panel. Same glass family as the rest of
+   the room: panel ground, one hairline, orange only where it is the light in
+   the frame. The bar is the only new shape and it is deliberately flat. */
+.readbox{background:linear-gradient(180deg,rgba(74,144,217,.09),rgba(21,51,80,.55));
+border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin:14px 0}
+.readbox h4{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:9px}
+.readbox.unread{background:none;border-style:dashed}
+.readrung{font-size:13px;color:var(--ink)}
+.readrung b{color:var(--orange-soft);font-size:15px}
+.readconf{float:right;font-size:11px;color:var(--muted)}
+.readbar{height:5px;border-radius:3px;background:var(--chip);margin:9px 0 10px;overflow:hidden}
+.readbar span{display:block;height:100%;border-radius:3px;
+background:linear-gradient(90deg,var(--blue),var(--orange))}
+.readlevel{font-size:12.5px;line-height:1.5;color:var(--ink)}
+.readrow{display:flex;justify-content:space-between;gap:14px;font-size:12px;margin-top:8px;
+padding-top:8px;border-top:1px solid rgba(39,80,111,.6)}
+.readrow .rk{color:var(--muted)}
+.readrow .rv{text-align:right}
+.rbad{color:var(--red)} .rmid{color:var(--amber)} .rok{color:var(--green)}
+.readfoot{font-size:11px;color:var(--muted);line-height:1.5;margin-top:10px}
+.readnote{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--blue);
+border-radius:9px;padding:10px 13px;margin:0 0 16px;font-size:12.5px;color:var(--muted);line-height:1.55}
+.readnote b{color:var(--ink)}
 .kd{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 @media(max-width:560px){.kd{grid-template-columns:1fr}}
 .kd .k{background:var(--chip);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
@@ -204,6 +279,7 @@ font-size:13px;font-weight:650;padding:10px 14px;border-radius:11px;margin:12px 
 
 JS = r"""
 var DEALS = __DATA__;
+var READ = __READ__;
 var PHASES = ["Research","Negotiation","Legal","Due Diligence","Closing"];
 var PHASE_COLOR = {"Research":"#e8b54a","Negotiation":"#41c08a","Legal":"#ec7a2c","Due Diligence":"#4a90d9","Closing":"#7ad0a6","Pending":"#6f88a0"};
 var OWN_COLOR = {"Joe":"#ec7a2c","Dell":"#4a90d9"};
@@ -286,8 +362,8 @@ function toast(msg){var t=document.getElementById("toast");t.textContent=msg;t.c
 function matches(d){
   if(state.owner==="ref"){if(!isReferred(d))return false;}
   else if(state.owner!=="all"&&(d.owner||"").split(" ")[0]!==state.owner) return false;
-  if(state.seg==="music"&&d.seg!=="Musicologie") return false;
-  if(state.seg==="core"&&d.seg==="Musicologie") return false;
+  if(state.seg==="music"&&d.seg!=="Cadence Studio") return false;
+  if(state.seg==="core"&&d.seg==="Cadence Studio") return false;
   if(state.q){var blob=[d.name,d.company,d.contact,d.city,d.seg,d.owner,d.phase,d.referral,whyLine(d)].join(" ").toLowerCase();
     if(blob.indexOf(state.q)<0) return false;}
   return true;
@@ -354,7 +430,8 @@ function bcard(d){
 }
 function renderBoard(el){
   var pool=DEALS.filter(matches);
-  var h='<div class="board">';
+  var h=readBanner();
+  h+='<div class="board">';
   PHASES.forEach(function(ph){
     var col=pool.filter(function(d){return d.phase===ph&&d.tier!=="pending"&&!d.outcome;});
     var pc=PHASE_COLOR[ph];
@@ -421,6 +498,56 @@ function renderRefs(el){
 }
 function openDetailBtn(d){openDetail(idxOf(d));}
 
+// WHAT THE RECORD SAYS. Three judgments read off the deal record by
+// ops/jev_deal_read.py: how far the deal has actually moved, who owes the next
+// move, and whether its silence means anything. A deal whose record is too
+// thin to read says so in plain words instead of showing a number -- that
+// refusal is the honest half of this panel and is never dressed up as a score.
+var WAITING_LABEL = {
+  client:"the client", counterparty:"the landlord or seller",
+  carr:"us", market:"the market — nothing fits yet",
+  third_party:"a lender, architect, contractor or the city",
+  client_timing:"nobody — the client's own timing",
+  not_recorded:"not recorded"};
+function readHtml(d){
+  var r=d.read;
+  if(!r) return '';
+  if(!r.judged){
+    return '<div class="readbox unread"><h4>What the record says</h4>'+
+      '<div class="emptynote">'+esc(r.reason||"Not read.")+'</div></div>';
+  }
+  var pct=Math.max(0,Math.min(100,(r.movement/(r.rungs-1))*100));
+  var h='<div class="readbox"><h4>What the record says</h4>';
+  h+='<div class="readrung">Step <b>'+r.rung+'</b> of '+r.rungs+
+     '<span class="readconf">read with '+Math.round(r.confidence*100)+'% confidence</span></div>';
+  h+='<div class="readbar"><span style="width:'+pct.toFixed(0)+'%"></span></div>';
+  h+='<div class="readlevel">'+esc(r.level)+'</div>';
+  h+='<div class="readrow"><span class="rk">Next move belongs to</span><span class="rv">'+
+     esc(WAITING_LABEL[r.waiting_on]||r.waiting_on)+'</span></div>';
+  if(r.quiet_days!==null&&r.quiet_days!==undefined){
+    var bad=r.silence_is_bad>=0.6, ok=r.silence_is_bad<=0.3;
+    var verdict=bad?"long enough to be a problem":(ok?"a normal wait":"worth a look");
+    h+='<div class="readrow"><span class="rk">Quiet for</span><span class="rv">'+
+       r.quiet_days+' day'+(r.quiet_days===1?'':'s')+' — <b class="'+
+       (bad?'rbad':(ok?'rok':'rmid'))+'">'+verdict+'</b></span></div>';
+  }
+  h+='<div class="readfoot">Read from '+r.evidence_chars+
+     ' characters of recorded evidence. A reading, not a forecast — no number '+
+     'here has been checked against a deal whose outcome is known. Of the '+
+     'ninety-nine closed deals only two carry enough written down to check a '+
+     'reading against, and both of those were won, so a wrong reading has '+
+     'nothing on record to be caught by.</div>';
+  return h+'</div>';
+}
+function readBanner(){
+  var s=READ.summary||{};
+  if(READ.note) return '<div class="readnote">'+esc(READ.note)+'</div>';
+  if(!s.deals) return '';
+  return '<div class="readnote">Read off the record: <b>'+s.judged+'</b> of '+s.deals+
+    ' live deals held enough to read. <b>'+(s.no_evidence||0)+'</b> hold too little — '+
+    'a name, a phase and a city, and nothing recorded about what has happened.</div>';
+}
+
 function meterHtml(d){
   if(d.tier==="pending") return "";
   var i=(d.outcome==="won")?PHASES.length:PHASES.indexOf(d.phase);
@@ -450,6 +577,7 @@ function openDetail(i){
   if(d.email)cl.push('<a href="mailto:'+esc(d.email)+'">'+esc(d.email)+'</a>');
   if(cl.length)h+='<div class="contact">'+cl.join(" &nbsp;&middot;&nbsp; ")+'</div>';
   h+=meterHtml(d);
+  h+=readHtml(d);
   h+='<div class="block"><h4>Next step</h4>';
   if(d.next_step&&d.next_step.text){
     h+='<div class="nextbox"><div class="nt">'+esc(d.next_step.text)+'</div><div class="nmeta">';
@@ -565,7 +693,7 @@ BODY = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
  <select id="segsel" aria-label="Segment">
   <option value="all">All segments</option>
   <option value="core">Panhandle book</option>
-  <option value="music">Musicologie rollout</option>
+  <option value="music">Cadence Studio rollout</option>
  </select>
  <select id="sortsel" class="hide" aria-label="Sort">
   <option value="attention">Needs attention first</option>
@@ -583,7 +711,8 @@ BODY = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 
 DOC = (BODY.replace("__CSS__", CSS)
            .replace("__STAMP__", STAMP)
-           .replace("__JS__", JS.replace("__DATA__", PAYLOAD)))
+           .replace("__JS__", JS.replace("__DATA__", PAYLOAD)
+                       .replace("__READ__", READ_PAYLOAD)))
 if CONTEXT.recovery:
     DOC = "<!-- RECOVERY NONCANONICAL projection; never source truth. -->\n" + DOC
 

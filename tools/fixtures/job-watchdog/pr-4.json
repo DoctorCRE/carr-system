@@ -1,0 +1,24 @@
+{
+  "number": 4,
+  "headRefOid": "0000000000000000000000000000000000000004",
+  "updatedAt": "2020-01-01T00:00:00Z",
+  "comments": [
+    {
+      "body": "REVIEW: APPROVED\nReviewed-SHA: 0000000000000000000000000000000000000004",
+      "createdAt": "2020-01-01T00:01:00Z"
+    }
+  ],
+  "commits": [
+    {
+      "committedDate": "2020-01-01T00:00:00Z"
+    }
+  ],
+  "isDraft": false,
+  "mergeable": "UNKNOWN",
+  "statusCheckRollup": [
+    {
+      "conclusion": "SUCCESS",
+      "status": "COMPLETED"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 // self-corrections in dictated text (added 2026-08-08, extending the
 // "scratch that" command LiveTyper.swift already handles). Joe speaks
 // corrections the way people actually talk — "send it Tuesday, no wait,
-// Wednesday", "copy Petersen, I mean Peterson" — and the ruling on this
+// Wednesday", "copy Whitfeld, I mean Whitfield" — and the ruling on this
 // (his words: "resolve these LOCALLY, no cloud, make it as good as
 // possible") is a bias, not just a scope limit: a false positive here
 // (mangling text that was never a correction) is WORSE than a false

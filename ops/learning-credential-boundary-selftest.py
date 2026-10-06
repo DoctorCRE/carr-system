@@ -24,6 +24,10 @@ def fixture_root(root: Path) -> tuple[Path, Path]:
     script = root / "bin" / "learning-weekly.sh"
     script.parent.mkdir()
     shutil.copy2(WEEKLY, script)
+    # The script sources bin/routine-credential-env.sh for the shared
+    # db.env sourceability guard, so the fixture bin/ must carry it too.
+    shutil.copy2(REPO / "bin" / "routine-credential-env.sh",
+                 script.parent / "routine-credential-env.sh")
     fake = root / ".venv" / "bin" / "python"
     fake.parent.mkdir(parents=True)
     fake.write_text(

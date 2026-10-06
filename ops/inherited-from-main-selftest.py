@@ -114,17 +114,36 @@ def branch(repo, name, edits):
     git(repo, "commit", "-q", "-m", f"work on {name}", must=True)
 
 
-def ask(repo, *extra, timeout="180", env=None):
-    """Run the helper the way ops/ci.sh runs it: from inside the branch tree."""
+def ask(repo, *extra, timeout="180", env=None, check_path="check.py"):
+    """Run the helper the way ops/ci.sh runs it: from inside the branch tree.
+
+    check_path is the repo-relative check, defaulting to the one make_repo
+    seeds; the collection cases below put a second copy in a subdirectory the
+    fixture's own ci.sh globs do not reach.
+    """
     e = fixture_env()
     e.pop("CARR_CI_NO_INHERIT_CHECK", None)
     if env:
         e.update(env)
     p = subprocess.run(
-        [sys.executable, HELPER, "--check", "check.py", "--timeout", timeout,
-         *extra, "--", sys.executable, "check.py"],
+        [sys.executable, HELPER, "--check", check_path, "--timeout", timeout,
+         *extra, "--", sys.executable, check_path],
         cwd=repo, capture_output=True, text=True, env=e, timeout=300)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def commit_ci_sh(repo, loops, extra_files=None):
+    """Give the fixture an ops/ci.sh whose collection globs are `loops`.
+
+    Only the `for t in ...; do` shape matters — the helper reads ci.sh's
+    collection globs out of its source and never executes it.
+    """
+    body = "".join(f"for t in {loop}; do :; done\n" for loop in loops)
+    write(repo, "ops/ci.sh", "#!/usr/bin/env bash\n" + body)
+    for rel, text in (extra_files or {}).items():
+        write(repo, rel, text)
+    git(repo, "add", "-A", must=True)
+    git(repo, "commit", "-q", "-m", "ci.sh and its collected checks", must=True)
 
 
 # ---------------------------------------------------------------- the two seeds
@@ -229,6 +248,215 @@ def test_exit_78_at_the_base_is_not_a_break():
               "exit 78" in out, out)
 
 
+def test_an_unmaterialised_runtime_prerequisite_is_not_a_break():
+    """A detached merge-base tree does not inherit ignored installed tools.
+
+    The caller's checkout has the runtime, so the check is reproducible there.
+    The helper's fresh worktree does not. Treating that environment difference
+    as a failing base would falsely exonerate an unrelated branch.
+    """
+    runtime_check = """\
+import pathlib
+import subprocess
+
+root = pathlib.Path(__file__).resolve().parent
+subprocess.run([str(root / "runtime" / "tool")], check=True)
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp, base_subject="good")
+        write(repo, "runtime-check.py", runtime_check)
+        git(repo, "add", "runtime-check.py", must=True)
+        git(repo, "commit", "-q", "-m", "add runtime-dependent check", must=True)
+        branch(repo, "innocent", {"unrelated.txt": "x\n"})
+        write(repo, "runtime/tool", "#!/bin/sh\nexit 0\n", executable=True)
+
+        live = subprocess.run([sys.executable, "runtime-check.py"], cwd=repo,
+                              capture_output=True, text=True, env=fixture_env())
+        check("the runtime-dependent check is configured in the caller checkout",
+              live.returncode == 0, live.stderr)
+
+        e = fixture_env()
+        p = subprocess.run(
+            [sys.executable, HELPER, "--check", "runtime-check.py", "--",
+             sys.executable, "runtime-check.py"],
+            cwd=repo, capture_output=True, text=True, env=e, timeout=300)
+        out = (p.stdout or "") + (p.stderr or "")
+        check("a runtime absent only from the detached replay resolves to cannot-tell",
+              p.returncode == CANNOT_TELL, f"exit {p.returncode}\n{out}")
+        check("the refusal names the unmaterialised runtime prerequisite",
+              "runtime prerequisite is absent from the merge-base worktree" in out, out)
+
+
+def test_the_replay_reuses_the_callers_installed_dependencies():
+    """Requirement: mcp-server/node_modules and .venv are symlinked into the
+    detached merge-base tree before a check runs there.
+
+    `git worktree add` materialises tracked source only — never an ignored,
+    installed directory such as node_modules or .venv (see .gitignore). A
+    check whose only problem is that IT runs in a fresh tree must not read as
+    a break on main; this proves the mechanism reuses what the caller
+    checkout already installed rather than merely detecting its absence.
+    """
+    dependency_check = """\
+import os
+import sys
+root = os.path.dirname(os.path.abspath(__file__))
+marker = os.path.join(root, "mcp-server", "node_modules", "MARKER")
+if os.path.isfile(marker):
+    sys.exit(0)
+sys.stderr.write("dependency missing: " + marker + "\\n")
+sys.exit(1)
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp, base_subject="good")
+        write(repo, "dependency-check.py", dependency_check)
+        git(repo, "add", "dependency-check.py", must=True)
+        git(repo, "commit", "-q", "-m", "add dependency-dependent check", must=True)
+        branch(repo, "innocent", {"unrelated.txt": "x\n"})
+        # An installed, ignored dependency directory present ONLY in the
+        # caller checkout — never committed, exactly like a real npm install.
+        os.makedirs(os.path.join(repo, "mcp-server", "node_modules"), exist_ok=True)
+        write(repo, "mcp-server/node_modules/MARKER", "installed\n")
+
+        rc, out = ask(repo, check_path="dependency-check.py")
+        check("the base replay finds the caller's node_modules via the symlink",
+              rc == NOT_INHERITED, f"exit {rc}\n{out}")
+        check("no attribution banner and no 'dependency missing' trace leak through",
+              "INHERITED FROM MAIN" not in out and "dependency missing" not in out, out)
+
+
+def test_missing_node_modules_replay_is_attribution_unavailable():
+    """defect 71c7c3f2 (PR #1195, hosted run 35979979350, 2026-09-24): the
+    merge-base re-run of ci-selftest.py's "ci.yml parses" check failed only
+    because the detached tree had no mcp-server/node_modules — a bare
+    `node -e "require('js-yaml')..."` MODULE_NOT_FOUND, reported INHERITED
+    FROM MAIN even though main's own gate had passed on its own PR.
+
+    This seeds a check whose caller-side install directory is ALSO absent (so
+    link_install_dirs() has nothing to symlink) and whose failure text names
+    the missing package rather than a tree-rooted path — the shape
+    missing_replay_prerequisite() cannot see, because Node's own
+    MODULE_NOT_FOUND message never spells the missing module as a path. The
+    verdict must be "attribution unavailable", never INHERITED and never a
+    silent NOT_INHERITED that would blame the branch for an environment gap.
+    """
+    node_style_check = """\
+import sys
+sys.stderr.write(
+    "node:internal/modules/cjs/loader:1050\\n"
+    "Error: Cannot find module 'js-yaml'\\n"
+    "Require stack:\\n"
+    "- /tmp/carr-mergebase-xyz/base/mcp-server/[eval]\\n"
+    "    at Module._resolveFilename (node:internal/modules/cjs/loader:1047:15) {\\n"
+    "  code: 'MODULE_NOT_FOUND',\\n"
+    "  requireStack: [ '/tmp/carr-mergebase-xyz/base/mcp-server/[eval]' ]\\n"
+    "}\\n"
+)
+sys.exit(1)
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp, base_subject="good")
+        write(repo, "node-check.py", node_style_check)
+        git(repo, "add", "node-check.py", must=True)
+        git(repo, "commit", "-q", "-m", "add node-dependent check", must=True)
+        branch(repo, "innocent", {"unrelated.txt": "x\n"})
+        # Deliberately no mcp-server/node_modules anywhere — the caller
+        # checkout has nothing to symlink, exactly like a from-scratch worktree.
+
+        rc, out = ask(repo, check_path="node-check.py")
+        check("a MODULE_NOT_FOUND replay is never read as an inherited break",
+              rc == CANNOT_TELL, f"exit {rc}\n{out}")
+        check("no INHERITED FROM MAIN banner is printed",
+              "INHERITED FROM MAIN" not in out, out)
+        check("the refusal names the environment-class signature",
+              "environment-class signature" in out and "MODULE_NOT_FOUND" in out, out)
+
+
+def test_missing_venv_replay_is_attribution_unavailable():
+    """The same environment-class guard for a Python virtualenv, not Node's."""
+    venv_style_check = """\
+import sys
+sys.stderr.write(
+    "/bin/sh: /tmp/carr-mergebase-xyz/base/.venv/bin/python: No such file or directory\\n"
+)
+sys.exit(1)
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp, base_subject="good")
+        write(repo, "venv-check.py", venv_style_check)
+        git(repo, "add", "venv-check.py", must=True)
+        git(repo, "commit", "-q", "-m", "add venv-dependent check", must=True)
+        branch(repo, "innocent", {"unrelated.txt": "x\n"})
+        # No .venv anywhere in the caller checkout either.
+
+        rc, out = ask(repo, check_path="venv-check.py")
+        check("a missing-venv replay is never read as an inherited break",
+              rc == CANNOT_TELL, f"exit {rc}\n{out}")
+        check("no INHERITED FROM MAIN banner is printed",
+              "INHERITED FROM MAIN" not in out, out)
+        check("the refusal names the missing virtualenv",
+              "virtualenv" in out, out)
+
+
+def test_a_check_this_branch_newly_collected_is_not_inherited():
+    """main never RAN it, so its failure at the merge base is not main's break.
+
+    2026-09-10, and this is the case that cost two full diagnoses. A branch
+    widened ops/ci.sh's collection globs to reach tools/<subdir>/test_*.py.
+    One of the suites that started running failed on the hosted runner, the
+    re-run at the merge base failed there too — truthfully, the suite really
+    does exit 1 in that environment — and the branch was told "INHERITED FROM
+    MAIN, wait for main to go green" about a file main's own globs had never
+    collected once. Main was green. The canary had nothing to name. No freeze
+    was going to lift, and the branch could not merge.
+
+    The check does NOT sit in the diff, so the pre-filter cannot see it, and it
+    DOES exist at the merge base, so the added-by-this-branch guard cannot
+    either. Only the collection globs tell the two situations apart.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp, base_subject="bad")            # the check is red
+        commit_ci_sh(repo, ["check-*.py"], {"sub/check.py": CHECK_PY})
+        # The branch widens collection and touches nothing else. sub/check.py is
+        # unchanged and present at the merge base; what changed is that anything
+        # runs it.
+        branch(repo, "widens-the-collector", {"unrelated.txt": "x\n"})
+        commit_ci_sh(repo, ["check-*.py sub/check*.py"])
+        rc, out = ask(repo, check_path="sub/check.py")
+        check("a check only this branch collects is never attributed to main",
+              rc == CANNOT_TELL, f"exit {rc}\n{out}")
+        check("the refusal says the branch is what makes the check run",
+              "this branch is what makes sub/check.py run" in out, out)
+        check("no attribution banner leaks into the newly-collected case",
+              "INHERITED FROM MAIN" not in out, out)
+
+
+def test_a_check_the_merge_base_already_collected_stays_inherited():
+    """The guard above must not become a blanket off-switch for ci.sh branches.
+
+    Two shapes it must leave exactly as they were: a check BOTH sides collect
+    (ci.sh changed for some unrelated reason), and a check NEITHER side collects
+    by glob — which is every check ci.sh invokes by name, hooks/gate-integrity.py
+    and the inventory checks among them.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp, base_subject="bad")
+        commit_ci_sh(repo, ["check*.py"])                    # the base collects it
+        branch(repo, "edits-ci-sh", {"unrelated.txt": "x\n"})
+        commit_ci_sh(repo, ["check*.py", "extra-*.py"])      # widened elsewhere
+        rc, out = ask(repo)
+        check("a check the merge base already collected keeps its verdict",
+              rc == INHERITED, f"exit {rc}\n{out}")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = make_repo(tmp, base_subject="bad")
+        commit_ci_sh(repo, ["ops/*-selftest.py"])            # collects neither side
+        branch(repo, "victim", {"unrelated.txt": "x\n"})
+        rc, out = ask(repo)
+        check("a check ci.sh invokes by name rather than by glob keeps its verdict",
+              rc == INHERITED, f"exit {rc}\n{out}")
+
+
 def test_a_slow_base_run_times_out_into_cannot_tell():
     with tempfile.TemporaryDirectory() as tmp:
         repo = make_repo(tmp, base_subject="slow")
@@ -290,6 +518,12 @@ def main():
                test_a_check_absent_from_the_merge_base_is_not_inherited,
                test_committing_a_new_check_is_answered_by_the_pre_filter_first,
                test_exit_78_at_the_base_is_not_a_break,
+               test_an_unmaterialised_runtime_prerequisite_is_not_a_break,
+               test_the_replay_reuses_the_callers_installed_dependencies,
+               test_missing_node_modules_replay_is_attribution_unavailable,
+               test_missing_venv_replay_is_attribution_unavailable,
+               test_a_check_this_branch_newly_collected_is_not_inherited,
+               test_a_check_the_merge_base_already_collected_stays_inherited,
                test_a_slow_base_run_times_out_into_cannot_tell,
                test_on_main_itself_there_is_nothing_to_attribute,
                test_no_base_ref_refuses,

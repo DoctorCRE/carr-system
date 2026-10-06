@@ -8,7 +8,7 @@ from cached speech with no model call at all.
 
 THE SAFETY PROPERTY, and the reason this is a lookup rather than a classifier:
 matching is on the WHOLE normalized utterance, never a substring. "Can you hear
-me" is a reflex; "can you hear me on the Hughes renewal" is NOT — it falls
+me" is a reflex; "can you hear me on the Ferris renewal" is NOT — it falls
 through to the brain, because it is a different whole utterance. A reflex can
 therefore never intercept a question about a client, a number, or a deal, which
 is the only failure that would matter (dialogue law 10: competence first, and a

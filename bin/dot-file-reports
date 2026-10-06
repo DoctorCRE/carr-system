@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""File saved Dot reports through the existing record-finding verb.
+
+bin/dot-file-reports [report.txt] [--reports-dir PATH] [--ledger PATH]
+No report argument scans out/orch/dot/reports/*.txt. Partial files are skipped.
+Publication ends with DOT-REPORT-END, optionally followed by a short job label.
+Writers must put that marker last, on the final part only, and close the file.
+Missing/intermediate completion markers refuse before any ledger claim or send.
+An unchanged regular-file snapshot is required before sending and after receipt;
+changes during transport retain the pending claim for reconciliation.
+The ignored ledger stores job names, receipt IDs and pending request hashes,
+never report content. A failed/ambiguous write exits nonzero; a later invocation
+replays the same idempotency key and payload. Changed pending reports refuse.
+Filed job names remain filed even if their files change. Do not delete the ledger.
+
+Full text and citations live in record_flag.value, kind=research_report, against
+repo:jbookout/doctorcre-app (readable in v_code_finding). observed means receipt
+of an AI-authored report, not independent verification of its claims. Date is
+the report file's UTC modification date. No model, Slack or credential access.
+"""
+
+import argparse
+from datetime import datetime, timezone
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import stat
+import subprocess
+import sys
+import uuid
+
+ROOT = Path(__file__).resolve().parents[1]
+SUBJECT = "repo:jbookout/doctorcre-app"
+
+
+class FilingError(Exception):
+    pass
+
+
+def digest(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def encoded(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def save_ledger(path, jobs):
+    # A stable separate lock survives replacement of the ledger inode.
+    pending = path.with_name(path.name + ".tmp")
+    with pending.open("w", encoding="utf-8") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(encoded({"schema": "dot-file-reports/v1", "jobs": jobs}) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(pending, path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def load_ledger(path):
+    if not path.exists():
+        return {}
+    try:
+        ledger = json.loads(path.read_text(encoding="utf-8"))
+        if ledger["schema"] != "dot-file-reports/v1":
+            raise ValueError("schema")
+        jobs = ledger["jobs"]
+        if not isinstance(jobs, dict):
+            raise ValueError("jobs")
+        for job, entry in jobs.items():
+            if (not isinstance(job, str) or not isinstance(entry, dict)
+                    or entry["status"] not in ("pending", "filed")
+                    or not re.fullmatch(r"[0-9a-f]{64}", entry["request_sha256"])
+                    or not isinstance(entry["source"], str)):
+                raise ValueError("entry")
+            datetime.fromisoformat(entry["observed_at"])
+            if entry["status"] == "filed":
+                if not isinstance(entry["flag_id"], str):
+                    raise ValueError("flag_id")
+                uuid.UUID(entry["flag_id"])
+        return jobs
+    except (ValueError, TypeError, KeyError):
+        raise FilingError("invalid ledger; reconcile it before filing") from None
+
+
+def source_identity(info):
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def require_unchanged(path, snapshot):
+    current = path.lstat()
+    if not stat.S_ISREG(current.st_mode) or source_identity(current) != source_identity(snapshot):
+        raise FilingError("report changed during filing; reconcile its pending request before retrying")
+
+
+def completed_snapshot(path):
+    # Open one no-follow descriptor: the bytes and metadata belong to one inode.
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise FilingError("report must be a regular file, not a symlink")
+        text = stream.read().decode("utf-8")
+        after = os.fstat(stream.fileno())
+    if source_identity(before) != source_identity(after):
+        raise FilingError("report changed while reading; no request submitted")
+    require_unchanged(path, after)
+    if not text.strip():
+        raise FilingError("empty report")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    marker = re.compile(r"(^|\s)DOT-REPORT-END(\s+[A-Za-z0-9._-]{1,48})?\s*$")
+    fence = None
+    markers = []
+    for i, line in enumerate(lines):
+        if fence:
+            if re.fullmatch(re.escape(fence[0]) + "{" + str(len(fence)) + ",}", line):
+                fence = None
+            continue
+        opening = re.match(r"(`{3,}|~{3,})", line)
+        if opening:
+            fence = opening.group(1)
+        elif marker.search(line):
+            markers.append(i)
+    if not markers or markers[-1] != len(lines) - 1:
+        raise FilingError("report publication incomplete; terminal DOT-REPORT-END required")
+    # The producer may have included a marker on an intermediate reply. Inspect
+    # the latest part's heading, rather than accepting that reply as the whole job.
+    start = markers[-2] + 1 if len(markers) > 1 else 0
+    part = re.search(r"\bpart\s+(\d+)\s+of\s+(\d+)\b", " ".join(lines[start:start + 2]), re.I)
+    if part and (int(part.group(1)) < 1 or int(part.group(1)) != int(part.group(2))):
+        raise FilingError("report publication incomplete; final part required")
+    return text, after
+
+
+def citation_url(url):
+    url = url.rstrip(".,;:!?]}")
+    while url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1].rstrip(".,;:!?]}")
+    return url
+
+
+def payload_for(path, entry, text):
+    # Decode bytes explicitly: Path.read_text would normalize CRLF and lose fidelity.
+    topic = next((heading for line in text.splitlines()
+                  if (heading := line.strip().lstrip("# ").strip())), path.stem)
+    citations = list(dict.fromkeys(
+        citation_url(url) for url in re.findall(r"https?://[^\s<>\"']+", text)
+    ))
+    return {
+        "idempotency_key": "dot-report:" + digest(path.stem),
+        "subject": SUBJECT,
+        "kind": "research_report",
+        "internal": True,
+        "epistemic_status": "observed",
+        "source": entry["source"],
+        "observed_at": entry["observed_at"],
+        "value": {"job": path.stem, "topic": topic,
+                  "date": entry["observed_at"][:10], "text": text,
+                  "citations": citations, "content_sha256": digest(text),
+                  "producer": "Dot", "claims_independently_verified": False},
+    }
+
+
+def call_finding(payload):
+    # Use the sanctioned noninteractive client. Never print a child's diagnostics:
+    # a server error might echo report content or other private response fields.
+    try:
+        with subprocess.Popen(
+            [str(ROOT / "run.sh"), "call", "record-finding", "-"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", start_new_session=True,
+        ) as process:
+            try:
+                stdout, _ = process.communicate(input=encoded(payload), timeout=60)
+            except subprocess.TimeoutExpired:
+                # run.sh owns a Python/Node chain. Kill its isolated group, then
+                # drain the pipes and reap our child before retaining the claim.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate()
+                raise FilingError("verb transport timed out; pending request retained") from None
+    except OSError:
+        raise FilingError("verb transport failed; pending request retained") from None
+    if process.returncode:
+        raise FilingError(f"record-finding failed (exit {process.returncode}); pending request retained")
+    try:
+        response = json.loads(stdout)
+        if (response["ok"] is not True or response["subject_type"] != "repo"
+                or response["kind"] != "research_report" or response["found"] is not True
+                or not isinstance(response["flag_id"], str)):
+            raise ValueError("receipt")
+        uuid.UUID(response["flag_id"])
+        return response["flag_id"]
+    except (ValueError, TypeError, KeyError):
+        raise FilingError("invalid filing receipt; pending request retained") from None
+
+
+def file_reports(paths, ledger):
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    with ledger.with_name(ledger.name + ".lock").open("a") as lock:
+        os.fchmod(lock.fileno(), 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        jobs = load_ledger(ledger)
+        for path in paths:
+            if path.suffix != ".txt" or ".partial" in path.suffixes:
+                continue
+            if jobs.get(path.stem, {}).get("status") == "filed":
+                print(f"already filed: {path.stem}")
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise FilingError("report must be a regular file, not a symlink")
+            text, snapshot = completed_snapshot(path)
+            entry = jobs.get(path.stem) or {
+                "status": "pending", "source": str(path.resolve()),
+                "observed_at": datetime.fromtimestamp(snapshot.st_mtime, timezone.utc).isoformat(),
+            }
+            payload = payload_for(path, entry, text)
+            request_hash = digest(encoded(payload))
+            if "request_sha256" in entry and entry["request_sha256"] != request_hash:
+                raise FilingError("pending report changed; reconcile its original request before retrying")
+            entry["request_sha256"] = request_hash
+            jobs[path.stem] = entry
+            require_unchanged(path, snapshot)
+            save_ledger(ledger, jobs)  # durable claim BEFORE the possible external effect
+            flag_id = call_finding(payload)
+            require_unchanged(path, snapshot)
+            entry.update(status="filed", flag_id=flag_id,
+                         filed_at=datetime.now(timezone.utc).isoformat())
+            save_ledger(ledger, jobs)
+            print(f"filed: {path.stem} ({flag_id})")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("report", nargs="?", type=Path)
+    parser.add_argument("--reports-dir", type=Path, default=ROOT / "out/orch/dot/reports")
+    parser.add_argument("--ledger", type=Path)
+    args = parser.parse_args()
+    ledger = args.ledger or args.reports_dir.parent / "filed-reports.json"
+    try:
+        if args.report is None and not args.reports_dir.is_dir():
+            raise FilingError("reports directory missing")
+        paths = [args.report] if args.report else sorted(args.reports_dir.glob("*.txt"))
+        file_reports(paths, ledger)
+    except (FilingError, OSError, UnicodeError) as exc:
+        # Filesystem errors can include private paths. Report only the error class.
+        message = str(exc) if isinstance(exc, FilingError) else type(exc).__name__
+        print(f"dot-file-reports: {message}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

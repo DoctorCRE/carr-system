@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ToolError } from "../src/tools.js";
-import { callTool, readCallInsertSQL, recordReadCall } from "../src/mcp.js";
+import { callTool, readCallInsertSQL, recordReadCall, scheduleWriterReadCall } from "../src/mcp.js";
 
 const JOE = { slug: "joe", display: "Joe", human: true, via: "oauth-google", client_id: "claude" };
 
@@ -94,6 +94,48 @@ test("recordReadCall: an insert failure is swallowed, never thrown — a logging
   await assert.doesNotReject(recordReadCall(insertFn, JOE, "standing-context", true, null));
 });
 
+test("notification-feed writer read: one synthetic call yields one metadata-only audit row", async () => {
+  const rows = [], pending = [];
+  const scheduled = scheduleWriterReadCall(
+    { writerConnection: true, write: false }, JOE, "notification-feed", true, null,
+    promise => pending.push(promise), async (text, params) => { rows.push({ text, params }); },
+  );
+  assert.equal(scheduled, true);
+  assert.equal(pending.length, 1);
+  await Promise.all(pending);
+  assert.equal(rows.length, 1);
+  assert.match(rows[0].text, /insert into tool_read_call/);
+  assert.deepEqual(rows[0].params.slice(0, 4), ["notification-feed", "joe", true, null]);
+  assert.equal(rows[0].params.length, 10, "only identity and outcome metadata reach the audit row");
+});
+
+test("mutating writer: synthetic calls never create a read-call row", async () => {
+  const rows = [], pending = [];
+  const insert = async () => { rows.push(true); };
+  for (const tool of [{ write: true }, { writerConnection: true, write: true }]) {
+    assert.equal(scheduleWriterReadCall(tool, JOE, "acknowledge-notification", true, null,
+      promise => pending.push(promise), insert), false);
+  }
+  assert.equal(pending.length, 0);
+  assert.equal(rows.length, 0);
+});
+
+test("R03 standing report keeps the migration proof's existing CSV fields in place", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const sql = await readFile(new URL("../../ops/r03-human-queue-health.sql", import.meta.url), "utf8");
+  const projection = sql.slice(sql.lastIndexOf("\nselect r.slug as recipient,"),
+    sql.lastIndexOf("\n  from recipients r"));
+  const columns = [...projection.matchAll(/\bas\s+([a-z_]+)\b/g)].map(match => match[1]);
+  assert.deepEqual(columns, [
+    "recipient", "eligible_actions", "persisted_notifications", "in_app_rows",
+    "acknowledged", "unnotified", "missing_in_app_rows", "missing_source_event",
+    "failed_attempts", "unresolved_failed_attempts", "deduped_attempts",
+    "deferred_excluded", "unnotified_age_unknown", "oldest_unnotified_days",
+    "breach_response", "device_rows", "feed_call_observations",
+    "successful_feed_call_observations", "latest_feed_call_at",
+  ]);
+});
+
 // ────────────────────────────────────────────────────────────────────────
 // callTool's read branch — proves the wiring: recording is scheduled via
 // ctx.waitUntil (never blocking the caller), fires for a successful read,
@@ -128,17 +170,23 @@ test("callTool read branch: never throws when DATABASE_URL_WRITER is absent, and
 });
 
 // ────────────────────────────────────────────────────────────────────────
-// The write path is unchanged: writes never touch tool_read_call. Source
-// assertion, same convention sponsor-runtime.test.mjs already uses to prove
-// wiring exists in a specific place without a live database.
+// Actor-scoped read doors take a read-only writer transaction, so the ordinary
+// reader branch alone cannot measure notification-feed use. Source assertion,
+// same convention sponsor-runtime.test.mjs uses for a dispatch seam that
+// cannot be invoked without a live database.
 // ────────────────────────────────────────────────────────────────────────
 
-test("mcp.js: read-call recording lives ONLY in the read branch, never in the write-transaction path", async () => {
+test("mcp.js: both read connection routes record metadata, while write verbs do not", async () => {
   const { readFile } = await import("node:fs/promises");
   const src = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
-  const writeBranch = src.slice(src.indexOf("// writes: real transaction on the writer pool"));
-  assert.doesNotMatch(writeBranch, /recordReadCall|tool_read_call/,
-    "the write path must stay exactly as it was — read-call recording belongs to reads only");
-  assert.match(src, /env\.ctx\?\.waitUntil\?\.\(recordReadCall\(/,
-    "recording must be scheduled via ctx.waitUntil so it never adds latency to the read");
+  const writerBranch = src.slice(src.indexOf("const needsAuthority = requiresAuthorityConnection"),
+    src.indexOf("export async function dispatch("));
+  assert.match(src, /if \(connectionRouteForTool\(tool\) === "reader"\)[\s\S]*?waitUntil\?\.\(recordReadCall\(/,
+    "ordinary reader calls must still be recorded");
+  assert.match(writerBranch, /const writerRead = tool\.writerConnection === true && !tool\.write/,
+    "only read-only writer calls are eligible for the second audit path");
+  assert.match(writerBranch, /begin read only/,
+    "audited writer reads must keep their read-only transaction");
+  assert.match(writerBranch, /if \(writerRead && env\?\.DATABASE_URL_WRITER\)[\s\S]*?scheduleWriterReadCall\(/,
+    "recording must be detached from the response and guarded against writes");
 });

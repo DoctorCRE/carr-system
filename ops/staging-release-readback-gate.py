@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import threading
@@ -115,6 +116,85 @@ def bind_live_schema_identity(cur) -> None:
     SCHEMA_APPLIED_COUNT = count
     SCHEMA_LEDGER_SHA256 = digest
 
+
+def worker_release_identity_query() -> str:
+    """The exact schema-identity SQL the deployed Worker runs for /release.
+
+    Extracted from mcp-server/src/release.js rather than copied, so this gate
+    executes the same query text production will run (rule a8c55a47). The
+    Worker's unit suite mocks the `sql` tag, so no PostgreSQL parser sees that
+    text before deploy — this execution is the parse-and-digest check. The
+    2026-08-26 staging rehearsal caught exactly this: a misnested
+    encode/digest/coalesce shipped to origin/main and every staging readback
+    came back "schema identity is invalid".
+    """
+    source = (_REPO / "mcp-server" / "src" / "release.js").read_text()
+    found = re.search(
+        r"await sql`\s*(select count\(\*\)::int as applied_count.*?from v_schema_ledger)`",
+        source, re.S)
+    if not found:
+        raise AssertionError(
+            "mcp-server/src/release.js no longer contains the v_schema_ledger identity query")
+    return found.group(1)
+
+
+def check_worker_release_identity(cur) -> None:
+    """Run the Worker's /release identity SQL and demand digest equality."""
+    cur.execute("savepoint worker_release_identity")
+    try:
+        cur.execute(worker_release_identity_query())
+        row = one(cur)
+        ok = (row[0] == SCHEMA_APPLIED_COUNT
+              and row[1] == SCHEMA_HIGHEST_MIGRATION
+              and row[2] == SCHEMA_LEDGER_SHA256)
+        detail = "" if ok else (
+            f"worker query returned {row!r}, reference is "
+            f"({SCHEMA_APPLIED_COUNT!r}, {SCHEMA_HIGHEST_MIGRATION!r}, {SCHEMA_LEDGER_SHA256!r})")
+    except Exception as exc:
+        cur.execute("rollback to savepoint worker_release_identity")
+        ok, detail = False, f"worker /release identity query failed to execute: {exc}"
+    cur.execute("release savepoint worker_release_identity")
+    check("worker /release schema-identity SQL executes and matches the reference digest",
+          ok, detail)
+
+
+def check_worker_release_lettered_highwater(cur) -> None:
+    """Exercise the extracted Worker query against an ordinary/lettered pair.
+
+    The explicit C collation makes the result independent of the database's
+    default locale: bytewise `9999a...` follows `9999_...`.
+    """
+    query = worker_release_identity_query()
+    check("worker /release pins highest migration to C collation",
+          '(max(filename collate "C") collate "default")' in " ".join(query.split()))
+    cur.execute("savepoint worker_release_lettered_highwater")
+    try:
+        cur.execute("""insert into public.schema_migrations(filename,sha256) values
+                       ('9999_ordinary_highwater.sql', repeat('1',64)),
+                       ('9999a_lettered_highwater.sql', repeat('2',64))""")
+        cur.execute("""select count(*)::int,
+                              (max(filename collate "C") collate "default"),
+                              'sha256:' || encode(public.digest(coalesce(string_agg(
+                                convert_to(filename, 'UTF8') || decode('00', 'hex') ||
+                                convert_to(sha256, 'UTF8') || decode('0a', 'hex'),
+                                ''::bytea order by filename collate "C"), ''::bytea),
+                                'sha256'), 'hex')
+                         from public.schema_migrations""")
+        expected = one(cur)
+        cur.execute(query)
+        observed = one(cur)
+        check("worker /release query returns the C-collated optional-letter highwater",
+              observed == expected and observed[1] == '9999a_lettered_highwater.sql',
+              f"worker query returned {observed!r}, C reference is {expected!r}")
+    except Exception as exc:
+        cur.execute("rollback to savepoint worker_release_lettered_highwater")
+        check("worker /release query returns the C-collated optional-letter highwater",
+              False, f"worker /release optional-letter highwater query failed: {exc}")
+    else:
+        # The mixed highwater rows prove only the extracted query; later gate
+        # fixtures must observe the real migration ledger unchanged.
+        cur.execute("rollback to savepoint worker_release_lettered_highwater")
+    cur.execute("release savepoint worker_release_lettered_highwater")
 
 def seed_fixture(cur, prefix: str) -> dict:
     bind_live_schema_identity(cur)
@@ -380,6 +460,8 @@ def main() -> int:
     with psycopg.connect(dsn, autocommit=False) as conn, conn.cursor() as cur:
         ensure_authority_roles(cur)
         fixture = seed_fixture(cur, "main")
+        check_worker_release_identity(cur)
+        check_worker_release_lettered_highwater(cur)
         attempt = uuid.uuid4()
         ids = [uuid.uuid4(),uuid.uuid4(),uuid.uuid4()]
         versions = [uuid.uuid4(),uuid.uuid4(),uuid.uuid4()]

@@ -458,10 +458,18 @@ def build_registry(source_map: dict[str, Any], migration_manifest: dict[str, Any
             if not control_name or not evidence.get("implementation") or not evidence.get("test"):
                 errors.append(f"{source_id}: built constraint lacks catalog evidence/tests")
             else:
+                # The admission sync registers each enforcement point with its
+                # refs JOINED ("a; b"), and the guidance_revision trigger checks
+                # exact containment of that registered string — so the compiled
+                # entry carries the joined form alongside the individual paths.
+                impl_refs = list(evidence["implementation"])
+                test_refs = list(evidence["test"])
+                joined_impl = "; ".join(impl_refs)
+                joined_test = "; ".join(test_refs)
                 item["delivery"].update({
                     "enforcement_control": control_name,
-                    "evidence": evidence["implementation"],
-                    "tests": evidence["test"],
+                    "evidence": impl_refs + ([joined_impl] if len(impl_refs) > 1 else []),
+                    "tests": test_refs + ([joined_test] if len(test_refs) > 1 else []),
                 })
         items.append(item)
 

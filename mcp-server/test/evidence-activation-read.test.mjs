@@ -66,17 +66,25 @@ test("only the exact expected refusal is translated; unexpected database faults 
   );
 });
 
-test("execution environment registry is a bounded read and lifecycle writes remain human authority only", async () => {
+test("execution environment registry is a bounded read; registration is demoted, activation stays human authority only", async () => {
   const registry = [{ provider_ref: "environment-provider:hermes-local:v1", state: "active", grants_authority: false }];
   const { tools, client, calls } = allTools((sql) => {
     if (/read_execution_environment_providers/.test(sql)) return { rows: [{ providers: registry }] };
     if (/register_execution_environment_provider/.test(sql)) return { rows: [{ provider_ref: "environment-provider:fixture:v1", manifest_digest: `sha256:${"a".repeat(64)}`, state: "discovered", replayed: false }] };
     if (/attest_execution_environment_conformance/.test(sql)) return { rows: [{ conformance_id: "22222222-2222-4222-8222-222222222222", replayed: false }] };
+    if (/set_config/.test(sql)) return { rows: [] };
     throw new Error(`unexpected query: ${sql}`);
   });
-  assert.equal(tools["register-execution-environment-provider"].humanOnly, true);
-  assert.equal(tools["register-execution-environment-provider"].authorityOnly, true);
+  // DEMOTED (WR-000019 slice S6): registration is pure quarantine bookkeeping —
+  // its own description says it "grants no authority and never activates the
+  // provider" — so it is now callable by a sponsored non-authority agent.
+  assert.equal(tools["register-execution-environment-provider"].humanOnly, undefined);
+  assert.equal(tools["register-execution-environment-provider"].authorityOnly, undefined);
+  // LEFT (unchanged): conformance attestation and the CAS transition that can
+  // actually drive a provider to 'active' production capability stay
+  // authority-only.
   assert.equal(tools["attest-execution-environment-conformance"].humanOnly, true);
+  assert.equal(tools["attest-execution-environment-conformance"].authorityOnly, true);
   assert.equal(tools["transition-execution-environment-provider"].authorityOnly, true);
   assert.deepEqual(await tools["read-execution-environment-providers"].handler(client, actor, {}), { ok: true, providers: registry });
 
@@ -85,6 +93,9 @@ test("execution environment registry is a bounded read and lifecycle writes rema
   assert.equal(response.verb, "register-execution-environment-provider");
   assert.equal(response.result.state, "discovered");
   assert.equal(calls.some(({ sql }) => /register_execution_environment_provider/.test(sql)), true);
+  // The handler tells the (relaxed) database function who is acting, the same
+  // way tenant scope is already passed for every other non-authority write.
+  assert.equal(calls.some(({ sql, params }) => /acting_actor_slug/.test(sql) && params[0] === actor.slug), true);
 
   const digest = `sha256:${"a".repeat(64)}`;
   const observation = {
@@ -180,4 +191,25 @@ test("activation read and render bind tenant in the same serverless statement", 
   assert.equal((await tools["read-context-activation"].handler(client, actor, args)).activation.binding.binding_id, args.binding_id);
   assert.deepEqual((await tools["render-context-activation"].handler(client, actor, args)).items, []);
   assert.equal(calls.length, 2);
+});
+
+test("transition-evaluation-case is demoted off the authority gate (WR-000019 slice S6)", async () => {
+  // Its own description already says the true thing: "This cannot promote a
+  // model, provider, or workflow." — pure evaluation-lifecycle bookkeeping,
+  // so it is now callable by a sponsored non-authority agent.
+  const { tools, client, calls } = allTools((sql) => {
+    if (/set_config/.test(sql)) return { rows: [] };
+    if (/transition_proposed_eval_candidate/.test(sql)) return { rows: [{ lifecycle: "triaged", golden_member: false }] };
+    throw new Error(`unexpected query: ${sql}`);
+  });
+  assert.equal(tools["transition-evaluation-case"].humanOnly, undefined);
+  assert.equal(tools["transition-evaluation-case"].authorityOnly, undefined);
+
+  const response = await tools["transition-evaluation-case"].handler(client, actor, {
+    human_ref: "WR-000007", candidate_ref: "eval-candidate:fixture", next_state: "triaged",
+    decision_basis: { note: "triage" }, idempotency_key: "33333333-3333-4333-8333-333333333333",
+  });
+  assert.equal(response.result.lifecycle, "triaged");
+  assert.equal(calls.some(({ sql, params }) => /acting_actor_slug/.test(sql) && params[0] === actor.slug), true);
+  assert.equal(calls.some(({ sql }) => /organization_tenant_id/.test(sql)), true);
 });

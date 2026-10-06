@@ -33,9 +33,12 @@ async function rejected(fn) {
 }
 
 test("guidance import decision and registry deactivation are human authority operations", () => {
+  // humanOnly LABEL RETIRED, authorityOnly UNCHANGED (WR-000019 slice S1,
+  // 2026-08-27) — see control-plane-authority-boundary.test.mjs for the same
+  // retirement note.
   for (const name of ["decide-guidance-import-batch", "deactivate-guidance-registry"]) {
     assert.equal(TOOLS[name].write, true, name);
-    assert.equal(TOOLS[name].humanOnly, true, name);
+    assert.equal(TOOLS[name].humanOnly, undefined, name);
     assert.equal(TOOLS[name].authorityOnly, true, name);
     assert.ok(TOOLS[name].inputSchema.required.includes("idempotency_key"), name);
     assert.ok(TOOLS[name].inputSchema.required.includes("manifest_digest"), name);
@@ -49,9 +52,13 @@ test("a non-human actor cannot decide or deactivate the typed guidance registry"
     ["deactivate-guidance-registry", { idempotency_key: "deactivation-denied", registry_id: REGISTRY_ID, manifest_digest: DIGEST, reason: "fixture" }],
   ]) {
     const db = new AuthorityDb();
-    const out = await rejected(() => executeRegisteredTool(db, AGENT, name, args));
-    assert.equal(out.error, "human_only", name);
-    assert.equal(db.calls.length, 0, name);
+    // INVERTED (Joe's ruling 2026-08-26, decision dc57f62d): authority no
+    // longer refuses these, so the agent must now REACH the handler. Whatever
+    // stops it after that is fixture shape, never human_only.
+    let out;
+    try { await executeRegisteredTool(db, AGENT, name, args); }
+    catch (error) { out = error.payload; }
+    assert.notEqual(out?.error, "human_only", name);
   }
 });
 

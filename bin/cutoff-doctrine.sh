@@ -17,7 +17,7 @@
 
 set -eu
 REPO="${0:A:h:h}"
-VAULT="/Users/booko/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI"
+VAULT="${CARR_VAULT:-$HOME/Library/CloudStorage/GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI}"
 STAGE="$VAULT/_to_delete/md-renders-cutoff-$(date +%Y%m%d)"
 LOG="$REPO/out/cutoff.log"
 mkdir -p "$REPO/out"

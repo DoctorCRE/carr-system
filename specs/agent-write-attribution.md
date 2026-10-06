@@ -96,7 +96,7 @@ two-writer discipline against Dell. Collapsing to `actor: claude` alone would lo
 ### Migration
 
 Only one row is known to be mis-stamped by an agent: the `update-deal` event of
-2026-08-02T13:36:52.974Z on the Elizabeth Hughes deal, made during this audit. It is
+2026-08-02T13:36:52.974Z on the Ferris deal, made during this audit. It is
 `actor: joe` and should be `actor: claude, on_behalf_of: joe`.
 
 **This is a correction, not a backfill.** The no-backfill policy in `DECISIONS.md` covers
@@ -117,7 +117,7 @@ treat pre-freeze attribution as unknown.
 | 2 | Joe edits the same field directly | `actor: joe`, `on_behalf_of: null` |
 | 3 | An agent attempts to pass `actor` in the payload | Rejected or ignored — never honored |
 | 4 | `integrity-digest` after an agent-only day | `writes_by_dell_24h: 0` and a non-zero agent count, rather than inflated human counts |
-| 5 | The 2026-08-02 Hughes `update-deal` event | Corrected to `actor: claude` |
+| 5 | The 2026-08-02 Ferris `update-deal` event | Corrected to `actor: claude` |
 
 ---
 

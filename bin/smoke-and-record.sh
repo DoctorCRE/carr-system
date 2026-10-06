@@ -29,7 +29,7 @@
 #   * a whole-payload substring match for retired_aliases:0 broke when a second
 #     live org row, "Henry Schein, Inc.", began matching the same query;
 #   * a fixture asserting C-155 has nothing blocked expired when the ternary
-#     Joe->Tyrer edge was recorded, and reporting it is loop #133 working.
+#     Joe->Okafor edge was recorded, and reporting it is loop #133 working.
 # Scheduling a red canary is what created the background noise the first time.
 # DO NOT RE-ARM A RED SUITE; fix it or gate it first.
 #

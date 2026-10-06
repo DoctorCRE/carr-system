@@ -118,8 +118,8 @@ EQUIVALENCE = [
                                       tool_input={"subagent_type": "poisoned", "description": ""})),
     ("one-repo-gate.py", payload(tool="Write",
                                  tool_input={"file_path": "/tmp/x.py", "content": "hi"})),
-    ("canonical-edit-gate.py", payload(tool="Write",
-                                       tool_input={"file_path": "/tmp/x.py", "content": "hi"})),
+    ("gate-edit-gate.py", payload(tool="Write",
+                                  tool_input={"file_path": "/tmp/x.py", "content": "hi"})),
     ("record-home-gate.py", payload(tool="Write",
                                     tool_input={"file_path": "/tmp/x.md", "content": "hi"})),
     ("write-effect-check.py", payload(event="PostToolUse",
@@ -155,6 +155,76 @@ def equivalence_cases(tmp):
             seen_deny = True
     check("the equivalence matrix actually exercised a DENY", seen_deny,
           "every case allowed — the test proves less than it claims")
+
+    # The Claude lifecycle gate publishes a structured Stop announcement and persists a
+    # per-task version. Give bare and wrapped runs independent empty state
+    # roots so the wrapper comparison is byte-for-byte, not normalized after
+    # the fact.
+    transcript = os.path.join(tmp, "context-equivalence.jsonl")
+    with open(transcript, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "type": "assistant",
+            "message": {
+                "model": "claude-opus-4-1",
+                "usage": {
+                    "input_tokens": 2,
+                    "cache_creation_input_tokens": 98,
+                    "cache_read_input_tokens": 599_800,
+                    "output_tokens": 100,
+                },
+            },
+        }) + "\n")
+    data = payload(event="Stop", tool="", tool_input={},
+                   transcript_path=transcript, session_id="context-equivalent")
+    target = os.path.join(HOOKS, "context-handoff-gate.py")
+    bare_env = env_for(
+        tmp,
+        CARR_SESSION_CONTEXT_STATE_DIR=os.path.join(tmp, "context-bare"),
+        CARR_CONTEXT_AUDIT="off",
+    )
+    wrapped_env = env_for(
+        tmp,
+        CARR_SESSION_CONTEXT_STATE_DIR=os.path.join(tmp, "context-wrapped"),
+        CARR_CONTEXT_AUDIT="off",
+    )
+    bare_rc, bare_out, bare_err = fire([target], data, bare_env)
+    wrap_rc, wrap_out, wrap_err = fire([RUNNER, target], data, wrapped_env)
+    check("context lifecycle wrapped exit is identical",
+          bare_rc == wrap_rc, f"bare {bare_rc} wrapped {wrap_rc}")
+    check("context lifecycle wrapped stdout is byte-identical",
+          bare_out == wrap_out, f"bare={bare_out!r} wrapped={wrap_out!r}")
+    check("context lifecycle wrapped stderr is byte-identical",
+          bare_err == wrap_err, f"bare={bare_err!r} wrapped={wrap_err!r}")
+    lifecycle_rows = [row for row in records(tmp)
+                      if row.get("hook") == "context-handoff-gate.py"]
+    check("context lifecycle telemetry records the announce-only outcome",
+          lifecycle_rows
+          and lifecycle_rows[-1].get("outcome") == "allow"
+          and lifecycle_rows[-1].get("register") == "announce"
+          and lifecycle_rows[-1].get("reopen") is False
+          and lifecycle_rows[-1].get("deny_class") is None,
+          lifecycle_rows[-1] if lifecycle_rows else "no row")
+
+    malformed_env = env_for(
+        tmp,
+        CARR_SESSION_CONTEXT_STATE_DIR=os.path.join(tmp, "context-malformed"),
+        CARR_CONTEXT_AUDIT="off",
+        CARR_CONTEXT_HOOK_EVENT="Stop",
+    )
+    malformed_rc, malformed_out, malformed_err = fire(
+        [RUNNER, target], "{bad", malformed_env)
+    malformed_rows = [row for row in records(tmp)
+                      if row.get("hook") == "context-handoff-gate.py"]
+    malformed_row = malformed_rows[-1] if malformed_rows else {}
+    check("malformed Stop telemetry uses trusted wired event",
+          malformed_rc == 0 and malformed_out.strip()
+          and not malformed_err.strip()
+          and malformed_row.get("event") == "Stop"
+          and malformed_row.get("outcome") == "allow"
+          and malformed_row.get("register") == "announce"
+          and malformed_row.get("reopen") is False
+          and malformed_row.get("deny_class") is None,
+          (malformed_rc, malformed_out, malformed_err, malformed_row))
 
 
 # ── 2. synthetic gates: every outcome shape the classifier must name ────────

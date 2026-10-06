@@ -63,8 +63,11 @@ RUN IT:
     python3 ops/run-scheduled-selftest.py
     tools/db-tap.py --project staging run ops/run-scheduled-selftest.py
 """
+import hashlib
+import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -930,10 +933,703 @@ def tier2() -> None:
         print("  (tier 2 probe rows deleted)")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# TIER 1 — THE RECEIPT THIS WRAPPER MINTS FOR ITSELF, added 2026-09-11 and
+# rewritten 2026-09-12 after review.
+#
+# WHY THIS SECTION EXISTS. Gate Zero's fourth predecessor step,
+# `step:scheduler-active-receipt`, is read by
+# mcp-server/src/gate-zero-seam-readers.v5.js, whose `receipt_binding` clause
+# wants a run row bound to a receipt. Measured against production on
+# 2026-09-11: 28,309 rows in ops.run, 21,894 of them written by
+# bin/run-scheduled.sh, and ZERO carrying an evidence_ref. The clause was
+# unsatisfiable by construction.
+#
+# WHAT THE FIRST DRAFT GOT WRONG, and it is the reason for half these checks.
+# It took `--evidence-ref-file PATH` and promoted whatever that file held. A
+# stale file from last week's run, or a file the child wrote whatever it liked
+# into, was then indistinguishable from a receipt minted during THIS run — and
+# a binding whose evidence the bound party supplies is not a binding. The
+# wrapper now mints the receipt itself: its own clock read after the child
+# exits, its own entropy, and the HASH of the run key rather than the key.
+#
+# WHAT THESE CHECKS DEFEND:
+#
+#   NOTHING OUTSIDE THE WRAPPER CAN SUPPLY A RECEIPT. There is no flag and no
+#   path. A file pre-seeded at the exact path the wrapper computes is
+#   overwritten by this run's mint and its content never reaches the row.
+#
+#   THE DIRECTORY IS NOT CALLER-SELECTABLE, which is the 2026-09-12 correction
+#   and the reason this section owns INSTALLATIONS instead of passing paths. It
+#   used to be $CARR_RUN_SCHEDULED_STATE_DIR/receipts: whoever set that variable
+#   chose the directory the wrapper validated and wrote in, and choosing the
+#   parents is choosing the file. It is now derived from the wrapper's own
+#   resolved location, every spelling of an override REFUSES, and each hostile
+#   directory below is built by installing a copy of this same wrapper in a
+#   temporary tree whose out/ is its own.
+#
+#   ONLY THE WRAPPER'S OWN REGULAR FILE IS WRITTEN, and the check and the write
+#   are the same open file rather than the same name looked up twice. One
+#   O_CREAT|O_EXCL|O_NOFOLLOW create, then fstat, write, rewind and read back on
+#   that descriptor. A symlink at the leaf, a FIFO, a directory, a hard link, a
+#   symlink where the receipt DIRECTORY belongs, a directory anyone may write
+#   in, and a FIFO swapped in while the mint runs each refuse under their own
+#   registered code, follow nothing and block on nothing — and each has a
+#   mutation control that deletes the guard and shows the hazard arriving.
+#
+#   A REFUSAL IS NAMED, NOT ANONYMOUS. The provenance line carries
+#   receipt_code=<one of the wrapper's own RECEIPT_CODES>, read here out of the
+#   wrapper's source rather than restated, so "this job records no evidence" and
+#   "something moved the directory under us" stop looking identical. The codes
+#   are swept against the privileged-word union too: a code is an export.
+#
+#   REJECT, NEVER REPAIR. A run key or service key carrying a carriage return,
+#   a newline, a tab, a space or any other byte outside [A-Za-z0-9:._-] mints
+#   NO receipt. It is not stripped down to an acceptable shape first: the
+#   earliest draft normalized with `tr -d '[:space:]'`, which turned
+#   `--state failed --exit-code 1` into a token the whitelist accepted. That is
+#   the exact shape of a check that reports green over a broken substrate.
+#
+#   NO CALLER WORD TRAVELS. A run key of `complete` or `allow-commit-green`
+#   yields a receipt of a fixed prefix and hex, in the recorder's argv AND in
+#   the provenance line — swept here against the closed privileged-word union.
+#
+#   AND IT STILL CANNOT FAIL A JOB. Every refusal above records exactly the row
+#   this wrapper recorded before receipts existed, and returns the child's own
+#   exit code.
+# ─────────────────────────────────────────────────────────────────────────────
+
+RECEIPT_SHAPE = re.compile(
+    r"^carr-run-receipt:v1:(\d{8}T\d{6}\.\d{3})Z:[0-9a-f]{16}:([0-9a-f]{32})$")
+
+# The closed union the 2026-09-11 standing rule names, swept as a substring.
+PRIVILEGED_WORDS = (
+    "allow", "commit", "prompt", "suppress", "release", "read", "covered",
+    "drafted", "proposed", "queued", "healthy", "passing", "ok", "pass",
+    "satisfied", "complete", "admitted", "resumed", "attended", "verified",
+    "present", "equivalent", "operational", "active", "green", "joins_exactly",
+    "coverage_complete", "favorable", "would_", "_if_authoritative",
+)
+
+
+def recorded_argv(run_key: str, db: str) -> list:
+    """The argument list the wrapper handed the recorder for one run key."""
+    rows = spool_rows(run_key, db=db)
+    return json.loads(rows[0][3]) if rows else []
+
+
+def evidence_ref_of(run_key: str, db: str):
+    """The --evidence-ref value in that argv, or None when the flag is absent."""
+    argv = recorded_argv(run_key, db)
+    return argv[argv.index("--evidence-ref") + 1] if "--evidence-ref" in argv else None
+
+
+def argv_value(run_key: str, db: str, flag: str):
+    argv = recorded_argv(run_key, db)
+    return argv[argv.index(flag) + 1] if flag in argv else None
+
+
+RECEIPT_DIRNAME = "run-scheduled-receipts"
+
+
+def receipt_dir_of(root: str) -> str:
+    """The directory bin/run-scheduled.sh derives for itself, computed the same
+    way it does: the install's own out/, resolved once because out/ is a symlink
+    in every worktree, plus one fixed name. There is no parameter for this and
+    no environment variable that moves it — which is the whole of the 2026-09-12
+    correction, and the reason every hostile-directory check below OWNS AN
+    INSTALL instead of passing a path."""
+    return os.path.join(os.path.realpath(os.path.join(root, "out")), RECEIPT_DIRNAME)
+
+
+def receipt_path(root: str, service: str, run_key: str) -> str:
+    """$REPO/out/run-scheduled-receipts/<sha256(service)[:16]>.<sha256(key)[:32]>.receipt"""
+    return os.path.join(
+        receipt_dir_of(root),
+        hashlib.sha256(service.encode()).hexdigest()[:16] + "."
+        + hashlib.sha256(run_key.encode()).hexdigest()[:32] + ".receipt")
+
+
+def registered_codes() -> list:
+    """The closed code list the wrapper declares in its own source. Read from
+    the file rather than restated here: a code these tests assert on must be one
+    the wrapper actually registers, and a code the wrapper stops registering
+    must fail a check rather than quietly stop being produced."""
+    with open(WRAPPER, encoding="utf-8") as fh:
+        src = fh.read()
+    match = re.search(r"^RECEIPT_CODES=\(\n(.*?)^\)$", src, re.S | re.M)
+    return match.group(1).split() if match else []
+
+
+def install_root(work: str, mutations: Optional[list] = None) -> Optional[str]:
+    """A SECOND INSTALL of this same wrapper, whose out/ is its own.
+
+    The receipt directory is derived from ${0:A:h:h} and from nothing else, so a
+    test that needs a symlink where the receipts go, an unwritable directory, or
+    a world-writable one cannot pass a path — it has to own the installation.
+    Every top-level entry is symlinked so the recorder, the venv and the tools
+    resolve exactly as they do in the real tree; bin/ is a real directory
+    holding a COPY of the wrapper, which is what makes REPO resolve here.
+
+    mutations, when given, are (old, new) substitutions applied to that copy —
+    the mutation control for a guard. Each must apply EXACTLY ONCE: a
+    substitution that silently matches nothing proves nothing and reports green,
+    which is the failure mode this repo has paid for twice."""
+    root = os.path.realpath(tempfile.mkdtemp(prefix="carr-selftest-install-", dir=work))
+    for name in os.listdir(REPO):
+        if name in ("out", "bin", ".git"):
+            continue
+        os.symlink(os.path.join(REPO, name), os.path.join(root, name))
+    os.mkdir(os.path.join(root, "bin"))
+    with open(WRAPPER, encoding="utf-8") as fh:
+        src = fh.read()
+    for old, new in (mutations or []):
+        if src.count(old) != 1:
+            check(f"the mutation control {old.strip()[:52]!r} applies exactly once",
+                  False, f"matched {src.count(old)} times")
+            return None
+        src = src.replace(old, new)
+    dst = os.path.join(root, "bin", "run-scheduled.sh")
+    with open(dst, "w", encoding="utf-8") as fh:
+        fh.write(src)
+    os.chmod(dst, 0o755)
+    return root
+
+
+def run_install(root: str, work: str, run_key: str,
+                service: str = "carr-selftest-probe", child: str = "exit 0",
+                env_extra: Optional[dict] = None, argv_prefix=(),
+                timeout: int = 120) -> tuple:
+    """One run of the wrapper installed at root, with its own spool and its own
+    throttle-stamp directory. A TIMEOUT IS A RESULT: a wrapper that blocks after
+    its child has already exited is the exact failure this mechanism must never
+    have, so it is caught and reported rather than aborting the suite."""
+    db = os.path.join(work, uuid.uuid4().hex + ".sqlite3")
+    env = unreachable_env()
+    env["CARR_RUN_SPOOL_DB"] = db
+    env["CARR_RUN_SCHEDULED_STATE_DIR"] = tempfile.mkdtemp(
+        prefix="carr-selftest-state-", dir=work)
+    env.update(env_extra or {})
+    wrapper = os.path.join(root, "bin", "run-scheduled.sh")
+    try:
+        proc = subprocess.run(
+            [wrapper, *argv_prefix, service, run_key, "/bin/sh", "-c", child],
+            capture_output=True, text=True, timeout=timeout, env=env, cwd=REPO)
+    except subprocess.TimeoutExpired:
+        proc = subprocess.CompletedProcess([], 99, "", f"timed out after {timeout}s")
+    return proc, db
+
+
+def install_line(root: str, run_key: str) -> str:
+    """The provenance line the install at root wrote for this run key."""
+    try:
+        with open(os.path.join(root, "out", "run-scheduled.log")) as fh:
+            hits = [ln.rstrip("\n") for ln in fh if f"key={run_key} " in ln]
+    except FileNotFoundError:
+        return ""
+    return hits[-1] if hits else ""
+
+
+def carries_privileged_word(value: str) -> str:
+    lowered = value.lower()
+    return next((w for w in PRIVILEGED_WORDS if w in lowered), "")
+
+
+# The fd discipline, asserted against the wrapper's own source. Behaviour proves
+# what a hazard DOES; this proves there is no second resolution of the name to
+# race at all — the property a passing behavioural check cannot distinguish from
+# a window nobody happened to hit. Its own mutation control is below: the
+# retired path-addressed shape must make this report the hazard.
+def fd_discipline(src: str) -> tuple:
+    body = src[src.index("mint_receipt() {"):src.index('\nmint_receipt || true')]
+    opens = body.count("sysopen -r -w -o creat,excl,nofollow -m 600 -u 3 --")
+    if opens != 1:
+        return False, f"{opens} exclusive creates in the mint, expected exactly 1"
+    # from the END of the open's own line: that line names the path once, which
+    # is the last time the name is allowed to appear.
+    after = body[body.index("sysopen -r -w -o creat,excl,nofollow"):]
+    after = after[after.index("\n"):after.index('evidence_ref="$candidate"')]
+    if '"$RECEIPT_FILE"' in after:
+        return False, "the pathname is resolved again after the open"
+    for needed in ("zstat -f 3 -H fst", "syswrite -o 3 -c wrote",
+                   "sysseek -u 3 0", "sysread -c gotn -i 3 got"):
+        if needed not in after:
+            return False, f"{needed!r} does not address the open descriptor"
+    return True, ""
+
+
+def tier1_receipt_mint() -> None:
+    print()
+    print("TIER 1 — the receipt this wrapper mints for itself")
+
+    work = tempfile.mkdtemp(prefix="carr-selftest-receipt-")
+    service = "carr-selftest-probe"
+    codes = registered_codes()
+    check("the wrapper declares a closed list of refusal codes", len(codes) >= 10,
+          repr(codes))
+
+    def code_of(root: str, run_key: str) -> str:
+        return field(install_line(root, run_key), "receipt_code")
+
+    def key(tag: str) -> str:
+        return f"selftest.receipt.{tag}.{uuid.uuid4().hex[:8]}"
+
+    # (a) THE REAL FLEET PATH, in the real tree. Every plist in ops/launchd/
+    #     passes no flag — there is no flag to pass — so this is the case that
+    #     covers all seven jobs, and it runs against the real installation
+    #     rather than a copy so the fixed directory it derives is the real one.
+    rk = key("fleet")
+    db = os.path.join(work, uuid.uuid4().hex + ".sqlite3")
+    env = unreachable_env()
+    env["CARR_RUN_SPOOL_DB"] = db
+    state_dir = tempfile.mkdtemp(prefix="carr-selftest-state-", dir=work)
+    env["CARR_RUN_SCHEDULED_STATE_DIR"] = state_dir
+    proc = subprocess.run([WRAPPER, service, rk, "/bin/sh", "-c", "exit 0"],
+                          capture_output=True, text=True, timeout=120, env=env, cwd=REPO)
+    minted = evidence_ref_of(rk, db)
+    shape = RECEIPT_SHAPE.match(minted or "")
+    live = receipt_path(REPO, service, rk)
+    check("an ordinary run — no flags, the way every plist calls this — passes "
+          "the recorder a minted --evidence-ref", shape is not None, repr(minted))
+    check("the child's exit code is still its own", proc.returncode == 0,
+          f"got {proc.returncode}")
+    check("the provenance line names no refusal", field(tail_line(rk), "receipt_code") == "none",
+          tail_line(rk))
+    if shape:
+        check("the receipt carries the HASH of THIS run key, so the reader can "
+              "tell it apart from a receipt minted for another job",
+              shape.group(2) == hashlib.sha256(rk.encode()).hexdigest()[:32],
+              f"{shape.group(2)} vs {hashlib.sha256(rk.encode()).hexdigest()[:32]}")
+        started = argv_value(rk, db, "--started-at")
+        check("the receipt was minted STRICTLY AFTER the dispatch this row "
+              "records, which is what the reader's clause requires",
+              shape.group(1).replace(".", "") >
+              started.replace("-", "").replace(":", "").rstrip("Z") + "000",
+              f"minted {shape.group(1)} vs started {started}")
+        check("the receipt is at most 128 characters", len(minted) <= 128, f"{len(minted)}")
+        check("it landed in the FIXED directory under this repository's own "
+              "out/, which no argument and no variable named",
+              os.path.exists(live), live)
+        if os.path.exists(live):
+            check("and that file holds exactly what reached the recorder",
+                  open(live).read() == minted + "\n", live)
+            check("the receipt directory is this user's and is not writable by "
+                  "anyone else", (os.stat(os.path.dirname(live)).st_mode & 0o022) == 0,
+                  oct(os.stat(os.path.dirname(live)).st_mode))
+    check("NOTHING was written under the throttle-stamp directory the "
+          "environment did name — a stamp is a timestamp, not evidence",
+          not os.path.exists(os.path.join(state_dir, "receipts")),
+          str(os.listdir(state_dir)))
+    if os.path.exists(live):
+        os.unlink(live)
+
+    # Every check from here on owns its installation, because the directory is
+    # no longer something a test can be handed.
+    plain = install_root(work)
+    if plain is None:
+        return
+
+    # (b) NOTHING OUTSIDE THE WRAPPER CAN SUPPLY ONE. A caller who works out the
+    #     path and pre-seeds it cannot get that content into the row: the file it
+    #     left is unlinked and a fresh inode created. The seeded content is a
+    #     privileged word on purpose.
+    rk = key("preseeded")
+    seeded = receipt_path(plain, service, rk)
+    os.makedirs(os.path.dirname(seeded), mode=0o700, exist_ok=True)
+    with open(seeded, "w") as fh:
+        fh.write("complete\n")
+    proc, db = run_install(plain, work, rk)
+    landed = evidence_ref_of(rk, db)
+    check("a receipt file pre-seeded at the exact path the wrapper computes "
+          "CANNOT bind the row — this run's own mint is what is recorded",
+          landed is not None and landed != "complete"
+          and RECEIPT_SHAPE.match(landed) is not None, repr(landed))
+    check("...and the pre-seeded content is gone from the wrapper's own file",
+          open(seeded).read().strip() == (landed or ""), open(seeded).read())
+
+    # (c) THERE IS NO FLAG AND NO ARGUMENT. Neither the retired
+    #     --evidence-ref-file nor a --receipt-dir anyone might reach for is
+    #     parsed as an option: both fall through to the positional arguments,
+    #     which is visible in what the recorder was told the service key was.
+    for flag in ("--evidence-ref-file", "--receipt-dir"):
+        hostile = os.path.join(work, "argument-" + uuid.uuid4().hex[:8])
+        os.makedirs(hostile)
+        rk = key("argument")
+        proc, db = run_install(plain, work, rk, service=flag,
+                              argv_prefix=(), env_extra=None)
+        # the flag IS the service key, and a service key starting with a dash is
+        # not a shape this wrapper mints for
+        check(f"{flag} is not an option: it is consumed as a positional "
+              f"argument, not as a door to a caller's directory",
+              argv_value(rk, db, "--service") == flag, repr(recorded_argv(rk, db)))
+        check(f"...and that run mints NO receipt, refused as {flag}",
+              evidence_ref_of(rk, db) is None and code_of(plain, rk) == "key_shape",
+              f"{evidence_ref_of(rk, db)!r} code={code_of(plain, rk)!r}")
+        check(f"...and nothing was written into the directory {flag} named",
+              os.listdir(hostile) == [], str(os.listdir(hostile)))
+
+    # (d) REJECT, NEVER REPAIR. A run key carrying a byte outside the token
+    #     shape mints nothing at all — it is not stripped into something
+    #     acceptable, and the job is recorded and returns its own code anyway.
+    for label, bad_key in (
+        ("a carriage return", "selftest.receipt.cr\rcomplete"),
+        ("a newline", "selftest.receipt.lf\ncomplete"),
+        ("a tab", "selftest.receipt.tab\tcomplete"),
+        ("a space", "selftest.receipt.sp complete"),
+        ("an argument-injection attempt", "selftest --state failed --exit-code 1"),
+        ("a NUL-adjacent control byte", "selftest.receipt.\x01complete"),
+    ):
+        proc, db = run_install(plain, work, bad_key)
+        got = evidence_ref_of(bad_key, db)
+        check(f"a run key carrying {label} mints NO receipt — refused, never "
+              f"repaired into an acceptable token", got is None, repr(got))
+        check(f"...and {label} still leaves the job's own exit code alone",
+              proc.returncode == 0, f"got {proc.returncode}")
+        check(f"...and the row for {label} is still recorded",
+              recorded_argv(bad_key, db) != [], "no row")
+
+    # (e) WHAT IS ALREADY AT THE LEAF, each class under its own code. Nothing is
+    #     followed, nothing is opened, and what was there is left as it was.
+    def occupy(kind: str, run_key: str) -> tuple:
+        root = install_root(work)
+        if root is None:
+            return None, None, None
+        path = receipt_path(root, service, run_key)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        target = os.path.join(work, "target-" + uuid.uuid4().hex[:8])
+        if kind == "symlink":
+            with open(target, "w") as fh:
+                fh.write("complete\n")
+            os.symlink(target, path)
+        elif kind == "fifo":
+            os.mkfifo(path)
+        elif kind == "hardlink":
+            with open(path, "w") as fh:
+                fh.write("complete\n")
+            os.link(path, target)
+        else:
+            os.makedirs(path)
+        return root, path, target
+
+    for kind, label, want in (("symlink", "a symlink", "leaf_symlink"),
+                              ("fifo", "a FIFO", "leaf_not_regular"),
+                              ("dir", "a directory", "leaf_not_regular"),
+                              ("hardlink", "a hard-linked regular file",
+                               "leaf_hard_linked")):
+        rk = key(kind)
+        root, path, target = occupy(kind, rk)
+        if root is None:
+            continue
+        proc, db = run_install(root, work, rk, timeout=60)
+        got = evidence_ref_of(rk, db)
+        code = code_of(root, rk)
+        check(f"{label} at the receipt path mints NO receipt, and says so as "
+              f"{want}", got is None and code == want, f"{got!r} code={code!r}")
+        check(f"...and {label} still leaves the job's own exit code alone",
+              proc.returncode == 0, f"got {proc.returncode}")
+        check(f"...and the row is still recorded over {label}",
+              recorded_argv(rk, db) != [], "no row")
+        if kind == "symlink":
+            check("...and the symlink was not followed: its target is untouched",
+                  open(target).read() == "complete\n", open(target).read())
+        if kind == "fifo":
+            check("...and the FIFO was never OPENED, so the wrapper did not "
+                  "block forever on a reader that never comes",
+                  proc.returncode == 0, proc.stderr or "the wrapper blocked")
+        if kind == "hardlink":
+            check("...and neither name was written: a stranger's inode is not "
+                  "this wrapper's file", open(path).read() == "complete\n"
+                  and open(target).read() == "complete\n",
+                  f"{open(path).read()!r} {open(target).read()!r}")
+
+    # (f) THE DIRECTORY ITSELF MUST BE OURS AND PRIVATE. Unwritable is a refusal
+    #     like any other; so is one anybody may write in, because a directory
+    #     others can write in makes every leaf check below it meaningless.
+    for mode, label in ((0o500, "an unwritable receipt directory"),
+                        (0o777, "a receipt directory anyone may write in")):
+        root = install_root(work)
+        if root is None:
+            continue
+        os.makedirs(receipt_dir_of(root), exist_ok=True)
+        os.chmod(receipt_dir_of(root), mode)
+        rk = key("dirmode")
+        try:
+            proc, db = run_install(root, work, rk)
+            code = code_of(root, rk)
+            check(f"{label} mints NO receipt and records the row anyway, as "
+                  f"dir_unusable", evidence_ref_of(rk, db) is None
+                  and code == "dir_unusable" and recorded_argv(rk, db) != [],
+                  f"{evidence_ref_of(rk, db)!r} code={code!r}")
+            check(f"...and the job's own exit code is still its own over {label}",
+                  proc.returncode == 0, f"got {proc.returncode}")
+        finally:
+            os.chmod(receipt_dir_of(root), 0o700)
+
+    # (g) A PARENT SYMLINK IS NOT A PARENT. The leaf check was never the whole
+    #     story: whoever controls a directory ON THE WAY to the leaf controls
+    #     where the write lands, so the directory is required to BE the fixed
+    #     one — no component under the resolved root may be a link.
+    root = install_root(work)
+    if root is not None:
+        elsewhere = os.path.join(work, "elsewhere-" + uuid.uuid4().hex[:8])
+        os.makedirs(elsewhere, mode=0o700)
+        os.makedirs(os.path.join(root, "out"), exist_ok=True)
+        os.symlink(elsewhere, receipt_dir_of(root))
+        rk = key("parentlink")
+        proc, db = run_install(root, work, rk)
+        code = code_of(root, rk)
+        check("a SYMLINK where the receipt directory belongs mints no receipt "
+              "and says dir_not_fixed",
+              evidence_ref_of(rk, db) is None and code == "dir_not_fixed",
+              f"{evidence_ref_of(rk, db)!r} code={code!r}")
+        check("...and nothing was written through it",
+              os.listdir(elsewhere) == [], str(os.listdir(elsewhere)))
+        check("...and the job's own exit code is still its own",
+              proc.returncode == 0, f"got {proc.returncode}")
+
+    # (h) NO VARIABLE NAMES THE DIRECTORY. Every spelling anyone might reach for
+    #     REFUSES rather than being honoured, so an attempt to move the evidence
+    #     is in the log instead of being silently obeyed; and the variable that
+    #     legitimately moves the throttle stamp does not move the receipt.
+    for var in ("CARR_RUN_SCHEDULED_RECEIPT_DIR", "CARR_RUN_SCHEDULED_RECEIPT_ROOT",
+                "CARR_RUN_SCHEDULED_RECEIPT_FILE", "CARR_RUN_SCHEDULED_RECEIPTS"):
+        hostile = os.path.join(work, "hostile-" + uuid.uuid4().hex[:8])
+        os.makedirs(hostile, mode=0o700)
+        rk = key("envredirect")
+        proc, db = run_install(plain, work, rk, env_extra={var: hostile})
+        code = code_of(plain, rk)
+        check(f"{var} mints NO receipt: naming the directory is refused, not "
+              f"honoured", evidence_ref_of(rk, db) is None
+              and code == "dir_not_selectable", f"{evidence_ref_of(rk, db)!r} code={code!r}")
+        check(f"...and nothing was written under the directory {var} named",
+              os.listdir(hostile) == [], str(os.listdir(hostile)))
+        check(f"...and the row is still recorded with {var} set",
+              recorded_argv(rk, db) != [], "no row")
+
+    hostile = os.path.join(work, "stampdir-" + uuid.uuid4().hex[:8])
+    os.makedirs(hostile, mode=0o700)
+    rk = key("stampdir")
+    proc, db = run_install(plain, work, rk,
+                          env_extra={"CARR_RUN_SCHEDULED_STATE_DIR": hostile})
+    check("CARR_RUN_SCHEDULED_STATE_DIR still redirects the throttle stamp and "
+          "does NOT move the receipt: the mint lands in the fixed directory",
+          RECEIPT_SHAPE.match(evidence_ref_of(rk, db) or "") is not None
+          and os.path.exists(receipt_path(plain, service, rk)),
+          f"{evidence_ref_of(rk, db)!r} {receipt_path(plain, service, rk)}")
+    check("...and no receipt appeared under the directory it did name",
+          not os.path.exists(os.path.join(hostile, RECEIPT_DIRNAME))
+          and not os.path.exists(os.path.join(hostile, "receipts")),
+          str(os.listdir(hostile)))
+
+    # (i) THE SWAP THAT ARRIVES AFTER THE CHILD HAS EXITED. The mint runs after
+    #     the child returns, so the child's own background process is the
+    #     adversary with the best timing available: it races the create itself.
+    #     O_CREAT|O_EXCL|O_NOFOLLOW makes both outcomes safe — we created this
+    #     inode, or we refused — and neither may block or change the job's code.
+    root = install_root(work)
+    if root is not None:
+        rk = key("swaprace")
+        leaf = receipt_path(root, service, rk)
+        os.makedirs(os.path.dirname(leaf), mode=0o700, exist_ok=True)
+        racer = (f"( sleep 0.05; rm -f '{leaf}'; mkfifo '{leaf}' ) "
+                 f">/dev/null 2>&1 & exit 0")
+        proc, db = run_install(root, work, rk, child=racer, timeout=60)
+        code = code_of(root, rk)
+        minted = evidence_ref_of(rk, db)
+        settled = (RECEIPT_SHAPE.match(minted or "") is not None and code == "none") \
+            or (minted is None and code in codes and code != "none")
+        check("a FIFO swapped in around the mint settles one way or the other — "
+              "this run's own token, or a named refusal — and never both",
+              settled, f"{minted!r} code={code!r}")
+        check("...and the wrapper did not block: the child's exit code came "
+              "back", proc.returncode == 0, f"got {proc.returncode}")
+        check("...and the row is recorded either way", recorded_argv(rk, db) != [],
+              "no row")
+
+    # (j) AND THERE IS NO SECOND RESOLUTION OF THE NAME TO RACE. Asserted
+    #     against the source, because a behavioural check cannot tell a window
+    #     nobody hit from one that is not there.
+    with open(WRAPPER, encoding="utf-8") as fh:
+        wrapper_src = fh.read()
+    held, why = fd_discipline(wrapper_src)
+    check("the mint opens the receipt exactly once, exclusively, and every "
+          "check, write and read-back addresses that descriptor", held, why)
+    retired = wrapper_src.replace(
+        'sysread -c gotn -i 3 got 2>/dev/null',
+        'got="$( (cat -- "$RECEIPT_FILE") 2>/dev/null )"')
+    held_retired, _ = fd_discipline(retired)
+    check("...and that assertion is load-bearing: the retired path-addressed "
+          "read-back fails it", not held_retired, "the mutated source passed")
+
+    # (k) NO CALLER WORD TRAVELS, in the recorder's argv, in the provenance line
+    #     OR in a refusal code. The run keys here are the hostile ones on
+    #     purpose: a receipt that quoted its run key would put `complete` and
+    #     `allow-commit-green` into ops.run.evidence_ref and into the log.
+    for hostile_key in ("complete", "allow-commit-green", "passing.and.ok"):
+        rk = f"selftest.receipt.{hostile_key}"
+        proc, db = run_install(plain, work, rk)
+        got = evidence_ref_of(rk, db) or ""
+        offending = carries_privileged_word(got)
+        check(f"the receipt minted for run key {rk!r} carries no privileged "
+              f"word", RECEIPT_SHAPE.match(got) is not None and offending == "",
+              f"{got!r} carries {offending!r}")
+        line = install_line(plain, rk)
+        check(f"...and the provenance line for {rk!r} exports the minted token "
+              f"and not the caller's own", field(line, "evidence_ref") == got,
+              f"{field(line, 'evidence_ref')!r} vs {got!r}")
+        check(f"...and that provenance field carries no privileged word",
+              carries_privileged_word(field(line, "evidence_ref")) == "",
+              field(line, "evidence_ref"))
+    offenders = {c: carries_privileged_word(c) for c in codes
+                 if carries_privileged_word(c)}
+    check("no refusal code the wrapper registers carries a privileged word — a "
+          "code is an export too", offenders == {}, repr(offenders))
+
+    # (l) AND THE LINE SAYS `none` WHEN NOTHING WAS MINTED, rather than dropping
+    #     the field and shifting every regex that reads this log.
+    rk = "selftest.receipt.none complete"
+    proc, db = run_install(plain, work, rk)
+    line = install_line(plain, "selftest.receipt.none")
+    check("a run that minted no receipt still writes evidence_ref=none on its "
+          "provenance line", field(line, "evidence_ref") == "none", line)
+    check("...and names the refusal rather than leaving it anonymous",
+          field(line, "receipt_code") == "key_shape", line)
+
+    # ── MUTATION CONTROLS ─────────────────────────────────────────────────────
+    # Each removes exactly one guard and shows the hazard the checks above claim
+    # to close becoming reachable. A check whose guard can be deleted with the
+    # suite still green is a check that proves nothing.
+    print()
+    print("TIER 1 — mutation controls: each guard removed, each hazard reachable")
+
+    DIR_LINK_GUARDS = [
+        ("""  if [ -L "$RECEIPT_DIR" ]; then
+    receipt_code=dir_not_fixed
+    return 1
+  fi
+  if [ ! -e "$RECEIPT_DIR" ]; then""",
+         """  if [ ! -e "$RECEIPT_DIR" ]; then"""),
+        ("""  if [ -L "$RECEIPT_DIR" ] || [ "${RECEIPT_DIR:A}" != "$RECEIPT_DIR" ]; then
+    receipt_code=dir_not_fixed
+    return 1
+  fi
+""", ""),
+        ("""  if (( (dlnk[mode] & 8#170000) == 8#120000 )); then
+    receipt_code=dir_not_fixed
+    return 1
+  fi
+""", ""),
+    ]
+    root = install_root(work, DIR_LINK_GUARDS)
+    if root is not None:
+        elsewhere = os.path.join(work, "mutated-elsewhere-" + uuid.uuid4().hex[:8])
+        os.makedirs(elsewhere, mode=0o700)
+        os.makedirs(os.path.join(root, "out"), exist_ok=True)
+        os.symlink(elsewhere, receipt_dir_of(root))
+        rk = key("mutparentlink")
+        proc, db = run_install(root, work, rk)
+        check("CONTROL — without the directory-is-the-fixed-one guard, a "
+              "symlinked receipt directory IS followed and the write lands "
+              "outside the repository", os.listdir(elsewhere) != [],
+              f"{os.listdir(elsewhere)} code={code_of(root, rk)!r}")
+
+    NLINK_GUARD = [("""    if [ "$lst[nlink]" -ne 1 ]; then
+      receipt_code=leaf_hard_linked
+      return 1
+    fi
+""", "")]
+    root = install_root(work, NLINK_GUARD)
+    if root is not None:
+        rk = key("muthardlink")
+        path = receipt_path(root, service, rk)
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with open(path, "w") as fh:
+            fh.write("complete\n")
+        other = os.path.join(work, "mutated-link-" + uuid.uuid4().hex[:8])
+        os.link(path, other)
+        proc, db = run_install(root, work, rk)
+        check("CONTROL — without the link-count guard, a hard-linked leaf is "
+              "cleared and minted over instead of refused",
+              RECEIPT_SHAPE.match(evidence_ref_of(rk, db) or "") is not None,
+              f"{evidence_ref_of(rk, db)!r} code={code_of(root, rk)!r}")
+
+    DIRMODE_GUARD = [("""  if [ "$lst[uid]" -ne "$UID" ] || (( (lst[mode] & 8#22) != 0 )); then
+    receipt_code=dir_unusable
+    return 1
+  fi
+""", "")]
+    root = install_root(work, DIRMODE_GUARD)
+    if root is not None:
+        os.makedirs(receipt_dir_of(root), exist_ok=True)
+        os.chmod(receipt_dir_of(root), 0o777)
+        rk = key("mutdirmode")
+        try:
+            proc, db = run_install(root, work, rk)
+            check("CONTROL — without the ownership-and-mode guard, a directory "
+                  "anyone may write in is accepted",
+                  RECEIPT_SHAPE.match(evidence_ref_of(rk, db) or "") is not None,
+                  f"{evidence_ref_of(rk, db)!r} code={code_of(root, rk)!r}")
+        finally:
+            os.chmod(receipt_dir_of(root), 0o700)
+
+    # The retired shape: the leaf is validated by name and then opened by name.
+    PATH_WRITE = [
+        ("""  if [ -L "$RECEIPT_FILE" ]; then
+    receipt_code=leaf_symlink
+    return 1
+  fi
+  if [ -e "$RECEIPT_FILE" ]; then""",
+         """  if false; then"""),
+        ('if ! sysopen -r -w -o creat,excl,nofollow -m 600 -u 3 -- "$RECEIPT_FILE" 2>/dev/null; then',
+         'if ! : > "$RECEIPT_FILE" 2>/dev/null; then'),
+    ]
+    root = install_root(work, PATH_WRITE)
+    if root is not None:
+        rk = key("mutfifo")
+        leaf = receipt_path(root, service, rk)
+        os.makedirs(os.path.dirname(leaf), mode=0o700, exist_ok=True)
+        os.mkfifo(leaf)
+        proc, db = run_install(root, work, rk, timeout=25)
+        check("CONTROL — with the retired path-addressed write, a FIFO at the "
+              "receipt path BLOCKS the wrapper after its child has already "
+              "exited", proc.returncode == 99, f"got {proc.returncode}")
+
+    root = install_root(work, PATH_WRITE)
+    if root is not None:
+        rk = key("mutsymlink")
+        leaf = receipt_path(root, service, rk)
+        os.makedirs(os.path.dirname(leaf), mode=0o700, exist_ok=True)
+        target = os.path.join(work, "mutated-target-" + uuid.uuid4().hex[:8])
+        with open(target, "w") as fh:
+            fh.write("complete\n")
+        os.symlink(target, leaf)
+        proc, db = run_install(root, work, rk, timeout=60)
+        check("CONTROL — with the retired path-addressed write, a symlink at "
+              "the receipt path is FOLLOWED and its target is overwritten",
+              open(target).read() != "complete\n", open(target).read())
+
+    CALLER_ROOT = [('  root="$REPO/out"',
+                    '  root="${CARR_RUN_SCHEDULED_STATE_DIR:-$REPO/out}"')]
+    root = install_root(work, CALLER_ROOT)
+    if root is not None:
+        hostile = os.path.join(work, "mutated-stampdir-" + uuid.uuid4().hex[:8])
+        os.makedirs(hostile, mode=0o700)
+        rk = key("mutcallerroot")
+        proc, db = run_install(root, work, rk,
+                              env_extra={"CARR_RUN_SCHEDULED_STATE_DIR": hostile})
+        check("CONTROL — make the directory caller-selectable again and the "
+              "receipt lands wherever the caller said, which is what the "
+              "checks above would catch",
+              os.path.isdir(os.path.join(hostile, RECEIPT_DIRNAME)),
+              f"{os.listdir(hostile)} code={code_of(root, rk)!r}")
+
+    shutil.rmtree(work, ignore_errors=True)
+
 def main() -> int:
     print("run-scheduled-selftest — bin/run-scheduled.sh must never change what "
           "a job does, prints, or returns")
     tier1()
+    tier1_receipt_mint()
     tier1_throttle()
     tier1_refresh_rules()
     tier2()

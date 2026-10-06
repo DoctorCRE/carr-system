@@ -73,6 +73,7 @@ import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
 try:                                    # telemetry only — never load-bearing
     import hook_meter
     LOG = hook_meter.guard_log_path(REPO)
@@ -188,7 +189,7 @@ def extract_targets(command):
     """Every path this command plausibly WRITES. Order is not significant."""
     targets = []
     try:
-        tokens = shlex.split(command, comments=False, posix=True)
+        tokens = shell_tokens(command)
     except ValueError:
         # Unbalanced quotes — usually a heredoc body. Fall back to line-wise
         # parsing so `cat > f <<EOF` is still seen, and accept that a heredoc
@@ -196,10 +197,15 @@ def extract_targets(command):
         tokens = []
         for line in command.splitlines():
             try:
-                tokens.extend(shlex.split(line, comments=False, posix=True))
+                tokens.extend(shell_tokens(line))
             except ValueError:
                 continue
 
+    try:
+        tokens, redirect_targets = shell_operands(tokens)
+        targets.extend(redirect_targets)
+    except ValueError:
+        pass  # retain the conservative scan of malformed redirection tokens
     index = 0
     while index < len(tokens):
         token = tokens[index]
@@ -216,9 +222,12 @@ def extract_targets(command):
                 index += 1
                 continue
 
+        end = next((j for j in range(index + 1, len(tokens))
+                    if tokens[j] in SHELL_BOUNDARIES), len(tokens))
+        remainder = tokens[index + 1:end]
         base = os.path.basename(token)
         if base == "tee":
-            for candidate in tokens[index + 1:]:
+            for candidate in remainder:
                 if candidate.startswith("-"):
                     continue
                 if REDIRECT.match(candidate) or candidate in ("|", "&&", ";"):
@@ -226,17 +235,17 @@ def extract_targets(command):
                 targets.append(candidate)
         elif base == "sed" and any(t == "-i" or t.startswith("-i") for t in
                                    tokens[index + 1:index + 4]):
-            for candidate in tokens[index + 1:]:
+            for candidate in remainder:
                 if candidate.startswith("-") or REDIRECT.match(candidate):
                     continue
                 targets.append(candidate)
         elif base in ("cp", "mv", "install", "rsync"):
-            tail = [t for t in tokens[index + 1:]
+            tail = [t for t in remainder
                     if not t.startswith("-") and not REDIRECT.match(t)]
             if len(tail) >= 2:
                 targets.append(tail[-1])
         elif base in ("truncate", "touch"):
-            for candidate in tokens[index + 1:]:
+            for candidate in remainder:
                 if not candidate.startswith("-"):
                     targets.append(candidate)
         elif token.startswith("of="):
@@ -258,6 +267,54 @@ def extract_targets(command):
     return out
 
 
+# FORGERY WARNING, NOT A BLOCK (round 3 of PR #1224, decision d47931da:
+# "detectable, not prevented"). out/jev-calls.jsonl is the receipt ledger the
+# completion-evidence Stop gate reads to decide whether a turn really called
+# Jev, and ops/typesafe_client.py's ask() is its ONLY legitimate writer — from
+# inside Python, so a real call's own shell command never names the file. A
+# shell write naming it is therefore either a forged receipt or a mistake, and
+# either way a human should see it. This gate WARNS loudly (a systemMessage to
+# the operator plus additionalContext to the model, and a hook-guard.log line)
+# and lets the call run; the Stop gate independently records a detection event
+# for the same turn. A read (tail/grep/wc) is not warned on.
+JEV_CALLS_BASENAME = "jev-calls.jsonl"
+JEV_INLINE_WRITE = re.compile(
+    r"""\.write\s*\(|write_text|write_bytes|writeFileSync|appendFileSync|"""
+    r"""createWriteStream|open\s*\([^)]*['"][awx]""")
+
+
+def jev_calls_write_targets(command, targets):
+    """The write targets in `command` that are the Jev call ledger, or a
+    one-item marker list when the command names the ledger AND carries an
+    inline interpreter write call the extractor could not bind to a literal
+    path (a variable path, say). [] when the command only reads it."""
+    if JEV_CALLS_BASENAME not in command:
+        return []
+    hits = [t for t in targets if os.path.basename(t) == JEV_CALLS_BASENAME]
+    if hits:
+        return hits
+    if JEV_INLINE_WRITE.search(command):
+        return [f"<inline write in a command naming {JEV_CALLS_BASENAME}>"]
+    return []
+
+
+def warn_jev_calls_write(hits):
+    note = (
+        "JEV RECEIPT LEDGER WRITE DETECTED: this command writes "
+        f"{', '.join(hits)}. out/{JEV_CALLS_BASENAME} is written ONLY by "
+        "ops/typesafe_client.py's ask() on a real Jev response; a row written "
+        "any other way is a forged Jev receipt. The command is allowed, but "
+        "this warning is logged, and the completion-evidence Stop gate records "
+        "a detection event for this turn (decision d47931da)."
+    )
+    log(f"WARN(jev-calls-ledger-write) {', '.join(hits)[:160]}")
+    print(json.dumps({
+        "systemMessage": note,
+        "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                               "additionalContext": note},
+    }))
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -274,7 +331,10 @@ def main():
             sys.exit(0)
 
         targets = extract_targets(command)
+        jev_hits = jev_calls_write_targets(command, targets)
         if not targets:
+            if jev_hits:
+                warn_jev_calls_write(jev_hits)
             sys.exit(0)
 
         cwd = payload.get("cwd") or os.getcwd()
@@ -313,6 +373,8 @@ def main():
                 log(f"DENY {path} :: {reason[:160]}")
                 print(text, file=sys.stderr)
                 sys.exit(2)
+        if jev_hits:
+            warn_jev_calls_write(jev_hits)
         sys.exit(0)
     except Exception as exc:
         log(f"ALLOW(internal-error) {exc}")

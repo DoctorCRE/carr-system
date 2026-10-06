@@ -16,6 +16,32 @@ const DISPOSITIONS = new Set(["applied", "not_applicable", "conflicted", "stale"
 const ENVELOPE_CORE_FIELDS = ["schema_version", "envelope_id", "work_request_id", "plan_revision", "agent_session", "issued_at", "expires_at", "request", "server_binding", "handoff", "state_binding", "phase_binding", "evaluation_context"];
 const ENVELOPE_ACTIVATION_FIELDS = ["activation_binding", "reliability_policy_binding", "context_activation_ref", "runtime_profile", "execution_topology", "evaluation_plan"];
 
+// engineering-slice-plan.v2 mirror. v1 keeps its exact accepted shape; v2 adds
+// the Q046.D1 design_contract per slice and the plan-level seam/parallel-resource
+// checks below. This mirrors mcp-server/src/engineering-runtime.js requirePlan /
+// requireDesignContract for engineering-slice-plan.v2 exactly; v1 is untouched.
+const SLICE_PLAN_VERSIONS = new Set(["engineering-slice-plan.v1", "engineering-slice-plan.v2"]);
+const SLICE_PLAN_V2 = "engineering-slice-plan.v2";
+const DESIGN_CONTRACT_VERSION = "engineering-design-contract.v1";
+const SHORT_RISK_CLASSES = new Set(["R0", "R1", "R2", "R3"]);
+const DESIGN_CONTRACT_FIELDS = ["authority", "code_model_decision", "completion", "contract_version", "dependency_rationale", "deployment", "evidence", "failure", "full_design_refs", "isolation", "rationale", "review", "routing", "seam_decision", "short_template", "tests"];
+const MODEL_STEP_FIELDS = ["input_contract_ref", "output_contract_ref", "rationale", "responsibility_class", "selection_basis", "step_ref"];
+const FULL_DESIGN_REF_FIELDS = ["authority_envelope_ref", "design_interview_ref", "failure_model_ref", "fixture_refs", "oracle_ref"];
+const SHORT_TEMPLATE_FIELDS = ["objective_summary", "template_ref", "verification_ref"];
+const RESERVED_CODE_RESPONSIBILITIES = new Set(["identity", "policy", "permissions", "state", "validation", "idempotency", "execution"]);
+const TYPED_UNCERTAINTY_CLASSES = new Set(["classification", "extraction", "summarization", "ranking", "drafting", "disambiguation"]);
+const SELECTION_BASIS_VALUES = new Set(["typed_uncertainty", "capability_gain", "quality_gain", "adaptability_gain", "cost"]);
+const EXECUTOR_CLASSES = new Set(["deterministic_code", "attended_human", "model_assisted"]);
+const AUTHORITY_ENVIRONMENTS = new Set(["local", "rehearsal", "staging", "production"]);
+const VERIFICATION_LANES = new Set(["unit", "contract", "integration", "manual_qa"]);
+const REVIEWER_CLASSES = new Set(["independent_agent"]);
+const EVIDENCE_REDACTION_CLASSES = new Set(["metadata_only", "redacted_evidence"]);
+const EVIDENCE_RETENTIONS = new Set(["ephemeral", "material_redacted"]);
+const COMPLETION_VERIFIERS = new Set(["independent_review", "independent_review_and_manual_qa"]);
+const SEAM_MODES = new Set(["reuse", "extend", "replace", "new_module"]);
+const NEW_MODULE_JUSTIFICATIONS = new Set(["authority", "lifecycle", "failure_isolation", "multi_adapter"]);
+const MEASUREMENT_BASES = new Set(["complexity_reduction", "defect_rate", "coverage", "latency", "operator_effort"]);
+
 function object(value) { return value && typeof value === "object" && !Array.isArray(value); }
 function string(value) { return typeof value === "string" && value.trim().length > 0; }
 function timestamp(value) { return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value); }
@@ -203,7 +229,8 @@ function validTelemetryMeasurement(value) {
 function validId(value) { return string(value) && /^[A-Za-z][A-Za-z0-9._:-]{2,127}$/.test(value); }
 function validEvidence(value, required = false) {
   return list(value) && (required ? value.length > 0 : true) && value.every((row) => exactKeys(row, ["ref", "redaction_class", "content_digest"])
-    && validId(row.ref) && ["metadata_only", "redacted_evidence"].includes(row.redaction_class) && DIGEST.test(row.content_digest));
+    && validId(row.ref) && ["metadata_only", "redacted_evidence"].includes(row.redaction_class)
+    && typeof row.content_digest === "string" && DIGEST.test(row.content_digest));
 }
 function sameSet(a, b) { return list(a) && list(b) && a.length === b.length && [...a].sort().every((item, index) => item === [...b].sort()[index]); }
 function validBinding(value) { return exactKeys(value, ["id", "state_version", "canonical_record_digest"]) && validId(value.id) && number(value.state_version) && DIGEST.test(value.canonical_record_digest); }
@@ -304,12 +331,207 @@ function validExecutionEnvelope(value, passport) {
   } else if (runtime.some((item) => item !== undefined) && (!runtime.every((item) => item !== undefined) || !validRuntimeMetadata(value.runtime_profile) || !validVersionedMetadata(value.execution_topology) || !validVersionedMetadata(value.evaluation_plan))) return false;
   return true;
 }
+function uniqueIdArray(value) { return list(value) && value.every(validId) && new Set(value).size === value.length; }
+
+/** Q035.D1 classifier: mirrors DESIGN_DEPTH_PREDICATES["engineering-design-contract.v1"] server-side. */
+function designDepth(slice) {
+  return SHORT_RISK_CLASSES.has(slice.risk_class) && slice.concurrency_posture === "parallel_safe" && slice.manual_qa_required === false
+    && slice.release_requirement === "not_required" && slice.dependency_refs.length === 0
+    && slice.declared_resource_refs.length <= 1 && slice.declared_component_refs.length <= 1 && slice.declared_plan_step_refs.length <= 1
+    ? "short" : "full";
+}
+
+function validSelectionBasis(value) {
+  return list(value) && value.length > 0 && value.every((item) => typeof item === "string") && new Set(value).size === value.length
+    && value.every((item) => SELECTION_BASIS_VALUES.has(item)) && !(value.length === 1 && value[0] === "cost");
+}
+
+function validModelJudgmentSteps(slice, decision) {
+  if (!list(decision.model_judgment_steps)) return null;
+  const steps = decision.model_judgment_steps;
+  const seen = new Set();
+  for (const step of steps) {
+    if (!exactKeys(step, MODEL_STEP_FIELDS)) return null;
+    if (!validId(step.step_ref) || seen.has(step.step_ref) || !slice.declared_plan_step_refs.includes(step.step_ref)) return null;
+    seen.add(step.step_ref);
+    if (RESERVED_CODE_RESPONSIBILITIES.has(step.responsibility_class) || !TYPED_UNCERTAINTY_CLASSES.has(step.responsibility_class)) return null;
+    if (!validId(step.input_contract_ref) || !validId(step.output_contract_ref)) return null;
+    if (!string(step.rationale)) return null;
+    if (!validSelectionBasis(step.selection_basis)) return null;
+  }
+  return steps;
+}
+
+/** Validate the closed Q046.D1 slice contract for one accepted v2 slice. Mirrors requireDesignContract. */
+function validDesignContract(slice) {
+  const contract = slice.design_contract;
+  if (!exactKeys(contract, DESIGN_CONTRACT_FIELDS)) return false;
+  if (contract.contract_version !== DESIGN_CONTRACT_VERSION) return false;
+  if (!string(contract.rationale) || !string(contract.dependency_rationale)) return false;
+
+  const decision = contract.code_model_decision;
+  if (!exactKeys(decision, ["model_judgment_steps", "rationale", "selection_basis"])) return false;
+  if (!string(decision.rationale) || !validSelectionBasis(decision.selection_basis)) return false;
+  const steps = validModelJudgmentSteps(slice, decision);
+  if (steps === null) return false;
+
+  const routing = contract.routing;
+  if (!exactKeys(routing, ["adapter_ref", "executor_class", "fresh_session_required"])) return false;
+  if (!EXECUTOR_CLASSES.has(routing.executor_class) || !validId(routing.adapter_ref) || routing.fresh_session_required !== true) return false;
+  if (routing.executor_class === "deterministic_code" && steps.length) return false;
+  if (routing.executor_class === "model_assisted" && !steps.length) return false;
+
+  const authority = contract.authority;
+  if (!exactKeys(authority, ["capability_profile", "environment", "read_only"])) return false;
+  if (!validId(authority.capability_profile) || typeof authority.read_only !== "boolean" || !AUTHORITY_ENVIRONMENTS.has(authority.environment)) return false;
+  if (!authority.read_only && authority.capability_profile !== "capability:engineering-repository-write") return false;
+
+  const isolation = contract.isolation;
+  if (!exactKeys(isolation, ["branch_required", "shared_resource_refs", "worktree_required"])) return false;
+  if (isolation.worktree_required !== true || isolation.branch_required !== true) return false;
+  if (!uniqueIdArray(isolation.shared_resource_refs)) return false;
+  if (isolation.shared_resource_refs.some((ref) => !slice.declared_resource_refs.includes(ref))) return false;
+  if (isolation.shared_resource_refs.length && slice.concurrency_posture === "parallel_safe") return false;
+
+  const tests = contract.tests;
+  if (!exactKeys(tests, ["planned_check_refs", "verification_lanes"])) return false;
+  const plannedRefs = slice.planned_checks.map((check) => check.check_ref);
+  if (!uniqueIdArray(tests.planned_check_refs) || tests.planned_check_refs.join(",") !== plannedRefs.join(",")) return false;
+  if (!list(tests.verification_lanes) || !tests.verification_lanes.length || new Set(tests.verification_lanes).size !== tests.verification_lanes.length
+    || tests.verification_lanes.some((lane) => !VERIFICATION_LANES.has(lane))) return false;
+  if (tests.verification_lanes.includes("manual_qa") !== slice.manual_qa_required) return false;
+
+  const review = contract.review;
+  if (!exactKeys(review, ["independent_review_required", "reviewer_class"])) return false;
+  if (review.independent_review_required !== true || !REVIEWER_CLASSES.has(review.reviewer_class)) return false;
+
+  const failure = contract.failure;
+  if (!exactKeys(failure, ["failure_modes"]) || !list(failure.failure_modes) || !failure.failure_modes.length) return false;
+  const failureRefs = new Set();
+  for (const mode of failure.failure_modes) {
+    if (!exactKeys(mode, ["compensation", "detection", "failure_ref"])) return false;
+    if (!validId(mode.failure_ref) || failureRefs.has(mode.failure_ref)) return false;
+    failureRefs.add(mode.failure_ref);
+    if (!string(mode.detection) || !string(mode.compensation)) return false;
+  }
+
+  const evidenceFacet = contract.evidence;
+  if (!exactKeys(evidenceFacet, ["evidence_refs", "redaction_class", "retention"])) return false;
+  if (!EVIDENCE_REDACTION_CLASSES.has(evidenceFacet.redaction_class) || !EVIDENCE_RETENTIONS.has(evidenceFacet.retention)) return false;
+  if (!validEvidence(evidenceFacet.evidence_refs)) return false;
+  if (evidenceFacet.evidence_refs.some((item) => item.redaction_class !== evidenceFacet.redaction_class)) return false;
+  if (slice.planned_checks.some((check) => check.evidence_requirement === "redacted_evidence_required") && evidenceFacet.redaction_class !== "redacted_evidence") return false;
+
+  const deployment = contract.deployment;
+  if (!exactKeys(deployment, ["confirmation_required", "release_requirement", "rollback_ref"])) return false;
+  if (deployment.release_requirement !== slice.release_requirement) return false;
+  if (deployment.release_requirement === "required") {
+    if (!validId(deployment.rollback_ref)) return false;
+  } else if (deployment.rollback_ref !== null && !validId(deployment.rollback_ref)) return false;
+  if (typeof deployment.confirmation_required !== "boolean") return false;
+  if (!["R0", "R1"].includes(slice.risk_class) && deployment.confirmation_required !== true) return false;
+
+  const completion = contract.completion;
+  if (!exactKeys(completion, ["completion_predicate", "verified_by"])) return false;
+  if (!string(completion.completion_predicate) || !COMPLETION_VERIFIERS.has(completion.verified_by)) return false;
+  if (completion.verified_by !== (slice.manual_qa_required ? "independent_review_and_manual_qa" : "independent_review")) return false;
+
+  const seam = contract.seam_decision;
+  if (!exactKeys(seam, ["measurement", "mode", "new_module_justification", "replaced_seam_refs", "residual_authority_refs", "target_seam_ref"])) return false;
+  if (!SEAM_MODES.has(seam.mode) || !validId(seam.target_seam_ref)) return false;
+  if (!exactKeys(seam.measurement, ["basis", "note"]) || !MEASUREMENT_BASES.has(seam.measurement.basis) || !string(seam.measurement.note)) return false;
+  if (!uniqueIdArray(seam.replaced_seam_refs) || !uniqueIdArray(seam.residual_authority_refs)) return false;
+  if (seam.mode === "new_module") {
+    if (!NEW_MODULE_JUSTIFICATIONS.has(seam.new_module_justification)) return false;
+  } else if (seam.new_module_justification !== null) return false;
+  if (seam.mode === "replace") {
+    if (!seam.replaced_seam_refs.length || seam.replaced_seam_refs.includes(seam.target_seam_ref)) return false;
+    if (seam.residual_authority_refs.length) return false;
+  } else if (seam.replaced_seam_refs.length || seam.residual_authority_refs.length) return false;
+
+  const depth = designDepth(slice);
+  if (depth === "full") {
+    if (contract.short_template !== null) return false;
+    const refs = contract.full_design_refs;
+    if (!exactKeys(refs, FULL_DESIGN_REF_FIELDS)) return false;
+    for (const field of ["design_interview_ref", "authority_envelope_ref", "failure_model_ref", "oracle_ref"]) if (!validId(refs[field])) return false;
+    if (!uniqueIdArray(refs.fixture_refs) || !refs.fixture_refs.length) return false;
+  } else {
+    if (contract.full_design_refs !== null) return false;
+    const template = contract.short_template;
+    if (!exactKeys(template, SHORT_TEMPLATE_FIELDS)) return false;
+    if (!validId(template.template_ref) || !validId(template.verification_ref) || !string(template.objective_summary)) return false;
+  }
+  return true;
+}
+
+/** Every slice a slice depends on, directly or transitively. Mirrors transitiveDependencies server-side. */
+function transitiveDependencies(plan) {
+  const direct = new Map(plan.slices.map((row) => [row.slice_ref, row.dependency_refs || []]));
+  const resolved = new Map();
+  const visit = (ref, stack) => {
+    if (resolved.has(ref)) return resolved.get(ref);
+    if (stack.has(ref)) return new Set();
+    stack.add(ref);
+    const closure = new Set();
+    for (const dependency of direct.get(ref) || []) {
+      closure.add(dependency);
+      for (const item of visit(dependency, stack)) closure.add(item);
+    }
+    stack.delete(ref);
+    resolved.set(ref, closure);
+    return closure;
+  };
+  for (const ref of direct.keys()) visit(ref, new Set());
+  return resolved;
+}
+
+/** Refuse duplicate seam authority and half-replacement across one v2 plan. Mirrors requireSeamAuthority. */
+function validSeamAuthority(plan) {
+  const owners = new Map(); const retired = new Map();
+  for (const slice of plan.slices) {
+    const seam = slice.design_contract.seam_decision;
+    if (["new_module", "replace"].includes(seam.mode)) {
+      if (owners.has(seam.target_seam_ref)) return false;
+      owners.set(seam.target_seam_ref, slice.slice_ref);
+    }
+    for (const seamRef of seam.replaced_seam_refs) {
+      if (retired.has(seamRef)) return false;
+      retired.set(seamRef, slice.slice_ref);
+    }
+  }
+  return plan.slices.every((slice) => {
+    const seam = slice.design_contract.seam_decision;
+    return !(["reuse", "extend"].includes(seam.mode) && retired.has(seam.target_seam_ref));
+  });
+}
+
+/** Refuse two concurrently admissible parallel_safe slices claiming one declared resource. Mirrors requireParallelResourceIsolation. */
+function validParallelResourceIsolation(plan) {
+  const ordered = transitiveDependencies(plan);
+  const owners = new Map();
+  for (const slice of plan.slices) {
+    if (slice.concurrency_posture !== "parallel_safe") continue;
+    for (const resourceRef of new Set(slice.declared_resource_refs)) {
+      for (const other of owners.get(resourceRef) || []) {
+        if (ordered.get(slice.slice_ref)?.has(other) || ordered.get(other)?.has(slice.slice_ref)) continue;
+        return false;
+      }
+      owners.set(resourceRef, [...(owners.get(resourceRef) || []), slice.slice_ref]);
+    }
+  }
+  return true;
+}
+
 function validEngineeringPlan(value) {
-  if (!exactKeys(value, ["schema_version", "work_request", "accepted_plan_revision", "plan_digest", "slices"]) || value.schema_version !== "engineering-slice-plan.v1"
+  if (!exactKeys(value, ["schema_version", "work_request", "accepted_plan_revision", "plan_digest", "slices"]) || !SLICE_PLAN_VERSIONS.has(value.schema_version)
     || !validBinding(value.work_request) || !validPlanRef(value.accepted_plan_revision) || !DIGEST.test(value.plan_digest) || !list(value.slices) || value.slices.length === 0) return false;
-    const refs = new Set(), ordinals = new Set();
+  const isV2 = value.schema_version === SLICE_PLAN_V2;
+  const refs = new Set(), ordinals = new Set();
   for (const slice of value.slices) {
-    if (!exactKeys(slice, ["slice_ref", "ordinal", "objective", "definition_of_done", "dependency_refs", "declared_resource_refs", "declared_component_refs", "declared_plan_step_refs", "baseline_evidence_refs", "planned_checks", "scope_boundary", "forbidden_change_refs", "concurrency_posture", "manual_qa_required", "risk_class", "release_requirement"])
+    const requiredKeys = ["slice_ref", "ordinal", "objective", "definition_of_done", "dependency_refs", "declared_resource_refs", "declared_component_refs", "declared_plan_step_refs", "baseline_evidence_refs", "planned_checks", "scope_boundary", "forbidden_change_refs", "concurrency_posture", "manual_qa_required", "risk_class", "release_requirement"];
+    if (isV2) requiredKeys.push("design_contract");
+    if (!exactKeys(slice, requiredKeys)
       || !validId(slice.slice_ref) || !number(slice.ordinal) || refs.has(slice.slice_ref) || ordinals.has(slice.ordinal)
       || !string(slice.objective) || !string(slice.definition_of_done) || !list(slice.dependency_refs) || !slice.dependency_refs.every(validId)
       || !list(slice.declared_resource_refs) || !slice.declared_resource_refs.every(validId) || !list(slice.declared_component_refs) || !slice.declared_component_refs.every(validId)
@@ -318,11 +540,13 @@ function validEngineeringPlan(value) {
       || !string(slice.scope_boundary) || !list(slice.forbidden_change_refs) || !slice.forbidden_change_refs.every(validId)
       || !["parallel_safe", "serial_after_dependencies", "exclusive_resource"].includes(slice.concurrency_posture)
       || typeof slice.manual_qa_required !== "boolean" || !/^R[0-6]$/.test(slice.risk_class) || !["required", "not_required"].includes(slice.release_requirement)) return false;
+    if (isV2 && !validDesignContract(slice)) return false;
     refs.add(slice.slice_ref); ordinals.add(slice.ordinal);
   }
   if (!value.slices.every((slice) => slice.dependency_refs.every((dep) => refs.has(dep)))) return false;
   const visit = (ref, visiting = new Set(), visited = new Set()) => { if (visiting.has(ref)) return false; if (visited.has(ref)) return true; visiting.add(ref); const slice = value.slices.find((row) => row.slice_ref === ref); if (!slice || !slice.dependency_refs.every((dep) => visit(dep, visiting, visited))) return false; visiting.delete(ref); visited.add(ref); return true; };
   if (![...refs].every((ref) => visit(ref))) return false;
+  if (isV2 && (!validSeamAuthority(value) || !validParallelResourceIsolation(value))) return false;
   const copy = structuredClone(value); delete copy.plan_digest;
   return canonicalDigest(copy) === value.plan_digest;
 }

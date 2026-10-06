@@ -1,0 +1,72 @@
+diff --git a/ops/config/rule-jit-triggers.v1.json b/ops/config/rule-jit-triggers.v1.json
+index f6ca1649..6c73e5ac 100644
+--- a/ops/config/rule-jit-triggers.v1.json
++++ b/ops/config/rule-jit-triggers.v1.json
+@@ -5,7 +5,7 @@
+   "seeded_detector_rule_ids": 50,
+   "seeded_detector_triggers": 14,
+   "structural_extra_triggers": 2,
+-  "triggers": 146
++  "triggers": 147
+  },
+  "generated_from": {
+   "jev_triggers_sha256": "fe5a1593d9c602327ecd986158c5f77c31d704f8695f0952e81d15552a20ca9d",
+@@ -372,6 +372,18 @@
+    "source": "structural_extra",
+    "trigger_id": "5e186a09dcf2"
+   },
++  {
++   "kind": "prompt_regex",
++   "packs": [
++    "delegation-council"
++   ],
++   "pattern": "(?m)^[ \\t]*Executor:[ \\t]+\\S",
++   "rule_ids": [
++    "c20dc3d5"
++   ],
++   "source": "prompt_cue",
++   "trigger_id": "195bbd2a0c6b"
++  },
+   {
+    "kind": "prompt_regex",
+    "packs": [
+diff --git a/ops/rule-jit-compile.py b/ops/rule-jit-compile.py
+index 958f5eff..b9a3b30b 100644
+--- a/ops/rule-jit-compile.py
++++ b/ops/rule-jit-compile.py
+@@ -202,6 +202,15 @@ PROMPT_CUE_TRIGGERS: tuple[dict[str, Any], ...] = (
+         "packs": ["joe-comms"],
+         "rule_ids": ["49533583", "c66dc739"],
+     },
++    # A dispatch brief that opens with its executor line ("Executor: Opus on
++    # the judgment lane ..."): the brief is the moment the escalation contract
++    # binds (c20dc3d5). Anchored to a line start so "ask the executor: who"
++    # mid-sentence does not fire. evals/rule-delivery round 2.
++    {
++        "pattern": r"(?m)^[ \t]*Executor:[ \t]+\S",
++        "packs": ["delegation-council"],
++        "rule_ids": ["c20dc3d5"],
++    },
+ )
+ 
+ 
+diff --git a/ops/rule-trigger-compile-selftest.py b/ops/rule-trigger-compile-selftest.py
+index 5bee1978..637491a6 100644
+--- a/ops/rule-trigger-compile-selftest.py
++++ b/ops/rule-trigger-compile-selftest.py
+@@ -760,9 +760,14 @@ for prompt, rule_id in (
+         ("Just click my Carr.us@gmail account. The password is autofilled", "c66dc739"),
+         ("It appears that flash got stuck on test 6", "d9ce2b08"),
+         ("it didnt ask, it just said no such file", "d9ce2b08"),
+-        ("look in my email folder for sapala", "49533583")):
++        ("look in my email folder for sapala", "49533583"),
++        ("Executor: Sonnet under the fit-map, as this is mechanical install work.", "c20dc3d5")):
+     check(f"committed cue delivers {rule_id} on its logged prompt",
+           rule_id in rtd.match(prompt, committed_rows or [], human=True), prompt[:40])
++check("the executor-line cue is anchored: a mid-sentence mention does not fire it",
++      "c20dc3d5" not in [r for r, sources in rtd.match(
++          "Ask the executor: who signed the estate?", committed_rows or [], human=True).items()
++          if "prompt_cue" in sources])
+ for banner in ("Last login: Thu Sep 24 11:01:21 on ttys001\nbooko@Joes-MacBook-Pro ~ % ls",
+                "the file to dells computer? or the command\n\n"
+                "Last login: Wed Sep 23 21:20:47 on ttys001\nbooko@J"):

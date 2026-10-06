@@ -1,0 +1,66 @@
+{
+  "/.well-known/oauth-protected-resource/mcp": {
+    "status": 200,
+    "challenge": null,
+    "body": {
+      "resource": "https://api.doctorcre.com/mcp",
+      "authorization_servers": [
+        "https://api.doctorcre.com"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ]
+    }
+  },
+  "/.well-known/oauth-protected-resource": {
+    "status": 200,
+    "challenge": null,
+    "body": {
+      "resource": "https://api.doctorcre.com",
+      "authorization_servers": [
+        "https://api.doctorcre.com"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ]
+    }
+  },
+  "/.well-known/oauth-authorization-server": {
+    "status": 200,
+    "challenge": null,
+    "body": {
+      "issuer": "https://api.doctorcre.com",
+      "authorization_endpoint": "https://api.doctorcre.com/authorize",
+      "token_endpoint": "https://api.doctorcre.com/token",
+      "registration_endpoint": "https://api.doctorcre.com/register",
+      "response_types_supported": [
+        "code"
+      ],
+      "response_modes_supported": [
+        "query"
+      ],
+      "grant_types_supported": [
+        "authorization_code",
+        "refresh_token"
+      ],
+      "token_endpoint_auth_methods_supported": [
+        "client_secret_basic",
+        "client_secret_post",
+        "none"
+      ],
+      "revocation_endpoint": "https://api.doctorcre.com/token",
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "client_id_metadata_document_supported": false
+    }
+  },
+  "/mcp": {
+    "status": 401,
+    "challenge": "Bearer realm=\"OAuth\", resource_metadata=\"https://api.doctorcre.com/.well-known/oauth-protected-resource/mcp\", error=\"invalid_token\", error_description=\"Missing or invalid access token\"",
+    "body": {
+      "error": "invalid_token",
+      "error_description": "Missing or invalid access token"
+    }
+  }
+}

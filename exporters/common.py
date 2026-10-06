@@ -19,11 +19,17 @@ import errno
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.credential_file import credential  # noqa: E402
 
 import psycopg
 
@@ -57,29 +63,188 @@ EXPORT_HOME = Path(os.environ.get("CARR_EXPORT_HOME")
                    or "/Users/booko/Library/CloudStorage/OneDrive-CARR,Inc/Joe's Folder/CARR AI")
 LIVE = os.environ.get("CARR_EXPORT_LIVE") == "1"
 KEEP_GENERATIONS = 7
-GENERATION_COPY_ATTEMPTS = 3
-GENERATION_COPY_RETRY_ERRNOS = frozenset({errno.EAGAIN, errno.EDEADLK})
-GENERATION_COPY_BACKOFF_SECONDS = (0.05, 0.10)
+# The retry budget below is sized against a OneDrive hydration stall, not a
+# scheduler hiccup.  It shipped on 2026-08-25 as 3 attempts over 0.05s + 0.10s,
+# and on 2026-08-26 the curriculum export died the same EDEADLK death anyway:
+# a sixth of a second is indistinguishable from no retry when the FileProvider
+# is materialising a dehydrated cloud file.  That night the step began at
+# 07:05:13Z and failed at 07:05:15Z, while the same file read by hand two
+# minutes later succeeded on the first try.  Seconds, not milliseconds.
+#
+# Keep ATTEMPTS == len(BACKOFF_SECONDS) + 1: the retry loops index
+# BACKOFF_SECONDS[attempt] on every attempt but the last, so a mismatch turns
+# the retry into an IndexError raised from inside the error handler.
+# ops/export-generation-retry-selftest.py pins both the total wall-clock budget
+# and that relationship, because a budget is the part of a retry that silently
+# regresses to a value which still looks like a retry.
+#
+# ETIMEDOUT JOINED THE SET ON 2026-09-15, AND IT IS THE ONE THAT WAS ACTUALLY
+# FIRING. Measured on this Mac at 16:35Z against the six live export files:
+# every one of them is a dehydrated OneDrive placeholder (st_blocks == 0), so
+# the nightly's FIRST read of each is a cold cloud download. That read returned
+# errno 60, ETIMEDOUT -- not EAGAIN and not EDEADLK -- which was NOT in this set,
+# so it escaped on attempt one and the backoff below was never entered at all.
+# Six straight nights (2026-09-10 through 09-15) lost all six targets that way,
+# twelve nights running lost at least one, while every by-hand run in the same
+# span succeeded.
+#
+# THE TIMEOUT IS ITSELF THE FIX'S EVIDENCE: the failed read is what asks the
+# FileProvider to hydrate the file, so the very next read returns instantly.
+# Measured in the same session -- attempt 1 ETIMEDOUT after 1.04s, attempts 2
+# through 6 OK in 0.00s. One retry would have carried it. The earlier reading of
+# this failure, that the budget was being exhausted, was wrong in the other
+# direction and is corrected here: the budget was never entered.
+#
+# EACCES and friends stay non-retryable on purpose. A permission, path or
+# storage failure is not a hydration stall and must reach the exporter.
+GENERATION_COPY_ATTEMPTS = 6
+GENERATION_COPY_RETRY_ERRNOS = frozenset({errno.EAGAIN, errno.EDEADLK, errno.ETIMEDOUT})
+GENERATION_COPY_BACKOFF_SECONDS = (0.5, 1.0, 2.0, 5.0, 15.0)
+
+# 20 minutes, against a measured 8-10 minute provider outage after a scheduled
+# dark wake. Long enough to cover roughly double the worst observed wait, short
+# enough that a genuinely dead provider is reported the same night rather than
+# hanging until morning. Polling faster than 20s buys nothing from something
+# that takes minutes, and only multiplies the log.
+PROVIDER_WAIT_BUDGET_SECONDS = float(os.environ.get("CARR_PROVIDER_WAIT_SECONDS", 1200))
+PROVIDER_WAIT_POLL_SECONDS = float(os.environ.get("CARR_PROVIDER_POLL_SECONDS", 20))
+# Materialization is per FILE, not per byte: the provider must fetch the content
+# before it can answer the first read at all, so one chunk proves what a full
+# read proves at a fraction of the cost on a 9320-row workbook.
+PROVIDER_PROBE_BYTES = 1 << 16
+
+# WAITING FOR A PROVIDER THAT IS NOT RUNNING, measured 2026-09-22. The 09-22
+# nightly is the first that reached the end of the budget above instead of being
+# killed by the step timeout, and what it proved is that the wait itself was
+# never the binding constraint: 60 poll lines over the full 1200s, no file ever
+# warming, then EDEADLK on all six targets. The cause was not a slow provider.
+# `ps -Ao lstart` that afternoon put OneDrive.app's start at 08:55:58 local,
+# three seconds after the session's "Display is turned on" event and nearly
+# SEVEN HOURS after the exports step ran at 02:05:29 local. OneDrive is a GUI
+# login item, so nothing had it running in the 02:05 window; every read of a
+# dehydrated placeholder answers EDEADLK forever when no provider exists to
+# service it. The same six files read in ~2s each once the client was up.
+#
+# After a bounded file read finds a hydration failure, the wait asks whether
+# anything is there to wait for and records the observation. When absent it makes ONE
+# attempt to start it (`open -gj -a OneDrive`, background and hidden: a no-op
+# when it is already running) and keeps waiting, so a night that would have lost
+# six targets can recover on its own. When the launch does not take, the budget
+# is not burned in silence: the message records the census and launch result
+# alongside the read errors, without asserting the cause of those errors.
+#
+# The check is a process probe, not an API call, because there is no supported
+# way to ask a File Provider extension whether it is up, and because a probe
+# that needs the provider in order to test the provider cannot report its
+# absence. Both names are matched: the appex services the reads, the app is
+# what `open` starts.
+# Match executable basenames, including the end delimiter: OneDriveUpdater is
+# an updater, not a process that can service file reads.
+PROVIDER_PROCESS_PATTERNS = (
+    r"^/Applications/OneDrive\.app/Contents/PlugIns/OneDrive File Provider\.appex/Contents/MacOS/OneDrive File Provider($| )",
+    r"^/Applications/OneDrive\.app/Contents/MacOS/OneDrive($| )",
+)
+PROVIDER_LAUNCH_COMMAND = ("open", "-gj", "-a", "OneDrive")
+PROVIDER_LAUNCH_TIMEOUT_SECONDS = 30.0
+PROVIDER_PROCESS_TIMEOUT_SECONDS = 2.0
+PROVIDER_FILE_TIMEOUT_SECONDS = 5.0
+
+
+def provider_running(run=subprocess.run, *, timeout=PROVIDER_PROCESS_TIMEOUT_SECONDS):
+    """Return observed presence, absence, or None for an unsuccessful census.
+
+    Both pgrep invocations share one timeout. Only status 1 proves no match;
+    missing tools, errors and timeouts cannot establish absence.
+    """
+    if timeout <= 0 or shutil.which("pgrep") is None:
+        return None
+    deadline = time.monotonic() + min(timeout, PROVIDER_PROCESS_TIMEOUT_SECONDS)
+    unknown = False
+    for pattern in PROVIDER_PROCESS_PATTERNS:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            done = run(["pgrep", "-f", pattern], capture_output=True, text=True,
+                       timeout=remaining)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode == 0 and done.stdout.strip():
+            return True
+        if done.returncode != 1:
+            unknown = True
+    return None if unknown else False
+
+
+def start_provider(run=subprocess.run, *, timeout=PROVIDER_LAUNCH_TIMEOUT_SECONDS):
+    """Request a background launch within available time; never raise."""
+    if timeout <= 0:
+        return False
+    try:
+        done = run(list(PROVIDER_LAUNCH_COMMAND), capture_output=True, text=True,
+                   timeout=min(timeout, PROVIDER_LAUNCH_TIMEOUT_SECONDS))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+# Isolate existence checks as well as open/read: any of them can wedge inside
+# FileProvider. subprocess.run kills and reaps the child on timeout, leaving no
+# blocked threads or file handles in the exporter process.
+_PROVIDER_FILE_PROBE = """
+import json, sys
+from pathlib import Path
+cold = []
+for index, name in enumerate(json.loads(sys.argv[1])):
+    try:
+        with Path(name).open('rb') as stream:
+            stream.read(int(sys.argv[2]))
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        cold.append([index, error.errno, str(error)])
+print(json.dumps(cold))
+"""
+
+
+def probe_provider_files(paths, *, timeout):
+    """Return unreadable files from a bounded batch; missing files need no warm-up."""
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", _PROVIDER_FILE_PROBE,
+             json.dumps([str(p) for p in paths]), str(PROVIDER_PROBE_BYTES)],
+            capture_output=True, text=True, timeout=timeout)
+        if done.returncode != 0:
+            raise OSError(errno.EIO, "file probe failed")
+        return [(paths[i], OSError(code, message))
+                for i, code, message in json.loads(done.stdout)]
+    except subprocess.TimeoutExpired:
+        return [(p, OSError(errno.ETIMEDOUT, "file probe exceeded its deadline")) for p in paths]
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, TypeError) as error:
+        return [(p, OSError(errno.EIO, f"file probe failed: {error}")) for p in paths]
+
+
+@dataclass
+class ProviderWaitResult:
+    """Errors and observations from one wait, without a later process census."""
+    cold: list[tuple[Path, OSError]]
+    provider_state: bool | None = None
+    launch_succeeded: bool | None = None
+
+    def diagnostic(self):
+        errors = ", ".join(sorted({errno.errorcode.get(e.errno, str(e.errno)) for _, e in self.cold}))
+        state = {True: "last observed up", False: "last observed absent", None: "state unknown"}[self.provider_state]
+        launch = {True: "launch attempt issued", False: "launch attempt failed",
+                  None: "no launch attempted"}[self.launch_succeeded]
+        return f"read errors: {errors}; provider {state}; {launch}"
 
 
 def connect():
-    url = os.environ.get("CARR_DB_EXPORTER_URL")
-    if not url:
-        env = Path.home() / ".config/carr/db.env"
-        if env.exists():
-            for line in env.read_text().splitlines():
-                if line.startswith("CARR_DB_EXPORTER_URL="):
-                    # .strip("\"'") IS LOAD-BEARING, added 2026-08-02. db.env has TWO
-                    # parsers with OPPOSITE requirements. `set -a; . db.env` (the exact
-                    # line bin/nightly.sh uses) needs values QUOTED: an unquoted `&` in
-                    # the jobs URL killed that line for two days and the cadence engine
-                    # and availability matcher reported NOT CONFIGURED the whole time.
-                    # Quoting the file fixed the shell and broke THIS parser, which fed
-                    # psycopg a DSN with a literal apostrophe on the front and died with
-                    # `invalid connection option` — blinding the export register, the one
-                    # check that would report exports having stopped. Do not remove either
-                    # half. Same fix in pipelines/brief_pack.py and lib/record_sources.py.
-                    url = line.split("=", 1)[1].strip().strip("\"'")
+    # db.env is read through lib/credential_file, the one Python reader of it.
+    # Its values are shell-quoted so `set -a; . db.env` survives an `&` in the
+    # DSN; on 2026-08-02 a hand-rolled parser here fed psycopg the quotes and
+    # blinded the export register. The shared reader unquotes as the shell does.
+    url = credential("CARR_DB_EXPORTER_URL")
     if not url:
         sys.exit("no CARR_DB_EXPORTER_URL (see ~/.config/carr/db.env)")
     return psycopg.connect(url)
@@ -218,6 +383,57 @@ def _generation_destinations(gen_dir: Path, final_path: Path, stamp: str):
         yield gen_dir / f"{stamp}-{sequence:02d}-{final_path.name}"
 
 
+def wait_for_provider(paths, budget_seconds=None, poll_seconds=None, sleep=time.sleep,
+                      running=provider_running, launch=start_provider,
+                      probe=probe_provider_files, monotonic=time.monotonic):
+    """Warm existing files within one deadline, returning errors and observations.
+
+    Warm or missing files never trigger a launch. Non-transient read errors
+    return immediately. Cold reads, process census, launch and sleep all spend
+    the same budget; failures remain observations so every export target runs.
+    """
+    budget = PROVIDER_WAIT_BUDGET_SECONDS if budget_seconds is None else budget_seconds
+    poll = max(PROVIDER_WAIT_POLL_SECONDS if poll_seconds is None else poll_seconds, 0.01)
+    paths = list(paths)
+    result = ProviderWaitResult([])
+    if not paths:
+        return result
+    deadline = monotonic() + max(budget, 0)
+    # Reserve time for recovery even when the first file probe consumes its
+    # entire allowance. This preserves the warm-file no-launch path.
+    while True:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            if not result.cold:
+                result.cold = [(p, OSError(errno.ETIMEDOUT, "warm-up budget exhausted")) for p in paths]
+            return result
+        result.cold = probe(paths, timeout=min(PROVIDER_FILE_TIMEOUT_SECONDS, remaining / 2))
+        if not result.cold or any(e.errno not in GENERATION_COPY_RETRY_ERRNOS for _, e in result.cold):
+            return result
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return result
+        try:
+            result.provider_state = running(timeout=min(PROVIDER_PROCESS_TIMEOUT_SECONDS, remaining))
+        except (OSError, subprocess.SubprocessError):
+            result.provider_state = None
+        remaining = deadline - monotonic()
+        if result.provider_state is False and result.launch_succeeded is None and remaining > 0:
+            try:
+                result.launch_succeeded = launch(timeout=min(PROVIDER_LAUNCH_TIMEOUT_SECONDS, remaining))
+            except (OSError, subprocess.SubprocessError):
+                result.launch_succeeded = False
+            print(f"[provider] {result.diagnostic()}", file=sys.stderr, flush=True)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return result
+        names = ", ".join(sorted(path.name for path, _e in result.cold))
+        print(f"[provider] {len(result.cold)} unreadable file(s) ({names}); "
+              f"{result.diagnostic()}; {remaining:.0f}s left before exports start anyway",
+              file=sys.stderr, flush=True)
+        sleep(min(poll, remaining))
+
+
 class _PublishedGenerationCleanupError(RuntimeError):
     """The generation is durable; cleanup failed and must not trigger a recopy."""
 
@@ -302,6 +518,47 @@ def keep_generation(final_path: Path):
         old.unlink()
 
 
+def publish_export(tmp_path: Path, final_path: Path, live: bool | None = None):
+    """Publish one built export atomically. Returns (published, file_sha, error).
+
+    `error` carries the publication failure when published is False, and the
+    tamper-hash failure (a landed file whose hash could not be read) when it is
+    True. It is None on a clean publication.
+
+    SEPARATED FROM run_export SO IT CAN FAIL AS ONE TARGET AND BE PROVED WITHOUT A
+    DATABASE. On 2026-09-01 the nightly's first target raised EDEADLK out of
+    keep_generation while reading the previous OneDrive copy; the OSError went
+    through run_export, through run_exports.main, and killed the process. The
+    caller now catches per target, but two things were still missing when a
+    publication fails: an `export_run` row saying so (the receipt `run.sh health`
+    reads), and removal of the staged .tmp left sitting in the vault.
+
+    THE ORDER IS THE SAFETY PROPERTY. keep_generation runs BEFORE os.replace, so
+    a failure to keep the dated copy means the previous good file was never
+    overwritten — the rollback guarantee is preserved by refusing to publish, not
+    by publishing and hoping.
+
+    The tamper hash is deliberately NOT allowed to fail the target: it is a second
+    cloud read of a file that has ALREADY landed, so losing a good export over the
+    detector would be the wrong trade. It comes back as sha_error instead.
+    """
+    if live is None:
+        live = LIVE
+    try:
+        keep_generation(final_path)
+        os.replace(tmp_path, final_path)
+    except Exception as error:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        return False, None, error
+    if not live:
+        return True, None, None
+    try:
+        return True, hashlib.sha256(final_path.read_bytes()).hexdigest(), None
+    except OSError as error:
+        return True, None, error
+
+
 def run_export(target_key, live_rel_path, build_fn, bootstrap=False):
     """build_fn(tmp_path, cur) -> (row_count, canonical_rows). Returns True on ok."""
     dest_dir = (EXPORT_HOME / live_rel_path).parent if LIVE else DRAFT
@@ -364,13 +621,21 @@ def run_export(target_key, live_rel_path, build_fn, bootstrap=False):
                   file=sys.stderr)
             return False
 
-        keep_generation(final_path)
-        os.replace(tmp_path, final_path)
         # file_sha is a LIVE-file tamper detector; a draft run's hash describes
         # out/exports/, not the vault, and recording it poisoned renders-verify
         # with false "tampered" flags (caught by the doctrine health pass,
         # 2026-08-08: three draft 03:43Z rows outranked the live 02:51Z ones).
-        file_sha = hashlib.sha256(final_path.read_bytes()).hexdigest() if LIVE else None
+        published, file_sha, publish_error = publish_export(tmp_path, final_path)
+        if not published:
+            record_run(cur, target_key, row_count, checksum, "failed")
+            conn.commit()
+            print(f"[{target_key}] PUBLISH FAILED: "
+                  f"{type(publish_error).__name__}: {publish_error}. "
+                  f"Previous good file untouched, staged copy removed.", file=sys.stderr)
+            return False
+        if publish_error is not None:
+            print(f"[{target_key}] file landed; tamper hash not recorded "
+                  f"({type(publish_error).__name__}: {publish_error})", file=sys.stderr)
         record_run(cur, target_key, row_count, checksum, "ok", file_sha)
         conn.commit()
         mode = "LIVE" if LIVE else "draft"

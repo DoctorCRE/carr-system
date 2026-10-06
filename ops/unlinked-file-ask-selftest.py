@@ -87,7 +87,7 @@ def flagged(text):
 
 # ── 1. the hole this closes ────────────────────────────────────────────────
 ASKS = [
-    "Take a look at deliverables/loi-victus-dental.docx and tell me if the term is right.",
+    "Take a look at deliverables/loi-vantora-dental.docx and tell me if the term is right.",
     "Can you open ops/config/services.json and confirm the cadence?",
     "Please review the draft at deliverables/proposal-gcph.docx before I send it.",
     "Edit corpus/templates/loi-template.docx and change the TI allowance.",
@@ -99,7 +99,7 @@ for text in ASKS:
 
 # ── 2. the direction a one-sided carve-out loses first ─────────────────────
 LINKED = [
-    "Take a look at [the Victus LOI](deliverables/loi-victus-dental.docx) and tell me if the term is right.",
+    "Take a look at [the Vantora LOI](deliverables/loi-vantora-dental.docx) and tell me if the term is right.",
     "Can you open [services.json](ops/config/services.json) and confirm the cadence?",
     "Please review [the GCPH proposal](deliverables/proposal-gcph.docx) before I send it.",
     "Check [the renewal shortlist](workspace/renewal-shortlist.xlsx) — the Miramar row looks wrong.",

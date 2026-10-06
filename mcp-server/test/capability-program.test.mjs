@@ -163,17 +163,22 @@ test("the registry exposes a read context and only human-governed lifecycle writ
   assert.equal(Boolean(TOOLS["complete-capability-project"]?.write), true);
   assert.equal(Boolean(TOOLS["begin-capability-project"]?.write), true);
   assert.equal(Boolean(TOOLS["attest-capability-project"]?.write), true);
-  assert.equal(TOOLS["complete-capability-project"].humanOnly, true);
-  assert.equal(TOOLS["start-capability-project"].humanOnly, true);
-  assert.equal(TOOLS["begin-capability-project"].humanOnly, true);
-  assert.equal(TOOLS["attest-capability-project"].humanOnly, true);
+  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): it was already a
+  // dead label — executeRegisteredTool stopped reading it 2026-08-26 by Joe's
+  // ruling, decision dc57f62d — and this slice removes the stale declaration
+  // from capability-program.js. These are still write:true, human-governed
+  // lifecycle transitions; only the unread flag is gone.
+  assert.equal(TOOLS["complete-capability-project"].humanOnly, undefined);
+  assert.equal(TOOLS["start-capability-project"].humanOnly, undefined);
+  assert.equal(TOOLS["begin-capability-project"].humanOnly, undefined);
+  assert.equal(TOOLS["attest-capability-project"].humanOnly, undefined);
 
   const completion = TOOLS["complete-capability-project"].inputSchema;
   assert.equal(completion.additionalProperties, false);
   assert.equal(completion.required.includes("base_version"), true);
   assert.equal(completion.required.includes("completion_evidence"), true);
   assert.deepEqual(completion.properties.completion_kind.enum, COMPLETION_KINDS);
-  assert.equal(TOOLS["prepare-capability-project"].humanOnly, true);
+  assert.equal(TOOLS["prepare-capability-project"].humanOnly, undefined);
   assert.equal(TOOLS["capability-program"].inputSchema.properties.program_key.const, PROGRAM,
     "the public reader must not select an arbitrary program");
   for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project"])
@@ -560,12 +565,132 @@ test("the scheduled builder definition cannot certify, merge, deploy, or communi
   ]) assert.match(prompt, new RegExp(boundary, "i"));
 });
 
-test("the dispatcher refuses every capability lifecycle write to a non-human actor", async () => {
+test("the dispatcher lets a non-human actor reach every capability lifecycle handler", async () => {
+  // INVERTED, not deleted (Joe's ruling 2026-08-26, decision dc57f62d). These
+  // five used to be stopped at the dispatcher before their handler ran. The
+  // point now is the opposite one, and it is still worth pinning: the actor
+  // must REACH the handler. The fake client throws the moment it is touched, so
+  // "handler must not run" arriving is proof the dispatcher passed the call
+  // through rather than refusing it on authority.
   const nonHuman = { id: "scheduled-builder", human: false, slug: "scheduled-builder" };
-  for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project"]) {
+  for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project", "cancel-capability-session"]) {
     await assert.rejects(
       executeRegisteredTool({ query: async () => { throw new Error("handler must not run"); } }, nonHuman, name, {}),
-      error => error instanceof RegistryToolError && error.payload.error === "human_only",
-      `${name} must be stopped by the dispatcher before its handler`);
+      error => !(error instanceof RegistryToolError && error.payload?.error === "human_only"),
+      `${name} must no longer be stopped on authority`);
   }
+});
+
+
+// ── cancel-capability-session ────────────────────────────────────────────────
+// The verb that unsticks a row whose session died mid-flight. These pin the
+// three ways a cancel could quietly become something worse than the problem it
+// solves: undoing a settled close, erasing evidence, and running without a
+// stated reason.
+
+function cancelFixture(overrides = {}) {
+  const row = { id: "wr", ref: "WR-AI-038", program_ordinal: 38, version: 5,
+    state: "verification", disposition: "decline", title: "Transformer",
+    project_context: {}, shape_disposition: "not_required",
+    executor_actor: "joe-local", ...overrides };
+  const head = { id: "head", ref: "WR-AI-001", program_ordinal: 2, version: 3,
+    state: "ready", disposition: "extend", title: "LLM evaluation harness", project_context: {} };
+  const session = { id: "sess", work_request_id: "wr", state: "verification",
+    candidate_kind: "declined", candidate_fingerprint: "abc", executor_actor_id: "ex" };
+  const writes = [];
+  const db = { query: async (sql, params = []) => {
+    if (/order by w.program_ordinal limit 1/.test(sql)) return { rows: [head] };
+    if (/program_ordinal=\$2/.test(sql)) return { rows: Number(params[1]) === 38 ? [row] : [] };
+    if (/from ops.capability_agent_session/.test(sql)) return { rows: overrides.__noSession ? [] : [session] };
+    if (/update ops.capability_agent_session/.test(sql)) { writes.push("session-cancelled"); return { rows: [{ ...session, state: "cancelled" }] }; }
+    if (/update ops.work_request/.test(sql)) { writes.push("row-ready"); return { rows: [{ ...row, state: "ready", executor_actor: null, version: 6 }] }; }
+    if (/delete/i.test(sql)) { writes.push("DELETE"); return { rows: [] }; }
+    throw new Error(`unexpected query: ${sql}`);
+  }};
+  return { db, writes, row, session };
+}
+
+function cancelTools(events = []) {
+  return capabilityProgramTools({
+    withEnvelope: async (_c, _a, _v, _args, fn) => fn(),
+    writeEvent: async (_c, _a, verb, _t, _id, payload) => { events.push({ verb, payload }); },
+    ToolError,
+  });
+}
+
+test("a cancel returns the row to ready, cancels the session, and deletes nothing", async () => {
+  const { db, writes } = cancelFixture();
+  const events = [];
+  const result = await cancelTools(events)["cancel-capability-session"].handler(db, actor, {
+    idempotency_key: "00000000-0000-4000-8000-00000000000a", sequence: 38, base_version: 5,
+    reason: "Joe parked the whole suite on 2026-08-26; this candidate must not be completed.",
+    program_key: PROGRAM,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.project.state, "ready", "the row must be workable again");
+  assert.equal(result.cancelled_session.state, "cancelled");
+  assert.equal(result.cancelled_session.previous_state, "verification",
+    "the report says what was actually abandoned, not just that something was");
+  assert.equal(result.cancelled_session.candidate_fingerprint, "abc",
+    "the frozen candidate is REPORTED, not erased — what happened did happen");
+  assert.ok(writes.includes("session-cancelled") && writes.includes("row-ready"));
+  assert.ok(!writes.includes("DELETE"), "a cancel must never delete evidence");
+  assert.equal(events[0].payload.new.reason.length > 0, true, "the reason reaches the timeline");
+});
+
+test("a cancel can NEVER reopen a settled close", async () => {
+  // requireProject only ever returns rows that are not confirmed_closed, so a
+  // closed row is simply not found out of order. This is the assertion that
+  // stops cancel becoming a back door around the immutability trigger.
+  const { db } = cancelFixture({ __noSession: false });
+  const closedDb = { query: async (sql, params = []) => {
+    if (/order by w.program_ordinal limit 1/.test(sql)) return { rows: [{ id: "head", ref: "WR-AI-001", program_ordinal: 2, version: 3, state: "ready", disposition: "extend", project_context: {} }] };
+    if (/program_ordinal=\$2/.test(sql)) return { rows: [] };  // closed rows are excluded by the query itself
+    return db.query(sql, params);
+  }};
+  await assert.rejects(
+    cancelTools()["cancel-capability-session"].handler(closedDb, actor, {
+      idempotency_key: "00000000-0000-4000-8000-00000000000b", sequence: 38, base_version: 6,
+      reason: "trying to undo a close", program_key: PROGRAM }),
+    error => error.payload.error === "out_of_order_project");
+});
+
+test("a cancel refuses without a reason, and refuses a row that is not in flight", async () => {
+  const blank = cancelFixture();
+  await assert.rejects(
+    cancelTools()["cancel-capability-session"].handler(blank.db, actor, {
+      idempotency_key: "00000000-0000-4000-8000-00000000000c", sequence: 38, base_version: 5,
+      reason: "   ", program_key: PROGRAM }),
+    error => error.payload.error === "capability_cancel_reason_required",
+    "a side exit with no reason is the thing the canonical machine forbids");
+
+  const idle = cancelFixture({ state: "ready" });
+  await assert.rejects(
+    cancelTools()["cancel-capability-session"].handler(idle.db, actor, {
+      idempotency_key: "00000000-0000-4000-8000-00000000000d", sequence: 38, base_version: 5,
+      reason: "nothing is running", program_key: PROGRAM }),
+    error => error.payload.error === "invalid_state_transition");
+});
+
+test("a cancel refuses a row with no shape disposition rather than letting the database refuse it", async () => {
+  // ops.work_request_shape_gate rejects any row entering ready without one, and
+  // freezes the shape columns after claim, so this verb cannot set one itself.
+  // Catching it here is the difference between a usable message and a raw
+  // trigger exception surfacing as an internal error.
+  const { db } = cancelFixture({ shape_disposition: null });
+  await assert.rejects(
+    cancelTools()["cancel-capability-session"].handler(db, actor, {
+      idempotency_key: "00000000-0000-4000-8000-00000000000e", sequence: 38, base_version: 5,
+      reason: "row is stuck", program_key: PROGRAM }),
+    error => error.payload.error === "work_shape_disposition_required");
+});
+
+test("a cancel refuses a session id that is not the row's open session", async () => {
+  const { db } = cancelFixture();
+  await assert.rejects(
+    cancelTools()["cancel-capability-session"].handler(db, actor, {
+      idempotency_key: "00000000-0000-4000-8000-00000000000f", sequence: 38, base_version: 5,
+      reason: "wrong session", capability_agent_session_id: "not-the-open-one", program_key: PROGRAM }),
+    error => error.payload.error === "capability_agent_session_not_for_current_project");
 });

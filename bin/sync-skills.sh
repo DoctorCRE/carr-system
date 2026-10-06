@@ -33,7 +33,7 @@ REPO="${0:A:h:h}"
 # script against throwaway trees. Nothing but a test ever sets these, and the
 # defaults are the only paths production uses.
 SRC="${CARR_SKILLS_SRC:-$REPO/claude-tree}"
-DST="${CARR_SKILLS_DST:-/Users/booko/My Drive/.claude}"
+DST="${CARR_SKILLS_DST:-$HOME/My Drive/.claude}"
 LOG="$REPO/out/sync-skills.log"
 mkdir -p "$REPO/out"
 stamp() { print -r -- "$(date -u +%FT%TZ) sync-skills $*" >> "$LOG" }

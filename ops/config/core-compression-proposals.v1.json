@@ -1,0 +1,163 @@
+{
+  "schema_version": "core-compression-proposals.v1",
+  "work_request": "WR-000019",
+  "slice": "S13",
+  "generated_note": "PROPOSALS ONLY for Joe amendment batch. No write verb was called to produce or apply these. human_quote fields are untouched by design; only the statement field is compressed here. Method: keep every binding clause verbatim in substance; compress/cut narrative provenance and war-story detail into one clauses_preserved_note line per rule plus, where retained, a bracketed one-line [Provenance: ...] tag inside the statement itself for context that materially explains WHY the rule exists.",
+  "measurement_method": "bytes/3.5 (matches the boot-diet token estimation convention used elsewhere in WR-000019)",
+  "current_core_payload": {
+    "chars": 41505,
+    "tokens_est": 11859
+  },
+  "proposed_core_payload": {
+    "chars": 20121,
+    "tokens_est": 5749
+  },
+  "reduction": {
+    "chars_saved": 21384,
+    "tokens_saved_est": 6110,
+    "pct_reduction": 51.5
+  },
+  "target_char_band_note": "Target band is 400-700 chars per rule. 5 of 20 rules land inside or near that band (already-short rules left essentially unchanged: 0f38532e, 6a4e6283, 1fddcffb; newly compressed into-band: 4f7c348f, 2dbb0ad8). The remaining 15 rules carry more binding clauses than the band can hold without cutting substance, so clause-preservation was weighted over the char target for those — each still ran to roughly a third to a half of its original length. Joe should treat the char counts as an honest tension report, not a shortfall: further cuts on the 15 would start trading away binding clauses, which task 2 explicitly rules out.",
+  "rules": [
+    {
+      "rule_id": "4f7c348f",
+      "current_chars": 1351,
+      "proposed_statement": "Every session recites BOTH rule files for its partner — shared AND that partner's own personal file — every time; neither is skipped, and personal is not optional. Form: state the count for each file, then name only the handful bearing on this session's task; never paste the full set back. Recitation is BEHAVIORAL — files are deliberately not autoloaded, so reciting proves the session actually read and obeyed them (audit signal) and stays short (concision rule). No prose preamble before the first tool batch: a session cannot recite rules it hasn't read yet.\n[Provenance: supersedes proposed rule 0e3ed876, which left the personal half ambiguous.]",
+      "proposed_chars": 652,
+      "clauses_preserved_note": "clauses: recite both files every session; state count-per-file then only task-relevant rules; never paste full set; recitation stays behavioral/not autoloaded (audit-signal + concision reasons); no prose preamble before first tool batch."
+    },
+    {
+      "rule_id": "0f38532e",
+      "current_chars": 597,
+      "proposed_statement": "Single source of truth: every file, idea and fact has ONE home, and every other mention points at it rather than restating it. A second copy is not redundancy, it is a future contradiction — the two homes drift and both then look authoritative. For anything the record layer owns, the ONE home is the database and the markdown is a generated view: pending-item status lives in loop_item and RENDERS into open-loops.md, so the file is read, never written. Applies to config as much as to prose — a value duplicated between a script and the file that configures it is the same defect one layer down.",
+      "proposed_chars": 597,
+      "clauses_preserved_note": "clauses: already at target length (597 chars); no compression performed. One home per fact, everything else points at it; record-layer content's home is the database, markdown is a generated view (read not written); applies equally to config duplication."
+    },
+    {
+      "rule_id": "2dbb0ad8",
+      "current_chars": 1305,
+      "proposed_statement": "SUBAGENTS — COST IS THE GATE, NOT NOVELTY. Firing an agent with a DEFINED SEAT is ordinary work needing no permission: route to it, fire it, report in one line what and why. Novelty is not the trigger. STOP AND ASK only for a genuinely expensive fan-out with NO existing seat — roughly more than ten agents, or a wholly new orchestration pattern — and name the cost when asking. SHAPE RULE: simple fan-out only, narrow jobs, each worker sees only what its job needs. TIERING: routine Haiku/Sonnet delegation inside an owned task is pre-approved; hard floors (client voice, Opus-only) never downtier.\n[Provenance: supersedes the original \"suggest, Joe decides, wait\" gate, which predated the agent roster.]",
+      "proposed_chars": 705,
+      "clauses_preserved_note": "clauses: defined-seat firing needs no permission, report in one line; novelty not the trigger; stop-and-ask threshold (>10 agents or new orchestration pattern, name cost); shape rule (narrow jobs, minimal worker context); tiering pre-approval with non-downtiering floors."
+    },
+    {
+      "rule_id": "2b889e80",
+      "current_chars": 2742,
+      "proposed_statement": "NO NEGATIVE FINDING FROM A SINGLE COLLECTION. Before saying or writing that something does not exist, NAME every parallel collection that could hold it, then check each one; \"not in X\" is a finding, \"it does not exist\" claims all of them. KNOWN SETS: SCHEDULED WORK spans the Claude scheduler, launchd, and cron. VERBS span this session's frozen tool list and mcp-server/src/tools.js (the authority — absent-from-list-but-in-tools.js means a stale session, not a missing verb). DECISIONS span the decision store and work-order/rulings files. DEALS span the record layer and Outlook deal folders. FILES ON DISK: a bounded `find -maxdepth N` is a partial sweep, not a sweep. PROCEDURE: (1) name the collections before searching, (2) check each, (3) when reporting a negative, name the collections checked — a negative without that list is an assumption wearing a finding's clothes. BOUNDARY: an unreachable collection makes any negative partial by definition; say which one went unchecked.\n[Provenance: 2026-08-02/03, a session produced four wrong negatives this way — Joe corrected all four from memory.]",
+      "proposed_chars": 1103,
+      "clauses_preserved_note": "clauses: name+check every parallel collection before a negative claim; enumerated known collection sets (scheduled work/verbs/decisions/deals/files-on-disk) preserved as substantive operational content, not narrative; three-step procedure; boundary rule for unreachable collections."
+    },
+    {
+      "rule_id": "6a4e6283",
+      "current_chars": 262,
+      "proposed_statement": "Independent verification before anything ships: maker never grades its own client-facing/public work — fresh-eyes pass first (writing-audit for prose; artifact-vs-criteria otherwise); flags get fixed, not caveated. Exempt: single drafts Joe reviews line-by-line.",
+      "proposed_chars": 262,
+      "clauses_preserved_note": "clauses: already at target length (262 chars); no compression performed. Maker never grades own client-facing/public work; fresh-eyes pass required; flags fixed not caveated; single-draft exemption."
+    },
+    {
+      "rule_id": "1fddcffb",
+      "current_chars": 217,
+      "proposed_statement": "Core routing test (Jul 15): the always-read core holds ONLY what every session needs regardless of task; anything task-specific becomes a task-loaded file with a one-line pointer. Enforcement: 00_Context/sweep-sop.md.",
+      "proposed_chars": 217,
+      "clauses_preserved_note": "clauses: already at target length (217 chars); no compression performed. Core holds only universal content; task-specific content moves to a task-loaded file with a pointer."
+    },
+    {
+      "rule_id": "14181e60",
+      "current_chars": 3157,
+      "proposed_statement": "DATABASE FIRST; MARKDOWN ONLY WHERE A MACHINE REQUIRES A FILE. Constraint, binding the moment a session is about to Write/Edit a .md file: stop and route content to the database via a verb (or to code, for logic), unless the file is on the machine-required manifest — the harness-loaded CLAUDE.md stub, the .claude skill trees, and compiled-rules renders (only until standing-context fully replaces file-based rule loading). HUMANS ARE NOT A JUSTIFICATION: a partner needing to read something never justifies a projection — human delivery is email/heartbeat/briefs as messages; client documents are Word/PDF/xlsx, never .md. Every generated .md render outside the manifest retires at the migration cutoff. TEST: if it can be code or database, it must be. AUDIT SIGNAL is structural, not behavioral: the unattended guard hard-blocks .md create/modify/rename outside the manifest and exporter-owned dirs. THE TWO SURVIVING HOMES ARE THE STORE (via verbs) and THE REPO; nothing else persists — a Drive write is lost, not implemented. Before touching anything already on a surface, read its recorded disposition in SURFACE_REGISTRY and respect its migration phase; a superseded duplicate is staged to _to_delete, never simply deleted. Extends ca841807 and d367188d from records to ALL content.\n[Provenance: Joe ruled 2026-08-07/08-15 rejecting a git-mirror of markdown and the Drive-render carve-out; migration itself runs through loop #242, not this rule.]",
+      "proposed_chars": 1453,
+      "clauses_preserved_note": "clauses: write-time constraint routing .md content to DB/code unless on exact machine-required manifest; humans-not-a-justification carve-out closed; generated renders retire at cutoff; structural audit signal (hard-block, not warn); two surviving homes (store+repo); pre-touch SURFACE_REGISTRY check; extends ca841807/d367188d to all content. Longer than 700 chars by design — this is the WRITE LAW rule (14181e60), carries the most binding clauses of the 20 and Joe should confirm the length is acceptable before amendment."
+    },
+    {
+      "rule_id": "24e10ee8",
+      "current_chars": 2745,
+      "proposed_statement": "THE COMMIT MESSAGE AND THE DIFF MUST AGREE. Binding the moment a session writes any act into a commit message, close-out, decision entry, or partner report — not a review step afterward. Writing that an act was performed does not perform it. THE TEST: name which file in this commit's own diff carries out the act just claimed, then run `git show --stat` and confirm it is there. If no file in the diff carries the claimed act, the claim is false — delete the sentence or perform the act. TWO TRAPS: quoting a rule's own words in the message is not obeying it (reads as compliance, nothing done); a green checker proves only what it checks — when a rule names two artifacts, a passing check on one says nothing about the other.\n[Provenance: 2026-08-13, a re-bless was claimed in a commit message but the inventory-hash file was never touched; a later session found and fixed it. The existing rules' audit signals fired too late — after the sentence was already written.]",
+      "proposed_chars": 970,
+      "clauses_preserved_note": "clauses: binding moment (any commit message/close-out/decision/report); mechanical test (name the diff file, git show --stat, confirm); false-claim remedy (delete sentence or perform act); two named traps (quoting-as-compliance, green-checker-partial-coverage)."
+    },
+    {
+      "rule_id": "58b44ccb",
+      "current_chars": 3430,
+      "proposed_statement": "A SESSION THAT CANNOT REACH THE CODE REPO STOPS, AND A CLAUDE CODE CLOUD SESSION TELEPORTS RATHER THAN STOPPING DEAD. Trigger: a session tries to reach ~/carr-system (jbookout/carr-system) and cannot, or is about to write code/migration/spec/durable engineering artifact with no such repo present. STANDING CONSTRAINT: all durable code lives in ONE repo; there is no second code home; a session that hits the trigger must STOP and say so, and must NEVER improvise a home (not another repo, not hand-authored markdown). SECOND HALF: a Claude Code CLOUD session has a real continuation — run /teleport in that session and continue locally with `claude --teleport <session id>` on a machine where ~/carr-system is reachable. AUDIT SIGNAL: state which move was taken, one line — \"repo unreachable, stopped\" or \"repo unreachable, teleporting, session <id>\". Cowork sessions have no teleport path and simply stop. This is a taught rule rather than a CLAUDE.md line because a cloud session unable to reach the repo cannot read CLAUDE.md either — the rule store is the only channel that reaches it.\n[Provenance: added after a cloud session filed an entire audit and two specs into an empty scaffold repo. Making the constraint mechanical (a gate, not just a rule) remains open.]",
+      "proposed_chars": 1270,
+      "clauses_preserved_note": "clauses: trigger definition; standing one-repo constraint + never-improvise; teleport continuation path for cloud sessions with exact command; one-line audit signal with two exact wordings; Cowork exemption stated so nobody over-reads it; why-taught-rule-not-file rationale."
+    },
+    {
+      "rule_id": "4a53ff82",
+      "current_chars": 1517,
+      "proposed_statement": "WORKTREE-PER-SESSION IS THE DEFAULT; THE CANONICAL TREE IS THE INTEGRATION LANE ONLY. Binding the moment a session is about to make its FIRST write to tracked files in ~/carr-system: take an isolated worktree first (`./run.sh worktree <name>` — creation fetches and branches from origin/main) and do all editing, committing, and testing there. The canonical checkout is reserved for integration only — the nightly chain, vault publishing, merges/landings, and pulls — never a session's editing surface. LANDING DISCIPLINE: branch + PR per session; one integrator seat performs the joins; a session's \"done\" is a pushed branch and an open PR, not a merge. LIFECYCLE: worktrees are born from fresh origin/main and reaped by `./run.sh worktree --sweep` once merged, clean, and idle.\n[Provenance: a shared editing tree produced constant collisions — HEAD moving under peers mid-build, sweeps capturing foreign files. Composes with 308ef1de, bc9188b4, 173119a8.]",
+      "proposed_chars": 957,
+      "clauses_preserved_note": "clauses: binding moment (first tracked write); exact worktree command; canonical-tree reservation for integration only; landing discipline (branch+PR, integrator seat, pushed-branch-is-done); lifecycle (birth from origin/main, sweep reaping)."
+    },
+    {
+      "rule_id": "b42e217e",
+      "current_chars": 1305,
+      "proposed_statement": "DELL IS A FULL WRITER AND A FULL TEACHER, EQUAL TO JOE — his sessions get the SAME verb surface, including teach, activate-rule, retire-rule, confirm-merge, and every write verb. Never scope capability by WHICH PARTNER holds the grant. Where capability scoping exists at all, it is by the RISK OF THE SESSION, never the identity of the human: interactive partner sessions (either partner) get the full surface; UNATTENDED scheduled runs and DELEGATED subagent seats get a narrow profile, because nobody is watching them and the model tier cannot be pinned. The person-level gate already fires identically for both partners: humanOnly verbs require a verified partner actor, base_version conflicts ask a human, needs_confirm stops on plausibility. Corollary: a newer partner needs better defaults, clearer verb descriptions, and a gentler first workflow — never fewer capabilities.",
+      "proposed_chars": 880,
+      "clauses_preserved_note": "clauses: equal full-writer/teacher status, same verb surface; capability scoping is by session risk not human identity; person-level gate fires identically for both partners; onboarding corollary (better defaults, never fewer capabilities)."
+    },
+    {
+      "rule_id": "c6f69dee",
+      "current_chars": 1401,
+      "proposed_statement": "THE STAFFING MODEL: AN AGENT IS A JOB DESCRIPTION, MADE UP OF SKILLS PLUS THE RULES THAT ROLE MUST NEVER BREAK. Name agents by HUMAN JOB TITLE, not file-name convention — \"Content Writer\" not write-content, \"Editor\" not writing-audit — because a job title is legible at a glance and a filename is not. THE AUTOBIOGRAPHER PRINCIPLE settles who may write in a partner's voice: an agent writes in Joe's voice because it is his autobiographer, not because it is him — voice work is a ROLE and belongs to an agent (supersedes the earlier line that anything needing back-and-forth had to stay a skill). DELEGATION IS FORTIFYING, NOT MERELY CHEAPER: a specialist hyperfocused on one job and a generalist holding whole-system context produce a better answer together than either alone — the specialist never forgets its short rule list; the generalist gets tripped up by carrying the entire system at once.\n[Provenance: proven when a specialist refused a brief built on a misread field and disproved it five ways, preventing a guard that would have silently broken set-lead.]",
+      "proposed_chars": 1067,
+      "clauses_preserved_note": "clauses: agent-as-job-description definition; naming convention (human job title); autobiographer principle (voice work is a role, supersedes prior skill-only line); delegation-is-fortifying claim with mechanism."
+    },
+    {
+      "rule_id": "c20dc3d5",
+      "current_chars": 3421,
+      "proposed_statement": "THE ESCALATION CONTRACT — three constraints, each binding at a named moment, making an agent hierarchy safe rather than merely tidy. A pyramid prevents unowned scope; it does not prevent propagated error. MOMENT ONE — handing a finding upward, it carries its evidence: the exact query/command run, file and line, row count, tool call — never the conclusion alone. MOMENT TWO — receiving a subagent's finding and about to act on it or pass it up: RE-RUN IT FIRST if it is material (material = acting on it would WRITE, SPEND, SEND, or CHANGE A DECISION). Re-running means independently reproducing it from source, not evaluating the report; the seat that spawned the subagent owns this. You are answerable for whether you re-ran, not for whether you agreed. MOMENT THREE — about to act but missing something needed: go back down before guessing or interrupting a human. Consult the seat that produced the finding — it still holds the raw evidence. Escalate to a human only after the producing seat has been asked and could not resolve it.\n[Provenance: corollary to 75c2e4c9 (delegation moves work, never accountability). Standing case: CLAUDE.md rev 10, a cloud session holding full context filed an audit and two specs into an empty scaffold repo, and no layer re-derived the finding.]",
+      "proposed_chars": 1285,
+      "clauses_preserved_note": "clauses: three named-moment constraints in full (evidence-carries-upward; re-run-if-material with materiality test; go-down-before-guessing); accountability framing (answerable for re-running not agreeing)."
+    },
+    {
+      "rule_id": "c53beeaa",
+      "current_chars": 3063,
+      "proposed_statement": "AN `ok:true` FROM A RECORD VERB CONFIRMS THE CALL PARSED, NEVER THAT THE VALUES LANDED IN THE RIGHT FIELDS. Re-read the row after any write carrying long or multi-line text. THE DEFECT: a malformed, unterminated, or stray parameter can land its closing tag INSIDE a field's value instead of terminating it — that field then swallows its own closer plus every parameter after it as literal text, and each of those parameters is written NULL. The verb returns ok:true regardless, because the call did parse, just into the wrong shape. PROCEDURE after any record write whose fields are paragraphs (teach, amend-rule, add-loop, update-loop, close-loop, log-decision, record-finding, new-client, and kin): (1) re-read the written ROW, not the response; (2) assert no field contains `<parameter`, `</parameter`, `<invoke`, or `</invoke`; (3) assert every field you passed is non-NULL. BEFORE DELETING ANY SUCH JUNK, READ WHAT IS IN IT — the absorbed text is the missing field's content and is recoverable verbatim; restore each parameter to its own field before exporting. Audit tables (event, tool_call) keep the junk on purpose for reversibility — never sweep them clean.\n[Provenance: 2026-08-03, three ACTIVE rules were found with human_quote swallowed by this defect; the same session reproduced it on its very next write while diagnosing it.]",
+      "proposed_chars": 1341,
+      "clauses_preserved_note": "clauses: ok:true does not confirm field placement; exact defect mechanism (closing tag swallowed into a field, cascading NULLs); three-step re-read procedure with verb list; read-before-delete recovery instruction; audit-table preservation rule."
+    },
+    {
+      "rule_id": "a8c55a47",
+      "current_chars": 2609,
+      "proposed_statement": "A MANUAL PATH AND AN AUTOMATED PATH THAT DO THE SAME JOB MUST BE THE SAME CODE. When a script already performs an operation correctly, documentation and sessions call THE SCRIPT — never re-document the raw command it wraps, because the wrapper carries the part people forget and the two copies drift silently while both keep looking like they worked. TRIGGER: before writing a command into a doc, SOP, task file, or chat instruction, check whether a script in bin/ or ops/ already runs it. If one does, name the script. If none does and the command needs a flag, env var, or ordering to be correct, write the script first and name that. GENERAL FORM: any operation with two implementations has two contracts, and the one nobody exercises is the one that rots — the failure is always silent, because each path independently reports success. COROLLARY: when the duplication cannot be removed, something must COMPARE the two; prefer deleting the second path, and where it must exist, add the comparison with a visible row.\n[Provenance: 2026-08-04, `run.sh export` reported success while writing to staging only — the undocumented `CARR_EXPORT_LIVE=1` flag was the difference; the same shape hit `run.sh health`'s bare python3 call and db.env's dual parsers within the same hour.]",
+      "proposed_chars": 1276,
+      "clauses_preserved_note": "clauses: manual/automated-must-be-same-code rule; trigger procedure (check bin/ops before documenting a raw command); general form of the two-contracts failure; corollary requiring comparison when duplication can't be removed."
+    },
+    {
+      "rule_id": "aa411351",
+      "current_chars": 2282,
+      "proposed_statement": "THE ESCALATION GATE IS DRAWN BY AUDIENCE, NOT DIFFICULTY — THE REPLACEMENT FOR ASKING IS RESEARCH. A decision goes to Joe if and only if it is CLIENT-FACING (a client, prospect, landlord, listing agent, or vendor will see it, or it binds Joe or a client), PUBLIC-FACING, MONEY, or DESTRUCTIVE/IRREVERSIBLE. Everything internal is the session's own call, DECIDED AND REPORTED, never presented for approval: schema, records, renders, jobs, config, permissions, rule authorship, refactors, agent/skill design, and the system's own operating procedure. This closes rule 14e0408b's \"genuine fork\" loophole — on an internal fork that clause no longer escalates. DIFFICULTY IS NOT A TICKET TO ESCALATE; neither is novelty, a two-way door, or the fact Joe would probably have an opinion. THE REPLACEMENT BEHAVIOR IS RESEARCH, NOT ASKING: when not confident, become confident — read the code, run the query, test the surface live, read the full verb list, convene the council, spawn a red team. The cost being measured is Joe's attention, not the session's risk; report what was decided and why in one line, and move.\n[Provenance: Joe — \"a human cannot hold up to that amount of thinking on system problems... you will be more effective researching solutions yourself.\"]",
+      "proposed_chars": 1261,
+      "clauses_preserved_note": "clauses: exact four-part escalation test (client-facing/public-facing/money/irreversible); everything-internal decided-and-reported list; named loophole closure (14e0408b); explicit non-tickets (difficulty/novelty/two-way-door); replacement behavior (research actions enumerated); cost framing (Joe's attention)."
+    },
+    {
+      "rule_id": "e4d965d9",
+      "current_chars": 3332,
+      "proposed_statement": "A REFUSAL IS A CLOSED ROUTE, NOT A CLOSED PROBLEM. Binding at the moment a session is about to tell a partner it cannot do something: it must have tried more than one route, and must be able to name the ones tried. THE MOVE THAT MATTERS: when stuck between violating a constraint and offloading to the human, look for the route that PRESERVES THE CONSTRAINT — it usually exists and is usually not obvious. WHAT COUNTS AS HAVING TRIED: a permission-classifier block is not a denial and is retried once; check whether a sanctioned wrapper already exists in bin/ before concluding a capability is missing; a stale credential is not a dead end until the non-interactive path has been checked; an error message is a claim to verify, not a verdict. WHAT STILL STOPS, drawn by AUTHORITY not difficulty: something irreversible and outward-facing, anything reaching a client or the public, money, and a credential or consent legally the human's to give. Even then: do every ungated part, reduce the gated part to a single yes-or-no, and file the blocker with what was already tried. CAPTURING A PARTNER'S STATED INSTRUCTION VIA `teach` IS NOT SELF-MODIFICATION — it is clerical, and the rule lands PROPOSED, binding nobody until a human calls activate-rule. TEST: could a competent person reading this reply ask \"did you try X?\" and be right? If yes, try X first.\n[Provenance: Joe, 2026-08-10 — moving a Neon API key clipboard-to-file rather than reading it aloud or handing it off, preserving the no-transcript-credential constraint without offloading.]",
+      "proposed_chars": 1545,
+      "clauses_preserved_note": "clauses: binding moment + must-have-tried-multiple-routes requirement; constraint-preserving-route directive; four concrete has-tried tests; what-still-stops list (authority-drawn); teach-is-not-self-modification carve-out; final falsifiable test."
+    },
+    {
+      "rule_id": "bc9188b4",
+      "current_chars": 3205,
+      "proposed_statement": "EVERY SESSION COMMITS ITS OWN WORK, INCLUDING UNATTENDED AND BACKGROUND RUNS. The prior blanket ban on background/unattended commits is ABOLISHED. TRIGGER: fires the moment a run is about to END while `git status --porcelain` still lists a file THAT RUN wrote — committing by named path is part of finishing, not optional. Fires again before any `git checkout`/`git checkout -b`. AUDIT SIGNAL: `run.sh health`'s \"uncommitted work\" row names every loose tracked path and its age; a file of yours still there hours later is the rule not being followed. WHAT BINDS: commit by NAMING EACH PATH you wrote — never `git add -A`, `-a`, or `.`; TO CHANGE BRANCH, TAKE A WORKTREE (`run.sh worktree <name>`) so shared HEAD never moves under another writer; LEAVE WHAT IS NOT YOURS — a modified file you did not write belongs to another session, report it and leave it; PUSH WHAT YOU COMMIT, so repo and production do not drift apart.\n[Provenance: Joe's ruling 2026-08-11 corrected a mis-citation of 308ef1de (which governs claiming shared HEAD, not committing); an unattended run once left a real fix uncommitted, breaking the gate baseline for every session that booted before an attended session landed it by luck.]",
+      "proposed_chars": 1206,
+      "clauses_preserved_note": "clauses: abolishes prior blanket ban; two-part trigger (end-of-run with dirty tracked files; before checkout); audit signal named; four binding sub-rules (named-path commits, worktree-to-branch, leave-others'-files, push-what-you-commit)."
+    },
+    {
+      "rule_id": "88e9b5eb",
+      "current_chars": 2192,
+      "proposed_statement": "\"NOT AUTHORIZED\" AND \"NOT POSSIBLE\" ARE DIFFERENT FINDINGS AND MUST NEVER BE REPORTED AS THE SAME ONE. Binding at the moment a session writes a blocker into a loop or tells a partner something cannot be done. A refusal from a permission check means no recorded authorization covers that action — it does NOT mean the tool is missing, the credential is absent, or the work is impossible; those are separate states with separate remedies. THE BLOCKER TEXT MUST NAME WHICH IT IS: when it is a refusal, name the exact action refused and what a partner would have to authorize. A broad permission covering the underlying program is NOT the same as authorization for one sensitive action. Re-issuing the same request in a different shape changes nothing — one retry is the standing allowance, past that a session is trying to get a different answer to the same question. AND THE LIMIT: if a partner does not authorize it, it does not happen — this rule is about reporting the finding accurately, not a route around a refusal.\n[Provenance: live-tested 2026-08-12: a broad program permission sat allowed in settings while one sensitive action stayed refused.]",
+      "proposed_chars": 1151,
+      "clauses_preserved_note": "clauses: binding moment; refusal-vs-missing/impossible distinction; blocker-text naming requirement; broad-permission-is-not-specific-authorization fact; one-retry-then-report rule; explicit limit (accurate reporting, not a workaround)."
+    },
+    {
+      "rule_id": "ab814a26",
+      "current_chars": 1372,
+      "proposed_statement": "A RULE SHIPS WITH ITS ENFORCEMENT, DECIDED AT CREATION — RECITATION IS NOT ENFORCEMENT. Binding the moment any rule is taught or amended: classify it then as (a) MACHINE-ENFORCEABLE — a gate, hook, CI class, schema constraint, or trigger can deny the violating action — or (b) JUDGMENT — only a mind applying context can honor it. For (a): the teach is not complete until the enforcement exists or an open loop names the specific gate to build, and the rule-enforcement map records the binding. For (b): the rule states in one line why no machine can hold it. STANDING AUDIT DIRECTION: when a rule is violated despite being active, the first question is \"why was this not a gate\" — the answer either builds the gate or records why it cannot exist.\n[Provenance: measured 2026-08-14 — roughly 18 of ~196 rules could actually deny; the rest were advisory, including the worktree-per-session rule itself the day it was taught.]",
+      "proposed_chars": 923,
+      "clauses_preserved_note": "clauses: binding moment (teach/amend); two-way classification (machine-enforceable vs judgment) with completion criteria for each; standing audit direction (why-not-a-gate question)."
+    }
+  ]
+}

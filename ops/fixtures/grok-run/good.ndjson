@@ -1,0 +1,5 @@
+{"type":"start","model":"grok-4.6"}
+{"type":"text","data":"Hello "}
+{"type":"thought","data":"ignored"}
+{"type":"text","data":"world"}
+{"type":"end","stopReason":"end_turn","num_turns":2,"cost_usd":0.012,"modelUsage":{"grok-4.7-build":{"modelCalls":1,"input_tokens":10}}}

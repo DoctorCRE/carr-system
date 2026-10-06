@@ -1,0 +1,520 @@
+{
+ "schema": "rule-delivery-hard-cases/v1",
+ "authored": "2026-09-29",
+ "note": "Hand-written, human-judged cases. `required` are rules that must reach the session; `acceptable` may reach it without counting as false deliveries; every other delivery is a false delivery. Should-not-fire and near-miss cases require nothing and accept nothing. Written before any trigger edit; the split is by sha256(id) in run_eval.py.",
+ "cases": [
+  {
+   "id": "h-sn-read-readme",
+   "kind": "should_not_fire",
+   "why": "Reading a repo doc is routine and no taught rule binds a plain read.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "/home/user/carr-system/README.md"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-read-source",
+   "kind": "should_not_fire",
+   "why": "Opening a library file to understand it binds nothing.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "/home/user/carr-system/lib/rule_routes.py"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-read-config",
+   "kind": "should_not_fire",
+   "why": "Reading a JSON config is inspection, not a decision a rule governs.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Read",
+     "tool_input": {
+      "file_path": "/home/user/carr-system/ops/config/hooks.json"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-grep-symbol",
+   "kind": "should_not_fire",
+   "why": "Searching code for a symbol is a read-only lookup with no rule at stake.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Grep",
+     "tool_input": {
+      "pattern": "def matched_rule_ids",
+      "path": "/home/user/carr-system/lib"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-glob-selftests",
+   "kind": "should_not_fire",
+   "why": "Listing files by glob is routine navigation.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Glob",
+     "tool_input": {
+      "pattern": "ops/*selftest.py"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-bash-ls",
+   "kind": "should_not_fire",
+   "why": "A directory listing changes nothing and binds no rule.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Bash",
+     "tool_input": {
+      "command": "ls -la evals",
+      "description": "List evals"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-bash-status",
+   "kind": "should_not_fire",
+   "why": "git status is a read-only check of the tree.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Bash",
+     "tool_input": {
+      "command": "git status --short"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-bash-log",
+   "kind": "should_not_fire",
+   "why": "git log is a read-only history check.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Bash",
+     "tool_input": {
+      "command": "git log --oneline -5"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-bash-head",
+   "kind": "should_not_fire",
+   "why": "Peeking at the top of a file is a read.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Bash",
+     "tool_input": {
+      "command": "head -20 ops/config/rule-routes.v1.json"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-bash-selftest",
+   "kind": "should_not_fire",
+   "why": "Running an existing selftest verifies work and creates nothing a rule governs.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Bash",
+     "tool_input": {
+      "command": "python3 ops/rule-delivery-eval-selftest.py"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-prompt-ack",
+   "kind": "should_not_fire",
+   "why": "A two-word acknowledgement carries no work for a rule to bind.",
+   "prompt": "ok thanks",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-prompt-where",
+   "kind": "should_not_fire",
+   "why": "A where-is-it question about the repo layout is answered by reading.",
+   "prompt": "Where does the routes file live in the repo?",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-sn-prompt-typo",
+   "kind": "should_not_fire",
+   "why": "A one-word copy fix is a small edit no doctrine rule governs.",
+   "prompt": "Fix the typo in the second paragraph of the README.",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-nm-push-notification",
+   "kind": "near_miss",
+   "why": "Push notifications on a phone are not git push, so no repo rule binds.",
+   "prompt": "Turn off push notifications on my phone while I am in the meeting.",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-nm-merge-prose",
+   "kind": "near_miss",
+   "why": "Merging paragraphs is editing prose, not merging records or a pull request.",
+   "prompt": "Merge these two paragraphs into one and keep the second sentence.",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-nm-echo-git-push",
+   "kind": "near_miss",
+   "why": "Echoing the words git push prints text and pushes nothing.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Bash",
+     "tool_input": {
+      "command": "echo 'remember: git push only after review' >> /tmp/notes.txt"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-nm-grep-git-push",
+   "kind": "near_miss",
+   "why": "Searching docs for the phrase git push is a read, not a push.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Bash",
+     "tool_input": {
+      "command": "grep -rn 'git push' docs | head"
+     }
+    }
+   ],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-nm-email-general",
+   "kind": "near_miss",
+   "why": "A general question about how email works does not touch Joe's mail.",
+   "prompt": "Explain in two sentences how email delivery works between servers.",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-nm-password-general",
+   "kind": "near_miss",
+   "why": "Password length advice is general security knowledge, not a login task.",
+   "prompt": "How long should a strong password be these days?",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-nm-agent-word",
+   "kind": "near_miss",
+   "why": "The word agent in the real estate sense is not a delegated subagent.",
+   "prompt": "What does the word agent mean in a commercial real estate listing agreement?",
+   "tool_calls": [],
+   "required": [],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-agent-brief",
+   "kind": "positive",
+   "why": "Briefing a subagent to sweep mail is delegation, which the seat-dispatch and data-class rules govern.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Agent",
+     "tool_input": {
+      "description": "Sweep vendor threads",
+      "subagent_type": "general-purpose",
+      "prompt": "Sweep Joe's mail export for vendor introduction threads and summarize each one."
+     }
+    }
+   ],
+   "required": [
+    "6cfb67f5",
+    "df55c398"
+   ],
+   "acceptable": [
+    "185013c6",
+    "2b66211d",
+    "81709f57",
+    "8aefcdce",
+    "b587f6c2",
+    "c20dc3d5",
+    "c6f69dee"
+   ]
+  },
+  {
+   "id": "h-pos-gmail-search",
+   "kind": "positive",
+   "why": "Searching Joe's mail through the Gmail connector is the exact move the local-mail-store rule forbids.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "mcp__Gmail__search_threads",
+     "tool_input": {
+      "query": "from:vendor newer_than:7d"
+     }
+    }
+   ],
+   "required": [
+    "49533583",
+    "c66dc739"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-gmail-send",
+   "kind": "positive",
+   "why": "Sending mail from the AI Gmail is governed by the email-handover rule.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "mcp__Gmail__send_message",
+     "tool_input": {
+      "to": "joe.bookout@carr.example",
+      "subject": "Draft for review",
+      "body": "Draft attached."
+     }
+    }
+   ],
+   "required": [
+    "9b081605"
+   ],
+   "acceptable": [
+    "236ca227",
+    "49533583",
+    "c66dc739",
+    "eaa31ac5"
+   ]
+  },
+  {
+   "id": "h-pos-add-loop",
+   "kind": "positive",
+   "why": "Opening a loop is what the deferral-gate rule polices.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "mcp__carr__add-loop",
+     "tool_input": {
+      "title": "Follow up on the vendor list",
+      "body": "Blocked on the spreadsheet."
+     }
+    }
+   ],
+   "required": [
+    "647f843d"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-confirm-merge",
+   "kind": "positive",
+   "why": "Confirming a party merge is where the survivorship and lead-vs-client rules bind.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "mcp__carr__confirm-merge",
+     "tool_input": {
+      "survivor_id": "00000000-0000-0000-0000-000000000001",
+      "loser_id": "00000000-0000-0000-0000-000000000002"
+     }
+    }
+   ],
+   "required": [
+    "2e8b4840",
+    "4c21d86b"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-teach",
+   "kind": "positive",
+   "why": "Capturing a taught rule is governed by the would-the-system-have-to-ask-again test.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "mcp__carr__teach",
+     "tool_input": {
+      "statement": "Always name the deal in the question."
+     }
+    }
+   ],
+   "required": [
+    "4a9188f3"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-gate-test-first",
+   "kind": "positive",
+   "why": "Writing a new hook file is building a gate, so write-the-test-first binds.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "Write",
+     "tool_input": {
+      "file_path": "/home/user/carr-system/hooks/example-new-gate.py",
+      "content": "#!/usr/bin/env python3\n"
+     }
+    }
+   ],
+   "required": [
+    "e65efc68"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-x-link",
+   "kind": "positive",
+   "why": "A shared x.com post binds the quoted-post rule and the Grok-first retrieval rule.",
+   "prompt": "Look at this and tell me what we should steal: https://x.com/someone/status/1234567890",
+   "tool_calls": [],
+   "required": [
+    "557838a5",
+    "57d13061"
+   ],
+   "acceptable": [
+    "466a545a",
+    "5e896ed6",
+    "6437ae15",
+    "98e74e7c",
+    "9e3fb6d0"
+   ]
+  },
+  {
+   "id": "h-pos-vendor-intro",
+   "kind": "positive",
+   "why": "A vendor pairing draft is intro-politics work, which the pairing-judgment rules govern.",
+   "prompt": "Draft an introduction pairing the roofing vendor with the Mobile clinic client.",
+   "tool_calls": [],
+   "required": [
+    "83b9a362",
+    "e6e0b0e7"
+   ],
+   "acceptable": [
+    "1f750181",
+    "3b0cd546",
+    "5f8c661d",
+    "6ec7312d",
+    "76a1ae2b",
+    "7b4ba3aa",
+    "7e4ca905",
+    "893aeec5",
+    "ba5730c5",
+    "bddb0e7b",
+    "cf1c13a6",
+    "defee176"
+   ]
+  },
+  {
+   "id": "h-pos-hipaa",
+   "kind": "positive",
+   "why": "A client note that names HIPAA binds the spelling and double-check rule.",
+   "prompt": "Draft a short note to the client about HIPAA compliance for the new lease.",
+   "tool_calls": [],
+   "required": [
+    "412d37d3"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-loi-terms",
+   "kind": "positive",
+   "why": "Asking which LOI terms are negotiable is the LOI-template rule's moment.",
+   "prompt": "Which terms on the LOI template are actually negotiable?",
+   "tool_calls": [],
+   "required": [
+    "4399df76"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-red-team",
+   "kind": "positive",
+   "why": "Convening reviewers is the moment the distinct-lenses red-team rule binds.",
+   "prompt": "Convene a red team of three reviewers for this design.",
+   "tool_calls": [],
+   "required": [
+    "81709f57"
+   ],
+   "acceptable": []
+  },
+  {
+   "id": "h-pos-new-client",
+   "kind": "positive",
+   "why": "Creating a client record triggers the open-source research rule.",
+   "prompt": "",
+   "tool_calls": [
+    {
+     "tool_name": "mcp__carr__new-client",
+     "tool_input": {
+      "name": "Gulf Coast Family Clinic"
+     }
+    }
+   ],
+   "required": [
+    "57d83b75"
+   ],
+   "acceptable": [
+    "5d44d3f3",
+    "cff429f5",
+    "d26d63b0"
+   ]
+  }
+ ]
+}

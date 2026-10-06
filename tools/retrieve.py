@@ -23,9 +23,9 @@ from typing import Any
 
 from retrieval_lexical import rank_index, toks
 
-DEFAULT_RECOVERY_VAULT = Path(
-    "/Users/booko/Library/CloudStorage/"
-    "GoogleDrive-joe.bookout.carr.us@gmail.com/My Drive/CARR AI"
+DEFAULT_RECOVERY_VAULT = (
+    Path.home() / "Library" / "CloudStorage"
+    / "GoogleDrive-joe.bookout.carr.us@gmail.com" / "My Drive" / "CARR AI"
 )
 EX_UNAVAILABLE = 69
 

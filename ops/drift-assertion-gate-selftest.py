@@ -53,15 +53,12 @@ import tempfile
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GATE = os.path.join(REPO, "hooks", "drift-assertion-gate.py")
 
-failures: list[str] = []
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "lib"))
+from selftest_harness import Checker  # noqa: E402
 
-
-def check(name, cond, detail=""):
-    if cond:
-        print(f"  ok   {name}")
-    else:
-        print(f"  FAIL {name} {detail}")
-        failures.append(name)
+CHECKER = Checker()
+failures = CHECKER.failures
+check = CHECKER.check
 
 
 def transcript(tmp, assistant_text, name="t.jsonl"):
@@ -75,8 +72,8 @@ def transcript(tmp, assistant_text, name="t.jsonl"):
     return path
 
 
-def run(tmp, path, decisions, state, event="Stop", stop_active=False):
-    payload = json.dumps({"session_id": "s1", "transcript_path": path,
+def run(tmp, path, decisions, state, event="Stop", stop_active=False, session="s1"):
+    payload = json.dumps({"session_id": session, "transcript_path": path,
                           "hook_event_name": event,
                           "stop_hook_active": stop_active})
     env = {**os.environ, "CARR_NONCANONICAL_DECISIONS_PATH": decisions,
@@ -122,6 +119,48 @@ def main():
         rc2, _ = run(tmp, path, decisions, state)
         check("the SAME claim a second time is allowed through", rc2 == 0,
               f"exit {rc2} — this gate would wedge the session")
+
+        # 2b. THE COUNCIL'S OWN DOUBLE FIRE, as a fixture (2026-08-23). The
+        # latch used to be a sha256 of the exact prose, so a REWORDED reply
+        # about the same subject minted a fresh identity and the same rulings
+        # were pushed at the session a second time. It happened live to a
+        # council chair, which then had to compose a third reply engineered not
+        # to match the detector — a gate teaching evasion instead of reading.
+        # The identity is now the set of rulings, so this must be silent.
+        reworded = ("The quokka-indexer lane is not firing on its schedule. That "
+                    "looks like a regression in the overnight lane rather than "
+                    "anything anyone chose, and the index has gone stale as a "
+                    "result with no re-pointing behind it.")
+        rc2b, err2b = run(tmp, transcript(tmp, reworded, "t2b.jsonl"), decisions, state)
+        check("a REWORDED claim over the SAME rulings is silent", rc2b == 0,
+              f"exit {rc2b}: {err2b[:160]}")
+
+        # ...and narrowing must not have become muting. A claim that matches a
+        # DIFFERENT ruling is a different finding and still blocks.
+        two_rulings = os.path.join(tmp, "two-decisions.md")
+        with open(two_rulings, "w") as fh:
+            fh.write(
+                "# Decision history\n\n"
+                "- `2026-08-13` — The quokka-indexer lane was DELIBERATELY disabled by "
+                "Joe after the overnight run cost more than it returned; leaving it off "
+                "is the chosen state and must not be read as drift.\n"
+                "- `2026-08-16` — The wombat-render surface was DELIBERATELY frozen at "
+                "version two; the newer renderer is not a rollout anyone is waiting on.\n")
+        other = ("The wombat-render surface is out of date: it sits on version two "
+                 "and the newer renderer never shipped, so every page it produces "
+                 "is stale and nothing has re-pointed it.")
+        rc2c, err2c = run(tmp, transcript(tmp, other, "t2c.jsonl"), two_rulings, state)
+        check("a claim over DIFFERENT rulings still blocks", rc2c == 2,
+              f"exit {rc2c}: the latch became a mute")
+        check("...and it quotes the ruling that actually applies",
+              "wombat-render" in err2c, err2c[:200])
+
+        # ...and one session's latch does not silence another's gate. out/ is a
+        # symlink back to the canonical checkout from every worktree here, so a
+        # ledger keyed on anything shared would do exactly that.
+        rc2d, _ = run(tmp, path, decisions, state, session="a-different-session")
+        check("a second session still hears the finding", rc2d == 2,
+              f"exit {rc2d} — the latch leaked across sessions")
 
         # 3. Silence when the decision log has nothing on the subject.
         empty = os.path.join(tmp, "empty-decisions.md")
@@ -177,12 +216,7 @@ def main():
     finally:
         subprocess.run(["rm", "-rf", tmp])
 
-    print()
-    if failures:
-        print(f"FAIL {len(failures)} check(s): {', '.join(failures)}")
-        return 1
-    print("OK all checks passed")
-    return 0
+    return CHECKER.summary()
 
 
 if __name__ == "__main__":

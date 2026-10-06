@@ -135,9 +135,16 @@ fi
 # Start the worker with a fresh environment.  Only the explicit jobs variable
 # crosses this boundary; DATABASE_URL can never become a routine fallback.
 # HOME/PATH are operational settings, not credentials.
+#
+# --mode auto resolves each due workflow to its own tier against the
+# acceptance ladder ops.enqueue_job enforces (migration 0332): shadow always;
+# canary once an accepted shadow receipt exists for that workflow and its
+# canary contract is enabled; live once an accepted canary receipt exists, or
+# once accepted shadow exists where the workflow's contract disables canary.
+# This wrapper only wakes the ledger -- it never chooses a tier itself.
 env -i PATH="$PATH" HOME="$HOME" CARR_DB_JOBS_URL="$jobs_url" \
   CARR_AI_ROUTE_PRIMARY_URL="$primary_url" \
   CARR_AI_ROUTE_PRIMARY_TOKEN="$primary_token" \
   CARR_AI_ROUTE_SECONDARY_URL="$secondary_url" \
   CARR_AI_ROUTE_SECONDARY_TOKEN="$secondary_token" \
-  "$PYTHON" "$REPO/tools/control-plane.py" tick --mode shadow
+  "$PYTHON" "$REPO/tools/control-plane.py" tick --mode auto

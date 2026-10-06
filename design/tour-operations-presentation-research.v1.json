@@ -1,0 +1,64 @@
+{
+  "schema": "carr.tour_operations.presentation_research.v1",
+  "version": "1.0.0",
+  "reviewed_at": "2026-08-27",
+  "research_status": {
+    "current_web": "complete",
+    "reddit": "complete_anecdotal_only",
+    "x_grok": "unavailable_no_claims_inferred"
+  },
+  "product_decision": {
+    "shared_source": "one ordered facts-only public projection",
+    "pdf": "exactly one property per Letter page with no cover, agenda, overview, or broker-conclusion page",
+    "web": "responsive confidential list-first share page with the same immutable stop order",
+    "map": "secondary orientation surface that never replaces the ordered list",
+    "interactions": ["interested", "discuss", "remove", "property_bound_comment"]
+  },
+  "exclusions": [
+    "internal_contacts",
+    "source_evidence",
+    "rights_metadata",
+    "provider_payloads",
+    "access_notes",
+    "broker_analysis",
+    "canonical_identifiers"
+  ],
+  "design_system": {
+    "navy": "#002F6C",
+    "orange": "#F57F29",
+    "rules": [
+      "Use navy for structure and orange only for focus, calls to action, and small accents.",
+      "Preserve generous white space, a fixed hierarchy, and a consistent fact grid.",
+      "Keep Stop 1, Stop 2, and subsequent route order visible across every surface.",
+      "Use one reviewed property image when a rights-cleared immutable asset exists; remain polished without one.",
+      "Express reaction state with words and control state, never color alone."
+    ]
+  },
+  "pdf_acceptance": [
+    "Author directly for US Letter with a fixed safe live area.",
+    "Pin template, renderer, font, asset, projection, and QC-rule digests.",
+    "Require one public property reference and one unique route marker per page.",
+    "Block page-count, order, marker, clipping, font, asset, link, component-digest, or R2-readback mismatch.",
+    "A clean automated QC result remains review_required; human review is separate from publication."
+  ],
+  "responsive_acceptance": [
+    "Use semantic headings and ordered lists, visible keyboard focus, labels, text status feedback, and single-column reflow.",
+    "Require explicit user action before exchanging the fragment bearer for a host-only session cookie.",
+    "Persist latest reaction state and bind every note and reaction to an opaque public property reference.",
+    "Verify PDF response bytes against the immutable SHA-256 artifact digest before delivery."
+  ],
+  "primary_sources": [
+    {"title": "Adobe print-ready PDF production", "url": "https://helpx.adobe.com/indesign/desktop/print/print-production-and-file-creation/produce-print-ready-pdf-files.html"},
+    {"title": "Adobe print scaling and page sizing", "url": "https://helpx.adobe.com/in/acrobat/kb/scale-or-resize-printed-pages.html"},
+    {"title": "WCAG 2.2", "url": "https://www.w3.org/TR/WCAG22/"},
+    {"title": "W3C reflow guidance", "url": "https://www.w3.org/TR/2023/DNOTE-wcag2ict-20230815/"},
+    {"title": "W3C accessible form notifications", "url": "https://www.w3.org/WAI/tutorials/forms/notifications/"},
+    {"title": "Adobe accessible PDF authoring", "url": "https://helpx.adobe.com/ie/indesign/using/creating-accessible-pdfs.html"},
+    {"title": "Apple Maps human-interface guidance", "url": "https://developer.apple.com/design/human-interface-guidelines/maps"}
+  ],
+  "anecdotal_sources": [
+    {"title": "Reddit: interactive property page", "url": "https://www.reddit.com/r/RealEstatePhotography/comments/1bghe1t"},
+    {"title": "Reddit: print plus online brochure", "url": "https://www.reddit.com/r/RealEstatePhotography/comments/kt5nsi"}
+  ],
+  "anecdotal_interpretation": "The Reddit signal supports paired print and responsive delivery but cannot override CARR facts-only, page-count, rights, confidentiality, accessibility, or human-publication rules."
+}

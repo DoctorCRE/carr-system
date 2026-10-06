@@ -18,7 +18,6 @@ import dispatch  # noqa: E402
 import job_passport_artifact as artifact_renderer  # noqa: E402
 import bridge  # noqa: E402
 import evaluation_kernel  # noqa: E402
-import evaluation_rubrics  # noqa: E402
 import spatial_surface  # noqa: E402
 import admission  # noqa: E402
 
@@ -435,6 +434,20 @@ def eval_portfolio_is_multidimensional_bound_and_rejects_cheap_critical_regressi
     expect_refusal(lambda: evaluation_kernel.validate_evaluation_kernel(forged), "redacted evidence must declare")
 
 
+def critical_dimension_gate_blocks_regression_whatever_the_headline():
+    def row(dim_id, critical, status, direction):
+        return {"dimension_id": dim_id, "critical": critical, "status": status,
+                "direction_vs_baseline": direction, "evidence_refs": [f"evidence:{dim_id}"]}
+    rows = [row("accuracy", True, "passed", "improved"), row("precision", True, "passed", "regressed"),
+            row("brevity", False, "passed", "regressed"), row("safety", True, "failed", "equivalent")]
+    assert evaluation_kernel.critical_dimension_blockers(rows) == ["precision", "safety"]
+    assert evaluation_kernel.critical_dimension_blockers(rows[:1] + rows[2:3]) == []
+    expect_refusal(lambda: evaluation_kernel.critical_dimension_blockers([]), "not an aggregate")
+    expect_refusal(lambda: evaluation_kernel.critical_dimension_blockers(rows[:1] * 2), "duplicate")
+    expect_refusal(lambda: evaluation_kernel.critical_dimension_blockers([dict(rows[0], score=0.9)]), "unknown fields")
+    expect_refusal(lambda: evaluation_kernel.critical_dimension_blockers([dict(rows[0], direction_vs_baseline="up")]), "direction")
+
+
 def shared_kernel_policy_is_risk_scaled_and_default_deny():
     kernel = json.loads((FIXTURES / "carr-evaluation-kernel.synthetic.v1.json").read_text())
     decision = evaluation_kernel.admission_decision(kernel)
@@ -474,7 +487,7 @@ def shared_kernel_policy_is_risk_scaled_and_default_deny():
     changed = copy.deepcopy(kernel)
     changed["cases"][0]["job_stages"] = ["not-a-shared-stage"]
     expect_refusal(lambda: evaluation_kernel.validate_evaluation_kernel(changed), "unknown workflow rubric stage")
-    rubrics = evaluation_rubrics.WORKFLOW_RUBRICS
+    rubrics = evaluation_kernel.WORKFLOW_RUBRICS
     assert {"workflow:claude-desktop-readonly", "workflow:codex-desktop-readonly", "workflow:hermes-orchestration", "workflow:grok-x-native-retrieval"}.issubset(rubrics)
     assert len({tuple(sorted(rubrics[key]["critical_dimensions"])) for key in rubrics}) == len(rubrics)
     assert {"visual_comprehension", "telemetry_truth", "layout_authority_separation"}.issubset(rubrics["workflow:job-passport"]["critical_dimensions"])
@@ -627,6 +640,7 @@ if __name__ == "__main__":
         ("typed telemetry wire binds current attempt and preserves unavailable", typed_telemetry_wire_binds_attempt_and_preserves_unavailable_cost),
         ("visual extension manifest denies unsafe or untrusted packages", visual_extensions_are_inspectable_but_untrusted_or_unsafe_packages_are_refused),
         ("evaluation ladder is multidimensional and rejects masked critical regression", eval_portfolio_is_multidimensional_bound_and_rejects_cheap_critical_regression),
+        ("critical dimension gate blocks a regression whatever the headline", critical_dimension_gate_blocks_regression_whatever_the_headline),
         ("shared kernel policy is risk-scaled and defaults deny", shared_kernel_policy_is_risk_scaled_and_default_deny),
         ("required rungs accept only active golden membership", required_rungs_only_accept_active_golden_membership),
         ("synthetic read-only rehearsal publishes typed facts on the existing wire", synthetic_read_only_rehearsal_publishes_every_typed_fact_to_the_existing_wire),

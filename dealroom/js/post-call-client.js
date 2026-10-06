@@ -1,4 +1,14 @@
+// Dev-only: the standalone post-call processor listens on this machine. No
+// hosted page imports this client, and it refuses to fetch unless the PAGE itself
+// is on a loopback host, so a production origin never attempts a loopback request
+// (and the Worker CSP's connect-src does not allow one).
 const DEFAULT_LOOPBACK = 'http://127.0.0.1:4682';
+const LOOPBACK_PAGE_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/** True only when the page hostname is a loopback host. Absent location fails closed. */
+export function loopbackAllowed(hostname = globalThis.location?.hostname) {
+  return LOOPBACK_PAGE_HOSTS.has(String(hostname || '').toLowerCase());
+}
 const DEFAULT_HEADER = { 'X-CARR-Call-Mode': 'deal-room-v1' };
 
 async function payload(response, fallback) {
@@ -16,10 +26,16 @@ async function payload(response, fallback) {
 export function createPostCallClient(options = {}) {
   const loopback = (options.loopbackUrl || DEFAULT_LOOPBACK).replace(/\/$/u, '');
   const fetchImpl = options.fetchImpl || fetch;
+  const allowed = loopbackAllowed(options.pageHostname ?? globalThis.location?.hostname);
   const postHeaders = { 'content-type': 'application/json', ...DEFAULT_HEADER,
     ...(options.postHeaders || {}) };
 
   async function loopbackFetch(path, init = {}) {
+    if (!allowed) {
+      const error = new Error('Call Mode runs only from a local page; this host never contacts the local processor.');
+      error.code = 'loopback_not_permitted';
+      throw error;
+    }
     try {
       return await fetchImpl(`${loopback}${path}`, { targetAddressSpace: 'loopback', ...init });
     } catch (cause) {

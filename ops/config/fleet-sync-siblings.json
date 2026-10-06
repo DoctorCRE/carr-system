@@ -1,0 +1,20 @@
+{
+  "_comment": [
+    "SINGLE SOURCE OF TRUTH for the sibling GitHub checkouts bin/fleet-sync.sh",
+    "also keeps current, alongside the canonical ~/carr-system checkout.",
+    "",
+    "Each entry is a directory name expected as a sibling of the carr-system",
+    "checkout, i.e. at ${REPO:h}/<name> (REPO is bin/fleet-sync.sh's own",
+    "canonical checkout root). Every sibling is assumed to be a plain git",
+    "checkout of github.com/jbookout/<name> on its default branch 'main'.",
+    "",
+    "Not every Mac has every sibling checked out (Dell's Mac, for one, has",
+    "neither today). An absent sibling is a clean, ordinary skip — never a",
+    "failure — reported by tools/fleet_sync_sibling_safety.py.",
+    "",
+    "Add or remove a sibling here ONLY; bin/fleet-sync.sh and its selftest",
+    "(ops/fleet-sync-siblings-selftest.py) both read this file rather than",
+    "carrying their own copy of the list."
+  ],
+  "siblings": ["doctorcre-app", "software-factory"]
+}

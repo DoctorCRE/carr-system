@@ -46,9 +46,12 @@ def cmd_register(reg: desks.Registry, args) -> int:
     entry = reg.register(
         args.name, args.kind, socket=args.socket, model=args.model, cwd=args.cwd,
         effort=getattr(args, "effort", None), sandbox=args.sandbox, add_dirs=args.add_dirs,
+        permission_mode=getattr(args, "permission_mode", None),
     )
     if args.seat:
         entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)
+    if getattr(args, "room_listen", None):
+        entry = registry_ext.set_room_listen(args.name, args.room_listen, path=reg.path)
     if args.profile:
         entry = registry_ext.set_profile(args.name, args.profile, path=reg.path)
     live = desks.is_live(entry.get("socket", "")) if entry.get("kind") in (
@@ -64,7 +67,7 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
         print(f"refresh: no desk named {args.name!r} — register it first", file=sys.stderr)
         return 2
     entry = entries[args.name]
-    if args.cwd and entry.get("kind") in ("codex-session", "codex-live"):
+    if args.cwd and entry.get("kind") in ("claude-desktop", "codex-session", "codex-live", "grok-cli"):
         # desks.Registry.register() always starts a codex-session entry with
         # thread_id=None (untouched, on purpose — see desks.py). Re-pointing a
         # stale cwd through it therefore also drops any old thread_id, which is
@@ -74,7 +77,7 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
         entry = reg.register(
             args.name, entry["kind"], socket=entry.get("socket"), model=entry.get("model"),
             effort=entry.get("effort"), cwd=args.cwd, sandbox=entry.get("sandbox"),
-            add_dirs=entry.get("add_dirs"),
+            add_dirs=entry.get("add_dirs"), permission_mode=entry.get("permission_mode"),
         )
         if entry.get("room_seat") is None:
             seat = entries[args.name].get("room_seat")
@@ -110,7 +113,7 @@ def cmd_list(reg: desks.Registry, args) -> int:
         seat = e.get("room_seat", "(no room seat — bridge will not route to it)")
         last_seen = e.get("last_seen", "never")
         last_live = e.get("last_live")
-        if e.get("kind") in ("codex-session", "codex-live") and e.get("model"):
+        if e.get("kind") in ("claude-desktop", "codex-session", "codex-live", "grok-cli") and e.get("model"):
             where = f"{e.get('model')} (effort={e.get('effort')})"
         else:
             where = e.get("socket") or "?"
@@ -146,7 +149,12 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model", default=None)
     r.add_argument("--effort", default=None, choices=list(desks.EFFORT_CHOICES))
     r.add_argument("--cwd", default=None)
+    r.add_argument("--permission-mode", default=None,
+                   help="dispatched desks use dontAsk only; other modes are refused and "
+                        "permission needs go to the orchestrator")
     r.add_argument("--seat", default=None, help="the room seat this desk speaks for")
+    r.add_argument("--room-listen", default=None, choices=list(registry_ext.ROOM_LISTEN_MODES),
+                   help="'mention': hear people's turns, and other desks only when @seat-mentioned")
     r.add_argument("--profile", default=None,
                    help="named agent profile this desk carries (builder, designer, "
                         "reviewer, doc) — presentation and routing only, never authority")

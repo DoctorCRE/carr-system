@@ -9,6 +9,7 @@ import errno
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +33,65 @@ def gen_dir_for(target: Path) -> Path:
 def generation_files(target: Path) -> list[Path]:
     directory = gen_dir_for(target)
     return sorted(path for path in directory.iterdir() if not path.name.startswith(".")) if directory.exists() else []
+
+
+def check_provider_wait(tmp: Path) -> None:
+    """The shared wait in front of the sweep, on the outcomes that matter.
+
+    Its NO must be as trustworthy as its YES, so a provider that never recovers
+    and one that fails for a non-transient reason are tested as hard as the
+    happy path. The clock is injected, so none of this sleeps.
+    """
+    target = tmp / "probe.xlsx"
+    target.write_bytes(b"rows\n")
+    slept: list[float] = []
+
+    check("a ready provider returns nothing cold",
+          common.wait_for_provider([target]).cold == [])
+
+    check("a path that does not exist is not waited for",
+          common.wait_for_provider([tmp / "absent.xlsx"]).cold == [])
+
+    # A provider that refuses twice and then serves must PASS, because the
+    # 02:05 outage is transient and giving up early is the whole bug.
+    state = {"calls": 0, "now": 0.0}
+
+    def advance(interval):
+        slept.append(interval)
+        state["now"] += interval
+
+    def flaky(paths, *, timeout):
+        state["calls"] += 1
+        if state["calls"] <= 2:
+            return [(target, OSError(errno.EDEADLK, "Resource deadlock avoided"))]
+        return common.probe_provider_files(paths, timeout=timeout)
+
+    def wait(probe, budget=600):
+        return common.wait_for_provider(
+            [target], budget_seconds=budget, poll_seconds=0, sleep=advance,
+            monotonic=lambda: state["now"], running=lambda **kw: True,
+            probe=probe).cold
+
+    cold = wait(flaky)
+    check("a transient refusal that clears returns ready", cold == [])
+    check("it actually waited rather than passing blind", state["calls"] >= 3,
+          f"{state['calls']} probe(s)")
+
+    # A permanently cold file still returns so each target can run. Both
+    # sleep and monotonic advance the same fake clock; no wall-time spinning.
+    slept.clear()
+    cold = wait(lambda paths, **kw: [(target, OSError(errno.EDEADLK, "cold"))], .05)
+    check("an exhausted budget reports the cold file", len(cold) == 1)
+    check("an exhausted budget does not raise", True)
+    check("a zero poll cannot busy-spin",
+          len(slept) <= int(.05 / .01) + 2,
+          f"{len(slept)} sleep(s): {[round(i, 4) for i in slept]}")
+
+    # A permission failure reads the same on the last attempt as the first.
+    slept.clear()
+    cold = wait(lambda paths, **kw: [(target, OSError(errno.EACCES, "Permission denied"))])
+    check("a hard error is reported at once", len(cold) == 1)
+    check("a hard error is not waited out", slept == [], f"{len(slept)} sleep(s)")
 
 
 def main():
@@ -80,10 +140,53 @@ def main():
         kept = generation_files(deadlock_target)
         check("EDEADLK used all required attempts", len(deadlock_reads) == 2,
               f"failed reads {len(deadlock_reads)}")
-        check("EDEADLK backoff is bounded and ordered",
-              sleeps == list(common.GENERATION_COPY_BACKOFF_SECONDS), repr(sleeps))
+        # A fixture that stalls TWICE sleeps twice, which is the leading slice of
+        # the declared backoff and not the whole of it. Those were the same list
+        # only while ATTEMPTS was 3, and asserting equality silently welded this
+        # partial-retry case to the size of the budget: widening the budget on
+        # 2026-08-26 failed here for no reason but the coincidence.
+        check("EDEADLK backoff is the ordered leading slice of the declared budget",
+              sleeps == list(common.GENERATION_COPY_BACKOFF_SECONDS[:len(sleeps)]),
+              f"{sleeps!r} vs budget {list(common.GENERATION_COPY_BACKOFF_SECONDS)!r}")
+        check("EDEADLK slept once between each attempt", len(sleeps) == len(deadlock_reads),
+              f"{len(sleeps)} sleep(s) for {len(deadlock_reads)} failed read(s)")
         check("retry leaves one complete generation",
               len(kept) == 1 and kept[0].read_bytes() == b"cloud path payload\n")
+
+        print("2b. the budget is sized against a real hydration stall")
+        # The retry shipped on 2026-08-25 as 3 attempts over 0.05s + 0.10s, and
+        # the curriculum export died the same EDEADLK death on 08-26 anyway: a
+        # sixth of a second is indistinguishable from no retry while OneDrive's
+        # FileProvider materialises a dehydrated file. The step began 07:05:13Z
+        # and failed 07:05:15Z; the same file read by hand two minutes later
+        # succeeded first try. So the reviewable number is total wall-clock, and
+        # nothing was asserting it.
+        budget = sum(common.GENERATION_COPY_BACKOFF_SECONDS)
+        check("total backoff outlasts a hydration stall", budget >= 20.0,
+              f"{budget:.2f}s of backoff")
+        # Both retry loops index BACKOFF_SECONDS[attempt] on every attempt but
+        # the last, so a mismatch turns the retry into an IndexError raised from
+        # inside the error handler.
+        check("attempts and backoff steps agree",
+              len(common.GENERATION_COPY_BACKOFF_SECONDS) == common.GENERATION_COPY_ATTEMPTS - 1,
+              f"{common.GENERATION_COPY_ATTEMPTS} attempts, "
+              f"{len(common.GENERATION_COPY_BACKOFF_SECONDS)} backoff step(s)")
+        check("backoff never shrinks",
+              all(a <= b for a, b in zip(common.GENERATION_COPY_BACKOFF_SECONDS,
+                                         common.GENERATION_COPY_BACKOFF_SECONDS[1:])),
+              repr(common.GENERATION_COPY_BACKOFF_SECONDS))
+        # Named constants, not integers: EDEADLK is 11 on macOS where EAGAIN is
+        # 35, and on Linux those numbers swap. Exact in both directions, so a
+        # permission or storage failure still escapes instead of burning the
+        # budget and surfacing late.
+        # ETIMEDOUT joined on 2026-09-15 and is the one that was actually
+        # firing nightly: a dehydrated OneDrive file's first read times out
+        # rather than returning either of the other two. Exact set, still, so a
+        # permission or storage failure escapes instead of burning the budget.
+        check("exactly the three FileProvider transients are retryable",
+              common.GENERATION_COPY_RETRY_ERRNOS ==
+              frozenset({errno.EAGAIN, errno.EDEADLK, errno.ETIMEDOUT}),
+              repr(sorted(common.GENERATION_COPY_RETRY_ERRNOS)))
 
         print("3. EAGAIN is transient, but exhaustion remains an error")
         again_target = tmp / "vendors.md"
@@ -141,6 +244,39 @@ def main():
         check("permanent failure publishes no generation", not generation_files(permanent_target))
         check("permanent failure removes its staged file",
               not list(gen_dir_for(permanent_target).glob(".*")))
+
+        print("4b. a cold-cloud read timeout retries and then publishes")
+        # THE REAL NIGHTLY FAILURE, pinned. A dehydrated OneDrive file's first
+        # read returns ETIMEDOUT, and that read is what triggers hydration, so
+        # the retry succeeds. Before 2026-09-15 this errno was not in the retry
+        # set and escaped on attempt one, which cost six consecutive nights of
+        # exports. The case asserts BOTH halves: it retries, and it publishes.
+        timeout_target = tmp / "vendors-timeout.md"
+        timeout_target.write_bytes(b"hydrates on the second read\n")
+        timeout_reads, timeout_sleeps = [], []
+
+        def timed_out_once(path):
+            if path == timeout_target and not timeout_reads:
+                timeout_reads.append(path)
+                raise OSError(errno.ETIMEDOUT, "Operation timed out")
+            if path == timeout_target:
+                timeout_reads.append(path)
+            return real_read_bytes(path)
+
+        Path.read_bytes = timed_out_once
+        common.time.sleep = timeout_sleeps.append
+        try:
+            common.keep_generation(timeout_target)
+        finally:
+            Path.read_bytes, common.time.sleep = real_read_bytes, real_sleep
+        check("cold-read timeout is retried rather than escaping",
+              len(timeout_reads) == 2 and timeout_sleeps == [common.GENERATION_COPY_BACKOFF_SECONDS[0]],
+              f"reads={len(timeout_reads)} sleeps={timeout_sleeps}")
+        check("cold-read timeout still publishes one complete generation",
+              len(generation_files(timeout_target)) == 1,
+              repr(generation_files(timeout_target)))
+        check("ETIMEDOUT is declared retryable",
+              errno.ETIMEDOUT in common.GENERATION_COPY_RETRY_ERRNOS)
 
         print("5. an existing same-second generation is never overwritten")
         collision_target = tmp / "client-roster.md"
@@ -224,6 +360,8 @@ def main():
         kept = generation_files(prune_target)
         check("prunes to configured cap", len(kept) == common.KEEP_GENERATIONS, f"found {len(kept)}")
         check("newest generation survives pruning", any(path.read_bytes() == b"newest\n" for path in kept))
+
+        check_provider_wait(tmp)
 
     print()
     if fails:

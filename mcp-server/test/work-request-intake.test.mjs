@@ -45,6 +45,7 @@ class IntakeFake {
       doctrine_source_label: "control-room#evidence", replayed: false,
       source_provenance: { policy_id: "lexical-dominant-v1" },
     }] };
+    if (sql.includes("acting-identity")) return { rows: [] };
     if (sql.includes("work_request_card")) return { rows: [{
       ref: "WR-0001", state: "captured", version: 1, title: REQUEST.title,
       desired_outcome: REQUEST.desired_outcome, acceptance_criteria: REQUEST.acceptance_criteria,
@@ -88,7 +89,7 @@ test("current-work-requests derives tenant server-side and returns only the type
   const read = db.calls.find(call => call.sql.includes("work-request-intake:current"));
   assert.deepEqual(read.params, ["carr-internal"]);
   const rejectedArgs = await rejected(() => executeRegisteredTool(new IntakeFake(), { ...ACTOR }, "current-work-requests", { state: "ready" }));
-  assert.equal(rejectedArgs.error, "invalid_current_work_requests_fields");
+  assert.ok(["invalid_current_work_requests_fields", "unregistered_operation_fields"].includes(rejectedArgs.error));
 });
 
 test("report-problem retrieves deterministically then captures exactly the top current visible source", async () => {
@@ -160,6 +161,29 @@ test("report-problem replay key is bound to the authenticated actor", async () =
   assert.equal(db.calls.filter(call => call.sql.includes("capture_sourced_work_request")).length, 1);
 });
 
+test("mutation replay key is bound to operation and server-derived principal context", async () => {
+  const db = new IntakeFake();
+  const firstActor = { ...ACTOR, client_id: "client:verified-a", authorization_class: "interactive" };
+  await executeRegisteredTool(db, firstActor, "report-problem", structuredClone(REQUEST));
+
+  for (const actor of [
+    { ...firstActor, client_id: "client:verified-b" },
+    { ...firstActor, via: "different-auth-adapter" },
+    { ...firstActor, authorization_class: "different-class" },
+    { ...firstActor, human: false, sponsoring_human_slug: "joe" },
+  ]) {
+    const out = await rejected(() => executeRegisteredTool(db, actor, "report-problem", structuredClone(REQUEST)));
+    assert.equal(out.error, "key_reuse");
+  }
+
+  const crossVerb = await rejected(() => executeRegisteredTool(db, firstActor, "review-and-triage", {
+    idempotency_key: KEY, human_ref: "WR-1", base_version: 1, classification: "operational",
+  }));
+  assert.equal(crossVerb.error, "key_reuse");
+  assert.equal(db.calls.filter(call => call.sql.includes("capture_sourced_work_request")).length, 1);
+  assert.equal(db.calls.some(call => call.sql.includes("triage_sourced_work_request")), false);
+});
+
 test("report-problem skips a higher-ranked personal hit and refuses when no shared source remains", async () => {
   const shared = new IntakeFake();
   shared.personalFirst = true;
@@ -195,7 +219,7 @@ test("report-problem refuses caller source, identity, and state fields before an
   for (const extra of [{ source_id: "secret" }, { state: "triaged" }, { actor: "other" }, { tenant: "other" }]) {
     const db = new IntakeFake();
     const out = await rejected(() => executeRegisteredTool(db, { ...ACTOR }, "report-problem", { ...REQUEST, ...extra }));
-    assert.ok(["invalid_report_problem_fields", "caller_authority_field_forbidden"].includes(out.error));
+    assert.ok(["invalid_report_problem_fields", "caller_authority_field_forbidden", "unregistered_operation_fields"].includes(out.error));
     assert.equal(db.calls.length, 0);
   }
 });
@@ -248,4 +272,70 @@ test("work-request-card retains triage readback when a ready request remains que
   assert.equal(card.plan.accepted_by_actor_slug, "joe");
   assert.equal(card.plan.accepted_at, "2026-08-16T01:00:00Z");
   assert.deepEqual(card.next_human_action, { label: "Plan accepted", effect: "none" }); assert.deepEqual(card.actions, []);
+});
+
+// ---- Jev rerank trial seam (CARR_JEV_RERANK_MODE, default off) ----
+
+const SECOND = { section_id: "30000000-0000-0000-0000-000000000002", doc_slug: "neon-database-sop",
+  section_key: "06-credentials-and-incidents", content_class: "sop",
+  title: "6. Credentials and incidents", snippet: "rotation is four calls, not one", final_score: 0.4,
+  provenance: { policy_id: "lexical-dominant-v1" } };
+
+function rerankFake({ personalFirst = false } = {}) {
+  const db = new IntakeFake();
+  db.personalFirst = personalFirst;
+  const original = db.query.bind(db);
+  db.query = async (text, params = []) => {
+    const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.includes("search_doctrine_situations")) {
+      const result = await original(text, params);
+      result.rows.push(SECOND);
+      return result;
+    }
+    if (sql.includes("work-request-intake:shared-shortlist")) {
+      db.calls.push({ sql, params });
+      // The database, not the caller, decides eligibility: the personal hit
+      // never comes back from this query.
+      return { rows: [
+        { section_id: "30000000-0000-0000-0000-000000000001", current_revision_id: "40000000-0000-0000-0000-000000000001" },
+        { section_id: SECOND.section_id, current_revision_id: "40000000-0000-0000-0000-000000000002" },
+      ] };
+    }
+    return original(text, params);
+  };
+  return db;
+}
+
+function jevPrefers(title, { requests = [] } = {}) {
+  return async request => {
+    requests.push(structuredClone(request));
+    const answers = Object.fromEntries(Object.entries(request.questions).map(([k, q]) =>
+      [k, { type: "noul", noul: q.instructions.includes(`"${title}`) ? 0.92 : 0.1 }]));
+    return { model: "jev-test", answers, usage: { input_tokens: 300, output_tokens: 2 } };
+  };
+}
+
+test("report-problem with the rerank flag off is byte-for-byte the deterministic path", async () => {
+  for (const jevRerank of [undefined, { posture: { enabled: false, mode: "off" }, ask: jevPrefers(SECOND.title) },
+    { posture: { enabled: false, mode: "off", posture: "misconfigured" }, ask: jevPrefers(SECOND.title) }]) {
+    const db = rerankFake();
+    if (jevRerank) db.jevRerank = jevRerank;
+    const result = await executeRegisteredTool(db, { ...ACTOR }, "report-problem", structuredClone(REQUEST));
+    assert.equal(result.source_selection, undefined);
+    assert.equal(db.calls.some(call => call.sql.includes("shared-shortlist")), false);
+    const capture = db.calls.find(call => call.sql.includes("capture_sourced_work_request"));
+    assert.equal(capture.params[4], "30000000-0000-0000-0000-000000000001");
+    assert.equal(capture.params[5], "40000000-0000-0000-0000-000000000001");
+  }
+});
+
+test("report-problem never calls optional Jev from its write envelope", async () => {
+  const db = rerankFake();
+  let asked = 0;
+  db.jevRerank = { posture: { enabled: true, mode: "noul" }, ask: async () => { asked += 1; throw new Error("outside call"); } };
+  const result = await executeRegisteredTool(db, { ...ACTOR }, "report-problem", structuredClone(REQUEST));
+  assert.equal(asked, 0);
+  assert.equal(result.source_selection, undefined);
+  const capture = db.calls.find(call => call.sql.includes("capture_sourced_work_request"));
+  assert.equal(capture.params[4], "30000000-0000-0000-0000-000000000001");
 });

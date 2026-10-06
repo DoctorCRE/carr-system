@@ -305,6 +305,9 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
   transition: stroke-opacity 200ms ease, stroke 200ms ease;
 }
 .stage-connector.is-outer { stroke-opacity: 0.30; stroke-dasharray: 3 5; }
+/* A moon's tether runs to Doc, not to the wire, and reads as the fainter of the
+   two so the wire's own spokes stay the dominant lines on the stage. */
+.stage-connector.is-moon { stroke-opacity: 0.24; stroke-width: 1; stroke-dasharray: 2 4; }
 .stage-connector.is-hot { stroke: var(--orange); stroke-opacity: 0.95; }
 
 .stage-core-halo { fill: url(#coreHalo); animation: breathe 3.5s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
@@ -326,6 +329,11 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 .stage-node-disc { fill: var(--node-seat); fill-opacity: 0.30; stroke: var(--node-halo); stroke-width: 2; }
 .stage-node.is-outer .stage-node-disc { fill-opacity: 0.18; stroke-opacity: 0.65; }
 .stage-node.is-outer { opacity: 0.55; }
+/* Doc's staff (loop 528): smaller than a lead desk and a shade quieter, but not
+   faded like the outer ring — they are staffed and working, not dormant. */
+.stage-node.is-moon { opacity: 0.88; }
+.stage-node.is-moon .stage-node-disc { fill-opacity: 0.24; stroke-width: 1.3; stroke-opacity: 0.8; }
+.stage-node.is-moon .stage-node-pulse { stroke-width: 1; }
 .stage-node.is-dim { opacity: 0.35; }
 .stage-node-glyph {
   fill: var(--text); font-family: var(--display); font-size: 13px;
@@ -719,6 +727,10 @@ button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 /* The full seat name inside the disc — "claude" and "codex" were both a "C". */
 .stage-node-name { font-size: 6.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* The moon's name sits under it, because an 8px disc cannot hold "deal steward"
+   and colour alone is never allowed to be the only channel. */
+.stage-moon-name { font-size: 5.5px; letter-spacing: 0.05em; text-transform: uppercase; fill: var(--muted); }
 
 /* Conversation | Everything — the feed's front door. */
 .chip-view { font-weight: 600; }

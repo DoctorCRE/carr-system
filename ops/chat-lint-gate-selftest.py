@@ -33,6 +33,7 @@ Joe and a block only buys a restatement he pays for twice (rule 1d50a3bb). The
 gate now parks a note that hooks/chat-lint-carryover.py injects before the next
 reply. CAUGHT = a note was parked; exit 2 is now itself a regression.
 """
+import itertools
 import json
 import os
 import shutil
@@ -42,6 +43,10 @@ import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(REPO, "hooks", "chat-lint-gate.py")
+# The audience split's once-per-session ledger. Pinned to a scratch directory so
+# fixtures never write into the live out/stop-latch, which every worktree on this
+# Mac shares through a symlink.
+LATCH_STATE = tempfile.mkdtemp(prefix="chat-lint-latch-")
 
 # (name, assistant_text, expect_caught)
 CASES = [
@@ -95,7 +100,31 @@ passed = 0
 bad: list[str] = []
 
 
-def run_stop(assistant_text, event="Stop", stop_active=False):
+# A FRESH SESSION ID PER CASE, and per process, for two different reasons that
+# both land here.
+#
+#   ACROSS RUNS: out/ is a symlink back to the canonical checkout from every
+#   worktree on this Mac, so a fixed "selftest" id meant every concurrent
+#   ops/ci.sh run read and wrote the SAME carry file.
+#
+#   ACROSS CASES: as of 2026-08-23 this gate consolidates reporting-prose
+#   findings into ONE note per session (the audience split — see the gate's
+#   main()). With a shared id, case two onwards would be legitimately silent
+#   and every one of them would read as a miss. Order-dependent fixtures are
+#   worse than no fixtures, because the failure looks like the gate.
+_SESSION_N = itertools.count()
+
+
+def next_session():
+    return f"selftest-{os.getpid()}-{next(_SESSION_N)}"
+
+
+def carry_path(session):
+    return os.path.join(REPO, "out", "chat-lint-carry", f"{session}.txt")
+
+
+def run_stop(assistant_text, event="Stop", stop_active=False, session=None):
+    session = session or next_session()
     fd, path = tempfile.mkstemp(suffix=".jsonl")
     # A PRIVATE REPO ROOT PER RUN, not a per-pid session id. The hook parks its
     # note at <root>/out/chat-lint-carry/selftest.txt; with the real repo root
@@ -114,13 +143,16 @@ def run_stop(assistant_text, event="Stop", stop_active=False):
             fh.write(json.dumps({"type": "assistant",
                 "message": {"content": [{"type": "text", "text": assistant_text}]}}) + "\n")
         payload = {"hook_event_name": event, "transcript_path": path,
-                   "session_id": "selftest", "stop_hook_active": stop_active}
+                   "session_id": session, "stop_hook_active": stop_active}
         # The gate no longer BLOCKS on a wording fault (rule 1d50a3bb: the bad
         # text has already reached Joe, so a block only buys a restatement he
         # pays for twice). It parks a note that hooks/chat-lint-carryover.py
         # injects before the next reply. So "caught" now means a note was
         # written, and exit 2 would itself be a regression.
-        carry = os.path.join(root, "out", "chat-lint-carry", "selftest.txt")
+        # The private repo root per run (HEAD, the load-flake fix) carries the
+        # carry file; the fresh session id per case (rationing branch) keeps
+        # cases from sharing one consolidated note. Both compose here.
+        carry = os.path.join(root, "out", "chat-lint-carry", f"{session}.txt")
         env = dict(os.environ, CARR_REPO_ROOT=root)
         p = subprocess.run([sys.executable, HOOK], input=json.dumps(payload),
                            capture_output=True, text=True, timeout=30, env=env)
@@ -132,6 +164,8 @@ def run_stop(assistant_text, event="Stop", stop_active=False):
                 note = fh.read()
         return bool(note.strip()), note
     finally:
+        # BOTH cleanups on EVERY path, including the exit-2 regression return
+        # above, which used to leave the temp tree behind for whoever came next.
         shutil.rmtree(root, ignore_errors=True)
         try:
             os.unlink(path)
@@ -153,6 +187,83 @@ def main():
             bad.append(name)
         print(f"  {'ok  ' if ok else 'FAIL'} {name:20} "
               f"want={'CAUGHT' if expect else 'clean'} got={'CAUGHT' if got else 'clean'}")
+
+    # ── THE AUDIENCE SPLIT (2026-08-23) ────────────────────────────────────
+    # The gates-audit council measured this lint firing on EIGHT messages in one
+    # shipped session, several of them reading ordinary reporting prose as
+    # "multi-clause tasks for Joe" when nothing was asked of him. Joe's
+    # 2026-08-10 layered-enforcement ruling settled that blanket keyword gates
+    # lose, and names its own reopen condition — measured false positives. These
+    # are that condition, frozen as fixtures.
+    #
+    # THE RULES ARE NOT NARROWED, THE MATCHER IS. Rule 38b15dc6 binds
+    # "multi-clause instructions TO A PARTNER"; prose instructing nobody was
+    # never inside it.
+    REPORTING = [
+        ("report-mentions-you",
+         "You'll see the count in the log now. The exporter checks the manifest "
+         "and writes the render, so the nightly run no longer needs the flag."),
+        ("report-two-verbs",
+         "The job will read the queue and update each row in one pass. Your "
+         "earlier concern about the ordering is handled by the index."),
+        ("report-narrating-plan",
+         "I will review the diff and then run the suite. Once that is green I "
+         "will open the pull request and add the label."),
+    ]
+    for name, text in REPORTING:
+        got, note = run_stop(text)
+        ok = not got
+        passed += ok
+        if not ok:
+            bad.append(name)
+        print(f"  {'ok  ' if ok else 'FAIL'} {name:28} "
+              f"want=clean got={'CAUGHT' if got else 'clean'}"
+              f"{'' if ok else ' :: ' + note[:200]}")
+
+    # ...and the real shape is untouched. This is a genuine two-clause
+    # instruction and must still be flagged.
+    got, note = run_stop(
+        "Please approve the migration and then send the LOI back to the "
+        "landlord once you have read it.")
+    ok = got and "multi-clause" in note
+    passed += ok
+    if not ok:
+        bad.append("real-multi-clause-ask-still-caught")
+    print(f"  {'ok  ' if ok else 'FAIL'} {'real-multi-clause-ask-still-caught':28} "
+          f"want=CAUGHT got={'CAUGHT' if got else 'clean'}")
+
+    # ── ONCE PER SESSION for reporting prose ───────────────────────────────
+    # Each fire costs the next reply a block of context. A finding that is true
+    # but standing does not need repeating every turn; a NEW ask does.
+    shared = next_session()
+    banned = CASES[0][1]                       # a wording fault, no ask in it
+    first, _ = run_stop(banned, session=shared)
+    passed += first
+    if not first:
+        bad.append("report-summary-delivered-once")
+    print(f"  {'ok  ' if first else 'FAIL'} {'report-summary-first-fire':28} "
+          f"want=CAUGHT got={'CAUGHT' if first else 'clean'}")
+
+    second, note2 = run_stop(banned, session=shared)
+    ok = not second
+    passed += ok
+    if not ok:
+        bad.append("report-summary-repeats")
+    print(f"  {'ok  ' if ok else 'FAIL'} {'report-summary-not-repeated':28} "
+          f"want=clean got={'CAUGHT' if second else 'clean'}"
+          f"{'' if ok else ' :: ' + note2[:160]}")
+
+    # ...but a PARTNER-DIRECTED ask in the same session is never consolidated
+    # away. This is the half that keeps the narrowing from becoming a mute.
+    third, note3 = run_stop(
+        "Please approve the migration and then send the LOI back to the "
+        "landlord once you have read it.", session=shared)
+    ok = third and "multi-clause" in note3
+    passed += ok
+    if not ok:
+        bad.append("partner-ask-still-flagged-after-summary")
+    print(f"  {'ok  ' if ok else 'FAIL'} {'partner-ask-after-summary':28} "
+          f"want=CAUGHT got={'CAUGHT' if third else 'clean'}")
 
     got, _ = run_stop(CASES[0][1], stop_active=True)
     if not got:
