@@ -6,6 +6,7 @@ import importlib.util
 import io
 import os
 import sys
+import tempfile
 from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
@@ -146,11 +147,12 @@ fake_bins = mod.PostgresBinaries(
     initdb=Path("/fake/initdb"), pg_ctl=Path("/fake/pg_ctl"),
     createdb=Path("/fake/createdb"), psql=Path("/fake/psql"),
 )
-fake_root = Path("/tmp/carr-local-pg-ci.selftest")
+fake_owner = mod.DisposablePostgres("carr-local-pg-ci.selftest-", fake_bins.pg_ctl)
+fake_root = fake_owner.root
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
     patch.object(mod.shutil, "rmtree") as remove,
 ):
     result = mod.run_local_ci(
@@ -282,7 +284,7 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
     patch.object(mod.shutil, "rmtree"),
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="strict", port=55432, runner=FakeRunner())
@@ -349,7 +351,7 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
     patch.object(mod.shutil, "rmtree"),
 ):
     assurance_stderr = io.StringIO()
@@ -396,7 +398,7 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
     patch.object(mod.shutil, "rmtree") as remove_failure,
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
@@ -413,7 +415,7 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
     patch.object(mod.shutil, "rmtree") as remove_continuity_failure,
 ):
     continuity_stderr = io.StringIO()
@@ -438,7 +440,7 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
     patch.object(mod.shutil, "rmtree") as remove_start_failure,
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
@@ -454,3 +456,5 @@ print(f"local PG CI selftest — {passed}/{passed + len(failed)} passed")
 if failed:
     print("FAILED: " + "; ".join(failed))
     raise SystemExit(1)
+
+fake_owner.close()

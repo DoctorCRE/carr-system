@@ -350,7 +350,9 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.assertEqual(snapshot["kind"], "project")
         self.assertEqual(set(snapshot), {"schema", "kind", "project", "title", "tasks", "deliverables",
                                          "notes", "decisions", "ledger", "repos", "history", "updated_at",
-                                         "github_sync", "omitted"})
+                                         "github_sync", "omitted", "costs"})
+        self.assertIn(snapshot["costs"]["state"], ("ready", "partial", "unavailable"))
+        self.assertIn("action", snapshot["costs"])
         self.assertEqual(snapshot["tasks"]["a"]["provider"], "Codex")
         self.assertEqual(snapshot["tasks"]["a"]["model"], "gpt-6-sol")
         self.assertEqual(snapshot["tasks"]["a"]["effort"], "high")

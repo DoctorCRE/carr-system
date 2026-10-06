@@ -1,10 +1,10 @@
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -25,10 +25,9 @@ const actor = { id: id(1), slug: 'joe', human: true, via: 'dealroom-cookie', cli
 
 test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !process.env.CARR_CI_DATABASE_URL && 'PostgreSQL unavailable' }, async t => {
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  const dir = ciDsn ? null : mkdtempSync('/tmp/local-deals-');
+  let postgresFixture, dir;
   let admin;
   let database;
-  let running = false;
   let c;
   // A provided CI cluster is owned and budgeted by its caller.
   const releaseBudget = ciDsn ? async () => {} : await acquirePostgresFixtureGroup();
@@ -46,9 +45,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       url.pathname = `/${database}`;
       connection = { connectionString: url.href };
     } else {
-      execFileSync(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale'], { stdio: 'pipe' });
-      execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start'], { stdio: 'pipe' });
-      running = true;
+      postgresFixture = await acquireDisposablePostgres({ prefix: 'local-deals-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+      dir = postgresFixture.root;
+      await postgresFixture.run(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale']);
+      await postgresFixture.run(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start']);
       connection = { host: dir, user: 'fixture', database: 'postgres' };
     }
     c = new pg.Client({ ...connection,
@@ -342,9 +342,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         try { if (database) await admin.query(`drop database "${database}"`); }
         finally { await admin.end(); }
       }
-      if (running) execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe' });
     } finally {
-      await releaseBudget();
+      try { await postgresFixture?.close(); } finally { await releaseBudget(); }
     }
   }
 });

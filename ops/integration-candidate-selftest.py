@@ -309,7 +309,7 @@ class RestoreForwardTests(unittest.TestCase):
         with (patch.object(pg,'find_postgres_binaries',return_value=self.bins),
               patch.object(pg,'port_is_available',return_value=True),
               patch.object(pg,'refuse_hosted_execution'),
-              patch.object(pg.tempfile,'mkdtemp',return_value=self.tmp.name),
+              patch.object(tempfile,'mkdtemp',return_value=self.tmp.name),
               patch.object(integration,'validate_candidate',side_effect=source),
               patch.object(integration,'git',return_value=b'-- exact current main schema'),
               patch.dict(os.environ,{'CANARY_TOKEN':'private-canary-123'})):
@@ -325,7 +325,7 @@ class RestoreForwardTests(unittest.TestCase):
         self.assertEqual(sum(a[0]=='/fake/initdb' for a in self.events),2)
         self.assertIn(':55433/',self.envs[forward]['DATABASE_URL'])
         self.assertIn(':55432/',self.envs[canonical]['CARR_CI_DATABASE_URL'])
-        self.assertEqual(sum(a[0]=='/fake/pg_ctl' and a[-1]=='stop' for a in self.events),3)
+        self.assertEqual(sum(a[0]=='/fake/pg_ctl' and a[-1]=='stop' for a in self.events),4)
         stop_primary=next(i for i,a in enumerate(self.events) if a[0]=='/fake/pg_ctl' and a[-1]=='stop')
         init_integration=[i for i,a in enumerate(self.events) if a[0]=='/fake/initdb'][1]
         self.assertLess(stop_primary,init_integration)

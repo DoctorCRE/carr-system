@@ -11,14 +11,13 @@ import re
 import socket
 import subprocess
 import sys
-import tempfile
 
 from git_env import scrubbed_env
 from successor_ownership import validate_outputs, JSON_ARTIFACTS
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lib.disposable_pg_fixture import postgres_fixture_group
+from lib.disposable_pg_fixture import postgres_fixture_group, DisposablePostgres
 from scac_mutation_db_inventory import project, summarize, project_role_authority
 
 
@@ -138,33 +137,27 @@ def disposable_database(repo):
     env = local.scrub_cloud_environment(os.environ)
     env["PATH"] = f"{binaries.psql.parent}{os.pathsep}{env.get('PATH', '')}"
     env["LC_ALL"] = "C"
-    root = Path(tempfile.mkdtemp(prefix="successor-postgres-"))
+    fixture = DisposablePostgres("successor-postgres-", binaries.pg_ctl, env)
+    root = fixture.root
     data = root / "data"
     with postgres_fixture_group():
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             port = sock.getsockname()[1]
         def run(args, child_env=None):
-            result = subprocess.run([str(arg) for arg in args], cwd=repo, env=child_env or env, capture_output=True, timeout=600)
+            result = fixture.run(args, cwd=repo, env=child_env or env, capture_output=True, timeout=600)
             if result.returncode:
                 (root / "failure.log").write_bytes(result.stderr + result.stdout)
                 raise ValueError(f"disposable database {Path(str(args[0])).name} failed; diagnostics retained at {root / 'failure.log'}")
-        started = False
         try:
             run([binaries.initdb, "-D", data, "-U", "carr_ci", "--auth=trust", "--encoding=UTF8", "--no-locale"])
-            started = True
             run([binaries.pg_ctl, "-D", data, "-l", root / "postgres.log", "-o", f"-h 127.0.0.1 -k {root} -p {port}", "-w", "start"])
             run([binaries.createdb, "-h", "127.0.0.1", "-p", port, "-U", "carr_ci", "carr_ci"])
             dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
             run([binaries.psql, dsn, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c", "create role neondb_owner"])
             yield dsn, env, run
         finally:
-            if started:
-                result = subprocess.run([str(binaries.pg_ctl), "-D", str(data), "-m", "fast", "-w", "stop"], env=env, capture_output=True, timeout=60)
-                if result.returncode:
-                    status = subprocess.run([str(binaries.pg_ctl), "-D", str(data), "status"], env=env, capture_output=True, timeout=30)
-                    if status.returncode != 3:
-                        raise ValueError(f"disposable database teardown unconfirmed; retained {root}")
+            fixture.close()
 
 
 def predecessor_rows(repo, version):

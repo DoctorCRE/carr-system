@@ -62,6 +62,7 @@ TOOLS_ROOT = HERE.parent
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 import credential_env  # noqa: E402 — shared long-lived-token loader
+import flashlib
 
 DEFAULT_RESULTS = Path(
     os.environ.get(
@@ -328,6 +329,11 @@ def dispatch(
     the Sol fixer desk a throwaway copy per task (2026-09-24)."""
     registry = registry or Registry()
     results_path = Path(results_path or DEFAULT_RESULTS)
+    if name == "flash" and registry.entries().get(name, {}).get("kind") == "claude-session":
+        try:
+            flashlib.ensure_desk(lambda: desks.is_live(registry.entries()[name].get("socket", "")))
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)          # every refusal happens here
     if retrieval and entry["kind"] != "grok-cli":
         raise DeskError("unsupported_retrieval", "explicit source retrieval requires a Grok desk")
@@ -357,7 +363,11 @@ def dispatch(
             )
 
     if entry["kind"] == "claude-session":
-        outcome = _to_claude(entry, task, msg_id)
+        if name == "flash":
+            with flashlib.activity_scope():
+                outcome = _to_claude(entry, task, msg_id)
+        else:
+            outcome = _to_claude(entry, task, msg_id)
     elif entry["kind"] == "claude-desktop":
         outcome = _to_claude_desktop(entry, task)
     elif entry["kind"] == "grok-cli":

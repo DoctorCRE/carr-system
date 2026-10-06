@@ -15,13 +15,16 @@ FIXTURES = ROOT / "tools/fixtures/job-watchdog"
 
 def setUpModule():
     from unittest.mock import patch
-    global board_publication
+    global board_publication, scheduled_machine
     board_publication = patch.dict(os.environ, {"PROGRESS_BOARD_LOCAL_ONLY": "1"})
     board_publication.start()
+    scheduled_machine = patch("scheduled_jobs.check", return_value=[])
+    scheduled_machine.start()
 
 
 def tearDownModule():
     board_publication.stop()
+    scheduled_machine.stop()
 
 
 class ReplayTests(unittest.TestCase):
@@ -390,6 +393,7 @@ class GithubBudgetTests(unittest.TestCase):
         self.listing = [{"number": 7, "head": {"sha": "a" * 40}, "updated_at": "2026-10-04T10:00:00Z"}]
         self.calls = []
         self.limited = False
+        self.branches = []
 
     def gh(self, argv, config, cwd=None):
         self.calls.append(argv)
@@ -397,7 +401,9 @@ class GithubBudgetTests(unittest.TestCase):
         if "pulls?state=open" in target:
             return json.dumps([self.listing])
         if "branches?" in target:
-            return "[[]]"
+            return json.dumps([self.branches])
+        if "/commits/" in target:
+            return json.dumps({"commit": {"committer": {"date": "2026-10-01T00:00:00Z"}}})
         if argv[:2] == ["gh", "api"] and target == "rate_limit":
             return json.dumps({"resources": {
                 "core": {"limit": 5000, "used": 12, "remaining": 4988, "reset": 2000000000},
@@ -439,6 +445,21 @@ class GithubBudgetTests(unittest.TestCase):
 
     def graphql_calls(self):
         return [a for a in self.calls if a[:3] in (["gh", "pr", "view"], ["gh", "api", "graphql"])]
+
+    def test_branch_dates_reuse_immutable_sha_but_retired_refs_leave_the_facts(self):
+        self.branches = [{"name": "codex/old", "commit": {"sha": "b" * 40}}]
+        first = self.collect(1000)
+        self.assertEqual(len(first["branches"]), 1)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.collect(1120)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 0)
+        dates = self.root / "out/watchdog/branch-dates.json"
+        dates.write_text(json.dumps({self.REPO + ":" + "b" * 40: float("nan")}))
+        refreshed = self.collect(1180)
+        self.assertEqual(refreshed["branches"], first["branches"])
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.branches = []
+        self.assertEqual(self.collect(1240)["branches"], [])
 
     def test_unchanged_pr_is_not_recollected_until_the_cache_expires(self):
         first = self.collect(1000)
@@ -737,7 +758,11 @@ class RunnerTests(unittest.TestCase):
             cp = root / "config.json"
             cp.write_text(json.dumps(config))
             env = dict(os.environ, PATH=str(executable.parent) + os.pathsep + os.environ["PATH"])
-            result = subprocess.run([sys.executable, str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"],
+            script = ("import sys, runpy; sys.path.insert(0, " + repr(str(ROOT / "lib")) + "); "
+                      "import scheduled_jobs; scheduled_jobs.check = lambda **kwargs: []; "
+                      "sys.argv = " + repr([str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"]) + "; "
+                      "runpy.run_path(sys.argv[0], run_name='__main__')")
+            result = subprocess.run([sys.executable, "-c", script],
                                     env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), "")

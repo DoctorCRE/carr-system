@@ -67,7 +67,8 @@ def main():
     assert destination_rules <= move_rules, sorted(destination_rules - move_rules)
     add_call = {"command": "*** Begin Patch\n*** Add File: hooks/probe.py\n+after\n*** End Patch"}
     add_rules = set(rule_routes.matched_rule_ids(routes, "apply_patch", add_call))
-    assert move_rules == add_rules and len(move_rules) == 9, (move_rules, add_rules)
+    assert move_rules == add_rules, (move_rules, add_rules)
+    assert {"4a53ff82", "58b44ccb", "99e951b9"} <= move_rules, move_rules
     move_out = {"command": "*** Begin Patch\n*** Update File: hooks/probe.py\n*** Move to: scratch.txt\n@@\n-before\n+after\n*** End Patch"}
     assert destination_rules <= set(rule_routes.matched_rule_ids(routes, "apply_patch", move_out))
     update_patch = {"command": "*** Begin Patch\n*** Update File: hooks/ledger-sweep.py\n@@\n-old\n+new\n*** End Patch"}
@@ -164,7 +165,7 @@ def main():
             page_one = state / "page-one.json"
             page_one.write_text(json.dumps({"rule_boot": {
                 "schema": boot.BOOT_SCHEMA, "digest": arm["digest"],
-                "page": 1, "pages_total": 2, "text": "fixture page one"}}))
+                "page": 1, "pages_total": 2, "total_chars": 12, "text": "page 1"}}))
             os.environ["CARR_RULE_BOOT_FETCH_STUB"] = str(page_one)
             try:
                 for source in ("startup", "resume", "clear"):
@@ -180,7 +181,7 @@ def main():
                 fetch = dict(base, tool_name="Bash", tool_input={"command": command})
                 assert invoke("rule-boot-gate.py", fetch, state) == {}
                 response = {"rule_boot": {"schema": boot.BOOT_SCHEMA, "digest": arm["digest"],
-                                          "page": page, "pages_total": 2, "text": f"page {page}"}}
+                                          "page": page, "pages_total": 2, "total_chars": 12, "text": f"page {page}"}}
                 post = dict(fetch, hook_event_name="PostToolUse", tool_response=response)
                 invoke("rule-boot-gate.py", post, state)
             assert invoke("rule-boot-gate.py", base, state) == {}

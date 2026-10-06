@@ -357,6 +357,7 @@ class Fixture:
                            call_verb=lambda verb, args: (verbs.append((verb, args)) or (True, {"ok": True})),
                            slice_marker=slice_marker, dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
         pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}}
+        pipe.sleep = lambda _seconds: None
         return pipe
 
     def state(self) -> dict:
@@ -715,6 +716,15 @@ class CanaryAggregate(Base):
 
 
 class Batching(Base):
+    def test_offline_live_poll_never_waits_on_the_wall_clock(self):
+        with mock.patch.object(rp.time, "sleep", side_effect=AssertionError("real sleep in offline fixture")):
+            pipe = self.fx.pipeline(FakeRunner())
+            pipe.http = mock.Mock(return_value={"git_sha": {"value": self.fx.base}})
+            served = pipe._await_live(pipe.cfg["worker"], lambda row: row["git_sha"]["value"],
+                                      "unserved-source", attempts=3)
+        self.assertEqual(served, self.fx.base)
+        self.assertEqual(pipe.http.call_count, 3)
+
     def test_many_merges_ship_once_at_the_latest_sha(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
         self.fx.commit({"mcp-server/src/b.js": "2"})

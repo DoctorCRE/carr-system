@@ -1,8 +1,8 @@
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, execFile } from 'node:child_process';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -20,17 +20,17 @@ test('Local Deals CI fixture provisions missing roles on a fresh cluster and pre
   skip: !bin && 'PostgreSQL unavailable',
 }, async () => {
   const releaseBudget = await acquirePostgresFixtureGroup();
-  const dir = mkdtempSync('/tmp/local-deals-ci-');
-  const socket = createServer();
-  await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
-  const port = socket.address().port;
-  await new Promise(resolve => socket.close(resolve));
-  let running = false;
+  let postgresFixture, dir;
   let admin;
   try {
-    execFileSync(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale'], { stdio: 'pipe' });
-    execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h 127.0.0.1 -p ${port}`, '-w', 'start'], { stdio: 'pipe' });
-    running = true;
+    const socket = createServer();
+    await new Promise(resolve => socket.listen(0, '127.0.0.1', resolve));
+    const port = socket.address().port;
+    await new Promise(resolve => socket.close(resolve));
+    postgresFixture = await acquireDisposablePostgres({ prefix: 'local-deals-ci-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+    dir = postgresFixture.root;
+    await postgresFixture.run(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale']);
+    await postgresFixture.run(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h 127.0.0.1 -p ${port}`, '-w', 'start']);
     const dsn = `postgresql://fixture@127.0.0.1:${port}/postgres`;
     admin = new pg.Client({ connectionString: dsn });
     await admin.connect();
@@ -58,7 +58,7 @@ test('Local Deals CI fixture provisions missing roles on a fresh cluster and pre
   } finally {
     try {
       try { if (admin) await admin.end(); }
-      finally { if (running) execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe' }); }
+      finally { await postgresFixture?.close(); }
     } finally { await releaseBudget(); }
   }
 });

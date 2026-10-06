@@ -670,7 +670,7 @@
       "wirings": [
         {
           "event": "PreToolUse",
-          "matcher": "Bash|Write|Edit|MultiEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*",
+          "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*",
           "fixtures": [
             "bash",
             "edits",

@@ -59,6 +59,8 @@ import uuid
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "tools"))
+import flashlib
 OUT = os.path.join(REPO, "out")
 RUNS_LOG = os.path.join(OUT, "flash-runs.jsonl")
 EXAMPLES_LOG = os.path.join(OUT, "flash-examples.jsonl")
@@ -578,17 +580,21 @@ def run_attempt(n, cwd, prompt, test_cmd, effort, workdir, think=True, rules_tex
             "--tools", *ATTEMPT_TOOLS, *extra, "--allowedTools", *allowed]
     reads, execs, port = _dep_reads(cwd), [os.path.join(cwd, ".venv", "bin")], flash_port()
     gitdir = gitdir_for(dest)
-    if sandbox:
-        execs = [*execs, *agent_execs()]
-        # The agent runs model-driven code, so it is sandboxed: writes only inside this attempt copy (never git
-        # metadata), no reads under home except its deps and its read-only git dir, network only to the local Flash
-        # port. A throwaway HOME keeps its config writable. It runs contained, so nothing it starts outlives it.
-        argv = sandbox_wrap(argv, dest, reads=[*reads, gitdir], execs=execs, port=port)
-        env = dict(_sandbox_env(env or os.environ, dest), GIT_DIR=gitdir, GIT_WORK_TREE=dest)
-        code, transcript = bounded_run(argv, dest, ATTEMPT_TIMEOUT, env=env)
-    else:
-        env = dict(env or os.environ, GIT_DIR=gitdir, GIT_WORK_TREE=dest)
-        code, transcript = _sh(argv, dest, ATTEMPT_TIMEOUT, env=env)
+    try:
+        with flashlib.request_scope(os.environ.get("CARR_FLASH_URL", flashlib.LOCAL_URL)):
+            if sandbox:
+                execs = [*execs, *agent_execs()]
+                # The agent runs model-driven code, so it is sandboxed: writes only inside this attempt copy (never git
+                # metadata), no reads under home except its deps and its read-only git dir, network only to the local Flash
+                # port. A throwaway HOME keeps its config writable. It runs contained, so nothing it starts outlives it.
+                argv = sandbox_wrap(argv, dest, reads=[*reads, gitdir], execs=execs, port=port)
+                env = dict(_sandbox_env(env or os.environ, dest), GIT_DIR=gitdir, GIT_WORK_TREE=dest)
+                code, transcript = bounded_run(argv, dest, ATTEMPT_TIMEOUT, env=env)
+            else:
+                env = dict(env or os.environ, GIT_DIR=gitdir, GIT_WORK_TREE=dest)
+                code, transcript = _sh(argv, dest, ATTEMPT_TIMEOUT, env=env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        code, transcript = 1, f"Flash unavailable: {exc}"
     elapsed = round(time.monotonic() - started, 1)
     test_code, test_out = (None, "")
     if test_cmd:

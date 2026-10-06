@@ -33,8 +33,8 @@ def route(st, t):
     return sorted(state_mod.route_turn(st, t, SEATS, mention_only=QUIET))
 
 
-def test_human_turn_reaches_every_desk():
-    assert route(state_mod.default_state(), turn("m1", "joe")) == ["codex-desk", "flash"]
+def test_unmentioned_human_turn_keeps_flash_idle():
+    assert route(state_mod.default_state(), turn("m1", "joe")) == ["codex-desk"]
 
 
 def test_mention_only_desk_does_not_hear_other_desk():
@@ -65,9 +65,9 @@ def test_mention_must_be_a_whole_seat_name():
     assert route(state_mod.default_state(), turn("m5", "codex", "@flashy thing")) == []
 
 
-def test_default_mention_only_is_empty():
+def test_flash_requires_a_mention_even_without_registry_listen_setting():
     st = state_mod.default_state()
-    assert sorted(state_mod.route_turn(st, turn("m6", "codex"), SEATS)) == ["flash"]
+    assert sorted(state_mod.route_turn(st, turn("m6", "codex"), SEATS)) == []
 
 
 def test_bridge_reads_room_listen_from_registry_entries():

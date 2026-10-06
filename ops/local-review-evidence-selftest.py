@@ -137,6 +137,31 @@ class CheckArtifacts(unittest.TestCase):
             self.assertIn("ci-inherited-from-main:gate-integrity", run.stdout)
             self.assertFalse(result.exists())
 
+    def test_quarantined_python_and_shell_suites_publish_both_diagnostics(self):
+        with tempfile.TemporaryDirectory(prefix="review-quarantined-logs-") as td:
+            root = Path(td)
+            copy_ci(root)
+            (root / 'hooks').mkdir()
+            (root / 'hooks/gate-integrity.py').write_text('raise SystemExit(0)\n')
+            (root / 'bin').mkdir()
+            shutil.copy(ROOT / 'bin/with-timeout.py', root / 'bin/with-timeout.py')
+            shutil.copy(ROOT / 'ops/ci-secret-scan.py', root / 'ops/ci-secret-scan.py')
+            (root / 'tools').mkdir()
+            for name, command in [('ops/fixture-selftest.py', 'print("python diagnostic"); raise SystemExit(1)\n'),
+                                  ('tools/test-fixture.sh', '#!/bin/sh\necho "shell diagnostic"\nexit 1\n')]:
+                (root / name).write_text(command)
+                (root / name).chmod(0o755)
+            entries = [{'test': name, 'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture',
+                'loop': 'https://github.com/jbookout/carr-system/issues/123'}
+                for name in ('ops/fixture-selftest.py', 'tools/test-fixture.sh')]
+            (root / 'ops/config/ci-quarantine.json').write_text(json.dumps({'version': 1, 'tests': entries}))
+            run = subprocess.run(['bash', str(root / 'ops/ci.sh'), '--strict', '--only', 'gates'],
+                env=fixture_env(), capture_output=True, text=True, timeout=20)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            self.assertEqual(run.stdout.count('python diagnostic'), 2, run.stdout)
+            self.assertEqual(run.stdout.count('shell diagnostic'), 2, run.stdout)
+
+
 
 class Admission(unittest.TestCase):
     def setUp(self):

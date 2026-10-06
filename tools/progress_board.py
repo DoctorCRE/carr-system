@@ -1934,9 +1934,22 @@ def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
-def board_snapshot(state: dict[str, Any]) -> dict[str, Any]:
-    """The versioned data contract the app page renders. Deterministic for a
-    given state. Full diagnostics stay local; the app receives bounded cards."""
+@functools.cache
+def cost_snapshot_reader() -> Callable:
+    """Use the collector's validation contract without importing a provider client."""
+    path = Path(__file__).resolve().with_name("system_costs.py")
+    spec = importlib.util.spec_from_file_location("carr_system_costs", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("system cost snapshot reader unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.load_snapshot
+
+
+def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
+    """The versioned data contract the app page renders, including fresh local
+    cost evidence. Full diagnostics stay local; the app receives bounded cards."""
     tasks = {}
     all_tasks = state.get("tasks") or {}
     for task_id, task in all_tasks.items():
@@ -1974,6 +1987,7 @@ def board_snapshot(state: dict[str, Any]) -> dict[str, Any]:
         # When GitHub facts were last checked and verified, and what failed:
         # a card kept from before an outage is never shown as fresh.
         "github_sync": state.get("github_sync"),
+        "costs": costs if costs is not None else cost_snapshot_reader()(REPO_ROOT / "out" / "system-costs.json", now=now_utc()),
         "omitted": {"live": 0, "merged": 0, "history": 0},
         "updated_at": state.get("updated_at"),
     })
@@ -2021,12 +2035,12 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
             'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
 
 
-def publish_board(project: str) -> dict[str, int]:
+def publish_board(project: str, *, costs=None) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
-    snapshot = board_snapshot(state)
+    snapshot = board_snapshot(state, costs=costs)
     if board == "carr-v5":
         from system_work_cache import cached_github
         snapshot["external_inventory"] = publish_external_inventory(cached_github(board_dir() / "system-work-github-cache.json",
@@ -2217,7 +2231,10 @@ def command_init(args: argparse.Namespace) -> None:
     }
     with board_lock(args.project):
         create_json(state)
-    refresh_and_publish(args.project)
+    if getattr(args, "costs", None) is not None:
+        publish_board(args.project, costs=args.costs)
+    else:
+        refresh_and_publish(args.project)
 
 
 def command_task(args: argparse.Namespace) -> None:

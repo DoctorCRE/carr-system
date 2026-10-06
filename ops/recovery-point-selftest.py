@@ -355,11 +355,20 @@ def main() -> int:
     check("a legacy backup-like artifact without complete provenance makes absence unknown",
           unverified["state"] == "unknown")
 
-    with mock.patch("time.sleep") as slept:
-        failed_api, failed_calls = cloud_fixture({"api_error": "synthetic provider unavailable"})
-    check("provider API failure is unknown", failed_api["state"] == "unknown")
-    check("a transient provider failure is retried before it reads unknown",
-          len(failed_calls) == 3 and slept.call_count == 2)
+    for failure in ("exit", "timeout"):
+        runner = mock.Mock(return_value=subprocess.CompletedProcess(
+            ["gh"], 1, "", "synthetic provider unavailable"))
+        if failure == "timeout":
+            runner.side_effect = subprocess.TimeoutExpired(["gh"], 30)
+        delays: list[float] = []
+        reader = rp.GitHubReader(gh="gh", runner=runner, sleep=delays.append)
+        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "jbookout/carr-system"}), \
+             mock.patch.object(rp.shutil, "which", return_value="gh"), \
+             mock.patch.object(rp, "GitHubReader", return_value=reader):
+            failed_api = rp.cloud_path(repo="/fixture")
+        check(f"provider {failure} failure is unknown", failed_api["state"] == "unknown")
+        check(f"a transient provider {failure} is retried before it reads unknown",
+              runner.call_count == 3 and delays == [5, 15])
 
     cap_fixtures = [
         provider_fixture(

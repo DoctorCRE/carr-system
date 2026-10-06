@@ -11,11 +11,12 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.disposable_pg_fixture import DisposablePostgres
 ROLLBACK_ONLY_GATES = {'siep12-policy-epoch-local-pg-gate.py', 'siep18-reference-monitor-local-pg-gate.py'}
 
 
@@ -53,7 +54,8 @@ def checked(command, env):
 
 def snapshot(dsn, env):
     bins = postgres_binaries()
-    root = Path(tempfile.mkdtemp(prefix='ci-db-gate-'))
+    fixture = DisposablePostgres('ci-db-gate-', bins / 'pg_ctl', env)
+    root = fixture.root
     try:
         owner = urlsplit(dsn).username
         if not owner:
@@ -65,9 +67,9 @@ def snapshot(dsn, env):
         roles = '\n'.join(line for line in roles.splitlines() if line not in creates_owner) + '\n'
         (root / 'roles.sql').write_text(roles)
         checked([bins / 'pg_dump', '-d', dsn, '-Fc', '-f', root / 'database.dump'], env)
-        return bins, root, owner
+        return bins, fixture, owner
     except BaseException:
-        quarantine(root)
+        fixture.close()
         raise
 
 
@@ -82,15 +84,16 @@ def run_gate(gate, dsn, log, env):
 
 
 def run_isolated(gate, image, log, env):
-    bins, root, owner = image
+    bins, fixture, owner = image
+    root = fixture.root
     port = free_port()
     bootstrap = f'postgres://{quote(owner, safe="")}@127.0.0.1:{port}/postgres'
     data = root / 'data'
     try:
-        checked([bins / 'initdb', '-D', data, '-U', owner,
-                 '--auth=trust', '--encoding=UTF8', '--no-locale'], env)
-        checked([bins / 'pg_ctl', '-D', data, '-l', root / 'postgres.log',
-                 '-o', f'-h 127.0.0.1 -p {port} -k {root}', '-w', 'start'], env)
+        fixture.run([bins / 'initdb', '-D', data, '-U', owner,
+                 '--auth=trust', '--encoding=UTF8', '--no-locale'], check=True, capture_output=True, timeout=120)
+        fixture.run([bins / 'pg_ctl', '-D', data, '-l', root / 'postgres.log',
+                 '-o', f'-h 127.0.0.1 -p {port} -k {root}', '-w', 'start'], check=True, capture_output=True, timeout=120)
         checked([bins / 'psql', '-d', bootstrap, '-v', 'ON_ERROR_STOP=1',
                  '-f', root / 'roles.sql'], env)
         checked([bins / 'createdb', '--maintenance-db', bootstrap, '-O', owner, 'carr_ci'], env)
@@ -98,13 +101,7 @@ def run_isolated(gate, image, log, env):
         checked([bins / 'pg_restore', '--exit-on-error', '-d', dsn, root / 'database.dump'], env)
         return run_gate(gate, dsn, log, env)
     finally:
-        subprocess.run([str(bins / 'pg_ctl'), '-D', str(data), '-m', 'fast', '-w', 'stop'],
-                                 env=env, capture_output=True, timeout=60)
-        status = subprocess.run([str(bins / 'pg_ctl'), '-D', str(data), 'status'],
-                                env=env, capture_output=True, timeout=30)
-        if status.returncode != 3:
-            raise RuntimeError('private gate cluster did not stop; retained for diagnosis')
-        quarantine(root)
+        fixture.close()
 
 
 def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):

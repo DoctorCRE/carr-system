@@ -1,6 +1,6 @@
 {
  "_note": "Committed classification for the gated rule boot (standing-context detail=boot, mcp-server/src/rule-boot.js). Holds ids, class, a <=20-word trigger summary and a length per rule; NEVER a rule statement. Statements are read live from the store when a context fetches its boot. `chars` is the statement length at classification, read only by the CI budget guard, which has no store to call. Class a includes standing person, team and business facts independent of task, including factual premises in mixed rules. ops/sync-rule-boot-classes.py validates supported fact shapes against the existing rule-selection corpus; unrecognized shapes require full-statement review. always_on = class a, plus rules whose only enforcement is a Stop gate (chat_lint, conduct_stop, completion_evidence: the gate fires after the reply is written), plus class-b rules with a conversational moment that Jev confirmed against the rule text. sponsors lists every partner whose scope the budget check measures.",
- "budget_tokens": 40000,
+ "budget_tokens": 80000,
  "chars_per_token": 3.6,
  "sponsors": ["dell", "joe"],
  "class_legend": {

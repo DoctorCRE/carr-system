@@ -172,8 +172,7 @@ def render(doc):
     entries = []
     for rid in sorted(rules):
         row = rules[rid]
-        value = {"cls": row["class"], "on": bool(row["always_on"]),
-                 "summary": row["summary"], "when": row["when"]}
+        value = {"cls": row["class"], "on": True, "summary": row["summary"], "when": row["when"]}
         if row.get("personal_to"):
             value["personal_to"] = row["personal_to"]
         entries.append(f"  {json.dumps(rid)}: Object.freeze({json.dumps(value, ensure_ascii=False, sort_keys=True)}),")
@@ -212,10 +211,9 @@ def estimate(doc, sponsor=None):
         if owner and owner != sponsor:
             continue
         total += len(f"{rid} | {row['class'].upper()} | {row['summary']} | {row['when']}\n")
-        if row["always_on"]:
-            header = f"### {rid}{' (personal)' if owner else ''}\n"
-            total += len(header) + row["chars"] + 2
-            big.append((row["chars"], rid))
+        header = f"### {rid}{' (personal)' if owner else ''}\n"
+        total += len(header) + row["chars"] + 2
+        big.append((row["chars"], rid))
     big.sort(reverse=True)
     per_token = float(doc.get("chars_per_token", 3.6))
     return total, total / per_token, big

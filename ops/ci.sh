@@ -652,7 +652,7 @@ PYEOF
   # script and refuses with "command line cannot be assembled, too long".
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
     b="$(basename "$1")"
-    "$PY" ops/ci-quarantine.py run --test "$1" --log "$LOGDIR/gate-$b.log" \
+    "$PY" ops/ci-quarantine.py run --print-log --test "$1" --log "$LOGDIR/gate-$b.log" \
       --identity-file "$LOGDIR/source-identity.json" -- \
       "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
       >"$LOGDIR/gate-$b.report" 2>&1
@@ -706,7 +706,7 @@ PYEOF
       continue
     fi
     count=$((count+1))
-    "$PY" ops/ci-quarantine.py run --test "$t" --log "$LOGDIR/gate-$sbase.log" \
+    "$PY" ops/ci-quarantine.py run --print-log --test "$t" --log "$LOGDIR/gate-$sbase.log" \
       --identity-file "$LOGDIR/source-identity.json" -- \
       "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
     grc=$?

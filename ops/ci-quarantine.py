@@ -54,6 +54,10 @@ def source_identity(repo):
     return {'sha': sha, 'tree': tree, 'fingerprint': digest.hexdigest()}
 
 
+def ordinary_failure(code):
+    return type(code) is int and 0 < code < 124 and code != 78
+
+
 def run(args):
     entries = load_manifest(args.manifest)
     entry = entries.get(args.test)
@@ -65,13 +69,18 @@ def run(args):
     status = 'passed' if first == 0 else 'failed'
     effective = first
     rerun = None
-    if first not in (0, 78, 124) and source_identity(args.repo) == identity:
+    if ordinary_failure(first) and source_identity(args.repo) == identity:
         with Path(str(log) + '.rerun.log').open('w') as output:
             rerun = subprocess.run(args.command, stdout=output, stderr=subprocess.STDOUT).returncode
+        if not ordinary_failure(rerun) and rerun != 0:
+            # A configuration error on retry cannot turn the first failure into a skip.
+            effective = first if rerun == 78 else rerun
         if rerun == 0 and source_identity(args.repo) == identity:
             status = 'flake-candidate'
     candidate = status == 'flake-candidate'
-    if entry and first not in (0, 78, 124) and 0 < first < 124:
+    if entry and ordinary_failure(first) and (rerun == 0 or ordinary_failure(rerun)):
+        if source_identity(args.repo) != identity:
+            raise ValueError("source changed during quarantine attempts")
         status = 'quarantined-failure'
         effective = 0
         print(f"QUARANTINED {args.test} · owner {entry['owner']} · loop {entry['loop']} · expires {entry['expires']}")
@@ -83,13 +92,16 @@ def run(args):
         with open(summary, 'a') as output:
             output.write(f"- {args.test}: {status}; first exit {first}; rerun {rerun}." +
                 (f" Loop {entry['loop']}; owner {entry['owner']}; expires {entry['expires']}." if entry else " Fix-loop proposal pending.") + '\n')
-    if args.print_log and first:
-        redacted = subprocess.run([sys.executable, str(REPO / 'ops/ci-secret-scan.py'), '--redact'],
-            input=log.read_text(errors='replace'), capture_output=True, text=True)
-        if redacted.returncode == 0:
-            print('\n'.join(redacted.stdout.splitlines()[-80:]))
-        else:
-            print('test output WITHHELD: redaction failed', file=sys.stderr)
+    if first and (args.print_log or status == 'quarantined-failure'):
+        for attempt_log in (log, Path(str(log) + '.rerun.log')):
+            if not attempt_log.exists():
+                continue
+            redacted = subprocess.run([sys.executable, str(REPO / 'ops/ci-secret-scan.py'), '--redact'],
+                input=attempt_log.read_text(errors='replace'), capture_output=True, text=True)
+            if redacted.returncode == 0:
+                print('\n'.join(redacted.stdout.splitlines()[-80:]))
+            else:
+                print('test output WITHHELD: redaction failed', file=sys.stderr)
     return effective
 
 

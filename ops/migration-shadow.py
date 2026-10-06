@@ -42,7 +42,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from types import ModuleType
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -211,16 +210,18 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
     base_snapshot = subprocess.run(["git", "show", f"{base}:{SNAPSHOT}"], cwd=REPO,
                                    capture_output=True, text=True, check=True).stdout
     (work / "base.sql").write_text(base_snapshot)
-    data, port = work / "data", free_port()
+    fixture = local_pg.DisposablePostgres("carr-migration-shadow.", bindir / "pg_ctl", env)
+    data, port = fixture.root / "data", free_port()
     dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
     python = REPO / ".venv/bin/python"
     python = python if python.is_file() else pathlib.Path(sys.executable)
 
-    run([bindir / "initdb", "-D", data, "-U", "carr_ci", "--auth=trust", "--encoding=UTF8",
-         "--no-locale"], env, "initdb", log)
     try:
-        run([bindir / "pg_ctl", "-D", data, "-l", work / "postgres.log",
-             "-o", f"-h 127.0.0.1 -p {port} -k {work}", "-w", "start"], env, "pg_ctl start", log)
+        fixture.run([bindir / "initdb", "-D", data, "-U", "carr_ci", "--auth=trust", "--encoding=UTF8",
+                     "--no-locale"], check=True, capture_output=True, text=True, timeout=120)
+        fixture.run([bindir / "pg_ctl", "-D", data, "-l", fixture.root / "postgres.log",
+                     "-o", f"-h 127.0.0.1 -p {port} -k {fixture.root}", "-w", "start"],
+                    check=True, capture_output=True, text=True, timeout=120)
         run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "carr_ci"],
             env, "createdb", log)
         run([bindir / "psql", dsn, "-v", "ON_ERROR_STOP=1", "-qc", "create role neondb_owner;"],
@@ -234,14 +235,9 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
              "--output-candidate", candidate], env, "bin/schema-snapshot.sh", log)
     finally:
         try:
-            stopped = subprocess.run([bindir / "pg_ctl", "-D", data, "-m", "fast", "-w", "stop"],
-                                     env=env, capture_output=True, timeout=60)
-            status = subprocess.run([bindir / "pg_ctl", "-D", data, "status"],
-                                    env=env, capture_output=True, timeout=30)
-        except (subprocess.TimeoutExpired, OSError):
-            raise ShutdownFailed(f"shutdown unavailable or timed out; cluster retained at {work}") from None
-        if stopped.returncode or status.returncode != 3:
-            raise ShutdownFailed(f"shutdown not verified; cluster retained at {work}")
+            fixture.close()
+        except RuntimeError as exc:
+            raise ShutdownFailed(str(exc)) from exc
     text = candidate.read_text()
     return base_snapshot, text, newly_applied(base_snapshot, text)
 
@@ -267,13 +263,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"migration-shadow: cannot resolve the base: {exc.stderr.strip()}", file=sys.stderr)
         return 2
 
-    work = pathlib.Path(tempfile.mkdtemp(prefix="carr-migration-shadow."))
-    retain = False
+    artifacts = local_pg.DisposablePostgres("carr-migration-shadow.", bindir / "pg_ctl")
+    work = artifacts.root
     try:
         try:
             _, candidate, applied = shadow(base, bindir, work)
         except (StepFailed, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            retain = isinstance(exc, ShutdownFailed)
             print(f"migration-shadow: FAILED against {base[:12]}'s production structure — {exc}",
                   file=sys.stderr)
             return 2
@@ -290,8 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         diffs = differences((REPO / SNAPSHOT).read_text(), candidate)
     finally:
-        if not retain:
-            shutil.rmtree(work)
+        artifacts.close()
     if not diffs:
         print(f"migration-shadow: OK — committed {SNAPSHOT} is exactly what the migrations produce")
         return 0

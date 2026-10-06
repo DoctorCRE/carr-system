@@ -1206,9 +1206,8 @@ class SpendHealthTests(unittest.TestCase):
 
     def test_loaded_nightly_chain_runs_the_spend_alarm_and_preflights_its_sources(self):
         nightly = (MODULE_PATH.parent.parent / "bin" / "nightly.sh").read_text()
-        self.assertTrue('step "Jev daily spend alarm"' in nightly
-                        and './.venv/bin/python tools/health-check.py --section jev-spend' in nightly,
-                        "nightly chain does not invoke the narrow Jev spend alarm")
+        self.assertIn('./run.sh costs --publish --alerts', nightly)
+        self.assertFalse('step "Jev daily spend alarm"' in nightly)
         preflight = nightly.split('if [ "${1:-}" = "--preflight" ]; then', 1)[1].split('missing=0', 1)[0]
         self.assertIn("tools/health-check.py", preflight)
         self.assertIn("ops/jev_spend_health.py", preflight)
@@ -1238,9 +1237,7 @@ class SpendHealthTests(unittest.TestCase):
             state = Path(d) / "loop.json"
             now = __import__("datetime").datetime(2026, 9, 28,
                 tzinfo=__import__("datetime").timezone.utc)
-            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                state, lambda *_: None, now=now,
-                worker_usage=lambda _day: {"calls": 0, "input_tokens": 0,
+            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", now=now, worker_usage=lambda _day: {"calls": 0, "input_tokens": 0,
                                             "unknown": 1, "pending_attempts": 1})
             self.assertIn("1 call or attempt missing usage", line)
             self.assertEqual(spend.nightly_exit_status(line), 0)
@@ -1249,9 +1246,7 @@ class SpendHealthTests(unittest.TestCase):
         spend = importlib.util.module_from_spec(SPEND_SPEC)
         SPEND_SPEC.loader.exec_module(spend)
         with tempfile.TemporaryDirectory() as d:
-            line = spend.check_spend(Path(d) / "absent", MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                Path(d) / "loop", lambda *_: None,
-                worker_usage=lambda _day: {"calls": 0, "input_tokens": 0, "unknown": 0,
+            line = spend.check_spend(Path(d) / "absent", MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", worker_usage=lambda _day: {"calls": 0, "input_tokens": 0, "unknown": 0,
                     "pending_attempts": 1, "abandoned_attempts": 2, "abandon_after_seconds": 3600})
             self.assertIn("2 abandoned attempts", line)
             self.assertIn("older than 3600s", line)
@@ -1264,7 +1259,7 @@ class SpendHealthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             log = Path(d) / "calls.jsonl"
             log.write_bytes(b"\xff")
-            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", Path(d) / "loop")
+            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json")
             self.assertIn("UNAVAILABLE", line)
             self.assertIn("owner orchestrator", line)
             self.assertEqual(spend.nightly_exit_status(line), 1)
@@ -1307,7 +1302,7 @@ class SpendHealthTests(unittest.TestCase):
                              "verify the next run", "auto-clear after three healthy runs"):
                 self.assertIn(required, missing.stdout)
 
-    def test_daily_spend_warns_and_dedups_one_loop_then_auto_clears(self):
+    def test_daily_spend_observation_warns_then_recovers_without_writing(self):
         self.assertTrue(SPEND_SPEC and SPEND_SPEC.loader)
         spend = importlib.util.module_from_spec(SPEND_SPEC)
         SPEND_SPEC.loader.exec_module(spend)
@@ -1322,6 +1317,7 @@ class SpendHealthTests(unittest.TestCase):
                 if name == "read-loop":
                     return {"loop_id": payload["loop_id"], "version": 1}
                 return {"ok": True, "loop_id": "loop-1", "number": "901"}
+            spend._run_verb = verb
 
             def row(ts, tokens, **other):
                 return json.dumps({"ts": ts, "ok": True, "usage": {"input_tokens": tokens,
@@ -1331,26 +1327,23 @@ class SpendHealthTests(unittest.TestCase):
                            row("2026-09-27T02:00:00Z", 90_000_000) +
                            row("2026-09-28T03:00:00Z", 10_000_000, cache_hit=True))
             day = __import__("datetime").datetime(2026, 9, 28, 4, tzinfo=__import__("datetime").timezone.utc)
-            first = spend.check_spend(log, config, state, verb, now=day)
+            first = spend.check_spend(log, config, now=day)
             self.assertIn("WARN", first)
             self.assertIn("$0.50", first)
             self.assertIn("owner orchestrator", first)
             self.assertIn("find caller in jev usage log", first)
             self.assertIn("auto-clear", first)
-            self.assertEqual([x[0] for x in events], ["add-loop"])
-            self.assertEqual(events[0][1]["owner"], "claude")
-            spend.check_spend(log, config, state, verb, now=day)
-            self.assertEqual(len(events), 1)
+            self.assertEqual(events, [])
+            spend.check_spend(log, config, now=day)
+            self.assertEqual(events, [])
             log.write_text(log.read_text() + row("2026-09-28T04:00:00Z", 5_000_000))
-            spend.check_spend(log, config, state, verb, now=day)
-            self.assertEqual([x[0] for x in events], ["add-loop", "read-loop", "update-loop"])
-            self.assertEqual(events[-1][1]["base_version"], 1)
+            spend.check_spend(log, config, now=day)
+            self.assertEqual(events, [])
             next_day = day.replace(day=29)
-            cleared = spend.check_spend(log, config, state, verb, now=next_day)
+            cleared = spend.check_spend(log, config, now=next_day)
             self.assertIn("OK", cleared)
-            self.assertEqual([x[0] for x in events], ["add-loop", "read-loop", "update-loop",
-                                                  "read-loop", "close-loop"])
-            self.assertEqual(events[-1][1]["base_version"], 1)
+            self.assertEqual(events, [])
+            self.assertFalse(state.exists())
 
     def test_success_without_usage_is_unknown_and_preserves_spend_warning(self):
         self.assertTrue(SPEND_SPEC and SPEND_SPEC.loader)
@@ -1365,23 +1358,23 @@ class SpendHealthTests(unittest.TestCase):
             def verb(name, payload):
                 events.append(name)
                 return {"ok": True, "loop_id": "warning-1"}
+            spend._run_verb = verb
 
             day = __import__("datetime").datetime(2026, 9, 28, tzinfo=__import__("datetime").timezone.utc)
             log.write_text(json.dumps({"ts": "2026-09-28T01:00:00Z", "ok": True,
                                        "usage": {"input_tokens": 12_000_000}}) + "\n")
-            self.assertIn("WARN", spend.check_spend(log, config, state, verb, now=day))
-            self.assertEqual(events, ["add-loop"])
+            self.assertIn("WARN", spend.check_spend(log, config, now=day))
+            self.assertEqual(events, [])
             log.write_text(log.read_text() + json.dumps({
                 "ts": "2026-09-29T01:00:00Z", "ok": True, "usage": None,
             }) + "\n")
-            unknown = spend.check_spend(log, config, state, verb,
-                                        now=day.replace(day=29))
+            unknown = spend.check_spend(log, config, now=day.replace(day=29))
             self.assertIn("UNKNOWN", unknown)
             self.assertIn("missing usage", unknown)
             self.assertNotIn("OK", unknown)
             self.assertNotIn("$0.000", unknown)
-            self.assertEqual(events, ["add-loop"])
-            self.assertEqual(json.loads(state.read_text())["loop_id"], "warning-1")
+            self.assertEqual(events, [])
+            self.assertFalse(state.exists())
 
     def test_daily_alarm_adds_factory_and_worker_receipts_once(self):
         spend = importlib.util.module_from_spec(SPEND_SPEC)
@@ -1404,13 +1397,12 @@ class SpendHealthTests(unittest.TestCase):
             def verb(name, payload):
                 events.append(name)
                 return {"ok": True, "loop_id": "spend-warning"}
-            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                state, verb, now=day, extra_logs=[factory],
-                worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
+            spend._run_verb = verb
+            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", now=day, extra_logs=[factory], worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
             self.assertIn("WARN", result)
             self.assertIn("$0.546", result)
             self.assertIn("4 calls", result)
-            self.assertEqual(events, ["add-loop"])
+            self.assertEqual(events, [])
 
     def test_daily_alarm_works_before_local_log_exists(self):
         spend = importlib.util.module_from_spec(SPEND_SPEC)
@@ -1426,12 +1418,11 @@ class SpendHealthTests(unittest.TestCase):
             def verb(name, payload):
                 events.append(name)
                 return {"ok": True, "loop_id": "spend-warning"}
-            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                state, verb, now=day, extra_logs=[factory],
-                worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
+            spend._run_verb = verb
+            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", now=day, extra_logs=[factory], worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
             self.assertIn("WARN", result)
             self.assertIn("$0.546", result)
-            self.assertEqual(events, ["add-loop"])
+            self.assertEqual(events, [])
 
 
 class LibraryShapeTests(unittest.TestCase):

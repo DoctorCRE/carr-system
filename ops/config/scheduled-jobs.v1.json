@@ -1,0 +1,2378 @@
+{
+  "schema_version": 1,
+  "canonical_checkout": "~/carr-system",
+  "scope": {
+    "launchd_label_prefixes": [
+      "com.carr.",
+      "local.carr-"
+    ],
+    "cron": "all current-user entries",
+    "claude": "definition drift owned by config-as-code; execution owned by Control Plane"
+  },
+  "captured_at": "2026-10-05T17:56:20Z",
+  "jobs": [
+    {
+      "label": "com.carr.calendar-eventkit",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "calendar-eventkit",
+        "launchd.run",
+        "/bin/sh",
+        "~/carr-system/bin/calendar-eventkit-capture.sh",
+        "--days",
+        "7"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Weekday": 2,
+            "Hour": 7,
+            "Minute": 20
+          },
+          {
+            "Weekday": 3,
+            "Hour": 7,
+            "Minute": 20
+          },
+          {
+            "Weekday": 4,
+            "Hour": 7,
+            "Minute": 20
+          },
+          {
+            "Weekday": 5,
+            "Hour": 7,
+            "Minute": 20
+          },
+          {
+            "Weekday": 6,
+            "Hour": 7,
+            "Minute": 20
+          }
+        ],
+        "RunAtLoad": false
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/calendar-capture.log",
+      "log_paths": [
+        "~/carr-system/out/calendar-capture.log",
+        "~/carr-system/out/calendar-capture.log"
+      ],
+      "log_max_age_seconds": 691200,
+      "owner": "orchestrator",
+      "done_signal": "ops.run calendar-eventkit/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/ff028bc6623992ac.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/ff028bc6623992ac.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.calendar-prebrief-joe",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/calendar-prebrief-joe-runtime.py",
+        "--profile",
+        "~/.config/carr/calendar-prebrief-joe.env",
+        "tick"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 1
+          },
+          {
+            "Minute": 2
+          },
+          {
+            "Minute": 3
+          },
+          {
+            "Minute": 4
+          },
+          {
+            "Minute": 5
+          },
+          {
+            "Minute": 6
+          },
+          {
+            "Minute": 7
+          },
+          {
+            "Minute": 8
+          },
+          {
+            "Minute": 9
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 11
+          },
+          {
+            "Minute": 12
+          },
+          {
+            "Minute": 13
+          },
+          {
+            "Minute": 14
+          },
+          {
+            "Minute": 15
+          },
+          {
+            "Minute": 16
+          },
+          {
+            "Minute": 17
+          },
+          {
+            "Minute": 18
+          },
+          {
+            "Minute": 19
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 21
+          },
+          {
+            "Minute": 22
+          },
+          {
+            "Minute": 23
+          },
+          {
+            "Minute": 24
+          },
+          {
+            "Minute": 25
+          },
+          {
+            "Minute": 26
+          },
+          {
+            "Minute": 27
+          },
+          {
+            "Minute": 28
+          },
+          {
+            "Minute": 29
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 31
+          },
+          {
+            "Minute": 32
+          },
+          {
+            "Minute": 33
+          },
+          {
+            "Minute": 34
+          },
+          {
+            "Minute": 35
+          },
+          {
+            "Minute": 36
+          },
+          {
+            "Minute": 37
+          },
+          {
+            "Minute": 38
+          },
+          {
+            "Minute": 39
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 41
+          },
+          {
+            "Minute": 42
+          },
+          {
+            "Minute": 43
+          },
+          {
+            "Minute": 44
+          },
+          {
+            "Minute": 45
+          },
+          {
+            "Minute": 46
+          },
+          {
+            "Minute": 47
+          },
+          {
+            "Minute": 48
+          },
+          {
+            "Minute": 49
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 51
+          },
+          {
+            "Minute": 52
+          },
+          {
+            "Minute": 53
+          },
+          {
+            "Minute": 54
+          },
+          {
+            "Minute": 55
+          },
+          {
+            "Minute": 56
+          },
+          {
+            "Minute": 57
+          },
+          {
+            "Minute": 58
+          },
+          {
+            "Minute": 59
+          }
+        ]
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/calendar-prebrief-joe-launchd.log",
+      "log_paths": [
+        "~/carr-system/out/calendar-prebrief-joe-launchd.log",
+        "~/carr-system/out/calendar-prebrief-joe-launchd.log"
+      ],
+      "log_max_age_seconds": 600,
+      "owner": "orchestrator",
+      "done_signal": "Calendar prebrief runtime projection run/observation receipts in record layer; launchd activity log",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.call-mode",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "~/carr-system/tools/dictation-rig/bin/call-mode.py",
+        "serve"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "KeepAlive": {
+          "SuccessfulExit": false
+        },
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/Library/Logs/carr-call-mode.log",
+      "log_paths": [
+        "~/Library/Logs/carr-call-mode.log",
+        "~/Library/Logs/carr-call-mode.log"
+      ],
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "READY line in ~/Library/Logs/carr-call-mode.log; resident HTTP server has no per-run completion receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05.",
+      "freshness_exception": "Resident, event-driven or on-demand agent; log age is not evidence of a missed firing. Registration and last exit remain checked."
+    },
+    {
+      "label": "com.carr.canary-ingest-sink",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/opt/homebrew/bin/python3",
+        "~/carr-system/tools/canary-ingest-sink.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "KeepAlive": true,
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/canary/notes-ingest/sink.log",
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/canary/notes-ingest/sink.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job.",
+      "freshness_exception": "Resident KeepAlive sink; log age is not evidence of a missed firing. Registration, running state and last exit remain checked."
+    },
+    {
+      "label": "com.carr.canonical-dirty-watchdog",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "canonical-dirty-watchdog",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/repo-hygiene-janitor.py",
+        "--canonical-freshness",
+        "watchdog",
+        "--repository",
+        "~/carr-system",
+        "--max-age-hours",
+        "24"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 7
+          }
+        ],
+        "RunAtLoad": false,
+        "ThrottleInterval": 60
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/canonical-dirty-watchdog.log",
+      "log_paths": [
+        "~/carr-system/out/canonical-dirty-watchdog.log",
+        "~/carr-system/out/canonical-dirty-watchdog.log"
+      ],
+      "log_max_age_seconds": 10800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run canonical-dirty-watchdog/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/2f293fd5474f77d5.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/2f293fd5474f77d5.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.canonical-fast-forward",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "canonical-fast-forward",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/repo-hygiene-janitor.py",
+        "--canonical-freshness",
+        "fast-forward",
+        "--repository",
+        "~/carr-system"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Hour": 3,
+            "Minute": 20
+          }
+        ],
+        "RunAtLoad": false
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/canonical-fast-forward.log",
+      "log_paths": [
+        "~/carr-system/out/canonical-fast-forward.log",
+        "~/carr-system/out/canonical-fast-forward.log"
+      ],
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run canonical-fast-forward/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/04176573923586d7.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/04176573923586d7.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.capture-poll",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "--heartbeat-interval",
+        "1800",
+        "capture-poll",
+        "launchd.run",
+        "~/carr-system/tools/dictation-rig/bin/capture-poll.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 5
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 15
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 25
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 35
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 45
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 55
+          }
+        ],
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/Library/Logs/capture-bridge.log",
+      "log_paths": [
+        "~/Library/Logs/capture-bridge.log",
+        "~/Library/Logs/capture-bridge.log"
+      ],
+      "log_max_age_seconds": 900,
+      "owner": "orchestrator",
+      "done_signal": "ops.run capture-poll/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/9ce6b29259585514.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/9ce6b29259585514.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.capture-watch",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "capture-watch",
+        "launchd.run",
+        "~/carr-system/tools/dictation-rig/bin/capture-watch.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "RunAtLoad": false,
+        "WatchPaths": [
+          "~/Recordings"
+        ],
+        "ThrottleInterval": 1
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/Library/Logs/capture-bridge.log",
+      "log_paths": [
+        "~/Library/Logs/capture-bridge.log",
+        "~/Library/Logs/capture-bridge.log"
+      ],
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "ops.run capture-watch/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/8c54b7854fc30fc4.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/8c54b7854fc30fc4.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05.",
+      "freshness_exception": "Resident, event-driven or on-demand agent; log age is not evidence of a missed firing. Registration and last exit remain checked."
+    },
+    {
+      "label": "com.carr.cc-version-sentinel",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "cc-version-sentinel",
+        "launchd.run",
+        "/bin/zsh",
+        "~/carr-system/bin/cc-version-sentinel.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 19
+          }
+        ],
+        "RunAtLoad": true,
+        "ThrottleInterval": 60
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/cc-version-sentinel.out",
+      "log_paths": [
+        "~/carr-system/out/cc-version-sentinel.out",
+        "~/carr-system/out/cc-version-sentinel.err"
+      ],
+      "log_max_age_seconds": 10800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run cc-version-sentinel/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/f66d2ee26d1e96e3.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/f66d2ee26d1e96e3.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.control-plane-tick",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/control-plane-tick.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 1
+          },
+          {
+            "Minute": 2
+          },
+          {
+            "Minute": 3
+          },
+          {
+            "Minute": 4
+          },
+          {
+            "Minute": 5
+          },
+          {
+            "Minute": 6
+          },
+          {
+            "Minute": 7
+          },
+          {
+            "Minute": 8
+          },
+          {
+            "Minute": 9
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 11
+          },
+          {
+            "Minute": 12
+          },
+          {
+            "Minute": 13
+          },
+          {
+            "Minute": 14
+          },
+          {
+            "Minute": 15
+          },
+          {
+            "Minute": 16
+          },
+          {
+            "Minute": 17
+          },
+          {
+            "Minute": 18
+          },
+          {
+            "Minute": 19
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 21
+          },
+          {
+            "Minute": 22
+          },
+          {
+            "Minute": 23
+          },
+          {
+            "Minute": 24
+          },
+          {
+            "Minute": 25
+          },
+          {
+            "Minute": 26
+          },
+          {
+            "Minute": 27
+          },
+          {
+            "Minute": 28
+          },
+          {
+            "Minute": 29
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 31
+          },
+          {
+            "Minute": 32
+          },
+          {
+            "Minute": 33
+          },
+          {
+            "Minute": 34
+          },
+          {
+            "Minute": 35
+          },
+          {
+            "Minute": 36
+          },
+          {
+            "Minute": 37
+          },
+          {
+            "Minute": 38
+          },
+          {
+            "Minute": 39
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 41
+          },
+          {
+            "Minute": 42
+          },
+          {
+            "Minute": 43
+          },
+          {
+            "Minute": 44
+          },
+          {
+            "Minute": 45
+          },
+          {
+            "Minute": 46
+          },
+          {
+            "Minute": 47
+          },
+          {
+            "Minute": 48
+          },
+          {
+            "Minute": 49
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 51
+          },
+          {
+            "Minute": 52
+          },
+          {
+            "Minute": 53
+          },
+          {
+            "Minute": 54
+          },
+          {
+            "Minute": 55
+          },
+          {
+            "Minute": 56
+          },
+          {
+            "Minute": 57
+          },
+          {
+            "Minute": 58
+          },
+          {
+            "Minute": 59
+          }
+        ],
+        "ThrottleInterval": 60
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/control-plane-tick-launchd.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/control-plane-tick-launchd.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.cutover-watch",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "cutover-watch",
+        "launchd.run",
+        "/bin/zsh",
+        "~/carr-system/bin/cutover-watch.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 30
+          }
+        ],
+        "RunAtLoad": true,
+        "ThrottleInterval": 60
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/cutover-watch.out",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/cutover-watch.out; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.delivery-cadence-a05-sweep",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "delivery-cadence-a05-sweep",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/delivery-cadence-a05-sweep.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": {
+          "Hour": 7,
+          "Minute": 0
+        },
+        "RunAtLoad": false
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/delivery-cadence-a05-sweep.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/delivery-cadence-a05-sweep.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.dictation-consent",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "dictation-consent",
+        "launchd.run",
+        "~/carr-system/tools/dictation-rig/bin/consent-watch.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 5
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 15
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 25
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 35
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 45
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 55
+          }
+        ],
+        "RunAtLoad": false,
+        "WatchPaths": [
+          "~/Recordings"
+        ],
+        "ThrottleInterval": 1
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/dictation-consent.log",
+      "log_paths": [
+        "~/carr-system/out/dictation-consent.log",
+        "~/carr-system/out/dictation-consent.log"
+      ],
+      "log_max_age_seconds": 900,
+      "owner": "orchestrator",
+      "done_signal": "ops.run dictation-consent/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/6f5002f208105194.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/6f5002f208105194.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.doc-engine",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/opt/homebrew/bin/python3",
+        "~/carr-system/tools/doc-convo/bin/convo-server.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "KeepAlive": true,
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "/tmp/doc-engine.log",
+      "log_paths": [
+        "/tmp/doc-engine.log",
+        "/tmp/doc-engine.log"
+      ],
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "HTTP server startup/activity in /tmp/doc-engine.log; resident server has no per-run completion receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05.",
+      "freshness_exception": "Resident, event-driven or on-demand agent; log age is not evidence of a missed firing. Registration and last exit remain checked."
+    },
+    {
+      "label": "com.carr.fetch-allowlist",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "fetch-allowlist",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/fetch-allowlist.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": {
+          "Hour": 7,
+          "Minute": 5
+        }
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/fetch-allowlist.log",
+      "log_paths": [
+        "~/carr-system/out/fetch-allowlist.log",
+        "~/carr-system/out/fetch-allowlist.log"
+      ],
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run fetch-allowlist/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/1969052ba43a7d04.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/1969052ba43a7d04.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.flash-idle-stop",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "--heartbeat-interval",
+        "300",
+        "flash-idle-stop",
+        "launchd.run",
+        "~/carr-system/bin/flash-idle-stop"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 5
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 15
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 25
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 35
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 45
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 55
+          }
+        ],
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/flash-idle-stop.log",
+      "log_paths": [
+        "~/carr-system/out/flash-idle-stop.log",
+        "~/carr-system/out/flash-idle-stop.log"
+      ],
+      "log_max_age_seconds": 900,
+      "owner": "orchestrator",
+      "done_signal": "local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/93dfeb445c72ae34.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Every-machine template added on main (flash-on-demand-lifecycle); declared from its repository template.",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/93dfeb445c72ae34.fbc9c66faebfd4b4db566c360b68b894.receipt"
+    },
+    {
+      "label": "com.carr.fleet-sync",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "fleet-sync",
+        "fleet.sync",
+        "/bin/zsh",
+        "~/carr-system/bin/fleet-sync.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 31
+          }
+        ],
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/fleet-sync.log",
+      "log_paths": [
+        "~/carr-system/out/fleet-sync.log",
+        "~/carr-system/out/fleet-sync.log"
+      ],
+      "log_max_age_seconds": 10800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run fleet-sync/fleet.sync; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/332c2a8da9d501b5.70fb8f1719d380b4cdc714dc215f34b6.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/332c2a8da9d501b5.70fb8f1719d380b4cdc714dc215f34b6.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.gate-zero-canary",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "gate-zero-canary",
+        "gatezero.canary",
+        "/bin/zsh",
+        "~/carr-system/bin/gate-zero-canary.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 43
+          }
+        ],
+        "RunAtLoad": true,
+        "ThrottleInterval": 60
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/gate-zero-canary-launchd.log",
+      "log_paths": [
+        "~/carr-system/out/gate-zero-canary-launchd.log",
+        "~/carr-system/out/gate-zero-canary-launchd.log"
+      ],
+      "log_max_age_seconds": 10800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run gate-zero-canary/gatezero.canary; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/6270a086a7d0e3ee.632a54024046edfdc34891e8cec815ce.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/6270a086a7d0e3ee.632a54024046edfdc34891e8cec815ce.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.job-watchdog",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "job-watchdog",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/job-watchdog.py",
+        "scan"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 2
+          },
+          {
+            "Minute": 4
+          },
+          {
+            "Minute": 6
+          },
+          {
+            "Minute": 8
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 12
+          },
+          {
+            "Minute": 14
+          },
+          {
+            "Minute": 16
+          },
+          {
+            "Minute": 18
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 22
+          },
+          {
+            "Minute": 24
+          },
+          {
+            "Minute": 26
+          },
+          {
+            "Minute": 28
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 32
+          },
+          {
+            "Minute": 34
+          },
+          {
+            "Minute": 36
+          },
+          {
+            "Minute": 38
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 42
+          },
+          {
+            "Minute": 44
+          },
+          {
+            "Minute": 46
+          },
+          {
+            "Minute": 48
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 52
+          },
+          {
+            "Minute": 54
+          },
+          {
+            "Minute": 56
+          },
+          {
+            "Minute": 58
+          }
+        ],
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/job-watchdog.log",
+      "log_max_age_seconds": 600,
+      "owner": "orchestrator",
+      "done_signal": "out/watchdog/runs.jsonl scan ledger; findings ledger and deduplicated orchestrator loops",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.keepalive-probe",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "keepalive-probe",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/bin/probe-keepalive.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 30
+          }
+        ],
+        "RunAtLoad": true,
+        "ThrottleInterval": 60
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/keepalive-probe.log",
+      "log_paths": [
+        "~/carr-system/out/keepalive-probe.log",
+        "~/carr-system/out/keepalive-probe.log"
+      ],
+      "log_max_age_seconds": 5400,
+      "owner": "orchestrator",
+      "done_signal": "ops.run keepalive-probe/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/06f0bed0e4f50cb0.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/06f0bed0e4f50cb0.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.local-briefs",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "local-briefs",
+        "launchd.run",
+        "/bin/zsh",
+        "~/carr-system/bin/local-briefs.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Weekday": 1,
+            "Hour": 6,
+            "Minute": 45
+          },
+          {
+            "Weekday": 2,
+            "Hour": 6,
+            "Minute": 45
+          },
+          {
+            "Weekday": 3,
+            "Hour": 6,
+            "Minute": 45
+          },
+          {
+            "Weekday": 4,
+            "Hour": 6,
+            "Minute": 45
+          },
+          {
+            "Weekday": 5,
+            "Hour": 6,
+            "Minute": 45
+          }
+        ]
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/run-scheduled.log",
+      "log_max_age_seconds": 345600,
+      "owner": "orchestrator",
+      "done_signal": "local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/26459840b77f5803.fbc9c66faebfd4b4db566c360b68b894.receipt; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job.",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/26459840b77f5803.fbc9c66faebfd4b4db566c360b68b894.receipt"
+    },
+    {
+      "label": "com.carr.logitech-keymap",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "logitech-keymap",
+        "launchd.run",
+        "/bin/sh",
+        "~/carr-system/tools/dictation-rig/bin/logitech-keymap.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 50
+          }
+        ],
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/run-scheduled.log",
+      "log_paths": [
+        null,
+        null
+      ],
+      "log_max_age_seconds": 1800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run logitech-keymap/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/9c2ed564eca94143.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/9c2ed564eca94143.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.nightly-exports-daytime-retry",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/nightly-exports-retry.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Hour": 11,
+            "Minute": 0
+          }
+        ],
+        "RunAtLoad": false
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/nightly-exports-retry-launchd.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/nightly-exports-retry-launchd.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.nightly-record-layer",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/nightly.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Hour": 2,
+            "Minute": 5
+          }
+        ],
+        "RunAtLoad": false
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/nightly-launchd.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/nightly-launchd.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.notes-sweep",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "notes-sweep",
+        "launchd.run",
+        "/bin/zsh",
+        "~/carr-system/bin/notes-sweep-post.sh",
+        "--scheduled"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 53
+          }
+        ],
+        "RunAtLoad": true,
+        "ThrottleInterval": 60
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/notes-sweep-launchd.log",
+      "log_paths": [
+        "~/carr-system/out/notes-sweep-launchd.log",
+        "~/carr-system/out/notes-sweep-launchd.log"
+      ],
+      "log_max_age_seconds": 10800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run notes-sweep/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/9de70447b648bf8a.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/9de70447b648bf8a.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.partner-ping",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "--heartbeat-interval",
+        "1800",
+        "--also-heartbeat",
+        "carr-local-edge-node",
+        "partner-ping",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/db-tap.py",
+        "run",
+        "pipelines/partner_ping.py",
+        "--scheduled"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 2
+          },
+          {
+            "Minute": 4
+          },
+          {
+            "Minute": 6
+          },
+          {
+            "Minute": 8
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 12
+          },
+          {
+            "Minute": 14
+          },
+          {
+            "Minute": 16
+          },
+          {
+            "Minute": 18
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 22
+          },
+          {
+            "Minute": 24
+          },
+          {
+            "Minute": 26
+          },
+          {
+            "Minute": 28
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 32
+          },
+          {
+            "Minute": 34
+          },
+          {
+            "Minute": 36
+          },
+          {
+            "Minute": 38
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 42
+          },
+          {
+            "Minute": 44
+          },
+          {
+            "Minute": 46
+          },
+          {
+            "Minute": 48
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 52
+          },
+          {
+            "Minute": 54
+          },
+          {
+            "Minute": 56
+          },
+          {
+            "Minute": 58
+          }
+        ],
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "/tmp/carr-partner-ping.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in /tmp/carr-partner-ping.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.quill-dictate",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "~/carr-system/tools/dictation-rig/dictate/.build/release/quill-dictate"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "KeepAlive": {
+          "SuccessfulExit": false
+        },
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/Library/Logs/quill-dictate-launchd.log",
+      "log_paths": [
+        null,
+        "~/Library/Logs/quill-dictate-launchd.log"
+      ],
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "Resident dictation process and ~/Library/Logs/quill-dictate-launchd.log; no per-run completion receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05.",
+      "freshness_exception": "Resident, event-driven or on-demand agent; log age is not evidence of a missed firing. Registration and last exit remain checked."
+    },
+    {
+      "label": "com.carr.recordings-purge",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "recordings-purge",
+        "launchd.run",
+        "/bin/sh",
+        "~/carr-system/tools/dictation-rig/bin/purge-recordings.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": {
+          "Hour": 4,
+          "Minute": 15
+        },
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/run-scheduled.log",
+      "log_paths": [
+        null,
+        null
+      ],
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run recordings-purge/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/d164dc895066bd19.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/d164dc895066bd19.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.release-pipeline",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "--heartbeat-interval",
+        "3600",
+        "release-pipeline",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/release-pipeline.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 1
+          },
+          {
+            "Minute": 2
+          },
+          {
+            "Minute": 3
+          },
+          {
+            "Minute": 4
+          },
+          {
+            "Minute": 5
+          },
+          {
+            "Minute": 6
+          },
+          {
+            "Minute": 7
+          },
+          {
+            "Minute": 8
+          },
+          {
+            "Minute": 9
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 11
+          },
+          {
+            "Minute": 12
+          },
+          {
+            "Minute": 13
+          },
+          {
+            "Minute": 14
+          },
+          {
+            "Minute": 15
+          },
+          {
+            "Minute": 16
+          },
+          {
+            "Minute": 17
+          },
+          {
+            "Minute": 18
+          },
+          {
+            "Minute": 19
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 21
+          },
+          {
+            "Minute": 22
+          },
+          {
+            "Minute": 23
+          },
+          {
+            "Minute": 24
+          },
+          {
+            "Minute": 25
+          },
+          {
+            "Minute": 26
+          },
+          {
+            "Minute": 27
+          },
+          {
+            "Minute": 28
+          },
+          {
+            "Minute": 29
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 31
+          },
+          {
+            "Minute": 32
+          },
+          {
+            "Minute": 33
+          },
+          {
+            "Minute": 34
+          },
+          {
+            "Minute": 35
+          },
+          {
+            "Minute": 36
+          },
+          {
+            "Minute": 37
+          },
+          {
+            "Minute": 38
+          },
+          {
+            "Minute": 39
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 41
+          },
+          {
+            "Minute": 42
+          },
+          {
+            "Minute": 43
+          },
+          {
+            "Minute": 44
+          },
+          {
+            "Minute": 45
+          },
+          {
+            "Minute": 46
+          },
+          {
+            "Minute": 47
+          },
+          {
+            "Minute": 48
+          },
+          {
+            "Minute": 49
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 51
+          },
+          {
+            "Minute": 52
+          },
+          {
+            "Minute": 53
+          },
+          {
+            "Minute": 54
+          },
+          {
+            "Minute": 55
+          },
+          {
+            "Minute": 56
+          },
+          {
+            "Minute": 57
+          },
+          {
+            "Minute": 58
+          },
+          {
+            "Minute": 59
+          }
+        ],
+        "RunAtLoad": false
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/release-pipeline.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/release-pipeline.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.repo-hygiene-janitor",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "repo-hygiene-janitor",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/repo-hygiene-janitor.py",
+        "--repository",
+        "~/carr-system"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "RunAtLoad": false
+      },
+      "expected_enabled": false,
+      "expected_installed": false,
+      "log_path": "~/carr-system/out/repo-hygiene-janitor.log",
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "Inactive source definition; no completion expected",
+      "expectation_note": "Source definition retained but not expected installed on this machine; disabled legacy or definition-only path.",
+      "freshness_exception": "Not expected to run; no freshness signal applies."
+    },
+    {
+      "label": "com.carr.resource-collector",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "~/carr-system/tools/resource-collector.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {},
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/resource-collector-launchd.log",
+      "log_paths": [
+        "~/carr-system/out/resource-collector-launchd.log",
+        "~/carr-system/out/resource-collector-launchd.log"
+      ],
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "record-resource-observation writes resource observation rows; no periodic schedule in installed plist",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05.",
+      "freshness_exception": "Resident, event-driven or on-demand agent; log age is not evidence of a missed firing. Registration and last exit remain checked."
+    },
+    {
+      "label": "com.carr.room-bridge",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "--heartbeat-interval",
+        "900",
+        "room-bridge",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/room-bridge/bridge.py",
+        "run-once"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 1
+          },
+          {
+            "Minute": 2
+          },
+          {
+            "Minute": 3
+          },
+          {
+            "Minute": 4
+          },
+          {
+            "Minute": 5
+          },
+          {
+            "Minute": 6
+          },
+          {
+            "Minute": 7
+          },
+          {
+            "Minute": 8
+          },
+          {
+            "Minute": 9
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 11
+          },
+          {
+            "Minute": 12
+          },
+          {
+            "Minute": 13
+          },
+          {
+            "Minute": 14
+          },
+          {
+            "Minute": 15
+          },
+          {
+            "Minute": 16
+          },
+          {
+            "Minute": 17
+          },
+          {
+            "Minute": 18
+          },
+          {
+            "Minute": 19
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 21
+          },
+          {
+            "Minute": 22
+          },
+          {
+            "Minute": 23
+          },
+          {
+            "Minute": 24
+          },
+          {
+            "Minute": 25
+          },
+          {
+            "Minute": 26
+          },
+          {
+            "Minute": 27
+          },
+          {
+            "Minute": 28
+          },
+          {
+            "Minute": 29
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 31
+          },
+          {
+            "Minute": 32
+          },
+          {
+            "Minute": 33
+          },
+          {
+            "Minute": 34
+          },
+          {
+            "Minute": 35
+          },
+          {
+            "Minute": 36
+          },
+          {
+            "Minute": 37
+          },
+          {
+            "Minute": 38
+          },
+          {
+            "Minute": 39
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 41
+          },
+          {
+            "Minute": 42
+          },
+          {
+            "Minute": 43
+          },
+          {
+            "Minute": 44
+          },
+          {
+            "Minute": 45
+          },
+          {
+            "Minute": 46
+          },
+          {
+            "Minute": 47
+          },
+          {
+            "Minute": 48
+          },
+          {
+            "Minute": 49
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 51
+          },
+          {
+            "Minute": 52
+          },
+          {
+            "Minute": 53
+          },
+          {
+            "Minute": 54
+          },
+          {
+            "Minute": 55
+          },
+          {
+            "Minute": 56
+          },
+          {
+            "Minute": 57
+          },
+          {
+            "Minute": 58
+          },
+          {
+            "Minute": 59
+          }
+        ],
+        "RunAtLoad": true,
+        "ThrottleInterval": 30
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/room-bridge-launchd.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/room-bridge-launchd.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.rules-refresh",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "rules-refresh",
+        "launchd.run",
+        "/bin/zsh",
+        "~/carr-system/bin/refresh-rules.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Hour": 7,
+            "Minute": 0
+          },
+          {
+            "Hour": 8,
+            "Minute": 0
+          },
+          {
+            "Hour": 9,
+            "Minute": 0
+          },
+          {
+            "Hour": 10,
+            "Minute": 0
+          },
+          {
+            "Hour": 11,
+            "Minute": 0
+          },
+          {
+            "Hour": 12,
+            "Minute": 0
+          },
+          {
+            "Hour": 13,
+            "Minute": 0
+          },
+          {
+            "Hour": 14,
+            "Minute": 0
+          },
+          {
+            "Hour": 15,
+            "Minute": 0
+          },
+          {
+            "Hour": 16,
+            "Minute": 0
+          },
+          {
+            "Hour": 17,
+            "Minute": 0
+          },
+          {
+            "Hour": 18,
+            "Minute": 0
+          },
+          {
+            "Hour": 19,
+            "Minute": 0
+          },
+          {
+            "Hour": 20,
+            "Minute": 0
+          }
+        ]
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/run-scheduled.log",
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/b7f587616eb7bf71.fbc9c66faebfd4b4db566c360b68b894.receipt; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job.",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/b7f587616eb7bf71.fbc9c66faebfd4b4db566c360b68b894.receipt"
+    },
+    {
+      "label": "com.carr.run-spool-flush",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "run-spool-flush",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/ops-spool.py",
+        "flush"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 30
+          }
+        ],
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "/tmp/carr-run-spool-flush.log",
+      "log_paths": [
+        "/tmp/carr-run-spool-flush.log",
+        "/tmp/carr-run-spool-flush.err"
+      ],
+      "log_max_age_seconds": 5400,
+      "owner": "orchestrator",
+      "done_signal": "ops.run run-spool-flush/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/39cee6d35b0cf4a1.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/39cee6d35b0cf4a1.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.session-trace-archive",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "session-trace-archive",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/session-trace-archive.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": {
+          "Hour": 3,
+          "Minute": 10
+        },
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/session-trace-archive.log",
+      "log_paths": [
+        "~/carr-system/out/session-trace-archive.log",
+        "~/carr-system/out/session-trace-archive.log"
+      ],
+      "log_max_age_seconds": 172800,
+      "owner": "orchestrator",
+      "done_signal": "ops.run session-trace-archive/launchd.run; local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/3d3be01d12de1d19.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "activity_path": "~/carr-system/out/run-scheduled-receipts/3d3be01d12de1d19.fbc9c66faebfd4b4db566c360b68b894.receipt",
+      "expectation_note": "Live installed job retained after source and cadence review on 2026-10-05."
+    },
+    {
+      "label": "com.carr.tailscale-up",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/tailscale-up.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "RunAtLoad": true
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/tailscale-up.log",
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/tailscale-up.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job.",
+      "freshness_exception": "Runs once at load; log age is not evidence of a missed firing. Registration and last exit remain checked."
+    },
+    {
+      "label": "com.carr.timebomb-audit",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "timebomb-audit",
+        "launchd.run",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/timebomb-audit.py"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": {
+          "Weekday": 1,
+          "Hour": 3,
+          "Minute": 30
+        },
+        "RunAtLoad": false
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/timebomb-audit.log",
+      "log_max_age_seconds": 691200,
+      "owner": "orchestrator",
+      "done_signal": "Job-specific completion and activity in ~/carr-system/out/timebomb-audit.log; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job."
+    },
+    {
+      "label": "com.carr.videopipeline",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/zsh",
+        "~/carr-system/bin/run-scheduled.sh",
+        "videopipeline",
+        "launchd.run",
+        "/bin/zsh",
+        "~/Movies/CARR Video Pipeline/Scripts/watch-encode.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "RunAtLoad": false,
+        "WatchPaths": [
+          "~/Movies/CARR Video Pipeline/01_Drop_Horizontal",
+          "~/Movies/CARR Video Pipeline/02_Drop_Vertical"
+        ],
+        "ThrottleInterval": 10
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/run-scheduled.log",
+      "log_max_age_seconds": null,
+      "owner": "orchestrator",
+      "done_signal": "local run-scheduled receipt ~/carr-system/out/run-scheduled-receipts/550c4bf0a3a27bf2.fbc9c66faebfd4b4db566c360b68b894.receipt; primary only",
+      "expectation_note": "Machine placement is derived at check time from lib/launchd_scope.py; these are the expectations where that policy places the job.",
+      "freshness_exception": "Event-driven by WatchPaths; log age is not evidence of a missed firing. Registration, loaded watch paths and last exit remain checked."
+    },
+    {
+      "label": "local.carr-progress-board",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "/bin/bash",
+        "~/carr-system/ops/progress-board-render.sh"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {
+            "Minute": 0
+          },
+          {
+            "Minute": 2
+          },
+          {
+            "Minute": 4
+          },
+          {
+            "Minute": 6
+          },
+          {
+            "Minute": 8
+          },
+          {
+            "Minute": 10
+          },
+          {
+            "Minute": 12
+          },
+          {
+            "Minute": 14
+          },
+          {
+            "Minute": 16
+          },
+          {
+            "Minute": 18
+          },
+          {
+            "Minute": 20
+          },
+          {
+            "Minute": 22
+          },
+          {
+            "Minute": 24
+          },
+          {
+            "Minute": 26
+          },
+          {
+            "Minute": 28
+          },
+          {
+            "Minute": 30
+          },
+          {
+            "Minute": 32
+          },
+          {
+            "Minute": 34
+          },
+          {
+            "Minute": 36
+          },
+          {
+            "Minute": 38
+          },
+          {
+            "Minute": 40
+          },
+          {
+            "Minute": 42
+          },
+          {
+            "Minute": 44
+          },
+          {
+            "Minute": 46
+          },
+          {
+            "Minute": 48
+          },
+          {
+            "Minute": 50
+          },
+          {
+            "Minute": 52
+          },
+          {
+            "Minute": 54
+          },
+          {
+            "Minute": 56
+          },
+          {
+            "Minute": 58
+          }
+        ]
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/progress-board-render.log",
+      "log_max_age_seconds": 600,
+      "owner": "orchestrator",
+      "done_signal": "Canonical out/boards/*.json and authenticated publish acknowledgement",
+      "expectation_note": "Required board publisher named in gap #3. Cadence is the lib/launchd_calendar.py two-minute form; StartInterval does not fire on macOS 27."
+    }
+  ],
+  "expectations_reviewed_at": "2026-10-05",
+  "generation_note": "Live capture via ops/scheduled-jobs-check.py --capture, then hand-reviewed enabled states, source-only definitions, required missing monitors and cadence grace. Vendor/Apple agents are outside CARR ownership. User crontab had no entries. Claude definitions inspected before build; existing config-as-code/Control Plane checks retain that scheduler. Captured on a secondary Mac (machine-role marker verified); primary/secondary placement is derived at check time from lib/launchd_scope.py and is not stored here. Primary installation and logs are not observable from this local capture.",
+  "captured_machine_role": "secondary"
+}

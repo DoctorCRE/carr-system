@@ -27,11 +27,12 @@ class Isolation(unittest.TestCase):
 
     def test_two_concurrent_gates_get_snapshot_data_and_private_role_catalogs(self):
         bins=runner.postgres_binaries()
-        root=Path(tempfile.mkdtemp(prefix='ci-gate-selftest-'))
+        fixture=runner.DisposablePostgres('ci-gate-selftest-', bins/'pg_ctl')
+        root=fixture.root
         port=runner.free_port()
         source=f'postgres://carr_ci@127.0.0.1:{port}/carr_ci'
         def run(*args):
-            subprocess.run([str(x) for x in args],check=True,capture_output=True)
+            fixture.run(args,check=True,capture_output=True)
         try:
             run(bins/'initdb','-D',root/'data','-U','carr_ci','--auth=trust','--no-locale','--encoding=UTF8')
             run(bins/'pg_ctl','-D',root/'data','-l',root/'postgres.log','-o',f'-h 127.0.0.1 -p {port} -k {root}', '-w','start')
@@ -59,7 +60,6 @@ class Isolation(unittest.TestCase):
             self.assertEqual(result.strip(),'f')
             self.assertEqual(len(list((root/'logs').glob('db-gate-*.log'))),2)
         finally:
-            subprocess.run([str(bins/'pg_ctl'),'-D',str(root/'data'),'-m','fast','-w','stop'],capture_output=True)
-            runner.quarantine(root)
+            fixture.close()
 
 if __name__=='__main__':unittest.main()

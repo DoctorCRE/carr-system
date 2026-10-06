@@ -71,6 +71,25 @@
 
   "services": [
     {
+      "key": "flash-idle-stop",
+      "name": "Flash idle shutdown",
+      "purpose": "Every five minutes, stop and disable ds4-server and its Model Room desk after fifteen minutes without a request. Shared request locks protect in-flight work.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "bin/flash-idle-stop",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.flash-idle-stop.plist",
+          "expected_cadence_seconds": 300,
+          "cadence_grace_seconds": 600,
+          "notes": "No credential or model call. Completion means idle decision checked; failures exit nonzero in out/flash-idle-stop.log and surface as flash_residency health findings."
+        }
+      ]
+    },
+    {
       "key": "tailscale-up",
       "name": "Tailscale recovery at login",
       "purpose": "Starts a stopped primary Mac node once at login using its stored preferences and node key. Ordinary health reads the local backend state; logged-out nodes require sign-in.",

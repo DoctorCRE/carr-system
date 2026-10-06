@@ -1,9 +1,9 @@
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
@@ -21,13 +21,14 @@ const tool = TOOLS['read-doc-activity'];
 
 test('activity feed executes store predicates, cursor serialization and selected database role',
   { skip: !bin && 'local PostgreSQL binaries unavailable' }, async t => {
-  const dir = mkdtempSync('/tmp/doc-activity-');
-  let running = false, c;
+  let postgresFixture, dir;
+  let c;
   const releaseBudget = await acquirePostgresFixtureGroup();
   try {
-    execFileSync(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale'], { stdio: 'pipe' });
-    execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start'], { stdio: 'pipe' });
-    running = true;
+    postgresFixture = await acquireDisposablePostgres({ prefix: 'doc-activity-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+    dir = postgresFixture.root;
+    await postgresFixture.run(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale']);
+    await postgresFixture.run(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start']);
     c = new pg.Client({ host: dir, user: 'fixture', database: 'postgres' });
     await c.connect();
     await c.query('create role carr_writer; create role carr_reader; create role carr_jobs; create role carr_authority; create role carr_exporter; create role dot_reader;');
@@ -122,9 +123,8 @@ test('activity feed executes store predicates, cursor serialization and selected
   } finally {
     try {
       if (c) await c.end();
-      if (running) execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe' });
     } finally {
-      await releaseBudget();
+      try { await postgresFixture?.close(); } finally { await releaseBudget(); }
     }
   }
 });

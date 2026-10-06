@@ -61,11 +61,11 @@ export function renderRuleBoot(rows, sponsor, classes = RULE_BOOT_CLASSES) {
   out.push("# CARR RULE BOOT — read every page before acting");
   out.push("");
   out.push(`Served live from the CARR doctrine store (the only source of truth) for ${sponsor ? `sponsor ${sponsor}` : "an unsponsored runtime (shared rules only)"}.`);
-  out.push("Part 1 is the FULL TEXT of every always-on rule: these bind on every turn.");
+  out.push("Part 1 is the FULL TEXT of retained rules. Each binds at its stated moment, not on every turn.");
   out.push("Part 2 is a one-line INDEX of every active rule: `id | class | summary | when it applies`.");
   out.push("Classes: A always-on (full text in Part 1); B binds at an action point; C binds when a topic is present;");
   out.push("D already enforced by a gate; E stale or duplicate; U unclassified (full text in Part 1).");
-  out.push("Before acting where a B, C, D or E rule applies, fetch its binding text:");
+  out.push("If a rule's full text is missing from Part 1, fetch its binding text:");
   out.push("standing-context with rule_ids:[\"<id>\"]. Never quote an index summary as the rule itself.");
   out.push(`Classification: ${RULE_BOOT_CLASSES_DIGEST}.`);
   out.push("");

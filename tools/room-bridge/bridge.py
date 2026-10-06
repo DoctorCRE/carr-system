@@ -335,11 +335,12 @@ def scan_for_result(log_path: Path, offset: int) -> str | None:
 
 def probe_live(entry: dict) -> bool:
     kind = entry.get("kind")
+    if kind == "claude-session" and entry.get("room_seat") == "flash":
+        return True  # Demand dispatch starts this desk; probes must not load it.
     if kind in ("claude-session", "codex-live"):
         return desks.is_live(entry.get("socket", ""))
     if kind == "flash-local":
-        # the Flash server is a local process with a health endpoint; a queue task waits while it is down
-        return flash_wire.is_up()
+        return True  # A claimed task, rather than a bridge heartbeat, starts Flash.
     # claude-desktop and codex-session are durable rather than live
     # (dispatch.py's own framing) —
     # there is no process to probe between dispatches, so "live" here means

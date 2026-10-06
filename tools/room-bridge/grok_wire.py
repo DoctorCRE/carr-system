@@ -190,6 +190,7 @@ def parse_stream(lines, returncode: int = 0) -> dict:
     """
     chunks = []
     final_chunks = []
+    responses = []
     end: dict = {}
     detail = None
     for line in lines:
@@ -219,11 +220,14 @@ def parse_stream(lines, returncode: int = 0) -> dict:
             # identified empty response. Older streams omit messageId, so text
             # also establishes a boundary. Accounting alone cannot erase it.
             if chunks or event.get("messageId"):
+                if chunks:
+                    responses.append("".join(chunks))
                 final_chunks = chunks
                 chunks = []
         elif event.get("type") == "end":
             end = event
     if chunks:
+        responses.append("".join(chunks))
         final_chunks = chunks
     text = "".join(final_chunks)
     code = 0
@@ -238,7 +242,7 @@ def parse_stream(lines, returncode: int = 0) -> dict:
         detail = model_usage_error(end.get("modelUsage"))
         if detail:
             code = 5
-    return {"text": text, "end": end, "detail": detail, "code": code}
+    return {"text": text, "report_text": "\n\n".join(responses), "end": end, "detail": detail, "code": code}
 
 
 def provider_receipt(end: dict, cli_version=None) -> dict:
@@ -273,7 +277,7 @@ def parse_result(stdout: str, returncode: int, *, urls: list[str] | None = None,
                 "session_id": end.get("sessionId"), "model_calls": usage["modelCalls"],
                 "cost_usd": receipt["cost_usd"], "stop_reason": end["stopReason"]}
     outcome = retrieval_result(result, urls) if urls else {
-        "status": "completed", "code": 0, "result": result if require_identity else parsed["text"]}
+        "status": "completed", "code": 0, "result": result if require_identity else parsed["report_text"]}
     return {**outcome, "provider_metadata": metadata, "receipt": receipt}
 
 

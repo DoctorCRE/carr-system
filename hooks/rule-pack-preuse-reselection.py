@@ -738,6 +738,12 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         # notice names every id and records nothing for dedupe.
         return _context(rule_routes.notice_too_large(ids))
     rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full])
+    try:
+        from lib.rule_recall import log_delivery
+        log_delivery(Path(REPO) / "out/rule-route-delivery.jsonl", json.loads(text)["receipt_id"],
+                     [r["id"] for r in full])
+    except (OSError, ValueError):
+        pass
     return _context(text)
 
 

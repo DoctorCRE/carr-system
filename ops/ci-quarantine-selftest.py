@@ -105,6 +105,30 @@ class QuarantineTests(unittest.TestCase):
                 self.assertEqual(result.returncode, code)
                 self.assertNotIn('QUARANTINED', result.stdout)
 
+    def test_quarantine_preserves_abnormal_rerun_exits(self):
+        for code in (78, 124, 143):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                marker = root / 'attempt'
+                entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+                    'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture'}
+                result = self.invoke(root,
+                    f"from pathlib import Path; p=Path({str(marker)!r}); seen=p.exists(); p.touch(); raise SystemExit({code} if seen else 1)", [entry])
+                self.assertEqual(result.returncode, 1 if code == 78 else code, result.stdout)
+                self.assertNotIn('QUARANTINED', result.stdout)
+
+    def test_suppressed_failure_publishes_both_attempt_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / 'attempt'
+            entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+                'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture'}
+            result = self.invoke(root,
+                f"from pathlib import Path; p=Path({str(marker)!r}); seen=p.exists(); p.touch(); print('rerun diagnostic' if seen else 'first diagnostic'); raise SystemExit(1)", [entry])
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertIn('first diagnostic', result.stdout)
+            self.assertIn('rerun diagnostic', result.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

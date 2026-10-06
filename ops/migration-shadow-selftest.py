@@ -92,7 +92,12 @@ with tempfile.TemporaryDirectory() as tmp:
     def fake_process(command, **kwargs):
         if command[0] == 'git':
             return subprocess.CompletedProcess(command, 0, snapshot(T, R1), '')
-        return subprocess.CompletedProcess(command, 1, '', '')
+        if pathlib.Path(command[0]).name == 'initdb':
+            data = pathlib.Path(command[command.index('-D') + 1])
+            data.mkdir(parents=True, exist_ok=True)
+            (data / 'PG_VERSION').write_text('18')
+        rc = 1 if command[-1] in ('stop', 'status') else 0
+        return subprocess.CompletedProcess(command, rc, '', '')
     with patch.object(shadow, 'run', side_effect=fake_run), patch.object(shadow.subprocess, 'run', side_effect=fake_process), patch.object(shadow, 'free_port', return_value=55701):
         try:
             shadow.shadow('HEAD', pathlib.Path('/synthetic/bin'), work)
