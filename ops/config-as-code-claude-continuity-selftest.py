@@ -42,6 +42,9 @@ class ContinuityOverlayTest(unittest.TestCase):
         (self.repo / "mcp-server").mkdir()
         (self.repo / "ops/launchd").mkdir()
         (self.repo / "ops/scheduled-tasks").mkdir()
+        (self.repo / "lib").mkdir()
+        (self.repo / "lib/claude_continuity_spool.py").write_text("# spool\n")
+        (self.repo / "lib/health_incident.py").write_text("# incident\n")
         (self.repo / "ops/claude-continuity-hook.py").write_text("# adapter\n")
         (self.repo / "mcp-server/continuity-stdio-proxy.mjs").write_text("// proxy\n")
         (self.repo / "ops/config/claude-continuity-hooks.json").write_text(

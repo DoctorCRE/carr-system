@@ -4,19 +4,17 @@ This is a library for the canonical health surface. It reads the canonical
 usage receipt log, never vendor credentials or prompt text.
 """
 
-import fcntl
 import json
-import os
 import subprocess
 import sys
-import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from contextlib import contextmanager
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib import record_call  # noqa: E402
+from lib.health_incident import (confirmed_reply, read_state as _state, save_state as _save_state,
+                                 incident_lock as _loop_lock)
 
 
 def _root():
@@ -44,46 +42,7 @@ ACTION = ('on breach: open/update one deduplicated loop per provider · owner or
 
 def _run_verb(name, payload):
     result = record_call.call_verb(name, payload, timeout=35)
-    if result.kind not in (record_call.OK, record_call.REFUSED):
-        raise RuntimeError(result.describe())
-    answer = result.reply
-    if not result.ok or not isinstance(answer, dict) or (name != "read-loop" and answer.get("ok") is not True):
-        raise RuntimeError(f"{name} did not confirm the write")
-    return answer
-
-
-def _state(path):
-    try:
-        result = json.loads(Path(path).read_text(encoding="utf-8"))
-        return result if isinstance(result, dict) else {}
-    except (OSError, ValueError):
-        return {}
-
-
-def _save_state(path, state):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
-        tmp = Path(handle.name)
-        try:
-            json.dump(state, handle, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
-            os.replace(tmp, path)
-        finally:
-            tmp.unlink(missing_ok=True)
-
-
-@contextmanager
-def _loop_lock(path):
-    lock = Path(str(path) + ".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    with lock.open("a+") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+    return confirmed_reply(name, result)
 
 
 def _today_usage(log_path, day):

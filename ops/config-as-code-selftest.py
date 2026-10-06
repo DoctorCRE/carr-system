@@ -41,6 +41,8 @@ def copy_continuity_contract(repo: Path) -> None:
         "ops/config/claude-continuity-hooks.json",
         "ops/claude-continuity-hook.py",
         "mcp-server/continuity-stdio-proxy.mjs",
+        "lib/claude_continuity_spool.py",
+        "lib/health_incident.py",
     ):
         destination = repo / relative
         destination.parent.mkdir(parents=True, exist_ok=True)

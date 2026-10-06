@@ -57,13 +57,16 @@ def load(repo: pathlib.Path | str) -> Contract:
         document = json.loads(rendered)
         adapter_bytes = adapter.read_bytes()
         proxy_bytes = proxy.read_bytes()
+        spool_bytes = (root / "lib/claude_continuity_spool.py").read_bytes()
+        incident_bytes = (root / "lib/health_incident.py").read_bytes()
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError("canonical Claude continuity configuration is unreadable") from exc
     hooks = document.get("hooks") if isinstance(document, dict) else None
     if not isinstance(hooks, dict) or set(hooks) != EVENTS:
         raise RuntimeError("canonical Claude continuity hook event set is invalid")
     digest = hashlib.sha256(rendered.encode("utf-8") + b"\0" + adapter_bytes
-                            + b"\0" + proxy_bytes).hexdigest()
+                            + b"\0" + proxy_bytes + b"\0" + spool_bytes
+                            + b"\0" + incident_bytes).hexdigest()
     mcp_server = {
         "type": "stdio",
         "command": "/usr/bin/env",

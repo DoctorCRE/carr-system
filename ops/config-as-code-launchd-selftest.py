@@ -250,7 +250,8 @@ def check_and_install_cases() -> list[bool]:
             (repo / "ops" / "config").mkdir(parents=True, exist_ok=True)
             for relative in ("ops/config/claude-continuity-hooks.json",
                              "ops/claude-continuity-hook.py",
-                             "mcp-server/continuity-stdio-proxy.mjs"):
+                             "mcp-server/continuity-stdio-proxy.mjs",
+                             "lib/claude_continuity_spool.py", "lib/health_incident.py"):
                 target = repo / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes((REPO / relative).read_bytes())

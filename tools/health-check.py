@@ -196,10 +196,10 @@ def _claude_continuity_spool_row(drain):
     except (OSError, ValueError) as exc:
         return (f"UNAVAILABLE claude continuity spool — drain {type(exc).__name__} · "
                 f"{continuity_spool.ACTION}"), 1
-    line = continuity_spool.health_row(run_verb=continuity_spool.run_verb,
+    result = continuity_spool.health_row(run_verb=continuity_spool.run_verb,
                                        state_path=continuity_spool.loop_state_path(),
                                        now=_dt.now(_tz.utc), drained=drained)
-    return line, int(not line.startswith("OK"))
+    return result.line, result.status
 
 
 if CANONICAL_SECTION == "claude-continuity-spool":

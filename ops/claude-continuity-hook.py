@@ -345,7 +345,8 @@ def _identity(payload: dict) -> tuple[dict, pathlib.Path]:
 
 
 def _call(name: str, args: dict) -> dict | None:
-    return spool.invoke(name, args)[0]
+    result = spool.invoke(name, args)
+    return result.response if isinstance(result, spool.Delivered) else None
 
 
 def _shadow_audit(event: str, identity: dict, cursor: dict) -> None:
@@ -385,9 +386,10 @@ def _record(event: str, identity: dict, cursor: dict, source_digest: str,
     if telemetry:
         args["telemetry"] = telemetry
     args["idempotency_key"] = receipt_key(args)
-    response, failure = spool.invoke("claude-record-event", args)
-    if response is not None:
+    result = spool.invoke("claude-record-event", args)
+    if isinstance(result, spool.Delivered):
         return True
+    failure = result.failure
     try:
         if failure["kind"] == "refused":
             spool.archive({"verb": "claude-record-event", "args": args}, "refused", failure["error"])

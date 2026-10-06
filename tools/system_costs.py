@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
 from jev_spend_health import _loop_lock, _save_state, USAGE_LOG, FACTORY_USAGE_LOG, LOOP_STATE, ACTION
 from credential_env import load_carr_tokens
 from lib import record_call
+from lib.health_incident import loop_record
 
 SCHEMA = 'carr-system-costs.v1'
 ROOT = Path(__file__).resolve().parents[1]
@@ -347,10 +348,7 @@ def reconcile(report, path, run_verb=cost_verb, *, legacy_path=None):
             current = state['open'].get(provider)
             if not current:
                 return None, None
-            answer = run_verb('read-loop', {'loop_id': current['loop_id']})
-            row = answer.get('loop', answer)
-            if row.get('loop_id') != current['loop_id'] or type(row.get('version')) is not int:
-                raise RuntimeError('read-loop returned no matching version')
+            row = loop_record(run_verb, current['loop_id'])
             if row.get('status', 'open') != 'open':
                 state['open'].pop(provider, None)
                 state.get('refusals', {}).pop(provider, None)

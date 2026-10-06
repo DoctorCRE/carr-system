@@ -66,6 +66,8 @@ COPIES = [
     "hooks/machine-converge.py",
     "hooks/grok_invocation.py",
     "lib/claude_continuity_config.py",
+    "lib/claude_continuity_spool.py",
+    "lib/health_incident.py",
     "lib/machine_prerequisites.py",
     "lib/launchd_calendar.py",
     "lib/machine_role.py",
