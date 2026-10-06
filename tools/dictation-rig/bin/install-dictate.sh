@@ -64,8 +64,6 @@ if [ "${1:-}" = "--config-only" ]; then
     exit 0
 fi
 
-# The LaunchAgent comes from config-as-code, which owns this label and rewrites
-# the home path per machine. A bare copy of this tool's plist spells Joe's home
-# literally — see install-agent-via-config.sh for the 2026-08-25 finding.
+# Canonical plists provide portable paths and the durable receipt wrapper.
 sh "$TOOL_DIR/bin/install-agent-via-config.sh" "com.carr.quill-dictate"
 echo "if the menu-bar mic shows a badge: grant Accessibility in System Settings"

@@ -36,6 +36,7 @@ exactly as they bind Joe, with zero mechanical enforcement on his side today.
     ops/config-as-code.py check      # drift report; exit 1 if any. THE DEFAULT.
     ops/config-as-code.py pull       # machine -> repo (capture what is live)
     ops/config-as-code.py install    # repo -> machine (deploy; needs --apply)
+    ops/config-as-code.py install-launchd [--apply] LABEL [LABEL ...]
     ops/config-as-code.py reinstall-launchd-calendar [--apply] [--kickstart]
     ops/config-as-code.py install-codex-continuity --apply
     ops/config-as-code.py verify-codex-continuity
@@ -2001,6 +2002,30 @@ def launchd_registration(label):
     return "failed", detail[:80] or "unknown launchctl error"
 
 
+def launchd_registered_config_matches(label, dest, body):
+    """Compare the loaded job's path and executable configuration to its render."""
+    expected = plistlib.loads(body.encode("utf-8"))
+    observed = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+                              capture_output=True, text=True, check=False, timeout=15)
+    if observed.returncode:
+        return False
+    text = observed.stdout or ""
+    path = re.search(r"(?m)^\s*path = (.+)$", text)
+    arguments = re.search(r"(?ms)^\s*arguments = \{\n(.*?)^\s*\}", text)
+    if not path or path.group(1).strip() != dest:
+        return False
+    if "ProgramArguments" in expected:
+        actual = [line.strip() for line in arguments.group(1).splitlines()] if arguments else None
+        if actual != expected["ProgramArguments"]:
+            return False
+    for field, key in (("Program", "program"), ("WorkingDirectory", "working directory")):
+        if field in expected:
+            actual = re.search(r"(?m)^\s*" + key + r" = (.+)$", text)
+            if not actual or actual.group(1).strip() != expected[field]:
+                return False
+    return True
+
+
 def install_launchd_plist(filename, dest, body, body_matches):
     """Render and load one plist without letting an active job unload itself.
 
@@ -2281,6 +2306,121 @@ def git_hooks_path_report() -> str:
     return f"  git core.hooksPath: {observed or '(unset)'} — {note} [informational]"
 
 
+def install_launchd_agents(apply, labels=None, held_labels=()):
+    """Install canonical plists; explicit requests fail on every skipped target.
+
+    Fleet reconciliation owns retirement and hold reconciliation. A scoped
+    request touches only its labels and never client settings or schedules.
+    """
+    launchd_activation_failures = []
+    scoped = labels is not None
+    if scoped:
+        filenames = []
+        for label in dict.fromkeys(labels):
+            if not launchd_hold.LABEL.fullmatch(label):
+                print(f"  REFUSED invalid launchd label: {label}")
+                return [label]
+            filename = label + ".plist"
+            if not os.path.isfile(launchd_repo_path(filename)):
+                print(f"  REFUSED untracked launchd label: {label}")
+                return [label]
+            filenames.append(filename)
+    else:
+        filenames = sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []
+    if apply:
+        os.makedirs(LAUNCHD_SRC, exist_ok=True)
+    for f in filenames:
+        source = read(launchd_repo_path(f))
+        if scoped:
+            try:
+                label = plistlib.loads(source.encode("utf-8")).get("Label")
+                if label != f.removesuffix(".plist"):
+                    raise ValueError("tracked filename and Label differ")
+                reason = launchd_off_reason(f, source)
+            except (AttributeError, OSError, ValueError, plistlib.InvalidFileException) as exc:
+                print(f"  REFUSED {f}: {exc}")
+                launchd_activation_failures.append(f)
+                continue
+            if reason:
+                print(f"  REFUSED {f}: {reason}")
+                launchd_activation_failures.append(f)
+                continue
+        if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
+            continue
+        if f in PRIMARY_ONLY and not IS_PRIMARY:
+            if scoped:
+                print(f"  REFUSED {f}: primary machine only")
+                launchd_activation_failures.append(f)
+                continue
+            live = os.path.join(LAUNCHD_SRC, f)
+            if os.path.exists(live):
+                if retire_primary_only_plist(f, live, apply) == "failed":
+                    launchd_activation_failures.append(f)
+            else:
+                print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
+            continue
+        if f in SECONDARY_ONLY and IS_PRIMARY:
+            if scoped:
+                launchd_activation_failures.append(f)
+            print(f"  SKIP  {f} (the nightly chain already does this here)")
+            continue
+        dest = os.path.join(LAUNCHD_SRC, f)
+        source = read(launchd_repo_path(f))
+        if source is None:
+            print(f"  ERROR  cannot render {f} because its tracked source is missing")
+            return [f]
+        refusal = launchd_template_refusal(source)
+        if refusal:
+            # Never install a schedule launchd will load and then never fire:
+            # the job would look installed and be dead (see the block above
+            # refused_launchd_templates). The installed copy is left as it is.
+            print(f"  REFUSED  {f}: {refusal}")
+            launchd_activation_failures.append(f)
+            continue
+        body = concrete(source)
+        body_matches = launchd_texts_match(read(dest), source)
+        if not scoped and body_matches and not apply and not os.path.exists(dest + ".pending-reload"):
+            continue
+        gone = missing_targets(body)
+        if gone:
+            print(f"  SKIP  {f} (not built on this machine: {gone[0]})")
+            if scoped:
+                launchd_activation_failures.append(f)
+            continue
+        if scoped and body_matches:
+            body_matches = launchd_registered_config_matches(label, dest, body)
+        if body_matches:
+            print(f"  VERIFY LOADED  {dest}")
+        else:
+            print(f"  {'WRITE' if apply else 'would write'}  {dest}")
+        if apply:
+            # Load it, do not print a command for a human to paste (rule
+            # e313a3ca). Writing the plist and stopping leaves the job on disk
+            # and dead: on a fresh machine that means the nightly never runs,
+            # so the record-derived fetch allowlist is generated once by the
+            # migration and then never refreshed as clients are added. A
+            # pending marker keeps an interrupted reload visible until an
+            # absent-before/load/registered-after sequence verifies it.
+            outcome = install_launchd_plist(f, dest, body, body_matches)
+            if scoped:
+                verified = (outcome in {"loaded", "kept"}
+                            and launchd_texts_match(read(dest), body)
+                            and launchd_registered_config_matches(label, dest, body))
+                if verified:
+                    print(f"  VERIFIED {label}: canonical plist and registered configuration")
+                else:
+                    # A loaded path alone cannot prove which definition launchd retained.
+                    if outcome in {"loaded", "kept"}:
+                        with open(dest + ".pending-reload", "w", encoding="utf-8") as fh:
+                            fh.write(hashlib.sha256(body.encode("utf-8")).hexdigest() + "\n")
+                    print(f"  UNVERIFIED {label}: installation outcome {outcome}")
+                    launchd_activation_failures.append(f)
+            elif outcome == "failed":
+                launchd_activation_failures.append(f)
+
+    return launchd_activation_failures
+
+
 def cmd_install(apply):
     """repo -> machine. The half that makes a second machine possible."""
     try:
@@ -2439,60 +2579,7 @@ def cmd_install(apply):
         print("  SKIP  scheduled tasks (secondary machines install none; no approved "
               "secondary task scope is configured)")
 
-    launchd_activation_failures = []
-    if apply:
-        os.makedirs(LAUNCHD_SRC, exist_ok=True)
-    for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
-        source = read(launchd_repo_path(f))
-        if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
-            continue
-        if f in PRIMARY_ONLY and not IS_PRIMARY:
-            live = os.path.join(LAUNCHD_SRC, f)
-            if os.path.exists(live):
-                if retire_primary_only_plist(f, live, apply) == "failed":
-                    launchd_activation_failures.append(f)
-            else:
-                print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
-            continue
-        if f in SECONDARY_ONLY and IS_PRIMARY:
-            print(f"  SKIP  {f} (the nightly chain already does this here)")
-            continue
-        dest = os.path.join(LAUNCHD_SRC, f)
-        source = read(launchd_repo_path(f))
-        if source is None:
-            print(f"  ERROR  cannot render {f} because its tracked source is missing")
-            return 1
-        refusal = launchd_template_refusal(source)
-        if refusal:
-            # Never install a schedule launchd will load and then never fire:
-            # the job would look installed and be dead (see the block above
-            # refused_launchd_templates). The installed copy is left as it is.
-            print(f"  REFUSED  {f}: {refusal}")
-            launchd_activation_failures.append(f)
-            continue
-        body = concrete(source)
-        body_matches = launchd_texts_match(read(dest), source)
-        if body_matches and not apply and not os.path.exists(dest + ".pending-reload"):
-            continue
-        gone = missing_targets(body)
-        if gone:
-            print(f"  SKIP  {f} (not built on this machine: {gone[0]})")
-            continue
-        if body_matches:
-            print(f"  VERIFY LOADED  {dest}")
-        else:
-            print(f"  {'WRITE' if apply else 'would write'}  {dest}")
-        if apply:
-            # Load it, do not print a command for a human to paste (rule
-            # e313a3ca). Writing the plist and stopping leaves the job on disk
-            # and dead: on a fresh machine that means the nightly never runs,
-            # so the record-derived fetch allowlist is generated once by the
-            # migration and then never refreshed as clients are added. A
-            # pending marker keeps an interrupted reload visible until an
-            # absent-before/load/registered-after sequence verifies it.
-            outcome = install_launchd_plist(f, dest, body, body_matches)
-            if outcome == "failed":
-                launchd_activation_failures.append(f)
+    launchd_activation_failures = install_launchd_agents(apply, held_labels=held_labels)
 
     # Git hooks. Added 2026-08-03, when Dell was granted WRITE and it turned out
     # branch protection is unavailable on a private free-plan repo — so the pull
@@ -3046,6 +3133,13 @@ def main():
         return cmd_install_codex_continuity(apply, remove=True)
     if mode == "verify-codex-continuity":
         return cmd_verify_codex_continuity()
+    if mode == "install-launchd":
+        import argparse
+        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
+        parser.add_argument("--apply", action="store_true")
+        parser.add_argument("labels", nargs="+")
+        options = parser.parse_args(sys.argv[2:])
+        return 1 if install_launchd_agents(options.apply, options.labels) else 0
     if mode == "install":
         return cmd_install(apply)
     if mode == "install-flash-on-demand":

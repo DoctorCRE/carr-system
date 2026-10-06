@@ -50,10 +50,7 @@ else
     echo "install-capture-bridge.sh: kept existing $CONFIG (never overwritten)"
 fi
 
-# The LaunchAgents come from config-as-code, never from a bare copy of this
-# tool's own plists — those spell Joe's home literally and are missing the
-# bin/run-scheduled.sh wrapper that records a durable run result. See
-# install-agent-via-config.sh for the full reasoning and the 2026-08-25 defect.
+# Canonical plists provide portable paths and the durable receipt wrapper.
 sh "$TOOL_DIR/bin/install-agent-via-config.sh" \
     "com.carr.capture-watch" "com.carr.capture-poll"
 
