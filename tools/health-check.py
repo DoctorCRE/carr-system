@@ -108,8 +108,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "claude-continuity-spool"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|claude-continuity-spool")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "claude-continuity-spool"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|claude-continuity-spool")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     return recovery, reason, vault, section, fixture, findings_json, rest
@@ -218,6 +218,12 @@ if CANONICAL_SECTION == "jev-spend":
         sys.exit(1)
     print(_spend_line)
     sys.exit(_spend_module.nightly_exit_status(_spend_line))
+
+if CANONICAL_SECTION == "costs":
+    import system_costs
+    _cost_snapshot = system_costs.load_snapshot(CANONICAL_FIXTURE or os.path.join(REPO_ROOT, 'out/system-costs.json'))
+    print(system_costs.health_row(_cost_snapshot, 'nightly collector owns reconciliation'))
+    sys.exit(0 if _cost_snapshot['state'] == 'ready' and not _cost_snapshot['alerts'] else 1)
 
 # ── scheduler register (added 2026-08-02) ────────────────────────────────────
 # A TASK THAT HAS NEVER REACHED ITS FIRST WINDOW LOOKS EXACTLY LIKE A TASK THAT IS
@@ -1340,6 +1346,17 @@ def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=Fal
     return 1
 
 
+def _seat_health_rows():
+    sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
+    from seat_health import health_rows
+    try:
+        with open(os.path.join(REPO_ROOT, "out", "orch", "budget", "seat-health.json")) as source:
+            report = json.load(source)
+    except (OSError, ValueError):
+        report = {}
+    return health_rows(report)
+
+
 def _tailscale_row():
     spec = importlib.util.spec_from_file_location(
         "tailscale_health", os.path.join(REPO_ROOT, "ops", "tailscale_health.py"))
@@ -1348,6 +1365,12 @@ def _tailscale_row():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
+
+
+def _system_cost_row():
+    import system_costs
+    snapshot = system_costs.load_snapshot(os.path.join(REPO_ROOT, 'out/system-costs.json'))
+    return snapshot, system_costs.health_row(snapshot, 'nightly collector owns reconciliation')
 
 
 def _branch_janitor_row():
@@ -1360,6 +1383,11 @@ def _canonical_health():
     """The normal health surface: record/control-plane/local truth only."""
     _FINDINGS.clear()
     rc = 0
+    if CANONICAL_SECTION == "all":
+        _cost_snapshot, _cost_line = _system_cost_row()
+        print("  " + _cost_line)
+        if _cost_snapshot['state'] != 'ready' or _cost_snapshot['alerts']:
+            rc = _red('system_costs', _cost_line, hard_error=_cost_snapshot['state'] == 'unavailable')
     if CANONICAL_SECTION in ("all", "credentials", "jev-cap"):
         _cap_line = _jev_paid_cap_row()
         print("  " + _cap_line)
@@ -1453,6 +1481,33 @@ def _canonical_health():
                       f"all receipted inside 26h{_carried}")
 
     if CANONICAL_SECTION in ("all", "jobs"):
+        sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
+        import scheduled_jobs as _scheduled_jobs
+        if CANONICAL_FIXTURE and "scheduled_jobs" not in snap:
+            print("  -- scheduled jobs NOT IN FIXTURE")
+        elif sys.platform != "darwin" and not CANONICAL_FIXTURE:
+            print("  -- scheduled jobs launchd check applies to macOS")
+        else:
+            try:
+                _scheduled_rows = _scheduled_jobs.check(
+                    snapshot=snap.get("scheduled_jobs") if CANONICAL_FIXTURE else None,
+                    now=_canonical_now(snap).timestamp())
+                for _job_row, _line in zip(_scheduled_rows, _scheduled_jobs.render(_scheduled_rows)):
+                    print("  " + _line)
+                    rc = _red("scheduled_jobs_" + _job_row["code"], _line,
+                              subject=_job_row["label"],
+                              hard_error=_job_row["code"] == "evidence_unavailable",
+                              time_rolling=_job_row["code"] == "stale_log")
+                if not _scheduled_rows:
+                    print("  OK scheduled jobs match manifest; canonical main is current")
+            except Exception as exc:
+                _detail = (f"scheduled job check unreadable ({type(exc).__name__}) · on breach: "
+                           "job-watchdog.py scan files/updates loop scheduled_jobs:checker:evidence_unavailable · "
+                           "owner orchestrator · fix: restore the manifest and machine evidence reader · "
+                           "verify: python3 ops/scheduled-jobs-check.py · auto-clear: next complete scan")
+                print("  WARN " + _detail)
+                rc = _red("scheduled_jobs_evidence_unavailable", _detail,
+                          subject="checker", hard_error=True)
         for headless_row in _headless_rows():
             print("  " + headless_row["line"])
             if headless_row["status"] == "WARN":
@@ -1804,6 +1859,19 @@ def _canonical_health():
         except Exception as e:
             print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
+
+    if CANONICAL_SECTION == "all":
+        try:
+            for _seat_line in _seat_health_rows():
+                print("  " + _seat_line)
+                if _seat_line.startswith("FAIL"):
+                    rc = _red("ai_seat_health", _seat_line, time_rolling=True)
+        except (ImportError, TypeError, AttributeError):
+            _seat_detail = ("Seat health evidence unreadable; on breach: orchestrator repairs "
+                            "ops/seat-health.py and reruns the daily exact-value probes; "
+                            "auto-clear when all seats pass")
+            print("  FAIL " + _seat_detail)
+            rc = _red("ai_seat_health", _seat_detail, time_rolling=True)
 
     if CANONICAL_SECTION == "all":
         # Jev liveness compares the last usable provider receipt with a

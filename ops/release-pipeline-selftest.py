@@ -164,20 +164,29 @@ class FakeRunner:
         return rp.Result(0, out)
 
     def _smoke_output(self, name, argv):
-        """Write the summary a real ops/release-smoke.py run would, at --out."""
+        """Write the summary a real ops/release-smoke.py run would, at --out.
+        A failure named `browser-journeys::<test>` fails the browser proof
+        with that test named in evidence.failed_tests."""
         failed = self.smoke.get(name, [])
         if failed is None:
             return rp.Result(1, "Traceback: release-smoke crashed")
+        lane = argv[argv.index('--lane') + 1]
         only = argv[argv.index("--only") + 1].split(",") if "--only" in argv else None
-        failed = [f for f in failed if only is None or f in only]
+        tests = sorted(f.split("::", 1)[1] for f in failed if "::" in f)
+        failed = sorted({f.split("::", 1)[0] for f in failed if only is None or f.split("::", 1)[0] in only})
         out = Path(argv[argv.index("--out") + 1])
         out.mkdir(parents=True, exist_ok=True)
+
+        def evidence(f):
+            if f not in failed:
+                return {}
+            row = {"tests": [{"title": f, "status": "failed",
+                              "artifacts": [str(out / "browser/artifacts/a1/screenshots/x.png"),
+                                            str(out / "browser/artifacts/a1/trace.zip")]}]}
+            return {**row, "failed_tests": tests} if f == "browser-journeys" and tests else row
         probes = [{"id": f, "status": "fail" if f in failed else "pass", "ms": 3,
-                   "detail": f"{f} broke" if f in failed else "",
-                   "evidence": {"tests": [{"title": f, "status": "failed",
-                                           "artifacts": [str(out / "browser/artifacts/a1/screenshots/x.png"),
-                                                         str(out / "browser/artifacts/a1/trace.zip")]}]} if f in failed else {}}
-                  for f in rp.SMOKE_JOURNEYS if only is None or f in only]
+                   "detail": f"{f} broke" if f in failed else "", "evidence": evidence(f)}
+                  for f in rp.SMOKE_LANE_JOURNEYS[lane] if only is None or f in only]
         value = {"schema": "carr-release-smoke.v1", "lane": argv[argv.index('--lane') + 1],
                  "sha": argv[argv.index('--sha') + 1], "phase": argv[argv.index('--phase') + 1],
                  "invocation_id": argv[argv.index('--invocation-id') + 1],
@@ -720,9 +729,11 @@ class Batching(Base):
         with mock.patch.object(rp.time, "sleep", side_effect=AssertionError("real sleep in offline fixture")):
             pipe = self.fx.pipeline(FakeRunner())
             pipe.http = mock.Mock(return_value={"git_sha": {"value": self.fx.base}})
-            served = pipe._await_live(pipe.cfg["worker"], lambda row: row["git_sha"]["value"],
-                                      "unserved-source", attempts=3)
-        self.assertEqual(served, self.fx.base)
+            matched, last, _, _ = pipe.await_live(pipe.cfg["worker"], "offline-poll",
+                                                  lambda row: row["git_sha"]["value"] == "unserved-source",
+                                                  attempts=3)
+        self.assertFalse(matched)
+        self.assertEqual(last["git_sha"]["value"], self.fx.base)
         self.assertEqual(pipe.http.call_count, 3)
 
     def test_many_merges_ship_once_at_the_latest_sha(self):
@@ -1119,6 +1130,81 @@ class PostReleaseProof(Base):
         self.assertEqual(post[post.index("--app-dir") + 1], runner.cwds["app-release"])
         self.assertNotIn("--worker-dir", post)
         self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_a_browser_test_already_failing_before_the_release_is_excused_per_test(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={name: ["browser-journeys::a.e2e.ts::one"] for name in
+                                  ("smoke-baseline", "smoke-post", "smoke-retry")})
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.fx.records()[-1]["post_release"]["preexisting"], ["browser-journeys::a.e2e.ts::one"])
+
+    def test_a_pre_existing_browser_failure_never_excuses_a_new_one(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={"smoke-baseline": ["browser-journeys::a.e2e.ts::one"],
+                                   "smoke-post": ["browser-journeys::a.e2e.ts::one", "browser-journeys::b.e2e.ts::two"],
+                                   "smoke-retry": ["browser-journeys::a.e2e.ts::one", "browser-journeys::b.e2e.ts::two"]})
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 1)
+        rec = self.fx.records()[-1]["post_release"]
+        self.assertEqual(rec["regressions"], ["browser-journeys::b.e2e.ts::two"])
+        self.assertEqual(rec["preexisting"], ["browser-journeys::a.e2e.ts::one"])
+        self.assertIn("app-rollback", runner.names())
+
+    def assert_browser_regression_across_granularity(self, post, retry):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={"smoke-post": post, "smoke-retry": retry})
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 1)
+        rec = self.fx.records()[-1]["post_release"]
+        self.assertEqual(rec["flaky"], [])
+        self.assertEqual(rec["regressions"], ["browser-journeys"])
+        self.assertIn("app-rollback", runner.names())
+
+    def test_a_whole_browser_failure_then_a_named_one_is_a_regression_not_a_flake(self):
+        self.assert_browser_regression_across_granularity(
+            ["browser-journeys"], ["browser-journeys::b.e2e.ts::two"])
+
+    def test_a_named_browser_failure_then_a_whole_one_is_a_regression_not_a_flake(self):
+        self.assert_browser_regression_across_granularity(
+            ["browser-journeys::b.e2e.ts::two"], ["browser-journeys"])
+
+    def test_each_lane_proves_only_its_own_journeys(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner()
+        self.assertEqual(self.app(runner, sha, [])[0], 0)
+        self.assertEqual(rp.SMOKE_LANE_JOURNEYS["app"], ("release-identity", "sign-in-gate", "browser-journeys"))
+        self.assertNotIn("deal-board", rp.SMOKE_LANE_JOURNEYS["app"])
+        self.assertNotIn("sign-in-gate", rp.SMOKE_LANE_JOURNEYS["worker"])
+
+    def test_a_failure_pre_existing_in_two_consecutive_releases_files_a_coverage_loop(self):
+        failing = {name: ["invoices-list"] for name in ("smoke-baseline", "smoke-post", "smoke-retry")}
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        rc, verbs, live = self.worker(FakeRunner(smoke=failing))
+        self.assertEqual(rc, 0)
+        self.assertEqual([a for v, a in verbs if v == "add-loop"], [])   # once may be a passing outage
+        self.fx.commit({"mcp-server/src/b.js": "2"})
+        runner = FakeRunner(smoke=failing)
+        verbs2: list = []
+        live = {"sha": self.fx.state()["worker"]["last_released_sha"]}
+        runner.live = live
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs2).tick(["worker"]), 0)
+        loops = [a for v, a in verbs2 if v == "add-loop"]
+        self.assertEqual(len(loops), 1)
+        self.assertIn("invoices-list", loops[0]["body"])
+        self.assertIn("two consecutive", loops[0]["body"])
+        self.assertEqual(self.fx.records()[-1]["post_release"]["persistent_preexisting"], ["invoices-list"])
+
+    def test_a_missing_smoke_switch_refuses_the_lane_before_anything_runs(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        cfg = self.fx.config()
+        del cfg["worker"]["post_release_smoke"]
+        runner = FakeRunner()
+        live = {"sha": self.fx.base}
+        runner.live = live
+        self.fx.pipeline(runner, cfg=cfg, live=live).tick(["worker"])
+        self.assertNotIn("promote", runner.names())
+        self.assertFalse([n for n in runner.names() if n.startswith("smoke-")])
 
     def test_app_fail_rolls_back_to_the_previous_app_version(self):
         sha = self.fx.commit({"src/worker.js": "1"})

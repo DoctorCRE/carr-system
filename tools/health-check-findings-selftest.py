@@ -91,12 +91,25 @@ import copy
 import json
 import tempfile
 import unittest
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HEALTH_CHECK_PATH = Path(__file__).resolve().parent / "health-check.py"
 SOURCE = HEALTH_CHECK_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(HEALTH_CHECK_PATH))
+sys.path.insert(0, str(HEALTH_CHECK_PATH.parent.parent / "lib"))
+
+
+def setUpModule():
+    from unittest.mock import patch
+    global scheduled_machine
+    scheduled_machine = patch("scheduled_jobs.check", return_value=[])
+    scheduled_machine.start()
+
+
+def tearDownModule():
+    scheduled_machine.stop()
 
 # The two names a finding-recording call inside tools/health-check.py may
 # appear under: the low-level `_canonical_finding` itself (still called
@@ -120,7 +133,7 @@ STRUCTURAL_KEYS = {
     "job_ledger", "control_state", "repo_status", "registry_integrity",
     "credential_health", "unrecorded_failure", "tailscale",
 }
-ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity"}
+ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity", "scheduled_jobs_evidence_unavailable"}
 
 
 def _find_function(name: str) -> ast.FunctionDef:
@@ -580,6 +593,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         ns.update(os=os, re=re, sys=sys, time=time, REPO_ROOT=str(HEALTH_CHECK_PATH.parent.parent),
                   CANONICAL_SECTION="credentials", CANONICAL_FIXTURE=None, timedelta=timedelta,
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
+                  _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
                   _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
                   _jev_site_spend_row=lambda: "OK jev spend by site — fixture",
                   _grok_session_row=lambda: ("OK fixture Grok session", 0),
@@ -679,6 +693,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         ns = self.namespace()
         snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}}
         ns.update(CANONICAL_SECTION="all", _canonical_snapshot=lambda: snap,
+                  _seat_health_rows=lambda: ["PASS seat fixture"],
                   _branch_janitor_row=lambda: ("OK branch janitor fixture", False),
                   _canonical_now=lambda snap: datetime.now(timezone.utc),
                   _canonical_contradiction_alarm=lambda: 0,

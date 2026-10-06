@@ -8,6 +8,31 @@ from successor_rehome_test_cases import ROOT, SuccessorCommands
 
 
 class CheckerCases(SuccessorCommands):
+    def test_large_repeated_schema_compares_within_budget_and_retains_edits(self):
+        target = 'db/schema.sql'
+        baseline = ''.join(f'create table fixture_{n} (value integer);\n' + '\n--\n' * 8 for n in range(2000))
+        self.git('switch', '-q', 'main')
+        self.write(target, baseline)
+        self.commit(target)
+        self.git('fetch', '-q', 'origin')
+        self.git('switch', '-q', 'feature')
+        self.git('merge', '-q', 'main')
+        approved_text = baseline.replace('fixture_1000 (value integer)', 'fixture_1000 (value bigint)')
+        self.write(target, approved_text)
+        self.commit(target)
+        approved = self.head()
+        def compare(expected):
+            try:
+                result = subprocess.run([sys.executable, str(ROOT / 'ops/successor-only-diff.py'), approved, self.head()],
+                    cwd=self.repo, env=self.env, capture_output=True, text=True, timeout=5)
+            except subprocess.TimeoutExpired:
+                self.fail('repeated schema lines exhaust the domain comparison budget')
+            self.assertEqual(result.returncode == 0, expected, result.stdout + result.stderr)
+        compare(True)
+        self.write(target, approved_text.replace('fixture_1500 (value integer)', 'fixture_1500 (value bigint)'))
+        self.commit(target)
+        compare(False)
+
     def check(self, approved, expected):
         result = self.command("successor-only-diff.py", approved, self.head())
         self.assertEqual(result.returncode == 0, expected, result.stdout + result.stderr)

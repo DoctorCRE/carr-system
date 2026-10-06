@@ -12,29 +12,34 @@ CARR_MCP_PROBE_TOKEN bearer in <credential-dir>/mcp-tokens.env). The Worker pins
 that actor to the read-only `probe` profile on the server side, and every write
 verb answers not_in_profile. This file calls only the read verbs in READ_VERBS.
 
-THE JOURNEYS (JOURNEYS, in this order):
-  release-identity  /release and /app-release answer; after a release the
-                    lane's live SHA is the released SHA
-  sign-in-gate      each core app page (deal board, Leads, invoices, progress
-                    board, Dr. CRE chat) redirects to its own
-                    /auth/login?return_to=<page>, and /status renders
-  deal-board        deal-board answers
-  leads-workspace   lead-board answers
-  invoices-list     read-invoice-tracker answers
-  progress-board    list-progress-boards answers
-  dr-cre-chat       list-doc-conversations answers
-  verb-registry     list-verbs serves every verb the released Worker SHA carries
-                    (--worker-dir); before the release, the missing ones are
-                    reported as the verbs this release adds
-browser-journeys runs only when --app-dir holds an installed doctorcre-app
-checkout. It runs the committed browser-product-proof.v1 producer against
-that source revision's synthetic application build. Live signed-in browser
-behavior is not proven by this fixture contract. Screenshots and traces
-are copied into the evidence folder.
+THE JOURNEYS. A lane runs only the journeys its own release can break
+(LANE_JOURNEYS), because the pipeline rolls back the lane that released and a
+rollback cannot repair the other one:
+  release-identity  both    the lane's identity endpoint (/release for the
+                            Worker, /app-release for the app) answers; after a
+                            release it serves the released SHA. The other
+                            lane's endpoint is read for the evidence only.
+  deal-board        worker  deal-board answers
+  leads-workspace   worker  lead-board answers
+  invoices-list     worker  read-invoice-tracker answers
+  dr-cre-chat       worker  list-doc-conversations answers
+  verb-registry     worker  list-verbs serves every verb the released Worker
+                            SHA carries (--worker-dir); before the release, the
+                            missing ones are reported as the verbs it adds
+  sign-in-gate      app     each core app page (deal board, Leads, invoices,
+                            progress board, Dr. CRE chat) redirects to its own
+                            /auth/login?return_to=<page>, and /status renders
+  browser-journeys  app     the committed browser-product-proof.v1 producer in
+                            the --app-dir checkout, against that revision's
+                            synthetic build. A failed run names each failed
+                            test (evidence.failed_tests) so the pipeline can
+                            attribute per test. Screenshots and traces are
+                            copied into the evidence folder.
 
-NOT EXERCISED, and it needs an identity: the probe actor is accepted only on
-/mcp, so no journey here renders a signed-in app page. NOT_EXERCISED lists them,
-and every summary repeats that list.
+NOT EXERCISED: no journey renders a signed-in app page (the probe actor is
+accepted only on /mcp), the progress board directory needs a partner sponsor
+the probe does not have, and Dr. CRE replying needs write verbs. NOT_EXERCISED
+lists them, and every summary repeats that list.
 
 EVIDENCE. <out>/summary.json (one row per journey: status, milliseconds,
 detail, evidence) and <out>/probes.jsonl. MCP evidence records the SHAPE of
@@ -81,20 +86,26 @@ read = _prod.read
 
 DEFAULT_API = "https://api.doctorcre.com"
 DEFAULT_APP = "https://app.doctorcre.com"
-JOURNEYS = ("release-identity", "sign-in-gate", "deal-board", "leads-workspace", "invoices-list",
-            "progress-board", "dr-cre-chat", "verb-registry")
 BROWSER = "browser-journeys"
+LANE_JOURNEYS = {
+    "worker": ("release-identity", "deal-board", "leads-workspace", "invoices-list", "dr-cre-chat",
+               "verb-registry"),
+    "app": ("release-identity", "sign-in-gate", BROWSER),
+}
 READ_VERBS = {"deal-board": "deal-board", "leads-workspace": "lead-board",
-              "invoices-list": "read-invoice-tracker", "progress-board": "list-progress-boards",
-              "dr-cre-chat": "list-doc-conversations"}
+              "invoices-list": "read-invoice-tracker", "dr-cre-chat": "list-doc-conversations"}
 GATED_PAGES = ("/deals", "/leads", "/invoices", "/control-room/progress", "/doc-chats")
 NOT_EXERCISED = (
     "signed-in deal board, Leads workspace, invoices list and progress board pages: the app gates "
     "every page on a CARR session cookie, and the only machine identity (smoke-probe) is accepted on "
     "/mcp alone, so the journeys above read the same verbs those pages call instead of rendering them",
+    "progress board directory: list-progress-boards answers only for a partner sponsor "
+    "(board-answers.js sponsor()), and smoke-probe is a machine actor with no sponsor, so the read "
+    "could only ever fail",
     "Dr. CRE chat responding: a reply needs create-doc-conversation/add-doc-conversation-turn, which "
     "write records; the read-only probe profile refuses both, so only the chat's read path is proven",
 )
+IDENTITY_PATH = {"worker": "/release", "app": "/app-release"}
 USER_AGENT = "carr-release-smoke/1 (+ops/release-smoke.py)"
 MCP_TIMEOUT = 30
 
@@ -116,32 +127,47 @@ def _json(reply: Any) -> Any:
         return None
 
 
+def served_version(lane: str, live: Any) -> str | None:
+    """The provider version a lane's identity payload says is serving: the one
+    reader the baseline, the rollback readback and this smoke all use."""
+    if not isinstance(live, dict):
+        return None
+    version = (live.get("worker_version") or {}).get("id") if lane == "worker" else live.get("provider_version_id")
+    return version if isinstance(version, str) else None
+
+
+def _served_sha(lane: str, reply: Any) -> str | None:
+    """The SHA a lane's identity endpoint serves, or None when it does not
+    answer as that lane's production identity."""
+    live = _json(reply)
+    if reply.status != 200 or not isinstance(live, dict):
+        return None
+    if lane == "worker":
+        sha = (live.get("git_sha") or {}).get("value") if isinstance(live.get("git_sha"), dict) else None
+        valid = live.get("ok") is True and (live.get("env") or {}).get("value") == "production"
+    else:
+        sha = live.get("source_commit")
+        valid = live.get("service") == "doctorcre-app" and live.get("environment") == "production"
+    return sha if valid and isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
 def _release_identity(ctx: dict) -> tuple[list[str], dict]:
-    failures: list[str] = []
-    worker_reply = ctx["http"](ctx["api"] + "/release")
-    app_reply = ctx["http"](ctx["app"] + "/app-release")
-    worker, app = _json(worker_reply), _json(app_reply)
-    worker_sha = ((worker.get("git_sha") or {}).get("value")
-                  if isinstance(worker, dict) and isinstance(worker.get("git_sha"), dict) else None)
-    app_sha = app.get("source_commit") if isinstance(app, dict) else None
-    valid_sha = lambda value: isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) is not None
-    worker_valid = (worker_reply.status == 200 and isinstance(worker, dict) and worker.get("ok") is True
-                    and (worker.get("env") or {}).get("value") == "production" and valid_sha(worker_sha))
-    app_valid = (app_reply.status == 200 and isinstance(app, dict) and app.get("service") == "doctorcre-app"
-                and app.get("environment") == "production" and valid_sha(app_sha))
-    if not worker_valid:
-        failures.append("worker_identity_unavailable_or_invalid")
-    if not app_valid:
-        failures.append("app_identity_unavailable_or_invalid")
-    if ctx["phase"] == "post" and (worker_sha if ctx["lane"] == "worker" else app_sha) != ctx["sha"]:
-        failures.append("released_source_mismatch")
-    version = worker.get("worker_version") if isinstance(worker, dict) else None
-    version_id = version.get("id") if isinstance(version, dict) else None
-    provider = app.get("provider_version_id") if isinstance(app, dict) else None
-    safe_version = lambda value: value if isinstance(value, str) and re.fullmatch(r"[0-9a-f-]{36}", value) else None
-    return failures, {"worker_sha": worker_sha if valid_sha(worker_sha) else None,
-                      "app_sha": app_sha if valid_sha(app_sha) else None,
-                      "worker_version_id": safe_version(version_id), "app_provider_version_id": safe_version(provider)}
+    lane = ctx["lane"]
+    other = "app" if lane == "worker" else "worker"
+    base = {"worker": ctx["api"], "app": ctx["app"]}
+    own = ctx["http"](base[lane] + IDENTITY_PATH[lane])
+    sha = _served_sha(lane, own)
+    version = served_version(lane, _json(own))
+    evidence = {"served_sha": sha,
+                "served_version_id": version if version and re.fullmatch(r"[0-9a-f-]{36}", version) else None,
+                # Informational: an outage of the other lane is not this release's.
+                "other_lane": "answered" if _served_sha(other, ctx["http"](base[other] + IDENTITY_PATH[other]))
+                else "unavailable"}
+    if sha is None:
+        return [f"{lane}_identity_unavailable_or_invalid"], evidence
+    if ctx["phase"] == "post" and sha != ctx["sha"]:
+        return ["released_source_mismatch"], evidence
+    return [], evidence
 
 
 def _sign_in_gate(ctx: dict) -> tuple[list[str], dict]:
@@ -170,7 +196,6 @@ READ_CONTRACTS: dict[str, dict[str, type]] = {
     "deal-board": {"deals": list},
     "lead-board": {"leads": list, "stages": list, "metrics": dict, "generated_at": str},
     "read-invoice-tracker": {"entries": list, "schema_version": str, "actor": str, "observed_at": str},
-    "list-progress-boards": {"ok": bool, "schema": str, "boards": list},
     "list-doc-conversations": {"ok": bool, "conversations": list},
 }
 
@@ -185,9 +210,8 @@ def _read_verb(verb: str) -> Callable[[dict], tuple[list[str], dict]]:
         if (not isinstance(answer, dict) or answer.get("ok") is False
                 or any(type(answer.get(key)) is not kind for key, kind in contract.items())):
             return ["read_contract_invalid"], evidence
-        if ((verb in ("list-progress-boards", "list-doc-conversations") and answer["ok"] is not True)
-                or (verb == "read-invoice-tracker" and answer["schema_version"] != "invoice-tracker.v1")
-                or (verb == "list-progress-boards" and answer["schema"] != "progress-board-directory.v1")):
+        if ((verb == "list-doc-conversations" and answer["ok"] is not True)
+                or (verb == "read-invoice-tracker" and answer["schema_version"] != "invoice-tracker.v1")):
             return ["read_contract_invalid"], evidence
         evidence["shape"] = _shape({key: answer[key] for key in contract})
         return [], evidence
@@ -237,7 +261,7 @@ def run_smoke(*, lane: str, sha: str, phase: str, api: str, app: str,
            "http": http, "mcp": mcp, "expected_verbs": expected_verbs,
            "expected_verbs_error": expected_verbs_error}
     probes: list[dict] = []
-    selected = [j for j in JOURNEYS if only is None or j in only]
+    selected = [j for j in LANE_JOURNEYS[lane] if j != BROWSER and (only is None or j in only)]
     for journey in selected:
         started = time.monotonic()
         try:
@@ -247,10 +271,10 @@ def run_smoke(*, lane: str, sha: str, phase: str, api: str, app: str,
         probes.append({"id": journey, "status": "fail" if failures else "pass",
                        "ms": int((time.monotonic() - started) * 1000),
                        "detail": "; ".join(failures), "evidence": evidence})
-    if only is None or BROWSER in only:
+    if BROWSER in LANE_JOURNEYS[lane] and (only is None or BROWSER in only):
         started = time.monotonic()
         if browser is None:
-            probes.append({"id": BROWSER, "status": "fail" if lane == "app" else "skip", "ms": 0, "evidence": {},
+            probes.append({"id": BROWSER, "status": "fail", "ms": 0, "evidence": {},
                            "detail": "no installed doctorcre-app checkout was given (--app-dir)"})
         else:
             try:
@@ -265,9 +289,13 @@ def run_smoke(*, lane: str, sha: str, phase: str, api: str, app: str,
                 source = outcome.get("source_commit")
                 source = source if isinstance(source, str) and re.fullmatch(r"[0-9a-f]{40}", source) else None
                 detail = "" if exit_code == 0 and passed else "browser_proof_failed_or_incomplete"
+                failed_tests = sorted(t["id"] for t in tests or [] if t.get("status") != "passed") if complete else []
                 outcome = {"exit": exit_code, "source_commit": source, "test_count": len(tests or []),
                            "scope": "synthetic application journeys",
-                           "artifacts": ["browser/checkpoint.png", "browser/video.webm", "browser/trace.zip"] if complete and passed else []}
+                           "artifacts": ["browser/checkpoint.png", "browser/video.webm", "browser/trace.zip"] if complete and passed else [],
+                           # Present only when a complete run names what failed: the
+                           # pipeline then attributes each test against the baseline.
+                           **({"failed_tests": failed_tests} if detail and failed_tests else {})}
             except Exception:  # noqa: BLE001
                 outcome, detail = {}, "browser_runner_unavailable_or_failed"
             probes.append({"id": BROWSER, "status": "fail" if detail else "pass",
@@ -362,6 +390,9 @@ def browser_runner(app_dir: Path, out: Path, *, expected_sha: str | None = None)
     This contract exercises its synthetic fixture build, including native
     journeys and continuity. Live authenticated pages remain unexercised.
     A configured checkout with no producer fails; it never becomes a skip.
+    When the producer refuses, this run's own native report (.e2e/report.json,
+    deleted before the run) still names each test's status, so a failing test
+    is reported by id instead of as a broken proof.
     """
     def run() -> dict:
         contract_paths = ("scripts/browser-product-proof.mjs", "e2e.config.ts",
@@ -376,15 +407,28 @@ def browser_runner(app_dir: Path, out: Path, *, expected_sha: str | None = None)
         if not required or len(required) != len(set(required)):
             raise RuntimeError("application_browser_coverage_invalid")
         proof = app_dir / ".e2e/proof"
-        packet_path, native_path = proof / "packet.json", proof / "native-report.json"
-        for path in (packet_path, native_path):
+        packet_path, native_path, run_report = proof / "packet.json", proof / "native-report.json", app_dir / ".e2e/report.json"
+        for path in (packet_path, native_path, run_report):
             path.unlink(missing_ok=True)
+
+        def statuses(native: dict) -> list[dict]:
+            selected = {row.get("testId"): row for row in native.get("results", []) if row.get("selected")}
+            return [{"id": key, "status": "passed" if key in selected and selected[key].get("status") == "passed"
+                     and len(selected[key].get("attempts", [])) == 1 else "failed"} for key in required]
         env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG") if os.environ.get(k)}
         env.update({"CI": "1", "E2E_TELEMETRY_DISABLED": "1"})
         proc = subprocess.run(["node", "scripts/browser-product-proof.mjs"], cwd=app_dir, env=env,
                               stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=1800)
         if proc.returncode:
-            raise RuntimeError("application_browser_process_failed")
+            try:
+                native = json.loads(run_report.read_text()).get("run", {})
+            except (OSError, ValueError, AttributeError):
+                raise RuntimeError("application_browser_process_failed") from None
+            if (native.get("vcs", {}).get("commit") != source or native.get("vcs", {}).get("dirty") is not False
+                    or not isinstance(native.get("results"), list)):
+                raise RuntimeError("application_browser_process_failed")
+            return {"exit": proc.returncode, "source_commit": source, "required": required,
+                    "tests": statuses(native), "artifacts": []}
         packet = json.loads(packet_path.read_text())
         report = json.loads(native_path.read_text())
         binding, native = packet.get("binding", {}), report.get("run", {})
@@ -394,9 +438,7 @@ def browser_runner(app_dir: Path, out: Path, *, expected_sha: str | None = None)
                 or native.get("vcs", {}).get("dirty") is not False or native.get("exitCode") != 0
                 or native.get("status") != "passed"):
             raise RuntimeError("application_browser_report_invalid")
-        selected = {row.get("testId"): row for row in native.get("results", []) if row.get("selected")}
-        tests = [{"id": key, "status": "passed" if key in selected and selected[key].get("status") == "passed"
-                  and len(selected[key].get("attempts", [])) == 1 else "failed"} for key in required]
+        tests = statuses(native)
         dest = out / "browser"
         dest.mkdir(parents=True, exist_ok=True)
         artifacts = []
@@ -419,7 +461,7 @@ def main(argv: list[str] | None = None, *, http: Callable[..., Any] = read,
     parser.add_argument("--app", default=DEFAULT_APP)
     parser.add_argument("--credential-dir", default="~/.config/carr")
     parser.add_argument("--worker-dir", help="the released Worker's mcp-server/ (installed), for verb-registry")
-    parser.add_argument("--app-dir", help="an installed doctorcre-app checkout, for browser-journeys")
+    parser.add_argument("--app-dir", help="an installed doctorcre-app checkout, for the app lane's browser-journeys")
     parser.add_argument("--invocation-id", default=None)
     parser.add_argument("--only", help="comma-separated journey ids (a retry)")
     args = parser.parse_args(argv)
@@ -441,7 +483,7 @@ def main(argv: list[str] | None = None, *, http: Callable[..., Any] = read,
             expected = released_verbs(Path(args.worker_dir))
         except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
             expected_error = str(error)
-    browser = browser_runner(Path(args.app_dir), out, expected_sha=args.sha if args.lane == "app" else None) if args.app_dir else None
+    browser = browser_runner(Path(args.app_dir), out, expected_sha=args.sha) if args.app_dir else None
     only = [j.strip() for j in args.only.split(",") if j.strip()] if args.only else None
 
     summary = run_smoke(lane=args.lane, sha=args.sha, phase=args.phase, api=args.api, app=args.app,

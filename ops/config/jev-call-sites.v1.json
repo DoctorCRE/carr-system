@@ -9,6 +9,20 @@
   },
   "sites": [
     {
+      "caller": "seat_health",
+      "trigger": "Once per UTC day: prove Jev returns the exact fixture answer; this explicitly authorized health probe makes no routing judgment.",
+      "runs_in": "Daily nightly-record-layer chain through ops/seat-health.py",
+      "attribution": "session_or_job",
+      "unattended": "allowed",
+      "hourly_budget": 1,
+      "daily_budget": 1,
+      "owner": "orchestrator",
+      "value": "One paid ask-jev task verifies provider, admission, model and exact answer; failures skip this seat and open one recovery loop.",
+      "sources": [
+        "ops/seat_health.py"
+      ]
+    },
+    {
       "caller": "rule_trigger_delivery",
       "trigger": "UserPromptSubmit on a human prompt (machine envelopes are skipped): one ranking + one batched binding request over pack rules the compiled triggers did not match",
       "runs_in": "interactive Claude and Codex sessions via hooks/rule-pack-preuse-reselection.py; Flash via tools/flash-run.py (once per scripted task) and tools/flash-prompt-rules.py (once per interactive message), which rank the whole active corpus through judge_budgeted",

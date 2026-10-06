@@ -15,13 +15,16 @@ FIXTURES = ROOT / "tools/fixtures/job-watchdog"
 
 def setUpModule():
     from unittest.mock import patch
-    global board_publication
+    global board_publication, scheduled_machine
     board_publication = patch.dict(os.environ, {"PROGRESS_BOARD_LOCAL_ONLY": "1"})
     board_publication.start()
+    scheduled_machine = patch("scheduled_jobs.check", return_value=[])
+    scheduled_machine.start()
 
 
 def tearDownModule():
     board_publication.stop()
+    scheduled_machine.stop()
 
 
 class ReplayTests(unittest.TestCase):
@@ -755,7 +758,11 @@ class RunnerTests(unittest.TestCase):
             cp = root / "config.json"
             cp.write_text(json.dumps(config))
             env = dict(os.environ, PATH=str(executable.parent) + os.pathsep + os.environ["PATH"])
-            result = subprocess.run([sys.executable, str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"],
+            script = ("import sys, runpy; sys.path.insert(0, " + repr(str(ROOT / "lib")) + "); "
+                      "import scheduled_jobs; scheduled_jobs.check = lambda **kwargs: []; "
+                      "sys.argv = " + repr([str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"]) + "; "
+                      "runpy.run_path(sys.argv[0], run_name='__main__')")
+            result = subprocess.run([sys.executable, "-c", script],
                                     env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), "")

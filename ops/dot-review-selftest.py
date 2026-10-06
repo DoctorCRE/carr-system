@@ -454,8 +454,27 @@ class DotReview(unittest.TestCase):
         self.assertEqual('Implement validation', req._human_text({'type':'user','origin':{'kind':'human'},'message':{'content':'Implement validation'}}))
 
     def test_b17_read_loop_contract(self):
-        spend = load("ops/jev_spend_health.py")
-        self.assertEqual(3, spend._loop_version(lambda *_: {'loop':{'loop_id':'L','version':3},'amended':False,'amendments':[]}, 'L'))
+        with patch.object(sys, 'path', [str(REPO / 'tools'), *sys.path]):
+            costs = load("tools/system_costs.py")
+        calls = []
+
+        def record(name, payload):
+            calls.append((name, payload))
+            if name == 'read-loop':
+                return {'loop': {'loop_id': 'L', 'version': 3}, 'amended': False, 'amendments': []}
+            return {'ok': True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / 'loops.json'
+            state.write_text(json.dumps({'open': {'jev': {'loop_id': 'L', 'fingerprint': 'old',
+                                                        'through': '2026-10-04'}},
+                                         'episodes': {'jev': 1}, 'pending': None}))
+            costs.reconcile({'through': '2026-10-05', 'observed_at': '2026-10-06T00:00:00Z',
+                             'providers': [], 'alerts': [{'provider': 'jev', 'kind': 'daily_spike',
+                                                         'amount_usd': 8, 'threshold_usd': 4,
+                                                         'driver': 'fixture'}]}, state, record)
+        self.assertEqual(['read-loop', 'update-loop'], [name for name, _ in calls])
+        self.assertEqual(3, calls[1][1]['base_version'])
 
     def test_b20_grader_harness_completion(self):
         score = load("ops/jev_scorecard.py")

@@ -73,6 +73,8 @@ def main():
     parser.add_argument("--timeout-seconds", type=int, default=int(TIMEOUT_S),
                         help="model invocation timeout in seconds (1-1800; default: 180)")
     parser.add_argument("--writable", action="store_true")
+    parser.add_argument("--no-sign-in-alert", action="store_true",
+                        help="The calling health job owns failure notification")
     parser.add_argument("--retrieve", action="store_true",
                         help="validate retrieved public source text for the prompt URLs")
     prompt = parser.add_mutually_exclusive_group(required=True)
@@ -94,7 +96,7 @@ def main():
             return preflight()
         except PreflightError as error:
             line = str(error)
-            if error.code == 3:
+            if error.code == 3 and not args.no_sign_in_alert:
                 try:
                     sign_in_alert()
                 except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):

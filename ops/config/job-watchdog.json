@@ -65,6 +65,7 @@
     "file_defects": true
   },
   "next_actions": {
+    "scheduled_job_drift": "Repair the declared schedule or canonical checkout; verify ops/scheduled-jobs-check.py and clear on a complete scan without the finding.",
     "job_hang": "Restart once with stdin closed; on recurrence inspect the job log.",
     "job_silent": "Restart once; on recurrence inspect the stalled command.",
     "job_dead": "Inspect the log and wrapper; establish the missing exit record before retrying.",

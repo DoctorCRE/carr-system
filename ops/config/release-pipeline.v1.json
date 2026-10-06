@@ -29,7 +29,7 @@
     "recovery_strategy": "forward_fix",
     "rollback_plan_ref": "runbooks/rollback-worker.md",
     "post_release_smoke": true,
-    "_post_release_smoke": "After the live readback, ops/release-smoke.py proves the live system works (read-only journeys, baseline before the release, one retry); a regression marks the release FAILED, rolls this lane back and files a loop. false turns the stage off for this lane.",
+    "_post_release_smoke": "After the live readback, ops/release-smoke.py proves the live system works (read-only journeys, baseline before the release, one retry); a regression marks the release FAILED, rolls this lane back and files a loop. false turns the stage off for this lane. Required: a missing value blocks the lane.",
     "ci_workflow_name": "CI",
     "ci_required_job": "ops/ci.sh --strict",
     "canary_workflow_name": "main canary",
