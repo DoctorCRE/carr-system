@@ -95,6 +95,7 @@ import { completeSetReviewA03StoreTools } from "./independent-review-cycle-store
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
+import { readNeedsJoe } from "./needs-joe.js";
 import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 
@@ -3188,6 +3189,14 @@ export const TOOLS = {
         const batch = result.rows[0]?.batch;
         return { items: Array.isArray(batch) ? batch : [] };
       });
+      // Joe's brief leads with the one list of what waits on him. A partial list
+      // with nothing in it is unavailable, never empty: a failed source could be
+      // hiding the item he needs to see.
+      const needsJoe = scope.sponsor === "joe" ? await section(async () => {
+        const { state: list_state, ...list } = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
+        if (list_state === "partial" && !list.items.length) throw new Error("needs-joe sources unavailable");
+        return { ...list, list_state };
+      }) : null;
       const costs = { ...morningCostSnapshot(undefined), ...await section(async () => {
         // Existing carr_reader grant and authenticated scope, like read-progress-board.
         // Ordinary brief reads never call billing providers.
@@ -3197,7 +3206,8 @@ export const TOOLS = {
           [organizationTenantForActor(actor), scope.sponsor, "system-costs"]);
         return morningCostSnapshot(result.rows[0]?.snapshot_json?.costs);
       }) };
-      const sections = { today, claim_card: claimCard, deals, loops, renewals, assurance_cadence: assuranceCadence, costs };
+      const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
+        today, claim_card: claimCard, deals, loops, renewals, assurance_cadence: assuranceCadence, costs };
       return {
         state: Object.values(sections).some((value) => value.state === "unavailable")
           ? "unavailable"
@@ -6298,9 +6308,9 @@ export const TOOLS = {
   // multi-table read.
   "governance-queue": {
     write: false,
-    description: "Read every pending governance decision in one payload: rules admitted and awaiting approve-rule, guidance import batches staged and awaiting decide-guidance-import-batch, and retrieval proposals awaiting approve-retrieval-proposals — each with enough context to decide. Read-only; grants no authority and performs no decision itself.",
+    description: "Read every pending decision in one payload: rules admitted and awaiting approve-rule, guidance import batches staged and awaiting decide-guidance-import-batch, retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
-    handler: async (c) => {
+    handler: async (c, actor, _args, { now } = {}) => {
       const row = (await c.query("select ops.read_governance_queue() as queue /* governance-queue */")).rows[0];
       const queue = row?.queue || {};
       const rules = queue.pending_rule_approvals || [];
@@ -6317,6 +6327,7 @@ export const TOOLS = {
           pending_retrieval_proposals: proposals.length,
           total: rules.length + batches.length + proposals.length,
         },
+        needs_joe: await readNeedsJoe(c, actor, queue, { now }),
       };
     },
   },

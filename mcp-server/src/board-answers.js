@@ -1,5 +1,6 @@
 import { ToolError } from "./tool-error.js";
 import { organizationTenantForActor } from "./identity.js";
+import { NEEDS_JOE_LOCAL_BOARD } from "./needs-joe.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
 
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/;
@@ -199,9 +200,9 @@ export function boardAnswerTools({ withEnvelope, writeEvent }) {
         const tenant = organizationTenantForActor(actor), principal = sponsor(actor);
         const result = await c.query(
           `select board_id,snapshot_json,updated_at from board_snapshot
-            where organization_tenant_id=$1 and sponsoring_human_slug=$2
+            where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id <> $3
             order by case when board_id='carr-v5' then 0 else 1 end,board_id`,
-          [tenant, principal]);
+          [tenant, principal, NEEDS_JOE_LOCAL_BOARD]);
         return { ok: true, schema: "progress-board-directory.v1", boards: result.rows.map(progressBoardSummary) };
       },
     },

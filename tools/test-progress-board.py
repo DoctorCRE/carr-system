@@ -171,6 +171,10 @@ class BoardCase(unittest.TestCase):
         self.env["PROGRESS_BOARD_LOCAL_ONLY"] = "1"
         self.fixture = self.root / "gh.json"
         self.gh_log = self.root / "gh.log"
+        door = patch.object(BOARD, "call_verb", side_effect=AssertionError("unit test reached the live verb door"))
+        self.live_door = door.start()
+        self.addCleanup(door.stop)
+        self.addCleanup(self.live_door.assert_not_called)
 
     def tearDown(self):
         self.tempdir.cleanup()
@@ -1353,9 +1357,10 @@ class PublishAndAnswers(BoardCase):
         with patch.object(BOARD, "render", lambda project: events.append(("render", project))), \
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))), \
              patch.object(BOARD, "poll_board_answers", lambda project: events.append(("poll", project))), \
-             patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))):
+             patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
+             patch.object(BOARD, "publish_needs_joe_local", lambda: events.append(("local", "needs-joe"))):
             BOARD.command_render(args)
-        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
+        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"), ("local", "needs-joe"),
                                   ("build", "all-repos"), ("publish", "all-repos")])
 
     def test_system_board_failure_is_logged_and_last_known_state_published(self):
@@ -1371,11 +1376,63 @@ class PublishAndAnswers(BoardCase):
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))), \
              patch.object(BOARD, "poll_board_answers", lambda project: events.append(("poll", project))), \
              patch.object(BOARD, "build_all_repos", broken), \
+             patch.object(BOARD, "publish_needs_joe_local"), \
              patch("sys.stderr", new_callable=io.StringIO) as err:
             BOARD.command_render(args)
         self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
                                   ("publish", "all-repos")])
         self.assertIn("gh unavailable", err.getvalue())
+
+
+class NeedsJoePublication(unittest.TestCase):
+    def test_local_publication_failures_do_not_interrupt_other_boards(self):
+        import needs_joe_local
+        from argparse import Namespace
+        failures = [RuntimeError("verb unavailable"), subprocess.TimeoutExpired("run.sh", 30),
+                    OSError("filesystem unavailable"), FileNotFoundError("zsh"),
+                    UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"), KeyError("version")]
+        for location in ("read_source", "call_verb"):
+            for failure in failures:
+                with self.subTest(location=location, failure=type(failure).__name__):
+                    events = []
+                    read_effect = failure if location == "read_source" else None
+                    call_effect = failure if location == "call_verb" else None
+                    with patch.object(BOARD, "render", lambda p: events.append(("render", p))), \
+                         patch.object(BOARD, "publish_board", lambda p: events.append(("publish", p))), \
+                         patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
+                         patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
+                         patch.object(needs_joe_local, "read_source", return_value="", side_effect=read_effect), \
+                         patch.object(BOARD, "call_verb", side_effect=call_effect) as call, \
+                         patch("sys.stderr", new_callable=io.StringIO) as err:
+                        BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
+                    self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"),
+                        ("poll", "carr-v5"), ("build", "all-repos"), ("publish", "all-repos")])
+                    self.assertIn("needs-joe local page not published", err.getvalue())
+                    self.assertEqual(call.call_count, 0 if location == "read_source" else 1)
+
+    def test_local_publication_uses_remote_version_and_reads_back(self):
+        import needs_joe_local
+        from argparse import Namespace
+        events = []
+        remote = {"version": 7, "snapshot_json": {}}
+        def call(verb, args):
+            events.append((verb, args["board_id"]))
+            if verb == "read-progress-board":
+                return {"snapshot": remote}
+            self.assertEqual(verb, "publish-board-snapshot")
+            self.assertEqual(args["base_version"], 7)
+            remote["snapshot_json"] = args["snapshot"]
+            return {"ok": True}
+        with patch.object(BOARD, "render", lambda p: events.append(("render", p))), \
+             patch.object(BOARD, "publish_board", lambda p: events.append(("publish", p))), \
+             patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
+             patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
+             patch.object(needs_joe_local, "read_source", return_value=""), \
+             patch.object(BOARD, "call_verb", call), patch("sys.stderr", new_callable=io.StringIO):
+            BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
+        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
+            ("read-progress-board", "needs-joe-local"), ("publish-board-snapshot", "needs-joe-local"),
+            ("read-progress-board", "needs-joe-local"), ("build", "all-repos"), ("publish", "all-repos")])
 
 class CardColumns(unittest.TestCase):
     """Addition 14: finished cards never sit in Building; retired cards leave the pipeline."""
@@ -1999,11 +2056,13 @@ class DeliveryTargetRelease(BoardCase):
                     with patch.object(BOARD, "urlopen", **kwargs), \
                          patch.object(BOARD, "fetch_pr", return_value=(merged_view("a" * 40), None)), \
                          patch.object(BOARD, "publish_board") as publish, \
-                         patch.object(BOARD, "poll_board_answers") as poll:
+                         patch.object(BOARD, "poll_board_answers") as poll, \
+                         patch.object(BOARD, "publish_needs_joe_local") as local:
                         BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=True))
                         self.assertEqual(publish.call_args_list,
                                          [unittest.mock.call(BOARD.LAUNCHD_BOARD), unittest.mock.call(BOARD.ALL_REPOS_BOARD)])
                         poll.assert_called_once_with(BOARD.LAUNCHD_BOARD)
+                        local.assert_called_once_with()
                     task = BOARD.read_state(BOARD.LAUNCHD_BOARD)["tasks"]["fix"]
                     self.assertEqual(task["stage"], "merged")
                     self.assertNotIn("completed_at", task)

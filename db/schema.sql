@@ -83906,7 +83906,7 @@ CREATE TABLE public.lead (
     drip_added_raw text,
     score_reason text,
     CONSTRAINT lead_do_not_contact_suppressed CHECK (((stage <> 'do_not_contact'::text) OR suppressed)),
-    CONSTRAINT lead_score_integer_range CHECK (((score IS NULL) OR (((score >= (0)::numeric) AND (score <= (100)::numeric)) AND (score = trunc(score)))))
+    CONSTRAINT lead_score_integer_range CHECK (((score IS NULL) OR ((score >= (0)::numeric) AND (score <= (100)::numeric) AND (score = trunc(score)))))
 );
 
 
