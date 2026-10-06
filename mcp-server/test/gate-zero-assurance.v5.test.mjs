@@ -1301,7 +1301,7 @@ const READER_CARDS = Object.freeze([
     seam: V5_A02_GATE_CONCLUSION_READER_SEAM,
     question: "which surface a gate's own conclusion is read from",
     reader: "readGateConclusionEvidence", fallback: "readGateGraphAssurance",
-    query: { headSha: "a".repeat(40), checkName: "main canary (gates, migration, types, freshness)" },
+    query: { headSha: "a".repeat(40), checkName: "main canary" },
   }),
 ]);
 

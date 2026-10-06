@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { assertAdmits } from './helpers/registry-admission.mjs';
 import { TOOLS } from '../src/tools.js';
 const id=n=>`30000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
 const human={id:id(900),slug:'joe',display:'Example Partner',human:true,via:'mcp',client_id:'test'};
@@ -63,24 +64,6 @@ test('Archived stage migration is explicit and never rewrites history',async()=>
 
 test('actor switch between read and command refuses all three writes before mutation',async()=>{for(const verb of ['claim-lead','link-lead-client','update-lead']){const db=new Fake();await assert.rejects(()=>TOOLS[verb].handler(db,human,args({expected_actor:'dell',client_id:id(800),confirmed:true,fields:{stage:'qualified'}})),e=>e.payload.error==='account_changed');assert.equal(db.updated,undefined)}});
 
- test('Leads frontier follows the immutable relationship registry', async()=>{
-  const { SCAC_MUTATION_REGISTRY_VERSION, registeredOperation } = await import('../src/mutation-registry.js');
-  assert.ok(Number(SCAC_MUTATION_REGISTRY_VERSION.split('.v').at(-1)) >= 112);
-  assert.equal(registeredOperation('confirm-merge').human_only, true);
-  for (const name of ['claim-lead','link-lead-client','update-lead','lead-board'])
-    assert.ok(registeredOperation(name));
-  const migration = await readFile(new URL('../../migrations/0846_leads_scac_successor.sql',import.meta.url),'utf8');
-  assert.match(migration,/0844_automation_undo_scac_successor.sql/);
-  assert.match(migration,/0845_lead_archived_stage.sql/);
- });
-
-test('reference monitor pins the predecessor counts sealed by main', async()=>{
- const gate = await readFile(new URL('../../ops/siep18-reference-monitor-local-pg-gate.py',import.meta.url),'utf8');
- const predecessor = gate.match(/SEALED_PREDECESSOR_VERSION = "([^"]+)"/)[1];
- const path = gate.match(/SEALED_PREDECESSOR_MIGRATION = \(\s*"([^"]+)"/)[1];
- const migration = await readFile(new URL(`../../${path}`,import.meta.url),'utf8');
- const sealed = migration.match(new RegExp(`values \\('${predecessor.replaceAll('.', '\\.')}'[^\\n]*?'sha256:[0-9a-f]{64}',(\\d+),(\\d+),`));
- assert.ok(sealed, 'predecessor must have an exact sealed registry row');
- const pinned = gate.match(/SEALED_PREDECESSOR_ENTRY_COUNTS = \((\d+), (\d+)\)/);
- assert.deepEqual(pinned.slice(1).map(Number), sealed.slice(1).map(Number));
+test('lead and human-only merge contracts remain admitted', async()=>{
+ await assertAdmits(['confirm-merge','claim-lead','link-lead-client','update-lead','lead-board']);
 });

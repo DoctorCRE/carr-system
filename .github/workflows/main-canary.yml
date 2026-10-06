@@ -1,58 +1,9 @@
-# main-canary.yml — the run that discovers a broken main and NAMES it.
-#
-# WHAT THIS IS NOT. It is not the post-merge full-suite job that ran here until
-# 2026-08-20, and the reasoning that removed that job stands: over the six days
-# after CI stabilised it produced 131 successes, 52 CANCELLED and 1 failure
-# across 184 runs, caught one real break in six days, was silently reporting
-# nothing 28% of the time, and cost roughly 20 of the ~45 daily runs. A net with
-# a 28% hole that fires once a week is not a safety net. Restoring THAT object
-# would be relitigating a decision that was correct on its numbers.
-#
-# WHAT CHANGED. Those numbers described a ~1/week break rate. On 2026-08-22 one
-# broken main produced SEVEN red runs across SIX unrelated branches in 40
-# minutes, and each victim session diagnosed a defect it did not cause. The
-# 2026-08-23 CI-failures council measured the cluster and ruled: restore a CHEAP
-# canary, not the full-suite-per-merge object -- one that runs only the classes
-# that actually fail, historically debounced to one run per merge burst, and whose failure
-# NAMES main instead of appearing as a red on somebody's innocent pull request.
-#
-# THE FOUR CLASSES ARE THE MEASURED ONES, not a guess. Across the 30 most recent
-# failed runs the failing classes were gates 24, migration 8, types 5, freshness
-# 4. Six classes never failed at all in that window -- unit, contract, secret,
-# dependency, binding, artifact -- and running them here would buy nothing and
-# cost the majority of the wall clock. If a class starts failing on main and is
-# not in this list, add it here and say why in the same change.
-#
-# THE DEBOUNCE. The sleep remains the FIRST step, before the checkout. The
-# concurrency group serializes runs and keeps only the newest pending run;
-# a running canary finishes even when another merge lands during the sleep.
-# The 90-second sleep now costs every started job; it no longer cancels running
-# jobs to collapse a burst. Only pending runs are replaced.
-#
-# THIS IS NOT AN ALWAYS-ON JOB and must not become one. It is event-driven on
-# push to main. There is no schedule here on purpose: ci.yml already carries the
-# 06:20 UTC backstop for quiet periods.
-#
-# IT IS NOT A REQUIRED CHECK and must never be made one. Required contexts are
-# evaluated on pull requests; this runs on main, after the merge. Its authority
-# is ops/main-canary-state.py, which derives the freeze state from these runs.
-#
-# CONFIRM-OR-KILL, seven days from 2026-08-24 (the council set the bar, not this
-# file): KEEP if PR reds whose failing check is absent from their own diff drop.
-# KILL -- deleting this file and keeping the inherited-from-main short-circuit,
-# which is independently useful -- if this workflow's billed minutes exceed the
-# victim minutes it saves. The two numbers to compare are in the run lists: this
-# workflow's total minutes, against six-minute victim runs avoided.
-
+# doctrine: engineering-workflow-sop
+# Running verdicts finish; GitHub replaces older pending runs with the newest.
 name: main canary
-
 on:
   push:
     branches: [main]
-    # Content that cannot break gates, migration, types or freshness. A merge
-    # touching only these skips the canary entirely, which is the cheapest
-    # possible run. Deliberately a DENY list rather than an allow list: a path
-    # nobody thought of should cause a canary run, not silently skip one.
     paths-ignore:
       - "corpus/**"
       - "audits/**"
@@ -60,39 +11,46 @@ on:
       - "out/**"
       - "**/*.md"
   workflow_dispatch:
-
-# Canaries take 20-30 minutes while merges can land every 20 minutes. Cancelling
-# the running canary starves releases of a completed verdict. Let it finish;
-# GitHub keeps only the newest pending run, replacing older pending runs.
-# Cost snapshot: 2026-09-22 20:50:38 to 2026-09-29 20:50:38 UTC (7 days).
-# 223 runs / 7 = 31.9/day: 135 non-cancelled completions (134 success, 1 failure),
-# 87 cancelled, 1 active; 224 main merges / 7 = 32/day. Job timestamps excluding
-# queue time give 19 rounded runner minutes/completion (median), or 26 for the
-# latest 20 completions; both include the sleep. All 87 cancellations started.
-# Top-up estimate: sum(max(0, T - cancelled_job_minutes)) / 7 = 218/7 = 31.1
-# extra runner min/day at T=19, or 732/7 = 104.6 at T=26. This assumes every
-# cancelled job survives; pending replacement can reduce that estimate. Gross
-# allowance ignoring minutes already spent: 87/7 * 26 = 323.1 extra min/day.
-# These are workload estimates, not daily ceilings: one running + one pending
-# bounds concurrency; the 60-minute timeout bounds each job, not daily usage.
-# Actual added billed min/day = 0: this PUBLIC repo uses standard ubuntu-latest
-# (sample run 35783412154 timing API: billable.UBUNTU.total_ms=0). Policy:
-# https://docs.github.com/en/billing/concepts/product-billing/github-actions
-# Accept the runner-time increase to obtain completed release verdicts instead
-# of starving releases; remeasure if merge cadence, duration or billing changes.
-# Reproduction commands, daily counts and assumptions are in PR #1419.
 concurrency:
   group: main-canary
   cancel-in-progress: false
-
 permissions:
   contents: read
-
+  actions: read
 jobs:
-  canary:
-    name: main canary (gates, migration, types, freshness)
+  evidence:
+    name: Resolve exact-tree PR evidence
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
+    outputs:
+      reused: ${{ steps.resolve.outputs.reused }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve successful identical-tree class evidence
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/ci-evidence.py resolve --output canary-evidence.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: main-canary-evidence
+          path: canary-evidence.json
+          if-no-files-found: error
+          overwrite: true
+  classes:
+    needs: evidence
+    if: ${{ needs.evidence.outputs.reused != 'true' }}
+    name: ops/ci.sh --strict --only ${{ matrix.classes }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        classes:
+          - "pushfloor unit types contract secret dependency binding artifact freshness"
+          - "gates"
+          - "replay"
+          - "migration"
+    timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
 
     services:
       postgres:
@@ -109,13 +67,13 @@ jobs:
           --health-retries 5
 
     steps:
-      # FIRST, BEFORE ANYTHING THAT COSTS. See the debounce note in the header.
-      - name: Debounce the merge burst
-        run: sleep 90
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The freshness class needs a merge base, exactly as in ci.yml.
+          # FULL HISTORY, for the freshness class only. actions/checkout defaults
+          # to a depth of 1, which is why nothing here could ever have caught a
+          # lost update: with no history there is no merge-base, so "has this
+          # branch seen main's latest change to this file" is unanswerable. Every
+          # other class reads the tree as it stands and does not care.
           fetch-depth: 0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -132,14 +90,22 @@ jobs:
           python -m pip install -r requirements.lock
 
       - name: Install Node dependencies
-        run: npm --prefix mcp-server ci
+        run: |
+          npm --prefix mcp-server ci
+          npm --prefix practice-plugin ci
 
       - name: Install zsh
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)
+          if ! sudo apt-get "${apt_options[@]}" install -y -qq zsh; then
+            sudo apt-get "${apt_options[@]}" update -qq
+            sudo apt-get "${apt_options[@]}" install -y -qq zsh
+          fi
 
       - name: Install PostgreSQL 17
-        # Role-migration fixtures own clusters so roles cannot leak into the
-        # service container used by the migration class.
+        if: contains(matrix.classes, 'gates') || matrix.classes == 'migration'
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -152,7 +118,30 @@ jobs:
           /usr/lib/postgresql/17/bin/initdb --version
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
+      - name: Install PostgreSQL 18 server for the migration shadow
+        # ops/migration-shadow.py builds its own loopback cluster on production's
+        # major (18) from the base branch's db/schema.sql and applies this
+        # change's migrations to it. No main cluster is created, so nothing
+        # competes with the service container's port.
+        if: contains(matrix.classes, 'migration')
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common/createcluster.d
+          echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-18
+          /usr/lib/postgresql/18/bin/initdb --version
+
       - name: Create the Neon admin role the migrations expect
+        # Migration 0005 grants the privilege bundles to neondb_owner, which
+        # exists on every Neon project and on no vanilla Postgres. Without it the
+        # migration set is not rehearsable anywhere except production, which
+        # defeats the point of rehearsing. Creating it here models Neon's
+        # environment rather than editing a migration that is already applied.
         env:
           PGPASSWORD: carr_ci
         run: |
@@ -163,35 +152,45 @@ jobs:
                end if;
              end \$\$;"
 
-      # NO CHECK LOGIC HERE, rule a8c55a47 — every class is ops/ci.sh's, called
-      # one at a time so a red class does not hide the ones after it. The class
-      # names are the only thing this file contributes, and
-      # Replay was part of gates; the separate class preserves that workload.
-      # ops/main-canary-selftest.py binds this selection to the measured classes.
-      - name: Run the classes that detect regressions on main
+      - name: Run this group's check classes
         env:
+          # ops/ci.sh refuses any DSN that is not loopback. This one is the
+          # service container above.
           CARR_CI_DATABASE_URL: postgres://carr_ci:carr_ci@localhost:5432/carr_ci # ci-secret-scan: allow — throwaway container credential, loopback only, dies with the runner
+          # Excludes the checks whose dependency cannot exist on a runner
+          # (installed Claude Code settings, macOS launchd). Each one prints its
+          # reason in the output; nothing is dropped silently.
           CARR_CI_PORTABLE_ONLY: "1"
+          # The migration shadow drops its regenerated db/schema.sql here; the
+          # next step uploads it when the class fails, so a stale snapshot is
+          # one download and one commit away from fixed.
+          CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
+        run: ops/ci.sh --strict --only "${{ matrix.classes }}"
+      - name: Upload the migration shadow's regenerated db/schema.sql
+        if: ${{ failure() && contains(matrix.classes, 'migration') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: migration-shadow-schema-${{ github.sha }}
+          path: ${{ runner.temp }}/migration-shadow/schema.sql
+          if-no-files-found: ignore
+          retention-days: 7
+
+  canary:
+    name: main canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: [evidence, classes]
+    if: ${{ always() }}
+    steps:
+      - name: Require reused evidence or green classes
+        env:
+          EVIDENCE: ${{ needs.evidence.result }}
+          REUSED: ${{ needs.evidence.outputs.reused }}
+          CLASSES: ${{ needs.classes.result }}
         run: |
-          set -uo pipefail
-          red=""
-          for class in gates replay migration types freshness; do
-            ops/ci.sh --strict --only "$class" || red="$red $class"
-          done
-          if [ -n "$red" ]; then
-            {
-              echo "## MAIN IS RED"
-              echo
-              echo "Failing classes on main:\`$red\`"
-              echo
-              echo "Commit \`$GITHUB_SHA\` — **this is main's break, not any pull request's.**"
-              echo
-              echo "THE MOVE: fix it on main, in its own change. Open PRs failing a check"
-              echo "they never touched are victims of this same break; ops/ci.sh names it"
-              echo "for them as INHERITED FROM MAIN and stops rather than diagnosing."
-              echo "Merges are frozen until this canary concludes green — nothing to reset."
-            } | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"   # set -u: never fail on the messenger
-            echo "main-canary-red:$red"
+          if [ "$EVIDENCE" = success ] && { [ "$CLASSES" = success ] || { [ "$REUSED" = true ] && [ "$CLASSES" = skipped ]; }; }; then
+            echo "main-canary-green: identical-tree PR evidence or all classes passed"
+          else
+            echo "MAIN IS RED: evidence=$EVIDENCE classes=$CLASSES reused=$REUSED" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          echo "main-canary-green: gates, replay, migration, types and freshness all pass on main"

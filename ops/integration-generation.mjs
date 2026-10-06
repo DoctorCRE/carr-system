@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 const repo = realpathSync(resolve(import.meta.dirname, '..'));
 // Sealed artifacts live only under these source roots. Exports and other
 // targets keep the plain filesystem writer and need no live Git context.
-const SOURCE_ARTIFACT = /^(?:migrations\/.*\.sql|mcp-server\/src\/scac-mutation-registry(?:\.v[1-9][0-9]*)?\.generated\.js)$/;
+const SOURCE_ARTIFACT = /^(?:migrations\/.*\.sql|mcp-server\/src\/scac-mutation-registry(?:\.v[1-9][0-9]*|\.current)?\.generated\.js)$/;
 
 export async function writeIntegratedArtifact(target, content) {
   const requested = target instanceof URL ? fileURLToPath(target) : resolve(String(target));

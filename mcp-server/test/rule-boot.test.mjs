@@ -3,6 +3,7 @@
 // always-on in full, sponsor scoping, determinism, the verb door.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { executeRegisteredTool } from "../src/tools.js";
 import { RULE_BOOT_CLASSES } from "../src/rule-boot-classes.js";
 import { paginate, renderRuleBoot, ruleBootPage, RULE_BOOT_PAGE_CHARS } from "../src/rule-boot.js";
@@ -74,6 +75,25 @@ test("always-on: full statements for always-on and unclassified rules, none for 
   assert.ok(part1.includes(rows.find(r => r.id.startsWith(alwaysOnId)).statement), "full text, not a summary");
   assert.ok(part1.includes("END-ffff0001"), "unclassified rules are recall-safe: full text");
   assert.ok(!part1.includes(`END-${indexOnlyId}`), "an index-only rule is not spent in Part 1");
+});
+
+test("standing team ownership reaches Joe, Dell and unsponsored boots without task keywords", async () => {
+  // The committed selection corpus preserves the live binding statement. Class
+  // metadata remains separate, so a summary cannot silently replace this fact.
+  const fixture = JSON.parse(readFileSync(new URL("../../ops/config/rule-selection-corpus.v1.json", import.meta.url), "utf8"))
+    .rules.find(r => r.id === "725dff46");
+  assert.ok(fixture, "vendor-network ownership fixture is required");
+  assert.match(fixture.statement, /vendor network is the TEAM's/);
+  for (const sponsor of ["joe", "dell", null]) {
+    const rows = [row(fixture.id, fixture.statement)];
+    const { text, always_on_ids: on } = renderRuleBoot(rows, sponsor);
+    assert.ok(on.includes(fixture.id), `${sponsor || "unsponsored"}: ownership is always on`);
+    assert.ok(text.split("## PART 2")[0].includes(fixture.statement), "Part 1 contains every byte of the fact");
+    assert.match(text.split("## PART 2")[1], /^725dff46 \| A \| /m);
+    const page = await ruleBootPage(rows, sponsor, 1);
+    const amended = await ruleBootPage([row(fixture.id, fixture.statement + " amended")], sponsor, 1);
+    assert.notEqual(page.digest, amended.digest, "standing text participates in the boot digest");
+  }
 });
 
 test("sponsor scoping: another sponsor's personal rule never renders", () => {

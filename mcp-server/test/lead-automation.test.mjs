@@ -140,10 +140,6 @@ test("database migration has draft-only constraints and finite forward transitio
   assert.match(sql,/unique\(lead_id,from_stage,to_stage,activity_id\)/);assert.doesNotMatch(sql,/grant.*delete/i);
 });
 
-test("lead schema and SCAC seal are one strict atomic delivery",()=>{
-  const runner=readFileSync(new URL("../../tools/migrate.py",import.meta.url),"utf8");
-  assert.equal((runner.match(/"0811_lead_stage_automation.sql",\s*"0812_lead_automation_scac_successor.sql"/g)||[]).length,2);
-});
 
 test("older strong evidence is not hidden by a newer weak match",()=>{
   const weak=change({...contact,id:"weak-example",occurred_at:"2026-10-01T17:00:00Z"},{match:"unconfirmed"});

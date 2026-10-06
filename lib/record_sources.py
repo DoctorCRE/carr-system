@@ -107,18 +107,9 @@ def resolve_mode(argv, default=MODE_RECORDS):
 
 def _exporter_url():
     """Same lookup exporters/common.py does. Returns None when unconfigured."""
-    url = os.environ.get("CARR_DB_EXPORTER_URL")
-    if url:
-        return url
-    env = Path.home() / ".config/carr/db.env"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith("CARR_DB_EXPORTER_URL="):
-                # .strip("\"'") — db.env values are shell-quoted so `set -a; . db.env`
-                # survives an `&` in the DSN; psycopg needs them unquoted. Full reasoning
-                # in exporters/common.py. Added 2026-08-02.
-                return line.split("=", 1)[1].strip().strip("\"'") or None
-    return None
+    sys.path.insert(0, str(REPO))
+    from lib.credential_file import credential
+    return credential("CARR_DB_EXPORTER_URL")
 
 
 def _records_available():

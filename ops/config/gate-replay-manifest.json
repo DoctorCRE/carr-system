@@ -882,6 +882,7 @@
   },
   "lib_helpers": [
     "lib/acceptance_checks.py",
+    "lib/credential_file.py",
     "lib/jev_required_actions.py",
     "lib/claude_continuity_config.py",
     "lib/claude_rule_delivery_dedupe.py",

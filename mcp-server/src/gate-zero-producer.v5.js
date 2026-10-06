@@ -344,7 +344,7 @@ const V5_A02_GATE_ZERO_GATE_GRAPH = deepFreeze([
   { gate_id: "local-db-ci-migration", check_name: "local-db-ci --class migration", depends_on: [] },
   {
     gate_id: "main-canary",
-    check_name: "main canary (gates, migration, types, freshness)",
+    check_name: "main canary",
     depends_on: ["local-db-ci-migration", "ops-ci-strict"],
   },
 ]);

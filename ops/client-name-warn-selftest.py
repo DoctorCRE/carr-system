@@ -158,7 +158,9 @@ with tempfile.TemporaryDirectory(prefix="client-name-warn-hook-") as tmp:
     hr = root / "hookrepo"
     (hr / "ops" / "githooks").mkdir(parents=True)
     for rel in ("ops/githooks/pre-push", "ops/githooks/client-name-warn.py",
-                "ops/pr-size-check.py", "ops/jev_intake.py"):
+                "ops/pr-size-check.py", "ops/jev_intake.py", "lib/review_tiers.py",
+                "ops/config/review-tiers.v1.json"):
+        (hr / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(HERE.parent / rel, hr / rel)
     subprocess.run(["git", "init", "-q", "-b", "main", str(hr)], check=True, env=ENV)
     git(hr, "config", "user.email", "selftest@example.invalid")

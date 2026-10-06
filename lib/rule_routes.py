@@ -79,7 +79,7 @@ CONNECTOR_GLOB = re.compile(r"^mcp__(\*|[A-Za-z0-9_-]+)__([A-Za-z0-9_-]+)$")
 
 RUN_SH_CALL = re.compile(r"\brun\.sh\s+call\s+['\"]?([a-z0-9][a-z0-9-]*)", re.I)
 CALL_VERB_PY = re.compile(r"\bcall-verb\.py\s+['\"]?([a-z0-9][a-z0-9-]*)", re.I)
-REGISTRY_IMPORT = re.compile(r'from\s+"\./(scac-mutation-registry\.v\d+\.generated\.js)"')
+REGISTRY_IMPORT = re.compile(r'from\s+"\./(scac-mutation-registry\.(?:v\d+|current)\.generated\.js)"')
 REGISTRY_VERB = re.compile(r'"ingress_key":\s*"mcp-tool:([a-z0-9][a-z0-9-]*)"')
 SHORT_ID = re.compile(r"\b[0-9a-f]{8}\b")
 

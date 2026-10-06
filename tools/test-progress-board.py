@@ -1036,16 +1036,7 @@ class GitHubSync(BoardCase):
         self.run_board("render", "demo")
         self.assertEqual(self.read_state("demo")["github_sync"]["failed"], [])
 
-    def test_gh_is_found_outside_a_launchd_path(self):
-        fallback = self.root / "homebrew" / "gh"
-        fallback.parent.mkdir()
-        fallback.write_text("#!/bin/sh\n")
-        fallback.chmod(0o755)
-        with patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}, clear=False), \
-             patch.object(BOARD.shutil, "which", lambda name: None), \
-             patch.object(BOARD, "GH_FALLBACKS", (str(self.root / "missing" / "gh"), str(fallback))):
-            os.environ.pop("PROGRESS_BOARD_SKIP_GH", None)
-            self.assertEqual(BOARD.gh_binary(), str(fallback))
+    def test_the_launchd_job_puts_homebrew_on_path(self):
         self.assertIn("/opt/homebrew/bin", LAUNCHD_SCRIPT.read_text())
 
 

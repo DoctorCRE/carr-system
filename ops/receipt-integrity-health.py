@@ -22,31 +22,24 @@ is 0 for OK/SKIP and 1 for FAIL.
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
-from typing import Any
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from lib.record_call import Runner, VerbResult, call_verb  # noqa: E402
 
 VERB = "read-jev-call-receipt-integrity"
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _parse_json(text: str) -> Any:
-    try:
-        return json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        return None
-
-
-def interpret(returncode: int, stdout: str, stderr: str) -> tuple[str, str]:
-    """Map one `./run.sh call` result to (status, message); status is OK/FAIL/SKIP."""
-    if returncode != 0:
-        if "unknown_tool" in (stderr or "") or "unknown_tool" in (stdout or ""):
-            return "SKIP", f"{VERB} is not served by the Worker yet (not deployed)"
-        tail = (stderr or stdout or "").strip().splitlines()
-        return "FAIL", "audit unreadable: " + (tail[-1][:160] if tail else f"exit {returncode}")
-    audit = _parse_json(stdout)
+def interpret(result: VerbResult) -> tuple[str, str]:
+    """Map one verb outcome to (status, message); status is OK/FAIL/SKIP."""
+    if result.error == "unknown_tool":
+        return "SKIP", f"{VERB} is not served by the Worker yet (not deployed)"
+    if not result.ok:
+        return "FAIL", "audit unreadable: " + (result.detail[:160] or result.kind)
+    audit = result.reply
     if not isinstance(audit, dict) or not isinstance(audit.get("receipts_without_tool_call"), dict):
         return "FAIL", "audit returned an unexpected shape"
     orphans = audit["receipts_without_tool_call"]
@@ -66,14 +59,12 @@ def interpret(returncode: int, stdout: str, stderr: str) -> tuple[str, str]:
     return "OK", f"{total} receipt(s), all credited by tool_call; append-only triggers enabled"
 
 
+def check(runner: Runner = subprocess.run) -> tuple[str, str]:
+    return interpret(call_verb(VERB, {}, timeout=90, runner=runner))
+
+
 def main() -> int:
-    run_sh = os.path.join(REPO, "run.sh")
-    try:
-        proc = subprocess.run([run_sh, "call", VERB, "{}"], capture_output=True, text=True,
-                              timeout=90, stdin=subprocess.DEVNULL, cwd=REPO)
-        status, message = interpret(proc.returncode, proc.stdout, proc.stderr)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        status, message = "FAIL", f"audit unreadable: {type(exc).__name__}"
+    status, message = check()
     if status == "SKIP":
         print(f"SKIP: {message}")
         return 0

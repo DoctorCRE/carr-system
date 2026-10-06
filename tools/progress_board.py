@@ -20,7 +20,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import time
 import sys
@@ -582,42 +581,49 @@ def checks_summary(payload: dict[str, Any]) -> str:
     return f"{passed} pass · {pending} pending · {failed} fail"
 
 
-# launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin, where Homebrew's
-# gh is invisible; a silent "no gh" there left every PR card frozen.
-GH_FALLBACKS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+def repo_lib(name: str) -> ModuleType:
+    """A lib/ module from the bound repository, imported when first used, so
+    an extracted copy still loads and reports what it cannot reach."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    return importlib.import_module(f"lib.{name}")
 
 
 def gh_binary() -> str | None:
     if os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         return None
-    found = shutil.which("gh")
-    if found:
-        return found
-    return next((path for path in GH_FALLBACKS if os.access(path, os.X_OK)), None)
+    return repo_lib("github_reader").resolve_gh()
 
 
 def log(message: str) -> None:
     print(f"progress-board: {message}", file=sys.stderr)
 
 
+# The board re-renders on a short interval and keeps the last known state when
+# a read fails, so one quick retry is worth having and a long wait is not.
+GH_RETRY_DELAYS = (2,)
+
+
+@functools.lru_cache(maxsize=None)
+def gh_reader(binary: str, timeout: int) -> Any:
+    """One lib/github_reader reader per binary and timeout for the whole run,
+    so a GitHub outage costs one retry cycle per render rather than one per read."""
+    return repo_lib("github_reader").GitHubReader(gh=binary, timeout=timeout,
+                                                  retry_delays=GH_RETRY_DELAYS)
+
+
 def gh_text(args: list[str], timeout: int = 30) -> str:
     binary = gh_binary()
     if binary is None:
         raise RuntimeError("gh CLI unavailable")
-    try:
-        result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"gh {' '.join(args[:2])} failed: {exc}") from exc
-    if result.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args[:2])} failed: {(result.stderr or result.stdout).strip()[:200]}")
-    return result.stdout
+    return gh_reader(binary, timeout).text(args)
 
 
 def gh_json(args: list[str], timeout: int = 30) -> Any:
-    try:
-        return json.loads(gh_text(args, timeout))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"gh {' '.join(args[:2])} returned invalid JSON") from exc
+    binary = gh_binary()
+    if binary is None:
+        raise RuntimeError("gh CLI unavailable")
+    return gh_reader(binary, timeout).json(args)
 
 
 # All GitHub reads for a render share this pass, including the all-repos
@@ -1866,18 +1872,13 @@ def mutate(project: str, change: Callable[[dict[str, Any]], bool | None]) -> Non
 
 
 def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Use the existing noninteractive local-token route; no model is involved."""
-    repo = REPO_ROOT
-    result = subprocess.run(
-        [str(repo / "run.sh"), "call", verb, json.dumps(args, sort_keys=True, separators=(",", ":"))],
-        cwd=repo, capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode:
-        raise RuntimeError(f"{verb} failed: {(result.stderr or result.stdout).strip()[:500]}")
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{verb} returned invalid JSON") from exc
+    """Use the existing noninteractive local-token route; no model is involved.
+    Anything short of an explicit ok:true reply raises."""
+    record_call = repo_lib("record_call")
+    result = record_call.call_verb(verb, args, timeout=30)
+    payload = result.reply
+    if not result.ok and result.kind != record_call.REFUSED:
+        raise RuntimeError(result.describe())
     if not isinstance(payload, dict) or payload.get("ok") is not True:
         raise RuntimeError(f"{verb} refused: {payload.get('error', 'unknown result') if isinstance(payload, dict) else 'invalid result'}")
     return payload

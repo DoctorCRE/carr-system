@@ -185,6 +185,14 @@ exempt["rules"]["aaaa0004"]["no_trigger_reason"] = "the moment is message compos
 check("a Stop-only class-d rule with a written no_trigger_reason passes",
       run(exempt) == [], run(exempt))
 
+# The registry reader follows the stable current projection as well as legacy fixtures.
+with tempfile.TemporaryDirectory() as tmp:
+    src = Path(tmp) / 'mcp-server/src'
+    src.mkdir(parents=True)
+    (src / 'mutation-registry.js').write_text('export {SCAC_MUTATION_OPERATIONS} from "./scac-mutation-registry.current.generated.js";\n')
+    (src / 'scac-mutation-registry.current.generated.js').write_text('{"ingress_key":"mcp-tool:example"}\n')
+    check("verb reader follows the current projection", routes_lib.known_verbs(Path(tmp)) == {'example'})
+
 # The verb registry reader is a real reader, not a fixture: it must see verbs
 # declared in tools.js AND in the modules tools.js spreads in.
 real_verbs = routes_lib.known_verbs(REPO)

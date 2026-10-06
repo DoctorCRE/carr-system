@@ -43,6 +43,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -657,12 +658,12 @@ def f05_rule_contract_binder_is_a_write():
     return passed
 
 
-def registry_prefix_coverage():
+def registry_prefix_coverage(*, required=False):
     """Keep the family classifier honest against the local live registry when present."""
     registry = os.path.join(REPO, "mcp-server", "src", "tools.js")
     if not os.path.exists(registry):
-        print("SKIP  live registry unavailable")
-        return True
+        print("FAIL  live registry unavailable" if required else "SKIP  live registry unavailable")
+        return not required
     script = (
         'import { TOOLS } from "./src/tools.js"; '
         'console.log(JSON.stringify(Object.keys(TOOLS).filter((n) => TOOLS[n].write).sort()))'
@@ -671,8 +672,8 @@ def registry_prefix_coverage():
                             cwd=os.path.join(REPO, "mcp-server"), text=True,
                             capture_output=True, timeout=30)
     if result.returncode:
-        print("SKIP  live registry could not load")
-        return True
+        print("FAIL  live registry could not load; run npm --prefix mcp-server ci" if required else "SKIP  live registry could not load")
+        return not required
     writes = json.loads(result.stdout)
     missing = [name for name in writes if not mod.is_write_action(name)]
     # notification-feed and read-doc-conversation are WR-000113/112 READS and must
@@ -1084,7 +1085,10 @@ def native_context_orders():
 
 
 def main():
+    if sys.argv[1:] == ["--registry-only"]:
+        return 0 if registry_prefix_coverage(required=True) else 1
     outcomes = []
+    _dot_runpy.run_path(str(__import__("pathlib").Path(__file__).with_name("dot-review-selftest.py")))["run_regressions"](['test_b21', 'test_b22'])
     for name, recs, expected in CASES:
         got, reason = mod.evaluate(completed_fixture(recs))
         ok = got == expected
@@ -1126,7 +1130,5 @@ def main():
 
 # Independently reproduced Dot cases share the offline behavioral fixtures.
 import runpy as _dot_runpy
-_dot_runpy.run_path(str(__import__("pathlib").Path(__file__).with_name("dot-review-selftest.py")))["run_regressions"](['test_b21', 'test_b22'])
-
 if __name__ == "__main__":
     raise SystemExit(main())

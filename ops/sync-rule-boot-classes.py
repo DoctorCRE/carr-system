@@ -6,8 +6,10 @@ WHY A GENERATED MODULE. standing-context's `detail: "boot"` mode (the gated
 rule boot, see mcp-server/src/rule-boot.js) renders an index of every active
 rule plus the full text of the always-on set. The class, the <=20-word
 summary and the "when it applies" line for each rule are committed data in
-ops/config/rule-classes.v1.json; the rule STATEMENTS are never committed and
-are read from the store at request time. A Cloudflare Worker has no
+ops/config/rule-classes.v1.json; rule STATEMENTS never enter class metadata and
+are read from the store at request time. Validation reads the existing committed
+rule-selection corpus to reject action/topic classes for supported standing
+identity facts. A Cloudflare Worker has no
 filesystem at request time, so the class data ships as this checked-in
 module, the same pattern as ops/sync-core-rule-ids.py.
 
@@ -39,11 +41,13 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLASSES_PATH = os.path.join(REPO, "ops", "config", "rule-classes.v1.json")
 MAP_PATH = os.path.join(REPO, "ops", "config", "rule-enforcement-map.json")
+CORPUS_PATH = os.path.join(REPO, "ops", "config", "rule-selection-corpus.v1.json")
 EXCLUDED_SURFACES = {"intro_politics"}
 OUT_PATH = os.path.join(REPO, "mcp-server", "src", "rule-boot-classes.js")
 CLASSES = {"a", "b", "c", "d", "e"}
@@ -60,11 +64,74 @@ def load(path=CLASSES_PATH):
         return json.load(fh)
 
 
-def validate(doc):
+def is_standing_fact(statement):
+    """Recognize bounded assertions of standing business/partner identity.
+
+    Decision order: remove quoted/code examples; reject conditional, hypothetical
+    or prohibited assertions; then match a supported fact shape. Merely naming a
+    partner, territory or Doc in an action instruction is insufficient. Mixed
+    rules qualify when they also declare an independent standing fact. This is
+    deliberately not a general natural-language classifier: unmatched shapes
+    still require review. No rule ids or summaries participate in the judgment.
+    """
+    if not isinstance(statement, str):
+        return False
+    text = re.sub(r"```[\s\S]*?```|`[^`]*`|\"[^\"]*\"|“[^”]*”|‘[^’]*’|(?<!\w)'[^'\n]+'(?!\w)",
+                  " ", statement)
+    partner = r"(?:joe|dell|(?:the|both|our) partners?)"
+    pair = r"(?:joe\s*(?:and|&)\s*dell|dell\s*(?:and|&)\s*joe|both partners|our partners)"
+    shapes = (
+        rf"\b{pair}\s+are\s+(?:both\s+)?(?:business partners|visual thinkers|early[- ]stage)\b",
+        r"\b(?:the\s+)?team\s+(?:is|means|consists of)\s+joe\s*(?:and|&)\s*dell\b",
+        rf"\b{partner}\s+is\s+(?:the|our|an?)\s+(?:ai/system[- ]design|system[- ]design|business|brokerage)\s+partner\b",
+        rf"\b{partner}\s+is\s+(?:an?\s+)?(?:licensed\s+)?(?:broker|realtor)\b",
+        r"\b(?:our|the team'?s|the shared)\s+territory\s+(?:is|covers|extends|runs|spans)\s+\S",
+        r"\bthe territory\s+is\s+(?:the\s+)?team'?s\b",
+        rf"\b{partner}\s+holds\s+(?:an?\s+)?(?:[a-z]+\s+){{0,3}}licen[cs]e\b",
+        rf"\b{partner}'s\s+licensure\s+is\s+(?:the\s+)?team'?s\b",
+        r"\b(?:the\s+)?(?:vendor network|team network)\s+(?:is\s+(?:the\s+)?team'?s|belongs to\s+(?:the|our)\s+team|is\s+owned by\s+(?:the|our)\s+team)\b",
+        r"\b(?:the\s+)?(?:persona|assistant)\s+(?:is named|is called|goes by)\s+\S",
+        r"\bcarr\s+(?:represents\s+(?:buyers and tenants|tenants and buyers)\s+only|never represents\s+(?:landlords|sellers))\b",
+        r"\bno[- ]conflict\s+(?:tenant/buyer|buyer/tenant)[- ]only\s+model\b",
+        rf"\b{partner}\s+(?:will never be able to|cannot|can't)\s+(?:hand[- ]feed\s+the system|manually\s+(?:report|log|feed)\s+(?:every|all)\s+(?:activity|activities|touches))\b",
+        rf"\b{partner}\s+values\s+being able to\s+[^.!?]{{0,90}}\b(?:phone|mobility)\b",
+        r"\bconcept coherence\s+is\s+(?:his|her|joe'?s|dell'?s|the partner'?s)\s+(?:edge|strength)\b",
+        r"\b(?:the|our)\s+(?:practice|business|team)\s+operates from\s+an?\s+[a-z-]+\s+mindset\b",
+        rf"\bcalm\s+is defined by\s+{partner}\b",
+        rf"\b{partner}\s+has granted standing permission\s+[^.!?]{{0,90}}\b(?:motion|interactive|effects)\b",
+        r"\bprospects\s+are\s+healthcare experts unfamiliar with\s+cre\b",
+    )
+    for sentence in re.split(r"[.!?\n]+", text.lower()):
+        sentence = sentence.strip()
+        if re.search(r"\b(?:if|unless|suppose|assuming|imagine|hypothetical|example|wrong|banned)\b", sentence):
+            continue
+        if re.match(r"(?:when|before|after|while)\b", sentence):
+            continue
+        if re.search(r"\b(?:(?:never|do not|don't)\s+(?:say|assume|assert|claim|state|write|infer)|"
+                     r"(?:false|untrue) that|not true that)\b", sentence):
+            continue
+        if any(re.search(shape, sentence) for shape in shapes):
+            return True
+    return False
+
+
+def corpus_statements(path=CORPUS_PATH):
+    """Use the existing selection corpus; class metadata must not contain text."""
+    with open(path, encoding="utf-8") as fh:
+        corpus = json.load(fh)
+    return {row["id"]: row["statement"] for row in corpus["rules"]}
+
+
+def validate(doc, statements=None):
     problems = []
     rules = doc.get("rules")
     if not isinstance(rules, dict) or not rules:
         return ["rules must be a non-empty object"]
+    if statements is None:
+        try:
+            statements = corpus_statements()
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            return [f"standing fact validation: cannot read selection corpus: {exc}"]
     for rid, row in sorted(rules.items()):
         if len(rid) != 8 or any(ch not in "0123456789abcdef" for ch in rid):
             problems.append(f"{rid}: id must be the 8-char lowercase hex short form")
@@ -85,6 +152,13 @@ def validate(doc):
             problems.append(f"{rid}: chars must be a positive integer")
         if "statement" in row or "human_quote" in row:
             problems.append(f"{rid}: rule text must never be committed here")
+        statement = statements.get(rid)
+        if row.get("class") in {"b", "c"} and (not isinstance(statement, str) or not statement.strip()):
+            problems.append(f"{rid}: class {row['class']} requires a non-empty corpus statement "
+                            "to validate that no standing fact is deferred")
+        if is_standing_fact(statement) and (row.get("class") != "a" or row.get("always_on") is not True):
+            problems.append(f"{rid}: standing fact requires class a and always_on=true; "
+                            "action/topic metadata cannot defer standing identity")
     return problems
 
 

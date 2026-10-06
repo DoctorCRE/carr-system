@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir, mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,20 +24,45 @@ export function suiteBatches(files) {
 }
 
 async function main() {
+  const repo = path.dirname(ROOT);
+  const python = process.env.CARR_CI_PYTHON || 'python3';
+  const runner = path.join(repo, 'ops/ci-quarantine.py');
+  const logs = path.join(repo, 'out/ci-node', String(process.pid));
+  await mkdir(logs, { recursive: true });
+  const identity = path.join(logs, 'source-identity.json');
+  const snapshot = await new Promise((resolve, reject) => {
+    let output = '';
+    const child = spawn(python, [runner, 'snapshot'], { cwd: repo, stdio: ['ignore', 'pipe', 'inherit'] });
+    child.stdout.on('data', (chunk) => { output += chunk; });
+    child.once('error', reject);
+    child.once('close', (code) => code === 0 ? resolve(output) : reject(new Error('source identity unreadable')));
+  });
+  await writeFile(identity, snapshot);
   // Chrome's cold first launch must not compete with the bulk MCP test pool.
   // Keep the browser shim intact (its inventory test enforces all imports),
   // Run the timing-sensitive launch fixtures alone too, then run the rest
   // Private PostgreSQL clusters also run alone: parallel postmasters can
   // exhaust the host's shared-memory IDs even with unique database paths.
-  // The remaining suites use Node's normal parallelism. No suite runs twice.
+  // Keep the serial batches; the bulk pool gives each suite its own result.
   for (const batch of suiteBatches(await readdir(path.join(ROOT, "test")))) {
     if (!batch.length) continue;
-    const code = await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, ["--test", ...batch.map((file) => path.join(ROOT, "test", file))], { cwd: ROOT, stdio: "inherit" });
-      child.once("error", reject);
-      child.once("close", (exitCode) => resolve(exitCode ?? 1));
-    });
-    if (code !== 0) { process.exitCode = code; return; }
+    let cursor = 0;
+    const workers = Math.min(batch.length, Number(process.env.CARR_CI_NODE_JOBS || 4));
+    if (!Number.isInteger(workers) || workers < 1) throw new Error('invalid CARR_CI_NODE_JOBS');
+    await Promise.all(Array.from({ length: workers }, async () => {
+      while (cursor < batch.length) {
+        const file = batch[cursor++];
+        const code = await new Promise((resolve, reject) => {
+          const child = spawn(python, [runner, 'run', '--test', `mcp-server/test/${file}`,
+            '--identity-file', identity, '--log', path.join(logs, `${file}.log`), '--print-log', '--',
+            process.execPath, '--test', path.join(ROOT, 'test', file)],
+            { cwd: ROOT, stdio: 'inherit' });
+          child.once('error', reject);
+          child.once('close', (exitCode) => resolve(exitCode ?? 1));
+        });
+        if (code !== 0) process.exitCode = 1;
+      }
+    }));
   }
 }
 

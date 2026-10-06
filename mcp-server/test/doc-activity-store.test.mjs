@@ -1,3 +1,4 @@
+import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +30,7 @@ test('activity feed executes store predicates, cursor serialization and selected
     running = true;
     c = new pg.Client({ host: dir, user: 'fixture', database: 'postgres' });
     await c.connect();
-    await c.query('create role carr_writer; create role carr_reader; create role carr_jobs; create role carr_authority; create role carr_exporter;');
+    await c.query('create role carr_writer; create role carr_reader; create role carr_jobs; create role carr_authority; create role carr_exporter; create role dot_reader;');
     const schema = readFileSync(new URL('../../db/schema.sql', import.meta.url), 'utf8');
     for (const name of ['actor', 'party', 'client', 'lead', 'vendor', 'deal', 'event']) {
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\n\\);`))?.[0];
@@ -39,6 +40,7 @@ test('activity feed executes store predicates, cursor serialization and selected
       assert.ok(grants.length, `committed grants for ${name}`);
       for (const grant of grants) await c.query(grant);
     }
+    await restoreEventIdentity(c, schema);
     await c.query("insert into actor(id,slug,display_name,kind,active) values ($1,'joe','Partner A','human',true),($2,'dell','Partner B','human',true)", [uuid(1), uuid(2)]);
     const seed = async (n, options = {}) => {
       const o = { at: '2026-10-01T15:00:00.123456Z', scope: 'none', tenant: 'carr-internal', cause: 'automation_job', partner: 'joe', type: 'deal', field: 'phase', old: { phase: 'research' }, next: { phase: 'legal' }, ...options };

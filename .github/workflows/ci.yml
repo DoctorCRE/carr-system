@@ -224,7 +224,7 @@ jobs:
       - name: Install PostgreSQL 17
         # Role-migration fixtures own clusters so roles cannot leak into the
         # service container used by the migration class.
-        if: contains(matrix.classes, 'gates')
+        if: contains(matrix.classes, 'gates') || matrix.classes == 'migration'
         run: |
           set -euo pipefail
           sudo install -d /usr/share/postgresql-common/pgdg
@@ -236,6 +236,24 @@ jobs:
           sudo apt-get install -y -qq postgresql-17
           /usr/lib/postgresql/17/bin/initdb --version
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Install PostgreSQL 18 server for the migration shadow
+        # ops/migration-shadow.py builds its own loopback cluster on production's
+        # major (18) from the base branch's db/schema.sql and applies this
+        # change's migrations to it. No main cluster is created, so nothing
+        # competes with the service container's port.
+        if: contains(matrix.classes, 'migration')
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg /etc/postgresql-common/createcluster.d
+          echo "create_main_cluster = false" | sudo tee /etc/postgresql-common/createcluster.d/no-main-cluster.conf > /dev/null
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            "https://www.postgresql.org/media/keys/ACCC4CF8.asc"
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-18
+          /usr/lib/postgresql/18/bin/initdb --version
 
       - name: Create the Neon admin role the migrations expect
         # Migration 0005 grants the privilege bundles to neondb_owner, which
@@ -262,7 +280,19 @@ jobs:
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
           CARR_CI_PORTABLE_ONLY: "1"
+          # The migration shadow drops its regenerated db/schema.sql here; the
+          # next step uploads it when the class fails, so a stale snapshot is
+          # one download and one commit away from fixed.
+          CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
         run: ops/ci.sh --strict --only "${{ matrix.classes }}"
+      - name: Upload the migration shadow's regenerated db/schema.sql
+        if: ${{ failure() && contains(matrix.classes, 'migration') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: migration-shadow-schema-${{ github.sha }}
+          path: ${{ runner.temp }}/migration-shadow/schema.sql
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Require a written pull request description
         if: ${{ github.event_name == 'pull_request' && matrix.classes == 'gates' }}
         run: python3 ops/pr-description-check.py
@@ -290,3 +320,15 @@ jobs:
             exit 1
           fi
           echo "ops/ci.sh --strict: every class group green"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Record the tested tree and class contract
+        run: python3 ops/ci-evidence.py record --output ci-evidence.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-tree-evidence
+          path: ci-evidence.json
+          if-no-files-found: error
+          overwrite: true

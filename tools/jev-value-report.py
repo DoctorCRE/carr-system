@@ -44,6 +44,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SOURCE_ROOT))
+from lib.github_reader import GitHubReader, GitHubUnreadable  # noqa: E402
 PRICE_CONFIG = SOURCE_ROOT / "ops" / "config" / "jev-cost-guard.v1.json"
 CI_SNAPSHOT = "jev-value-ci-snapshot.json"
 FETCH_HINT = "run tools/jev-value-report.py --fetch-ci to save GitHub CI run history"
@@ -590,7 +592,8 @@ def read_commits(root, start, end):
 
 
 def _gh(args):
-    return subprocess.run(args, capture_output=True, text=True, check=True, cwd=SOURCE_ROOT, timeout=60).stdout
+    """`gh ...` stdout through lib/github_reader (retried, redacted, bounded)."""
+    return GitHubReader(cwd=str(SOURCE_ROOT), timeout=60).text(args[1:])
 
 
 def _gh_json(gh, endpoint):
@@ -718,7 +721,7 @@ def main(argv=None):
     if args.fetch_ci:
         try:
             path, ci = fetch_ci(root, start, end)
-        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        except (OSError, ValueError, subprocess.SubprocessError, GitHubUnreadable) as exc:
             print(f"CI fetch failed ({type(exc).__name__}); previous snapshot preserved", file=sys.stderr)
             return 1
         print(f"saved {len(ci['runs'])} runs and {len(ci['pulls'])} PRs to {path}", file=sys.stderr)

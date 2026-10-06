@@ -541,7 +541,9 @@ def deliver(name: str, entry: dict, seat: str, queued_turn: dict, *, state: dict
             return {"desk": name, "outcome": "replied_sync"}
         add_room_turn(
             body=json.dumps({"desk": name, "status": status,
-                             "detail": row.get("detail")}, separators=(",", ":")),
+                             "detail": row.get("detail"),
+                             **({key: row[key] for key in ("next_route", "diagnostic_path") if key in row}
+                                if kind == "grok-cli" else {})}, separators=(",", ":")),
             seat="hermes", kind="receipt", msg_id=str(uuid.uuid4()),
         )
         return {"desk": name, "outcome": f"failed:{status}"}

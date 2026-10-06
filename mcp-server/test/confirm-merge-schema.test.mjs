@@ -1,3 +1,4 @@
+import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -60,6 +61,7 @@ test("confirm-merge executes against the current activity schema", async t => {
     db = new pg.Client({ host: socket, port, user: "carr_fixture", database: "postgres" });
     await db.connect();
     await db.query(ddl);
+    await restoreEventIdentity(db, schema);
     const refView = schema.match(/CREATE VIEW public\.v_ref_index AS\n.*?;\n/s);
     assert.ok(refView, "current schema must define v_ref_index");
     await db.query(refView[0]);

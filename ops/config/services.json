@@ -509,7 +509,7 @@
     {
       "key": "release-pipeline",
       "name": "Scripted release pipeline (Worker + DoctorCRE app)",
-      "purpose": "Decisions 17ef11fa/b729859d: release is script-triggered. Every 15 minutes compares each lane's origin/main with the last SHA it released and, when the batch touches release paths, runs the sanctioned manual release sequence unattended from a detached worktree at the exact SHA (staging replacement, staging app writer, migrate-prod, deploy-worker upload/staging/promote, live readback, health; credential-free node scripts/prepare-release.mjs, then provider-only node scripts/release-production.mjs for the app). Stops on any nonzero exit, records the step and log, never retries that SHA, and enqueues a repo-write Model Room diagnosis session to fix forward by PR. Kill switch: ops/config/release-pipeline.v1.json enabled, or ~/.config/carr/release-pipeline.off. See ops/release-pipeline.py.",
+      "purpose": "Decisions 17ef11fa/b729859d: release is script-triggered. Every minute compares each lane's origin/main with the last SHA it released and, when the batch touches release paths, runs the sanctioned manual release sequence unattended from a detached worktree at the exact SHA (staging replacement, staging app writer, migrate-prod, deploy-worker upload/staging/promote, live readback, health; credential-free node scripts/prepare-release.mjs, then provider-only node scripts/release-production.mjs for the app). Stops on any nonzero exit, records the step and log, never retries that SHA, and enqueues a repo-write Model Room diagnosis session to fix forward by PR. Kill switch: ops/config/release-pipeline.v1.json enabled, or ~/.config/carr/release-pipeline.off. See ops/release-pipeline.py.",
       "family": "Local Mac edge",
       "criticality": "high",
       "owner_actor": "joe",
@@ -521,7 +521,7 @@
           "deploy_mechanism": "ops/launchd/com.carr.release-pipeline.plist",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 5400,
-          "notes": "Wakes every 900s; bin/run-scheduled.sh --heartbeat-interval 3600 throttles SUCCEEDED rows to one an hour, and every failure (a stopped release, or exit 3 for a missing unattended credential) is recorded immediately. Grace covers the ops-spool flush delay, as for room-bridge. What shipped, failed or blocked is in out/release-pipeline/releases.jsonl; `ops/release-pipeline.py report --date D` prints it for a daily note."
+          "notes": "Wakes every 60s; bin/run-scheduled.sh --heartbeat-interval 3600 throttles SUCCEEDED rows to one an hour, and every failure (a stopped release, or exit 3 for a missing unattended credential) is recorded immediately. Grace covers the ops-spool flush delay, as for room-bridge. What shipped, failed or blocked is in out/release-pipeline/releases.jsonl; `ops/release-pipeline.py report --date D` prints it for a daily note."
         }
       ]
     },

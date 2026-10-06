@@ -59,12 +59,6 @@ on:
     # here lands next to that run rather than racing it.
     - cron: "45 6 * * *"
   workflow_dispatch:
-    inputs:
-      export_candidate:
-        description: "Export and independently restore a disposable PG17 schema candidate"
-        type: boolean
-        required: true
-        default: false
 
 concurrency:
   # PR validation supersedes by workflow + PR. Non-PR verdicts are independent:
@@ -176,7 +170,6 @@ jobs:
           sudo install -d -m 0775 -o "$USER" -g "$(id -gn)" /var/run/postgresql
 
       - name: Run the disposable-Postgres migration lane
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.export_candidate }}
         env:
           # ops/local-pg-ci.py refuses hosted runners by DEFAULT and still does.
           # This is the declared opt-in — the module additionally requires the
@@ -196,20 +189,3 @@ jobs:
         # the same arguments. The default port 55432 is contended on a developer
         # Mac and free on a fresh runner.
         run: python ops/local-pg-ci.py --class migration
-
-      - name: Export and restore a disposable schema candidate
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_candidate }}
-        env:
-          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
-          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
-          LC_ALL: C
-        run: python ops/local-pg-ci.py --export-candidate "$RUNNER_TEMP/carr-schema-candidate"
-
-      - name: Upload verified schema candidate and manifest
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.export_candidate }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: carr-schema-candidate-${{ github.sha }}
-          path: ${{ runner.temp }}/carr-schema-candidate/
-          if-no-files-found: error
-          retention-days: 3

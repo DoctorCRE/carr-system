@@ -31,6 +31,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 MODULE_PATH = HERE / "recovery-point.py"
@@ -354,8 +355,11 @@ def main() -> int:
     check("a legacy backup-like artifact without complete provenance makes absence unknown",
           unverified["state"] == "unknown")
 
-    failed_api, _ = cloud_fixture({"api_error": "synthetic provider unavailable"})
+    with mock.patch("time.sleep") as slept:
+        failed_api, failed_calls = cloud_fixture({"api_error": "synthetic provider unavailable"})
     check("provider API failure is unknown", failed_api["state"] == "unknown")
+    check("a transient provider failure is retried before it reads unknown",
+          len(failed_calls) == 3 and slept.call_count == 2)
 
     cap_fixtures = [
         provider_fixture(

@@ -3,7 +3,7 @@
 """Warn, never block, when a change set is too big or too mixed to review well.
 
 engineering-workflow-sop section 15, "Small incremental changes: the soft
-threshold": a PR over 300 changed lines or 5 files outside generated paths, or
+threshold": a PR over 300 changed code lines or 5 code files outside generated paths, or
 one that mixes a refactor with a behavior change, gets a decomposition warning
 at the pre-push floor. Warning, not block, until the weekly numbers show what
 the distribution actually is.
@@ -11,6 +11,8 @@ the distribution actually is.
   * The numbers are the escalation router's own (ops/jev_intake.py
     ROUTE_MAX_DIFF_LINES and ROUTE_MAX_FILES), imported, never copied, so a
     rebase of the threshold happens in one place.
+  * Test evidence uses lib/review_tiers.py classification and is reported
+    separately from code lines and files. It remains reviewable.
   * Changed lines are added plus deleted, from `git diff -M --numstat` over the
     range (default origin/main...HEAD). A binary file counts as a file with no
     lines.
@@ -34,6 +36,8 @@ import sys
 from dataclasses import dataclass, field
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+from lib.review_tiers import is_test_file
 
 # THE EXCLUSION LIST, in one place and in data form so a later shared
 # review-tier map in ops/config/ can take it over row for row. Each row is
@@ -115,6 +119,10 @@ class Change:
         return any(is_excluded(p) is None for p in sides)
 
     @property
+    def test_evidence(self) -> bool:
+        return all(is_test_file(p) for p in [self.path] + ([self.old_path] if self.old_path else []))
+
+    @property
     def content_edit(self) -> bool:
         """Changed bytes, not only a mode bit: lines, a binary change, an add or a delete.
 
@@ -133,6 +141,8 @@ class Report:
     max_files: int
     mixed: bool
     top: list[Change] = field(default_factory=list)
+    test_lines: int = 0
+    test_files: int = 0
 
     @property
     def over_lines(self) -> bool:
@@ -189,13 +199,15 @@ def changed_files(repo: str, rng: str) -> list[Change]:
 
 
 def assess(changes: list[Change], max_lines: int, max_files: int) -> Report:
-    counted = [c for c in changes if c.counted]
+    tests = [c for c in changes if c.test_evidence]
+    counted = [c for c in changes if not c.test_evidence and c.counted]
     moves = [c for c in counted if c.status == "R" and c.similarity >= NEAR_PURE_RENAME]
     edits = [c for c in counted if c not in moves and c.content_edit]
     top = sorted((c for c in counted if c.lines), key=lambda c: (-c.lines, c.path))[:TOP_FILES]
     return Report(lines=sum(c.lines for c in counted), files=len(counted),
                   max_lines=max_lines, max_files=max_files,
-                  mixed=bool(moves) and bool(edits), top=top)
+                  mixed=bool(moves) and bool(edits), top=top,
+                  test_lines=sum(c.lines for c in tests), test_files=len(tests))
 
 
 def render(r: Report) -> str:
@@ -203,7 +215,9 @@ def render(r: Report) -> str:
                "hard to review in one piece."]
     if r.over_lines or r.over_files:
         out.append(f"    {r.lines} changed lines (threshold {r.max_lines}) across {r.files} "
-                   f"files (threshold {r.max_files}), generated and vendored paths left out")
+                   f"files of code (threshold {r.max_files}), generated and vendored paths left out")
+    if r.test_files:
+        out.append(f"    Tests (evidence): {r.test_lines} changed lines across {r.test_files} files; reviewed separately")
     if r.mixed:
         out.append("    mixes moves with edits; consider splitting")
     if r.top:

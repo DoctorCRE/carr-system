@@ -67,6 +67,9 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.github_reader import GitHubReader  # noqa: E402
+
 # ── policy ──────────────────────────────────────────────────────────────────
 # generated_files: paths written wholesale by tooling, where neither side of a
 # conflict carries human intent. Adding one here is a real decision: it says
@@ -262,10 +265,7 @@ def rebase_branch(repo: str, branch: str, base: str, policy: dict) -> GitResult:
 
 # ── GitHub shell (thin on purpose; the decision above is where the logic is) ──
 def _gh_json(args: list[str]) -> object:
-    p = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
-    if p.returncode != 0:
-        raise RuntimeError((p.stderr or p.stdout or "gh failed").strip()[:300])
-    return json.loads(p.stdout or "[]")
+    return GitHubReader(timeout=120).json(args)
 
 
 def probe_conflicts(repo: str, branch: str, base: str, policy: dict) -> GitResult:

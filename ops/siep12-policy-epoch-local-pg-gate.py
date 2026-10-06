@@ -57,12 +57,8 @@ def deferred_refusal(cur, mutation: str, fragment: str) -> None:
 
 
 def generated_registry_digest(version: int) -> str:
-    suffix = "" if version == 1 else f".v{version}"
-    source = (REPO / f"mcp-server/src/scac-mutation-registry{suffix}.generated.js").read_text(encoding="utf-8")
-    match = re.search(r'SCAC_MUTATION_REGISTRY_DIGEST = "([0-9a-f]{64})"', source)
-    if not match:
-        raise RuntimeError(f"generated v{version} runtime projection lacks one digest")
-    return "sha256:" + match.group(1)
+    from registry_chain import registry_chain
+    return registry_chain()['versions'][version-1]['digest']
 
 
 def uuid_for(short: str) -> str:

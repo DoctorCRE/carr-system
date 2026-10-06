@@ -1,3 +1,4 @@
+import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,6 +54,7 @@ test('SQL catchup store binds identity, time, coverage and late commits', { skip
       assert.ok(table, name);
       await c.query(table);
     }
+    await restoreEventIdentity(c, schema);
     await c.query('alter table public.actor add primary key(id);');
     const actorFunction = schema.match(/CREATE FUNCTION ops.portfolio_writer_actor_id\(\)[\s\S]*?\n\$\$;/)?.[0];
     assert.ok(actorFunction);
