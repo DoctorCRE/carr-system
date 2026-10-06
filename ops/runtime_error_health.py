@@ -2,10 +2,17 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-ACTION = ('on breach: open/update one fingerprint loop · owner orchestrator · '
-          'repair the failing route or capture/consumer connectivity · '
-          'verify an error replay becomes one loop and a successful request passes · '
-          'auto-clear after 24h quiet on a newer release')
+CONTRACT = json.loads((Path(__file__).resolve().parent.parent / 'mcp-server/src/runtime-errors.v1.json').read_text())
+ACTION = CONTRACT['response_action'].replace('{quiet_hours}', str(CONTRACT['auto_clear']['quiet_ms'] // 3600000))
+
+
+def release_gate_failure(repo, row):
+    try:
+        installation = json.loads((Path(repo) / 'out/runtime-error-consumer-installed.json').read_text())
+        return (installation.get('workflow') == 'runtime-error-watch'
+                and installation.get('installed') is True and row.startswith('UNAVAILABLE'))
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def health_row(repo, now=None):

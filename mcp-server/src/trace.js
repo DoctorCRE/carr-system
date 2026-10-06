@@ -78,7 +78,7 @@
 
 import { neon } from "@neondatabase/serverless";
 import { logLine } from "./correlation.js";
-import { scrubError, captureRuntimeError } from './runtime-errors.js';
+import { scrubError, captureRuntimeError, scrubRoute } from './runtime-errors.js';
 
 const SERVICE_KEY = "carr-mcp";
 const DEFAULT_SEVERITY = "SEV-3"; // contained: one request failed, not the whole service —
@@ -171,9 +171,9 @@ export function incidentSignature({ serviceKey, environment, routeKey, failureCl
  * `detail` (the same short string, if any, the response already carries — this
  * never adds a NEW leak surface beyond what the caller already sent back). */
 export function incidentFactText({ routeKey, failureClass, correlationId, detail }) {
-  const safe = scrubError({ route: routeKey, message: detail });
-  const base = `${safe.route} failed (${failureClass}), correlation ${correlationId}`;
-  return detail ? `${base} — ${safe.message}` : base;
+  const message = scrubError({ message: detail }).message;
+  const base = `${scrubRoute(routeKey, { server: true })} failed (${failureClass}), correlation ${correlationId}`;
+  return detail && message !== '[redacted]' ? `${base} — ${message}` : base;
 }
 
 // ── the recorder ─────────────────────────────────────────────────────────────
@@ -438,7 +438,7 @@ export function scheduleFailureRecord(env, ctx, { routeKey, failureClass, detail
 
 function safeRouteKey(request) {
   try {
-    return scrubError({ route: new URL(request.url).pathname }).route;
+    return scrubRoute(new URL(request.url).pathname, { server: true });
   } catch {
     return "/unparseable";
   }

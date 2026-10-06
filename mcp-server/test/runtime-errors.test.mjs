@@ -43,7 +43,8 @@ test('grouping is value independent, pending loop creation survives restart, and
   const spike = (await call('/plan')).operations[0];
   assert.equal(spike.verb, 'update-loop');
   assert.equal(spike.args.loop_id, '12345678-1234-1234-1234-123456789abc');
-  assert.match(spike.args.body, /Count 10/);
+  assert.match(spike.args.source_note, /Count 10/);
+  assert.equal(spike.args.body, undefined);
 });
 
 test('quiet alone cannot close; a newer observed release permits close after 24h', async () => {

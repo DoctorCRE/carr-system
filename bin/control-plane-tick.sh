@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Feed due work to the CARR ledger from Joe's local edge node.
 #
-# launchd wakes the durable runtime-error loop consumer and the work ledger.
+# This wrapper neither owns recurrence nor invokes workflow code.
 # The ledger decides which workflows are due and serializes their work.
 # The LaunchAgent definition is versioned but not installed here.
 
@@ -24,8 +24,6 @@ release_lock() {
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 trap release_lock EXIT
-
-node "$REPO/ops/runtime-error-watch.mjs" || print -ru2 -- "runtime-error-watch: failed; next tick retries durable pending operations"
 
 # Read a local KEY=VALUE file without treating it as a shell program.  The
 # tick adapter handles credentials, so ``source``/``eval`` would give a local

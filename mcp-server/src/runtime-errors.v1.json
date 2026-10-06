@@ -1,6 +1,6 @@
 {
   "schema": "carr-runtime-errors.v1",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "browser_endpoint": "/api/v1/runtime-errors",
   "edge_entrypoint": "RuntimeErrorSink",
   "edge_method": "capture",
@@ -9,5 +9,7 @@
   "route_segments": ["api", "v1", "auth", "mcp", "health", "healthz", "release", "app-release", "runtime-errors", "pipeline", "changes", "capture", "clients", "vendors", "deals", "leads", "tours", "status", "control-room", "business", "workspace", "incidents", "invoices", "notifications", "search", "room", "system-work"],
   "spike": { "count": 10, "window_ms": 300000, "update_at": "double the notified window count" },
   "auto_clear": { "quiet_ms": 86400000, "release": "different current source SHA with a Cloudflare version creation timestamp after the last error" },
+  "response_action": "on breach: open/update one fingerprint loop · owner orchestrator (claude) · repair the failing route or capture/consumer connectivity · verify an error replay becomes one loop and a successful request passes · auto-clear after {quiet_hours}h quiet on a newer release",
+  "limits": { "groups_per_source": 1000, "operations_per_plan": 5, "cleared_retention_ms": 604800000 },
   "privacy": "Allowlisted error types and message templates; all other values redacted; stack locations only; no request/response bodies or record fields."
 }

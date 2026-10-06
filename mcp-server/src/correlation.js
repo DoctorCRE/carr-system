@@ -1,4 +1,4 @@
-import { scrubError } from './runtime-errors.js';
+import { scrubError, scrubRoute } from './runtime-errors.js';
 
 // CARR MCP server — correlation id middleware (Program 3, Gap A, 2026-08-14).
 //
@@ -143,7 +143,7 @@ export function wrapWithCorrelation(handler) {
     } catch (e) {
       logLine("error", "worker_uncaught_error", {
         correlation_id: correlationId,
-        path: scrubError({ route: safePath(request) }).route,
+        path: scrubRoute(safePath(request), { server: true }),
         message: scrubError({ type: e?.name, message: e?.message }).message,
       });
       response = new Response(

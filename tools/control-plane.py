@@ -649,6 +649,8 @@ class RuntimeWorkflowFactCollector:
         if not isinstance(text, str):
             return False
         markers: dict[tuple[str, str], tuple[str, ...]] = {
+            ('runtime-error-watch', 'shadow'): (r'runtime-error-watch: mode=shadow result=(?:OK|WARN) writes=0',),
+            ('runtime-error-watch', 'live'): (r'runtime-error-watch: mode=live result=(?:OK|WARN) receipt=written',),
             ('calendar-fetch-daily', 'shadow'): (r'calendar-capture: source=eventkit mode=shadow scanned=\d+ exact=\d+ domain=\d+ unknown=\d+ writes=0 failed=0',),
             ('calendar-fetch-daily', 'canary'): (r'calendar-capture: canary-result \{"contact_count":\d+,"domain_count":\d+,"exact_count":\d+,"snapshot_digest":"[0-9a-f]{64}","source_snapshot_id":"[0-9a-f-]{36}","unknown_count":\d+\}',),
             ('calendar-fetch-daily', 'live'): (r'calendar-capture: source=eventkit mode=live scanned=\d+ exact=\d+ domain=\d+ unknown=\d+ writes=\d+ failed=0',),
@@ -733,6 +735,11 @@ class RuntimeWorkflowFactCollector:
         return False
 
     def _pre_value(self, fact: str) -> bool:
+        if fact == 'runtime_errors.consumer_registered':
+            return (self.workflow['key'] == 'runtime-error-watch'
+                    and self.workflow['execution']['entrypoint'] == 'ops/runtime-error-watch.mjs'
+                    and (REPO / self.workflow['execution']['entrypoint']).is_file()
+                    and self._registered_args() is not None)
         local = self.instant.astimezone(__import__('zoneinfo').ZoneInfo(
             self.workflow['recurrence']['timezone']))
         if fact.endswith('.weekday') or fact.endswith('.weekday_slot'):

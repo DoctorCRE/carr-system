@@ -162,12 +162,11 @@ test("incidentFactText: carries route, failure class and correlation id; redacts
   assert.equal(noDetail, `/mcp failed (http_5xx), correlation ${A_CORR}`);
 
   const withDetail = incidentFactText({ routeKey: "/mcp", failureClass: "http_5xx", correlationId: A_CORR, detail: "boom" });
-  assert.match(withDetail, /— \[redacted\]$/);
+  assert.equal(withDetail, noDetail);
 
   const longDetail = "x".repeat(500);
   const truncated = incidentFactText({ routeKey: "/mcp", failureClass: "http_5xx", correlationId: A_CORR, detail: longDetail });
-  const appended = truncated.slice(truncated.indexOf("— ") + 2);
-  assert.equal(appended, '[redacted]', 'arbitrary detail must never reach the record');
+  assert.equal(truncated, noDetail, 'arbitrary detail must never reach the record');
 });
 
 // ────────────────────────────────────────────────────────────────────────

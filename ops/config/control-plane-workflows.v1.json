@@ -103,6 +103,112 @@
   ],
   "workflows": [
     {
+      "key": "runtime-error-watch",
+      "version": 1,
+      "enabled": true,
+      "risk": "green",
+      "recurrence": {
+        "cron": "*/5 * * * *",
+        "timezone": "America/Chicago",
+        "source": "CARR job ledger"
+      },
+      "execution": {
+        "kind": "deterministic",
+        "entrypoint": "ops/runtime-error-watch.mjs",
+        "args": [],
+        "shadow_args": [
+          "--shadow"
+        ],
+        "canary": {
+          "enabled": false,
+          "reason": "live-equivalent: control uses the production durable store; shadow observes without writes"
+        }
+      },
+      "state": {
+        "owner": "ops.job",
+        "initial": "queued"
+      },
+      "inventory": {
+        "trigger": "five-minute ledger cadence",
+        "owner": "ops.job dispatcher",
+        "inputs": [
+          "durable runtime-error groups",
+          "release observations"
+        ],
+        "canonical_reads": [
+          "RuntimeErrorStore",
+          "loop_item"
+        ],
+        "canonical_writes": [
+          "loop_item through registered verbs",
+          "ops.job_receipt"
+        ],
+        "external_dependencies": [
+          "local CARR machine bearer",
+          "Worker control endpoint"
+        ],
+        "authority": "bounded idempotent loop writes; human edits suspend mutation",
+        "current_completion_signal": "runtime-error-watch mode-specific result and health receipt",
+        "replacement_program": "ops.job_definition:runtime-error-watch:v1",
+        "acceptance": "accepted read-only shadow before live through the ledger acceptance ladder",
+        "retirement_approval": "no independent provider schedule"
+      },
+      "routing": {
+        "key": "facts.all_true",
+        "spec": {
+          "all_of": [
+            "runtime_errors.consumer_registered"
+          ]
+        },
+        "description": "every due ledger lease observes the store"
+      },
+      "filtering": {
+        "key": "facts.all_true",
+        "spec": {
+          "all_of": [
+            "command.registered_args_selected"
+          ]
+        },
+        "description": "the exact registered mode-specific restore command is selected"
+      },
+      "validation": {
+        "key": "facts.all_true",
+        "spec": {
+          "all_of": [
+            "command.exit_zero",
+            "command.workflow_marker_valid"
+          ]
+        },
+        "description": "the restore command exits zero with its mode-specific preflight or reconciliation marker"
+      },
+      "retry": {
+        "max_attempts": 2,
+        "backoff": "exponential",
+        "base_seconds": 60,
+        "cap_seconds": 300,
+        "timeout_seconds": 600
+      },
+      "deduplication": {
+        "key_template": "runtime-error-watch:{scheduled_for}"
+      },
+      "completion": {
+        "key": "facts.all_true",
+        "spec": {
+          "all_of": [
+            "command.receipt_persisted",
+            "command.execution_evidence_reconciles"
+          ]
+        },
+        "description": "immutable command receipt reconciles to bounded consumer result",
+        "receipt_kind": "runtime_error_watch"
+      },
+      "legacy_schedule": {
+        "provider": "none",
+        "status": "disabled",
+        "disable_requires": "no independent provider schedule exists"
+      }
+    },
+    {
       "key": "ai-capability-builder", "version": 1, "enabled": false, "risk": "yellow",
       "recurrence": {"cron": null, "timezone": "America/Chicago", "source": "disabled pending governed cadence"},
       "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "capability-program.next-candidate"},

@@ -1626,6 +1626,18 @@ def _canonical_health():
             rc = _red("grok_session", _grok_line,
                       hard_error=_grok_line.startswith("UNAVAILABLE"), time_rolling=True)
 
+    if CANONICAL_SECTION in ("all", "jobs"):
+        try:
+            runtime_spec = importlib.util.spec_from_file_location('runtime_error_health', os.path.join(REPO_ROOT, 'ops', 'runtime_error_health.py'))
+            runtime_health = importlib.util.module_from_spec(runtime_spec)
+            runtime_spec.loader.exec_module(runtime_health)
+            runtime_row = runtime_health.health_row(REPO_ROOT)
+            print('  ' + runtime_row)
+            if runtime_health.release_gate_failure(REPO_ROOT, runtime_row):
+                rc = _red('runtime_errors', runtime_row, hard_error=True)
+        except Exception as exc:
+            print(f'  UNAVAILABLE runtime errors — health reader {type(exc).__name__}')
+
     if CANONICAL_SECTION in ("all", "credentials"):
         # The source log is canonical across worktrees. The row carries its
         # response action on both OK and WARN, and the helper owns one loop.
@@ -1636,14 +1648,6 @@ def _canonical_health():
             print(f"  UNAVAILABLE jev spend — {type(exc).__name__}; "
                   "on breach: open/update one dedup loop · owner orchestrator · "
                   "remediation find caller in jev usage log · auto-clear when below threshold")
-        runtime_spec = importlib.util.spec_from_file_location('runtime_error_health', os.path.join(REPO_ROOT, 'ops', 'runtime_error_health.py'))
-        runtime_health = importlib.util.module_from_spec(runtime_spec)
-        runtime_spec.loader.exec_module(runtime_health)
-        runtime_row = runtime_health.health_row(REPO_ROOT)
-        print('  ' + runtime_row)
-        if runtime_row.startswith(('WARN', 'UNAVAILABLE')):
-            rc = _red('runtime_errors', runtime_row, hard_error=runtime_row.startswith('UNAVAILABLE'))
-
         # ── credential health (added 2026-09-24) ────────────────────────────
         # Daily liveness lane for every credential CARR needs to run
         # unattended — wrangler/Cloudflare, Neon, the two MCP machine-bearer

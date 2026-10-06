@@ -9,13 +9,13 @@ test('a lost update acknowledgement replays identical versioned arguments agains
     get: async key => structuredClone(data.get(key)), put: async (key, value) => data.set(key, structuredClone(value)),
     list: async () => structuredClone(data),
   } });
-  let version = 1, interrupt = false;
+  let version = 0, interrupt = false;
   const control = async (path, body) => {
     if (interrupt && path.endsWith('/ack')) { interrupt = false; throw new Error('lost ack'); }
     return (await store.fetch(new Request('https://store' + path.replace('/_runtime-errors', ''), { method: 'POST', body: JSON.stringify(body) }))).json();
   };
   const call = async (verb, args) => {
-    if (verb === 'read-loop') return { version };
+    if (verb === 'read-loop') return { loop: { version, status: 'open' } };
     if (writes.has(args.idempotency_key)) { assert.deepEqual(args, writes.get(args.idempotency_key)); return { ok: true, loop_id: '12345678-1234-1234-1234-123456789abc' }; }
     writes.set(args.idempotency_key, structuredClone(args)); version++;
     return { ok: true, loop_id: '12345678-1234-1234-1234-123456789abc' };
@@ -27,7 +27,7 @@ test('a lost update acknowledgement replays identical versioned arguments agains
   await assert.rejects(consumeRuntimeErrors(control, call), /lost ack/);
   await consumeRuntimeErrors(control, call);
   assert.equal(writes.size, 2, 'one creation and one update despite replay');
-  assert.equal(version, 3);
+  assert.equal(version, 2);
   assert.equal([...data.values()][0].pending, null);
 });
 
@@ -49,8 +49,8 @@ test('lost acknowledgement replays the same add-loop operation instead of filing
 test('updates and closures read the loop version before a write and retain one loop id', async () => {
   const calls = [];
   for (const verb of ['update-loop', 'close-loop']) {
-    const control = async path => path.endsWith('/plan') ? { ok: true, operations: [{ verb, key: verb, fingerprint: 'fp', args: { loop_id: 'one-loop' } }], health: 'OK' } : path.endsWith('/prepare') ? { ok: true, operation: { args: { loop_id: 'one-loop', base_version: 7 } } } : { ok: true };
-    await consumeRuntimeErrors(control, async (name, args) => { calls.push({ name, args }); return name === 'read-loop' ? { version: 7 } : { ok: true, loop_id: 'one-loop' }; });
+    const control = async path => path.endsWith('/plan') ? { ok: true, operations: [{ verb, key: verb, fingerprint: 'fp', expected_version: 7, args: { loop_id: 'one-loop' } }], health: 'OK' } : path.endsWith('/prepare') ? { ok: true, operation: { args: { loop_id: 'one-loop', base_version: 7 } } } : { ok: true };
+    await consumeRuntimeErrors(control, async (name, args) => { calls.push({ name, args }); return name === 'read-loop' ? { loop: { version: 7, status: 'open' } } : { ok: true, loop_id: 'one-loop' }; });
   }
   assert.deepEqual(calls.map(call => call.name), ['read-loop', 'update-loop', 'read-loop', 'close-loop']);
   assert.equal(calls[1].args.base_version, 7);

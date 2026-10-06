@@ -577,8 +577,13 @@ def main() -> int:
                (REPO / "ops" / "scheduled-tasks").glob("*.SKILL.md")}
     registered = {w["key"] for w in manifest.get("workflows", [])}
     check("every tracked scheduled-task definition is registered",
-          tracked == registered,
-          f"missing={sorted(tracked-registered)} extra={sorted(registered-tracked)}")
+          tracked <= registered,
+          f"missing={sorted(tracked-registered)}")
+    ledger_native = [w for w in manifest.get("workflows", []) if w["key"] not in tracked]
+    check("workflows without agent prompts are deterministic and ledger-native",
+          all(w["execution"]["kind"] == "deterministic"
+              and w["legacy_schedule"]["provider"] == "none"
+              and w["state"]["owner"] == "ops.job" for w in ledger_native))
     check("the live register is not frozen at the council's original 17",
           len(registered) >= 20, f"registered={len(registered)}")
 
