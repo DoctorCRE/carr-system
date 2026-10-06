@@ -19,7 +19,7 @@ class LeadStageJobTests(unittest.TestCase):
                 if failure == "timeout":
                     raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output="private-sentinel")
                 raise OSError("private-sentinel launch failure")
-            with self.subTest(failure=failure), patch.object(job.subprocess, "run", run):
+            with self.subTest(failure=failure), patch("subprocess.run", run):
                 try:
                     job.call_verb("record-lead-contact", args)
                 except Exception:

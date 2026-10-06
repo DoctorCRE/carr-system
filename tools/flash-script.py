@@ -47,6 +47,8 @@ from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(REPO, "tools")
+sys.path.insert(0, TOOLS)
+import flashlib
 RUNS_LOG = os.path.join(REPO, "out", "flash-script-runs.jsonl")
 FLASH_URL = os.environ.get("CARR_FLASH_URL", "http://127.0.0.1:8000")
 FLASH_MODEL = os.environ.get("CARR_FLASH_MODEL", "qwen3.8-flash-next")
@@ -101,7 +103,7 @@ def chat(messages, *, max_tokens=COMPUTE_TOKENS, think=True, timeout=THINK_TIMEO
         body["chat_template_kwargs"] = {"enable_thinking": False}
     req = urllib.request.Request(f"{FLASH_URL}/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with flashlib.request_scope(FLASH_URL), urllib.request.urlopen(req, timeout=timeout) as r:
         reply = json.load(r)
     choice = reply["choices"][0]
     msg = choice["message"]
@@ -259,22 +261,24 @@ def run_code(code, work, n, *, sandbox=True):
             return "[refused: no script sandbox on this machine; model-written code does not run unsandboxed]", 0.0
         argv = [SANDBOX_EXEC, "-p", sandbox_profile(work), *argv]
     env = {"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONPATH": work, "LANG": "C.UTF-8",
-           "PYTHONDONTWRITEBYTECODE": "1", "CARR_FLASH_URL": FLASH_URL, "CARR_FLASH_MODEL": FLASH_MODEL}
+           "PYTHONDONTWRITEBYTECODE": "1", "CARR_FLASH_URL": FLASH_URL, "CARR_FLASH_MODEL": FLASH_MODEL,
+           "CARR_FLASH_PREPARED": "1"}
     out_path, err_path = os.path.join(work, f".flash_out_{n}"), os.path.join(work, f".flash_err_{n}")
     t = time.monotonic()
-    with open(out_path, "wb") as so, open(err_path, "wb") as se:
-        p = subprocess.Popen(argv, cwd=work, stdout=so, stderr=se, stdin=subprocess.DEVNULL, env=env,
-                             start_new_session=True, preexec_fn=_limits)
-        try:
-            p.wait(timeout=RUN_TIMEOUT)
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            timed_out = True
+    with flashlib.activity_scope():
+        with open(out_path, "wb") as so, open(err_path, "wb") as se:
+            p = subprocess.Popen(argv, cwd=work, stdout=so, stderr=se, stdin=subprocess.DEVNULL, env=env,
+                                 start_new_session=True, preexec_fn=_limits)
             try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            p.wait()
+                p.wait(timeout=RUN_TIMEOUT)
+                timed_out = False
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                p.wait()
     stdout, stderr = _tail(out_path, OUT_CLIP), _tail(err_path, 1200)
     out = (stdout + ("\n[stderr]\n" + stderr if stderr.strip() else "")).strip()
     if timed_out:

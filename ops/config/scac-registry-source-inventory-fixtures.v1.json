@@ -95836,7 +95836,7 @@
     },
     "scac-mutation-registry.v112": {
       "base_version": "v112",
-      "reason": "Bind the atomic Leads migration pair bookkeeping without changing script authority.",
+      "reason": "Bind the atomic Leads migration pair bookkeeping without changing script authority. Architecture C1 moves atomic migration pair declarations to the generated chain; the migration CLI and authority contract are unchanged.",
       "upsert": [
         {
           "ingress_key": "external-admin:tools/migrate.py",
@@ -95844,8 +95844,8 @@
           "operation": "tools/migrate.py",
           "effect_class": "administrative_mutation",
           "source_locator": "tools/migrate.py",
-          "schema_digest": "3f29da1dd58219542b2db2a108c46a4765bbb2e145b36a200cc0daaf922fd8fd",
-          "handler_digest": "3f29da1dd58219542b2db2a108c46a4765bbb2e145b36a200cc0daaf922fd8fd",
+          "schema_digest": "ef9eef1fb4942ce32f78d5d59c1acc38d25e4bb41e20bdcf9bbdcdfdad2938c3",
+          "handler_digest": "ef9eef1fb4942ce32f78d5d59c1acc38d25e4bb41e20bdcf9bbdcdfdad2938c3",
           "write": true,
           "human_only": false,
           "authority_only": true,
@@ -95863,7 +95863,7 @@
         }
       ],
       "expected_count": 1130,
-      "expected_sha256": "68823ecb3188bce0e1f283be758da520027c1670401ec38af3088dd7113ed5d2"
+      "expected_sha256": "cd2787524475e13050602e0453688165bb43f62aa99aff065eac61a415deff20"
     }
   }
 }

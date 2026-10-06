@@ -112,8 +112,15 @@
     {
      "kind": "gate",
      "gate": "hooks/record-home-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "152ceb65": {
    "moment": "any turn explaining something with a shape",
@@ -425,8 +432,17 @@
      "path_globs": [
       "*ops/ci.sh"
      ]
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [],
+     "bash_patterns": [
+      "\\bgit\\b(?:\\s+[^\\n;]+)?\\s+commit\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "25fab860": {
    "moment": "weekly social batch proposal validation",
@@ -479,8 +495,17 @@
     {
      "kind": "gate",
      "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [
+      "update-document-status"
+     ],
+     "tools": [],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "2b66211d": {
    "moment": "fan-out brief / delegating tasks to agents",
@@ -936,8 +961,20 @@
     {
      "kind": "gate",
      "gate": "hooks/canonical-edit-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit"
+     ],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "4a9188f3": {
    "moment": "the teach verb, at a partner-correction/decision trigger",
@@ -979,8 +1016,17 @@
     {
      "kind": "gate",
      "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [
+      "update-document-status"
+     ],
+     "tools": [],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "4e104d4c": {
    "moment": "completion_evidence gate, new-verb deployment claim",
@@ -1065,8 +1111,15 @@
     {
      "kind": "gate",
      "gate": "ops/trigger-grant-check.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*migrations/*.sql"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "54e2bcb9": {
    "moment": "versioned_record schema (tools.js+db) - contact fact promotion",
@@ -1178,8 +1231,19 @@
      "bash_patterns": [
       "\\bgit\\s+clone\\b"
      ]
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit"
+     ],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "58cef3a1": {
    "moment": "correcting one of Joe's mislabeled statements",
@@ -2177,8 +2241,17 @@
     {
      "kind": "gate",
      "gate": "ops/githooks/index-upkeep-check.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "Write"
+     ],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "9b081605": {
    "moment": "no_send_worker check (outbound send)",
@@ -2270,6 +2343,14 @@
     {
      "kind": "gate",
      "gate": "hooks/guard-unattended.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\b(?:ssh|scp|sftp)\\b"
+     ]
     }
    ]
   },
@@ -2406,6 +2487,14 @@
     {
      "kind": "gate",
      "gate": "hooks/rule-shape-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "approve-rule"
+     ],
+     "bash_patterns": []
     }
    ]
   },
@@ -2835,6 +2924,12 @@
     {
      "kind": "gate",
      "gate": "hooks/record-home-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
     }
    ]
   },
@@ -3429,8 +3524,21 @@
     {
      "kind": "gate",
      "gate": "hooks/costar-lane-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "mcp__*__navigate",
+      "mcp__*__get_page_text",
+      "mcp__*__computer"
+     ],
+     "bash_patterns": [
+      "\\bcostar\\.com\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "f92dfab2": {
    "moment": "client_asset_packet render (search-packet)",

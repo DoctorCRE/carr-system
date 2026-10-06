@@ -28,7 +28,7 @@ EXACT_SHA = set("0123456789abcdef")
 CHECKS = (
     "ops/ci.sh --strict",
     "local-db-ci --class migration",
-    "main canary (gates, migration, types, freshness)",
+    "main canary",
 )
 HTTP_USER_AGENT = "DoctorCRE-WR95-Rehearsal/1.0"
 

@@ -670,7 +670,7 @@
       "wirings": [
         {
           "event": "PreToolUse",
-          "matcher": "Bash|Write|Edit|MultiEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*",
+          "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*",
           "fixtures": [
             "bash",
             "edits",
@@ -882,6 +882,7 @@
   },
   "lib_helpers": [
     "lib/acceptance_checks.py",
+    "lib/credential_file.py",
     "lib/jev_required_actions.py",
     "lib/claude_continuity_config.py",
     "lib/claude_rule_delivery_dedupe.py",

@@ -88,6 +88,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib.credential_file import credential  # noqa: E402
 PY = REPO / ".venv" / "bin" / "python"
 if not PY.exists():
     PY = Path(sys.executable)
@@ -195,14 +197,7 @@ def _plausible_neon_credential_exists() -> bool:
     'unavailable' rather than a minute of silence."""
     if os.environ.get("NEON_API_KEY", "").strip():
         return True
-    db_env = Path.home() / ".config" / "carr" / "db.env"
-    try:
-        with open(db_env, encoding="utf-8") as fh:
-            return any(line.strip().startswith("NEON_API_KEY=") and
-                       line.split("=", 1)[1].strip().strip("\"'")
-                       for line in fh)
-    except OSError:
-        return False
+    return credential("NEON_API_KEY", environ={}) is not None
 
 
 def staging_dsn() -> str:

@@ -1210,6 +1210,16 @@ def _stub_git_answering_the_floor(changed_paths, *, main_paths=None, added_paths
         yield {"PATH": f"{td}{os.pathsep}{os.environ.get('PATH', '')}"}
 
 
+def test_migration_structure_is_checked_before_slow_work():
+    floor = _push_floor_body()
+    migration = _ci_function_body("check_migration", "check_binding")
+    command = '"$PY" ops/migration-order-gate.py'
+    check("migration structure runs in the push floor before gate closure",
+          command in floor and floor.index(command) < floor.index('local gate_surface='))
+    check("migration structure runs before schema loading and the database probe",
+          command in migration and migration.index(command) < migration.index('local dsn='))
+
+
 def test_push_floor_defers_the_gates_class_instead_of_running_it():
     """A touched gate with no paired selftest is NAMED, not paid for locally.
 
@@ -1515,7 +1525,10 @@ if mode == "retry-failed" and len(calls) == 3:
               all("zsh" in args for args in calls if "install" in args))
 
 
-def main():
+def main(argv=None):
+    if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
+        test_every_test_file_in_the_tree_is_collected()
+        return 1 if any(not ok for _, ok, _ in RESULTS) else 0
     for fn in (test_no_green_without_running,
                test_class_table_is_complete,
                test_strict_turns_skip_into_failure,
@@ -1538,6 +1551,7 @@ def main():
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
                test_gates_treats_only_78_as_not_configured,
                test_gates_selftests_have_a_process_group_watchdog,
+               test_migration_structure_is_checked_before_slow_work,
                test_push_floor_defers_the_gates_class_instead_of_running_it,
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,
                test_strict_still_owns_the_gates_class,

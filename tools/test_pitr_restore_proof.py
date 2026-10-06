@@ -43,7 +43,7 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.disposable_pg_fixture import postgres_fixture_group
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 from lib import recovery_evidence  # noqa: E402
@@ -541,23 +541,20 @@ class Migration0597OnADisposableCluster(unittest.TestCase):
         cls.pg_budget.__enter__()
         cls.addClassCleanup(cls.pg_budget.__exit__, None, None, None)
         cls.bins = _pg_bins()
-        cls.tmp = Path(tempfile.mkdtemp(prefix="carr-f08-0597-"))
+        env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+        cls.fixture = DisposablePostgres("carr-f08-0597-", cls.bins["pg_ctl"], env=env)
+        cls.addClassCleanup(cls.fixture.close)
+        cls.tmp = cls.fixture.root
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             cls.port = str(s.getsockname()[1])
-        env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
-        subprocess.run([cls.bins["initdb"], "-D", str(cls.tmp / "data"), "-U", "owner", "--auth=trust", "--locale=C"],
+        cls.fixture.run([cls.bins["initdb"], "-D", str(cls.tmp / "data"), "-U", "owner", "--auth=trust", "--locale=C"],
                        check=True, capture_output=True, env=env)
-        subprocess.run([cls.bins["pg_ctl"], "-D", str(cls.tmp / "data"), "-l", str(cls.tmp / "log"), "-w", "-o",
+        cls.fixture.run([cls.bins["pg_ctl"], "-D", str(cls.tmp / "data"), "-l", str(cls.tmp / "log"), "-w", "-o",
                         f"-p {cls.port} -k {cls.tmp} -c listen_addresses=''", "start"], check=True, capture_output=True, env=env)
         cls.sql("create schema ops; create extension pgcrypto schema public; "
                 "create role carr_reader; create role carr_writer; create role carr_jobs; create role carr_authority;")
         cls.sql((REPO / "migrations" / "0597_pitr_probe.sql").read_text())
-
-    @classmethod
-    def tearDownClass(cls):
-        subprocess.run([cls.bins["pg_ctl"], "-D", str(cls.tmp / "data"), "-m", "immediate", "stop"], capture_output=True)
-        shutil.rmtree(cls.tmp, ignore_errors=True)
 
     @classmethod
     def sql(cls, text, check=True):

@@ -98,6 +98,8 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib.credential_file import carr_config, read_env_file  # noqa: E402
 REGISTRY = REPO / "ops" / "config" / "services.json"
 WRANGLER_CONFIG = REPO / "mcp-server" / "wrangler.toml"
 MAX_RELEASE_BODY_BYTES = 65536
@@ -464,18 +466,14 @@ def credential_names() -> tuple[str, ...]:
 
 
 def _load_db_env() -> None:
-    """Read ~/.config/carr/db.env the same way every other job does. Values are
-    shell-quoted there so `set -a; . db.env` survives an & in a DSN."""
-    path = Path.home() / ".config" / "carr" / "db.env"
+    """Read ~/.config/carr/db.env through lib/credential_file, the reader every
+    other Python job uses. Values already in the environment win."""
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip("\"'"))
+        values = read_env_file(carr_config("db.env"))
     except OSError:
-        pass
+        return
+    for name, value in values.items():
+        os.environ.setdefault(name, value)
 
 
 def dsn(kind: str) -> str:

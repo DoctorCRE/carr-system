@@ -115,6 +115,8 @@ KNOWN_HOSTS = (
     # verifying a staging deploy toward the production URL instead. That is the
     # confusion the incident was made of, which is why it is listed here.
     "carr-mcp-staging.joe-bookout-carr-us.workers.dev",
+    # Staging app Worker, CARR-owned, no client data.
+    "doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
     # nodejs.org: the official Node.js download host, and node is INFRASTRUCTURE
     # for this repo rather than a research read — mcp-server/local-verb.mjs is the
     # only route from a terminal or an unattended job to the record verbs, and

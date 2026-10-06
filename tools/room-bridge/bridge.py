@@ -335,11 +335,12 @@ def scan_for_result(log_path: Path, offset: int) -> str | None:
 
 def probe_live(entry: dict) -> bool:
     kind = entry.get("kind")
+    if kind == "claude-session" and entry.get("room_seat") == "flash":
+        return True  # Demand dispatch starts this desk; probes must not load it.
     if kind in ("claude-session", "codex-live"):
         return desks.is_live(entry.get("socket", ""))
     if kind == "flash-local":
-        # the Flash server is a local process with a health endpoint; a queue task waits while it is down
-        return flash_wire.is_up()
+        return True  # A claimed task, rather than a bridge heartbeat, starts Flash.
     # claude-desktop and codex-session are durable rather than live
     # (dispatch.py's own framing) —
     # there is no process to probe between dispatches, so "live" here means
@@ -541,7 +542,9 @@ def deliver(name: str, entry: dict, seat: str, queued_turn: dict, *, state: dict
             return {"desk": name, "outcome": "replied_sync"}
         add_room_turn(
             body=json.dumps({"desk": name, "status": status,
-                             "detail": row.get("detail")}, separators=(",", ":")),
+                             "detail": row.get("detail"),
+                             **({key: row[key] for key in ("next_route", "diagnostic_path") if key in row}
+                                if kind == "grok-cli" else {})}, separators=(",", ":")),
             seat="hermes", kind="receipt", msg_id=str(uuid.uuid4()),
         )
         return {"desk": name, "outcome": f"failed:{status}"}

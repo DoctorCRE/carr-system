@@ -1,8 +1,9 @@
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, mkdirSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -25,15 +26,15 @@ const uuid = n => `aa000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 
 test('SQL catchup store binds identity, time, coverage and late commits', { skip: !bin && 'local PostgreSQL binaries unavailable' }, async () => {
   const migration = readFileSync(path.join(root, 'migrations/0765_doc_whats_new.sql'), 'utf8');
-  const dir = mkdtempSync('/tmp/doc-catchup-');
-  let running = false;
+  let postgresFixture, dir;
   const clients = [];
   const releaseBudget = await acquirePostgresFixtureGroup();
   try {
-    execFileSync(path.join(bin,'initdb'), ['-D',dir,'-U','fixture','--auth=trust','--no-locale'], { stdio: 'pipe' });
+    postgresFixture = await acquireDisposablePostgres({ prefix: 'doc-catchup-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+    dir = postgresFixture.root;
+    await postgresFixture.run(path.join(bin,'initdb'), ['-D',dir,'-U','fixture','--auth=trust','--no-locale']);
     // Hosted Postgres uses UTC; the catchup date contract uses America/Chicago.
-    execFileSync(path.join(bin,'pg_ctl'), ['-D',dir,'-l',path.join(dir,'server.log'),'-o',`-k ${dir} -h '' -c timezone=UTC`,'-w','start'], { stdio: 'pipe' });
-    running = true;
+    await postgresFixture.run(path.join(bin,'pg_ctl'), ['-D',dir,'-l',path.join(dir,'server.log'),'-o',`-k ${dir} -h '' -c timezone=UTC`,'-w','start']);
     const connect = async () => {
       const c = new pg.Client({ host: dir, user: 'fixture', database: 'postgres' });
       await c.connect(); clients.push(c);
@@ -53,6 +54,7 @@ test('SQL catchup store binds identity, time, coverage and late commits', { skip
       assert.ok(table, name);
       await c.query(table);
     }
+    await restoreEventIdentity(c, schema);
     await c.query('alter table public.actor add primary key(id);');
     const actorFunction = schema.match(/CREATE FUNCTION ops.portfolio_writer_actor_id\(\)[\s\S]*?\n\$\$;/)?.[0];
     assert.ok(actorFunction);
@@ -260,11 +262,8 @@ test('SQL catchup store binds identity, time, coverage and late commits', { skip
   } finally {
     try {
       for (const c of clients) await c.end();
-      if (running) execFileSync(path.join(bin,'pg_ctl'), ['-D',dir,'-m','fast','-w','stop'], { stdio:'pipe' });
-      mkdirSync('/tmp/_to_delete',{ recursive:true });
-      renameSync(dir,path.join('/tmp/_to_delete',path.basename(dir)));
     } finally {
-      await releaseBudget();
+      try { await postgresFixture?.close(); } finally { await releaseBudget(); }
     }
   }
 });

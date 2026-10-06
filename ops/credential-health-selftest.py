@@ -1025,12 +1025,16 @@ test_write_jsonl_refuses_disallowed_keys()
 # deduplication
 # ═══════════════════════════════════════════════════════════════════════════
 
+# What `./run.sh call add-loop` prints when the loop was written.
+LOOP_FILED = b'{"ok": true, "id": 901}\n'
+
+
 def test_dedup_same_bucket_does_not_refile():
     calls = []
 
     def fake_run(*a, **k):
         calls.append(a)
-        return subprocess.CompletedProcess(a, 0, b"", b"")
+        return subprocess.CompletedProcess(a, 0, LOOP_FILED, b"")
     ch.SUBPROCESS_RUN = fake_run
     cred = _cred("dedup-cred", "shell_exit_status")
     state = {}
@@ -1047,7 +1051,7 @@ def test_dedup_bucket_change_refiles():
 
     def fake_run(*a, **k):
         calls.append(a)
-        return subprocess.CompletedProcess(a, 0, b"", b"")
+        return subprocess.CompletedProcess(a, 0, LOOP_FILED, b"")
     ch.SUBPROCESS_RUN = fake_run
     cred = _cred("dedup-cred-2", "shell_exit_status")
     state = {}
@@ -1071,8 +1075,19 @@ def test_dry_run_never_calls_subprocess():
           r == "dry_run" and len(calls) == 0, (r, len(calls)))
 
 
+def test_refused_filing_is_not_filed():
+    def refusing_run(*a, **k):
+        return subprocess.CompletedProcess(a, 0, b'{"ok": false, "error": "blocker_required"}\n', b"")
+    ch.SUBPROCESS_RUN = refusing_run
+    state = {}
+    r = ch.file_loop_if_needed(_cred("refused-cred", "shell_exit_status"), "failed", state)
+    check("a refused add-loop is file_failed, never filed",
+          r == "file_failed" and state["refused-cred"]["filed_ok"] is False, (r, state))
+
+
 test_dedup_same_bucket_does_not_refile()
 test_dedup_bucket_change_refiles()
+test_refused_filing_is_not_filed()
 test_dry_run_never_calls_subprocess()
 
 

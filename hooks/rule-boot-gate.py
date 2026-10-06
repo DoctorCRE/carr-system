@@ -16,7 +16,7 @@ MCP standing-context), where it reads what the fetch returned: a real page
 (recorded; a new digest or page count re-arms the session), a rejection of
 detail=boot (the Worker is not deployed yet) or an error (store unreachable).
 See lib/rule_boot_gate.py for the state layout, the fetch-call grammar and
-why it can never lock a context out.
+the recovery paths that remain available while effects are held.
 
   · a boot page fetch (CARR MCP standing-context, or a Bash command that runs
     this repo's run.sh `call standing-context '<json>'` by any path, after an
@@ -27,15 +27,13 @@ why it can never lock a context out.
     up to the boot's total_chars
   · other standing-context calls, the read-only rule verbs, ToolSearch -> allow
   · every page of the armed digest confirmed in this context          -> allow
-  · a fetch in this context failed, or the store was unreachable at arming
-    and the context has attempted once          -> allow + RULES UNAVAILABLE
-  · the Worker does not serve detail=boot yet   -> allow + NOT DEPLOYED (once)
-  · the hold could not be recorded (state unwritable) -> allow + notice
-  · held DENY_CAP times without progress        -> allow + RULES UNREAD
+  · incomplete boot, outage, absent deployment, unwritable state or repeated
+    holds                                     -> DENY with the recovery calls
   · otherwise                                   -> DENY, naming the exact calls
 
-FAILS OPEN on any internal error, like every other hook here: a gate that
-crashes must never be able to stop work. Logged to out/hook-guard.log.
+An internal error cannot establish delivery. PreToolUse therefore denies the
+effect; PostToolUse reports the error without confirming a page. Errors are
+logged to out/hook-guard.log.
 
 Fixtures: ops/rule-boot-gate-selftest.py
 """
@@ -74,9 +72,11 @@ def main():
     try:
         payload = json.load(sys.stdin)
     except Exception as exc:
-        log(f"ALLOW(parse-error) {exc}")
+        log(f"DENY(parse-error) {type(exc).__name__}")
+        emit("deny", "RULE BOOT UNVERIFIED: invalid hook input; repair the adapter before an ordinary effect.")
         return 0
     if not isinstance(payload, dict):
+        emit("deny", "RULE BOOT UNVERIFIED: hook input must be an object; repair the adapter.")
         return 0
     event = payload.get("hook_event_name") or "PreToolUse"
     try:
@@ -90,7 +90,9 @@ def main():
             log(f"DENY tool={payload.get('tool_name')} agent={payload.get('agent_id') or 'main'}")
         emit(decision, text)
     except Exception as exc:
-        log(f"ALLOW(internal-error) {exc}")
+        log(f"UNVERIFIED(internal-error) {type(exc).__name__}")
+        emit("allow" if event in ("PostToolUse", "PostToolUseFailure") else "deny",
+             "RULE BOOT UNVERIFIED: the delivery check failed; repair it and fetch the missing pages.", event)
     return 0
 
 

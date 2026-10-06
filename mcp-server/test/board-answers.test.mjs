@@ -239,10 +239,8 @@ test("read cursor and asker reference are both in the tenant scoped query", asyn
   assert.deepEqual(params.slice(0, 4), ["carr-internal", "joe", "orchestrator:project", 12]);
 });
 
-test("migration pairs the typed records with a sealed successor", () => {
+test("typed board records install reference monitors and question uniqueness", () => {
   const schema = readFileSync(new URL("../../migrations/0740_board_answers.sql", import.meta.url), "utf8");
-  const seal = readFileSync(new URL("../../migrations/0741_board_answers_scac_successor.sql", import.meta.url), "utf8");
-  const migrate = readFileSync(new URL("../../tools/migrate.py", import.meta.url), "utf8");
   for (const table of ["board_snapshot", "board_question", "board_answer"])
     assert.match(schema, new RegExp(`create table public\\.${table}`));
   for (const table of ["board_snapshot", "board_question", "board_answer"]) {
@@ -250,9 +248,4 @@ test("migration pairs the typed records with a sealed successor", () => {
     assert.match(schema, new RegExp(`on public\\.${table} for each statement execute function ops\\.scac_reference_monitor_guard\\(\\)`));
   }
   assert.match(schema, /unique \(organization_tenant_id,sponsoring_human_slug,board_id,question_id,question_revision\)/i);
-  assert.match(seal, /scac-mutation-registry\.v94/);
-  assert.match(seal,
-    /\(grant_snapshot->>'entry_count'\)::integer=322 and\s+grant_snapshot->>'grant_digest'='sha256:c8ce3685983e4fbfd361f7b1e6fdac9b0974502bc32c979b4738bc6e651aa296'/);
-  assert.equal((migrate.match(/0740_board_answers\.sql/g) || []).length, 2);
-  assert.equal((migrate.match(/0741_board_answers_scac_successor\.sql/g) || []).length, 2);
 });

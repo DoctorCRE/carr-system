@@ -4,10 +4,13 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib import record_call  # noqa: E402
 
 THRESHOLD_HOURS = 2
 REMEDIATION = {
@@ -360,16 +363,7 @@ def reconcile(result, state_path, verb):
     return "none"
 
 
-def call_verb(name, payload, *, repo):
-    process = subprocess.run(["./run.sh", "call", name, json.dumps(payload)],
-                             cwd=repo, capture_output=True, text=True, timeout=35,
-                             stdin=subprocess.DEVNULL)
-    if process.returncode:
-        return {"ok": False}
-    output = process.stdout
-    start = output.find("{")
-    try:
-        response = json.loads(output[start:]) if start >= 0 else {}
-    except json.JSONDecodeError:
-        response = {}
-    return response if isinstance(response, dict) else {"ok": False}
+def call_verb(name, payload):
+    """A loop verb's reply, or {"ok": False} for anything but an ok outcome."""
+    result = record_call.call_verb(name, payload, timeout=35)
+    return result.reply if result.ok and isinstance(result.reply, dict) else {"ok": False}

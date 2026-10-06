@@ -1,9 +1,10 @@
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -24,10 +25,9 @@ const actor = { id: id(1), slug: 'joe', human: true, via: 'dealroom-cookie', cli
 
 test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !process.env.CARR_CI_DATABASE_URL && 'PostgreSQL unavailable' }, async t => {
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  const dir = ciDsn ? null : mkdtempSync('/tmp/local-deals-');
+  let postgresFixture, dir;
   let admin;
   let database;
-  let running = false;
   let c;
   // A provided CI cluster is owned and budgeted by its caller.
   const releaseBudget = ciDsn ? async () => {} : await acquirePostgresFixtureGroup();
@@ -45,9 +45,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       url.pathname = `/${database}`;
       connection = { connectionString: url.href };
     } else {
-      execFileSync(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale'], { stdio: 'pipe' });
-      execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start'], { stdio: 'pipe' });
-      running = true;
+      postgresFixture = await acquireDisposablePostgres({ prefix: 'local-deals-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+      dir = postgresFixture.root;
+      await postgresFixture.run(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale']);
+      await postgresFixture.run(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start']);
       connection = { host: dir, user: 'fixture', database: 'postgres' };
     }
     c = new pg.Client({ ...connection,
@@ -73,9 +74,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.ok(table, name);
       await c.query(table);
     }
+    await restoreEventIdentity(c, schema);
     await c.query('alter table tool_call add primary key(idempotency_key);');
     await c.query("create view v_last_touch as select null::text subject_type, null::uuid subject_id, null::date last_touch where false;");
-    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_account', 'v_deal_room_board', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document']) {
+    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease']) {
       const view = schema.match(new RegExp(`CREATE VIEW public\\.${name} AS[\\s\\S]*?;`))?.[0];
       assert.ok(view, name);
       await c.query(view);
@@ -87,8 +89,6 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     for (const [slug, sort] of [['research', 1], ['negotiation', 2], ['legal', 3], ['closed', 4]]) {
       await c.query('insert into deal_phase(slug,label,sort) values($1,$1,$2)', [slug, sort]);
     }
-    await c.query(readFileSync(path.join(root, 'migrations/0771_local_deal_board_evidence.sql'), 'utf8'));
-    await c.query(readFileSync(path.join(root, 'migrations/0800_deal_timeline_lease_read.sql'), 'utf8'));
     const fixture = async national => {
       await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Practice',$2,$2)", [id(2), actor.id]);
       await c.query('insert into client(id,party_id,created_by,updated_by) values($1,$2,$3,$3)', [id(3), id(2), actor.id]);
@@ -104,7 +104,6 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
-    await c.query(readFileSync(path.join(root, 'migrations/0782_deal_invoice_read_fields.sql'), 'utf8'));
     const invoiceFields = ['invoiced_on', 'closed_on', 'lane', 'outcome'];
     const readInvoiceDeals = async () => ({
       'deal-board': await TOOLS['deal-board'].handler(c),
@@ -343,9 +342,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         try { if (database) await admin.query(`drop database "${database}"`); }
         finally { await admin.end(); }
       }
-      if (running) execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe' });
     } finally {
-      await releaseBudget();
+      try { await postgresFixture?.close(); } finally { await releaseBudget(); }
     }
   }
 });

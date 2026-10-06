@@ -24,6 +24,8 @@ from types import MappingProxyType
 from zoneinfo import ZoneInfo
 import health_submodule as _health_sub
 import jev_outage_health as _jev_outage
+import flashlib
+from lib.credential_file import read_env_file
 
 # Script-relative, NOT expanduser("~/carr-system") — same fix as commit fad87a4
 # (tests) and c4d040d (gates). This is the ONLY caller of ops/renders-verify.py,
@@ -1348,6 +1350,12 @@ def _tailscale_row():
     return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
 
 
+def _branch_janitor_row():
+    sys.path.insert(0, os.path.join(REPO_ROOT, "lib"))
+    from branch_retirement import health
+    return health(REPO_ROOT)
+
+
 def _canonical_health():
     """The normal health surface: record/control-plane/local truth only."""
     _FINDINGS.clear()
@@ -1381,6 +1389,11 @@ def _canonical_health():
         return 1
 
     print(f"Façade check (rule 28) — {time.strftime('%Y-%m-%d %H:%M')} — canonical receipts, not Drive renders")
+    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
+        flash_line = flashlib.health_row()
+        print("  " + flash_line)
+        if flash_line.startswith("WARN"):
+            rc = _red("flash_residency", flash_line)
     for error in snap.get("errors", []):
         print(f"  ⚠︎ canonical source UNREADABLE — {error}")
         rc = _red("source_unreadable", str(error), hard_error=True)
@@ -1805,7 +1818,7 @@ def _canonical_health():
             _action = _jev_outage.action(_joh.get("reason"))
             _outcome = _jev_outage.reconcile(
                 _joh, _loop_state,
-                lambda name, payload: _jev_outage.call_verb(name, payload, repo=REPO_ROOT))
+                _jev_outage.call_verb)
             if _joh["status"] == "warn":
                 _last = (f"last success {_joh['age_hours']}h ago"
                          if _joh["age_hours"] is not None else "no usable call recorded")
@@ -1878,6 +1891,19 @@ def _canonical_health():
             _detail = f"check failed ({type(e).__name__}: {e})"
             print(f"  ⚠︎ {'jev receipts':<18} {_detail}")
             rc = _red("jev_call_receipt_integrity", _detail, hard_error=True)
+
+    if CANONICAL_SECTION in ("all", "jobs") and not CANONICAL_FIXTURE:
+        print("Branch retirement — local scheduled receipts")
+        try:
+            line, failed = _branch_janitor_row()
+            print("  " + line)
+            if failed:
+                rc = _red("branch_janitor", line, subject="three-repo-retirement")
+        except Exception as exc:
+            line = (f"branch janitor unavailable ({type(exc).__name__}) · on breach: owner orchestrator "
+                    "· restore lib/branch_retirement.py · verify health · auto-clear after successful readback")
+            print("  WARN " + line)
+            rc = _red("branch_janitor", line, subject="three-repo-retirement")
 
     if CANONICAL_SECTION in ("all", "tailscale"):
         try:
@@ -2099,12 +2125,10 @@ GATES = {
 
 
 def _keys_in_env_file():
-    """Key names declared in db.env, parsed as text. Never sources, never stores values."""
+    """Key names whose value LOADS from db.env through lib/credential_file, the
+    reader every Python job uses. Never sources, never stores values."""
     try:
-        with open(DB_ENV) as fh:
-            return {ln.split("=", 1)[0].strip()
-                    for ln in fh
-                    if "=" in ln and not ln.lstrip().startswith("#") and ln.split("=", 1)[1].strip()}
+        return {name for name, value in read_env_file(DB_ENV).items() if value}
     except OSError:
         return set()
 
@@ -3372,6 +3396,18 @@ except Exception as e:
 # --- the doctrine store (P4/P5, 2026-08-08; decisions 82a2fb62 + import door) -
 # Every row prints its bound action inline (rule 590b11e1: no metric without a
 # bound action, visible in the render itself). A failed read is never all-clear.
+print("\nrule delivery")
+try:
+    from ops.rule_recall_health import check_local as _check_rule_recall
+    _line = _check_rule_recall(REPO_ROOT)
+    print("  " + _line)
+    if not _line.startswith("OK"):
+        rc = 1
+except Exception as e:
+    from ops.rule_recall_health import ACTION as _recall_action
+    print(f"  UNAVAILABLE rule recall — {type(e).__name__}; warning retained · {_recall_action}")
+    rc = 1
+
 print("\ndoctrine store")
 try:
     _q = ("select "

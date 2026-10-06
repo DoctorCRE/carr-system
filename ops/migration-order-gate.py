@@ -68,7 +68,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 # The one slot grammar the allocator and the runner share, so a lettered
 # interstitial slot (0532a_...) is a migration here exactly as it is there.
-from migration_number_contract import SLOT_RE  # noqa: E402
+from migration_number_contract import SLOT_RE, MigrationNumberError, validate_migration_names  # noqa: E402
 
 MIGRATIONS_DIR = "migrations"
 
@@ -138,6 +138,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"migration-order-gate: cannot read migrations/ at {args.head!r} or its "
               f"merge base with {base!r}: {(exc.stderr or '').strip()}", file=sys.stderr)
         return 2
+
+    try:
+        validate_migration_names(path.rsplit("/", 1)[-1] for path in head_paths)
+    except MigrationNumberError as exc:
+        print(f"migration-order-gate: REFUSED — {exc}", file=sys.stderr)
+        return 1
 
     bad = violations(base_paths, fork_paths, head_paths)
     ceiling = highest_number(base_paths)

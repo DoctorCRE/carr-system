@@ -41,24 +41,11 @@ SessionStart or at the next boot fetch by any context in the session (every
 new subagent makes one). A session whose contexts are all complete and that
 starts no subagent keeps the digest it has until one of those happens.
 
-NEVER A LOCKOUT. Reviewed on PR #1328; each path is a selftest case:
-  * The fetch, the read-only rule verbs and ToolSearch are always allowed.
-  * A DENY IS ONLY EVER MADE ON STATE THE HOOK WROTE. Every deny first writes
-    its own d-marker; if that write fails (folder unwritable, disk or inodes
-    full) the call is allowed with STATE_UNWRITABLE_NOTICE instead. A missing
-    marker the hook could not write can therefore never become a deny.
-  * DENY CAP: after DENY_CAP denies in one context with no page confirmed in
-    between, every call is allowed with CAP_NOTICE. That covers contexts with
-    no tool that can fetch (a Read/Edit-only subagent) and any lockout nobody
-    foresaw. Subagent types known to have no fetch tool are never denied.
-  * STORE UNREACHABLE (at arming, or a later fetch that errors, or a fetch
-    that never answered within PENDING_GRACE_S): after that one attempt the
-    context is allowed on every call with UNAVAILABLE_NOTICE.
-  * WORKER NOT YET DEPLOYED (standing-context rejects detail=boot): its own
-    status and NOT_DEPLOYED_NOTICE, shown once per context; nothing is held.
-
-A LIBRARY: no shebang, no main guard (see ops/jev_judge.py's docstring on the
-SCAC inventory).
+DELIVERY BEFORE EFFECTS. Ordinary tools remain held until every full page is
+confirmed. Outages, repeated attempts, missing adapters and unwritable state
+are explicit failures, never evidence that rules were read. Fetches, rule-read
+verbs and ToolSearch remain allowed for recovery. The diagnostic marker count
+is capped; enforcement is not. Tool-less delegates need a fetch-capable route.
 """
 import errno
 import json
@@ -72,7 +59,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA = "carr-rule-boot-gate/v1"
 BOOT_SCHEMA = "carr-rule-boot/v1"
 
-DENY_CAP = 3
+MAX_DIAGNOSTIC_MARKERS = 3
 PENDING_GRACE_S = 45
 
 # The CARR connector's MCP prefixes: the local server, the records alias and
@@ -144,47 +131,18 @@ _BOOT_UNSUPPORTED = re.compile(
     r"|\"?field\"?\s*[:=]\s*\"?detail\b[\s\S]{0,300}value_not_in_declared_vocabulary")
 _OUT_OF_RANGE = "page_out_of_range"
 
-# The four notices. Wording reviewed by Jev (semantic_creation,
-# kind rule-boot-gate-notice-texts): each says what happened and what to do.
 UNAVAILABLE_NOTICE = (
-    "RULES UNAVAILABLE: the CARR store did not answer the rule boot fetch, so this context has "
-    "not read the CARR rules. The gate will not hold your tool calls. Do this: (1) tell the user "
-    "the rules are unavailable before you act on anything that depends on them; (2) retry "
-    "standing-context {\"detail\":\"boot\",\"page\":1} later and read its pages if it answers.")
+    "RULES UNAVAILABLE: the CARR store did not answer the full boot. Ordinary tools stay held. "
+    "Report the outage; retry the read-only standing-context boot door and read every page.")
 NOT_DEPLOYED_NOTICE = (
-    "RULE BOOT NOT DEPLOYED YET: the CARR store answered, but its Worker does not serve "
-    "standing-context detail=boot yet. This is expected until that release ships and is not "
-    "an outage: keep working normally, and use applicable-rules for the task in hand. "
-    "Nothing is blocked.")
-_FETCH_BOTH = (
-    "standing-context {{\"detail\":\"boot\",\"page\":1}} (CARR MCP) or `"
-    + os.path.join(REPO, "run.sh").replace("{", "{{").replace("}", "}}")
-    + " call standing-context '{{\"detail\":\"boot\",\"page\":1}}'` (Bash), then each "
-    "further page the reply lists")
-CAP_NOTICE = (
-    "RULES UNREAD: you tried other tools {n} times without fetching the CARR rules, so the rule "
-    "gate has stopped blocking you. You have NOT read the CARR rules. Next: fetch them now with "
-    + _FETCH_BOTH + ". If you have neither tool, carry on and write \"CARR rules not read\" in "
-    "your result.")
+    "RULE BOOT NOT DEPLOYED YET: the Worker answered but does not serve detail=boot. "
+    "Ordinary tools stay held until the full boot is served. Rule reads and ToolSearch remain available.")
 STATE_UNWRITABLE_NOTICE = (
-    "RULE BOOT STATE UNWRITABLE: the rule gate cannot save its files on this machine ({why}, "
-    "for example a full disk or a read-only folder), so it has stopped blocking and cannot "
-    "tell whether this context has read the CARR rules. Next: (1) unless the CARR rule boot "
-    "pages are already in this conversation, fetch them now with " + _FETCH_BOTH + "; if you "
-    "have neither tool, carry on and write \"CARR rules not read\" in your result. (2) Tell "
-    "the user the rule gate's state folder cannot be written.")
-# After the first full notice in a context, later calls carry only this.
-SHORT_NOTICE = {
-    "unavailable": ("RULES UNAVAILABLE: the CARR store is unreachable, so the rules are unread. Tell "
-                    "the user if you have not yet; you may keep working."),
-    "unarmed": ("RULE BOOT NOT ARMED: the rules are unread. Fetch standing-context "
-                "{\"detail\":\"boot\"} if you can, or say in your result that the rules are unread."),
-    "cap": ("RULES UNREAD: the gate no longer holds this context. Fetch standing-context "
-            "{\"detail\":\"boot\",\"page\":1} if you can; else write \"CARR rules not read\" in your result."),
-}
+    "RULE BOOT STATE UNWRITABLE: cannot save verified page state ({why}). Ordinary tools stay held. "
+    "Report the state-folder fault and repair it; rule reads and ToolSearch remain available.")
 UNARMED_NOTICE = (
     "RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every "
-    "page standing-context {\"detail\":\"boot\"} names before acting, or say the rules are unread.")
+    "page standing-context {\"detail\":\"boot\"} names before acting, before ordinary tools can run.")
 
 
 def state_root():
@@ -537,9 +495,7 @@ def fetch_instructions(pages, digest=None, pages_total=None):
         "doctrine-sections) and ToolSearch will run. A leading `cd <absolute repo path> &&` and a pipe "
         "into a formatter (jq, python3 -c from the repo root, head) keep it a fetch if the whole JSON "
         "prints; anything run after the fetch (&&, ;, ||, &) does not. "
-        "This can never lock you out: a fetch that "
-        f"fails unlocks you with a notice, and after {DENY_CAP} holds without a fetch the gate "
-        "stops holding this context.")
+        "Ordinary tools stay held until the complete boot is verified; recovery rule reads remain available.")
 
 
 # ---------------------------------------------------------------- answers
@@ -672,33 +628,15 @@ def _toolless(payload):
     return bool(payload.get("agent_id") or payload.get("agentId")) and kind in TOOLLESS_AGENT_TYPES
 
 
-def _notice(folder, name, full):
-    """The full notice the first time in a context, then its one-line form
-    (the full one again whenever the marker cannot be written)."""
-    if f"shown-{name}" in _markers(folder):
-        return SHORT_NOTICE[name]
-    _touch(folder, f"shown-{name}")
-    return full
-
-
 def _hold(folder, confirmed, reason):
-    """Deny, but only on state written now; capped per context. Past the cap
-    nothing more is written."""
+    """Hold until verified; bound diagnostic writes, never bound enforcement."""
     held = sum(1 for n in _markers(folder) if n.startswith(f"d{confirmed}-"))
-    if held >= DENY_CAP:
-        return "allow", _notice(folder, "cap", CAP_NOTICE.format(n=DENY_CAP))
+    if held >= MAX_DIAGNOSTIC_MARKERS:
+        return "deny", reason
     why = _touch(folder, f"d{confirmed}-{secrets.token_hex(4)}")
     if why:
-        return "allow", STATE_UNWRITABLE_NOTICE.format(why=why)
+        return "deny", reason + "\n" + STATE_UNWRITABLE_NOTICE.format(why=why)
     return "deny", reason
-
-
-def _once(folder, name, notice):
-    """A notice shown once per context (again if the marker cannot be written)."""
-    if name in _markers(folder):
-        return None
-    _touch(folder, name)
-    return notice
 
 
 def verdict(payload, now=None):
@@ -721,24 +659,19 @@ def verdict(payload, now=None):
         return "allow", None
     status = (arm or {}).get("status")
     if status == "not_deployed":
-        return "allow", _once(folder, "shown-not-deployed", NOT_DEPLOYED_NOTICE)
+        return _hold(folder, 0, NOT_DEPLOYED_NOTICE + "\nFull boot is required before ordinary tools.")
     names = _markers(folder)
     if "unsupported" in names:
-        return "allow", _once(folder, "shown-not-deployed", NOT_DEPLOYED_NOTICE)
+        return _hold(folder, 0, NOT_DEPLOYED_NOTICE + "\nFull boot is required before ordinary tools.")
     if _toolless(payload):
-        return "allow", _once(folder, "shown-toolless", CAP_NOTICE.format(n=0))
+        return _hold(folder, 0, "RULES UNREAD: this subagent needs a rule-fetch tool before ordinary tools.")
     attempted = _pages(names, "p")
     if status != "armed":
-        # NOT ARMED, OR THE STORE WAS UNREACHABLE AT ARMING. There is no page
-        # count to hold the context to, so the gate asks for one thing: an
-        # ATTEMPT at the boot fetch in this context (Jev, 2026-09-26: a plain
-        # allow here is a material bypass). After it, every call is allowed
-        # with the notice.
         notice = UNAVAILABLE_NOTICE if arm else UNARMED_NOTICE
         if attempted or "failed" in names:
-            return "allow", _notice(folder, "unavailable" if arm else "unarmed", notice)
+            return _hold(folder, 0, notice + "\nFull boot is required; retry the read-only rule door.")
         return _hold(folder, 0, notice + "\nBefore any other tool, ATTEMPT the rule boot fetch once in "
-                     "this context (it is always allowed, and a failure still unlocks you):\n"
+                     "this context (the fetch and rule-read tools always remain allowed):\n"
                      + fetch_instructions([1]))
     confirmed = _pages(names, "c")
     total = int(arm.get("pages_total") or 0)
@@ -752,7 +685,7 @@ def verdict(payload, now=None):
             "Fetch every page again and keep the whole JSON.\n")
             + fetch_instructions(list(range(1, total + 1)), arm.get("digest"), total))
     if "failed" in names:
-        return "allow", _notice(folder, "unavailable", UNAVAILABLE_NOTICE)
+        return _hold(folder, len(confirmed), UNAVAILABLE_NOTICE + "\nFull boot is required; retry the missing pages.")
     # A page attempted but never answered: PostToolUse writes c<N> or failed,
     # so silence past the grace means the fetch failed without a result.
     now = now or time.time()
@@ -763,7 +696,7 @@ def verdict(payload, now=None):
             except OSError:
                 continue
             if age > PENDING_GRACE_S:
-                return "allow", _notice(folder, "unavailable", UNAVAILABLE_NOTICE)
+                return _hold(folder, len(confirmed), UNAVAILABLE_NOTICE + "\nNo confirmed answer; retry the missing pages.")
     unreadable = [p for p in missing if f"u{p}" in names]
     lead = (f"Page(s) {', '.join(map(str, unreadable))} came back without the whole page (a pipe or "
             "formatter kept only part of it), so they do not count as read.\n") if unreadable else ""
@@ -782,11 +715,37 @@ def _utf16_len(text):
     return len(text.encode("utf-16-le", "surrogatepass")) // 2
 
 
+def boot_rule_ids(text):
+    """The rule ids whose full text a boot page carries (Part 1 headings)."""
+    return re.findall(r"^### ([0-9a-f]{8})(?: \(personal\))?$", text, re.M)
+
+
+def boot_delivery(pages):
+    """The rule ids one context received in full, or None.
+
+    `pages` maps page number to the boot answers ONE context read (one
+    session, one agent, one compaction epoch). Delivery needs every page of
+    one digest, the same page count and total_chars on each, and page texts
+    whose JavaScript lengths add up to total_chars: the gate's own test."""
+    if not pages:
+        return None
+    first = next(iter(pages.values()))
+    meta = (first.get("digest"), first.get("pages_total"), first.get("total_chars"))
+    if any((p.get("digest"), p.get("pages_total"), p.get("total_chars")) != meta
+           or not _is_page(p, n) for n, p in pages.items()):
+        return None
+    if set(pages) != set(range(1, int(meta[1] or 0) + 1)):
+        return None
+    if sum(_utf16_len(p["text"]) for p in pages.values()) != int(meta[2]):
+        return None
+    return [rid for n in sorted(pages) for rid in boot_rule_ids(pages[n]["text"])]
+
+
 def _is_page(boot, page):
     """A boot answer is page `page` read in full: it names that page and a
     digest, and carries the page's text."""
     try:
-        same_page = int(boot.get("page")) == int(page)
+        same_page = int(boot.get("page")) == int(page) and int(boot.get("total_chars") or 0) > 0
     except (TypeError, ValueError):
         return False
     text = boot.get("text")
@@ -811,20 +770,19 @@ def _put(folder, name, content):
 def _short_text(folder, arm):
     """True when every page is confirmed but their texts' lengths do not add up
     to the boot's total_chars: some page was cut on its way to the context.
-    Skipped (False) when the arm carries no total_chars or a page marker
-    carries no length (a marker written before lengths were recorded)."""
+    Missing length metadata never establishes complete delivery."""
     want = int(arm.get("total_chars") or 0)
     if want < 1:
-        return False
+        return True
     got = 0
     for p in range(1, int(arm.get("pages_total") or 0) + 1):
         try:
             with open(os.path.join(folder, f"c{p}"), encoding="utf-8") as fh:
                 raw = fh.read(32).strip()
         except OSError:
-            return False
+            return True
         if not raw.isdigit():
-            return False
+            return True
         got += int(raw)
     return got != want
 
@@ -881,14 +839,32 @@ def observe(payload):
                 write_arm(session_id, arm)
             except OSError:
                 return None
+        if answer == "boot" and not arm.get("total_chars"):
+            arm["total_chars"] = int(boot["total_chars"])
+            try:
+                write_arm(session_id, arm)
+            except OSError:
+                return None
         folder = _fetch_dir(session_id, agent_id, _stand_in(arm))
         if answer == "out_of_range":
-            # Not an outage: the page does not exist. The context is held as
-            # usual for the pages that do (bounded by the deny cap).
             return (f"RULE BOOT: page {page} does not exist; this boot has {total or 'fewer'} "
                     "page(s). Fetch the pages the gate names.")
         _touch(folder, f"p{page}")
         _put(folder, f"c{page}", str(_utf16_len(boot["text"])))
+        _put(folder, f"r{page}", json.dumps(boot_rule_ids(boot["text"])))
+        confirmed = _pages(_markers(folder), "c")
+        if total > 0 and confirmed == set(range(1, total + 1)) and not _short_text(folder, arm):
+            try:
+                from lib.rule_recall import log_delivery
+                ids = []
+                for n in range(1, total + 1):
+                    with open(os.path.join(folder, f"r{n}"), encoding="utf-8") as handle:
+                        ids.extend(json.load(handle))
+                if ids:
+                    log_delivery(os.path.join(REPO, "out", "rule-boot-delivery.jsonl"),
+                                 f"boot:{session_id}:{agent_id or 'main'}:{_stand_in(arm)}", ids)
+            except (OSError, ValueError):
+                pass
         for stale in ("failed", "unsupported", f"u{page}"):
             try:
                 os.unlink(os.path.join(folder, stale))

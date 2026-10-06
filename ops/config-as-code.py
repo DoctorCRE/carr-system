@@ -42,6 +42,7 @@ exactly as they bind Joe, with zero mechanical enforcement on his side today.
     ops/config-as-code.py install-codex-continuity-mcp --apply
     ops/config-as-code.py verify-codex-continuity-mcp
     ops/config-as-code.py install-progress-board [--repo CANONICAL] --apply
+    ops/config-as-code.py install-flash-on-demand [--apply]
     ops/config-as-code.py verify-progress-board [--repo CANONICAL]
     ops/config-as-code.py check-launchd-main-paths
     ops/config-as-code.py remove-codex-continuity --apply
@@ -2964,6 +2965,13 @@ def main():
         return cmd_verify_codex_continuity()
     if mode == "install":
         return cmd_install(apply)
+    if mode == "install-flash-on-demand":
+        import argparse
+        from tools import flash_install
+        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
+        parser.add_argument("--apply", action="store_true")
+        options = parser.parse_args(sys.argv[2:])
+        return flash_install.configure(REPO_HERE, apply=options.apply)
     if mode == "check-launchd-main-paths":
         return cmd_check_launchd_main_paths()
     if mode in {"install-progress-board", "verify-progress-board"}:

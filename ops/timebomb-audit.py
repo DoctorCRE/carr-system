@@ -118,10 +118,11 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(os.environ.get("CARR_TIMEBOMB_REPO") or Path(__file__).resolve().parent.parent)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib import record_call  # noqa: E402
 OUT_DIR = Path(os.environ.get("CARR_TIMEBOMB_OUT_DIR") or (REPO / "out" / "timebomb-audit"))
 TRIAGE_PATH = Path(os.environ.get("CARR_TIMEBOMB_TRIAGE_PATH")
                     or (REPO / "ops" / "config" / "timebomb-triage.v1.json"))
-RUN_SH = REPO / "run.sh"
 
 # ── SCAN ─────────────────────────────────────────────────────────────────
 # Ported from scratchpad/timebomb/find_candidates.py's tightened pass
@@ -601,28 +602,16 @@ def judge_regions(regions: list[dict], jcr, tsc, ask=None) -> tuple[list[dict], 
 
 
 # ── RECORD-LAYER FILING ──────────────────────────────────────────────────
-# Same call path tools/cutover-watch.py uses (a subprocess to `run.sh call
-# <verb> '<json>'`, never the generic MCP call-verb passthrough).
+# lib/record_call: `run.sh call <verb> '<json>'`, never the generic MCP
+# call-verb passthrough.
 
 def call_verb(verb: str, args: dict) -> tuple[bool, object]:
-    """Never raises -- a verb call that fails is a finding, not a crash."""
-    if not RUN_SH.exists():
-        return False, f"no such file: {RUN_SH}"
+    """Never raises -- a verb call that fails is a finding, not a crash. Only
+    an ok outcome is success: a refused write is reported, never accepted."""
     child_env = {"HOME": os.environ.get("HOME", ""), "PATH": os.environ.get("PATH", ""),
                  "LANG": os.environ.get("LANG", "C")}
-    try:
-        proc = subprocess.run([str(RUN_SH), "call", verb, json.dumps(args)],
-                               cwd=str(REPO), env=child_env, capture_output=True,
-                               text=True, timeout=120)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"subprocess failed: {type(exc).__name__}: {exc}"
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        return False, f"run.sh call {verb} exit {proc.returncode}: {tail[-1] if tail else '(no output)'}"
-    try:
-        return True, json.loads(proc.stdout)
-    except ValueError:
-        return False, f"non-JSON stdout from {verb}: {proc.stdout[:200]!r}"
+    result = record_call.call_verb(verb, args, env=child_env, timeout=120)
+    return (True, result.reply) if result.ok else (False, result.describe())
 
 
 def summarize_findings(findings: list[dict]) -> str:

@@ -2,11 +2,14 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
+import { readRegistryArtifact as readFileSync, historicalRows } from "./registry-history.mjs";
 import { mkdir } from "node:fs/promises";
 import { writeIntegratedArtifact as writeFile } from "./integration-generation.mjs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { registryChain, registryVersion, renderRuntimeProjection } from "./registry-chain.mjs";
 
 import { renderPolicyEpochMigration } from "./scac-policy-epoch-sql.mjs";
 
@@ -23,42 +26,42 @@ function requireTools(tools) {
   return tools;
 }
 
-export const REGISTRY_VERSION = "scac-mutation-registry.v1";
-export const REGISTRY_V2_VERSION = "scac-mutation-registry.v2";
-export const REGISTRY_V3_VERSION = "scac-mutation-registry.v3";
-export const REGISTRY_V4_VERSION = "scac-mutation-registry.v4";
-export const REGISTRY_V5_VERSION = "scac-mutation-registry.v5";
-export const REGISTRY_V6_VERSION = "scac-mutation-registry.v6";
-export const REGISTRY_V7_VERSION = "scac-mutation-registry.v7";
-export const REGISTRY_V8_VERSION = "scac-mutation-registry.v8";
-export const REGISTRY_V9_VERSION = "scac-mutation-registry.v9";
-export const REGISTRY_V10_VERSION = "scac-mutation-registry.v10";
+export const REGISTRY_VERSION = registryVersion(1).version;
+export const REGISTRY_V2_VERSION = registryVersion(2).version;
+export const REGISTRY_V3_VERSION = registryVersion(3).version;
+export const REGISTRY_V4_VERSION = registryVersion(4).version;
+export const REGISTRY_V5_VERSION = registryVersion(5).version;
+export const REGISTRY_V6_VERSION = registryVersion(6).version;
+export const REGISTRY_V7_VERSION = registryVersion(7).version;
+export const REGISTRY_V8_VERSION = registryVersion(8).version;
+export const REGISTRY_V9_VERSION = registryVersion(9).version;
+export const REGISTRY_V10_VERSION = registryVersion(10).version;
 // v11 binds the exact post-0480 disposable-Postgres catalog receipt.
-export const REGISTRY_V11_VERSION = "scac-mutation-registry.v11";
+export const REGISTRY_V11_VERSION = registryVersion(11).version;
 // v12 binds the exact post-0485 disposable-Postgres catalog receipt.
-export const REGISTRY_V12_VERSION = "scac-mutation-registry.v12";
+export const REGISTRY_V12_VERSION = registryVersion(12).version;
 // v13 binds the reviewed Claude startup cursor repair after the v12 seal.
-export const REGISTRY_V13_VERSION = "scac-mutation-registry.v13";
+export const REGISTRY_V13_VERSION = registryVersion(13).version;
 // v14 binds the Claude recovery actor-hydration repair after the v13 seal.
-export const REGISTRY_V14_VERSION = "scac-mutation-registry.v14";
+export const REGISTRY_V14_VERSION = registryVersion(14).version;
 // v15 binds the Claude continuity config-preservation repair after the v14 seal.
-export const REGISTRY_V15_VERSION = "scac-mutation-registry.v15";
+export const REGISTRY_V15_VERSION = registryVersion(15).version;
 // v16 binds the Codex post-compaction checkpoint refresh after the v15 seal.
-export const REGISTRY_V16_VERSION = "scac-mutation-registry.v16";
+export const REGISTRY_V16_VERSION = registryVersion(16).version;
 // v17 registers the snapshot-guarded backup and artifact-status helper ingresses.
-export const REGISTRY_V17_VERSION = "scac-mutation-registry.v17";
+export const REGISTRY_V17_VERSION = registryVersion(17).version;
 // v18 binds the WR-000068 sourced shape forward-correction surface after the v17 seal.
-export const REGISTRY_V18_VERSION = "scac-mutation-registry.v18";
+export const REGISTRY_V18_VERSION = registryVersion(18).version;
 // v19 binds WR-000069's incident/work-request evidence edge after the v18 seal.
-export const REGISTRY_V19_VERSION = "scac-mutation-registry.v19";
+export const REGISTRY_V19_VERSION = registryVersion(19).version;
 // v20 binds the continuity archive successor after the final v19 seal.
-export const REGISTRY_V20_VERSION = "scac-mutation-registry.v20";
+export const REGISTRY_V20_VERSION = registryVersion(20).version;
 // v21 binds the R06 hooks-correctness re-digest after the final v20 seal.
-export const REGISTRY_V21_VERSION = "scac-mutation-registry.v21";
+export const REGISTRY_V21_VERSION = registryVersion(21).version;
 // v22 binds the DoctorCRE v5 portfolio hierarchy after the final v21 seal.
-export const REGISTRY_V22_VERSION = "scac-mutation-registry.v22";
-export const REGISTRY_V23_VERSION = "scac-mutation-registry.v23";
-export const REGISTRY_V24_VERSION = "scac-mutation-registry.v24";
+export const REGISTRY_V22_VERSION = registryVersion(22).version;
+export const REGISTRY_V23_VERSION = registryVersion(23).version;
+export const REGISTRY_V24_VERSION = registryVersion(24).version;
 // v25 admits the WR-000040 AC-FRESH canonical-freshness agents, the Gate Zero
 // scheduler canary and the files that prove the canary runs. Every successor
 // since v20 has been registry-only because its source change re-digested
@@ -70,17 +73,17 @@ export const REGISTRY_V24_VERSION = "scac-mutation-registry.v24";
 // migration comment and the review reason in the fixture -- is rendered from
 // that derivation. A count that is typed is a count that drifts, which is
 // exactly what PR #1006 review 2 caught.
-export const REGISTRY_V25_VERSION = "scac-mutation-registry.v25";
-export const REGISTRY_V26_VERSION = "scac-mutation-registry.v26";
+export const REGISTRY_V25_VERSION = registryVersion(25).version;
+export const REGISTRY_V26_VERSION = registryVersion(26).version;
 // v27 seals the WR-000095 foundation-assurance minimum surface after the
 // domain migrations have installed their dedicated oracle role and functions.
-export const REGISTRY_V27_VERSION = "scac-mutation-registry.v27";
+export const REGISTRY_V27_VERSION = registryVersion(27).version;
 // v28 seals the WR-000109 deal-field change provenance: patch-deal-field's
 // inputSchema admits two optional provenance properties, which moves its
 // schema_digest. A schema_digest is a contract, and current_source_review can
 // only ever re-digest source bytes, so a successor is the only surface that
 // can carry it.
-export const REGISTRY_V28_VERSION = "scac-mutation-registry.v28";
+export const REGISTRY_V28_VERSION = registryVersion(28).version;
 // v29 seals the WR-000110 V5-F02 program-controller seams. Two independent
 // moves ride it: ops.record_program_controller_fact is a new SECURITY DEFINER
 // ingress with TWO explicit grantees, and the engineering-runtime.js edit that
@@ -89,7 +92,7 @@ export const REGISTRY_V28_VERSION = "scac-mutation-registry.v28";
 // new database proofs, and tools/migrate.py and
 // ops/foundation-assurance-candidate-rehearsal.py are edited. One successor
 // carries all four reasons.
-export const REGISTRY_V29_VERSION = "scac-mutation-registry.v29";
+export const REGISTRY_V29_VERSION = registryVersion(29).version;
 // v30 seals the WR-000111/112/113 producer trio as ONE successor, because three
 // accepted plans land in one branch and a registry frontier admits one seal at a
 // time. Three domain migrations ride it: 0519 installs the producer cost ledger
@@ -101,7 +104,7 @@ export const REGISTRY_V29_VERSION = "scac-mutation-registry.v29";
 // re-digest every mcp-tool row registered from those files; and the inventoried
 // script entrypoints ops/ci.sh, tools/migrate.py and the completion-evidence gate
 // move with them. One successor carries every reason.
-export const REGISTRY_V30_VERSION = "scac-mutation-registry.v30";
+export const REGISTRY_V30_VERSION = registryVersion(30).version;
 // v31 seals the WR-000114 Doc conversation write doors. 0523 installs THREE new
 // SECURITY DEFINER ingresses on the WR-000112 store -- ops.create_doc_conversation,
 // ops.share_doc_conversation and ops.rename_doc_conversation -- each granted to
@@ -110,7 +113,7 @@ export const REGISTRY_V30_VERSION = "scac-mutation-registry.v30";
 // mcp-server/src/tools.js is not edited at all and its mcp-tool rows do not
 // re-digest: only the two sibling rows sourced from doc-conversation.js move
 // with it. The inventoried script entrypoints this branch edits move too.
-export const REGISTRY_V31_VERSION = "scac-mutation-registry.v31";
+export const REGISTRY_V31_VERSION = registryVersion(31).version;
 // v32 seals the WR-000115 Doc conversation LIST door. 0525 installs ONE new
 // SECURITY DEFINER ingress on the WR-000112 store -- ops.list_doc_conversations
 // -- granted to carr_writer AND carr_authority, which is two db-function-acl
@@ -120,7 +123,7 @@ export const REGISTRY_V31_VERSION = "scac-mutation-registry.v31";
 // with it. The inventoried script entrypoints this branch edits move too. The
 // verb is a READ -- `list` is not a write prefix -- so no completion-evidence
 // gate entry is owed and hooks/completion-evidence-gate.py is untouched.
-export const REGISTRY_V32_VERSION = "scac-mutation-registry.v32";
+export const REGISTRY_V32_VERSION = registryVersion(32).version;
 // v33 seals the WR-000116 notification-preference PAIR. 0527 installs TWO new
 // SECURITY DEFINER ingresses on the WR-000113 notification store --
 // ops.notification_preference_facts and ops.set_notification_preference -- each
@@ -134,7 +137,7 @@ export const REGISTRY_V32_VERSION = "scac-mutation-registry.v32";
 // classifies as a write through the completion-evidence gate's own `set`
 // prefix, so no gate entry is owed and hooks/completion-evidence-gate.py is
 // untouched.
-export const REGISTRY_V33_VERSION = "scac-mutation-registry.v33";
+export const REGISTRY_V33_VERSION = registryVersion(33).version;
 // v34 seals the WR-000117 session-identity READ PAIR. 0529 installs TWO new
 // SECURITY DEFINER ingresses -- ops.session_identity_facts and
 // ops.session_dispatch_history -- each granted to carr_writer AND
@@ -147,7 +150,7 @@ export const REGISTRY_V33_VERSION = "scac-mutation-registry.v33";
 // whose registrySource is that file. Both verb names partition to `read`,
 // which is in neither of the completion-evidence gate's two collections, so
 // no gate entry is owed and hooks/completion-evidence-gate.py is untouched.
-export const REGISTRY_V34_VERSION = "scac-mutation-registry.v34";
+export const REGISTRY_V34_VERSION = registryVersion(34).version;
 // v35 seals the WR-000119 DISPATCH SPINE. 0531 installs TWO new SECURITY
 // DEFINER write ingresses -- ops.record_dispatch_link and
 // ops.acknowledge_dispatch -- each granted to carr_writer AND carr_authority,
@@ -167,99 +170,99 @@ export const REGISTRY_V34_VERSION = "scac-mutation-registry.v34";
 // but `acknowledge` is deliberately NOT one, so hooks/completion-evidence-gate.py
 // gains ONE exact entry -- which is why that file is authorized here and was
 // not in WR-000117.
-export const REGISTRY_V35_VERSION = "scac-mutation-registry.v35";
+export const REGISTRY_V35_VERSION = registryVersion(35).version;
 // v36 is the sole WR-000125 successor. Its source rows are generated from
 // 0532a/0532b and the exact current tree; v35 remains immutable history.
-export const REGISTRY_V36_VERSION = "scac-mutation-registry.v36";
+export const REGISTRY_V36_VERSION = registryVersion(36).version;
 // v37 is the WR-000130 successor for 0538 assurance binding. v36 remains frozen.
-export const REGISTRY_V37_VERSION = "scac-mutation-registry.v37";
+export const REGISTRY_V37_VERSION = registryVersion(37).version;
 // v38 seals the attended release-readiness successor. v37 remains immutable.
-export const REGISTRY_V38_VERSION = "scac-mutation-registry.v38";
-export const REGISTRY_V39_VERSION = "scac-mutation-registry.v39";
-export const REGISTRY_V40_VERSION = "scac-mutation-registry.v40";
-export const REGISTRY_V41_VERSION = "scac-mutation-registry.v41";
+export const REGISTRY_V38_VERSION = registryVersion(38).version;
+export const REGISTRY_V39_VERSION = registryVersion(39).version;
+export const REGISTRY_V40_VERSION = registryVersion(40).version;
+export const REGISTRY_V41_VERSION = registryVersion(41).version;
 // v42 seals the B09 strict-atomic migration repair. v41 stays immutable.
-export const REGISTRY_V42_VERSION = "scac-mutation-registry.v42";
-export const REGISTRY_V43_VERSION = "scac-mutation-registry.v43";
+export const REGISTRY_V42_VERSION = registryVersion(42).version;
+export const REGISTRY_V43_VERSION = registryVersion(43).version;
 // v44 seals the Codex exec_command activation repair. v43 remains immutable.
-export const REGISTRY_V44_VERSION = "scac-mutation-registry.v44";
-export const REGISTRY_V45_VERSION = "scac-mutation-registry.v45";
+export const REGISTRY_V44_VERSION = registryVersion(44).version;
+export const REGISTRY_V45_VERSION = registryVersion(45).version;
 // v46 seals the Deal Room undo lock-order repair. v45 remains immutable.
-export const REGISTRY_V46_VERSION = "scac-mutation-registry.v46";
+export const REGISTRY_V46_VERSION = registryVersion(46).version;
 // v47 seals the Hermes dispatch-link profile grant. The database's
 // hermes-pilot-only function remains the authority boundary.
-export const REGISTRY_V47_VERSION = "scac-mutation-registry.v47";
-export const REGISTRY_V48_VERSION = "scac-mutation-registry.v48";
+export const REGISTRY_V47_VERSION = registryVersion(47).version;
+export const REGISTRY_V48_VERSION = registryVersion(48).version;
 // v49 seals the V5-UX-B11 Meeting Mode store: eight carr_writer definer doors
 // and eight MCP verbs. It moves the runtime selector.
-export const REGISTRY_V49_VERSION = "scac-mutation-registry.v49";
+export const REGISTRY_V49_VERSION = registryVersion(49).version;
 // v50 seals the per-machine role marker (config-as-code, machine-converge)
 // and the once-per-task Stop headroom notice. No new ingress or grant.
-export const REGISTRY_V50_VERSION = "scac-mutation-registry.v50";
+export const REGISTRY_V50_VERSION = registryVersion(50).version;
 // v51 seals the deduplicated schema snapshot rendering (bin/schema-snapshot.sh)
 // and the OUT-argument grants grammar (tools/schema_snapshot_grants.py).
 // No new ingress or grant.
-export const REGISTRY_V51_VERSION = "scac-mutation-registry.v51";
+export const REGISTRY_V51_VERSION = registryVersion(51).version;
 // v52 seals the attempt-first Jev handoff (conduct Stop gate, escalation
 // gate, conduct patterns helper). No new ingress or grant.
-export const REGISTRY_V52_VERSION = "scac-mutation-registry.v52";
+export const REGISTRY_V52_VERSION = registryVersion(52).version;
 // v53 seals the OpenSSL resolution fix: the calendar-prebrief collector,
 // coordinator, envelope verifier and provisioner and the renewal source
 // adapter run Homebrew's OpenSSL 3 by absolute path instead of whatever
 // "openssl" PATH finds (macOS LibreSSL). No new ingress or grant.
-export const REGISTRY_V53_VERSION = "scac-mutation-registry.v53";
+export const REGISTRY_V53_VERSION = registryVersion(53).version;
 // v54 seals the 2026-09-23 audit entrypoint batch: machine paths derived from
 // HOME instead of one user's literal, the rule-pack drift Stop gate metered
 // on the repo interpreter, hook error tails kept in telemetry and Jev outages
 // recorded. Seventeen existing script entrypoints re-digested; no new
 // ingress or grant.
-export const REGISTRY_V54_VERSION = "scac-mutation-registry.v54";
+export const REGISTRY_V54_VERSION = registryVersion(54).version;
 // v55 seals the Logitech keymap per-machine opt-out: a machine whose
 // Logitech keyboard already sends Right Control/Right GUI correctly clears
 // the 046d:c52b mapping via a $HOME/.config/carr/logitech-keymap.off marker
 // instead of applying the swap. No new ingress or grant.
-export const REGISTRY_V55_VERSION = "scac-mutation-registry.v55";
+export const REGISTRY_V55_VERSION = registryVersion(55).version;
 // v56 seals the hosted CI split (Joe's ruling 2026-09-23, audit item 3 of
 // 8): .github/workflows/ci.yml runs the ci.sh classes as a three-group
 // matrix behind the unchanged required context. One entrypoint re-digested;
 // no new ingress or grant.
-export const REGISTRY_V56_VERSION = "scac-mutation-registry.v56";
+export const REGISTRY_V56_VERSION = registryVersion(56).version;
 // v57 seals tour property registration (Joe, 2026-09-23: "turn the hosted
 // tour surface on and feed it sapala"): migration 0565 installs
 // ops.register_tour_property, and mcp-server/src/tour-property-jurisdiction.js
 // gains the authority-only register-tour-property verb. One new definer grant,
 // one new write ingress, three sibling verbs re-digested with their module.
-export const REGISTRY_V57_VERSION = "scac-mutation-registry.v57";
+export const REGISTRY_V57_VERSION = registryVersion(57).version;
 // v58 seals the tour registration atomic pair: tools/migrate.py declares
 // 0565 + 0566 as one reviewed transaction group after production refused 0565
 // alone at the deferred epoch boundary (2026-09-23). One entrypoint
 // re-digested; no new ingress, verb, or grant beyond the v58 registration
 // function itself.
-export const REGISTRY_V58_VERSION = "scac-mutation-registry.v58";
+export const REGISTRY_V58_VERSION = registryVersion(58).version;
 // v59 seals three entrypoint edits together: hooks/completion-evidence-gate.py
 // (the Jev requirement checklist), hooks/lint-gate.py (#1150, the per-edit
 // Jev shadow verdict), and hooks/peer-broadcast-gate.py (stop charging a
 // subagent's sends to its parent's peer budget). ops/jev_requirements.py,
 // ops/jev_code_review.py, and ops/jev-review-task-selftest.py are new/changed
 // but are not inventoried script entrypoints. No new ingress or grant.
-export const REGISTRY_V59_VERSION = "scac-mutation-registry.v59";
+export const REGISTRY_V59_VERSION = registryVersion(59).version;
 // v60 seals the Call Mode app-origin companion: call-mode.py admits the
 // https://app.doctorcre.com origin and post_call.py shapes the record
 // layer's call context index before its unchanged strict validation. No new
 // ingress or grant.
-export const REGISTRY_V60_VERSION = "scac-mutation-registry.v60";
+export const REGISTRY_V60_VERSION = registryVersion(60).version;
 // v61 seals the Quill within-track speaker labels: transcribe_session.py
 // calls the new speaker_split.py library (no shebang, no __main__, not an
 // inventoried entrypoint) to attach diarized speaker labels, and
 // build-quill.sh wires it into the packaged app. Existing script entrypoints
 // are re-digested; no new ingress or grant.
-export const REGISTRY_V61_VERSION = "scac-mutation-registry.v61";
+export const REGISTRY_V61_VERSION = registryVersion(61).version;
 // v62 seals the required-args nullable acceptance: assertRequiredArgs in
 // mcp-server/src/tools.js now accepts an explicit null for a required field
 // whose schema declares it nullable. Every tools.js MCP verb is re-digested;
 // no verb definition, input schema or authority flag changes, and no new
 // ingress or grant.
-export const REGISTRY_V62_VERSION = "scac-mutation-registry.v62";
+export const REGISTRY_V62_VERSION = registryVersion(62).version;
 // v63 seals answering Joe (Model Room "Answer Waiting for Joe"): migration
 // 0574 installs ops.answer_work_request_for_joe, the sole needs_joe -> triaged
 // transition state-machines.v1.json declares, and
@@ -267,20 +270,20 @@ export const REGISTRY_V62_VERSION = "scac-mutation-registry.v62";
 // answer-work-request-for-joe verb. One new definer grant, one new write
 // ingress; sibling verbs sourced from tools.js and work-request-intake.js are
 // unchanged in their bound fields.
-export const REGISTRY_V63_VERSION = "scac-mutation-registry.v63";
+export const REGISTRY_V63_VERSION = registryVersion(63).version;
 // v64 seals the answer-work-request-for-joe atomic pair: tools/migrate.py
 // declares 0575 + 0576 as one reviewed transaction group after production
 // refused 0575 alone at the deferred epoch boundary (2026-09-24). One
 // entrypoint re-digested; no new ingress, verb, or grant beyond the v64
 // registration function itself.
-export const REGISTRY_V64_VERSION = "scac-mutation-registry.v64";
+export const REGISTRY_V64_VERSION = registryVersion(64).version;
 // v65 seals DoctorCRE V5-UX-C02/C06's resource-metering read contract:
 // migration 0579 installs ops.record_resource_observation (the collector's
 // write door, one new definer grant) and mcp-server/src/resource-
 // observation.v5.js registers two new verbs, read-resource-dashboard and
 // record-resource-observation. Two new mcp-tool rows; no sibling verb's
 // bound fields change.
-export const REGISTRY_V65_VERSION = "scac-mutation-registry.v65";
+export const REGISTRY_V65_VERSION = registryVersion(65).version;
 // v66 seals tools/migrate.py's own re-digest after this PR adds the
 // (0579,0580) pair to ATOMIC_MIGRATION_GROUPS and STRICT_ATOMIC_MIGRATION_GROUPS
 // -- tools/migrate.py is itself a bound external-admin row (decision
@@ -289,7 +292,7 @@ export const REGISTRY_V65_VERSION = "scac-mutation-registry.v65";
 // Same shape as v64 (PR #1193/b583dd85) for the 0575/0576 pair. No new
 // ingress, verb, or grant; the runtime selector (mutation-registry.js)
 // stays on v65 -- only tools/migrate.py's frozen source-inventory row moves.
-export const REGISTRY_V66_VERSION = "scac-mutation-registry.v66";
+export const REGISTRY_V66_VERSION = registryVersion(66).version;
 // v67 admits exactly one new workflow_entrypoint row: com.carr.timebomb-audit
 // (launchd). No installer script (bin/install-timebomb-audit.sh was dropped
 // before this seal), so physical_authority_refs carries a single
@@ -297,14 +300,14 @@ export const REGISTRY_V66_VERSION = "scac-mutation-registry.v66";
 // verb, or grant beyond the launchd row itself; the runtime selector
 // (mutation-registry.js) stays on v65 -- launchd-workflow is an
 // UNSEALED_INGRESS_KINDS member so it never becomes the runtime selector.
-export const REGISTRY_V67_VERSION = "scac-mutation-registry.v67";
+export const REGISTRY_V67_VERSION = registryVersion(67).version;
 // v68 admits exactly one new workflow_entrypoint row: com.carr.release-pipeline
 // (launchd, PR #1211). No installer script, so physical_authority_refs carries
 // a single ops.service_environment:release-pipeline:production ref. No new
 // ingress, verb, or grant beyond the launchd row itself; the runtime selector
 // (mutation-registry.js) stays on v65 -- launchd-workflow is an
 // UNSEALED_INGRESS_KINDS member so it never becomes the runtime selector.
-export const REGISTRY_V68_VERSION = "scac-mutation-registry.v68";
+export const REGISTRY_V68_VERSION = registryVersion(68).version;
 // v69 seals the server-side Jev call log: migration 0587 installs the
 // append-only ops.jev_call_receipt behind three SECURITY DEFINER doors,
 // ops.record_jev_call_receipt (EXECUTE to carr_writer),
@@ -314,14 +317,14 @@ export const REGISTRY_V68_VERSION = "scac-mutation-registry.v68";
 // read-jev-call-receipt-integrity (reads). Three new mcp-tool rows; no sibling verb's
 // bound fields change. The runtime selector (mutation-registry.js) moves to
 // v69 so the door admits both verbs.
-export const REGISTRY_V69_VERSION = "scac-mutation-registry.v69";
+export const REGISTRY_V69_VERSION = registryVersion(69).version;
 // v70 seals tools/migrate.py's own re-digest after this PR adds the
 // (0587, 0588) pair to ATOMIC_MIGRATION_GROUPS and
 // STRICT_ATOMIC_MIGRATION_GROUPS -- tools/migrate.py is a bound external-admin
 // row. Same shape as v66 (PR #1205) for the (0580, 0581) pair. No new
 // ingress, verb, or grant; the runtime selector stays on v69 -- only
 // tools/migrate.py's frozen source-inventory row moves.
-export const REGISTRY_V70_VERSION = "scac-mutation-registry.v70";
+export const REGISTRY_V70_VERSION = registryVersion(70).version;
 // v71 admits exactly one new workflow_entrypoint row:
 // com.carr.nightly-exports-daytime-retry (launchd, PR #1241 review round 4).
 // No installer script (bin/install-nightly-exports-retry.sh was never kept --
@@ -333,7 +336,7 @@ export const REGISTRY_V70_VERSION = "scac-mutation-registry.v70";
 // selector (mutation-registry.js) stays on v69 -- launchd-workflow is an
 // UNSEALED_INGRESS_KINDS member so it never becomes the runtime selector,
 // same as v67/v68 before it.
-export const REGISTRY_V71_VERSION = "scac-mutation-registry.v71";
+export const REGISTRY_V71_VERSION = registryVersion(71).version;
 // v72 admits DoctorCRE V5-R02 (workflow cutover, caller migration and
 // retirement readiness, migration 0602, sealed by 0603, live-enqueue gating
 // 0604), chained from v71 (migration 0600): ten new mcp-tool ingresses in
@@ -347,14 +350,14 @@ export const REGISTRY_V71_VERSION = "scac-mutation-registry.v71";
 // ATOMIC_MIGRATION_GROUPS and STRICT_ATOMIC_MIGRATION_GROUPS gain the
 // (0602, 0603) pair. It carries forward every row v69-v71 sealed. The runtime
 // selector (mutation-registry.js) moves to v72.
-export const REGISTRY_V72_VERSION = "scac-mutation-registry.v72";
+export const REGISTRY_V72_VERSION = registryVersion(72).version;
 // v73 seals bin/deploy-worker.sh's own re-digest after PR #1246 teaches its
 // --upload-version step to apply a pending Durable Object migration with the
 // documented `wrangler deploy` (wrangler 4.137 refuses `versions upload` while
 // one is pending) -- bin/deploy-worker.sh is a bound external-admin row.
 // Same shape as v70 (PR #1243) for tools/migrate.py. No new ingress, verb, or
 // grant -- only bin/deploy-worker.sh's frozen source-inventory row moves.
-export const REGISTRY_V73_VERSION = "scac-mutation-registry.v73";
+export const REGISTRY_V73_VERSION = registryVersion(73).version;
 // v74 admits DoctorCRE V5-M01's live door to the Journey 1 clock runtime,
 // chained from v73 (migration 0609): two new mcp-tool ingresses in
 // mcp-server/src/journey-one-clock-door.v5.js -- read-journey-one-clock (a
@@ -364,7 +367,7 @@ export const REGISTRY_V73_VERSION = "scac-mutation-registry.v73";
 // appends through the 0509/0510 functions already granted. Only v74's own
 // registration function and its runtime EXECUTE grants move the catalog.
 // The runtime selector (mutation-registry.js) moves to v74.
-export const REGISTRY_V74_VERSION = "scac-mutation-registry.v74";
+export const REGISTRY_V74_VERSION = registryVersion(74).version;
 // v75 admits DoctorCRE V5-A05's delivery cadence, escalation and quiet-hours
 // queue, chained from v74 (migration 0614): three new mcp-tool ingresses in
 // mcp-server/src/delivery-cadence-a05-tools.js -- cadence-status (a read on
@@ -373,14 +376,14 @@ export const REGISTRY_V74_VERSION = "scac-mutation-registry.v74";
 // for the (0617, 0618) atomic pair. Migration 0617 adds the SECURITY DEFINER
 // doors and grants the catalog baseline below measures. The runtime selector
 // (mutation-registry.js) moves to v75.
-export const REGISTRY_V75_VERSION = "scac-mutation-registry.v75";
+export const REGISTRY_V75_VERSION = registryVersion(75).version;
 // v76 registers read-global-boundaries (V5-S01), chained from v75
 // (migration 0618): the read projection of the settled v5 global boundaries
 // and the dispatch door's shadow counters, served from
 // mcp-server/src/global-boundaries-door.v5.js. One new read verb and nothing
 // else: only v76's own registration function and its runtime EXECUTE grants
 // move the catalog. The runtime selector (mutation-registry.js) moves to v76.
-export const REGISTRY_V76_VERSION = "scac-mutation-registry.v76";
+export const REGISTRY_V76_VERSION = registryVersion(76).version;
 // v77 admits DoctorCRE V5-F01, chained from v76 (migration 0625): migration
 // 0626 installs the record-source-authority store and the document
 // derivative registration doors (SECURITY DEFINER functions with EXECUTE to
@@ -391,7 +394,7 @@ export const REGISTRY_V76_VERSION = "scac-mutation-registry.v76";
 // record-artifact-preservation-hold). tools/migrate.py's (0626, 0627) atomic
 // group re-digests its external-admin row. The runtime selector
 // (mutation-registry.js) moves to v77.
-export const REGISTRY_V77_VERSION = "scac-mutation-registry.v77";
+export const REGISTRY_V77_VERSION = registryVersion(77).version;
 // v78 admits the DoctorCRE v5 slice done-record (migration 0628):
 // register-slice-criteria-from-catalog, bind-slice-criterion-evidence,
 // record-release-slice-members, propose-slice-completion,
@@ -401,7 +404,7 @@ export const REGISTRY_V77_VERSION = "scac-mutation-registry.v77";
 // narrows register-slice-checkable-done's evidence kinds. Automation
 // proposes; only a partner confirms complete. Chained over v77 (0627) by
 // migration 0629. The runtime selector (mutation-registry.js) moves to v78.
-export const REGISTRY_V78_VERSION = "scac-mutation-registry.v78";
+export const REGISTRY_V78_VERSION = registryVersion(78).version;
 // v79 admits DoctorCRE V5-J103's governed correspondence store, chained from
 // v78 (migration 0629): four new mcp-tool ingresses in
 // mcp-server/src/governed-correspondence-store.v5.js -- correspondence-readiness
@@ -412,7 +415,7 @@ export const REGISTRY_V78_VERSION = "scac-mutation-registry.v78";
 // granted to nobody), so those and v79's registration function move the
 // catalog; tools/migrate.py's row moves because it pairs (0700, 0701).
 // The runtime selector (mutation-registry.js) moves to v79.
-export const REGISTRY_V79_VERSION = "scac-mutation-registry.v79";
+export const REGISTRY_V79_VERSION = registryVersion(79).version;
 // v80 admits DoctorCRE V5-J102, chained from v79 (migration 0701): migration
 // 0704 installs the healthcare CRE lifecycle store (SECURITY DEFINER writers and
 // readers with EXECUTE to carr_reader, carr_writer and the carr_authority
@@ -422,7 +425,7 @@ export const REGISTRY_V79_VERSION = "scac-mutation-registry.v79";
 // authorityOnly (record-lifecycle-correction) and five more authorityOnly.
 // tools/migrate.py's (0704, 0705) atomic group re-digests its external-admin
 // row. The runtime selector (mutation-registry.js) moves to v80.
-export const REGISTRY_V80_VERSION = "scac-mutation-registry.v80";
+export const REGISTRY_V80_VERSION = registryVersion(80).version;
 // v81 admits amend-closed-loop, chained from v80 (migration 0705): a new
 // mcp-tool ingress (amend-closed-loop, write:true) appending a correction to
 // a CLOSED loop's outcome (defect a2c04ffa, loop c7265238), plus migration
@@ -432,7 +435,7 @@ export const REGISTRY_V80_VERSION = "scac-mutation-registry.v80";
 // otherwise) so read-loop can surface the amendment trail with no
 // base-table grant. read-loop's existing registration row is unchanged --
 // it is the same tool with a richer read, not a new ingress.
-export const REGISTRY_V81_VERSION = "scac-mutation-registry.v81";
+export const REGISTRY_V81_VERSION = registryVersion(81).version;
 // v82 admits DoctorCRE V5-D01, chained from v81 (migration 0707): three new
 // mcp-tool ingresses -- register-action-class-successor (write:true),
 // read-action-class-successors and read-action-class-gate (both reads) --
@@ -445,7 +448,7 @@ export const REGISTRY_V81_VERSION = "scac-mutation-registry.v81";
 // as amend-closed-loop's v81: one new grantable table plus two new definer
 // functions move secdef_execute, relation_dml and runtime_dml_grants.
 // tools/migrate.py's atomic-group edit re-digests its external-admin row.
-export const REGISTRY_V82_VERSION = "scac-mutation-registry.v82";
+export const REGISTRY_V82_VERSION = registryVersion(82).version;
 // v83 admits V5-A01's exact-scope assurance-health read and evidence-ingress
 // verbs, chained from v82 (migration 0709): two new mcp-tool ingresses --
 // record-assurance-health-evidence (write:true) and read-assurance-health
@@ -459,21 +462,21 @@ export const REGISTRY_V82_VERSION = "scac-mutation-registry.v82";
 // door is entirely SECURITY DEFINER-mediated. 0718 seals that catalog as
 // v83. tools/migrate.py's atomic-group edit re-digests its external-admin
 // row again.
-export const REGISTRY_V83_VERSION = "scac-mutation-registry.v83";
+export const REGISTRY_V83_VERSION = registryVersion(83).version;
 // v84 admits DoctorCRE V5-A03's authoritative complete-set review cycle,
 // chained from v83 (migration 0718): six new MCP ingresses in
 // mcp-server/src/independent-review-cycle-store.v5.js front the append-only
 // case, participant, finding-set, round and adjudication records installed by
 // 0719. 0720 seals that catalog as v84. tools/migrate.py also re-digests for
 // the (0719, 0720) atomic pair.
-export const REGISTRY_V84_VERSION = "scac-mutation-registry.v84";
+export const REGISTRY_V84_VERSION = registryVersion(84).version;
 // v85 provisionally admits DoctorCRE V5-A02's authoritative live rule
 // coverage reader and Joe-authority-only fallback receipt writer, chained from
 // v84 (migration 0720). Migration 0721 installs their two SECURITY DEFINER
 // doors (EXECUTE to carr_reader and carr_authority respectively) and grants no
 // table privilege; 0722 seals this successor. Final numbering is assigned at
 // merge.
-export const REGISTRY_V85_VERSION = "scac-mutation-registry.v85";
+export const REGISTRY_V85_VERSION = registryVersion(85).version;
 // v86 admits exactly one new workflow_entrypoint row:
 // com.carr.session-trace-archive (launchd, PR #1302), the nightly local
 // archive of CARR-scoped agent session transcripts. Its
@@ -483,20 +486,20 @@ export const REGISTRY_V85_VERSION = "scac-mutation-registry.v85";
 // selector (mutation-registry.js) stays on v85 -- launchd-workflow is an
 // UNSEALED_INGRESS_KINDS member, same as v67/v68/v71 before it. 0723 seals
 // it over v85 (0722).
-export const REGISTRY_V86_VERSION = "scac-mutation-registry.v86";
+export const REGISTRY_V86_VERSION = registryVersion(86).version;
 // v87 admits DoctorCRE V5-F05's authenticated rule-context runtime: one
 // read-only actor-scoped coverage verb (read-action-context), one
 // Joe-authority typed-contract binder (bind-rule-context-contract), and 0724's
 // two SECURITY DEFINER functions. 0725 seals it over v86 (0723). Final
 // numbering is assigned at merge.
-export const REGISTRY_V87_VERSION = "scac-mutation-registry.v87";
+export const REGISTRY_V87_VERSION = registryVersion(87).version;
 // v88 provisionally admits the DoctorCRE V5-RW02 attended Salesforce
 // reconciliation record layer, chained from v87 (migration 0725): three
 // write-side observation/evidence verbs and one per-action evidence read.
 // Migration 0726 installs only the append-only evidence store and its
 // SECURITY DEFINER doors; it grants no Salesforce or other provider effect.
 // 0727 seals it. Final numbering is assigned at merge.
-export const REGISTRY_V88_VERSION = "scac-mutation-registry.v88";
+export const REGISTRY_V88_VERSION = registryVersion(88).version;
 // v89 admits exactly one new external-admin row:
 // tools/provision-engineering-controller.py (PR #1252), which sets the
 // Engineering Passport controller's Worker secret without the value ever
@@ -507,7 +510,7 @@ export const REGISTRY_V88_VERSION = "scac-mutation-registry.v88";
 // shape as v71/v73 for bin/deploy-worker.sh. No new verb, worker route, or
 // grant; the runtime selector (mutation-registry.js) stays on v88. 0730
 // seals it over v88 (0727).
-export const REGISTRY_V89_VERSION = "scac-mutation-registry.v89";
+export const REGISTRY_V89_VERSION = registryVersion(89).version;
 // v90 re-digests exactly one existing MCP verb row: standing-context, whose
 // input schema gained detail="boot" and an integer page (the paginated rule
 // boot served from mcp-server/src/rule-boot.js). The verb stays read-only
@@ -515,7 +518,7 @@ export const REGISTRY_V89_VERSION = "scac-mutation-registry.v89";
 // grant. Because the runtime compares a verb's schema_digest before admitting
 // it, the runtime selector (mutation-registry.js) moves to v90 with it. 0731
 // seals it over v89 (0730).
-export const REGISTRY_V90_VERSION = "scac-mutation-registry.v90";
+export const REGISTRY_V90_VERSION = registryVersion(90).version;
 // v91 (PROVISIONAL) registers DoctorCRE V5-RW02's safe-stop run store: the
 // read-salesforce-autonomy-counter read, the record-salesforce-run-outcome
 // writer, and the human-only revoke-salesforce-read-consent writer. It
@@ -523,41 +526,53 @@ export const REGISTRY_V90_VERSION = "scac-mutation-registry.v90";
 // (the (0733, 0734) atomic group). No provider effect: the store only
 // counts attended runs and records consent revocations. 0734 seals it
 // over v90 (0731). Final numbering is assigned at merge.
-export const REGISTRY_V91_VERSION = "scac-mutation-registry.v91";
+export const REGISTRY_V91_VERSION = registryVersion(91).version;
 // v92 registers incident triage and reseals the incident-ref schema contract.
 // 0737 follows the already-applied 0733/0734/0735/0736 ledger in order.
-export const REGISTRY_V92_VERSION = "scac-mutation-registry.v92";
+export const REGISTRY_V92_VERSION = registryVersion(92).version;
 // v93 registers Industry Events after incident triage v92 (0737).
-export const REGISTRY_V93_VERSION = "scac-mutation-registry.v93";
-export const REGISTRY_V94_VERSION = "scac-mutation-registry.v94";
-export const REGISTRY_V95_VERSION = "scac-mutation-registry.v95";
-export const REGISTRY_V96_VERSION = "scac-mutation-registry.v96";
-export const REGISTRY_V97_VERSION = "scac-mutation-registry.v97";
-export const REGISTRY_V98_VERSION = "scac-mutation-registry.v98";
-export const REGISTRY_V99_VERSION = "scac-mutation-registry.v99";
-export const REGISTRY_V100_VERSION = "scac-mutation-registry.v100";
-export const REGISTRY_V101_VERSION = "scac-mutation-registry.v101";
-export const REGISTRY_V102_VERSION = "scac-mutation-registry.v102";
+export const REGISTRY_V93_VERSION = registryVersion(93).version;
+export const REGISTRY_V94_VERSION = registryVersion(94).version;
+export const REGISTRY_V95_VERSION = registryVersion(95).version;
+export const REGISTRY_V96_VERSION = registryVersion(96).version;
+export const REGISTRY_V97_VERSION = registryVersion(97).version;
+export const REGISTRY_V98_VERSION = registryVersion(98).version;
+export const REGISTRY_V99_VERSION = registryVersion(99).version;
+export const REGISTRY_V100_VERSION = registryVersion(100).version;
+export const REGISTRY_V101_VERSION = registryVersion(101).version;
+export const REGISTRY_V102_VERSION = registryVersion(102).version;
 // Rule lookup and atomic teach supersession follow the shipped human-only merge seal.
-export const REGISTRY_V103_VERSION = "scac-mutation-registry.v103";
+export const REGISTRY_V103_VERSION = registryVersion(103).version;
 // Paid Worker attempts share the local cap through explicit cache-only / one-attempt modes.
-export const REGISTRY_V104_VERSION = "scac-mutation-registry.v104";
+export const REGISTRY_V104_VERSION = registryVersion(104).version;
 // Observatory's bounded newest-room read follows the capped Worker contract.
-export const REGISTRY_V105_VERSION = "scac-mutation-registry.v105";
+export const REGISTRY_V105_VERSION = registryVersion(105).version;
 // Lead automation follows the delivered Observatory read contract.
-export const REGISTRY_V106_VERSION = "scac-mutation-registry.v106";
-export const REGISTRY_V107_VERSION = "scac-mutation-registry.v107";
-export const REGISTRY_V108_VERSION = "scac-mutation-registry.v108";
-export const REGISTRY_V109_VERSION = "scac-mutation-registry.v109";
-export const REGISTRY_V110_VERSION = "scac-mutation-registry.v110";
-export const REGISTRY_V111_VERSION = "scac-mutation-registry.v111";
-export const REGISTRY_V112_VERSION = "scac-mutation-registry.v112";
-export const CURRENT_REGISTRY_VERSION = REGISTRY_V112_VERSION;
+export const REGISTRY_V106_VERSION = registryVersion(106).version;
+export const REGISTRY_V107_VERSION = registryVersion(107).version;
+export const REGISTRY_V108_VERSION = registryVersion(108).version;
+export const REGISTRY_V109_VERSION = registryVersion(109).version;
+export const REGISTRY_V110_VERSION = registryVersion(110).version;
+export const REGISTRY_V111_VERSION = registryVersion(111).version;
+export const REGISTRY_V112_VERSION = registryVersion(112).version;
 const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE_INVENTORY_FIXTURE_PATH = new URL(
   "./config/scac-registry-source-inventory-fixtures.v1.json", import.meta.url);
 const SOURCE_INVENTORY_FIXTURES = JSON.parse(
   readFileSync(SOURCE_INVENTORY_FIXTURE_PATH, "utf8"));
+// Generated fixtures own the frontier; integration never adds a source-code
+// version constant. Missing or duplicate slots cannot silently select a seal.
+const SOURCE_INVENTORY_VERSION_KEYS = Object.freeze(Object.fromEntries(
+  [...SOURCE_INVENTORY_FIXTURES.base.versions,
+    ...SOURCE_INVENTORY_FIXTURES.patches.map(patch => patch.version)]
+    .map((key, index) => {
+      if (key !== `v${index + 2}`)
+        throw new Error(`source-inventory frontier is not contiguous at ${key}`);
+      return [`scac-mutation-registry.${key}`, key];
+    })));
+export const CURRENT_REGISTRY_VERSION = Object.keys(SOURCE_INVENTORY_VERSION_KEYS).at(-1);
+if (!CURRENT_REGISTRY_VERSION)
+  throw new Error("source-inventory frontier is empty");
 function historicalArtifactReplayReview() {
   const review = SOURCE_INVENTORY_FIXTURES.historical_artifact_replay_review;
   if (!review || review.base_version !== "v26" || !Array.isArray(review.upsert))
@@ -578,146 +593,12 @@ const FULL_ENTRY_SET_SEALS_PATH = new URL(
 // active post-main tail may be regenerated only through the explicit
 // --write-rebased-* commands below; ordinary historical write modes stay
 // refused so an accidental invocation cannot rewrite a reviewed seal.
-export const HISTORICAL_REGISTRY_SEALS = Object.freeze({
-  v1: Object.freeze({ version: REGISTRY_VERSION, digest: "sha256:7cc2feacec82bf7cce2af9af309dc4ae9426922003471703af010f6728957190", entryCount: 1387, sourceEntryCount: 800 }),
-  v2: Object.freeze({ version: REGISTRY_V2_VERSION, digest: "sha256:6dc9f8353712e0f9ee9dcbc96d05b802631e420cfa698944c2b6401a11c6a9ff", entryCount: 1391, sourceEntryCount: 800 }),
-  v3: Object.freeze({ version: REGISTRY_V3_VERSION, digest: "sha256:ace611250aaf2ffd7b96ca3195d20e9dc2697bbea555eadc7c661407e838cae7", entryCount: 1395, sourceEntryCount: 800 }),
-  v4: Object.freeze({ version: REGISTRY_V4_VERSION, digest: "sha256:32b9edaf4e718cfa55f87cc6b650f97480a09f00fbde35c10f1e5e23bc6eaa4c", entryCount: 1399, sourceEntryCount: 800 }),
-  v5: Object.freeze({ version: REGISTRY_V5_VERSION, digest: "sha256:314a4b108eaded1a00b7f604af93d44838b615fab79820d1a2c9d9d4b08fa6ca", entryCount: 1404, sourceEntryCount: 800 }),
-  v6: Object.freeze({ version: REGISTRY_V6_VERSION, digest: "sha256:afd27c13b68423dcaaeafc68c0c1ddc018452ef8d9e7cad5bb32cac4327d80d7", entryCount: 1408, sourceEntryCount: 800 }),
-  v7: Object.freeze({ version: REGISTRY_V7_VERSION, digest: "sha256:405a1bd7aa421b16ebd3d3fe7422a2525826dba563dffeb2dad5a6b90d12859b", entryCount: 1412, sourceEntryCount: 800 }),
-  v8: Object.freeze({ version: REGISTRY_V8_VERSION, digest: "sha256:56edcf25393a1c7b47985b9e2a272a8e7fcf0930709147ae823ca9b15290212e", entryCount: 1425, sourceEntryCount: 800 }),
-  v9: Object.freeze({ version: REGISTRY_V9_VERSION, digest: "sha256:398ddf5f86a46110518f7498af63782b65e047b9f624b798bf3c798058a79b4d", entryCount: 1439, sourceEntryCount: 800 }),
-  v10: Object.freeze({ version: REGISTRY_V10_VERSION, digest: "sha256:9109437968d4ab76090980ff9ec370da1ccfbb65e0683f485e0239d3d5158a62", entryCount: 1458, sourceEntryCount: 814 }),
-  v11: Object.freeze({ version: REGISTRY_V11_VERSION, digest: "sha256:27d615d0a07d519b8e902a3a21b53918a314cfefdadfe5a50e2c4da33b2f9ad7", entryCount: 1471, sourceEntryCount: 819 }),
-  v12: Object.freeze({ version: REGISTRY_V12_VERSION, digest: "sha256:4e8ae7fc6a017d7d3cd55452fbe4da7a302b93b8cfb34a43ba018dcf2b84f2a6", entryCount: 1487, sourceEntryCount: 825 }),
-  v13: Object.freeze({ version: REGISTRY_V13_VERSION, digest: "sha256:7b2270375fe6a83d04dd3c62146db54321183d8ca202ee909e050663d2a050b8", entryCount: 1491, sourceEntryCount: 825 }),
-  v14: Object.freeze({ version: REGISTRY_V14_VERSION, digest: "sha256:7f2987fe1dcb5bdf5bcbc269f9714261166419b992dc40f6fc446d6889e18558", entryCount: 1495, sourceEntryCount: 825 }),
-  v15: Object.freeze({ version: REGISTRY_V15_VERSION, digest: "sha256:5f81f4579cf584a1807715f68b8297ddc4a5997a2c20906ef5300672d195360f", entryCount: 1499, sourceEntryCount: 825 }),
-  v16: Object.freeze({ version: REGISTRY_V16_VERSION, digest: "sha256:d5418b025506b131252ddb214d75c2e1f995235db8b72ac56765485ccb5a1a54", entryCount: 1503, sourceEntryCount: 825 }),
-  v17: Object.freeze({ version: REGISTRY_V17_VERSION, digest: "sha256:5aab15679a2d26207210bde3e16be265301b9c69816e08dc90b2f2e8a48c7db2", entryCount: 1509, sourceEntryCount: 827 }),
-  v18: Object.freeze({ version: REGISTRY_V18_VERSION, digest: "sha256:680d42c68be736fe3f227019e3a4afd3e0aad53ed63d115db1fbb0467ea884c8", entryCount: 1515, sourceEntryCount: 827 }),
-  v19: Object.freeze({ version: REGISTRY_V19_VERSION, digest: "sha256:19c1c9967bf960a64cefa39c53f6011193180f0c65128a1d8d5987ea6e120841", entryCount: 1520, sourceEntryCount: 828 }),
-  v20: Object.freeze({ version: REGISTRY_V20_VERSION, digest: "sha256:45bf7a56d2756337c1b5efdad195f4935259fad6cf5f6a9c081c28592bacfb05", entryCount: 1524, sourceEntryCount: 828 }),
-  v21: Object.freeze({ version: REGISTRY_V21_VERSION, digest: "sha256:d9100082d444f090e062a2fb9ac55043d0c9790c2fbd9b68672987e3ed12927b", entryCount: 1528, sourceEntryCount: 828 }),
-  v22: Object.freeze({ version: REGISTRY_V22_VERSION, digest: "sha256:5bbe68942f2652523b52c024c07615b1718b59c7de4c0e41524a955566ba5f75", entryCount: 1590, sourceEntryCount: 833 }),
-  v23: Object.freeze({ version: REGISTRY_V23_VERSION, digest: "sha256:d6633db96266ebd54bf6ade83cd35b587ee9f128f0f9db35ea557861e66f743b", entryCount: 1596, sourceEntryCount: 835 }),
-  // READ FROM THE CLUSTER and confirmed against 0528's own sealed text and
-  // the v33 runtime header, for the reason every seal here is read rather
-  // than recomputed: a number this file derived could drift with this file.
-  v33: Object.freeze({ version: REGISTRY_V33_VERSION, digest: "sha256:b782b2e82303698f298b7edc0572e057622a640a2302e1f05279fa5725bb049b", entryCount: 1835, sourceEntryCount: 866 }),
-  // READ FROM THE CLUSTER -- a disposable PostgreSQL loaded from db/schema.sql
-  // at origin/main 0f6cb388 -- and confirmed against 0530's own sealed text,
-  // for the reason every seal here is read rather than recomputed: a number
-  // this file derived could drift with this file.
-  v34: Object.freeze({ version: REGISTRY_V34_VERSION, digest: "sha256:7fd4d40a717b19d619da78a1939053656fa8abf1a4cfce2286d4e3d6cdfabf40", entryCount: 1845, sourceEntryCount: 868 }),
-  v24: Object.freeze({ version: REGISTRY_V24_VERSION, digest: "sha256:d280236b45e706ba6e2c642a526ffc827afdc0a1e2220331fb0424ea16758c23", entryCount: 1600, sourceEntryCount: 835 }),
-  // Read off migration 0501's own sealed text rather than recomputed here, for
-  // the reason every seal above it was: a number this file derives could drift
-  // with this file, and the point of a seal is that it cannot.
-  v25: Object.freeze({ version: REGISTRY_V25_VERSION, digest: "sha256:f4d2642e4744b2f55894b17ce17d25a2dd55ad721c02bad1c0e5b3b45b8f5fd0", entryCount: 1609, sourceEntryCount: 840 }),
-  v26: Object.freeze({ version: REGISTRY_V26_VERSION, digest: "sha256:68fc828e461c9749147e15a050a6eeec1235ea6115c8856de76dc84a5dff76d1", entryCount: 1616, sourceEntryCount: 841 }),
-  // Read off migration 0512's own sealed text and confirmed against the
-  // ops.scac_mutation_registry_version row a disposable PostgreSQL holds after
-  // loading through 0515, for the reason every seal above it is read rather
-  // than recomputed: a number this file derives could drift with this file.
-  v27: Object.freeze({ version: REGISTRY_V27_VERSION, digest: "sha256:72bb5aa1520b02da401b4f7b74f2cf2bfa6117a580812f975629f5966cfc585b", entryCount: 1775, sourceEntryCount: 856 }),
-  // READ FROM THE CLUSTER, not carried forward from this file: a disposable
-  // PostgreSQL built from db/schema.sql and every migration through 0517 holds
-  // this ops.scac_mutation_registry_version row after 0516. A number this file
-  // derived could drift with this file, which is the whole point of a seal.
-  v28: Object.freeze({ version: REGISTRY_V28_VERSION, digest: "sha256:dda28b6627818dd818d30cfdf3d2fc621108b4a8d5d7de21eb741f873c8bbbc5", entryCount: 1779, sourceEntryCount: 856 }),
-  // READ FROM THE CLUSTER, for the same reason as every seal above it: a
-  // disposable PostgreSQL built from db/schema.sql and every migration through
-  // 0518 holds this ops.scac_mutation_registry_version row. A number this file
-  // derived could drift with this file, which is the whole point of a seal.
-  v29: Object.freeze({ version: REGISTRY_V29_VERSION, digest: "sha256:a87638b8780376e147a45994d69b3a3dd9443e72b8f9e21a4ee589ccd2f4ef86", entryCount: 1785, sourceEntryCount: 856 }),
-  // READ FROM THE CLUSTER, for the same reason as every seal above it: a
-  // disposable PostgreSQL built from db/schema.sql holds this
-  // ops.scac_mutation_registry_version row after 0522. A number this file
-  // derived could drift with this file, which is the whole point of a seal.
-  v30: Object.freeze({ version: REGISTRY_V30_VERSION, digest: "sha256:37699037cdfa6521796bef2725c90c39a08134694bd675faefd01e32ac165255", entryCount: 1805, sourceEntryCount: 860 }),
-  // READ FROM THE CLUSTER, for the same reason as every seal above it: a
-  // disposable PostgreSQL built from db/schema.sql holds this
-  // ops.scac_mutation_registry_version row after 0524. A number this file
-  // derived could drift with this file, which is the whole point of a seal.
-  v31: Object.freeze({ version: REGISTRY_V31_VERSION, digest: "sha256:7e6aa5faf0c73eb0eee748bec22cb99f5f01a8cbc1c265d40464f2a83d98c927", entryCount: 1818, sourceEntryCount: 863 }),
-  // READ OFF 0526's OWN SEALED TEXT and off the generated v32 runtime header,
-  // then confirmed against the ops.scac_mutation_registry_version row a
-  // disposable PostgreSQL holds after loading through 0526 -- for the reason
-  // every seal above it is read rather than recomputed: a number this file
-  // derived could drift with this file, which is the whole point of a seal.
-  v32: Object.freeze({ version: REGISTRY_V32_VERSION, digest: "sha256:62bbe633e74d909fc8bcb25f49923b37695b2e5cfb5acb4f3ebcca04baab077c", entryCount: 1825, sourceEntryCount: 864 }),
-});
+export const HISTORICAL_REGISTRY_SEALS = Object.freeze(Object.fromEntries(registryChain.versions.map(row => [
+  `v${row.number}`, Object.freeze({ version: row.version, digest: row.digest, entryCount: row.entry_count, sourceEntryCount: row.source_count }),
+])));
 export const HISTORICAL_REGISTRY_ARTIFACT_SHA256 = Object.freeze({
-  "migrations/0530_session_identity_scac_successor.sql": "de3e49883bf377a51e533f082cfe1597798ef84ab2fa7bae1adcc038f14a4a2a",
-  "mcp-server/src/scac-mutation-registry.v34.generated.js": "4656626288a0863186ebb7a3f30cf3feb948781bea8d400a45e212350179031f",
-  "migrations/0528_notification_preferences_scac_successor.sql": "90883fba372ef6e1d63e596f652f36b546689f12dd82b5f44d7549ebd17dcd96",
-  "mcp-server/src/scac-mutation-registry.v33.generated.js": "6b59eb53c8872aef18ffb4d20f55c0d8b0e5203cc9a9a9eea5522e448cbec93b",
-  "migrations/0526_doc_conversation_list_scac_successor.sql": "4061cede182796eff5ada345d66f78c075fd07bb337e4f69322dc41825200140",
-  "mcp-server/src/scac-mutation-registry.v32.generated.js": "4f9744e29764a12e84c9c09811f02a69922b38c69c2a90793ff192bf0a8c1cff",
-  "migrations/0524_doc_conversation_write_doors_scac_successor.sql": "a0b4bd1dc30d49dc23b16f4dafd79b28cbca6926d81dd2051a33a2a826570ea5",
-  "mcp-server/src/scac-mutation-registry.v31.generated.js": "f2f56b7698540049e365a1cf6a4ac400514decabf5fd9b0ba48bc41ea8a1286d",
-  "migrations/0522_producer_trio_scac_successor.sql": "3e5710d122ce4c703094151ceaa00be69a2e5475d2f2fe7fc26231a3937278af",
-  "mcp-server/src/scac-mutation-registry.v30.generated.js": "12a83b7307125986b6718552d798d24d1c1a59863f2bac43ae415f92cdc73cb7",
-  "migrations/0518_program_controller_seams_scac_successor.sql": "1e4aa9acd713ea43393ea8d04a5ef80e0d2cf09b04bfed94b4fac9ba3755240c",
-  "mcp-server/src/scac-mutation-registry.v29.generated.js": "6bc77538014526def94d03f5a77b2fc95a792d4a9bcfd439a1445882d5f25242",
-  "migrations/0516_deal_field_change_provenance_and_scac_successor.sql": "2e3ff8af70548b6c0b8e384bd766ca90d0e4bee49b5d88efa0afd7e4003f7256",
-  "mcp-server/src/scac-mutation-registry.v28.generated.js": "765c046332186c04528b9a787933c46f3ed0ce910edfd1e36246264f9cf260fb",
-  "migrations/0512_foundation_assurance_scac_successor.sql": "df42b1bf2b4bd6036520fdb8ee4958a1da2ca0ae461fdedf62787181624a17c5",
-  "mcp-server/src/scac-mutation-registry.v27.generated.js": "559156eca564cd06f18dacc50c12c6af70a5977b905cd8afb55bd60557997f8c",
-  "migrations/0503_gate_zero_outcome_and_scac_successor.sql": "3153daf34e54b01101dd09f430343c8d2342ad4cc3a17e5f6f80a8730095d2b0",
-  "mcp-server/src/scac-mutation-registry.v26.generated.js": "7c43fd8395d35e03011f9bb5db384686f399fd893c31cc427386d4e912dff0ab",
-  "migrations/0501_scheduled_job_admission_and_scac_successor.sql": "a0014c38dd90874c0331f0fe4b56df4290cc11bb49e615945b70fbef967a2b3f",
-  "mcp-server/src/scac-mutation-registry.v25.generated.js": "6bdef1596b8d7da958575c614363a4c25feb2d83e6d0e23adf6f6618d7420596",
-  "migrations/0454_siep11_mutation_registry.sql": "7985d42b9b36964b33503f4ff42d332e6bcce085217f06464a9d6abf58126bdd",
-  "migrations/0455_siep12_policy_epoch.sql": "8a2e223cf1c3637ad2b8d8b2fcac54f6407f9e2ceef9f7b227c502b13dc04101",
-  "migrations/0457_siep13_forward_mutation_registry.sql": "32e85f50dcb95909db2e85d8eb41ff656cd642899d4e356f926c9edf39b0b007",
-  "migrations/0459_siep14_forward_mutation_registry.sql": "1419b2c502583e09d1cabf26ad73b9861fc88e98d5616bb718949718a3253568",
-  "mcp-server/src/scac-mutation-registry.generated.js": "e8cf336806337ba0ba25532816692ac2a24b48f9df58cee2966baaeafdae5abc",
-  "mcp-server/src/scac-mutation-registry.v2.generated.js": "8fff96eb365b2e52882b89dcdfd2955e39e4a2caf3f1868f6edb93f2a72edb32",
-  "mcp-server/src/scac-mutation-registry.v3.generated.js": "88ae034dcffb5c108efd98a5b1ca93798f712b13ad2615be7949af517ee26a38",
-  "mcp-server/src/scac-mutation-registry.v4.generated.js": "6a0dba5ce1781d806dc14520d667eef71bdffa8899504ce929efe788a70a9f46",
-  "migrations/0461_siep15_forward_mutation_registry.sql": "248fc0aa91e2bddf6d886131808b82d1ee20a488d581beef567bb6d0af36f867",
-  "mcp-server/src/scac-mutation-registry.v5.generated.js": "fbc4957e875afaafcda88f1c21aa982eb52b91448bd608fa5d595a5ca6e848cc",
-  "migrations/0462_siep16_forward_mutation_registry.sql": "a2ee709e37ff09dd7ab25f5fe7b407b5dbece93a701b86af8531d1c4e6768e94",
-  "mcp-server/src/scac-mutation-registry.v6.generated.js": "1e190fb0ffc024b2a7c379aae966d55e74150a6d94a062d24abde19fb60e92bf",
-  "migrations/0464_siep16_integrated_mutation_registry.sql": "d85f267542b9ce3c269ac3ce3989043dfd7da4f3d5674196aed96b7f8db4523e",
-  "mcp-server/src/scac-mutation-registry.v7.generated.js": "83f19c1a998245f0465958a468f96459a6562e3353cdf0650457b645a470e4a1",
-  "migrations/0466_siep17_forward_mutation_registry.sql": "069d16e50ffe5bf28a757a946de63bae9fdde3f3fcbe6cef733ed724534b27d0",
-  "mcp-server/src/scac-mutation-registry.v8.generated.js": "37fec5ba9528c9d91c7d4c30830c9b5eeb57569da3e7024b8d33726544692d51",
-  "migrations/0468_siep18_forward_mutation_registry.sql": "d398a22491e759290c20f2435f1c83a3034071069cca839491ce132e97461a73",
-  "mcp-server/src/scac-mutation-registry.v9.generated.js": "c85115b40f7bd52f533a875decc78f298030f50daef1f12f772a306142c78ae0",
-  "migrations/0471_source_merge_catalog_registry_successor.sql": "7d93dfb007a27e2e6798d1ff12cd7f57763745d82e564e49b056442ac47cc4d1",
-  "mcp-server/src/scac-mutation-registry.v10.generated.js": "471c8609889a2fd4f55a413f4b2fca48ffdffbfdadb6cf6b3e72c2c5d8e7d8c2",
-  "migrations/0481_codex_continuity_registry_activation.sql": "7a63ba4d86cdc15b25005c5874011a1441325c28235c2ccf8785ebfaba1bc8f3",
-  "mcp-server/src/scac-mutation-registry.v11.generated.js": "19478e6a1b7f548dc55ee15bf0166826ad1eb29aa3f81199ee79d60290f9bad3",
-  "migrations/0486_claude_continuity_registry_activation.sql": "270f817ef74fa87bbfaa4630fc26ce313f5684a7613975c80a64cf4d25ffb127",
-  "mcp-server/src/scac-mutation-registry.v12.generated.js": "6f924c4b4df73ec8505c81db8824555a930dab2e047503d0f15f35f56f8bb2be",
-  "migrations/0487_claude_startup_registry_activation.sql": "04fe724c10278534638562575fda16bc5b9dc963c1478e063ba13fbf9db620aa",
-  "mcp-server/src/scac-mutation-registry.v13.generated.js": "c6abfd1cc8a89778ae938ac819e3fcdf8fb9f158129a9f32e7a34188b6c64bdc",
-  "migrations/0488_claude_actor_hydration_registry_activation.sql": "2f170e330ab4582485e9074bbb69fdbbaeb4f2a635d6e0326f440ef1cfb8c948",
-  "mcp-server/src/scac-mutation-registry.v14.generated.js": "a5032bb27133c1acc2feb214c2c701c5931ffa30a432d23cc6b3f6505507a5b9",
-  "migrations/0489_claude_config_preservation_registry_activation.sql": "838be13404202e1a2077c8b52cc48a27572179f2814a3fe9c7f48e56b280cbec",
-  "mcp-server/src/scac-mutation-registry.v15.generated.js": "6fecd62c9407ad47ae11c8ecd1c2f0d7f9cfedffc27c9500f23bc5c9ebfeee1b",
-  "migrations/0490_codex_compaction_checkpoint_registry_activation.sql": "febd1bd3b6170767874636e34770dea84f814a24f170c39b955a7ec4465545a1",
-  "mcp-server/src/scac-mutation-registry.v16.generated.js": "2bdcf517c9e2c418a20a75e742805686f1b6c83afbbc1fa070af0a2874018315",
-  "migrations/0491_backup_guard_status_registry_activation.sql": "49129915fe40f41400c5fc769f82633b2da68949a29d193329fba2c6016e3913",
-  "mcp-server/src/scac-mutation-registry.v17.generated.js": "5a1945eea59704fe7f1200937215be9f4fba6fda3a65d5a4321df9245873432d",
-  "migrations/0492_sourced_shape_forward_correction_and_scac_successor.sql": "3c38ac9b0b22984603f58838aabcf97094e451ad166bc8526b09273f3f9755c6",
-  "mcp-server/src/scac-mutation-registry.v18.generated.js": "980da606f08812d7f256427ca2f64a0209b8652cef834b4cf69de7a6f2afc59f",
-  "migrations/0493_incident_work_request_link_scac_successor.sql": "0c7ba65bde7d0479cfec28c89d01f2721940c6be23a7ec9ad6c2f27e4f39ef3f",
-  "mcp-server/src/scac-mutation-registry.v19.generated.js": "cd5c11d4caa792533ca46bdaf7ac1e3b698d633ea80c470a90c50192a1119dc9",
-  "migrations/0494_codex_continuity_archive_registry.sql": "510e96efbff3870d87c4efefd6ad5bb1b32c7647cb3f5d306aa2aaead12a4a8e",
-  "mcp-server/src/scac-mutation-registry.v20.generated.js": "dd679c9fa87fb45afe25d8508be462acfa395c532bf235f7fbdc0511b8678371",
-  "migrations/0495_r06_hooks_correctness_scac_successor.sql": "97ba2964737373f31d17c089046ddae2337050dcdc278e309cd1a4797e16ad83",
-  "mcp-server/src/scac-mutation-registry.v21.generated.js": "ff1088b58871db05d0eeb37e520eaefda35c1756b6b8144f9cd9d595b8e49b61",
-  "migrations/0496_doctorcre_portfolio_hierarchy_and_scac_successor.sql": "b8de4ce8bfa23c5ac06c4a1729456da4cfc301ec6b82e54b336ab072c3d6dca7",
-  "migrations/0497_r07_repo_hygiene_janitor_and_scac_successor.sql": "88a9f228116f9814bc32d4d26663ec5e2885557ea8f985f4468300894ff4ad1b",
-  "mcp-server/src/scac-mutation-registry.v23.generated.js": "0dec1d570e18816106f22401dfcf32a78179c265f7b2a48e3e1ebe04f87d0ccb",
-  "migrations/0498_f09_workflow_truth_and_scac_successor.sql": "2c4d52031e1150e31459df5c96b49a4de54324e28abca45d15350ac2332c2923",
-  "mcp-server/src/scac-mutation-registry.v24.generated.js": "6278c2bfadc10c532e18a105d589efabe61d84b3920279606da4c6137fb1a0db",
-  "mcp-server/src/scac-mutation-registry.v22.generated.js": "58e37870d1aba7750b841468ef0c4bea76cb75f18ee2a978eb4b3ce567302c20",
+  ...Object.fromEntries(registryChain.versions.map(row => [row.migration, row.migration_sha256])),
+  ...Object.fromEntries(registryChain.versions.map(row => [row.path, row.artifact_sha256])),
 });
 // WR-000068 rebases four Production-applied consumers of the sourced shape
 // columns on the effective receipt-backed lineage. The v18 generator reads the
@@ -2696,120 +2577,6 @@ export function fullInventory(tools = defaultTools) {
     .sort((left, right) => left.ingress_key.localeCompare(right.ingress_key));
 }
 
-const SOURCE_INVENTORY_VERSION_KEYS = Object.freeze({
-  [REGISTRY_V2_VERSION]: "v2",
-  [REGISTRY_V3_VERSION]: "v3",
-  [REGISTRY_V4_VERSION]: "v4",
-  [REGISTRY_V5_VERSION]: "v5",
-  [REGISTRY_V6_VERSION]: "v6",
-  [REGISTRY_V7_VERSION]: "v7",
-  [REGISTRY_V8_VERSION]: "v8",
-  [REGISTRY_V9_VERSION]: "v9",
-  [REGISTRY_V10_VERSION]: "v10",
-  [REGISTRY_V11_VERSION]: "v11",
-  [REGISTRY_V12_VERSION]: "v12",
-  [REGISTRY_V13_VERSION]: "v13",
-  [REGISTRY_V14_VERSION]: "v14",
-  [REGISTRY_V15_VERSION]: "v15",
-  [REGISTRY_V16_VERSION]: "v16",
-  [REGISTRY_V17_VERSION]: "v17",
-  [REGISTRY_V18_VERSION]: "v18",
-  [REGISTRY_V19_VERSION]: "v19",
-  [REGISTRY_V20_VERSION]: "v20",
-  [REGISTRY_V21_VERSION]: "v21",
-  [REGISTRY_V22_VERSION]: "v22",
-  [REGISTRY_V23_VERSION]: "v23",
-  [REGISTRY_V24_VERSION]: "v24",
-  [REGISTRY_V25_VERSION]: "v25",
-  [REGISTRY_V26_VERSION]: "v26",
-  [REGISTRY_V27_VERSION]: "v27",
-  [REGISTRY_V28_VERSION]: "v28",
-  [REGISTRY_V29_VERSION]: "v29",
-  [REGISTRY_V30_VERSION]: "v30",
-  [REGISTRY_V31_VERSION]: "v31",
-  [REGISTRY_V32_VERSION]: "v32",
-  [REGISTRY_V33_VERSION]: "v33",
-  [REGISTRY_V34_VERSION]: "v34",
-  [REGISTRY_V35_VERSION]: "v35",
-  [REGISTRY_V36_VERSION]: "v36",
-  [REGISTRY_V37_VERSION]: "v37",
-  [REGISTRY_V38_VERSION]: "v38",
-  [REGISTRY_V39_VERSION]: "v39",
-  [REGISTRY_V40_VERSION]: "v40",
-  [REGISTRY_V41_VERSION]: "v41",
-  [REGISTRY_V42_VERSION]: "v42",
-  [REGISTRY_V43_VERSION]: "v43",
-  [REGISTRY_V44_VERSION]: "v44",
-  [REGISTRY_V45_VERSION]: "v45",
-  [REGISTRY_V46_VERSION]: "v46",
-  [REGISTRY_V47_VERSION]: "v47",
-  [REGISTRY_V48_VERSION]: "v48",
-  [REGISTRY_V49_VERSION]: "v49",
-  [REGISTRY_V50_VERSION]: "v50",
-  [REGISTRY_V51_VERSION]: "v51",
-  [REGISTRY_V52_VERSION]: "v52",
-  [REGISTRY_V53_VERSION]: "v53",
-  [REGISTRY_V54_VERSION]: "v54",
-  [REGISTRY_V55_VERSION]: "v55",
-  [REGISTRY_V56_VERSION]: "v56",
-  [REGISTRY_V57_VERSION]: "v57",
-  [REGISTRY_V58_VERSION]: "v58",
-  [REGISTRY_V59_VERSION]: "v59",
-  [REGISTRY_V60_VERSION]: "v60",
-  [REGISTRY_V61_VERSION]: "v61",
-  [REGISTRY_V62_VERSION]: "v62",
-  [REGISTRY_V63_VERSION]: "v63",
-  [REGISTRY_V64_VERSION]: "v64",
-  [REGISTRY_V65_VERSION]: "v65",
-  [REGISTRY_V66_VERSION]: "v66",
-  [REGISTRY_V67_VERSION]: "v67",
-  [REGISTRY_V68_VERSION]: "v68",
-  [REGISTRY_V69_VERSION]: "v69",
-  [REGISTRY_V70_VERSION]: "v70",
-  [REGISTRY_V71_VERSION]: "v71",
-  [REGISTRY_V72_VERSION]: "v72",
-  [REGISTRY_V73_VERSION]: "v73",
-  [REGISTRY_V74_VERSION]: "v74",
-  [REGISTRY_V75_VERSION]: "v75",
-  [REGISTRY_V76_VERSION]: "v76",
-  [REGISTRY_V77_VERSION]: "v77",
-  [REGISTRY_V78_VERSION]: "v78",
-  [REGISTRY_V79_VERSION]: "v79",
-  [REGISTRY_V80_VERSION]: "v80",
-  [REGISTRY_V81_VERSION]: "v81",
-  [REGISTRY_V82_VERSION]: "v82",
-  [REGISTRY_V83_VERSION]: "v83",
-  [REGISTRY_V84_VERSION]: "v84",
-  [REGISTRY_V85_VERSION]: "v85",
-  [REGISTRY_V86_VERSION]: "v86",
-  [REGISTRY_V87_VERSION]: "v87",
-  [REGISTRY_V88_VERSION]: "v88",
-  [REGISTRY_V89_VERSION]: "v89",
-  [REGISTRY_V90_VERSION]: "v90",
-  [REGISTRY_V91_VERSION]: "v91",
-  [REGISTRY_V92_VERSION]: "v92",
-  [REGISTRY_V93_VERSION]: "v93",
-  [REGISTRY_V94_VERSION]: "v94",
-  [REGISTRY_V95_VERSION]: "v95",
-  [REGISTRY_V96_VERSION]: "v96",
-  [REGISTRY_V97_VERSION]: "v97",
-  [REGISTRY_V98_VERSION]: "v98",
-  [REGISTRY_V99_VERSION]: "v99",
-  [REGISTRY_V100_VERSION]: "v100",
-  [REGISTRY_V101_VERSION]: "v101",
-  [REGISTRY_V102_VERSION]: "v102",
-  [REGISTRY_V103_VERSION]: "v103",
-  [REGISTRY_V104_VERSION]: "v104",
-  [REGISTRY_V105_VERSION]: "v105",
-  [REGISTRY_V106_VERSION]: "v106",
-  [REGISTRY_V107_VERSION]: "v107",
-  [REGISTRY_V108_VERSION]: "v108",
-  [REGISTRY_V109_VERSION]: "v109",
-  [REGISTRY_V110_VERSION]: "v110",
-  [REGISTRY_V111_VERSION]: "v111",
-  [REGISTRY_V112_VERSION]: "v112",
-});
-
 export function sourceInventoryFixtureDigest(rows) {
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
 }
@@ -2823,42 +2590,7 @@ export function frozenInventory(version) {
     throw new Error(`unsupported source-inventory fixture schema: ${fixture.schema_version}`);
   if (fixture.source_commit !== "f422e1720f33c8f7c24cd7433f151b115ef37ee7")
     throw new Error(`unexpected source-inventory fixture provenance: ${fixture.source_commit}`);
-  const rowsByKey = new Map(fixture.base.rows.map(row => [row.ingress_key, row]));
-  let expectedCount = fixture.base.expected_count;
-  let expectedDigest = fixture.base.expected_sha256;
-  if (!fixture.base.versions.includes(targetKey)) {
-    let found = false;
-    for (const patch of fixture.patches) {
-      for (const ingressKey of patch.remove) rowsByKey.delete(ingressKey);
-      for (const row of patch.upsert) rowsByKey.set(row.ingress_key, row);
-      for (const [ingressKey, replacement] of Object.entries(patch.row_replacements || {})) {
-        const current = rowsByKey.get(ingressKey);
-        if (!current || !replacement || typeof replacement !== "object" || Array.isArray(replacement))
-          throw new Error(`${patch.version} row replacement is malformed: ${ingressKey}`);
-        rowsByKey.set(ingressKey, { ...current, ...replacement });
-      }
-      for (const [sourceLocator, sourceDigest] of Object.entries(patch.source_digest_replacements || {})) {
-        if (!/^[0-9a-f]{64}$/.test(sourceDigest))
-          throw new Error(`${patch.version} source digest replacement is malformed: ${sourceLocator}`);
-        for (const [ingressKey, row] of rowsByKey) {
-          if (row.source_locator === sourceLocator)
-            rowsByKey.set(ingressKey, { ...row, source_digest: sourceDigest });
-        }
-      }
-      expectedCount = patch.expected_count;
-      expectedDigest = patch.expected_sha256;
-      if (patch.version === targetKey) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) throw new Error(`source-inventory fixture patch missing for ${targetKey}`);
-  }
-  const rows = [...rowsByKey.values()]
-    .sort((left, right) => left.ingress_key.localeCompare(right.ingress_key));
-  const observedDigest = sourceInventoryFixtureDigest(rows);
-  if (rows.length !== expectedCount || observedDigest !== expectedDigest)
-    throw new Error(`${targetKey} source-inventory fixture drifted: count ${rows.length}/${expectedCount}, sha256 ${observedDigest}/${expectedDigest}`);
+  const rows = historicalRows(Number(targetKey.slice(1)), fixture);
   return Object.freeze(rows.map(row => Object.freeze(structuredClone(row))));
 }
 
@@ -2983,25 +2715,7 @@ export function assertCurrentSourceInventoryMatchesFixture(tools = defaultTools,
 }
 
 export function registryDigestFor(version, rows = fullInventory(), dbCatalogBaseline = DB_CATALOG_BASELINE) {
-  if (![REGISTRY_VERSION, REGISTRY_V2_VERSION, REGISTRY_V3_VERSION, REGISTRY_V4_VERSION,
-    REGISTRY_V5_VERSION, REGISTRY_V6_VERSION, REGISTRY_V7_VERSION, REGISTRY_V8_VERSION,
-    REGISTRY_V9_VERSION, REGISTRY_V10_VERSION, REGISTRY_V11_VERSION,
-    REGISTRY_V12_VERSION, REGISTRY_V13_VERSION, REGISTRY_V14_VERSION,
-    REGISTRY_V15_VERSION, REGISTRY_V16_VERSION, REGISTRY_V17_VERSION,
-    REGISTRY_V18_VERSION, REGISTRY_V19_VERSION, REGISTRY_V20_VERSION,
-    REGISTRY_V21_VERSION, REGISTRY_V22_VERSION,
-    REGISTRY_V23_VERSION, REGISTRY_V24_VERSION,
-    REGISTRY_V25_VERSION, REGISTRY_V26_VERSION, REGISTRY_V27_VERSION,
-    REGISTRY_V28_VERSION, REGISTRY_V29_VERSION,
-    REGISTRY_V30_VERSION, REGISTRY_V31_VERSION, REGISTRY_V32_VERSION,
-    REGISTRY_V33_VERSION, REGISTRY_V34_VERSION,
-    REGISTRY_V35_VERSION, REGISTRY_V36_VERSION, REGISTRY_V37_VERSION,
-    REGISTRY_V38_VERSION, REGISTRY_V39_VERSION, REGISTRY_V40_VERSION,
-    REGISTRY_V41_VERSION, REGISTRY_V42_VERSION, REGISTRY_V43_VERSION,
-    REGISTRY_V44_VERSION, REGISTRY_V45_VERSION, REGISTRY_V46_VERSION,
-    REGISTRY_V47_VERSION, REGISTRY_V48_VERSION, REGISTRY_V49_VERSION,
-    REGISTRY_V50_VERSION, REGISTRY_V51_VERSION, REGISTRY_V52_VERSION, REGISTRY_V53_VERSION, REGISTRY_V54_VERSION,
-    REGISTRY_V55_VERSION, REGISTRY_V56_VERSION, REGISTRY_V57_VERSION, REGISTRY_V58_VERSION, REGISTRY_V59_VERSION, REGISTRY_V60_VERSION, REGISTRY_V61_VERSION, REGISTRY_V62_VERSION, REGISTRY_V63_VERSION, REGISTRY_V64_VERSION, REGISTRY_V65_VERSION, REGISTRY_V66_VERSION, REGISTRY_V67_VERSION, REGISTRY_V68_VERSION, REGISTRY_V69_VERSION, REGISTRY_V70_VERSION, REGISTRY_V71_VERSION, REGISTRY_V72_VERSION, REGISTRY_V73_VERSION, REGISTRY_V74_VERSION, REGISTRY_V75_VERSION, REGISTRY_V76_VERSION, REGISTRY_V77_VERSION, REGISTRY_V78_VERSION, REGISTRY_V79_VERSION, REGISTRY_V80_VERSION, REGISTRY_V81_VERSION, REGISTRY_V82_VERSION, REGISTRY_V83_VERSION, REGISTRY_V84_VERSION, REGISTRY_V85_VERSION, REGISTRY_V86_VERSION, REGISTRY_V87_VERSION, REGISTRY_V88_VERSION, REGISTRY_V89_VERSION, REGISTRY_V90_VERSION, REGISTRY_V91_VERSION, REGISTRY_V92_VERSION, REGISTRY_V93_VERSION, REGISTRY_V94_VERSION, REGISTRY_V95_VERSION, REGISTRY_V96_VERSION, REGISTRY_V97_VERSION, REGISTRY_V98_VERSION, REGISTRY_V99_VERSION, REGISTRY_V100_VERSION, REGISTRY_V101_VERSION, REGISTRY_V102_VERSION, REGISTRY_V103_VERSION, REGISTRY_V104_VERSION, REGISTRY_V105_VERSION, REGISTRY_V106_VERSION, REGISTRY_V107_VERSION, REGISTRY_V108_VERSION, REGISTRY_V109_VERSION, REGISTRY_V110_VERSION, REGISTRY_V111_VERSION, REGISTRY_V112_VERSION].includes(version))
+  if (version !== REGISTRY_VERSION && !Object.hasOwn(SOURCE_INVENTORY_VERSION_KEYS, version))
     throw new Error(`unsupported SCAC mutation registry version: ${version}`);
   return sha256({ schema_version: version, rows, db_catalog_baseline: dbCatalogBaseline });
 }
@@ -3025,33 +2739,7 @@ export function registrySeal(version, rows, dbCatalogBaseline) {
   });
 }
 
-export function renderRuntimeProjection(rows = fullInventory(), {
-  version = REGISTRY_VERSION,
-  dbCatalogBaseline = DB_CATALOG_BASELINE,
-} = {}) {
-  const digest = registryDigestFor(version, rows, dbCatalogBaseline);
-  const sourceSetDigest = sourceContractSetDigest(rows);
-  const catalogBaselineDigest = sha256(dbCatalogBaseline);
-  const projection = Object.fromEntries(rows.filter(row => row.ingress_kind === "mcp_tool").map(row => [row.operation, {
-    ingress_key: row.ingress_key,
-    source_locator: row.source_locator,
-    source_digest: row.source_digest,
-    schema_digest: row.schema_digest,
-    write: row.write,
-    human_only: row.human_only,
-    authority_only: row.authority_only,
-    delegates_to: row.delegates_to,
-  }]));
-  return `// GENERATED by ops/scac-mutation-inventory.mjs. Review changes; never hand-edit.\n` +
-    `// This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.\n` +
-    `export const SCAC_MUTATION_REGISTRY_VERSION = ${JSON.stringify(version)};\n` +
-    `export const SCAC_MUTATION_REGISTRY_DIGEST = ${JSON.stringify(digest)};\n` +
-    `export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = ${JSON.stringify(sourceSetDigest)};\n` +
-    `export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = ${JSON.stringify(catalogBaselineDigest)};\n` +
-    `export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;\n` +
-    `export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;\n` +
-    `export const SCAC_MUTATION_OPERATIONS = Object.freeze(${JSON.stringify(projection, null, 2)});\n`;
-}
+export { renderRuntimeProjection };
 
 function sqlLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;

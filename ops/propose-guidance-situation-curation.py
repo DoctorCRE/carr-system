@@ -43,6 +43,8 @@ import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib import record_call  # noqa: E402
 REVIEW = REPO / "audits" / "guidance-situation-curation-review.v1.json"
 KEY_PREFIX = "guidance-situation-curation-20260823"
 # The proposal verbs store idempotency_key as a UUID column, so a readable key
@@ -59,15 +61,11 @@ def key(*parts: str) -> str:
 
 def call(verb: str, args: dict) -> dict:
     """One deployed verb through the sanctioned local door (run.sh call)."""
-    result = subprocess.run(
-        [str(REPO / "run.sh"), "call", verb, json.dumps(args)],
-        capture_output=True, text=True, cwd=REPO)
-    text = result.stdout
-    start = text.find("{")
-    if start < 0:
-        raise RuntimeError(f"{verb}: no payload — {result.stderr.strip()[-300:]}")
-    payload = json.loads(text[start:])
-    if not payload.get("ok"):
+    result = record_call.call_verb(verb, args, timeout=None)
+    payload = result.reply
+    if result.kind not in (record_call.OK, record_call.REFUSED):
+        raise RuntimeError(f"{verb}: no payload — {result.detail}")
+    if not result.ok or not isinstance(payload, dict) or not payload.get("ok"):
         raise RuntimeError(f"{verb}: refused — {json.dumps(payload)[:300]}")
     return payload
 

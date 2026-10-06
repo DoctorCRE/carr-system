@@ -8,10 +8,14 @@ import fcntl
 import json
 import os
 import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import contextmanager
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib import record_call  # noqa: E402
 
 
 def _root():
@@ -37,15 +41,11 @@ ACTION = ("on breach: open/update one dedup loop · owner orchestrator · "
 
 
 def _run_verb(name, payload):
-    result = subprocess.run(["./run.sh", "call", name, json.dumps(payload)],
-                            cwd=ROOT, capture_output=True, text=True, timeout=35)
-    if result.returncode:
-        raise RuntimeError(f"{name} returned {result.returncode}")
-    start = result.stdout.find("{")
-    if start < 0:
-        raise RuntimeError(f"{name} returned no JSON")
-    answer = json.loads(result.stdout[start:])
-    if not isinstance(answer, dict) or answer.get("error") or (name != "read-loop" and answer.get("ok") is not True):
+    result = record_call.call_verb(name, payload, timeout=35)
+    if result.kind not in (record_call.OK, record_call.REFUSED):
+        raise RuntimeError(result.describe())
+    answer = result.reply
+    if not result.ok or not isinstance(answer, dict) or (name != "read-loop" and answer.get("ok") is not True):
         raise RuntimeError(f"{name} did not confirm the write")
     return answer
 

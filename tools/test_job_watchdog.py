@@ -390,6 +390,7 @@ class GithubBudgetTests(unittest.TestCase):
         self.listing = [{"number": 7, "head": {"sha": "a" * 40}, "updated_at": "2026-10-04T10:00:00Z"}]
         self.calls = []
         self.limited = False
+        self.branches = []
 
     def gh(self, argv, config, cwd=None):
         self.calls.append(argv)
@@ -397,7 +398,9 @@ class GithubBudgetTests(unittest.TestCase):
         if "pulls?state=open" in target:
             return json.dumps([self.listing])
         if "branches?" in target:
-            return "[[]]"
+            return json.dumps([self.branches])
+        if "/commits/" in target:
+            return json.dumps({"commit": {"committer": {"date": "2026-10-01T00:00:00Z"}}})
         if argv[:2] == ["gh", "api"] and target == "rate_limit":
             return json.dumps({"resources": {
                 "core": {"limit": 5000, "used": 12, "remaining": 4988, "reset": 2000000000},
@@ -439,6 +442,21 @@ class GithubBudgetTests(unittest.TestCase):
 
     def graphql_calls(self):
         return [a for a in self.calls if a[:3] in (["gh", "pr", "view"], ["gh", "api", "graphql"])]
+
+    def test_branch_dates_reuse_immutable_sha_but_retired_refs_leave_the_facts(self):
+        self.branches = [{"name": "codex/old", "commit": {"sha": "b" * 40}}]
+        first = self.collect(1000)
+        self.assertEqual(len(first["branches"]), 1)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.collect(1120)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 0)
+        dates = self.root / "out/watchdog/branch-dates.json"
+        dates.write_text(json.dumps({self.REPO + ":" + "b" * 40: float("nan")}))
+        refreshed = self.collect(1180)
+        self.assertEqual(refreshed["branches"], first["branches"])
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.branches = []
+        self.assertEqual(self.collect(1240)["branches"], [])
 
     def test_unchanged_pr_is_not_recollected_until_the_cache_expires(self):
         first = self.collect(1000)

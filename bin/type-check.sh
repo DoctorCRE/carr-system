@@ -31,6 +31,16 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO" || exit 2
 
+if [ "$#" -gt 0 ]; then
+  if [ "$1" != "--files" ] || [ "$#" -lt 2 ]; then
+    echo "usage: type-check.sh [--files <path> ...]" >&2
+    exit 2
+  fi
+  shift
+else
+  set -- pipelines tools exporters lib generators shared fill-engine bin hooks ops
+fi
+
 MYPY="$REPO/.venv/bin/mypy"
 # A WORKTREE HAS NO .venv OF ITS OWN, and worktrees are now the normal way to
 # push here: hooks/git-writer-gate.py refuses a branch change while the shared
@@ -65,4 +75,4 @@ if [ -z "$MYPY" ] || [ ! -x "$MYPY" ]; then
   exit 78
 fi
 
-exec "$MYPY" pipelines tools exporters lib generators shared fill-engine bin hooks ops
+exec "$MYPY" "$@"

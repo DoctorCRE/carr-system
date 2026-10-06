@@ -69,7 +69,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 REPO = Path(__file__).resolve().parent.parent
-RUN_SH = REPO / "run.sh"
+sys.path.insert(0, str(REPO))
+from lib import record_call  # noqa: E402
 DEFAULT_SENTINEL = REPO / "out" / "cutover-watch" / "last-report.json"
 LOOP_NUMBER = "532"
 
@@ -230,24 +231,12 @@ def fetch_state(dsn: str):
 # ---------------------------------------------------------------------------
 
 def call_verb(verb: str, args: dict):
-    """Never raises — a verb call that fails is a finding, not a crash."""
-    if not RUN_SH.exists():
-        return False, f"no such file: {RUN_SH}"
+    """Never raises — a verb call that fails is a finding, not a crash. Only an
+    ok outcome is success: a refused write is reported, never accepted."""
     child_env = {"HOME": os.environ.get("HOME", ""), "PATH": os.environ.get("PATH", ""),
                  "LANG": os.environ.get("LANG", "C")}
-    try:
-        p = subprocess.run(
-            [str(RUN_SH), "call", verb, json.dumps(args)],
-            cwd=str(REPO), env=child_env, capture_output=True, text=True, timeout=60)
-    except Exception as exc:  # noqa: BLE001 — reported as a finding, not raised
-        return False, f"subprocess failed: {type(exc).__name__}: {exc}"
-    if p.returncode != 0:
-        tail = (p.stderr or p.stdout or "").strip().splitlines()
-        return False, f"run.sh call {verb} exit {p.returncode}: {tail[-1] if tail else '(no output)'}"
-    try:
-        return True, json.loads(p.stdout)
-    except ValueError:
-        return False, f"non-JSON stdout from {verb}: {p.stdout[:200]!r}"
+    result = record_call.call_verb(verb, args, env=child_env, timeout=60)
+    return (True, result.reply) if result.ok else (False, result.describe())
 
 
 def write_loop_update(changes: list[str]) -> tuple[bool, str]:

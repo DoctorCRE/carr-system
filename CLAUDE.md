@@ -80,3 +80,17 @@ Before operating a rule lifecycle, load
 ## PR design and debt
 
 Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-debt-pass).
+
+## Agent skills
+
+### Issue tracker
+
+Issues are CARR Work Requests in the record layer (`report-problem`, `work-request-card`), not GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five triage roles map to Work Request states and `review-and-triage` classes; triage itself is human-only. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context; the glossary and decisions live in the doctrine store and decision log, not repo files. See `docs/agents/domain.md`.

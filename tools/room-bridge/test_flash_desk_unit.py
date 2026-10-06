@@ -105,7 +105,7 @@ def test_registry_takes_a_flash_local_desk_naming_model_and_effort():
         assert reg.resolve("flash-model")["kind"] == "flash-local"
 
 
-def test_bridge_delivers_flash_synchronously_and_probes_its_server():
+def test_bridge_delivers_flash_synchronously_and_keeps_the_cold_route_available():
     rooms = []
     out = bridge.deliver("flash-model", {"kind": "flash-local"}, "flash",
                          {"body": "hi", "msg_id": "m", "seq": 1, "seat": "joe"}, state={}, registry=None,
@@ -115,7 +115,7 @@ def test_bridge_delivers_flash_synchronously_and_probes_its_server():
     saved = flash_wire.is_up
     try:
         flash_wire.is_up = lambda *a, **k: False
-        assert bridge.probe_live({"kind": "flash-local"}) is False
+        assert bridge.probe_live({"kind": "flash-local"}) is True
     finally:
         flash_wire.is_up = saved
 
@@ -915,7 +915,7 @@ def main() -> int:
     check("wire empty reply is no_answer", test_wire_empty_reply_is_no_answer_not_completed)
     check("wire unreachable and malformed fail cleanly", test_wire_unreachable_and_malformed_fail_cleanly)
     check("registry takes a flash-local desk", test_registry_takes_a_flash_local_desk_naming_model_and_effort)
-    check("bridge delivers flash synchronously and probes it", test_bridge_delivers_flash_synchronously_and_probes_its_server)
+    check("bridge delivers flash synchronously and probes it", test_bridge_delivers_flash_synchronously_and_keeps_the_cold_route_available)
     check("grammar accepts auto, keeps human-only on Joe's lane", test_grammar_accepts_auto_and_keeps_human_only_on_joes_lane)
     check("auto direct task goes to flash", test_auto_direct_task_goes_to_flash_with_the_route_on_the_receipt)
     check("auto judgment task goes to opus", test_auto_judgment_task_goes_to_opus)

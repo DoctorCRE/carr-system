@@ -61,6 +61,7 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Callable
+import flashlib
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUN_SH = os.path.join(REPO_ROOT, "run.sh")
@@ -114,11 +115,9 @@ def measure_host_capacity() -> dict[str, Any]:
 def flash_server_available(
     opener: Callable[..., Any] = urllib.request.urlopen, timeout: float = FLASH_HEALTH_TIMEOUT
 ) -> tuple[bool, dict[str, Any] | None]:
-    """Probe the already-running Flash Next server. Never starts, stops, or
-    restarts it -- same contract as tools/dictation-rig/bin/post_call.py's
-    flash_server_available()."""
+    """Ensure Flash before probing; retain the offline observation on timeout."""
     try:
-        with opener(f"{FLASH_SERVER_URL}/v1/models", timeout=timeout) as resp:
+        with flashlib.request_scope(FLASH_SERVER_URL, opener=opener), opener(f"{FLASH_SERVER_URL}/v1/models", timeout=timeout) as resp:
             body = json.loads(resp.read().decode("utf-8"))
             return True, body
     except Exception:

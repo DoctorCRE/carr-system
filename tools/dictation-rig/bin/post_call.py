@@ -15,6 +15,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import time
 import urllib.request
 import urllib.parse
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import post_call_jev
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import flashlib
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -39,11 +42,10 @@ LLAMA_MODEL = Path.home() / ".cache" / "llama.cpp" / "models" / "qwen2.5-1.5b-in
 LLAMA_PORT = 8598
 OUTLOOK_URL_LIMIT = 1900
 
-# The already-running Flash Next server (ds4-serve, launchd label
-# local.ds4-flash-next), shared with the Model Room flash desk. This module
-# never starts, stops, or restarts it: it is a fixed loopback endpoint the
-# distiller calls like any other resident service, and requests here may
-# queue behind other callers. It is a much stronger model than the bundled
+# Flash Next (launchd label local.ds4-flash-next) shares its loopback endpoint
+# with the Model Room flash desk. flashlib loads it on demand and protects
+# requests from idle shutdown. Requests may queue behind other callers.
+# It is a much stronger model than the bundled
 # 1.5B llama.cpp model and, unlike it, reliably produces a usable review pack
 # (2026-09-23 feasibility check against a real and a synthetic transcript).
 FLASH_SERVER_URL = "http://127.0.0.1:8000"
@@ -637,29 +639,19 @@ class DistillerUnavailable(RuntimeError):
 
 def flash_server_available(opener: Callable[..., Any] = urllib.request.urlopen, timeout: float = FLASH_SERVER_HEALTH_TIMEOUT) -> bool:
     try:
-        with opener(f"{FLASH_SERVER_URL}/v1/models", timeout=timeout):
+        with flashlib.request_scope(FLASH_SERVER_URL, opener=opener), opener(f"{FLASH_SERVER_URL}/v1/models", timeout=timeout):
             return True
     except Exception:
         return False
 
 
 def resident_flash_distiller(request: dict[str, Any], opener: Callable[..., Any] = urllib.request.urlopen) -> dict[str, Any]:
-    """Call the already-running Flash Next server; never spawns or kills it.
-
-    That server (127.0.0.1:8000, ds4-serve / local.ds4-flash-next) is shared
-    with the Model Room flash desk, so requests may queue behind other
-    callers. This function owns no lifecycle over it: if it cannot be
-    reached, that is reported as ``DistillerUnavailable`` (a RuntimeError
-    subclass) rather than started, retried past a short bound, or silently
-    swallowed.
-    """
+    """Ensure Flash through the shared lifecycle helper; retain DistillerUnavailable on failure."""
     context_json = json.dumps(request["context"], ensure_ascii=False)
     if len(context_json) > 28000:
         raise RuntimeError("call-context index exceeds bounded local distiller context")
     if not flash_server_available(opener=opener):
-        raise DistillerUnavailable(
-            f"the resident local model server at {FLASH_SERVER_URL} is unreachable"
-        )
+        raise DistillerUnavailable(f"the local model server at {FLASH_SERVER_URL} is unreachable")
     chunks = _topic_chunks(request["transcript"])
     outputs: list[dict[str, Any]] = []
     try:
@@ -670,7 +662,7 @@ def resident_flash_distiller(request: dict[str, Any], opener: Callable[..., Any]
             )
             req = urllib.request.Request(f"{FLASH_SERVER_URL}/v1/chat/completions", data=body, headers={"Content-Type": "application/json"}, method="POST")
             try:
-                with opener(req, timeout=150) as response:
+                with flashlib.request_scope(FLASH_SERVER_URL, opener=opener), opener(req, timeout=150) as response:
                     outer = json.loads(response.read().decode("utf-8"))
             except (OSError, TimeoutError) as exc:
                 raise DistillerUnavailable(

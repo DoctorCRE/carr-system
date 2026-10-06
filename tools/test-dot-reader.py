@@ -29,7 +29,7 @@ from psycopg import sql
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lib.disposable_pg_fixture import postgres_fixture_group
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 MIGRATION = ROOT / "migrations/0756_dot_reader.sql"
 
 
@@ -49,9 +49,10 @@ class DotReader(unittest.TestCase):
         cls.pg_budget = postgres_fixture_group()
         cls.pg_budget.__enter__()
         cls.addClassCleanup(cls.pg_budget.__exit__, None, None, None)
-        cls.tmp = tempfile.TemporaryDirectory(prefix="dot-reader-test-")
-        cls.addClassCleanup(cls.tmp.cleanup)
-        cls.data = Path(cls.tmp.name) / "data"
+        cls.fixture = DisposablePostgres("dot-reader-test-", cls.bin.pg_ctl)
+        cls.addClassCleanup(cls.fixture.close)
+        cls.tmp = cls.fixture.root
+        cls.data = cls.tmp / "data"
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             cls.port = probe.getsockname()[1]
@@ -59,10 +60,9 @@ class DotReader(unittest.TestCase):
                     "--auth-local=trust", "--auth-host=scram-sha-256", "--encoding=UTF8", "--no-locale"])
         hba = cls.data / "pg_hba.conf"
         hba.write_text("host carr_ci carr_ci 127.0.0.1/32 trust\n" + hba.read_text())
-        cls.run_pg([cls.bin.pg_ctl, "-D", cls.data, "-l", Path(cls.tmp.name) / "pg.log",
-                    "-o", f"-h 127.0.0.1 -k {cls.tmp.name} -p {cls.port} -c fsync=off -c synchronous_commit=off -c full_page_writes=off", "-w", "start"])
-        cls.addClassCleanup(cls.run_pg, [cls.bin.pg_ctl, "-D", cls.data, "-m", "immediate", "-w", "stop"])
-        cls.owner_args = dict(host=cls.tmp.name, port=cls.port, user="carr_ci", dbname="postgres")
+        cls.run_pg([cls.bin.pg_ctl, "-D", cls.data, "-l", cls.tmp / "pg.log",
+                    "-o", f"-h 127.0.0.1 -k {cls.tmp} -p {cls.port} -c fsync=off -c synchronous_commit=off -c full_page_writes=off", "-w", "start"])
+        cls.owner_args = dict(host=str(cls.tmp), port=cls.port, user="carr_ci", dbname="postgres")
         if os.environ.get("CARR_DOT_REPO_SCHEMA") == "1":
             with psycopg.connect(**cls.owner_args, autocommit=True) as owner:
                 owner.execute("create database carr_ci")
@@ -72,7 +72,7 @@ class DotReader(unittest.TestCase):
                 owner.execute("create role neondb_owner")
                 # psql understands the snapshot's meta-commands. No credentials
                 # are on argv: this owned Unix socket authenticates locally.
-                cls.run_pg([cls.bin.psql, "-h", cls.tmp.name, "-p", str(cls.port),
+                cls.run_pg([cls.bin.psql, "-h", str(cls.tmp), "-p", str(cls.port),
                             "-U", "carr_ci", "-d", cls.owner_args["dbname"], "-v", "ON_ERROR_STOP=1",
                             "-q", "-1", "-f", ROOT / "db/schema.sql"])
                 pending = subprocess.run([sys.executable, str(ROOT / "tools/migrate.py"),
@@ -172,8 +172,9 @@ class DotReader(unittest.TestCase):
 
 
     @classmethod
-    def run_pg(cls, args):
-        result = subprocess.run([str(x) for x in args], capture_output=True, text=True, timeout=45)
+    def run_pg(cls, args, fixture=None):
+        fixture = fixture or cls.fixture
+        result = fixture.run([str(x) for x in args], capture_output=True, text=True, timeout=45)
         if result.returncode:
             raise RuntimeError("disposable PostgreSQL setup failed")
 
@@ -530,36 +531,38 @@ class DotReader(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("CARR_DOT_REPO_SCHEMA") == "1", "requires complete snapshot source")
     def test_complete_restore_preserves_narrowed_acl_and_defaults(self):
         candidate = self.complete_snapshot()
-        with tempfile.TemporaryDirectory(prefix="dot-independent-restore-") as directory:
+        with DisposablePostgres("dot-independent-restore-", self.bin.pg_ctl) as fixture:
+            directory = str(fixture.root)
+
+            def run_pg(args):
+                self.run_pg(args, fixture=fixture)
+
             data = Path(directory) / "data"
             with socket.socket() as probe:
                 probe.bind(("127.0.0.1",0))
                 port = probe.getsockname()[1]
-            self.run_pg([self.bin.initdb, "-D", data, "-U", "carr_ci", "--auth-local=trust",
+            run_pg([self.bin.initdb, "-D", data, "-U", "carr_ci", "--auth-local=trust",
                          "--auth-host=scram-sha-256", "--encoding=UTF8", "--no-locale"])
-            self.run_pg([self.bin.pg_ctl, "-D", data, "-l", Path(directory)/"pg.log", "-o",
+            run_pg([self.bin.pg_ctl, "-D", data, "-l", Path(directory)/"pg.log", "-o",
                          f"-h 127.0.0.1 -k {directory} -p {port} -c fsync=off -c synchronous_commit=off -c full_page_writes=off", "-w", "start"])
-            try:
-                args = dict(host=directory, port=port, user="carr_ci", dbname="postgres")
-                with psycopg.connect(**args, autocommit=True) as owner:
-                    owner.execute("create role neondb_owner")
-                self.run_pg([self.bin.psql, "-h", directory, "-p", str(port), "-U", "carr_ci",
-                             "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q", "-1", "-f", candidate])
-                with psycopg.connect(**args, autocommit=True) as owner:
-                    self.assertEqual(owner.execute("select rolpassword is null,rolcanlogin,rolconnlimit from pg_authid where rolname='dot_reader'").fetchone(), (True, True, 2))
-                    self.assertEqual(owner.execute("select has_table_privilege('dot_reader','public.dot_narrow_acl','SELECT')").fetchone(), (False,))
-                    owner.execute("create table ops.dot_restored_future(id int); create sequence ops.dot_restored_seq")
-                    owner.execute("create table public.dot_restored_future(id int)")
-                    self.assertEqual(owner.execute("select has_table_privilege('dot_reader','ops.dot_restored_future','SELECT'),has_sequence_privilege('dot_reader','ops.dot_restored_seq','SELECT'),has_table_privilege('dot_reader','public.dot_restored_future','SELECT')").fetchone(), (False, False, True))
-                with psycopg.connect(**{**args,"user":"dot_reader"}, autocommit=True) as dot:
+            args = dict(host=directory, port=port, user="carr_ci", dbname="postgres")
+            with psycopg.connect(**args, autocommit=True) as owner:
+                owner.execute("create role neondb_owner")
+            run_pg([self.bin.psql, "-h", directory, "-p", str(port), "-U", "carr_ci",
+                         "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q", "-1", "-f", candidate])
+            with psycopg.connect(**args, autocommit=True) as owner:
+                self.assertEqual(owner.execute("select rolpassword is null,rolcanlogin,rolconnlimit from pg_authid where rolname='dot_reader'").fetchone(), (True, True, 2))
+                self.assertEqual(owner.execute("select has_table_privilege('dot_reader','public.dot_narrow_acl','SELECT')").fetchone(), (False,))
+                owner.execute("create table ops.dot_restored_future(id int); create sequence ops.dot_restored_seq")
+                owner.execute("create table public.dot_restored_future(id int)")
+                self.assertEqual(owner.execute("select has_table_privilege('dot_reader','ops.dot_restored_future','SELECT'),has_sequence_privilege('dot_reader','ops.dot_restored_seq','SELECT'),has_table_privilege('dot_reader','public.dot_restored_future','SELECT')").fetchone(), (False, False, True))
+            with psycopg.connect(**{**args,"user":"dot_reader"}, autocommit=True) as dot:
+                with self.assertRaises(psycopg.errors.InsufficientPrivilege):
+                    dot.execute("create temp table dot_restore_nope(id int)")
+                for table in ("public.dot_narrow_acl", "ops.dot_restored_future"):
                     with self.assertRaises(psycopg.errors.InsufficientPrivilege):
-                        dot.execute("create temp table dot_restore_nope(id int)")
-                    for table in ("public.dot_narrow_acl", "ops.dot_restored_future"):
-                        with self.assertRaises(psycopg.errors.InsufficientPrivilege):
-                            dot.execute(sql.SQL("select * from {}").format(sql.Identifier(*table.split('.'))))
-                    dot.execute("select * from public.dot_restored_future").fetchall()
-            finally:
-                self.run_pg([self.bin.pg_ctl,"-D",data,"-m","immediate","-w","stop"])
+                        dot.execute(sql.SQL("select * from {}").format(sql.Identifier(*table.split('.'))))
+                dot.execute("select * from public.dot_restored_future").fetchall()
 
     @unittest.skipUnless(os.environ.get("CARR_DOT_REPO_SCHEMA") == "1", "requires assurance functions from the full schema")
     def test_assurance_gate_accepts_only_dot_select_exception(self):
@@ -608,7 +611,7 @@ class ReleaseAbandonFixture(unittest.TestCase):
                             self.assertEqual(connection.execute("select 1").fetchone(), (1,))
                             data = Path(connection.execute("show data_directory").fetchone()[0])
                             self.assertEqual(connection.execute("show unix_socket_directories").fetchone(), ("",))
-                        self.assertEqual(data.parent.parent, Path(parent))
+                        self.assertEqual(data.parent.parent.resolve(), Path(parent).resolve())
                     self.assertFalse(data.parent.exists(), "verified shutdown removes the cluster")
 
     def test_failed_shutdown_retains_live_cluster_and_reports_location(self):

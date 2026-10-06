@@ -2,10 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { invoiceTrackerTools } from '../src/invoice-tracker.js';
 import { TOOLS } from '../src/tools.js';
-import { readFileSync, readdirSync } from 'node:fs';
+import { assertAdmits } from './helpers/registry-admission.mjs';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { SCAC_MUTATION_REGISTRY_VERSION } from '../src/mutation-registry.js';
-import { frozenInventory, registrySeal, RELATIONSHIP_V109_DB_CATALOG_BASELINE } from '../../ops/scac-mutation-inventory.mjs';
 class ToolError extends Error { constructor(payload) { super(payload.error); this.payload=payload; } }
 function harness(patch={}) {
   const row={id:'demo-commission',deal_id:'demo-deal',status:'invoiced',version:4,invoiced_on:'2026-09-01',received_on:null,today:'2026-10-02',...patch};
@@ -31,7 +30,8 @@ test('invalid dates, future dates, pre-invoice dates, stale versions and expecte
   const h=harness(patch);await assert.rejects(h.tools['record-commission-receipt'].handler(h.c,actor,{...args,...change}),e=>e.payload.error===error);assert.ok(h.calls.every(c=>!c.sql.includes('update commission')));assert.equal(h.events.length,0);
  }
 });
-test('registered paid action has a closed schema and no outbound provider authority',()=>{
+test('registered paid action has a closed schema and no outbound provider authority',async()=>{
+ await assertAdmits(['read-invoice-tracker','record-commission-receipt']);
  assert.equal(TOOLS['record-commission-receipt'].write,true);assert.equal(TOOLS['record-commission-receipt'].humanOnly,true);
  assert.deepEqual(Object.keys(TOOLS['record-commission-receipt'].inputSchema.properties),['idempotency_key','commission_id','base_version','received_on']);
 });
@@ -47,52 +47,8 @@ test('all deal reads expose the four lifecycle fields without inventing a missin
  }
 });
 
-test('reference-monitor acceptance follows the live frontier and its sealed predecessor', async()=>{
- const gate=readFileSync(new URL('../../ops/siep18-reference-monitor-local-pg-gate.py',import.meta.url),'utf8');
- const value=name=>gate.match(new RegExp(`${name}\\s*=\\s*(?:\\(\\s*)?"([^"]+)"`))?.[1];
- const live=Number(SCAC_MUTATION_REGISTRY_VERSION.split('.v')[1]);
- assert.ok(live>=110);
- assert.equal(value('LIVE_REGISTRY_VERSION'),SCAC_MUTATION_REGISTRY_VERSION);
- assert.equal(Number(gate.match(/LIVE_REGISTRY_ORDINAL = (\d+)/)?.[1]),live);
- const previous=`scac-mutation-registry.v${live-1}`;
- assert.equal(value('SEALED_PREDECESSOR_VERSION'),previous);
- const runtime=readFileSync(new URL(`../src/${previous}.generated.js`,import.meta.url),'utf8');
- const digest=runtime.match(/SCAC_MUTATION_REGISTRY_DIGEST = "([^"]+)"/)[1];
- assert.equal(value('SEALED_PREDECESSOR_DIGEST'),'sha256:'+digest);
-});
 
-// Parallel registry additions must form one ordered history, preserving both contracts.
-test('invoice successor preserves the shipped relationship frontier', async()=>{
- const inventory=await import('../../ops/scac-mutation-inventory.mjs');
- assert.ok(Number(SCAC_MUTATION_REGISTRY_VERSION.split('.v')[1])>=110);
- assert.equal(inventory.REGISTRY_V110_VERSION,'scac-mutation-registry.v110');
- const invoices=inventory.frozenInventory('scac-mutation-registry.v110');
- const predecessor=inventory.frozenInventory('scac-mutation-registry.v109');
- for(const key of ['mcp-tool:read-invoice-tracker','mcp-tool:record-commission-receipt'])
-  assert.ok(invoices.some(row=>row.ingress_key===key),key);
- for(const row of predecessor) assert.ok(invoices.some(next=>next.ingress_key===row.ingress_key),row.ingress_key);
- const boundBefore=inventory.boundInventoryRows(predecessor);
- const boundAfter=inventory.boundInventoryRows(invoices);
- for(const row of boundBefore)
-  assert.deepEqual(boundAfter.find(next=>next.ingress_key===row.ingress_key),row,row.ingress_key);
- assert.deepEqual(boundAfter.filter(row=>!boundBefore.some(previous=>previous.ingress_key===row.ingress_key)).map(row=>row.ingress_key).sort(),
-  ['mcp-tool:read-invoice-tracker','mcp-tool:record-commission-receipt']);
- const sql=readFileSync(new URL('../../migrations/0842_invoice_tracker_scac_successor.sql',import.meta.url),'utf8');
- assert.match(sql,/0840_relationship_scac_successor.sql/);
- assert.match(sql,/scac_mutation_registry_v110_seal_available/);
- assert.match(sql,/scac_mutation_registry_v108_seal_available/);
-});
 
-// These migrations must append after main; inserting below its ledger breaks prefix checks.
-test('invoice migrations append with exclusive numbers after shipped relationship contract',()=>{
- const names=readdirSync(new URL('../../migrations/',import.meta.url)).filter(n=>n.endsWith('.sql'));
- const predecessor='0840_relationship_scac_successor.sql';
- for(const filename of ['0841_invoice_tracker.sql','0842_invoice_tracker_scac_successor.sql']){
-  assert.ok(names.includes(filename),filename);
-  assert.ok(filename>predecessor,`${filename} must follow ${predecessor}`);
-  assert.deepEqual(names.filter(n=>n.slice(0,4)===filename.slice(0,4)),[filename]);
- }
-});
 
 test('shipped invoice read-fields migration retains its filename and bytes',()=>{
  const sql=readFileSync(new URL('../../migrations/0782_deal_invoice_read_fields.sql',import.meta.url));
