@@ -58,7 +58,9 @@ def patch_changes(before, after):
     new = after.splitlines(keepends=True)
     changes = []
     source_context = b"\0" + b"\0".join(old) + b"\0"
-    for kind, i, j, k, l in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+    # Repeated snapshot lines cannot be useful anchors; unequal blocks still
+    # reach the source-context comparison below.
+    for kind, i, j, k, l in difflib.SequenceMatcher(None, old, new).get_opcodes():
         if kind == "equal":
             continue
         # Bind the edit to source context, not numeric offsets. Grow anchors

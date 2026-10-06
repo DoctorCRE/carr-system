@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
 import pg from "pg";
 import { executeRegisteredTool } from "../src/tools.js";
 const dsn = process.env.LEAD_WORKSPACE_TEST_DATABASE_URL;
@@ -64,8 +65,8 @@ async function fixture(c, options = {}) {
   const party = randomUUID(),
     lead = randomUUID();
   await c.query(
-    "insert into party(id,kind,name,created_by,updated_by,contact_state) values($1,'person','Synthetic candidate',$2,$2,$3)",
-    [party, aid, options.contact_state || "active"],
+    "insert into party(id,kind,name,created_by,updated_by,contact_state,state) values($1,'person','Synthetic candidate',$2,$2,$3,$4)",
+    [party, aid, options.contact_state || "active", options.state || "FL"],
   );
   await c.query(
     "insert into lead(id,party_id,stage,created_by,updated_by) values($1,$2,'new',$3,$3)",
@@ -150,6 +151,11 @@ run(
       );
     const r = await read(c, f);
     assert.equal(r.detail.id, f.lead);
+    const legacy = await executeRegisteredTool(c, f.human, "lead-board", {});
+    const row = legacy.leads.find(l => l.id === f.lead);
+    assert.equal(row.party_id, f.party);
+    assert.equal(row.converted, false);
+    assert.deepEqual(row.stage_moves, []);
     await c.query("reset role");
   },
 );
@@ -475,3 +481,73 @@ run(
     assert.equal(r.detail?.id, f.lead);
   },
 );
+
+run("lead scores reasons and owner survive registered writes and granted workspace reads", async c => {
+  const f=await fixture(c,{state:"AL"});
+  await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell') on conflict(slug) do nothing");
+  const dell=(await c.query("select id,display_name from actor where slug='dell'")).rows[0];
+  for(const owner of [undefined,"joe","dell"]){
+    const r=await executeRegisteredTool(c,f.human,"new-lead",{idempotency_key:randomUUID(),party_id:f.party,stage:"new",score:0,score_reason:"Synthetic expansion estimate",...(owner?{owner}:{})});
+    const row=(await c.query("select owner_id,owner_label,score,score_reason,created_by,updated_by from lead where id=$1",[r.lead_id])).rows[0];
+    assert.equal(Number(row.score),0);assert.equal(row.score_reason,"Synthetic expansion estimate");assert.equal(row.owner_id,owner==="joe"?f.human.id:dell.id);assert.equal(row.owner_label,owner==="joe"?f.human.display:dell.display_name);assert.equal(row.created_by,f.human.id);assert.equal(row.updated_by,f.human.id);
+  }
+  await command(c,f,"update-lead",{fields:{score:100,score_reason:"Synthetic reviewed score",owner:"dell"}},f.machine);
+  let stored=(await c.query("select owner_id,owner_label,updated_by,version from lead where id=$1",[f.lead])).rows[0];
+  assert.equal(stored.owner_id,dell.id);assert.equal(stored.updated_by,f.machine.id);
+  const events=(await c.query("select field,old_value,new_value,actor_id from event where subject_id=$1 order by field",[f.lead])).rows;
+  assert.equal(events.length,3);assert.ok(events.every(e=>e.actor_id===f.machine.id));assert.equal(events.find(e=>e.field==='owner').new_value.owner,'dell');
+  await c.query('set role carr_reader');
+  const board=await read(c,f);assert.equal(board.detail.score,100);assert.equal(board.detail.score_reason,'Synthetic reviewed score');assert.equal(board.leads.find(l=>l.id===f.lead).score_reason,'Synthetic reviewed score');
+  await c.query('reset role');
+  await command(c,f,'update-lead',{fields:{notes:'Synthetic unrelated note'}});
+  stored=(await c.query('select score,score_reason,owner_id from lead where id=$1',[f.lead])).rows[0];assert.equal(Number(stored.score),100);assert.equal(stored.owner_id,dell.id);
+  await command(c,f,'update-lead',{fields:{score:null,score_reason:null}});
+  stored=(await c.query('select score,score_reason from lead where id=$1',[f.lead])).rows[0];assert.equal(stored.score,null);assert.equal(stored.score_reason,null);
+});
+run('registered score owner validation and database score check refuse atomically',async c=>{
+  const f=await fixture(c);
+  for(const fields of [{score:-1},{score:101},{score:1.5},{score:'50'},{score:true},{score_reason:7},{owner:'someone'},{owner:null}]){
+    await assert.rejects(()=>command(c,f,'update-lead',{fields}),e=>['invalid_score','invalid_score_reason','invalid_owner'].includes(e.payload?.error));
+  }
+  assert.equal((await c.query('select count(*)::int as n from event where subject_id=$1',[f.lead])).rows[0].n,0);
+  for(const score of [-1,101,1.5])await assert.rejects(()=>c.query('update lead set score=$1 where id=$2',[score,f.lead]),e=>e.code==='23514');
+});
+run('territory backfill emits exact audit, increments versions once, is replay safe and refuses partial or changed inputs',async c=>{
+  const directory=new URL('../../migrations/',import.meta.url);
+  const names=(await readdir(directory)).filter(name=>/^\d{4}[a-z]?_lead_score_owner_reader_repair\.sql$/.test(name));
+  assert.equal(names.length,1,'one territory repair migration must survive integration allocation');
+  const text=await readFile(new URL(names[0],directory),'utf8');
+  const backfill=text.slice(text.indexOf('create temp table lead_territory_score_repair'));
+  const f=await fixture(c);
+  await c.query("insert into actor(slug,kind,display_name) values('dell','human','Synthetic Dell'),('system','system','Synthetic migrations') on conflict(slug) do nothing");
+  const dell=(await c.query("select id from actor where slug='dell'")).rows[0].id;
+  async function seed(start,count){
+    for(let i=0;i<count;i++){
+      const party=randomUUID();await c.query("insert into party(id,kind,name,state,created_by,updated_by) values($1,'person','Synthetic territory repair',$2,$3,$3)",[party,i<44?'AL':'FL',f.human.id]);
+      await c.query("insert into lead(registry_ref,party_id,stage,segment,owner_id,owner_label,created_by,updated_by) values($1,$2,'new',$3,$4,$5,$4,$4)",['L-'+(start+i),party,'Expansion signal – est. score '+(i%101),f.human.id,f.human.display]);
+    }
+  }
+  const runBackfill=start=>c.query(backfill.replace('generate_series(269,313)',`generate_series(${start},${start+44})`));
+  await c.query('begin');
+  try{
+    await seed(900269,45);await runBackfill(900269);
+    const rows=(await c.query("select l.registry_ref,l.version,l.score,l.segment,l.owner_id,e.old_value,e.new_value from lead l join event e on e.subject_id=l.id and e.verb='backfill-lead-score-owner' where l.registry_ref between 'L-900269' and 'L-900313' order by l.registry_ref")).rows;
+    assert.equal(rows.length,45);for(let i=0;i<45;i++){assert.equal(rows[i].version,2);assert.equal(Number(rows[i].score),i);assert.equal(rows[i].segment,'Expansion signal');assert.equal(rows[i].owner_id,i<44?dell:f.human.id);assert.equal(rows[i].old_value.score,null);assert.equal(rows[i].new_value.version,2)}
+    await c.query('alter table lead_territory_score_repair rename to lead_territory_score_first_run');await runBackfill(900269);
+    assert.equal((await c.query("select count(*)::int as n from event where idempotency_key like 'wr-000218:L-900%'")).rows[0].n,45);
+    assert.equal((await c.query("select max(version) as v from lead where registry_ref between 'L-900269' and 'L-900313'")).rows[0].v,2);
+    await c.query('alter table lead_territory_score_repair rename to lead_territory_score_second_run');
+    await c.query("update lead set score=100 where registry_ref='L-900269'");
+    await assert.rejects(()=>runBackfill(900269),e=>e.code==='P0001');
+  }finally{await c.query('rollback')}
+  for(const mode of ['partial','changed','ambiguous','out_of_range','partial_receipt']){
+    await c.query('begin');try{
+      await seed(901269,mode==='partial'?44:45);
+      if(mode==='changed')await c.query("update lead set score=30 where registry_ref='L-901269'");
+      if(mode==='ambiguous')await c.query("update lead set segment='Expansion signal – est. score 45 or 80' where registry_ref='L-901269'");
+      if(mode==='partial_receipt')await c.query("insert into event(occurred_at,actor_id,verb,subject_type,subject_id,cause,idempotency_key) select now(),$1,'backfill-lead-score-owner','lead',id,'import_migration','wr-000218:'||registry_ref from lead where registry_ref='L-901269'",[f.human.id]);
+      if(mode==='out_of_range')await c.query("update lead set segment='Expansion signal – est. score 101' where registry_ref='L-901269'");
+      await assert.rejects(()=>runBackfill(901269),e=>e.code==='P0001');
+    }finally{await c.query('rollback')}
+  }
+});
