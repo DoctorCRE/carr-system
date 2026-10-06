@@ -20,16 +20,27 @@ nothing to production logs or caches (log_path=os.devnull, no session id).
 GRADER (programmatic, expected rule ids per case):
   expected  = gold - disputed - boot-delivered rules, restricted to rules the
               trigger layer owes (a trigger/path route, or pack-layer member).
+              Frozen per case in expectations.v1.json (--freeze-expectations)
+              and graded from there, so a change to the routes cannot move its
+              own denominator; a drift from the live derivation needs a new
+              expectations version.
   recall    = |delivered & expected| / |expected|, per case and micro.
   false     = delivered rules outside the case's full gold set (and not
               disputed). A should-not-fire case has no expected rule.
   tokens    = estimated context tokens of the receipts the events would inject
               (render replicated offline; chars / 4, no offline tokenizer).
 
+RECEIPT EVIDENCE: --observe writes one raw observation per case (what was
+delivered, no grades); score_receipt() grades a baseline and a candidate
+observation cohort against the frozen expectations and is the scorer
+ops/check-eval-receipt.py re-runs. make_report.py produces both.
+
 Usage:
   run_eval.py --variant baseline --split train
   run_eval.py --variant v1 --split all
   run_eval.py --compare baseline v1 --split test
+  run_eval.py --observe OUT.jsonl [--trace-reads READS.json]
+  run_eval.py --freeze-expectations
 """
 import argparse
 import hashlib
@@ -47,6 +58,8 @@ sys.path.insert(0, REPO)
 
 V2_CASES = os.path.join(REPO, "ops", "fixtures", "rule-delivery-eval", "cases.v2.json")
 HARD_CASES = os.path.join(HERE, "hard_cases.v1.json")
+EXPECTATIONS = os.path.join(HERE, "expectations.v1.json")
+EXPECTATIONS_VERSION = "rule-delivery-expectations/v1"
 RUNS = os.path.join(HERE, "runs")
 CHARS_PER_TOKEN = 4.0
 METRIC_IDS = ("recall", "false_deliveries", "tokens")
@@ -60,6 +73,13 @@ def _load(path, name):
 
 
 # ----------------------------------------------------------------- cases
+
+def input_sha256(prompt, tool_calls):
+    """What a case feeds the system under test, checkout-independent ({{REPO}} unexpanded)."""
+    payload = json.dumps({"prompt": prompt, "tool_calls": tool_calls}, sort_keys=True,
+                         separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
 
 def hard_split(case_id):
     """Deterministic 50/50 split for the hand-written cases, fixed by id."""
@@ -78,7 +98,8 @@ def load_cases(split=None):
         cases.append({"id": case["id"], "source": "v2", "stratum": case["stratum"],
                       "split": case["split"], "prompt": case["prompt"],
                       "tool_calls": case["tool_calls"], "gold": case["gold"],
-                      "disputed": case["disputed"], "kind": "trace", "note": ""})
+                      "disputed": case["disputed"], "kind": "trace", "note": "",
+                      "input_sha256": input_sha256(case["prompt"], case["tool_calls"])})
     with open(HARD_CASES, "r", encoding="utf-8") as handle:
         doc = json.load(handle)
     for row in doc["cases"]:
@@ -88,7 +109,8 @@ def load_cases(split=None):
                       "required": sorted(row["required"]),
                       "gold": sorted(set(row["required"]) | set(row["acceptable"])),
                       "disputed": [],
-                      "kind": row["kind"], "note": row["why"]})
+                      "kind": row["kind"], "note": row["why"],
+                      "input_sha256": input_sha256(row.get("prompt", ""), row.get("tool_calls", []))})
     cases.extend(replay_cases())
     return [c for c in cases if split in (None, "all", c["split"])]
 
@@ -132,8 +154,10 @@ def replay_cases():
                 if not keep(row):
                     continue
                 case_id = f"rr-{fname.split('-')[0]}-{row['id']}"
+                raw = [{"tool_name": row["tool_name"], "tool_input": row["tool_input"]}]
                 out.append({"id": case_id, "source": "real-replay", "stratum": "routine_read",
                             "split": hard_split(case_id), "prompt": "",
+                            "input_sha256": input_sha256("", raw),
                             "tool_calls": [{"tool_name": row["tool_name"],
                                             "tool_input": fix(row["tool_input"])}],
                             "gold": [], "disputed": [], "required": [], "kind": "should_not_fire",
@@ -144,9 +168,13 @@ def replay_cases():
 # ----------------------------------------------------------------- world
 
 class World:
-    """Everything the replay reads, loaded once from the working tree."""
+    """Everything the replay reads, loaded once from the working tree.
 
-    def __init__(self):
+    Grading labels come from the frozen expectations when given (a case they
+    label is graded by them and nothing else); derive() is the live labelling
+    they were frozen from."""
+
+    def __init__(self, expectations=None):
         from lib import rule_delivery_preuse as preuse
         from lib import rule_routes
         self.preuse, self.rule_routes = preuse, rule_routes
@@ -161,7 +189,10 @@ class World:
                                for r in json.load(handle)["rules"]}
         meta = ev.rule_meta(REPO)
         self.layer = {rid: row["layer"] for rid, row in meta.items()}
-        self.boot = ev.boot_always_on_ids(REPO) | {
+        with open(os.path.join(REPO, "ops/config/rule-classes.v1.json"), encoding="utf-8") as handle:
+            classes = json.load(handle)["rules"]
+        self.frozen_jit_boot_ids = {rid for rid, row in classes.items() if row["always_on"]
+                     and row.get("personal_to") in (None, "joe")} | {
             rid for rid, row in meta.items() if row["layer"] == "layer0"}
         routes = self.rule_routes.load_routes(__import__("pathlib").Path(REPO))["rules"]
         owed = set()
@@ -169,14 +200,32 @@ class World:
             if any(route.get("kind") in ("trigger", "path_rule") for route in entry["routes"]):
                 owed.add(rid)
         owed |= {rid for rid, layer in self.layer.items() if layer == "pack"}
-        self.owed = owed - self.boot
-        self.labelled = set(self.statements)
+        self.owed = owed - self.frozen_jit_boot_ids
+        if expectations:
+            self.owed = {rid for row in expectations["cases"].values() for rid in row["expected"]}
+        self.envelope = _load(os.path.join(REPO, "ops", "machine_envelope.py"),
+                              "rde_envelope").is_machine_envelope
+        self.pinned = (expectations or {}).get("cases", {})
+        self.labelled = (set(expectations["labelled"]) if expectations
+                         else set(self.statements))
+
+    def derive(self, case):
+        """The live labels for a case: what the trigger layer owes it, from this tree."""
+        if "required" in case:  # hand-written case: the labeller already said which
+            expected = sorted(case["required"])
+        else:
+            expected = sorted((set(case["gold"]) - set(case["disputed"])) & self.owed)
+        return {"split": case.get("split"), "input_sha256": case.get("input_sha256"),
+                "cohort": "envelope" if self.envelope(case["prompt"]) else "human",
+                "expected": expected,
+                "allowed": sorted(set(case["gold"]) | set(case["disputed"])),
+                "should_not_fire": not expected}
+
+    def label(self, case):
+        return self.pinned.get(case["id"]) or self.derive(case)
 
     def expected(self, case):
-        if "required" in case:  # hand-written case: the labeller already said which
-            return sorted(case["required"])
-        gold = set(case["gold"]) - set(case["disputed"])
-        return sorted(gold & self.owed)
+        return list(self.label(case)["expected"])
 
     # ---- delivery
 
@@ -258,22 +307,40 @@ def replay(world, case):
     return events
 
 
-def grade(world, case, events):
-    expected = set(world.expected(case))
-    gold = set(case["gold"]) | set(case["disputed"])
-    delivered = {rid for ev in events for rid in ev["ids"]}
-    hit = delivered & expected
-    false = {rid for rid in delivered - gold if rid in world.labelled}
-    tokens = sum(ev["tokens"] for ev in events)
-    return {"expected": sorted(expected), "delivered": sorted(delivered),
-            "hit": sorted(hit), "missed": sorted(expected - delivered),
-            "false": sorted(false), "events": len(events), "tokens": tokens,
-            "recall": (len(hit) / len(expected)) if expected else None,
+def observe(case, events, boot_ids=None):
+    """The raw observation of one case: what was delivered, never how it grades."""
+    if boot_ids is None:
+        boot_ids = _load(os.path.join(REPO, "ops/rule_delivery_eval.py"), "rde_boot").boot_always_on_ids(REPO)
+    return {"case_id": case["id"], "split": case.get("split"), "input_sha256": case.get("input_sha256"),
+            "available": sorted(set(boot_ids) | {rid for ev in events for rid in ev["ids"]}),
+            "delivered": sorted({rid for ev in events for rid in ev["ids"]}),
+            "prompt_delivered": sorted({rid for ev in events if ev["kind"] == "prompt" for rid in ev["ids"]}),
+            "events": len(events), "tokens": sum(ev["tokens"] for ev in events),
             "over_cap_events": sum(1 for ev in events if ev["overflow"])}
 
 
+def grade_observation(label, obs, labelled):
+    """One case graded against its label. A false delivery is a labelled rule
+    outside the case's allowed set; prompt_false counts the prompt event alone."""
+    expected, allowed = set(label["expected"]), set(label["allowed"])
+    delivered = set(obs["delivered"])
+    hit = delivered & expected
+    false = {rid for rid in delivered - allowed if rid in labelled}
+    prompt_false = {rid for rid in set(obs["prompt_delivered"]) - allowed if rid in labelled}
+    return {"expected": sorted(expected), "delivered": sorted(delivered),
+            "hit": sorted(hit), "missed": sorted(expected - delivered),
+            "false": sorted(false), "prompt_false": sorted(prompt_false),
+            "events": obs["events"], "tokens": obs["tokens"],
+            "recall": (len(hit) / len(expected)) if expected else None,
+            "over_cap_events": obs["over_cap_events"]}
+
+
+def grade(world, case, events):
+    return grade_observation(world.label(case), observe(case, events), world.labelled)
+
+
 def run(split, variant, out_dir=None):
-    world = World()
+    world = World(load_expectations())
     rows = []
     for case in load_cases(split):
         events = replay(world, case)
@@ -324,6 +391,152 @@ def write_run(out_dir, variant, rows):
             json.dump(trace, handle)
 
 
+# ----------------------------------------------------------------- expectations
+
+def freeze_expectations(world, cases):
+    """The grading labels for every case, as the live tree derives them now."""
+    return {"schema": "rule-delivery-expectations", "version": EXPECTATIONS_VERSION,
+            "rule": ("expected = gold - disputed - boot-delivered, restricted to rules the trigger layer "
+                     "owes; hand cases use their required list. allowed = gold + disputed. cohort = "
+                     "envelope when ops/machine_envelope classifies the prompt, else human. labelled = "
+                     "every rule in the selection corpus; only those count as false deliveries."),
+            "labelled": sorted(world.labelled),
+            "cases": {c["id"]: world.derive(c) for c in sorted(cases, key=lambda c: c["id"])}}
+
+
+def load_expectations(path=EXPECTATIONS):
+    with open(path, "r", encoding="utf-8") as handle:
+        doc = json.load(handle)
+    if doc.get("version") != EXPECTATIONS_VERSION:
+        raise ValueError(f"{path} is version {doc.get('version')!r}, this harness grades {EXPECTATIONS_VERSION!r}")
+    return doc
+
+
+def expectation_drift(world, cases, expectations):
+    """Case ids whose live labels no longer match the frozen ones."""
+    pinned = expectations["cases"]
+    return sorted(c["id"] for c in cases if pinned.get(c["id"]) != world.derive(c))
+
+
+def observe_all():
+    world = World()
+    boot_ids = world.ev.boot_always_on_ids(REPO)
+    return [observe(case, replay(world, case), boot_ids) for case in sorted(load_cases("all"), key=lambda c: c["id"])]
+
+
+def trace_repo_reads():
+    """Record every file under the repository this process opens from now on."""
+    repo = os.path.realpath(REPO)
+    root = repo + os.sep
+    seen = set()
+
+    def hook(event, args):
+        if event == "open" and args and isinstance(args[0], (str, bytes, os.PathLike)):
+            path = os.path.realpath(os.fsdecode(args[0]))
+            if path.startswith(root):
+                seen.add(os.path.relpath(path, repo))
+                if path.endswith(".pyc"):
+                    try:
+                        source = importlib.util.source_from_cache(path)
+                    except ValueError:
+                        source = path[:-1]
+                    if os.path.isfile(source):
+                        seen.add(os.path.relpath(source, repo))
+    sys.addaudithook(hook)
+    return seen
+
+
+# ----------------------------------------------------------------- receipt scorer
+
+class CohortError(ValueError):
+    pass
+
+
+def paired_cohorts(expectations, baseline_rows, candidate_rows):
+    """Both arms indexed by case id, refusing anything but the exact labelled set."""
+    cases = expectations["cases"]
+
+    def index(rows, arm):
+        out = {}
+        for row in rows:
+            cid = row["case_id"]
+            if cid in out:
+                raise CohortError(f"{arm} repeats case {cid}")
+            if cid not in cases:
+                raise CohortError(f"{arm} carries unlabelled case {cid}")
+            if (row["split"], row["input_sha256"]) != (cases[cid]["split"], cases[cid]["input_sha256"]):
+                raise CohortError(f"{arm} case {cid} differs from its label in split or input")
+            out[cid] = row
+        missing = sorted(set(cases) - set(out))
+        if missing:
+            raise CohortError(f"{arm} is missing {len(missing)} labelled case(s), first {missing[0]}")
+        return out
+    return index(baseline_rows, "baseline"), index(candidate_rows, "candidate")
+
+
+def _prompt_clean(rows):
+    return _mean(0.0 if r["detail"]["prompt_false"] else 1.0 for r in rows)
+
+
+RECEIPT_DIMENSIONS = (
+    # (dimension id, test-split cohort, statistic)
+    ("envelope-prompt-clean-delivery", "envelope", _prompt_clean),
+    ("human-required-recall", "human", lambda rs: summarize(rs)["recall_micro"]),
+    ("human-delivery-precision", "human", lambda rs: summarize(rs)["precision"]),
+)
+
+
+def score_receipt(expectations, baseline_rows, candidate_rows):
+    """Every measured number in receipt.json, from the two observation cohorts.
+
+    Each dimension is scored on the test split of its cohort: the point
+    estimate, a case-bootstrap interval per arm, and the paired-bootstrap delta.
+    The controls push an oracle (deliver exactly the expected rules) and a null
+    (deliver nothing) through the same grader."""
+    base, cand = paired_cohorts(expectations, baseline_rows, candidate_rows)
+    cases, labelled = expectations["cases"], set(expectations["labelled"])
+
+    def graded(rows):
+        return {cid: {"prompt_id": cid, "split": cases[cid]["split"],
+                      "detail": grade_observation(cases[cid], row, labelled)} for cid, row in rows.items()}
+    gb, gc = graded(base), graded(cand)
+    dims = {}
+    with open(V2_CASES, encoding="utf-8") as handle:
+        fixture = json.load(handle)
+    availability_ids = {c["id"]: set(c["gold"]) for c in fixture["cases"] if c["split"] == "test"}
+    def availability_row(observed, cid):
+        gold = availability_ids[cid]
+        return dict(observed, prompt_id=cid, availability_hits=len(set(observed["available"]) & gold),
+                    availability_required=len(gold))
+    def availability(rows):
+        return sum(r["availability_hits"] for r in rows) / sum(r["availability_required"] for r in rows)
+    ab = [availability_row(base[cid], cid) for cid in sorted(availability_ids)]
+    ac = [availability_row(cand[cid], cid) for cid in sorted(availability_ids)]
+    b_lo, b_hi = boot_ci(ab, availability)
+    c_lo, c_hi = boot_ci(ac, availability)
+    delta, low, high = paired_bootstrap(ab, ac, availability)
+    dims["full-text-availability"] = {"baseline": {"score": availability(ab), "ci_low": b_lo, "ci_high": b_hi},
+        "candidate": {"score": availability(ac), "ci_low": c_lo, "ci_high": c_hi},
+        "delta": {"value": delta, "ci_low": low, "ci_high": high}}
+    for dim_id, cohort, stat in RECEIPT_DIMENSIONS:
+        ids = sorted(cid for cid, c in cases.items() if c["split"] == "test" and c["cohort"] == cohort)
+        b, n = [gb[i] for i in ids], [gc[i] for i in ids]
+        (b_lo, b_hi), (n_lo, n_hi) = boot_ci(b, stat), boot_ci(n, stat)
+        point, lo, hi = paired_bootstrap(b, n, stat)
+        dims[dim_id] = {"baseline": {"score": stat(b), "ci_low": b_lo, "ci_high": b_hi},
+                        "candidate": {"score": stat(n), "ci_low": n_lo, "ci_high": n_hi},
+                        "delta": {"value": point, "ci_low": lo, "ci_high": hi}}
+
+    def control(deliver):
+        rows = [{"detail": grade_observation(case, {"delivered": deliver(case), "prompt_delivered": [],
+                                                    "events": 1, "tokens": 0.0, "over_cap_events": 0},
+                                             labelled)} for case in cases.values()]
+        return summarize(rows)["recall_micro"]
+    return {"dimensions": dims,
+            "controls": {"oracle_pass_rate": control(lambda c: c["expected"]),
+                         "null_pass_rate": control(lambda c: [])}}
+
+
 # ----------------------------------------------------------------- metrics
 
 def _mean(values):
@@ -365,8 +578,17 @@ def per_case_vectors(rows):
 
 def paired_bootstrap(base_rows, new_rows, stat, reps=2000, seed=20260929):
     """(delta, lo, hi): 95% percentile interval of stat(new) - stat(base) over
-    cases resampled with replacement, same resample for both variants."""
-    ids = sorted(set(r["prompt_id"] for r in base_rows) & set(r["prompt_id"] for r in new_rows))
+    cases resampled with replacement, same resample for both variants.
+
+    The two arms must be the same cases: a case dropped from one arm would
+    otherwise vanish from both, and a deleted failing row would raise the score."""
+    b_ids = [r["prompt_id"] for r in base_rows]
+    n_ids = [r["prompt_id"] for r in new_rows]
+    if len(set(b_ids)) != len(b_ids) or len(set(n_ids)) != len(n_ids) or set(b_ids) != set(n_ids):
+        only_b, only_n = sorted(set(b_ids) - set(n_ids)), sorted(set(n_ids) - set(b_ids))
+        raise CohortError(f"paired comparison needs identical case cohorts: {len(only_b)} only in base, "
+                          f"{len(only_n)} only in new, or a repeated case")
+    ids = sorted(b_ids)
     b = {r["prompt_id"]: r for r in base_rows}
     n = {r["prompt_id"]: r for r in new_rows}
     rng = random.Random(seed)
@@ -439,7 +661,35 @@ def main(argv=None):
     parser.add_argument("--print", action="store_true", help="print the summary only; write nothing")
     parser.add_argument("--verdict", nargs=3, metavar=("BASE", "NEW", "GOAL"),
                         help="keep/revert call for NEW against BASE; GOAL is recall or tokens")
+    parser.add_argument("--observe", metavar="OUT", help="write one raw observation per case, sorted by id")
+    parser.add_argument("--trace-reads", metavar="OUT", help="with --observe: write the repository files read")
+    parser.add_argument("--freeze-expectations", action="store_true",
+                        help=f"write {os.path.basename(EXPECTATIONS)} from the live labels")
     args = parser.parse_args(argv)
+    if args.observe:
+        reads = trace_repo_reads() if args.trace_reads else None
+        rows = observe_all()
+        with open(args.observe, "w", encoding="utf-8") as handle:
+            handle.writelines(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+        if reads is not None:
+            with open(args.trace_reads, "w", encoding="utf-8") as handle:
+                json.dump(sorted(reads), handle, indent=1)
+        return 0
+    if args.freeze_expectations:
+        doc = freeze_expectations(World(), load_cases("all"))
+        text = json.dumps(doc, indent=1, sort_keys=True) + "\n"
+        if os.path.exists(EXPECTATIONS):
+            with open(EXPECTATIONS, encoding="utf-8") as handle:
+                current = handle.read()
+            if current != text and json.loads(current).get("version") == EXPECTATIONS_VERSION:
+                print(f"refusing: the labels changed but {EXPECTATIONS_VERSION} is already frozen; "
+                      f"relabelling is a new version (bump EXPECTATIONS_VERSION and the file name)",
+                      file=sys.stderr)
+                return 1
+        with open(EXPECTATIONS, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        print(f"froze {len(doc['cases'])} cases as {EXPECTATIONS_VERSION}")
+        return 0
     if args.verdict:
         keep, reasons, _d = verdict(*args.verdict)
         print("KEEP" if keep else "REVERT", "; ".join(reasons))

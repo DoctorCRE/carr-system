@@ -10,9 +10,37 @@ from __future__ import annotations
 from typing import Any
 
 import execution_contract as contract
-from evaluation_rubrics import rubric_for
 import design_kernel
 import policy_learning
+
+
+WORKFLOW_RUBRICS = {
+    "workflow:job-passport": {
+        "rubric_id": "rubric:job-passport-visual",
+        "stages": {"typed_receipt_ingestion", "freshness_cas_selection", "projection", "visual_interaction_accessibility", "evidence_promotion_display"},
+        "critical_dimensions": {"receipt_integrity", "freshness_integrity", "visual_accessibility", "visual_comprehension", "telemetry_truth", "layout_authority_separation"},
+    },
+    "workflow:claude-desktop-readonly": {
+        "rubric_id": "rubric:claude-desktop-readonly",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"native_hook_attribution", "receipt_integrity"},
+    },
+    "workflow:codex-desktop-readonly": {
+        "rubric_id": "rubric:codex-desktop-readonly",
+        "stages": {"typed_receipt_ingestion", "freshness_cas_selection", "projection"},
+        "critical_dimensions": {"adapter_configuration_binding", "freshness_integrity"},
+    },
+    "workflow:hermes-orchestration": {
+        "rubric_id": "rubric:hermes-orchestration",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"profile_staffing_separation", "handoff_checkpoint"},
+    },
+    "workflow:grok-x-native-retrieval": {
+        "rubric_id": "rubric:grok-x-native-retrieval",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"x_native_provenance", "retrieval_evidence_binding"},
+    },
+}
 
 
 class EvalPortfolioError(contract.ContractError):
@@ -133,7 +161,7 @@ def validate_eval_portfolio(raw: Any, projection: Any | None = None) -> dict[str
     workflow = _exact(value["workflow"], WORKFLOW_FIELDS, "evaluation workflow rubric")
     for field in ("workflow_id", "rubric_id", "rubric_version"):_id(workflow[field], f"evaluation workflow {field}")
     for field in ("rubric_digest", "case_set_digest"): _digest(workflow[field], f"evaluation workflow {field}")
-    rubric = rubric_for(workflow["workflow_id"])
+    rubric = WORKFLOW_RUBRICS.get(workflow["workflow_id"])
     if rubric is None or rubric["rubric_id"] != workflow["rubric_id"]:
         raise EvalPortfolioError("evaluation workflow/rubric is not registered")
     policy = _exact(value["policy"], POLICY_FIELDS, "evaluation policy")

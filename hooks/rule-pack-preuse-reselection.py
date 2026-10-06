@@ -99,11 +99,11 @@ from typing import Callable, TypeGuard
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from lib.rule_delivery_preuse import (  # noqa:E402
-    BUILD_RECEIPT_SCHEMA, CORPUS_RELATIVE, GENERALIZED_RECEIPT_SCHEMA, PACK, RECEIPT_SCHEMA,
+    CORPUS_RELATIVE, GENERALIZED_RECEIPT_SCHEMA, PACK, RECEIPT_SCHEMA,
     SEMANTIC_RECEIPT_SCHEMA, TRIGGER_TABLE_RELATIVE, canonical, digest,
     load_trigger_table, merge_trigger_delivery, receipt_id, semantic_delivery,
     semantic_selector_digest, scheduled_rule_ids as _scheduled_rule_ids, valid_local_identity,
-    validate_build_receipt, validate_generalized_receipt,
+    validate_generalized_receipt,
 )
 from lib.rule_delivery_shadow import (  # noqa:E402
     WINDOW_SOURCE_PATHS, file_sha256, source_sha256,
@@ -511,34 +511,8 @@ def _semantic_adviser(situation: str, session_id: str | None = None) -> list[dic
     return module.advise(situation, session_id=session_id, deadline=deadline)
 
 
-def _build_adviser(situation: str) -> dict:
-    path = REPO / "ops/jev_build_advisory.py"
-    spec = importlib.util.spec_from_file_location("jev_build_advisory_live", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("build advisory unavailable")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.deferred()
-
-
-def _build_unavailable(error: Exception | None = None) -> dict:
-    path = REPO / "ops/jev_build_advisory.py"
-    spec = importlib.util.spec_from_file_location("jev_build_advisory_unavailable", path)
-    if spec is None or spec.loader is None:
-        return {
-            "schema": "jev-build-advisory-unavailable/v1",
-            "status": "unavailable",
-            "reason": "unknown",
-            "effect": "visible_advisory_abstention",
-            "instruction": "Jev build-time intake was unavailable; qualified judgment remains explicit and uncredited.",
-        }
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.unavailable(module.failure_reason(error) if error else "unknown")
-
-
 def _semantic_receipt(payload: dict, response: dict, selected: list[dict],
-                      packs: list[str], ids: list[str], build_receipt: dict) -> dict:
+                      packs: list[str], ids: list[str]) -> dict:
     identity, delivery, rules = _validate_generalized_selector(response, packs, ids)
     client = _client(payload)
     probabilities = {row["id"]: float(row["probability"])
@@ -572,7 +546,6 @@ def _semantic_receipt(payload: dict, response: dict, selected: list[dict],
         "rules": rules,
         "probabilities": probabilities,
         "model_provenance": model_provenance,
-        "build_receipt": build_receipt,
         "rule_delivery": {
             "mode": delivery["mode"],
             "declared_packs": packs,
@@ -583,51 +556,14 @@ def _semantic_receipt(payload: dict, response: dict, selected: list[dict],
     return row
 
 
-def _build_receipt(payload: dict, advisory: dict, status: str,
-                   failure_stage: str | None = None,
-                   failure_reason: str | None = None) -> dict:
-    client = _client(payload)
-    row = {
-        "schema": BUILD_RECEIPT_SCHEMA,
-        "client": client,
-        "session_id": payload["session_id"],
-        "turn_id": payload.get("turn_id") if client == "codex" else None,
-        "prompt_sha256": digest(payload["prompt"]),
-        "adviser_digest": semantic_selector_digest(REPO),
-        "configuration_digest": digest({
-            relative: file_sha256(REPO / relative)
-            for relative in ("ops/config/hooks.json", "ops/config/codex-hooks.json")
-        }),
-        "source_digest": source_sha256(REPO),
-        "semantic_rule_delivery": status,
-        "advisory": advisory,
-    }
-    if status == "failed":
-        row["failure_stage"] = failure_stage
-        row["failure_reason"] = failure_reason
-    row["receipt_id"] = receipt_id(row)
-    if not validate_build_receipt(row, repo=REPO):
-        raise RuntimeError("build receipt failed local validation")
-    return row
-
-
 def _process_prompt(payload: dict, runner: Callable,
-                    adviser: Callable[[str], list[dict]] | None,
-                    build_adviser: Callable[[str], dict] | None) -> dict | None:
+                    adviser: Callable[[str], list[dict]] | None) -> dict | None:
     prompt = payload.get("prompt")
     if (not _nonempty(payload.get("session_id")) or not _nonempty(prompt)
             or (_client(payload) == "codex" and not _nonempty(payload.get("turn_id")))):
         return None
     if len(prompt) > MESSAGE_LIMIT_CHARS:
-        receipt = _build_receipt(payload, _build_unavailable(),
-                                 "not_attempted_oversize")
-        return _context(canonical(receipt).decode("utf-8"), "UserPromptSubmit")
-    try:
-        build = (build_adviser or _build_adviser)(prompt)
-        if not isinstance(build, dict):
-            raise RuntimeError("build adviser returned malformed advice")
-    except Exception as exc:
-        build = _build_unavailable(exc)
+        return _context("RULE DELIVERY NOT ATTEMPTED: prompt exceeds the context limit.", "UserPromptSubmit")
     failure_stage = "semantic_adviser"
     try:
         selected = (adviser(prompt) if adviser is not None
@@ -642,8 +578,7 @@ def _process_prompt(payload: dict, runner: Callable,
                 candidate_ids.append(candidate_id)
         ids, packs = semantic_delivery(REPO, candidate_ids)
         if not ids:
-            receipt = _build_receipt(payload, build, "not_applicable")
-            return _context(canonical(receipt).decode("utf-8"), "UserPromptSubmit")
+            return None
         by_id = {row.get("id"): row for row in selected if isinstance(row, dict)}
         selected = [by_id[short] for short in ids]
         if any(row.get("probability") is None for row in selected):
@@ -653,9 +588,8 @@ def _process_prompt(payload: dict, runner: Callable,
         failure_stage = "selector_response"
         _validate_generalized_selector(response, packs, ids)
         failure_stage = "receipt_assembly"
-        build_receipt = _build_receipt(payload, build, "delivered")
         receipt = _semantic_receipt(
-            payload, response, selected, packs, ids, build_receipt)
+            payload, response, selected, packs, ids)
         return _context(canonical(receipt).decode("utf-8"), "UserPromptSubmit")
     except Exception as exc:
         if isinstance(exc, SelectorError):
@@ -666,8 +600,7 @@ def _process_prompt(payload: dict, runner: Callable,
             failure_reason = "invalid_data"
         else:
             failure_reason = "exception"
-        receipt = _build_receipt(payload, build, "failed", failure_stage, failure_reason)
-        return _context(canonical(receipt).decode("utf-8"), "UserPromptSubmit")
+        return _context(f"RULE DELIVERY FAILED: {failure_stage} ({failure_reason}); read the applicable rules before acting.", "UserPromptSubmit")
 
 
 # ---------------------------------------------------------------------------
@@ -805,14 +738,19 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         # notice names every id and records nothing for dedupe.
         return _context(rule_routes.notice_too_large(ids))
     rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full])
+    try:
+        from lib.rule_recall import log_delivery
+        log_delivery(Path(REPO) / "out/rule-route-delivery.jsonl", json.loads(text)["receipt_id"],
+                     [r["id"] for r in full])
+    except (OSError, ValueError):
+        pass
     return _context(text)
 
 
 def process(payload: dict, *, runner: Callable = subprocess.run,
-            adviser: Callable[[str], list[dict]] | None = None,
-            build_adviser: Callable[[str], dict] | None = None) -> dict | None:
+            adviser: Callable[[str], list[dict]] | None = None) -> dict | None:
     if payload.get("hook_event_name") == "UserPromptSubmit":
-        return _process_prompt(payload, runner, adviser, build_adviser)
+        return _process_prompt(payload, runner, adviser)
     if _matches(payload):
         # Keep the original receipt when it is visible in full. An oversized
         # receipt is not delivery: Claude persists it and shows a preview.

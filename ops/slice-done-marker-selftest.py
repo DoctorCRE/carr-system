@@ -248,8 +248,10 @@ class FakeServer:
 
     def v_read_slice_completion(self, args):
         sid = args["slice_id"]
+        # Exactly the projection ops.read_slice_done_state returns.
         members = [{"id": m["id"], "release_key": m["release_key"], "commit_sha": m["commit_sha"],
-                    "pr_number": m.get("pr_number"), "subject": m["subject"]} for m in self.members
+                    "pr_number": m.get("pr_number"), "subject": m["subject"],
+                    "attribution": m["attribution"]} for m in self.members
                    if m["slice_id"] == sid]
         criteria = []
         for c in self.registered.get(sid, []):
@@ -278,26 +280,11 @@ def fake_git(commits, reach):
     """commits: [(sha, subject)] newest first; reach: {release_sha: set(commit shas)}."""
     def run(*args):
         if args[0] == "log":
-            return "".join(f"{sha}\x1f{subject}\x1fbody of {subject}\x1e" for sha, subject in commits)
+            return "".join(f"{sha}\x1f{subject}\x1e" for sha, subject in commits)
         if args[0] == "rev-list":
             return "\n".join(sorted(reach.get(args[-1], set())))
         raise AssertionError(args)
     return run
-
-
-class FakeJev:
-    """Matches every shipped criterion to one member; records calls. The
-    marker asks Jev nothing else: the kind is the server's."""
-
-    def __init__(self, match="m0", match_prob=0.9):
-        self.match, self.match_prob = match, match_prob
-        self.calls: list[list[str]] = []
-
-    def __call__(self, state, questions, facets):
-        self.calls.append(facets)
-        assert all(q.startswith("evidence_matching_") for q in questions), questions
-        return {qid: {"type": "choice", "choice": self.match, "probabilities": {self.match: self.match_prob}}
-                for qid in questions}
 
 
 COMMITS = [(SHA_S00, "S00 portfolio negatives gate (#9)"),
@@ -306,9 +293,9 @@ COMMITS = [(SHA_S00, "S00 portfolio negatives gate (#9)"),
            (SHA_F08, SRC)]
 
 
-def marker(server, jev=None, commits=COMMITS, reach=None):
+def marker(server, commits=COMMITS, reach=None):
     reach = reach if reach is not None else {REL1: {SHA_F08, SHA_S00}, REL2: {SHA_F08, SHA_R03, SHA_S00}}
-    return sdm.Marker(call=server, git_run=fake_git(commits, reach), ask=jev or FakeJev(), out=lambda _s: None)
+    return sdm.Marker(call=server, git_run=fake_git(commits, reach), out=lambda _s: None)
 
 
 def by_id(outcomes):
@@ -348,7 +335,7 @@ class Run(unittest.TestCase):
                            "member": member_of(server, "V5-F08"), "via": "automation"}])
         # J303's merge is in no complete release yet.
         self.assertEqual(out["V5-J303"].status, "in_progress")
-        self.assertIn("no shipped change of this slice was matched", out["V5-J303"].reason)
+        self.assertIn("no sole shipped change of this slice to propose yet", out["V5-J303"].reason)
         # A runtime outcome no kind can show stays unbound: blocked, named.
         self.assertEqual(out["V5-R01"].status, "blocked")
         self.assertIn("Joe pilot observed for two weeks -> no server-resolvable evidence kind", out["V5-R01"].reason)
@@ -414,7 +401,7 @@ class Run(unittest.TestCase):
         server = FakeServer()
         marker(server).run()
         before = len(server.writes())
-        marker(server, FakeJev()).run()
+        marker(server).run()
         self.assertEqual(server.writes()[before:], [])
 
     def test_a_partner_hold_is_skipped_untouched(self):
@@ -426,18 +413,15 @@ class Run(unittest.TestCase):
         self.assertEqual(out["V5-J303"].wrote, "skipped")
         self.assertEqual(server.writes()[before:], [])
 
-    def test_a_none_match_proposes_nothing(self):
+    def test_two_shipped_members_are_ambiguous_and_propose_nothing(self):
         server = FakeServer()
-        out = by_id(marker(server, FakeJev(match="none")).run())
+        second = "e" * 40
+        commits = COMMITS + [(second, "V5-F08 backup scanner follow-up (#11)")]
+        reach = {REL1: {SHA_F08, SHA_S00, second}, REL2: {SHA_F08, SHA_R03, SHA_S00, second}}
+        out = by_id(marker(server, commits, reach).run())
         self.assertNotIn(("V5-F08", F08_SHIP), server.bindings)
         self.assertEqual(out["V5-F08"].status, "in_progress")
-        self.assertIn(f"{F08_SHIP} -> no shipped change of this slice was matched", out["V5-F08"].reason)
-
-    def test_a_low_confidence_match_proposes_nothing(self):
-        server = FakeServer()
-        out = by_id(marker(server, FakeJev(match_prob=0.4)).run())
-        self.assertNotIn(("V5-F08", F08_SHIP), server.bindings)
-        self.assertEqual(out["V5-F08"].status, "in_progress")
+        self.assertIn(f"{F08_SHIP} -> no sole shipped change of this slice to propose yet", out["V5-F08"].reason)
 
     def test_server_refusal_of_the_proposal_is_recorded_as_in_progress(self):
         server = FakeServer()
@@ -462,7 +446,7 @@ class Run(unittest.TestCase):
         server = FakeServer()
         server.registered["V5-F08"] = [F08_SHIP, F08_RESTORE]
         server.partner_bind("V5-F08", F08_SHIP, "unbound")
-        out = by_id(marker(server, FakeJev()).run({"V5-F08"}))
+        out = by_id(marker(server).run({"V5-F08"}))
         self.assertNotIn(F08_SHIP, [a.get("criterion") for v, a in server.calls
                                     if v == "bind-slice-criterion-evidence"])
         self.assertEqual(out["V5-F08"].status, "blocked")

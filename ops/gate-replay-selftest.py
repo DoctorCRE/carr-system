@@ -39,11 +39,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import signal
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -69,6 +71,85 @@ GR = load("gate_replay_under_test", REPO / "ops" / "gate-replay.py")
 EX = load("extract_real_replay_under_test", REPO / "tools" / "extract-real-replay.py")
 CHECK = Checker()
 check = CHECK.check
+
+
+# Host scheduling is not a fixture input. Suspend an interpreter between clock
+# reads, then prove replay deadlines don't consume the host's pause. Stdlib
+# subprocess waits must still expire on real time even when the shim is active.
+clock_env = git_env.fixture_env()
+clock_env.update(PYTHONPATH=str(GR.SHIM_DIR), CARR_GATE_REPLAY_EPOCH="1800000000")
+clock_probe = '''
+import os, signal, subprocess, sys, time
+before = time.monotonic()
+print("ready", flush=True)
+os.kill(os.getpid(), signal.SIGSTOP)
+print(time.monotonic() - before, flush=True)
+before = time.monotonic()
+time.sleep(0.02)
+print(time.monotonic() - before, flush=True)
+try:
+    subprocess.run([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.1)
+except subprocess.TimeoutExpired:
+    print("real timeout", flush=True)
+'''
+with subprocess.Popen([sys.executable, "-c", clock_probe], env=clock_env,
+                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as probe:
+    assert probe.stdout is not None
+    try:
+        assert probe.stdout.readline().strip() == "ready"
+        _, status = os.waitpid(probe.pid, os.WUNTRACED)
+        assert os.WIFSTOPPED(status)
+        time.sleep(0.1)
+    finally:
+        os.kill(probe.pid, signal.SIGCONT)
+    output, error = probe.communicate(timeout=10)
+    lines = output.splitlines()
+    check("host suspension cannot exhaust a replay deadline",
+          probe.returncode == 0 and float(lines[0]) < 0.01, output + error)
+    check("explicit sleep advances the replay deadline",
+          float(lines[1]) >= 0.02, output + error)
+    check("stdlib subprocess timeouts retain real time", lines[2:] == ["real timeout"], output + error)
+
+
+# Waiters imported after startup must use real deadlines, even though gate code
+# reads logical monotonic time. Exercise timeout failures and completed results.
+waiter_probe = """
+import concurrent.futures as futures
+import queue
+import time
+
+def expires(label, call, exception):
+    started = time.perf_counter()
+    try:
+        call()
+    except exception:
+        elapsed = time.perf_counter() - started
+        assert 0.03 <= elapsed < 0.5, (label, elapsed)
+    else:
+        raise AssertionError(label + " did not time out")
+
+q = queue.Queue()
+expires("queue get", lambda: q.get(timeout=0.05), queue.Empty)
+q = queue.Queue(maxsize=1)
+q.put("first")
+expires("queue put", lambda: q.put("second", timeout=0.05), queue.Full)
+f = futures.Future()
+expires("future result", lambda: f.result(timeout=0.05), futures.TimeoutError)
+expires("as_completed", lambda: next(futures.as_completed([f], timeout=0.05)), futures.TimeoutError)
+started = time.perf_counter()
+done, pending = futures.wait([f], timeout=0.05)
+assert not done and pending == {f}
+assert 0.03 <= time.perf_counter() - started < 0.5
+f.set_result("done")
+assert f.result(timeout=0.05) == "done"
+assert list(futures.as_completed([f], timeout=0.05)) == [f]
+print("real waiter deadlines")
+"""
+waiter = subprocess.run([sys.executable, "-c", waiter_probe], env=clock_env,
+                        capture_output=True, text=True, timeout=10)
+check("stdlib queue and future waits retain real deadlines",
+      waiter.returncode == 0 and waiter.stdout.strip() == "real waiter deadlines",
+      waiter.stdout + waiter.stderr)
 
 
 # ---------------------------------------------------------------- leak guard
@@ -304,6 +385,45 @@ with tempfile.TemporaryDirectory(prefix="gate-replay-extract2-") as tmp:
     check("extractor keeps an ordinary edit", len(kept) == 1 and kept[0].get("new_string") == "timeout = 45",
           kept)
 
+
+# A descheduled replay process must not spend its inspection budget before
+# reaching Jev. Inject host elapsed time without waiting, then exercise the
+# real supervisor's deadline branch through the logical replay clock shim.
+budget_probe = r'''
+import importlib.util, os, runpy, sys, time
+from pathlib import Path
+repo = Path(sys.argv[1])
+host_elapsed = [100.0]
+cpu_elapsed = [0.0]
+time.monotonic = lambda: host_elapsed[0]
+time.process_time = lambda: cpu_elapsed[0]
+time.process_time_ns = lambda: int(cpu_elapsed[0] * 1e9)
+os.environ["CARR_GATE_REPLAY_EPOCH"] = "1750000000"
+runpy.run_path(str(repo / "ops/gate_replay_shim/sitecustomize.py"))
+spec = importlib.util.spec_from_file_location("supervisor", repo / "hooks/jev-supervisor.py")
+hook = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hook)
+run = hook.Run(receipt_path=os.devnull)
+called = []
+def inspect_stop_boundary():
+    called.append(True)
+    return []
+host_elapsed[0] += 20.0
+run.do(inspect_stop_boundary)
+assert called, run.results
+assert not run.results, run.results
+for _ in range(int(hook.BUDGET_SECONDS / 0.001) + 1):
+    time.monotonic()
+run.do(inspect_stop_boundary)
+assert len(called) == 1, called
+assert run.results[0]["detail"]["advice"].startswith(
+    "inspect_stop_boundary unavailable (time_budget_exhausted)"), run.results
+'''
+budget_result = subprocess.run([sys.executable, "-c", budget_probe, str(REPO)],
+                       capture_output=True, text=True, timeout=10,
+                       env=git_env.fixture_env())
+check("host scheduling delays cannot exhaust the replayed Stop inspection budget",
+      budget_result.returncode == 0, budget_result.stderr)
 
 # ---------------------------------------------------------------- manifest coverage
 

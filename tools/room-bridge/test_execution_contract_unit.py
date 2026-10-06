@@ -18,7 +18,6 @@ import dispatch  # noqa: E402
 import job_passport_artifact as artifact_renderer  # noqa: E402
 import bridge  # noqa: E402
 import evaluation_kernel  # noqa: E402
-import evaluation_rubrics  # noqa: E402
 import spatial_surface  # noqa: E402
 import admission  # noqa: E402
 
@@ -488,7 +487,7 @@ def shared_kernel_policy_is_risk_scaled_and_default_deny():
     changed = copy.deepcopy(kernel)
     changed["cases"][0]["job_stages"] = ["not-a-shared-stage"]
     expect_refusal(lambda: evaluation_kernel.validate_evaluation_kernel(changed), "unknown workflow rubric stage")
-    rubrics = evaluation_rubrics.WORKFLOW_RUBRICS
+    rubrics = evaluation_kernel.WORKFLOW_RUBRICS
     assert {"workflow:claude-desktop-readonly", "workflow:codex-desktop-readonly", "workflow:hermes-orchestration", "workflow:grok-x-native-retrieval"}.issubset(rubrics)
     assert len({tuple(sorted(rubrics[key]["critical_dimensions"])) for key in rubrics}) == len(rubrics)
     assert {"visual_comprehension", "telemetry_truth", "layout_authority_separation"}.issubset(rubrics["workflow:job-passport"]["critical_dimensions"])

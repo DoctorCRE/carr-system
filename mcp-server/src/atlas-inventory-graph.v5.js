@@ -23,7 +23,7 @@
 
 import { organizationTenantForActor } from "./identity.js";
 import { TOOLS } from "./tools.js";
-import { SCAC_MUTATION_OPERATIONS } from "./scac-mutation-registry.v35.generated.js";
+import { ATLAS_MUTATION_DECLARATIONS as SCAC_MUTATION_OPERATIONS } from "./atlas-mutation-declarations.generated.js";
 import { SCAC_MUTATION_REGISTRY_DIGEST, SCAC_MUTATION_REGISTRY_VERSION } from "./mutation-registry.js";
 import { AUTHENTICATED_SURFACES, WORKSPACE_ROUTES } from "./workspace-surface-inventory.js";
 

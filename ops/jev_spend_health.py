@@ -1,4 +1,4 @@
-"""Local Jev spend estimate and its single deduplicated response loop.
+"""Read-only local, factory and Worker Jev spend estimate.
 
 This is a library for the canonical health surface. It reads the canonical
 usage receipt log, never vendor credentials or prompt text.
@@ -8,10 +8,15 @@ import fcntl
 import json
 import os
 import subprocess
+import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import contextmanager
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib import record_call  # noqa: E402
 
 
 def _root():
@@ -31,31 +36,20 @@ USAGE_LOG = ROOT / "out" / "jev-calls.jsonl"
 FACTORY_USAGE_LOG = Path.home() / ".local" / "state" / "software-factory" / "jev-calls.jsonl"
 LOOP_STATE = ROOT / "out" / "jev-spend-loop.json"
 CONFIG = Path(__file__).resolve().parent / "config" / "jev-cost-guard.v1.json"
-ACTION = ("on breach: open/update one dedup loop · owner orchestrator · "
-          "remediation find caller in jev usage log · verify next UTC-day estimate "
-          "below threshold · auto-clear when below threshold")
+ACTION = ('on breach: open/update one deduplicated loop per provider · owner orchestrator · '
+          'remediation inspect named billing driver; for Jev find caller in jev usage log and remove duplicate work or reduce its usage; restore named billing reader and confirmed plan price for unknown coverage · '
+          'verify next complete UTC day <= daily warning threshold where configured, <= 2x prior 14-day median and projection <= budget · '
+          'auto-clear after all checks pass with complete coverage')
 
 
 def _run_verb(name, payload):
-    result = subprocess.run(["./run.sh", "call", name, json.dumps(payload)],
-                            cwd=ROOT, capture_output=True, text=True, timeout=35)
-    if result.returncode:
-        raise RuntimeError(f"{name} returned {result.returncode}")
-    start = result.stdout.find("{")
-    if start < 0:
-        raise RuntimeError(f"{name} returned no JSON")
-    answer = json.loads(result.stdout[start:])
-    if not isinstance(answer, dict) or answer.get("error") or (name != "read-loop" and answer.get("ok") is not True):
+    result = record_call.call_verb(name, payload, timeout=35)
+    if result.kind not in (record_call.OK, record_call.REFUSED):
+        raise RuntimeError(result.describe())
+    answer = result.reply
+    if not result.ok or not isinstance(answer, dict) or (name != "read-loop" and answer.get("ok") is not True):
         raise RuntimeError(f"{name} did not confirm the write")
     return answer
-
-
-def _loop_version(run_verb, loop_id):
-    current = run_verb("read-loop", {"loop_id": loop_id})
-    current = current.get("loop", current)
-    if current.get("loop_id") != loop_id or type(current.get("version")) is not int:
-        raise RuntimeError("read-loop returned no matching version")
-    return current["version"]
 
 
 def _state(path):
@@ -69,9 +63,15 @@ def _state(path):
 def _save_state(path, state):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
-    os.replace(tmp, path)
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+        tmp = Path(handle.name)
+        try:
+            json.dump(state, handle, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -84,10 +84,6 @@ def _loop_lock(path):
             yield
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
-
-
-def _id(day, action, amount):
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"carr-jev-spend:{day}:{action}:{amount:.2f}"))
 
 
 def _today_usage(log_path, day):
@@ -133,8 +129,7 @@ def nightly_exit_status(line):
     ) else 1
 
 
-def check_spend(log_path=USAGE_LOG, config_path=CONFIG, state_path=LOOP_STATE,
-                run_verb=_run_verb, *, now=None, extra_logs=(), worker_usage=None):
+def check_spend(log_path=USAGE_LOG, config_path=CONFIG, *, now=None, extra_logs=(), worker_usage=None):
     """Return one health row, with the bound action in the row itself."""
     config = json.loads(Path(config_path).read_text(encoding="utf-8"))
     threshold = float(config["daily_warning_usd"])
@@ -185,46 +180,4 @@ def check_spend(log_path=USAGE_LOG, config_path=CONFIG, state_path=LOOP_STATE,
         line += f" · at least this amount; {missing}"
     if worker_unavailable:
         line += " · at least this amount; Worker usage unavailable"
-    body = (f"Jev estimated recorded spend is ${amount:.3f} on {day} UTC, above "
-            f"${threshold:.2f}/day. Find caller in jev usage log at "
-            "out/jev-calls.jsonl, in software-factory's jev-calls.jsonl, "
-            "or in Worker Jev receipts; inspect prompt hashes for duplicate "
-            "calls and verify the next UTC-day estimate below threshold.")
-    try:
-        with _loop_lock(state_path):
-            state = _state(state_path)
-            if amount > threshold:
-                if not state.get("loop_id"):
-                    answer = run_verb("add-loop", {
-                        "idempotency_key": _id(day, "add", amount),
-                        # CARR's orchestrator queue is named "claude" in the
-                        # loop owner contract; the health row names the role.
-                        "kind": "open_loop", "domain": "system", "owner": "claude",
-                        "body": body, "marker": "none", "blocker": "capability",
-                        "blocker_detail": "TypeSafe callers outside this machine's local usage ledger",
-                    })
-                    if not answer.get("loop_id"):
-                        raise RuntimeError("add-loop returned no loop_id")
-                    state = {"loop_id": answer["loop_id"], "reported": amount, "day": day}
-                    _save_state(state_path, state)
-                elif day != state.get("day") or amount - float(state.get("reported", 0)) >= 0.10:
-                    run_verb("update-loop", {
-                        "idempotency_key": _id(day, "update", amount),
-                        "loop_id": state["loop_id"],
-                        "base_version": _loop_version(run_verb, state["loop_id"]),
-                        "body": body,
-                    })
-                    state.update(reported=amount, day=day)
-                    _save_state(state_path, state)
-            elif state.get("loop_id") and not worker_unavailable and not unknown:
-                run_verb("close-loop", {
-                    "idempotency_key": _id(day, "clear", amount),
-                    "loop_id": state["loop_id"], "resolution": "done",
-                    "base_version": _loop_version(run_verb, state["loop_id"]),
-                    "outcome": (f"Auto-cleared: estimated Jev spend on {day} UTC "
-                                f"is ${amount:.3f}, below ${threshold:.2f}/day."),
-                })
-                _save_state(state_path, {})
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        line += f" · loop action FAILED ({type(exc).__name__})"
-    return line
+    return line + " · monthly system cost collector owns response reconciliation"

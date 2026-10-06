@@ -1,68 +1,4 @@
-"""jev_intake.py — BEFORE-the-task checks for a coding agent session.
-
-Six of the checks from open loop #629's twenty-five: pick the files to read
-before touching anything (#1), pick a thinking-level recommendation (#2), stop
-on ambiguous asks before writing code (#3), route a task to a local model or
-escalate it (#5), split a multi-step plan into per-step routing (#18), and
-pick the closest past worked example (#23).
-
-EVERY PUBLIC FUNCTION HERE IS A CHECK, NEVER A GATE. It reports; it never
-blocks and never raises. On any failure to reach Jev — including a missing
-credential, a timeout, or a malformed response — it catches the failure and
-returns verdict "unavailable" rather than letting the caller crash or hang.
-That is a deliberate widening beyond the two- or three-way verdict named for
-each check below: "unavailable" is always a fourth possible outcome, and a
-caller checks for it before trusting the named verdicts at all.
-
-A CHECK, DELIBERATELY, NOT AN ACTING GATE (Joe, 2026-09-24, decision 5ec806a4:
-"every jev check in the system too is not a shadow" — read alongside this
-module, not against it). That ruling retired shadow as a DEFAULT holding
-pattern; it did not turn every judgment in the codebase into a blocker. These
-six checks stay report-only because nothing here HAS a deterministic
-mechanism to compare against or override — pick_effort, split_plan and the
-rest are the caller's only source for that judgment, not a second opinion on
-one. Every check that actually reaches Jev still calls ops/jev_judge.py's
-record() with what Jev said, so a threshold here can be measured against real
-traffic rather than argued for in a docstring — that discipline did not
-change. A check that never reaches Jev because its deterministic trigger did
-not fire has nothing to record — there is no judgment to log, only a skip —
-so those paths return without a record() call. That is documented per
-function below, not left implicit.
-
-THE SHAPE PER CHECK. A cheap deterministic trigger runs first; a Jev round
-trip only happens when it fires, because a hook runs on every tool call and a
-round trip is 0.5-2s. Independent facts about ONE subject are asked together
-in ONE request — several nouls, or several scores, in a single judge.judge()
-call — never as separate requests, per the vendor's own measured 12.2x/10x
-efficiency finding. Candidates competing for a single slot (a central file, a
-worked example) are a single Choice with an explicit "none of these" option,
-never one Noul per candidate.
-
-THRESHOLDS ARE NAMED CONSTANTS AND ARE PROVISIONAL. The generic 0.6
-confidence default measured elsewhere on this project did not transfer —
-evidence-state choice confidences had a median of 0.33 while still being
-right — so every threshold below is a documented placeholder to replace once
-this module's own shadow log has real traffic to measure against. Low
-confidence is treated as information (escalate=True), never smoothed over by
-falling back to a first guess.
-
-ONE MEASURED FACT THAT SHAPES pick_effort AND split_plan: on the local Qwen
-model, HIGHER thinking effort HURT on hard tasks — the 27B model at high
-effort went 0 for 9. So "low" is the default recommendation everywhere in
-this module and "high" is returned only when the evidence for it is strong:
-a score placed near the hardest level AND the judgment itself confident about
-that placement. This is the opposite of what intuition suggests ("harder
-task, ask for more effort") and it is why the mapping below is conservative
-on purpose rather than proportional.
-
-IT IS A LIBRARY AND MUST STAY ONE. No shebang line and no main guard: either
-one turns a .py file into a registered script entrypoint in the sealed source
-inventory, moves the frontier, and owes a forward-only registry successor.
-The inventory's detector is a regex over the whole file with no notion of a
-docstring, so the construct is described here and never spelled out, even as
-an example. ops/typesafe_client.py carries the long version of this warning.
-Its sibling selftest, ops/jev-intake-selftest.py, is exempt by its own name.
-"""
+"""Exact file references, test availability, change size and named policy constraints run first. All semantic task questions share one cached task batch; added candidate rosters and plans form separate evidence boundaries. Paths and difficulty recommendations remain review advice pending labeled calibration."""
 
 from __future__ import annotations
 
@@ -262,8 +198,8 @@ def pick_context(task_text, repo_root, *, max_files=8, client=None):
                 "change or be read.",
                 true=f"the task would need to read or edit {path}",
                 false=f"the task would not need {path}")
-        answer = judge_mod.judge({"task_text": task_text, "candidate_count": len(ranked)},
-                                 questions, client=tsc)
+        answer = _semantic().ask({"task_text": task_text[:6000], "candidate_count": len(ranked)},
+                                 questions, client=tsc, caller="jev_intake", version="vendor-v1", transport=judge_mod.judge)
     except Exception as exc:  # never raises past a check: see module docstring
         return _unavailable(check_id, kind, task_text, exc)
 
@@ -287,8 +223,8 @@ def pick_context(task_text, repo_root, *, max_files=8, client=None):
 
     return {"check": check_id, "verdict": "picked" if ordered else "none_found",
             "confidence": central["confidence"],
-            "escalate": (not ordered) or bool(central["escalate"]),
-            "detail": {"paths": ordered, "candidate_count": len(ranked),
+            "escalate": True,
+            "detail": {"paths": [], "advisory_paths": ordered, "review_required": True, "candidate_count": len(ranked),
                       "shortlist": shortlist}}
 
 
@@ -335,15 +271,11 @@ def _effort_from_score(score_value, confidence):
 
 
 def pick_effort(task_text, *, context_summary=None, client=None):
-    """Recommend a thinking-level verdict in {"low", "medium", "high"}.
+    """Return deterministic low effort for trivial tasks, otherwise review_required.
 
-    Asks ONE Score question over EFFORT_LEVELS. The mapping from score to
-    verdict is deliberately biased toward "low": on the local Qwen model,
-    HIGHER effort measurably HURT on hard tasks (27B at high effort went 0/9),
-    so "high" is only returned when the score sits near the hardest level AND
-    the judgment is itself confident about that placement — see
-    _effort_from_score. Low confidence returns "low" with escalate=True,
-    never a guess.
+    Reads difficulty from the shared task batch. The provisional mapping in
+    _effort_from_score supplies detail.advisory_verdict; it never authorizes
+    execution. Every semantic result requires review, including low effort.
 
     TRIGGER: skipped, returning "low" with confidence=1.0 and no Jev call,
     when TRIVIAL_TASK_SIGN matches the task text.
@@ -358,13 +290,7 @@ def pick_effort(task_text, *, context_summary=None, client=None):
     try:
         tsc = client or _client()
         judge_mod = _judge()
-        questions = {"difficulty": tsc.score(
-            "Rate how difficult and how novel `state.task_text` is to implement "
-            "correctly in one pass, against the ordered levels.", EFFORT_LEVELS)}
-        subject = {"task_text": task_text}
-        if context_summary:
-            subject["context_summary"] = context_summary
-        answer = judge_mod.judge(subject, questions, client=tsc)
+        answer = _task_judgment(task_text, context_summary, tsc, judge_mod)
     except Exception as exc:
         return _unavailable(check_id, kind, task_text, exc)
 
@@ -373,13 +299,13 @@ def pick_effort(task_text, *, context_summary=None, client=None):
         score_value = float(decision["value"])
     except (TypeError, ValueError):
         score_value = None
-    verdict, escalate = _effort_from_score(score_value, decision["confidence"])
+    verdict, _ = _effort_from_score(score_value, decision["confidence"])
 
     judge_mod.record(kind, task_text[:160], answer, None)
 
-    return {"check": check_id, "verdict": verdict, "confidence": decision["confidence"],
-            "escalate": escalate,
-            "detail": {"score": score_value, "levels": EFFORT_LEVELS}}
+    return {"check": check_id, "verdict": "review_required", "confidence": decision["confidence"],
+            "escalate": True,
+            "detail": {"advisory_verdict": verdict, "score": score_value, "levels": EFFORT_LEVELS}}
 
 
 # ============================================================================
@@ -438,12 +364,12 @@ def _needs_ambiguity_check(task_text):
 
 
 def check_ambiguity(task_text, *, context_summary=None, client=None):
-    """Verdict "clear" or "ambiguous", naming which fixed kind(s) apply.
+    """Return deterministic clear for targeted tasks, otherwise review_required.
 
-    Every kind in AMBIGUITY_KINDS is asked as one Noul, all in ONE request.
-    `detail.kinds` names, per kind, whether it applies and Jev's own
-    escalate flag for that specific Noul. verdict is "ambiguous" the moment
-    ANY kind applies.
+    Reads every AMBIGUITY_KINDS Noul from the shared task batch.
+    detail.kinds retains whether each kind applies and its escalation flag.
+    The semantic verdict is always review_required, including when no kind
+    applies; semantic advice never clears execution.
 
     TRIGGER: skipped, returning "clear", when the task text is at least
     SHORT_TASK_CHARS long AND names a concrete file or function — see
@@ -458,30 +384,21 @@ def check_ambiguity(task_text, *, context_summary=None, client=None):
     try:
         tsc = client or _client()
         judge_mod = _judge()
-        questions = {qid: tsc.noul(text, true=true, false=false)
-                     for qid, (text, true, false) in AMBIGUITY_KINDS.items()}
-        subject = {"task_text": task_text}
-        if context_summary:
-            subject["context_summary"] = context_summary
-        answer = judge_mod.judge(subject, questions, client=tsc)
+        answer = _task_judgment(task_text, context_summary, tsc, judge_mod)
     except Exception as exc:
         return _unavailable(check_id, kind, task_text, exc)
 
     kinds = {}
-    any_applies = False
-    any_escalate = False
     for qid in AMBIGUITY_KINDS:
         decision = judge_mod.read(answer, qid, min_confidence=AMBIGUITY_MIN_CONFIDENCE)
         applies = decision["outcome"] == "yes"
         kinds[qid] = {"applies": applies, "probability": decision["value"],
                      "escalate": decision["escalate"]}
-        any_applies = any_applies or applies
-        any_escalate = any_escalate or decision["escalate"]
 
     judge_mod.record(kind, task_text[:160], answer, None)
 
-    return {"check": check_id, "verdict": "ambiguous" if any_applies else "clear",
-            "confidence": None, "escalate": any_applies or any_escalate,
+    return {"check": check_id, "verdict": "review_required",
+            "confidence": None, "escalate": True,
             "detail": {"kinds": kinds}}
 
 
@@ -526,13 +443,13 @@ def _deterministic_route_reasons(task_text, files, diff_size_estimate, has_tests
 
 def route_task(task_text, *, files=None, diff_size_estimate=None, has_tests=None,
                client=None):
-    """Verdict "local" or "escalate" plus detail.reason.
+    """Return deterministic escalate, otherwise review_required plus detail.reason.
 
     Deterministic rules run first and are FINAL when any fires: security or
     parser-shaped work, untested algorithm/concurrency work, a diff over
     ROUTE_MAX_DIFF_LINES, more than ROUTE_MAX_FILES files, or no test command
-    at all. Only when NONE of those fire does this ask Jev one Noul —
-    "is this still hard or risky enough to escalate" — on what is left.
+    at all. When none fire, the shared task batch supplies a risk Noul and
+    its reason remains advice under review_required.
 
     TRIGGER: the deterministic rules ARE the trigger for skipping Jev; there
     is no separate gate on top of them.
@@ -549,24 +466,7 @@ def route_task(task_text, *, files=None, diff_size_estimate=None, has_tests=None
     try:
         tsc = client or _client()
         judge_mod = _judge()
-        questions = {"hard_enough_to_escalate": tsc.noul(
-            "`state.task_text` describes a coding task that already passed "
-            "every deterministic escalation rule (not security-sensitive, "
-            "tested algorithm work if any, a small diff, few files, tests "
-            "available). Given everything else known about it, is it STILL "
-            "hard or risky enough that a person or a larger model should do "
-            "it rather than a small local model? Answer no for ordinary, "
-            "well-scoped work.",
-            true="a person or a larger model should do this",
-            false="ordinary work for a small local model")}
-        subject = {"task_text": task_text}
-        if files:
-            subject["files"] = list(files)
-        if diff_size_estimate is not None:
-            subject["diff_size_estimate"] = diff_size_estimate
-        if has_tests is not None:
-            subject["has_tests"] = has_tests
-        answer = judge_mod.judge(subject, questions, client=tsc)
+        answer = _task_judgment(task_text, None, tsc, judge_mod)
     except Exception as exc:
         return _unavailable(check_id, kind, task_text, exc)
 
@@ -576,8 +476,8 @@ def route_task(task_text, *, files=None, diff_size_estimate=None, has_tests=None
     judge_mod.record(kind, task_text[:160], answer, None)
 
     verdict = "escalate" if decision["outcome"] == "yes" else "local"
-    return {"check": check_id, "verdict": verdict, "confidence": decision["confidence"],
-            "escalate": verdict == "escalate" or bool(decision["escalate"]),
+    return {"check": check_id, "verdict": "review_required", "confidence": decision["confidence"],
+            "escalate": True,
             "detail": {"reason": ("Jev judged this hard or risky enough to "
                                   "escalate" if verdict == "escalate" else
                                   "no deterministic or judged escalation signal"),
@@ -600,7 +500,7 @@ PLAN_MIN_CONFIDENCE = 0.5
 
 
 def split_plan(plan_steps: list, *, client=None):
-    """Per-step {"step", "route": "local"|"escalate", "difficulty"}.
+    """Per-step review_required with advisory_route and difficulty.
 
     One request carries one Score question per step of `plan_steps`, all
     about the single subject `state.plan.steps` — never one request per
@@ -618,6 +518,8 @@ def split_plan(plan_steps: list, *, client=None):
     if not plan_steps:
         return _skip(check_id, "routed", {"reason": "no steps to route", "steps": []})
 
+    if len(plan_steps) > 20:
+        return _skip(check_id, "review_required", {"reason":"plan exceeds bounded semantic shortlist"}, escalate=True)
     try:
         tsc = client or _client()
         judge_mod = _judge()
@@ -626,8 +528,8 @@ def split_plan(plan_steps: list, *, client=None):
             "to implement correctly in one pass, against the ordered levels.",
             PLAN_DIFFICULTY_LEVELS)
             for i in range(len(plan_steps))}
-        answer = judge_mod.judge({"plan": {"steps": list(plan_steps)}}, questions,
-                                 client=tsc)
+        answer = _semantic().ask({"plan": {"steps": [str(step)[:1000] for step in plan_steps]}}, questions,
+                                 client=tsc, caller="jev_intake", version="vendor-v1", transport=judge_mod.judge)
     except Exception as exc:
         return _unavailable(check_id, kind, f"plan with {len(plan_steps)} steps", exc)
 
@@ -643,13 +545,13 @@ def split_plan(plan_steps: list, *, client=None):
             score_value, decision["confidence"])
         route = "escalate" if difficulty == "high" else "local"
         any_escalate = any_escalate or low_confidence_escalate or route == "escalate"
-        steps_out.append({"step": step_text, "route": route, "difficulty": difficulty,
+        steps_out.append({"step": step_text, "route": "review_required", "advisory_route": route, "difficulty": difficulty,
                           "confidence": decision["confidence"]})
 
     judge_mod.record(kind, f"plan with {len(plan_steps)} steps", answer, None)
 
     return {"check": check_id, "verdict": "routed", "confidence": None,
-            "escalate": any_escalate, "detail": {"steps": steps_out}}
+            "escalate": True, "detail": {"steps": steps_out}}
 
 
 # ============================================================================
@@ -714,7 +616,7 @@ def pick_example(task_text, examples: list, *, client=None):
             "`state.task_text` describes a new piece of work. Which past worked "
             "example, if any, solves the closest problem and would be worth "
             "reading before starting this one?", options)}
-        answer = judge_mod.judge({"task_text": task_text}, questions, client=tsc)
+        answer = _semantic().ask({"task_text": task_text[:6000]}, questions, client=tsc, caller="jev_intake", version="vendor-v1", transport=judge_mod.judge)
     except Exception as exc:
         return _unavailable(check_id, kind, task_text, exc)
 
@@ -724,8 +626,29 @@ def pick_example(task_text, examples: list, *, client=None):
     chosen = decision["value"]
     if chosen in (None, EXAMPLE_NONE):
         return {"check": check_id, "verdict": "none_fits",
-                "confidence": decision["confidence"], "escalate": bool(decision["escalate"]),
+                "confidence": decision["confidence"], "escalate": True,
                 "detail": {"example_id": None, "candidate_count": len(trimmed)}}
     return {"check": check_id, "verdict": "matched", "confidence": decision["confidence"],
-            "escalate": bool(decision["escalate"]),
-            "detail": {"example_id": chosen, "candidate_count": len(trimmed)}}
+            "escalate": True,
+            "detail": {"example_id": None, "advisory_example_id": chosen, "review_required": True, "candidate_count": len(trimmed)}}
+
+
+def _semantic():
+    path = os.path.join(REPO, "ops", "jev_semantic.py")
+    spec = importlib.util.spec_from_file_location("jev_semantic", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+
+def _task_judgment(task_text, context_summary, tsc, judge):
+    qs = {qid: tsc.noul(text, true=true, false=false)
+          for qid, (text, true, false) in AMBIGUITY_KINDS.items()}
+    qs["difficulty"] = tsc.score("How difficult is task_text to implement correctly?", EFFORT_LEVELS)
+    qs["hard_enough_to_escalate"] = tsc.noul(
+        "Does task_text require uncertain semantic or design judgment beyond ordinary implementation? "
+        "Exact path, numeric and test availability checks have already run in code.")
+    return _semantic().ask({"task_text": (task_text or "")[:6000],
+                            "context_summary": (context_summary or "")[:2000]}, qs,
+                           transport=judge.judge, client=tsc, caller="jev_intake", version="task-v1")

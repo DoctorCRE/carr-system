@@ -78,7 +78,6 @@
     "scheduled-run-record.py": {"catch_class": "scheduled run finishing with no run row", "also_caught_by": "unverified"},
     "chat-lint-gate.py": {"catch_class": "writing lint on the turn's prose", "also_caught_by": "unverified"},
     "chat-lint-carryover.py": {"catch_class": "carryover of the previous turn's lint", "also_caught_by": "unverified"},
-    "stale-claim-gate.py": {"catch_class": "claim asserted from stale state", "also_caught_by": "unverified"},
     "loose-work-gate.py": {"catch_class": "turn ended with loose work outstanding", "also_caught_by": "unverified"},
     "unread-artifact-gate.py": {"catch_class": "artifact referenced but never read", "also_caught_by": "unverified"},
     "drift-claim-gate.py": {"catch_class": "drift claimed without a record", "also_caught_by": "unverified"},

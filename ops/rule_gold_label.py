@@ -1,82 +1,4 @@
-"""rule_gold_label.py — dense gold labels for the rule-delivery benchmark.
-
-WHAT IT PRODUCES. For every benchmark case, a probability for EVERY live rule
-that the rule binds on that turn — not a shortlist. ops/rule_delivery_eval.py
-then scores every delivery path against the gold set these become. The gold
-is the answer key the rule-system gate is tuned against, so the procedure is
-spelled out here rather than left to whoever runs it.
-
-THE BATCHING SCHEME (architecture_or_design, judged by Jev before the scale
-run; see the PR body for the numbers). The case is the SUBJECT and each rule
-is an independent true-or-false question about it: one request per case, the
-case as the state, one noul per live rule (195 today) carrying that rule's
-statement. That is the shape ops/jev_judge.py names for independent labels
-("ask every independent question about one subject in one request"), and it
-keeps the state small, which is where Jev's accuracy lives. Measured on the
-live corpus on 2026-09-26: the whole roster in one request with this wording
-returns HTTP 400 max_tokens_exceeded, so a case is two requests of about 100
-rules (about 82k input tokens a case), each answering in under a second. On
-the 16 hand-labelled v1 cases it recovered 81% of the hand gold at p >= 0.5,
-against 59% for the rule-as-state shape; Jev put 1.00 on this scheme over the
-four alternatives below. The rejected alternatives: one Choice over the roster (wrong shape —
-several rules bind at once, and a Choice's probabilities sum to one); a
-keyword shortlist then nouls (a shortlist is exactly the recall ceiling this
-benchmark exists to measure, so it cannot be inside the labeller); and the
-rule as the state with one noul per case (used here only as the SECOND PASS,
-because it asks the same question from the other side).
-
-THE STRICT RE-LABEL (2026-09-27). A merge review re-judged a sample of the
-first gold with a stricter question and found about a third of it not binding,
-and found universal-trigger rules labelled inconsistently across cases. The
-gold was re-labelled end to end: rule_question() now asks whether the rule
-binds the ACTION the turn takes (ignoring it here would violate it); the case
-state says who reads the turn's closing reply (partner, or the orchestrating
-agent for a subagent brief) and whether the turn opens a session; and the
-rules in UNIVERSAL_POLICY are settled by one written policy each instead of a
-per-case judgment. Every borderline pair was then second-passed and
-adjudicated again under the strict standard.
-
-THE REVIEW SET (rule gold, round 3, 2026-09-27). A second review found the
-0.35-0.75 band labelled the same situation two ways (clear dispatch turns at
-p <= 0.35 never reviewed; auto-gold at p >= 0.75 contradicting the rule's own
-trigger). The rule gold now has no auto-gold: per rule, every pair with p
-above REVIEW_LOW (REVIEW_LOW_EXTENDED for rules whose earlier in-band gold
-rate was high), and every case carrying the rule's action signal, gets a
-second Jev pass (evidence only) and a written adjudication that applies ONE
-trigger to all of that rule's cases; the adjudication decides. Pairs outside
-the set are not gold. Action signals (action-signals.v2.json) settle some
-labels outright; see "the review band" below. An adjudication file row is
-{"case": id, "rule": id, "gold": bool, "reason": text, "jev_misfire": bool,
- "case_binding": {"case_id": id, "input_sha256": digest}}. The worklist emits
-the binding and the adjudicator must return it with its own decision; never
-attach case ids to an ordered list of anonymous answers. Build verifies the
-echoed id and the exact case input before accepting any reviewed rule label.
-This detects shifted outputs and changed inputs, not semantic mistakes in a
-reason. A mechanical binding import of legacy rows is not a fresh review.
-
-THE BANDS (doctrine gold). p >= YES_AT is gold, p <= NO_AT is not, anything
-between is BORDERLINE and gets a written adjudication that decides.
-
-THE SPLIT. 30 per cent of cases are held out as TEST, fixed by seed:
-within each stratum, cases are ordered by sha256(seed:id) and the first
-ceil(0.3 n) are test. A case added later (a regression case from the intake
-command) is assigned by the same hash against a threshold, so adding a case
-never moves an existing one. Tuning may read only the train split.
-
-RULE CLASSES. The recall question differs by how a rule is supposed to reach
-a session, so every rule gets one class, decided by these ordered questions
-against ops/config/rule-enforcement-map.json and the JIT trigger table:
-  1. Is its load layer `layer0` (recited at every boot)?        -> a always_on
-  2. Is its load layer `control` (an installed deny, stop or schema gate
-     prints it where it binds)?                                  -> d gate_named
-  3. Does a compiled JIT tool trigger name it, or is its enforcement class
-     `surfacing` (delivered at a named action)?                  -> b action_point
-  4. Otherwise (a pack rule delivered on topic).                 -> c topic
-
-A LIBRARY. No entrypoint construct, for the sealed-inventory reason
-ops/typesafe_client.py documents; the command lines are tools/rule-gold-label.py
-and tools/rule-delivery-eval-intake.py.
-"""
+"""Sampled semantic label proposals, cached once per bounded case. Exact universal policy labels stay in code; omitted candidates are explicitly unjudged. Independent adjudication supplies gold, not model self-agreement."""
 
 import hashlib
 import json
@@ -89,10 +11,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 YES_AT = 0.75
 NO_AT = 0.35
-STATEMENT_CHARS = 2500
-# Rules per request. The whole roster in one request with this wording returns
-# HTTP 400 max_tokens_exceeded (measured 2026-09-26); two requests per case fit.
-CHUNK = 100
+STATEMENT_CHARS = 1500
+LABEL_CAP = 20
 TEST_FRACTION = 0.30
 DEFAULT_SEED = "rule-delivery-eval-v2"
 RULE_CLASSES = ("always_on", "action_point", "topic", "gate_named")
@@ -143,8 +63,8 @@ def case_state(case):
     turn = {"from": ("machine notification" if is_machine else
                      "orchestrating agent (a subagent brief)" if opens_session(case) else
                      "partner"),
-            "message": case["prompt"],
-            "tool_calls": [call_line(c) for c in case.get("tool_calls") or []]}
+            "message": case["prompt"][:6000],
+            "tool_calls": [call_line(c) for c in (case.get("tool_calls") or [])[:20]]}
     if "origin" in case:
         turn["reply_read_by"] = audience(case)
         turn["opens_a_session"] = opens_session(case)
@@ -202,29 +122,41 @@ def policy_labels(case):
             for rid, (pred, _reason) in UNIVERSAL_POLICY.items()}
 
 
-def label_case(case, rules, tsc, *, calls_log, timeout=120.0, chunk=None):
-    """{rule id: probability} for one case, every rule, in `chunk`-sized
-    requests. Rules settled by UNIVERSAL_POLICY are not asked: they get 1.0 or
+def _semantic():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def roster_binding(rules):
+    material = sorted((r["id"], r["statement"]) for r in rules)
+    return hashlib.sha256(json.dumps(material, ensure_ascii=False).encode()).hexdigest()
+
+def label_case(case, rules, tsc, *, calls_log, timeout=120.0):
+    """{rule id: probability} for one bounded case in one request. Rules settled by UNIVERSAL_POLICY are not asked: they get 1.0 or
     0.0 from the policy. Returns (probabilities, usage) with usage
     {"input_tokens", "output_tokens", "requests"}."""
     probs, usage = {}, {"input_tokens": 0, "output_tokens": 0, "requests": 0}
-    size = chunk or CHUNK
     state = case_state(case)
     for rid, value in policy_labels(case).items():
         if any(r["id"] == rid for r in rules):
             probs[rid] = 1.0 if value else 0.0
     rules = [r for r in rules if r["id"] not in UNIVERSAL_POLICY]
-    for start in range(0, len(rules), size):
-        part = rules[start:start + size]
-        answer = tsc.ask(state, {r["id"]: rule_question(tsc, r) for r in part},
-                         calls_log=calls_log, timeout=timeout,
-                         facets=["evidence_matching"])
-        for rid, row in (answer.get("answers") or {}).items():
+    words = set(re.findall(r"[a-z]{3,}", str(state).lower()))
+    ranked = sorted(rules, key=lambda r: (-len(words & set(re.findall(r"[a-z]{3,}", r["statement"].lower()))), r["id"]))
+    part = ranked[:LABEL_CAP]
+    usage["unjudged"] = [r["id"] for r in ranked[LABEL_CAP:]]
+    if part:
+        answer = _semantic().ask(state, {r["id"]: rule_question(tsc, r) for r in part},
+                                 client=tsc, caller="rule_gold_label", version="case-v2",
+                                 calls_log=calls_log, timeout=timeout, facets=["evidence_matching"])
+        for rid, row in answer["answers"].items():
             probs[rid] = round(float(row["noul"]), 4)
-        u = answer.get("usage") or {}
-        usage["input_tokens"] += int(u.get("input_tokens") or 0)
-        usage["output_tokens"] += int(u.get("output_tokens") or 0)
-        usage["requests"] += 1
+        usage.update({"input_tokens": 0, "output_tokens": 0} if answer.get("cache_hit") else answer.get("usage") or {})
+        usage["cached_observation"] = answer.get("cached_observation") or (answer.get("usage") if answer.get("cache_hit") else None)
+        usage["requests"] = 0 if answer.get("cache_hit") else 1
     return probs, usage
 
 
@@ -248,38 +180,20 @@ def second_pass(rule, cases, tsc, *, calls_log, timeout=120.0):
             "or different action, is not enough.",
             true="The rule's trigger is met by this turn's action; ignoring it here would violate it.",
             false="The rule's trigger is not met by this turn's action.")
-    answer = tsc.ask(state, questions, calls_log=calls_log, timeout=timeout,
+    answer = _semantic().ask(state, questions, client=tsc, caller="rule_gold_label", version="second-pass-v1", calls_log=calls_log, timeout=timeout,
                      facets=["evidence_matching"])
-    u = answer.get("usage") or {}
+    u = {} if answer.get("cache_hit") else answer.get("usage") or {}
     return ({cid: round(float(row["noul"]), 4) for cid, row in (answer.get("answers") or {}).items()},
             {"input_tokens": int(u.get("input_tokens") or 0),
-             "output_tokens": int(u.get("output_tokens") or 0), "requests": 1})
+             "output_tokens": int(u.get("output_tokens") or 0), "requests": 0 if answer.get("cache_hit") else 1,
+             "cached_observation": answer.get("cached_observation") or (answer.get("usage") if answer.get("cache_hit") else None)})
 
 
 # ------------------------------------------------------------------ doctrine (second target)
 #
-# 2,272 doctrine sections cannot each be asked about every case, so doctrine
-# gold is a SHORTLIST-THEN-LABEL scheme, and its recall ceiling is the
-# shortlist's (said plainly in the fixture header):
-#   1. one Jev noul per doctrine DOCUMENT (title and opening text, all 261),
-#      case as state: which documents govern this turn;
-#   2. plus the deterministic search-doctrine hits for the turn's text;
-#   3. candidates = the search hits first, then every section of the
-#      documents at p >= DOC_AT (the top DOC_TOP at most), capped at
-#      SECTION_CAP;
-#   4. one Jev noul per candidate section, case as state; the same bands as
-#      rules, and every borderline pair is adjudicated in writing.
-# The cap was 120 for the first labelling and cut 11 cases (search hits went
-# last and were cut first). At 400 no case is cut: the largest uncapped
-# shortlist on the v2 set is 356 sections, and the 1,263 extra section
-# questions for those 11 cases cost about 0.8M input tokens.
-
-DOC_AT = 0.5
-DOC_TOP = 6
-SECTION_CAP = 400
+# Lexical search selects bounded sections. Documents and sections share one
+# speculative question set; every proposed label needs independent adjudication.
 SECTION_CHARS = 1200
-DOC_CHUNK = 90
-SECTION_CHUNK = 60
 
 
 def document_question(tsc, doc):
@@ -306,40 +220,32 @@ def section_question(tsc, section):
         false="This section does not govern this turn.")
 
 
-def _ask_nouls(tsc, state, items, builder, key, chunk, calls_log, timeout):
-    probs, usage = {}, {"input_tokens": 0, "requests": 0}
-    for start in range(0, len(items), chunk):
-        part = items[start:start + chunk]
-        answer = tsc.ask(state, {str(i): builder(tsc, item) for i, item in enumerate(part)},
-                         calls_log=calls_log, timeout=timeout)
-        for i, item in enumerate(part):
-            row = (answer.get("answers") or {}).get(str(i))
-            if row is not None:
-                probs[item[key]] = round(float(row["noul"]), 4)
-        usage["input_tokens"] += int((answer.get("usage") or {}).get("input_tokens") or 0)
-        usage["requests"] += 1
-    return probs, usage
-
-
 def doctrine_label_case(case, documents, sections, tsc, *, calls_log, search_refs=(),
                         timeout=120.0):
-    """({doc id: p}, {section ref: p}, usage) for one case: the document pass,
-    the shortlist, and the section pass. `documents` rows carry id, title,
+    """({doc id: p}, {section ref: p}, usage) in one cached question set. `documents` rows carry id, title,
     opening; `sections` rows carry ref, doc, doc_title, title, text. Refs and
     doc ids are opaque store ids (slugs carry names; see the CLI catalog)."""
     state = case_state(case)
-    doc_p, u1 = _ask_nouls(tsc, state, documents, document_question, "id", DOC_CHUNK,
-                           calls_log, timeout)
-    top = [did for did, p in sorted(doc_p.items(), key=lambda kv: -kv[1]) if p >= DOC_AT][:DOC_TOP]
-    by_ref = {s["ref"]: s for s in sections}
-    # Search hits FIRST, so the cap can never cut the door's own hits.
-    picked = [ref for ref in dict.fromkeys(search_refs) if ref in by_ref]
-    picked += [s["ref"] for s in sections if s["doc"] in top and s["ref"] not in picked]
-    picked = picked[:SECTION_CAP]
-    sec_p, u2 = _ask_nouls(tsc, state, [by_ref[r] for r in picked], section_question, "ref",
-                           SECTION_CHUNK, calls_log, timeout)
-    usage = {"input_tokens": u1["input_tokens"] + u2["input_tokens"],
-             "requests": u1["requests"] + u2["requests"], "shortlist": len(picked)}
+    words = set(re.findall(r"[a-z]{3,}", str(state).lower()))
+    by_ref = {row["ref"]: row for row in sections}
+    ranked = sorted(sections, key=lambda row: (-len(words & set(re.findall(r"[a-z]{3,}", str(row).lower()))), row["ref"]))
+    refs = list(dict.fromkeys([ref for ref in search_refs if ref in by_ref]+[row["ref"] for row in ranked]))[:LABEL_CAP]
+    picked = [by_ref[ref] for ref in refs]
+    qs = {"s"+str(i): section_question(tsc,row) for i,row in enumerate(picked)}
+    doc_ids = {row["doc"] for row in picked}
+    docs = sorted([d for d in documents if d["id"] in doc_ids], key=lambda d:d["id"])
+    qs.update({"d"+str(i): document_question(tsc,row) for i,row in enumerate(docs)})
+    if not qs:
+        return {}, {}, {"input_tokens":0,"requests":0,"shortlist":0}
+    answer = _semantic().ask(state, qs, client=tsc, caller="rule_gold_label", version="doctrine-case-v2",
+                            calls_log=calls_log, timeout=timeout)
+    bodies = answer["answers"]
+    doc_p = {d["id"]:float(bodies["d"+str(i)]["noul"]) for i,d in enumerate(docs)}
+    sec_p = {row["ref"]:float(bodies["s"+str(i)]["noul"]) for i,row in enumerate(picked)}
+    usage = {"input_tokens":0 if answer.get("cache_hit") else int((answer.get("usage") or {}).get("input_tokens") or 0),
+             "requests":0 if answer.get("cache_hit") else 1, "shortlist":len(picked),
+             "unjudged": [row["ref"] for row in sections if row["ref"] not in refs]}
+
     return doc_p, sec_p, usage
 
 
@@ -509,17 +415,15 @@ def review_plan(cases, probs, signals, extended_rules, floors=None):
 
 
 def review_set(probs, low_by_rule, signals_hit, settled_rules=(), settled_pairs=()):
-    """{(case id, rule id)} the adjudication must cover: p above the rule's
-    lower bound, or the case carries the rule's action signal. Rules in
-    `settled_rules` (policy rules) and pairs in `settled_pairs` (signal-settled
-    gold) are excluded: their label is written, not judged."""
+    """Every non-policy semantic proposal requires independent adjudication.
+    Score floors can prioritize review but cannot create negative gold labels.
+    Exact policy rules and exact signal-settled pairs remain in code."""
     out = set()
     for cid, row in probs.items():
         for rid, p in row.items():
             if rid in settled_rules or (cid, rid) in settled_pairs:
                 continue
-            if p > low_by_rule.get(rid, REVIEW_LOW) or (cid, rid) in signals_hit:
-                out.add((cid, rid))
+            out.add((cid, rid))  # both positive and negative proposals need review
     return out
 
 
@@ -583,25 +487,20 @@ def gold_sets_reviewed(probs, adjudications, low_by_rule, signals_hit, settled_l
 
 
 def gold_sets(probs, adjudications, yes_at=YES_AT, no_at=NO_AT):
-    """{case id: sorted gold ids}. A borderline pair with no adjudication is an
-    error, not a silent 'not gold': every one must be decided in writing."""
+    """Gold requires independent adjudication for every semantic pair, at every score."""
     decided = {(a["case"], a["rule"]): bool(a["gold"]) for a in adjudications}
     missing = []
     out = {}
     for cid, row in probs.items():
         gold = []
         for rid, p in row.items():
-            b = band(p, yes_at, no_at)
-            if b == "gold":
+            if (cid, rid) not in decided:
+                missing.append((cid, rid))
+            elif decided[(cid, rid)]:
                 gold.append(rid)
-            elif b == "borderline":
-                if (cid, rid) not in decided:
-                    missing.append((cid, rid))
-                elif decided[(cid, rid)]:
-                    gold.append(rid)
         out[cid] = sorted(gold)
     if missing:
-        raise ValueError(f"{len(missing)} borderline labels have no adjudication, "
+        raise ValueError(f"{len(missing)} semantic labels have no adjudication, "
                          f"first {missing[:5]}")
     return out
 
@@ -928,26 +827,19 @@ def intake_case(doc, case_id, missed_rule, *, live_rules, prompt=None, stratum=N
     must be a PARAPHRASE of it: no run of more than MAX_SHARED_RUN words in
     common, nothing scrub_findings() refuses.
 
-    `missed_rule` is gold by observation: the rule was needed and not
-    delivered. `probs` ({rule id: p}, one Jev first pass over every live rule)
-    fills the rest densely: p >= YES_AT is gold, a borderline p is DISPUTED
-    (excluded from scoring on both sides) until someone adjudicates it in
-    writing, which keeps the intake from inventing labels. Without `probs`
-    the case carries the copied case's gold (or only the missed rule) and is
-    marked labels="partial"."""
+    `missed_rule` is gold by observation. Copied gold remains explicit source
+    evidence; every additional Jev proposal is disputed pending adjudication.
+    Numeric confidence never promotes an intake label."""
+
     existing = {c["id"]: c for c in doc.get("cases") or []}
     base = existing.get(case_id)
     prompt, stratum, calls, new_id = validate_intake(
         doc, case_id, missed_rule, live_rules=live_rules, prompt=prompt, stratum=stratum,
         tool_calls=tool_calls, source_text=source_text, extra_names=extra_names)
-    disputed, labels = [], "dense"
-    if probs:
-        gold = {rid for rid, p in probs.items() if rid in live_rules and p >= YES_AT}
-        disputed = sorted(rid for rid, p in probs.items()
-                          if rid in live_rules and band(p) == "borderline" and rid != missed_rule)
-    else:
-        gold = set((base or {}).get("gold") or [])
-        labels = "partial"
+    gold = set((base or {}).get("gold") or [])
+    disputed = sorted(rid for rid in (probs or {}) if rid in live_rules
+                      and rid != missed_rule and rid not in gold)
+    labels = "partial"
     gold.add(missed_rule)
     return {"id": new_id, "stratum": stratum,
             "split": split_for_new_case(new_id, seed or DEFAULT_SEED),

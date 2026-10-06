@@ -1,0 +1,6407 @@
+{
+ "cases": {
+  "h-nm-agent-word": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "92732ac9670beb67e04c43f44348588e409909a27d686379a4d669994093ce81",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-nm-echo-git-push": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "a6a9bf903a178863a183b819a6fe8e1e191f37201e970768202f21d8c8a2658d",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-nm-email-general": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "5bb044735598be6eb675499e29cc20f0341e7bafb0a340a10d91e83c62e18098",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-nm-grep-git-push": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "dc6a3921734d9117ad7f1c7851c1811266c1cf02305805a2090c3aad34f6c9d7",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-nm-merge-prose": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d22fa3b7fe19134e22b2ee0e53abaede45387a3f2da0b1fde9677262068ec3ea",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-nm-password-general": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "0ac8f4dc02d65489c704db569715540b56e13ece4e19ab56f8835fb3293cfca6",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-nm-push-notification": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "436d114c268219d1a8d9c49dd0e55cf15c058bdde7ea054bf7d8740df7011c67",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-pos-add-loop": {
+   "allowed": [
+    "647f843d"
+   ],
+   "cohort": "human",
+   "expected": [
+    "647f843d"
+   ],
+   "input_sha256": "b006105cb6332d7d15e9058da108b95d04e03c0dbcdb25747256efda7c7af71c",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "h-pos-agent-brief": {
+   "allowed": [
+    "185013c6",
+    "2b66211d",
+    "6cfb67f5",
+    "81709f57",
+    "8aefcdce",
+    "b587f6c2",
+    "c20dc3d5",
+    "c6f69dee",
+    "df55c398"
+   ],
+   "cohort": "human",
+   "expected": [
+    "6cfb67f5",
+    "df55c398"
+   ],
+   "input_sha256": "e0fbc226287dddc8209bcf37a6f054501c2e119b3515994e293214454aad78c8",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "h-pos-confirm-merge": {
+   "allowed": [
+    "2e8b4840",
+    "4c21d86b"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2e8b4840",
+    "4c21d86b"
+   ],
+   "input_sha256": "ea73740b74d60eb6ba0337b06304cc9953eb4b2689d7cd17a45dab85f70dd4bd",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "h-pos-gate-test-first": {
+   "allowed": [
+    "e65efc68"
+   ],
+   "cohort": "human",
+   "expected": [
+    "e65efc68"
+   ],
+   "input_sha256": "37b92fd7f05fe58b0b4e91b1c4c5b4bfa762ff7add1126f82ff37ddd337c29f8",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "h-pos-gmail-search": {
+   "allowed": [
+    "49533583",
+    "c66dc739"
+   ],
+   "cohort": "human",
+   "expected": [
+    "49533583",
+    "c66dc739"
+   ],
+   "input_sha256": "80fa0fb1ad088eaa4b505eecaf9581e4d6b82573def9d1cd951f2d8a4737c4f5",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "h-pos-gmail-send": {
+   "allowed": [
+    "236ca227",
+    "49533583",
+    "9b081605",
+    "c66dc739",
+    "eaa31ac5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "9b081605"
+   ],
+   "input_sha256": "de913b4b7262ad97e875f8619b72fff7fbd13333a69f87f55a1e7dc0ea0376f5",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "h-pos-hipaa": {
+   "allowed": [
+    "412d37d3"
+   ],
+   "cohort": "human",
+   "expected": [
+    "412d37d3"
+   ],
+   "input_sha256": "5b90f664f1cb15edfb3cc502a99e2cc014f9c67ec2ff58ecb1b14595c810d212",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "h-pos-loi-terms": {
+   "allowed": [
+    "4399df76"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4399df76"
+   ],
+   "input_sha256": "e3615167f4e6e60f31b8c89c8e9fe455f19a4d55da92965c2386bd42d4e999ca",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "h-pos-new-client": {
+   "allowed": [
+    "57d83b75",
+    "5d44d3f3",
+    "cff429f5",
+    "d26d63b0"
+   ],
+   "cohort": "human",
+   "expected": [
+    "57d83b75"
+   ],
+   "input_sha256": "3e4923212231ac85acd429b9baca5872c1fafa25cbf2aea005a0e5bb4553ff5e",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "h-pos-red-team": {
+   "allowed": [
+    "81709f57"
+   ],
+   "cohort": "human",
+   "expected": [
+    "81709f57"
+   ],
+   "input_sha256": "1b8aff0a721fa5b6d44d080c292ea02d8261f91a2a4c517d96740b70bc6ea4ef",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "h-pos-teach": {
+   "allowed": [
+    "4a9188f3"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3"
+   ],
+   "input_sha256": "3324f696e302a464c286b5876229b369d082390174a554e89cf9929f145fe7b8",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "h-pos-vendor-intro": {
+   "allowed": [
+    "1f750181",
+    "3b0cd546",
+    "5f8c661d",
+    "6ec7312d",
+    "76a1ae2b",
+    "7b4ba3aa",
+    "7e4ca905",
+    "83b9a362",
+    "893aeec5",
+    "ba5730c5",
+    "bddb0e7b",
+    "cf1c13a6",
+    "defee176",
+    "e6e0b0e7"
+   ],
+   "cohort": "human",
+   "expected": [
+    "83b9a362",
+    "e6e0b0e7"
+   ],
+   "input_sha256": "8ba511d9ff0ebbe22312c2633521203be6c7a4d6aa249631e8228c14e9dc932b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "h-pos-x-link": {
+   "allowed": [
+    "466a545a",
+    "557838a5",
+    "57d13061",
+    "5e896ed6",
+    "6437ae15",
+    "98e74e7c",
+    "9e3fb6d0"
+   ],
+   "cohort": "human",
+   "expected": [
+    "557838a5",
+    "57d13061"
+   ],
+   "input_sha256": "7f315ca552a80529353f81ac38975b10de67f0fad1cf279bcd4f57d579824e55",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "h-sn-bash-head": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d79a1f5b2e3f65116856d97cbb4518ba9c00422401aab36839895ba944d7e1e3",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-bash-log": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "16a1af19c05d9707c116f8c136e8e9e3c2e446361ba3978f188059cf2391e440",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-bash-ls": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "31faf88286168ac54e29ec7fef37c328fdb0e7f9bb56da1542fecaaf6510354e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-bash-selftest": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "6e93c97898e314cb298ba616b7d25bfb5c8d0ba150598eb26b18fe49aea0464e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-bash-status": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "3e164b1b03570eb7b1b3af958d10e356f79b27717ef22cd7345c1c246e6823de",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-sn-glob-selftests": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "ac5d447bfdaaa2b2af36a1a59df4e36c7a30701a4755a66080281fedce044f2e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-grep-symbol": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "f82ae81de68a092048dcd81b05cb327e6721916c03e247b8740722676336fdd3",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-prompt-ack": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "17a432920961c9db5591ed099ea91e1690edcefc322cc01d69798325b3529044",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-prompt-typo": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "69f96c4a07fcb193ee6bd1c613ca5e4866fdd421d78625ab447ca4aa89c877bd",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-sn-prompt-where": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "e2e58c35c5ef03d716f75ca6ccedf90a93a4bd20c2214473c42ec7b2e0bb4642",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-sn-read-config": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "16a061b3c21354b3d19270959e7d36f4bfe90cf70adc2f47f597becfb4317df9",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "h-sn-read-readme": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "ff16476945c33683528be45ba4c4acf4a2c1181c47d52a14df8e3f3b635de6be",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "h-sn-read-source": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "62b4d7e8f122b7a13ea4597e7c8ebaaa9d9d986e509523355126d2571104c48c",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-03387a2a928c": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "186627632cad6b29f468238cc414bbfcc5757edbf3a1006086d870723bb68b85",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-0b053897cc44": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "12c7b89a3df02da8ca1b6615db9e36f2534713e8f767e211834b8eedf56b70be",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-13895411be1f": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "75e71a4e8444a38a95d77856bbcca836b535c7e6d0d5b7ef6691f23d32c93c77",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-244a4db26293": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "42eefa3089d7f648ebbd1b0e7df987312ef32a8866fd0f28a582e5ebeb12e9d9",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-2ce43e34d070": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "c8218e97581b450a5e9269545d99c1e29447331b4f00f892445be68f8ffdd3f2",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-3746d4554452": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "5cfbbc8f2f21b6467386d4be4dc531466a1a34c1b63d928ef06b070d3490c830",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-3ff89fc930d6": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "312d107bb6c8e6b05bf2229704ba6fda84dd2977af59081dfa264c9e2932e499",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-413f59a62d96": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "afc11e585d2218e603e6c07ce2fb0c714b8429dd8f3605769129456cb805a0a1",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-470524c7eec8": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "6e00ef951294aba7ed8b5a5f4d612f3ba4f386b207e7adf3ac2fdb0a2f13b0a2",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-51b2509bee6f": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d2a8ec30ea8c7c8caa2c79966e0a2792d3a90ae847171accbbf5bc6ad2546022",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-52f13466c7be": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "66696e5fe739e2837fcee5b80477ee08193ad36ae97bb98536103142680fc799",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-732501501bd2": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "81ee2f0d43e0d271118bac443cf241f700404aba770720f84166f9518808d43b",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-791b87ac34b9": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "e3d7926bbffba4c299eebd442954ca0d824aec2490d8c333e423b5b6f38863ec",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-882b52bb9351": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "f2eecd2b8775bfb154e5435983a1e52ae44cfc7567c4d0129cc5096fec790de6",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-9fcfc2d5b12d": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "82e79849c78e9251b8334c41e203d294785fe22c9972df62e090be03c2e6cb4d",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-a26c9b7bd1b5": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "832351c40f2cf5d704daaff18e319ac6d8ee3b1019b31139a77f88df42d330c4",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-bash-a68e9097bd21": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "309c29e8f0c05efad85afa9bea732f00fdf0f69ee42926a9f1fb655ec1727c5c",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-bash-f79bbc067e7f": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "748891e0ff919e1839f554c4ce80aeb06e7adfb7c024c15418d214d51f54328f",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-02c975a2f703": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "21fc62c13164c3b8f48dbd4b26a6fecee17d52227a1f121de56a1c3de675735a",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-0869e795c36e": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "1452595407acc8d6acd6aa4907cba3cb3f20496ddf5d628cc713b07f5ac29dd1",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-089380787c1a": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "98ca75dbc443d1742bb7075d46e13663c7d4ae4ffb7ba4b9c6b1c6fb5277c7dd",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-0f17f5e14cd0": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "7cc0e071908c4f45257fd9cb8cf9a202239d49e0a48def9d81cd2708546d8c62",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-13dd876c3feb": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "8f68737b0bb28120017378961937d7e19f139e844e5a307fb205cc0415a40e64",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-1a35ae50bc08": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "bc5e30a22a6cf9570d1bd41189cc0641ed775b0af2766e6b1cb6555917a0d9fd",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-24883105c858": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "693f8dedb684859b5524864a1213f73aa525ef1bf218beda829d9a2d382a6df0",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-2888657a01d8": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "2bc9c120d1c46fbb999bdcc45a462ae21c4a626f9ef4a0b859890353b2f83aae",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-2f2199176329": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "8566833ce68f0f17570cf8a0eccc659ed7aadbd8e6d85fbc12c64dd5dc341e69",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-2f8cdc1462aa": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "a681f34e457c3556226b36f24d8533e76adee94f5fec4d3cd189704ae054e778",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-3e1e0756fbf3": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "f8f604d1aae327a5e81728ac120b0a564619dd3335b8d58bc45f16f4fe67cf93",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-48f51fe1c24c": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "96ac61a3fbab42eaa87adb7571be70d3dbfa144980061a80c032727ffff06841",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-4e612882f052": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "70911d271debe0b3504ecc63d992d70d7d8a6b548b60b839dbd83a790e112b94",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-53268620a4d2": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "5c32fefdc29b83f953308cc8aade6de6b1b9a0fcf203285f3a53c089f47b22e9",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-58ee0a9d91e0": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "c779065fc9d778248666e2a4dd9f29c7d67a4c702cce36b391eea2f5dd737752",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-5a9c5373c27e": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "7ea054828497349f5140620d9b87f169a38be5be6e0e887a88bf755ecc2949ca",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-5c2546a38d57": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "e2d05b89dcb5cdd09039d1f21b658ef347a67762d7665b8eb168d6b547df232e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-5ca3833cf310": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "05abcab2a29420a753c79e695b78cbdf63d28f7c34c7b33c5de945dca58e3872",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-5db764a00b08": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "96876aa622cebdb2684bcff2fc447c1866a12147bc80f720deae67f7d3dbcd67",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-5e9a9fcc29bb": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "33fc595c8af34ba6bf3d5fe31fdd097aea5d4a9998cc85570ef0d333cfe0a7d2",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-5e9efd30d945": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "362696f8d97a22c759c46b24428c69b1aaa625857f2e754f573d461e671d7f36",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-6477230263f7": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "4c89750af320a17c2adc4f5029c5cf737dd0d3687ac0a2125436a9b6d37f4048",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-648eb0c11a26": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "0f9c192f1f8ee548248a521c94f1ee5a299fd327a3d3bcca858c64323db23ccd",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-6a49917e6e51": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "9f79a8371923f880b7055ba08b753d8ca954c00273e792e46d14788650befebe",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-6c2c31840126": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "98ee52341c2f69b3e945104fde925ed6d343dd8fa333b420fa7a1b87229be5c8",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-7248b9382f9e": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "68bda362bdc18c4431f488aefbd69837d9b0374284a0cb64f1e729549ae2bd8b",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-729c41c8ca72": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "53f66ca773d4eaa424bc7906c13fe5fd14d87799363d378ee825e8b2be7491bf",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-775a943c0edd": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "6d7f86a31558b99cc62639b77c608b7ef59ce1ae690546939e4e2f1f786c8c4b",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-87e16ff8c9c3": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d8fd987b46fe61f0db8cc0ecd8290e4290996ec171b501e741a1e35266207952",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-8ae1decfd95c": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "7fb1077933c5b1b609cbb385eed608562df7f461dd7c2cd2f35f92327f8a94a8",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-9707eb2387ed": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "4eab79e2869735dd49ab987f00419ddbd2070cb3dfcdad861d6d715a07ce8a86",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-9c1d40470d43": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d851871b9c57f60e1db66847d7275bbaaecdb1f8a6c9d9f451d10199240c33da",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-9e9bea17dcac": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "828b58a104014d3840242e9e4ebbdf74d0642f336d85e4736fcb6d7724c59c5d",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-a037ceddd24e": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "e022e6bcec2f0d9602da906e4a56db3a25da13dd5fa969de29e503a316c887e7",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-b8ee0d8bbf41": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "0e1f2c10fcd91cc86922f31a0e8cdd4d4e5493af58988c97a8d2e6a83c7116f4",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-bdf5a9398fd6": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "1f76cd7022394c3bdc16e4b5abf79c307760b6f191b703053df86f2cb44bd26a",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-c13469956ba1": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "2e214daf93995bb6a1f7c215032c509576c662926a60085b40c4e76f9a435fc3",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-c68def4a42cb": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "03e8721c30c9401baa0390ab84b65df2560361d94258d764d485232f7001bdc2",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-ca72ecdc9577": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "373bc720386d40a16a5739b107003952aa6df6dd8be2e016d528389d09e68fab",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-cb94519aa94d": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "f9cb05516662c13ef143f94f08ac9d79305b99ea123a10427bf1a667aad044b3",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-cf9940a2e704": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "a7bc5719c5b2f6637bcdaea1adb26fb68758797f7245ce3f64b9c78a09b50c6d",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-cfc86eab6d67": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "e58bfb0940092be193609c5895177bee33da043271bff42608eb662db5af2c61",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-d226439d9855": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "8c320dadd8417a7678a77d4e4cc5eda3de6ff742fcdd210d871c6f133de45432",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-ddfa17f8c707": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "b3e408b569fe7fb252ff4b6c22f9c4b15b73c1625b30cb9a4ed79d9ec8d5fc96",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-e57a1086cc5c": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "05e6661283e0dbdeef1995a1e06b29677180980d86ec365078244f3e07560b63",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "rr-read-e633860c4cae": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "a057fba232696170aa75250d3225f4fd8489c0fe03b5d38665c5e0ca470e8515",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "rr-read-f83b0bd614da": {
+   "allowed": [],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d7b430a8049a0a223a5063d3c2decf55752d1de1a12a2ef0981f8c0b112d36d2",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-chat-001": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d1abe20f3a2451a9a85e40d27b5b876cbd6b032f820b44b275b33dd8fed33bed",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-002": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "8898e92d9b3febde65796f574440f50bde067a7fc168da4fc7e170cefe2f8b6e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-003": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "83a8b8b3d0669ff56757ea82474b272ef3fb31f7c549ef1c41625f8188926af8",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-004": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "4a9188f3",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "eaa31ac5",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "4a9188f3",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "5b8ae0c4969d310e667df09d1dcd69f19077bb294096703f32993d3e0f8971ff",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-chat-005": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "512b2684060bdb334f2490059c80a5091d49c9ce0ceba711df5c09305e9b8d3a",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-006": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "2271e684",
+    "24e10ee8",
+    "4a9188f3",
+    "5be2f462",
+    "5e89c211",
+    "7e9739f2",
+    "9310827b",
+    "9530fb1c",
+    "b3ea627f",
+    "bbffc139",
+    "df8f1da0",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "4a9188f3",
+    "5e89c211",
+    "bbffc139"
+   ],
+   "input_sha256": "3dedca6052bd1ecf71d00d8b51f4f2839cebce0dd822108f545f31c3ed7f7291",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-chat-007": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "dcf98880",
+    "e313a3ca",
+    "eaa31ac5"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "9aac9a587594e562bc8dbfd9b7542cba52668ebf3202b611da9ee537bdd5b183",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-008": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "2b889e80",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "162a49dcc7610d87641c7f679b95031fb8fa7473f4dc72656226098d12affb41",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-009": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "03a177843cbc2fb886ac78bd32e265c83756c07ba964c30230a3655e0374a5c7",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-chat-010": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "0eee31a626f8eec43232a9eea968c9e7f3d228d12a7c5fb565c3db2bf59f634e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-011": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "1b5a8f89f6353baf800cf42607a299dfb91564779078a9a86c2c5e0dbfe9c905",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-012": {
+   "allowed": [
+    "0156e9fa",
+    "24e10ee8",
+    "3a9dbafd",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c53beeaa",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "c53beeaa"
+   ],
+   "input_sha256": "8a65470fde53b8e6a7ad980d874bb3cafc07c0b7551b9408a2a18265ba3b0567",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-chat-013": {
+   "allowed": [
+    "0156e9fa",
+    "4a53ff82",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "a7784a18",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c1db316c",
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "e65efc68"
+   ],
+   "input_sha256": "7724567325cdc1eac2fa0053c241c84ad9cb954811ebd5c46462d424f0971030",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-chat-014": {
+   "allowed": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "cc16e390c9fa8e4758deffb009185b28b4ec012282364fcc6be6ea5e15768985",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-chat-015": {
+   "allowed": [
+    "0156e9fa",
+    "113b3833",
+    "2b889e80",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833"
+   ],
+   "input_sha256": "3381bfe0a4c9f47b8364800bab644b7bc158132efb80b53dc08a489c42355236",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-chat-016": {
+   "allowed": [
+    "0156e9fa",
+    "43e2ef76",
+    "5be2f462",
+    "7e9739f2",
+    "9530fb1c",
+    "a7784a18",
+    "b3ea627f",
+    "c1db316c",
+    "e313a3ca"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "e58fa31e12b2e6143893e6ac824323dcb2467cda2465833eee7acbc0a5d3bce7",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-chat-017": {
+   "allowed": [
+    "0156e9fa",
+    "0e22e34a",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c1547ed1",
+    "e313a3ca",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0e22e34a",
+    "c1547ed1"
+   ],
+   "input_sha256": "73237443b572b047761bc84d8e4d84779541fb78d6f50a37ed35abe0bf7c34ba",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-chat-018": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "43e2ef76",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c1db316c",
+    "e313a3ca"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "44aac4fe34e1abea8d8f4fa7672eb647313d8c9a35288ca9c0dfdd31e0fe320a",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-019": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "0921c02cc53f7b5ef83603ded9d504e9d66b1d59d1b6d1b0f15bc26c48e5732e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-020": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "7b8d947c3ac9539b39b32c0f495c7cb2220158913064fe89954aefee192391c0",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-021": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "f325bb7c9f2a496c534d2d2ddd2943da22f309c8cce25559afa4ba747df859af",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-chat-022": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "3e1d872aa5ba50163efeb1142d65663cd3e17a23060d264b6bdf13bb19acf90d",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-023": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "847f9995",
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "c1db316c",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "0e6595bc2640fab0ad993e1898a3a3e53c3aa3d9b29536296b743a7162c99933",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-chat-024": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "d670942955d853fb04025a80e12668abf94e1ddee223b50ecf246df686457cfb",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-chat-025": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "c20dc3d5",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139",
+    "c20dc3d5"
+   ],
+   "input_sha256": "89d56c5a55ba2e32bbbe82df84445116ca4be62f5b7bc47d07723402e721a889",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-chat-026": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "67fbc7cc3a400845a2d10879a121f0131eb45f0ebae04430fba168460fe85e17",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-027": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "0a3db297f62bfe63c55f00043531ffe80d87a56f7fcdeb9726a8c8ca72d0f70e",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-chat-028": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "2038be77c8285fd08516b7d43bb18e9f2d6bb7ce2e560cb97ac8f174815fbbcf",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-029": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "469c81b6f757a6d98f1516070496b24aa5406b41ae15df016d0866ee520d9613",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-chat-030": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "2b66211d",
+    "4a9188f3",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "2b66211d",
+    "4a9188f3",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "fcc8480762082819a39fa8e03fc5958fdd50837275bbba45006b27a804ed3a7e",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-001": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
+    "67580c28",
+    "7e9739f2",
+    "80def9d2",
+    "9310827b",
+    "a7784a18",
+    "a8f159ad",
+    "b3ea627f",
+    "bbffc139",
+    "d3774a28",
+    "e313a3ca",
+    "f2d58a30",
+    "f92dfab2",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "67580c28",
+    "80def9d2",
+    "a8f159ad",
+    "bbffc139",
+    "d3774a28",
+    "f2d58a30",
+    "f92dfab2"
+   ],
+   "input_sha256": "085dc18aaa2d27958c2a2af6711609e4c500d10e0bad8a2c755ac581aaccbf21",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-deal-002": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "113b3833",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "d3774a28",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa",
+    "d3774a28",
+    "fb2b263d"
+   ],
+   "input_sha256": "e55f01e4b842f1be893aa0b3a51a03b2141172e167a69a12d7e54037ef910245",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-003": {
+   "allowed": [
+    "0156e9fa",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
+    "5e89c211",
+    "7e9739f2",
+    "86647daf",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431",
+    "fc4d7753"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "5e89c211",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa",
+    "fb2b263d"
+   ],
+   "input_sha256": "0c37a7f3f5514e40a6e1c18f7f3b7c05637ea17d3d91f6b1167ccfb4564c8478",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-deal-004": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "9310827b",
+    "ab814a26",
+    "b3ea627f",
+    "bbffc139",
+    "f5beac20",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139"
+   ],
+   "input_sha256": "109f2de2473f6c70d76e873f0708ce21cf910720bfbcaba150cbe79c7892f94c",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-deal-005": {
+   "allowed": [
+    "2271e684",
+    "4f7c348f",
+    "c20dc3d5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "16cea52c88c8fb4f59dccd35a4f95d5e2aec4af2a1ff016495d424a33b120f41",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-deal-006": {
+   "allowed": [
+    "015183f5",
+    "2271e684",
+    "2b66211d",
+    "4f7c348f",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "9d75a2916732ada931b3a2486866794e8112889468fdcf2e8676c1de72fbbb8f",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-deal-007": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "2e001f6b2151db1447dbaf03c5fdc89f507bd0012459f75d012d0443d52132e4",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-008": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "c66dc739",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5",
+    "c66dc739"
+   ],
+   "input_sha256": "c1a91bbe81c63633df86c85ef5c67ee20a0df9474af512fb2c94c3d90a7f0098",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-009": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "67580c28",
+    "9293d609",
+    "a6e6ab4e",
+    "a7784a18",
+    "b7ec8f3b",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "67580c28",
+    "9293d609",
+    "b7ec8f3b",
+    "e65efc68"
+   ],
+   "input_sha256": "a7128829a8c5ebb81fb1226570567e81c593434ab705bb13113bb447bf64b0c3",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-010": {
+   "allowed": [
+    "015183f5",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a7784a18",
+    "bc9188b4",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bc9188b4",
+    "e65efc68"
+   ],
+   "input_sha256": "5ac366c15143c7e8ad526f9b225a50ec4de9cd82e965c29212e8163cd0ba2aa9",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-011": {
+   "allowed": [
+    "015183f5",
+    "1c42d80c",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "596f7549",
+    "67580c28",
+    "a6e6ab4e",
+    "a7784a18",
+    "a9ecd5b4",
+    "c1db316c",
+    "e65efc68",
+    "eeb3d106",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "67580c28",
+    "e65efc68",
+    "eeb3d106"
+   ],
+   "input_sha256": "fc695f7de6b6741fff98cdd1bc91d55a5f68f4cdea67da224fc762773bb8f5fe",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-deal-012": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "43e2ef76",
+    "4f7c348f",
+    "67580c28",
+    "80def9d2",
+    "9293d609",
+    "a7784a18",
+    "b7ec8f3b",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "67580c28",
+    "80def9d2",
+    "9293d609",
+    "b7ec8f3b",
+    "e65efc68"
+   ],
+   "input_sha256": "95b0d41d303c59790bc41a16b1cef5ea7de83b8b0dee1a7ba54ba3282fd438d0",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-013": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "24e10ee8",
+    "2b889e80",
+    "43e2ef76",
+    "4f7c348f",
+    "67580c28",
+    "9293d609",
+    "a7784a18",
+    "a8f159ad",
+    "b7ec8f3b",
+    "c1db316c",
+    "e65efc68",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "24e10ee8",
+    "67580c28",
+    "9293d609",
+    "a8f159ad",
+    "b7ec8f3b",
+    "e65efc68"
+   ],
+   "input_sha256": "8f4043fe57324c9642743e49f9ee856abe0f47af64bb049acb5e52129bffc537",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-014": {
+   "allowed": [
+    "015183f5",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a7784a18",
+    "b1521526",
+    "c1db316c",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "003d1a6331269eda3e14abd2cd34b04cfaf5e6f72891d4fc6e9c7ddc40051918",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-deal-015": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "fd7350c8275d52213d08c94019b13a38fc791e7aa02904dbc35dc77616733683",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-016": {
+   "allowed": [
+    "015183f5",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a7784a18",
+    "b1521526",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "e65efc68"
+   ],
+   "input_sha256": "71b5c40ad737d04bd5bc3213e948ef719945657592e31ea085821ef62a7f2aa7",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-017": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "5be2f462",
+    "7e9739f2",
+    "80def9d2",
+    "b3ea627f",
+    "f2d58a30",
+    "f92dfab2"
+   ],
+   "cohort": "human",
+   "expected": [
+    "80def9d2",
+    "f2d58a30",
+    "f92dfab2"
+   ],
+   "input_sha256": "f4da2d0b00d5c506934584242d279ffe312ef95e32ee7c6c57cba4cd40ec49d6",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-018": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "24e10ee8",
+    "2e362970",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a7784a18",
+    "c1db316c",
+    "e65efc68",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "24e10ee8",
+    "2e362970",
+    "e65efc68"
+   ],
+   "input_sha256": "0bed915c2206ffbf9638129cf28236943c900be49202049234717081e9c5c3ba",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-019": {
+   "allowed": [
+    "015183f5",
+    "2271e684",
+    "4f7c348f",
+    "c20dc3d5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "12a2e791fefe14b261582971d5c4b68620c924342b443c4d2a8dcc2476cf49a7",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-deal-020": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "b9e5fa314454fcfd2a3699cbac716e3e26312424150a78145aafe4527f3caa65",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-021": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "629a3ff5c78ab2404e6761b00518a17d573410d2261d7fad60130e77cf9e8fc5",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-deal-022": {
+   "allowed": [
+    "0156e9fa",
+    "113b3833",
+    "2b889e80",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "fb110a39"
+   ],
+   "input_sha256": "d9e860f249637e4d5ee2d524c7e5b8743fbb84fd30afc337cc24cedb1544b0ed",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-023": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "2b889e80",
+    "4a9188f3",
+    "5be2f462",
+    "5e89c211",
+    "647f843d",
+    "7e9739f2",
+    "b3ea627f",
+    "c53beeaa",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "4a9188f3",
+    "5e89c211",
+    "647f843d",
+    "c53beeaa"
+   ],
+   "input_sha256": "12edfcb6f66aa62083f1b9ffc54562e4da98f0f12364ec85b0227190af91463d",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-024": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "bd7840cf97a1d175f9d82df18c75e38d3615df664650e7e74b135c6383ebdd22",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-deal-025": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "596f7549",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "5d60f315c5745cd27f958f57cc1dbe95d97a9122a01bfb2f649c6555676d109f",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-deal-026": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "9730f565",
+    "b3ea627f",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "5b9192f2aafba7f0e564c8514dc9471c2a44386a3d06d6aee27faae24908d5db",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-deal-027": {
+   "allowed": [
+    "0156e9fa",
+    "0e22e34a",
+    "2a3ff869",
+    "4399df76",
+    "4dd44fd7",
+    "5be2f462",
+    "67580c28",
+    "6a4e6283",
+    "7e9739f2",
+    "80def9d2",
+    "8c1e6057",
+    "b3ea627f",
+    "c315befa",
+    "ca841807",
+    "ede4c735",
+    "f2d58a30",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0e22e34a",
+    "4399df76",
+    "67580c28",
+    "80def9d2",
+    "ede4c735",
+    "f2d58a30"
+   ],
+   "input_sha256": "44a1500d60bc33ed87c2f917c35464825153aabd2f5498618d1f1300cd677559",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-028": {
+   "allowed": [
+    "0156e9fa",
+    "4a9188f3",
+    "57d83b75",
+    "5be2f462",
+    "7e9739f2",
+    "9f15f21a",
+    "b3ea627f",
+    "cff429f5",
+    "d26d63b0",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "57d83b75",
+    "9f15f21a",
+    "cff429f5",
+    "d26d63b0"
+   ],
+   "input_sha256": "7b525249d67ff0e49096a0e85bbc3dd6db467108397d85762b458ec8dab18de1",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-deal-029": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "2651180198ee41a6c04eea27a67663421712f3128f2a13c85e412d2654252b9d",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-deal-030": {
+   "allowed": [
+    "0156e9fa",
+    "236ca227",
+    "5be2f462",
+    "7e9739f2",
+    "9730f565",
+    "9d80fd2d",
+    "b3ea627f",
+    "ca841807",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "236ca227",
+    "9d80fd2d"
+   ],
+   "input_sha256": "5f30f26b7f5082e1a1e9a463550d642ba75d091092837eea6ca43e20e39186ed",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-001": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "185013c6",
+    "5be2f462",
+    "6cfb67f5",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "eaa31ac5",
+    "f04a05aa",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "ad23885704de4702eaab6b85c23c77dde701f591c2200487d04766525090ba59",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-002": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "20d106f1",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "86647daf",
+    "9310827b",
+    "b1521526",
+    "b3ea627f",
+    "b42e217e",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "d3774a28",
+    "f04a05aa",
+    "fa217e48",
+    "fb110a39",
+    "fb2b263d",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "20d106f1",
+    "4a9188f3",
+    "6cfb67f5",
+    "86647daf",
+    "b42e217e",
+    "bbffc139",
+    "c53beeaa",
+    "d3774a28",
+    "fb110a39",
+    "fb2b263d"
+   ],
+   "input_sha256": "12e767cfb1335449368f524431f16b64cd41c52f0bc325bcf0c390d687362818",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-003": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "4a9188f3",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "e313a3ca",
+    "f04a05aa",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "4a9188f3",
+    "6cfb67f5",
+    "bbffc139",
+    "fb110a39"
+   ],
+   "input_sha256": "c7ed57f088c5d4f7590385088c1897ed1eee01e2cd8b20a1a738e3ab300a89ac",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-004": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "185013c6",
+    "43e2ef76",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "80def9d2",
+    "b3ea627f",
+    "c1db316c",
+    "f04a05aa",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "185013c6",
+    "6cfb67f5",
+    "80def9d2",
+    "fb110a39"
+   ],
+   "input_sha256": "dc382b0594c8878641dfc4ee514da05c59d7c3082affe6228679ab7e9d1de8a3",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-005": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "1c42d80c",
+    "2e362970",
+    "5be2f462",
+    "6330bec8",
+    "6cfb67f5",
+    "7e9739f2",
+    "847f9995",
+    "9310827b",
+    "a3f6c7f9",
+    "b3ea627f",
+    "df55c398",
+    "df8f1da0",
+    "f04a05aa",
+    "f47a8fe9",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "2e362970",
+    "6cfb67f5",
+    "df55c398",
+    "fb110a39"
+   ],
+   "input_sha256": "c30dd08ba0ca33c1985d7a7e9c2fd7fb11e5ac574bf8538e8577112bf79b72a4",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-006": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "1c42d80c",
+    "43e2ef76",
+    "5be2f462",
+    "6330bec8",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "c1db316c",
+    "f04a05aa",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "6cfb67f5",
+    "bbffc139",
+    "fb110a39"
+   ],
+   "input_sha256": "e86c8c3ed853e51d49ecc1d0afcf750ff1b353df3737430f0c9f9bf2cff2ed68",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-007": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "185013c6",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "df8f1da0",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "fb110a39"
+   ],
+   "input_sha256": "95675ee2b3dfeecf0bb2a275617f0678229df356de2f924018bdc3d1a1197929",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-008": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "5be2f462",
+    "6cfb67f5",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "df55c398",
+    "f04a05aa",
+    "f47a8fe9",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "6cfb67f5",
+    "df55c398",
+    "fb110a39"
+   ],
+   "input_sha256": "fad2e440dc0aeb1c8be868b9bd4e5fd31e63a8fb3596b4c0092a56afaeae0a89",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-009": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "1c42d80c",
+    "3a9dbafd",
+    "5be2f462",
+    "6330bec8",
+    "6cfb67f5",
+    "7e9739f2",
+    "80def9d2",
+    "86647daf",
+    "a3f6c7f9",
+    "b3ea627f",
+    "b587f6c2",
+    "bbffc139",
+    "c1db316c",
+    "c53beeaa",
+    "ca841807",
+    "e8868cbe",
+    "f04a05aa",
+    "fa217e48",
+    "fb110a39",
+    "fb2b263d",
+    "fc21a431",
+    "fc4d7753"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "6cfb67f5",
+    "80def9d2",
+    "86647daf",
+    "b587f6c2",
+    "bbffc139",
+    "c53beeaa",
+    "fb110a39",
+    "fb2b263d"
+   ],
+   "input_sha256": "830f4271cf02ec60543b5552b64a47a8e10970ad3b8158c1372b7458bbae30b9",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-010": {
+   "allowed": [
+    "0156e9fa",
+    "19304882",
+    "20d106f1",
+    "4a9188f3",
+    "5be2f462",
+    "5e89c211",
+    "7e9739f2",
+    "86647daf",
+    "a3f6c7f9",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "d3774a28",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431",
+    "fc4d7753"
+   ],
+   "cohort": "human",
+   "expected": [
+    "19304882",
+    "20d106f1",
+    "4a9188f3",
+    "5e89c211",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa",
+    "d3774a28",
+    "fb2b263d"
+   ],
+   "input_sha256": "b4e512fee3ce0721b8678c8c0ddaa3134cf16445490b72f12170a93d9c7d2718",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-011": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "179be4b8",
+    "43e2ef76",
+    "4a53ff82",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "a7784a18",
+    "b3ea627f",
+    "bc9188b4",
+    "c1db316c",
+    "e313a3ca",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bc9188b4"
+   ],
+   "input_sha256": "af229741775cdfb727fec278c4414f13df3de06e3ba69f12d82d34ef17ffae32",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-012": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "185013c6",
+    "1f3a7372",
+    "27277539",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
+    "5e89c211",
+    "6cfb67f5",
+    "7e9739f2",
+    "847f9995",
+    "86647daf",
+    "a9ecd5b4",
+    "b3ea627f",
+    "bbffc139",
+    "c1547ed1",
+    "c1db316c",
+    "c53beeaa",
+    "ca841807",
+    "f04a05aa",
+    "fa217e48",
+    "fb110a39",
+    "fb2b263d",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "4a9188f3",
+    "5e89c211",
+    "6cfb67f5",
+    "86647daf",
+    "bbffc139",
+    "c1547ed1",
+    "c53beeaa",
+    "fb110a39",
+    "fb2b263d"
+   ],
+   "input_sha256": "6021485b83e6c001584d52b6c2c56f43110018d9eb94c497a17b942185813215",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-013": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "57d13061",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "f04a05aa",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "57d13061",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "abf6fe483ece4bf94a7f6cec6e06505f53e508ada374b3697234f7b29688e17e",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-014": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "2b66211d",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "f04a05aa",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "2b66211d",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "bf6e9f1d2a4d7990f73358fe2a834cff8c823a798d092f831ff27c50d6d2c029",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-015": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "f04a05aa",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "01023f6989eb7d3b9910cdc17b529fa0a8a70d124b73558286e8d13dd03c664b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-016": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "2e362970",
+    "4a9188f3",
+    "5be2f462",
+    "6330bec8",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "c1db316c",
+    "f04a05aa",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "2e362970",
+    "4a9188f3",
+    "6cfb67f5",
+    "bbffc139",
+    "fb110a39"
+   ],
+   "input_sha256": "6179c9f5db05abbfce765e16dd9357a5da7d6e205a78a2994f0f2498d0b2cd3f",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-017": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "19304882",
+    "20d106f1",
+    "4a9188f3",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "86647daf",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "df55c398",
+    "f04a05aa",
+    "fa217e48",
+    "fb110a39",
+    "fb2b263d",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "19304882",
+    "20d106f1",
+    "4a9188f3",
+    "6cfb67f5",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa",
+    "df55c398",
+    "fb110a39",
+    "fb2b263d"
+   ],
+   "input_sha256": "666111f72dbff45c19811c52402b83322f76c709aa1a84c187a8fa423fd6d511",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-018": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "185013c6",
+    "1c42d80c",
+    "204391be",
+    "3578d799",
+    "43e2ef76",
+    "49c627cc",
+    "5be2f462",
+    "6cfb67f5",
+    "737a68d6",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "c1db316c",
+    "f04a05aa",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "204391be",
+    "6cfb67f5",
+    "bbffc139",
+    "fb110a39"
+   ],
+   "input_sha256": "98b78417f8c79cdf5e9979e25d5f7435a6b4e3c92a732a6ceeb4b0cc44ce5697",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-019": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "185013c6",
+    "2e362970",
+    "43e2ef76",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "847f9995",
+    "9310827b",
+    "b3ea627f",
+    "c1547ed1",
+    "c1db316c",
+    "dcf98880",
+    "e313a3ca",
+    "f04a05aa",
+    "fb110a39",
+    "fc21a431",
+    "fc4d7753"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "2e362970",
+    "6cfb67f5",
+    "c1547ed1",
+    "fb110a39"
+   ],
+   "input_sha256": "506a420759f81d88e1c89edaf65c977002669a9c1ecc87eb502ff6a679dab9c7",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-020": {
+   "allowed": [
+    "0156e9fa",
+    "113b3833",
+    "2271e684",
+    "27277539",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833"
+   ],
+   "input_sha256": "36519169ed7101b2287cd38e0af5591bfb636f99da2d4887e92d7f12f52ec331",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-021": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "db0fe247e81fbf9f05d8895025b3bca021365d87e4fe2651a899f00e8d5e453d",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-022": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "d9ce2b08"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "3b7f92e34f8b5c69c44ecc637b26dafb5459cda773f601c233d08da0ad028877",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-023": {
+   "allowed": [
+    "015183f5",
+    "4f7c348f",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "d15194bff4c9c67818adb47d2e16c40347d57fa17cf594b310249af2d7b83804",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-024": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "596f7549",
+    "5e89c211",
+    "a3f6c7f9",
+    "a6e6ab4e",
+    "a7784a18",
+    "a9ecd5b4",
+    "bc9188b4",
+    "c1db316c",
+    "c20dc3d5",
+    "d9ce2b08",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "24e10ee8",
+    "5e89c211",
+    "bc9188b4",
+    "c20dc3d5",
+    "e65efc68"
+   ],
+   "input_sha256": "ff6fac59aa0ff2e6e20e490dbd6fbafe38050786606ac6cebfb2b9249b4a6a37",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-025": {
+   "allowed": [
+    "015183f5",
+    "4f7c348f",
+    "c20dc3d5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "565d30a42688617a76c8a0e14870d35cb4a25e77438897df3fb28060a4337eef",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-026": {
+   "allowed": [
+    "015183f5",
+    "4f7c348f",
+    "c20dc3d5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "805411c79ae9c85dfc4c28c57a8c3b7b4ce3c56721d4a0c49d5488f0f5419986",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-027": {
+   "allowed": [
+    "4f7c348f",
+    "c20dc3d5",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "48744475951d55bbde30cfa735e0389e238b63ce427236018fcd0a3808a5d031",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-028": {
+   "allowed": [
+    "2271e684",
+    "4f7c348f",
+    "c20dc3d5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "9b9342b2c2c6a7e189c104c8a9506f409c07894087e9c93a744d45326ca97708",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-disp-029": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "2b66211d",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "86647daf",
+    "97326357",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "86647daf",
+    "c20dc3d5"
+   ],
+   "input_sha256": "81ee0556f0f74159d9515dab3b84ae1c7febb08025b9a13f942626ea4b612e75",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-disp-030": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "2b66211d",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "2b66211d",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "5dbe8e62673160e5c736e5a543f4b506abdda28664b09c6351e26e61e0c848c1",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-001": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "ab814a26",
+    "b3ea627f",
+    "bbffc139",
+    "ca841807",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431",
+    "fc4d7753"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "fb2b263d"
+   ],
+   "input_sha256": "f804d15ed2cc68349eac37e56c2448829c349cbfa5743550fefb466a258c5c04",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-002": {
+   "allowed": [
+    "0156e9fa",
+    "0e22e34a",
+    "0f38532e",
+    "1c42d80c",
+    "1fddcffb",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "ab814a26",
+    "b3ea627f",
+    "bbffc139",
+    "ca841807",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431",
+    "fc4d7753"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0e22e34a",
+    "0f38532e",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "fb2b263d"
+   ],
+   "input_sha256": "bc33f5e62587d6ea8ae41237fa39d2d745ffe7e7891a639c3c3505648ef502fa",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-eng-003": {
+   "allowed": [
+    "0156e9fa",
+    "24e10ee8",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "e313a3ca",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "bbffc139",
+    "c53beeaa"
+   ],
+   "input_sha256": "1e6a729c9b387db3b0bab7b1720f6b735521cc932eaf25326697569054ce53b5",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-004": {
+   "allowed": [
+    "0156e9fa",
+    "20d106f1",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "a3f6c7f9",
+    "b3ea627f",
+    "bbffc139",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "20d106f1",
+    "4a9188f3",
+    "bbffc139",
+    "fb110a39"
+   ],
+   "input_sha256": "19438a053587ecb6e711763fa91e24c7c4ffab9efff415f846abe0fbd8f5b06d",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-eng-005": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "308ef1de",
+    "43e2ef76",
+    "4a53ff82",
+    "5be2f462",
+    "7e9739f2",
+    "a7784a18",
+    "b3ea627f",
+    "bc9188b4",
+    "c20dc3d5",
+    "d5dcfe26",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "308ef1de",
+    "bc9188b4",
+    "c20dc3d5"
+   ],
+   "input_sha256": "5639ffdd40577ed7782af39401cd7642e55348bbc02865a58141de6031457ae0",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-006": {
+   "allowed": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "ab814a26",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa"
+   ],
+   "input_sha256": "6e8329cfb143d792121e2d0996dc3cada57342fc799dd2d5150f48d848129f09",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-007": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "596f7549",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08",
+    "e313a3ca",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "fb110a39"
+   ],
+   "input_sha256": "b5c8e743b4d09acea4089da730eeee0622aff60c0e609fd620616f4776137b5d",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-008": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "58cef3a1",
+    "5be2f462",
+    "6330bec8",
+    "7e9739f2",
+    "9730f565",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "81dcac3e003ac5601aa96848563ab97c975025c2c9322fbc207e189324a1d762",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-eng-009": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "fb110a39"
+   ],
+   "input_sha256": "bd9fb8ea98fbee04484f48207ba39263e548c50a0ab2a12fbd8560cf7f06a3eb",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-010": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "2b889e80",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08",
+    "f47a8fe9",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "fb110a39"
+   ],
+   "input_sha256": "f14f47fc10ef560eeb63a5bcbaaf12504517e10c39f6a2067be77ab3102a437d",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-011": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "3a9dbafd",
+    "5be2f462",
+    "7e9739f2",
+    "9310827b",
+    "b3ea627f",
+    "df8f1da0",
+    "f0f9156e"
+   ],
+   "cohort": "human",
+   "expected": [
+    "f0f9156e"
+   ],
+   "input_sha256": "14a3d475bcf35b0382ddf5d96df75739692d53f20bbee5ca1a837bc8e3327418",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-eng-012": {
+   "allowed": [
+    "0156e9fa",
+    "113b3833",
+    "152ceb65",
+    "20d106f1",
+    "2271e684",
+    "4a9188f3",
+    "58cef3a1",
+    "5be2f462",
+    "6330bec8",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "c1db316c",
+    "d3774a28",
+    "df8f1da0",
+    "f47a8fe9",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "20d106f1",
+    "4a9188f3",
+    "bbffc139",
+    "d3774a28",
+    "fb110a39"
+   ],
+   "input_sha256": "03a5a050da491b7cef687e32cd5b41ba2c7bc71caea0053c9565bb81c891ebab",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-013": {
+   "allowed": [
+    "0156e9fa",
+    "4fae20f4",
+    "5be2f462",
+    "6330bec8",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "fb110a39"
+   ],
+   "input_sha256": "77a60f253806b83d260d196fd94c5c2f628c22e146b4f2826418656eb50639ab",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-014": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139"
+   ],
+   "input_sha256": "af5ada5342e690bfffcdf9c01f639d103bbec815d52c88b2e9df8c3769de24b2",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-015": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "86647daf",
+    "9310827b",
+    "97326357",
+    "a9ecd5b4",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "86647daf"
+   ],
+   "input_sha256": "ad09c29ff3e90d7932e88d5122f212330d307624b5059fa756c162869f752ccc",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-eng-016": {
+   "allowed": [
+    "0156e9fa",
+    "113b3833",
+    "2271e684",
+    "58cef3a1",
+    "5be2f462",
+    "7e9739f2",
+    "97326357",
+    "b3ea627f",
+    "b42f11a0",
+    "df8f1da0"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "b42f11a0"
+   ],
+   "input_sha256": "42b6b27f96c9ed5d909d538198bcb1dbad857e5dbdddb20a33e0af84eb7dbbab",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-eng-017": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "3a9dbafd",
+    "43e2ef76",
+    "4a53ff82",
+    "5be2f462",
+    "5e89c211",
+    "6330bec8",
+    "7e9739f2",
+    "a6e6ab4e",
+    "a7784a18",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c1db316c",
+    "d9ce2b08",
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "5e89c211",
+    "e65efc68",
+    "fb110a39"
+   ],
+   "input_sha256": "c5329d6264a4bf339df90887a48d37886aa23962872c35613c41f1f1fb503edc",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-018": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "1c42d80c",
+    "43e2ef76",
+    "4a53ff82",
+    "4a9188f3",
+    "5be2f462",
+    "5e89c211",
+    "7e9739f2",
+    "a7784a18",
+    "a9ecd5b4",
+    "ab814a26",
+    "b3ea627f",
+    "bbffc139",
+    "c1db316c",
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "5e89c211",
+    "bbffc139",
+    "e65efc68",
+    "fb110a39"
+   ],
+   "input_sha256": "f9e2725b2d972a7ce2e209139375d7b124a6b85c88926a651ee5124c9e5aa276",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-019": {
+   "allowed": [
+    "0156e9fa",
+    "113b3833",
+    "4a9188f3",
+    "58cef3a1",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "d3774a28",
+    "f47a8fe9",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "4a9188f3",
+    "bbffc139",
+    "d3774a28",
+    "fb110a39"
+   ],
+   "input_sha256": "788a0d2d44fa0e85190fb00fd8e94ee4798bfa8c1dfafe3c37b41d68727cd205",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-020": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "a90166300d2969fde6828e8ea6fa82ed57f4e134f2c68f74b488e81cb4c1c76e",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-eng-021": {
+   "allowed": [
+    "0156e9fa",
+    "43e2ef76",
+    "4a53ff82",
+    "5be2f462",
+    "7e9739f2",
+    "847f9995",
+    "b3ea627f",
+    "c1db316c",
+    "e313a3ca",
+    "e8868cbe",
+    "f04a05aa",
+    "fa217e48",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "fb110a39"
+   ],
+   "input_sha256": "e8dea7931de83b2bde22c844839cf521e580f991510f0c94601d6c2dca99f15a",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-eng-022": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "20d106f1",
+    "27277539",
+    "4a9188f3",
+    "58cef3a1",
+    "5be2f462",
+    "6330bec8",
+    "7e9739f2",
+    "86647daf",
+    "95e76c1f",
+    "97326357",
+    "b3ea627f",
+    "bbffc139",
+    "c1db316c",
+    "c53beeaa",
+    "ca841807",
+    "d3774a28",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431",
+    "fc4d7753"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "20d106f1",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa",
+    "d3774a28",
+    "fb2b263d"
+   ],
+   "input_sha256": "10ae49ca13faccd26dfe67ff75bf5664d3bdf3e22b7b6ca6db340b6c9ed43968",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-023": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "3717fe08837c7c4d85fd6953f1082505a25af2e456bace7494b4b41c6806677d",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-eng-024": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "95e76c1f",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "df8f1da0",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "e1a18049d896b88ad83144b89dd34659a2e54dbc470814e873d0821b4baf4117",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-eng-025": {
+   "allowed": [
+    "0156e9fa",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "9310827b",
+    "a6e6ab4e",
+    "a7784a18",
+    "b3ea627f",
+    "bbffc139",
+    "e313a3ca",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "86647daf",
+    "bbffc139"
+   ],
+   "input_sha256": "15161fc1783a62d416b26678ce41a9e67930bef3dd41138648de58189f730bcd",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-026": {
+   "allowed": [
+    "2271e684",
+    "4f7c348f",
+    "847f9995",
+    "a8c55a47",
+    "c20dc3d5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "a8c55a47",
+    "c20dc3d5"
+   ],
+   "input_sha256": "b6e928ae8cab25b973295d3df2b71f6b382a288962c874db79b664af0a68171a",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-027": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08",
+    "e313a3ca"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "197e090d61528e250b6075d7af2a00aca2f73f3bfcb1afc8b2368f0618096f7e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-eng-028": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "df8f1da0",
+    "e313a3ca",
+    "fa217e48",
+    "faae6748"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139",
+    "faae6748"
+   ],
+   "input_sha256": "fb7d762e86a24c8bbc495fe15497cbbffef99140197aa37e2208a8002769f973",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-029": {
+   "allowed": [
+    "0156e9fa",
+    "20d106f1",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "847f9995",
+    "a3f6c7f9",
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "20d106f1",
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "e5bcf0729461d2809432e6435c9c64810d2f48e82d96397a93400542a71020ba",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-eng-030": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "9310827b",
+    "b3ea627f",
+    "d9ce2b08",
+    "e313a3ca",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "a448aa2682fa76ecc0e5f67fe76ca885678de634f155faa634433e399387be0d",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-001": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "1ab1cc27caa2b15e7624118a2b57979dd99ab6fe16da3ad26c6f529004f3a925",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-002": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "b7ee344e29cc32a520babd44e77f080602ad4b26011306780824d864aa07b904",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-003": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "185013c6",
+    "2b66211d",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "f04a05aa",
+    "f47a8fe9",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "185013c6",
+    "2b66211d",
+    "6cfb67f5",
+    "c20dc3d5",
+    "fb110a39"
+   ],
+   "input_sha256": "348c4c125a29e4053de77cf976af33b41c9b84ac05e9ae96d13fd16c1163e314",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-notif-004": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "345fecfd95c523b88bd32c7526e855bc7660cef1ae934210d70b191a51fd0661",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-005": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "99197949673af7425689e6688a3e990334aa39086e7b79da59ed2611061759a9",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-006": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "b1521526",
+    "b3ea627f",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "c4547b5c84caf1cebac213ec9747f8b0d7eaefcc239f6f4ef572a4b62c61c127",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-007": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "1288cf9a2fc9b8c9aa3d1bc9032300cc456458d41bfbf9446166d2a7061b64a9",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-008": {
+   "allowed": [
+    "0156e9fa",
+    "2b66211d",
+    "5be2f462",
+    "7e9739f2",
+    "a9ecd5b4",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "2b66211d"
+   ],
+   "input_sha256": "9e6fa8851951aec2b56500ae21eb213c621c11e58f68fdc545aecbd363e6a672",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-009": {
+   "allowed": [
+    "0156e9fa",
+    "185013c6",
+    "2b66211d",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "f04a05aa",
+    "f47a8fe9",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "185013c6",
+    "2b66211d",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "0ac4ba2e9a1bddbd862fe4366b9b95c6f47549c1465e99ff4982df5a7e5be6c3",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-notif-010": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "097510c2e28c7f7c4dcb1e610b373552212b0fe11f4f02dcd53977c9fa737676",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-011": {
+   "allowed": [
+    "0156e9fa",
+    "2b66211d",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "ebe87567a7e2c355383e6046d640369596562b4a6d614f8197cc7a34f3401f73",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-notif-012": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "185013c6",
+    "43e2ef76",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "d3774a28",
+    "f04a05aa",
+    "f47a8fe9",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "185013c6",
+    "6cfb67f5",
+    "c20dc3d5",
+    "d3774a28",
+    "fb110a39"
+   ],
+   "input_sha256": "b22e3efdce6a7bbdd9b270c62840f6a7356991f9117437aa30c5a9ecd28c407a",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-notif-013": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "185013c6",
+    "2b66211d",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "847f9995",
+    "b3ea627f",
+    "c20dc3d5",
+    "f04a05aa",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "185013c6",
+    "2b66211d",
+    "6cfb67f5",
+    "c20dc3d5",
+    "fb110a39"
+   ],
+   "input_sha256": "5cac805d830bcc41bd251135001f893a4d60d40b4d42d70bdd11fc295caf9cfa",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-notif-014": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "09fc2ac65dbb2fb1471f8112e22192384c89b88427c1f2af5d35164e2e9661f4",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-015": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "3a9dbafd",
+    "5be2f462",
+    "647f843d",
+    "7e9739f2",
+    "b3ea627f",
+    "c53beeaa",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "647f843d",
+    "c53beeaa"
+   ],
+   "input_sha256": "14b28883a632e5fd61a1159604b5045b81088f069b6fb96502b65662f287711a",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-notif-016": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "1b8e7f43",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "1fb81e7a56aa20a912c0c32c48110b1201b53d323f0a381bfb063c1db9e8f0a4",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-017": {
+   "allowed": [
+    "0156e9fa",
+    "308ef1de",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "bc9188b4",
+    "e313a3ca",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "308ef1de",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "bc9188b4"
+   ],
+   "input_sha256": "40028dcfbbe2556b829e55fbe479cf2a66cfd66349142166225b3d2da04b8f2f",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-018": {
+   "allowed": [
+    "0156e9fa",
+    "2b66211d",
+    "5be2f462",
+    "7e9739f2",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "b95b39e2628ed2197ba415007186ee8e12ef4730dbc6c89b0574c8d9c77aadcc",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-notif-019": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "2b66211d",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "2b47ae504f2f3b5818b9cc3c8e0483f61d439dd127ca644d8048931e40338c72",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-020": {
+   "allowed": [
+    "0156e9fa",
+    "2b66211d",
+    "5be2f462",
+    "7e9739f2",
+    "847f9995",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "e95b1e734299e83b3c61c22741c16094c85728609995620c982475d6082bc1fd",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-021": {
+   "allowed": [
+    "0156e9fa",
+    "173119a8",
+    "179be4b8",
+    "1b8e7f43",
+    "1c42d80c",
+    "5be2f462",
+    "5cd8d0f6",
+    "7e9739f2",
+    "88e9b5eb",
+    "b3ea627f",
+    "c20dc3d5",
+    "d9ce2b08",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "34c2a4469c88e01e086885401aa6184dfe44f1ad96be6e3553154be8aad4afb0",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-022": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "809758bc3b0389533f146db92df83327f45546fce3c5d9117b3a1c3e4b65afe1",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-023": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "2914f2e7e67ff03a3dd85b9997a1b0737a9748af794aa50b72bcf76524d8d2a7",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-024": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "9e17d2b5b12893469caecfea7f780be6f926c1e69215e87c3a5d9c8c08e3f347",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-025": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "2b66211d",
+    "5be2f462",
+    "7e9739f2",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "8fe2c1feea52d1a557ba34cb023bf9254025ac3970b208a03849405a86a99b5b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-026": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "86647daf"
+   ],
+   "input_sha256": "13816f676b56425d1798a81d9f7c59e63ca2583a929704b3f1cfb109e08cb975",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-notif-027": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d9ce2b08"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "409e34b6d687f8e7dd7ed7e99d120181a66821fa2bd5bc2686d2f2704db5bc2d",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-notif-028": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "7bd9fa164b3f662425704c383f28b1fe0dedc9bd01074d37f2308f39e662e065",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-notif-029": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "1d50a3bb",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "d51742fcd81867490c6c951dbbcc5a3775fe1f4e65a57015158680c5fbfaed8a",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-notif-030": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [
+    "86647daf",
+    "c20dc3d5"
+   ],
+   "input_sha256": "692a4591b7052a691ee0977de13a8668ec7e801d2676c3ebbe708bbaf0ebd42c",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-001": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "eaa31ac5",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "f0d9bde35a69dd0993284072d40072083c0c65d3c20f7f6a24b0f42bc83dbd85",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-rel-002": {
+   "allowed": [
+    "0156e9fa",
+    "2b66211d",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "9310827b",
+    "a9ecd5b4",
+    "b3ea627f",
+    "c20dc3d5",
+    "e313a3ca",
+    "e8868cbe",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "4a9188f3",
+    "c20dc3d5"
+   ],
+   "input_sha256": "8c3bf01bd83932215e223534c030cbe94c1873893a59bc2a19ef333f81cc8f8d",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-003": {
+   "allowed": [
+    "0156e9fa",
+    "1b8e7f43",
+    "1c42d80c",
+    "3a9dbafd",
+    "5be2f462",
+    "5cd8d0f6",
+    "647f843d",
+    "7e9739f2",
+    "86647daf",
+    "88e9b5eb",
+    "9530fb1c",
+    "b3ea627f",
+    "c53beeaa",
+    "ca841807",
+    "d9ce2b08",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "647f843d",
+    "86647daf",
+    "c53beeaa"
+   ],
+   "input_sha256": "04c7530c105daf6a0296552700342c7fa77b1d33936b5051c6467c84b84aeae7",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-004": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "185013c6",
+    "5be2f462",
+    "6cfb67f5",
+    "7e9739f2",
+    "847f9995",
+    "b3ea627f",
+    "f04a05aa",
+    "fb110a39",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "6cfb67f5",
+    "fb110a39"
+   ],
+   "input_sha256": "f7b734b7c492f5921ab2031a738607d029cd7983dedcb9d2ec42754cbb16d144",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-005": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "185013c6",
+    "1f3a7372",
+    "20d106f1",
+    "25fcddee",
+    "2e362970",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
+    "5e89c211",
+    "6cfb67f5",
+    "7e9739f2",
+    "847f9995",
+    "a3f6c7f9",
+    "a9ecd5b4",
+    "b3ea627f",
+    "b42e217e",
+    "bbffc139",
+    "c1547ed1",
+    "c1db316c",
+    "c6f69dee",
+    "f04a05aa",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "185013c6",
+    "20d106f1",
+    "25fcddee",
+    "2e362970",
+    "4a9188f3",
+    "5e89c211",
+    "6cfb67f5",
+    "b42e217e",
+    "bbffc139",
+    "c1547ed1",
+    "c6f69dee",
+    "fb110a39"
+   ],
+   "input_sha256": "58ced1b0fd786bc0308c6ffe3ae34e4b891e3c4e3f80e45eaa33756d7f9ea2ca",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-006": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "db927a68d7bfa4191b489fa64eb872313196a3103c3e7641810c0fa7507129ed",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-007": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "24e10ee8",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "9530fb1c",
+    "b3ea627f",
+    "bbffc139",
+    "c20dc3d5",
+    "e313a3ca",
+    "e8868cbe",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "c20dc3d5"
+   ],
+   "input_sha256": "8b383f6a55b11b76d3ee20dfb98e221c277639b1884bba1ae75fff1fc4662ba3",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-008": {
+   "allowed": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "a3f6c7f9",
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "5faa5fecc7ae92d2ad840053911160e4869a4a2daa565d4ac17667f778ad9274",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-009": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "179be4b8",
+    "1c42d80c",
+    "2b66211d",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "d5dcfe26",
+    "d9ce2b08",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d"
+   ],
+   "input_sha256": "67e85d085477209bb576f8616e515186064aea4e9f4ef12ddb1947ff7087d203",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-010": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "1ba052d05eacd5ca8a0bd5fcf1120c5e1f40929a43d58f080166ca610e28ceb0",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-011": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "2b66211d",
+    "4f7c348f",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "2ecc24ee16d87a390ee926ffc49bb80c181499a15daabfcbbea02aa04267f101",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-012": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "b39ebae208f6c9998f50d3dfd19b521dd5417972d63324c242b2961181a26bc8",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-013": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "388cc81e",
+    "4a9188f3",
+    "4c21d86b",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "ca841807",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "388cc81e",
+    "4a9188f3",
+    "4c21d86b",
+    "bbffc139"
+   ],
+   "input_sha256": "870ef71018da5a2be3aa8ed59e2387dda74d4c543ad74f109bccdfae21b793df",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-014": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "67580c28",
+    "a6e6ab4e",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "67580c28",
+    "c20dc3d5"
+   ],
+   "input_sha256": "d7b67b8193b406d762cda432301de597b445df6b49301d550c725110d471855b",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-015": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a7784a18",
+    "a9ecd5b4",
+    "bc9188b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "bc9188b4",
+    "c20dc3d5"
+   ],
+   "input_sha256": "38b8dfda52ebf76441fb86e18c50a367b2a6bc02b94f5661015efdf42b6c7c33",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-016": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "4f7c348f",
+    "67580c28",
+    "9293d609",
+    "a7784a18",
+    "b7ec8f3b",
+    "bc9188b4",
+    "c1db316c",
+    "c20dc3d5",
+    "e65efc68",
+    "eeb3d106",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "67580c28",
+    "9293d609",
+    "b7ec8f3b",
+    "bc9188b4",
+    "c20dc3d5",
+    "e65efc68",
+    "eeb3d106"
+   ],
+   "input_sha256": "ebe1f02729577ec45f284beab4d6f747351da81cf976244c1020a1968aa0c956",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-017": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "847f9995",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "03963817ff89a6e67fdb3b6fc5dc1621572720aad1252d4dffb4455c2b337f83",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-018": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a7784a18",
+    "bc9188b4",
+    "c1db316c",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "bc9188b4"
+   ],
+   "input_sha256": "293eb46862b9ed2b9948d26ae710a8ade55225a71222c7ea4efdbc4e20ee5da4",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-019": {
+   "allowed": [
+    "015183f5",
+    "1c42d80c",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "596f7549",
+    "6330bec8",
+    "847f9995",
+    "a3f6c7f9",
+    "a6e6ab4e",
+    "a7784a18",
+    "a9ecd5b4",
+    "c1db316c",
+    "c20dc3d5",
+    "d9ce2b08",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "c20dc3d5",
+    "e65efc68"
+   ],
+   "input_sha256": "c5495b6dfc9b0ff18b6b47cf4a2fd9b0d623cf7cbf4ead24aeb3305440e2e496",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-020": {
+   "allowed": [
+    "015183f5",
+    "1c42d80c",
+    "24e10ee8",
+    "308ef1de",
+    "4a53ff82",
+    "4f7c348f",
+    "a7784a18",
+    "bc9188b4",
+    "c1db316c",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "308ef1de",
+    "bc9188b4"
+   ],
+   "input_sha256": "b44ed5f994a0312a9e1d1096caf47dd3744686ae09ffc567c5f2598c2f0f6a9e",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-021": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "5e89c211",
+    "9730f565",
+    "a7784a18",
+    "a9ecd5b4",
+    "c1db316c",
+    "e65efc68",
+    "e8868cbe",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "5e89c211",
+    "e65efc68"
+   ],
+   "input_sha256": "073dec704555fc1042dc3d4b9581fe88f2850c6f2be734e910f35bd093490680",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-022": {
+   "allowed": [
+    "015183f5",
+    "1c42d80c",
+    "2b66211d",
+    "4f7c348f",
+    "7105955b",
+    "847f9995",
+    "a6e6ab4e",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "7105955b",
+    "c20dc3d5"
+   ],
+   "input_sha256": "d451ec0075948052c4810e560713db5c419494d1d36ef6081919e2303c8df29c",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-023": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "4c83a66349f65960c98dc76c0f6a576aa43755f5032333f1e4180767f33217db",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-rel-024": {
+   "allowed": [
+    "015183f5",
+    "4f7c348f",
+    "a6e6ab4e",
+    "e8868cbe",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "719b0b0202c3393c26fd77315b4479396e3315fdf158cda992b7c8ab746f730b",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-rel-025": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "847f9995",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "586748d05bca54a88726576a46e4fb9e0fea5b380497b48c219016b0544cb83f",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-026": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "308ef1de",
+    "4a53ff82",
+    "4a9188f3",
+    "4f7c348f",
+    "a7784a18",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "308ef1de",
+    "4a9188f3"
+   ],
+   "input_sha256": "5a7dc3dddc05ebe1cbfd7a8bb5c1871e46b534b58d42cd59b4cca64f13049ed8",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-027": {
+   "allowed": [
+    "015183f5",
+    "1c42d80c",
+    "2271e684",
+    "24e10ee8",
+    "308ef1de",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "847f9995",
+    "a6e6ab4e",
+    "a7784a18",
+    "a8c55a47",
+    "a9ecd5b4",
+    "bc9188b4",
+    "c1db316c",
+    "e65efc68",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "308ef1de",
+    "a8c55a47",
+    "bc9188b4",
+    "e65efc68"
+   ],
+   "input_sha256": "5b14ab6c8217826080b43f1d10b6f72393ab245954342894b44b62473b37f13b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-028": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a6e6ab4e",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "b328d39c0dd600d11dffd60a9cea134fd10ee6b1a754a30365362ebb98157c33",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-029": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "c20dc3d5",
+    "d9ce2b08",
+    "df8f1da0",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "f5a1d80e7163a8056f587c5b78eadeb822080e7ee0ea322cf95d7fc4add65d1b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-rel-030": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "9310827b",
+    "a6e6ab4e",
+    "a7784a18",
+    "b3ea627f",
+    "bbffc139",
+    "d9ce2b08",
+    "e313a3ca",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "968ae90d2e3653b1f79736fed25f15c941ed7895fd0e8dbad7d23293a9877966",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-001": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "2b66211d",
+    "4f7c348f",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "818c20591792c76ee3a10c8b089091f376b93f1e231df55f6d5d124e96eacaf1",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-002": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "2b66211d",
+    "4f7c348f",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "23e99c5d0463cc8ba0e012928716f4d83833e6eb807619ea92cd76d93d44e8d9",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-003": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "5be2f462",
+    "7e9739f2",
+    "847f9995",
+    "b3ea627f",
+    "c1db316c",
+    "e313a3ca",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "4b892b14e8f9ad08edd701dab274bfc39179838a6cc08482283156c4c0b3805b",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-sfb-004": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "2e362970",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a7784a18",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "2e362970",
+    "e65efc68"
+   ],
+   "input_sha256": "baa512ce63d42c8ded4419ba5684c9b65f034f88e216861048fdfb8919ebdf3b",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-sfb-005": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "2b66211d",
+    "4f7c348f",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "bf4a93cece7b399c608313e0829c32ceb6c51c7155e16a3c4118454df31af8f1",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-sfb-006": {
+   "allowed": [
+    "2271e684",
+    "4f7c348f",
+    "847f9995",
+    "c20dc3d5",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "70a9b71d1be8fce0ad589170b03e75ebed4c826640ee3c93824753cb88f2145b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-007": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "c1db316c",
+    "d9ce2b08",
+    "e313a3ca",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "58690d12fe66d952f0669fdabdaabf21ba4851468dfe172a1a4424f29d1fff04",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-sfb-008": {
+   "allowed": [
+    "015183f5",
+    "173119a8",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "596f7549",
+    "67580c28",
+    "a7784a18",
+    "a9ecd5b4",
+    "bc9188b4",
+    "c1db316c",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "67580c28",
+    "bc9188b4"
+   ],
+   "input_sha256": "e128e8c150b074180121a99613d44d596d64d1643678b342d8a0c5dbd1b2fafc",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-009": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "b8af36187d90a1a0249937e12dcecf3fad6055aa5a85b19ad30ecbbc79603715",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-sfb-010": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a7784a18",
+    "c1db316c",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "24e10ee8"
+   ],
+   "input_sha256": "1fb295a8f240cd0aea5e36a721db29246fa7144bad8a088b03f73a5093cf888a",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-011": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139"
+   ],
+   "input_sha256": "38b7881a3c38a90363c5b0a43ca9bedfdae1a3ae1b430ed919a4e78d98453922",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-sfb-012": {
+   "allowed": [
+    "2271e684",
+    "4f7c348f",
+    "57d13061",
+    "c20dc3d5"
+   ],
+   "cohort": "human",
+   "expected": [
+    "57d13061",
+    "c20dc3d5"
+   ],
+   "input_sha256": "b15af205e6ad078191039c953b511f0a64d2c0bbd77ab9f031e106e0ac56889e",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-sfb-013": {
+   "allowed": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "ab814a26",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa",
+    "fb2b263d"
+   ],
+   "input_sha256": "2a64b59be8bdfb1b6e4475fb8f3d53258400af7fb3c9be702156cf42476148d6",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-sfb-014": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a7784a18",
+    "a9ecd5b4",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "e65efc68"
+   ],
+   "input_sha256": "4f7f7d0469e4455b71a9474d33607670a2cfd03e5c66bd15d22d315f3f535023",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-015": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "67580c28",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "67580c28",
+    "c20dc3d5"
+   ],
+   "input_sha256": "5a2c2352d08c54c9bd42d08a851b63fcf89eb9b80221a43b1eb40014ae6b1011",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-sfb-016": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "9310827b",
+    "b3ea627f",
+    "bbffc139",
+    "f5beac20",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139"
+   ],
+   "input_sha256": "9e9505dad4f2b829000dd0de795ee092187ab0574ef829e1f938eabb56f3b729",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-017": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "bfd73465591df935ad2202a5879bf58ec69e3131b225461e4e74ebc110bc5c46",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-018": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "113b3833",
+    "2b889e80",
+    "43e2ef76",
+    "5be2f462",
+    "67580c28",
+    "7e9739f2",
+    "80def9d2",
+    "a8f159ad",
+    "b3ea627f",
+    "f47a8fe9",
+    "f92dfab2",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "67580c28",
+    "80def9d2",
+    "a8f159ad",
+    "f92dfab2"
+   ],
+   "input_sha256": "b46c7136a39805bdcdbf3d46f266c6739af015002d3597b85e3d16cc171197f2",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-019": {
+   "allowed": [
+    "0156e9fa",
+    "58cef3a1",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139",
+    "c53beeaa"
+   ],
+   "input_sha256": "c62a78af5aae1a12668d6d6239e18c2e8f3d00224871773e670dd23d6e0eb5cf",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-020": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "bbc8d94541acde5500c84a319e65fb7ca82125cc4556daca6061ad3b3931fde1",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-sfb-021": {
+   "allowed": [
+    "015183f5",
+    "173119a8",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "5409731b",
+    "a7784a18",
+    "a9ecd5b4",
+    "c1db316c",
+    "c20dc3d5",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "c20dc3d5",
+    "e65efc68"
+   ],
+   "input_sha256": "c1ba8fa509cdd55de34a6f954ec10b58be1718ceaee85dda91a78ec2191fb7a4",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-sfb-022": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "ab814a26",
+    "b1521526",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "4a9188f3",
+    "86647daf",
+    "bbffc139",
+    "c53beeaa",
+    "fb2b263d"
+   ],
+   "input_sha256": "d66378bb6b8107748c0051bd21677bf7fd0f4554e19becbd6983b85187a64f66",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-023": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "94c352cdfdf830fc93851fc840b75989043d37958c13e547df2948c2719edbaf",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-sfb-024": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "2271e684",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139"
+   ],
+   "input_sha256": "17bf3dfcf91e9014bd1adf76a45a6161c8855de93de5bd1112d1b21b24288e15",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-025": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "9310827b",
+    "b3ea627f",
+    "dcf98880",
+    "e313a3ca",
+    "e4d965d9"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "bf4762b6a9c69f8f6de50042ecb65ebfcb83796a4addaf7a03f5941dcadd58ec",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-sfb-026": {
+   "allowed": [
+    "0156e9fa",
+    "0f38532e",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "b1521526",
+    "b3ea627f",
+    "bbffc139",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "0f38532e",
+    "4a9188f3",
+    "bbffc139"
+   ],
+   "input_sha256": "3bf5a73792b20caae4166e12f0d8b0ac8eb1fbb56b49e75c6afb2b09da4241d1",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-027": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "5dd17d7bfe84a8e7c421d842ab497794a545001ca783b1dee7e69c8e080463b5",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-sfb-028": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "152ceb65",
+    "2ca2add2",
+    "5be2f462",
+    "7e9739f2",
+    "9310827b",
+    "94806da2",
+    "9730f565",
+    "b3ea627f",
+    "ca841807",
+    "f47a8fe9",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2ca2add2",
+    "fb110a39"
+   ],
+   "input_sha256": "6786c62324abcda42b60c35fee52173eea13075b424f2db940daa9f0c6d64671",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-sfb-029": {
+   "allowed": [
+    "0156e9fa",
+    "2b889e80",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "7479206077236a353becae15ef9079725f921c2dcb65ddb174ca2e791dff0e7e",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-sfb-030": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "8ed42941aa070369a9b63be1f222a2aa2963d570a34a82ac12aaa8da0851db9d",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-001": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "113b3833",
+    "43e2ef76",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833"
+   ],
+   "input_sha256": "98f8f68d16c4340d071b065e71e347b6d161bd81e45d75ace5c4bd3bc8bef1a4",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-002": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "bbffc139",
+    "c53beeaa",
+    "ca841807",
+    "f5beac20",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139",
+    "c53beeaa"
+   ],
+   "input_sha256": "573d435311d5a73325eff2d9f7effb4bfc7d2d08c2e752689bf17a55d3312199",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-tour-003": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "b6ba537a8ec2e7ab0b6037cdba7ce4096de80f692918c80e8d45747f4fc877eb",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-004": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "179be4b8",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3"
+   ],
+   "input_sha256": "00d54aa98b650aa5d481fa901c14b6a67fe7cabe26fdf49133bae833817fcbe0",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-tour-005": {
+   "allowed": [
+    "0156e9fa",
+    "43e2ef76",
+    "4a53ff82",
+    "4a9188f3",
+    "5be2f462",
+    "67580c28",
+    "7e9739f2",
+    "80def9d2",
+    "a8f159ad",
+    "b3ea627f",
+    "bbffc139",
+    "c315befa",
+    "d3774a28",
+    "f92dfab2",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "67580c28",
+    "80def9d2",
+    "a8f159ad",
+    "bbffc139",
+    "d3774a28",
+    "f92dfab2"
+   ],
+   "input_sha256": "ca7df94223559afe25e08271f24d36305767f6ebcc301cf644592a3430aed610",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-006": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "113b3833",
+    "152ceb65",
+    "43e2ef76",
+    "5be2f462",
+    "67580c28",
+    "7e9739f2",
+    "80def9d2",
+    "a8f159ad",
+    "b3ea627f",
+    "f47a8fe9",
+    "f92dfab2",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "67580c28",
+    "80def9d2",
+    "a8f159ad",
+    "f92dfab2"
+   ],
+   "input_sha256": "e7c465d3a98b80691cf8b716a1637e61e1b0ebc2631bf16c4c6eced4e6a91fa7",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-tour-007": {
+   "allowed": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
+    "7e9739f2",
+    "95e76c1f",
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "bbffc139"
+   ],
+   "input_sha256": "90e25cd69f7aebf133670104673d9ae2bd856f66260d6d1cc5f0f3bde5a4509b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-008": {
+   "allowed": [
+    "0156e9fa",
+    "179be4b8",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "c291fea913f9c63f7ca5ca5f1dde6b879798f0f373d040749c466773e1ffe457",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-009": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "d4376cab863b4fd26252929c83b4afe6da8610cbd3e83ebfaab5e1e8081bfb02",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-tour-010": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "152ceb65",
+    "43e2ef76",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48",
+    "fb110a39"
+   ],
+   "cohort": "human",
+   "expected": [
+    "fb110a39"
+   ],
+   "input_sha256": "fe9d4c06cbbab652fcf22f6cd215e374e0c7c57f0f3ef165d6ebb5714e929a6c",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-011": {
+   "allowed": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "67580c28",
+    "a6e6ab4e",
+    "a7784a18",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "24e10ee8",
+    "67580c28",
+    "e65efc68"
+   ],
+   "input_sha256": "10c25d9c76c18cc0d7fcf87977ec454b7b695551d5fbac89045222a59ce8c063",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-tour-012": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "822b8227c33470ad0f0baa0ab05e81289fc3afe012cb10582c9882b54c2778d2",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-013": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "67580c28",
+    "a7784a18",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "24e10ee8",
+    "67580c28",
+    "e65efc68"
+   ],
+   "input_sha256": "8a55f26a55a04ac158069b7ba101cb38734b3a6d2c41a9456937e6070f793303",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-014": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "67580c28",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "67580c28",
+    "c20dc3d5"
+   ],
+   "input_sha256": "b810923d23ea2b49f22e37fd54ef09a0a0681fb792fa665e57e9ec5b0166247b",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-015": {
+   "allowed": [
+    "015183f5",
+    "113b3833",
+    "24e10ee8",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "9293d609",
+    "a7784a18",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "113b3833",
+    "24e10ee8",
+    "9293d609",
+    "e65efc68"
+   ],
+   "input_sha256": "43a0538f974ce404d7039be47bb6c76699664699016b551bba7108ef1d09a0b5",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-016": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "67580c28",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "67580c28",
+    "c20dc3d5"
+   ],
+   "input_sha256": "ffc9586eb06d93abc907097a7dce22e91ccc971086be8f80b56ea9f36a79f6bf",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-tour-017": {
+   "allowed": [
+    "015183f5",
+    "2271e684",
+    "308ef1de",
+    "43e2ef76",
+    "4a53ff82",
+    "4f7c348f",
+    "a7784a18",
+    "a9ecd5b4",
+    "bc9188b4",
+    "c1db316c",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "308ef1de",
+    "bc9188b4",
+    "e65efc68"
+   ],
+   "input_sha256": "07c29a79c197357d50ed56ca81bca76dee58bb1deccfa477ddc72d877cc7e597",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-018": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "67580c28",
+    "7e9739f2",
+    "80def9d2",
+    "a8f159ad",
+    "b3ea627f",
+    "f47a8fe9"
+   ],
+   "cohort": "human",
+   "expected": [
+    "67580c28",
+    "80def9d2",
+    "a8f159ad"
+   ],
+   "input_sha256": "60020831901bdab2fd9ccf1d8463f8a12eed527cb97655480047165d5f1ef5c2",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-tour-019": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "5be2f462",
+    "7e9739f2",
+    "9730f565",
+    "a6e6ab4e",
+    "b3ea627f",
+    "ca841807",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "5de8f2110af33daa6ec22f52403701c2dc4fed95854273a36f7691fe5c1eae27",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-020": {
+   "allowed": [
+    "015183f5",
+    "2b66211d",
+    "4f7c348f",
+    "a6e6ab4e",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "2b66211d",
+    "c20dc3d5"
+   ],
+   "input_sha256": "1df197e01bcaea33aafd76ca5bb4ec2d23b1e227f2332f42a0fc96ad11ef6461",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-021": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "142e933b707d070776f81655fedbd99e48958cf32a0bd33c616a3729ad110e2c",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-022": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "envelope",
+   "expected": [],
+   "input_sha256": "e054637ad031d4105d8f115acaec6e4aba669e7f60525f07090dd4c95efc3f0c",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-023": {
+   "allowed": [
+    "1c42d80c",
+    "2271e684",
+    "4f7c348f",
+    "596f7549",
+    "6330bec8",
+    "c20dc3d5",
+    "d9ce2b08"
+   ],
+   "cohort": "human",
+   "expected": [
+    "c20dc3d5"
+   ],
+   "input_sha256": "dcec5723ee5a676c1d45bd0387af4297eef3929c57624a9b7d65803a510ccf0a",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-024": {
+   "allowed": [
+    "015183f5",
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "86647daf",
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "ca841807",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "86647daf",
+    "bbffc139"
+   ],
+   "input_sha256": "355fe5478c9830f1a99c077019d73975de6656d0e34fb5e8ebc6b97c915d39dd",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-025": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "67580c28",
+    "7e9739f2",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "67580c28"
+   ],
+   "input_sha256": "b241e16f4a0db1c974815883c12254f35601e0bf1f5f1db8a9cbf27bd8a964cb",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-026": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "67580c28",
+    "6a4e6283",
+    "7e9739f2",
+    "8c1e6057",
+    "b3ea627f",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "67580c28"
+   ],
+   "input_sha256": "3659bae9657a4664c3b473e5f3407131c84882fa9add52829c1beba460048451",
+   "should_not_fire": false,
+   "split": "test"
+  },
+  "v2-tour-027": {
+   "allowed": [
+    "0156e9fa",
+    "1c42d80c",
+    "4a53ff82",
+    "596f7549",
+    "5be2f462",
+    "67580c28",
+    "7e9739f2",
+    "a6e6ab4e",
+    "a7784a18",
+    "b3ea627f",
+    "bc9188b4",
+    "c1db316c",
+    "c20dc3d5",
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [
+    "67580c28",
+    "bc9188b4",
+    "c20dc3d5",
+    "e65efc68"
+   ],
+   "input_sha256": "6119287f6127a6070fa4c77b357f48e900a3379909aeb557df706be0aa4ac68a",
+   "should_not_fire": false,
+   "split": "train"
+  },
+  "v2-tour-028": {
+   "allowed": [
+    "0156e9fa",
+    "152ceb65",
+    "5be2f462",
+    "7e9739f2",
+    "a6e6ab4e",
+    "b3ea627f",
+    "ca841807",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "8f3247495a8812d0408b9f4ad24ae46fdb8c26e0884fe7aa32cb93cb2c05bbf5",
+   "should_not_fire": true,
+   "split": "test"
+  },
+  "v2-tour-029": {
+   "allowed": [
+    "0156e9fa",
+    "5be2f462",
+    "6a4e6283",
+    "7e9739f2",
+    "b3ea627f",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
+   ],
+   "cohort": "human",
+   "expected": [],
+   "input_sha256": "93c8772b7a2408b3744abbbebbdf63eb4d3432c58118c01fb4f417879a91f49e",
+   "should_not_fire": true,
+   "split": "train"
+  },
+  "v2-tour-030": {
+   "allowed": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
+    "7e9739f2",
+    "9530fb1c",
+    "a6e6ab4e",
+    "a8f159ad",
+    "b1521526",
+    "b3ea627f",
+    "bbffc139",
+    "ca841807",
+    "fa217e48",
+    "fc21a431"
+   ],
+   "cohort": "human",
+   "expected": [
+    "4a9188f3",
+    "a8f159ad",
+    "bbffc139"
+   ],
+   "input_sha256": "439e6f2eba37b726693420713d9cd9b6ccc8727319331f4c562c259c4f9119d7",
+   "should_not_fire": false,
+   "split": "train"
+  }
+ },
+ "labelled": [
+  "015183f5",
+  "0156e9fa",
+  "018ce972",
+  "0c1bac27",
+  "0e22e34a",
+  "0f38532e",
+  "1021fa84",
+  "113b3833",
+  "11b2b73b",
+  "14181e60",
+  "152ceb65",
+  "173119a8",
+  "179be4b8",
+  "17ffd587",
+  "185013c6",
+  "19304882",
+  "1b8e7f43",
+  "1c21263c",
+  "1c42d80c",
+  "1d50a3bb",
+  "1f3a7372",
+  "1f750181",
+  "1fcaa63a",
+  "1fddcffb",
+  "204391be",
+  "20d106f1",
+  "2271e684",
+  "236ca227",
+  "23ea0607",
+  "24e10ee8",
+  "25fab860",
+  "25fcddee",
+  "27277539",
+  "2a3ff869",
+  "2b66211d",
+  "2b889e80",
+  "2ca2add2",
+  "2e362970",
+  "2e8b4840",
+  "308ef1de",
+  "30a189fb",
+  "347a9ca6",
+  "3578d799",
+  "388cc81e",
+  "38b15dc6",
+  "3a9dbafd",
+  "3b0cd546",
+  "3d185f2b",
+  "3fa17fa0",
+  "4039b9b5",
+  "412d37d3",
+  "424ba0cc",
+  "4399df76",
+  "43e2ef76",
+  "4402973a",
+  "466a545a",
+  "48083552",
+  "49533583",
+  "49c627cc",
+  "4a53ff82",
+  "4a9188f3",
+  "4c21d86b",
+  "4dd44fd7",
+  "4e104d4c",
+  "4f7c348f",
+  "4fae20f4",
+  "51d9f05f",
+  "5409731b",
+  "54e2bcb9",
+  "557838a5",
+  "5697071b",
+  "57d13061",
+  "57d83b75",
+  "58b44ccb",
+  "58cef3a1",
+  "590b11e1",
+  "596f7549",
+  "5be2f462",
+  "5cd8d0f6",
+  "5d44d3f3",
+  "5e896ed6",
+  "5e89c211",
+  "5f8c661d",
+  "614c1209",
+  "6172e7d5",
+  "61c64d91",
+  "6330bec8",
+  "6437ae15",
+  "647f843d",
+  "67580c28",
+  "6901cc3b",
+  "6a4e6283",
+  "6cfb67f5",
+  "6ec7312d",
+  "70e372f0",
+  "7105955b",
+  "725dff46",
+  "72e06bdf",
+  "73381d78",
+  "737a68d6",
+  "740bb505",
+  "767f9b41",
+  "76a1ae2b",
+  "76a53dfe",
+  "7b4ba3aa",
+  "7e4ca905",
+  "7e9739f2",
+  "80def9d2",
+  "81709f57",
+  "83b9a362",
+  "847f9995",
+  "86647daf",
+  "88e9b5eb",
+  "893aeec5",
+  "8aefcdce",
+  "8c1e6057",
+  "8c812bed",
+  "8cddc6ad",
+  "9293d609",
+  "9310827b",
+  "94806da2",
+  "9530fb1c",
+  "95e76c1f",
+  "9730f565",
+  "97326357",
+  "9873a0d2",
+  "98e74e7c",
+  "99e951b9",
+  "9b081605",
+  "9d80fd2d",
+  "9e3fb6d0",
+  "9f15f21a",
+  "9ff56260",
+  "a2e78f48",
+  "a3f6c7f9",
+  "a6e6ab4e",
+  "a7784a18",
+  "a8c55a47",
+  "a8f159ad",
+  "a9ecd5b4",
+  "ab814a26",
+  "af7de070",
+  "b01edd26",
+  "b1521526",
+  "b3ea627f",
+  "b42e217e",
+  "b42f11a0",
+  "b587f6c2",
+  "b7ec8f3b",
+  "ba5730c5",
+  "bbffc139",
+  "bc4145f6",
+  "bc9188b4",
+  "bd4a6d22",
+  "bddb0e7b",
+  "c0b38d80",
+  "c1547ed1",
+  "c1db316c",
+  "c20dc3d5",
+  "c315befa",
+  "c4a284b2",
+  "c53beeaa",
+  "c66dc739",
+  "c6f69dee",
+  "c864b8cb",
+  "c8ebeb5b",
+  "ca841807",
+  "cd84d22a",
+  "ce12c11e",
+  "cf1c13a6",
+  "cff429f5",
+  "d26d63b0",
+  "d3774a28",
+  "d5dcfe26",
+  "d7c69aa6",
+  "d7e6de46",
+  "d7f74c93",
+  "d8c9b1f0",
+  "d9874334",
+  "d9ce2b08",
+  "dcf98880",
+  "def3e84e",
+  "defee176",
+  "df55c398",
+  "df8f1da0",
+  "e313a3ca",
+  "e4d965d9",
+  "e65efc68",
+  "e6e0b0e7",
+  "e8868cbe",
+  "eaa31ac5",
+  "ede4b241",
+  "ede4c735",
+  "eeb3d106",
+  "efbdfb1a",
+  "f04a05aa",
+  "f0f9156e",
+  "f2d58a30",
+  "f47a8fe9",
+  "f5bac101",
+  "f5beac20",
+  "f5d97b4a",
+  "f92dfab2",
+  "fa217e48",
+  "faae6748",
+  "faf1b643",
+  "fb110a39",
+  "fb2b263d",
+  "fc21a431",
+  "fc4d7753"
+ ],
+ "rule": "expected = gold - disputed - boot-delivered, restricted to rules the trigger layer owes; hand cases use their required list. allowed = gold + disputed. cohort = envelope when ops/machine_envelope classifies the prompt, else human. labelled = every rule in the selection corpus; only those count as false deliveries.",
+ "schema": "rule-delivery-expectations",
+ "version": "rule-delivery-expectations/v1"
+}

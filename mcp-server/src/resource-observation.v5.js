@@ -1,3 +1,4 @@
+import { connectionsProjection } from './connections.v1.js';
 // DoctorCRE v5 slices V5-UX-C02 (Resource dashboard and metering read
 // contract) and V5-UX-C06 (Local compute capacity and model-route
 // visibility).
@@ -42,7 +43,7 @@ export function resourceObservationTools({ withEnvelope, ToolError }) {
         const dashboard = row?.dashboard;
         if (!dashboard || !Array.isArray(dashboard.providers))
           throw new ToolError({ error: "resource_dashboard_unavailable" });
-        return { ok: true, ...dashboard };
+        return { ok: true, ...dashboard, connections: connectionsProjection(dashboard) };
       },
     },
 

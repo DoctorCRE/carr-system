@@ -54,5 +54,9 @@
 
   <key>StandardOutPath</key><string>{{REPO}}/out/cutover-watch.out</string>
   <key>StandardErrorPath</key><string>{{REPO}}/out/cutover-watch.err</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+  </dict>
 </dict>
 </plist>

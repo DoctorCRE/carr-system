@@ -335,11 +335,12 @@ def scan_for_result(log_path: Path, offset: int) -> str | None:
 
 def probe_live(entry: dict) -> bool:
     kind = entry.get("kind")
+    if kind == "claude-session" and entry.get("room_seat") == "flash":
+        return True  # Demand dispatch starts this desk; probes must not load it.
     if kind in ("claude-session", "codex-live"):
         return desks.is_live(entry.get("socket", ""))
     if kind == "flash-local":
-        # the Flash server is a local process with a health endpoint; a queue task waits while it is down
-        return flash_wire.is_up()
+        return True  # A claimed task, rather than a bridge heartbeat, starts Flash.
     # claude-desktop and codex-session are durable rather than live
     # (dispatch.py's own framing) —
     # there is no process to probe between dispatches, so "live" here means
@@ -541,7 +542,9 @@ def deliver(name: str, entry: dict, seat: str, queued_turn: dict, *, state: dict
             return {"desk": name, "outcome": "replied_sync"}
         add_room_turn(
             body=json.dumps({"desk": name, "status": status,
-                             "detail": row.get("detail")}, separators=(",", ":")),
+                             "detail": row.get("detail"),
+                             **({key: row[key] for key in ("next_route", "diagnostic_path") if key in row}
+                                if kind == "grok-cli" else {})}, separators=(",", ":")),
             seat="hermes", kind="receipt", msg_id=str(uuid.uuid4()),
         )
         return {"desk": name, "outcome": f"failed:{status}"}
@@ -602,6 +605,21 @@ def heartbeat_body(desk_entries: dict, cursor: int, cycle_at: str,
     # when the directory could not be read this cycle — same stance as profiles.
     if sessions is not None:
         heartbeat["sessions"] = sessions
+        # The room caps a turn at 20,000 characters. A burst of live sessions
+        # must not silence desk health altogether; publish the newest bounded
+        # roster and say how many entries could not fit.
+        if len(json.dumps({"heartbeat": heartbeat}, separators=(",", ":"))) > 20000:
+            newest = sorted(sessions, key=lambda row: str(row.get("last_live_at") or ""), reverse=True)
+            heartbeat["sessions_total"] = len(sessions)
+            heartbeat["sessions_truncated"] = 0
+            heartbeat["sessions"] = []
+            for row in newest:
+                heartbeat["sessions"].append(row)
+                heartbeat["sessions_truncated"] = len(sessions) - len(heartbeat["sessions"])
+                if len(json.dumps({"heartbeat": heartbeat}, separators=(",", ":"))) > 19000:
+                    heartbeat["sessions"].pop()
+                    heartbeat["sessions_truncated"] += 1
+                    break
     return json.dumps({"heartbeat": heartbeat}, separators=(",", ":"))
 
 

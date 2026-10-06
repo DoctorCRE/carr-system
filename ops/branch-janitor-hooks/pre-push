@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""Allow exactly one deletion at its previously verified remote tip."""
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+from job_watchdog import load_config, protected_branch
+
+config = load_config(Path(__file__).resolve().parents[1] / "config/job-watchdog.json")
+
+rows = [line.split() for line in sys.stdin if line.strip()]
+expected = ["(delete)", "0" * 40, os.environ.get("CARR_RETIRE_REF"),
+            os.environ.get("CARR_RETIRE_HEAD")]
+if not all(expected) or protected_branch(config, (expected[2] or "").removeprefix("refs/heads/")) or rows != [expected]:
+    print("branch janitor: remote advertisement changed or operation is not a bound deletion", file=sys.stderr)
+    sys.exit(1)

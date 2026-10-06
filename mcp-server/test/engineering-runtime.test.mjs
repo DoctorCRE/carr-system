@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readSystemWorkCensus, SYSTEM_WORK_LEGS } from "../src/system-work-census.v5.js";
 import {
   canonicalDigest,
   ENGINEERING_REPOSITORY_ACTIONS,
@@ -510,6 +511,56 @@ test("closure projection is generation-aware: exact review completes, unreviewed
   const noReceiptSuccessor = closureProjection({ ...base, receipts: [failed, success], reviewer_facts: [oldPass, exactPass] }, Error);
   assert.equal(noReceiptSuccessor.slices[0].state, "eligible", "an unsuperseded leaf without a receipt must fence an older reviewed pass");
   assert.equal(noReceiptSuccessor.closure_state, "blocked");
+});
+
+test("system census honors exact Passport completion before library filtering, counts and pagination", async () => {
+  const plan = typedEngineeringPlan([engineeringSlice("slice:one", 1)]);
+  const envelope = envelopeRow("11111111-1111-4111-8111-111111111111", "slice:one", "2026-08-26T00:00:01Z");
+  const receipt = bindReceiptLineage(receiptRow("22222222-2222-4222-8222-222222222222", envelope.id, "slice:one", "claimed_complete", "2026-08-26T00:00:02Z"), plan, envelope);
+  const review = reviewerRow("33333333-3333-4333-8333-333333333333", receipt.id, "slice:one", "passed", "2026-08-26T00:00:03Z");
+  const facts = passportFacts(plan, { envelopes: [envelope], receipts: [receipt], reviewer_facts: [review] });
+  assert.equal(closureProjection(facts, Error).closure_state, "complete");
+  const row = { id: facts.slice_plans[0].id, title: "Synthetic complete engineering plan", state: "in_progress",
+    opened_at: "2026-08-01T00:00:00Z", last_activity_at: "2026-08-26T00:00:00Z", version: "3",
+    completed: false, cancelled: false, identity: { work_request: source.work.ref },
+    plan_digest: plan.plan_digest, accepted_plan_id: source.plan.record_id, accepted_plan_hash: source.plan.digest };
+  const client = { query: async (sql, params) => {
+    if (sql.includes("as cache")) return { rows: [] };
+    if (sql.includes("ops.engineering_passport_facts")) {
+      assert.equal(params[0], source.work.ref); return { rows: [{ facts }] };
+    }
+    assert.ok(sql.includes(SYSTEM_WORK_LEGS.find(l => l.kind === "slice_plan").sql));
+    assert.deepEqual(params, ["carr-internal"], "the raw slice-plan statement binds only its tenant parameter");
+    const rows = sql.includes("completed=$3") && params[2] !== row.completed ? [] : [row];
+    return { rows: sql.includes("count(*) as count") ? [{ count: rows.length }] : rows };
+  } };
+  const read = live_library => readSystemWorkCensus({ client, actor: { slug: "joe", human: true }, kinds: "slice_plan", live_library, limit: 1 });
+  let unfinished = await read(false), live = await read(true);
+  assert.equal(unfinished.items.length, 0);
+  assert.equal(unfinished.coverage[0].count_total, 0);
+  assert.equal(live.items[0]?.id, row.id);
+  assert.equal(live.coverage[0].count_total, 1);
+  assert.equal(live.items[0].state, "complete");
+  assert.equal(live.next_cursor, null);
+  // A legacy completion mark cannot hide a current unreviewed or stale generation.
+  row.completed = true;
+  facts.reviewer_facts = [];
+  unfinished = await read(false); live = await read(true);
+  assert.equal(unfinished.items[0]?.id, row.id); assert.equal(live.items.length, 0);
+  facts.reviewer_facts = [review];
+  facts.source.work_request = { ...facts.source.work_request, version: 4 };
+  assert.equal((await read(false)).items[0]?.id, row.id);
+  assert.equal((await read(true)).items.length, 0);
+  facts.source.work_request = source.work;
+  const successor = envelopeRow("44444444-4444-4444-8444-444444444444", "slice:one", "2026-08-27T00:00:00Z", envelope.id);
+  facts.envelopes.push(successor);
+  facts.receipts.push(bindReceiptLineage(receiptRow("55555555-5555-4555-8555-555555555555", successor.id, "slice:one", "failed", "2026-08-27T00:01:00Z"), plan, successor));
+  assert.equal((await read(false)).items[0]?.id, row.id);
+  assert.equal((await read(true)).items.length, 0);
+  facts.slice_plans[0].id = "66666666-6666-4666-8666-666666666666";
+  const mismatched = await read(true);
+  assert.equal(mismatched.items.length, 0);
+  assert.equal(mismatched.coverage[0].state, "unavailable", "a different registered plan cannot fall back to a legacy completion mark");
 });
 
 test("source merge authority comes from one reader-safe projection, never direct runtime table reads", async () => {

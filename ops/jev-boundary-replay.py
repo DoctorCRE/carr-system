@@ -27,7 +27,6 @@ def load(name):
 
 watch = load("jev_session_watch")
 done = load("jev_done_checks")
-advisory = load("jev_build_advisory")
 
 
 class Client:
@@ -97,6 +96,7 @@ def flags(rows):
             out.add("failure")
         if check == "path_repair" and verdict == "path_found": out.add("path_repair")
         if check == "done_claim" and verdict == "unsupported": out.add("done_unsupported")
+        if check == "done_claim" and verdict == "needs_review": out.add("done_review")
         if check == "review_triage" and verdict == "needs_review": out.add("review_high")
     return out
 
@@ -106,24 +106,10 @@ def evaluate_case(case, *, old, temp_dir):
     client = Client(case.get("answers") or {}, old=old)
     judge = Judge(client)
     results = []
-    if family == "intake":
-        if old:
-            # Pre-change seven guidance and six facet questions were always
-            # asked on a human prompt; the 0.5 facet threshold made obligations.
-            client.answers = {facet: 0.9 for facet in advisory.FACETS}
-            result = advisory.advise(case["prompt"], client=client)
-            if any(p >= 0.5 for p in result["facets"].values()):
-                results.append({"check": "prompt", "verdict": "obligation"})
-        else:
-            result = advisory.deferred()
-            assert result["effect"] == "no_prompt_obligation"
-    elif family == "tool":
+    if family == "tool":
         tool, inp, output = case["tool"], case["input"], case["output"]
         code = case.get("exit_code")
         if old:
-            if tool in {"Read", "WebFetch", "WebSearch", "Bash", "Grep"}:
-                results.append(watch.screen_tool_output(tool, output, "task",
-                               client=client))
             if tool == "Bash" and code not in (None, 0):
                 results.append(watch.triage_failure(str(inp.get("command") or ""), output,
                                                     code, client=client))
@@ -138,21 +124,15 @@ def evaluate_case(case, *, old, temp_dir):
                 receipt_path=os.path.join(temp_dir, "tool-receipts.jsonl"))
     elif family in {"stop", "stop_repeat"}:
         if old:
-            results.append(done.check_done_claim(case["final"], case["evidence"],
-                        client=client, judge_module=judge))
-            results.append(done.triage_review(case["diff"], "task", client=client,
-                           judge_module=judge, cache_path=""))
+            results.append(done.check_done_claim(case["final"], case["evidence"]))
+            results.append(done.triage_review(case["diff"], "task"))
         else:
             # stop_repeat deliberately uses the same session and state marker.
             results = done.inspect_stop_boundary(case["final"], case["evidence"],
-                case["diff"], "task", "repeated-stop" if family == "stop_repeat" else "stop",
-                client=client, judge_module=judge, state_dir=temp_dir,
-                receipt_path=os.path.join(temp_dir, "stop-receipts.jsonl"))
+                case["diff"], "task", "repeated-stop" if family == "stop_repeat" else "stop")
             if family == "stop_repeat":
                 results = done.inspect_stop_boundary(case["final"], case["evidence"],
-                    case["diff"], "task", "repeated-stop", client=client,
-                    judge_module=judge, state_dir=temp_dir,
-                    receipt_path=os.path.join(temp_dir, "stop-receipts.jsonl"))
+                    case["diff"], "task", "repeated-stop")
                 client.calls.clear()
     found = flags(results)
     if any(r.get("verdict") == "obligation" for r in results):
@@ -178,6 +158,8 @@ def labeled_replay(*, verify_sources=True):
     hashes = log_row_hashes(fixture["source_logs"]) if verify_sources else None
     rows = []
     for case in fixture["cases"]:
+        if case["family"] == "intake":
+            continue
         if hashes is not None:
             assert (case["source_log"], case["source_row_sha256"]) in hashes, case["id"]
         with tempfile.TemporaryDirectory() as tmp:

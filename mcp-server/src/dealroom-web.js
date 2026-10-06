@@ -6,6 +6,7 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
+import { USAGE_PATH, usageResponse } from './usage-signals.js';
 import {
   exchangeGoogleCode,
   googleAuthorizationUrl,
@@ -520,6 +521,30 @@ async function roomTurns(request, env, session, dependencies) {
     csrf_token: session.csrfToken });
 }
 
+/** GET /api/room/latest — the read-room-latest verb through the same wire. */
+async function roomLatest(request, env, session, dependencies) {
+  if (typeof dependencies.roomLatestFn !== "function") return json({ error: "not_found" }, 404);
+  const url = new URL(request.url);
+  const rawBefore = url.searchParams.get("before_seq");
+  const rawLimit = url.searchParams.get("limit");
+  const rawMode = url.searchParams.get("mode") || "all";
+  if (rawBefore !== null && !/^\d{1,15}$/.test(rawBefore)) return json({ error: "before_seq_invalid" }, 400);
+  if (rawLimit !== null && !/^\d{1,15}$/.test(rawLimit)) return json({ error: "limit_invalid" }, 400);
+  if (!["all", "conversation"].includes(rawMode)) return json({ error: "mode_invalid" }, 400);
+  const { limit } = normalizeRoomPaging({ limit: rawLimit === null ? undefined : Number(rawLimit) });
+  let read;
+  try {
+    read = await dependencies.roomLatestFn(env, {
+      before_seq: rawBefore === null ? undefined : Number(rawBefore), limit, mode: rawMode,
+    });
+  } catch (error) {
+    return json({ error: "wire_unavailable", detail: String(error?.message || error).slice(0, 200) }, 503);
+  }
+  if (!read || read.ok !== true) return json({ error: read?.error || "wire_unavailable" }, 503);
+  return json({ ...read, actor: { slug: session.actor.slug, display: session.actor.display },
+    csrf_token: session.csrfToken });
+}
+
 /** GET /api/room/queue — the read-room-queue verb's exact projection. */
 async function roomQueue(_request, env, _session, dependencies) {
   if (typeof dependencies.queueReadFn !== "function") return json({ error: "not_found" }, 404);
@@ -611,6 +636,10 @@ async function roomTurnPost(request, env, session, dependencies) {
 
 async function roomRequest(request, env, session, dependencies) {
   const pathname = new URL(request.url).pathname;
+  if (pathname === `${ROOM_PREFIX}/latest`) {
+    if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+    return roomLatest(request, env, session, dependencies);
+  }
   if (pathname === `${ROOM_PREFIX}/turns`) {
     if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
     return roomTurns(request, env, session, dependencies);
@@ -764,7 +793,7 @@ async function defaultWorkInventoryReader(env, actor, correlationId, params = {}
   const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
   return readWorkInventoryCensus({
     client, actor, correlationId: correlationId || env.CORRELATION_ID,
-    cursor: params.cursor, limit: params.limit, kinds: params.kinds, statuses: params.statuses,
+    ...params,
   });
 }
 
@@ -780,7 +809,7 @@ async function defaultWorkInventoryReader(env, actor, correlationId, params = {}
 async function workInventoryResponse(request, env, session, dependencies) {
   if (!workspaceCommandCenterEnabled(env)) return json({ error: "not_found" }, 404);
   const url = new URL(request.url);
-  const allowed = new Set(["cursor", "limit", "kinds", "statuses"]);
+  const allowed = new Set(["cursor", "limit", "kinds", "statuses", "system", "source", "age", "text", "live_library", "id"]);
   if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
     return json({ error: "AUTHORIZATION_REFUSED" }, 403);
   }
@@ -803,6 +832,8 @@ async function workInventoryResponse(request, env, session, dependencies) {
       limit: url.searchParams.get("limit"),
       kinds: url.searchParams.get("kinds"),
       statuses: url.searchParams.get("statuses"),
+      ...Object.fromEntries(["system", "source", "age", "text", "live_library", "id"]
+        .filter(key => url.searchParams.has(key)).map(key => [key, url.searchParams.get(key)])),
     });
     if (request.method === "HEAD") return new Response(null, { status: 200, headers: JSON_HEADERS });
     return json(payload);
@@ -1117,6 +1148,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       // The business read is the ONLY addition to that surface, and it is
       // admitted by an exact path parser rather than a prefix.
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
+          url.pathname !== USAGE_PATH && url.pathname !== `${USAGE_PATH}/session` &&
           url.pathname !== JEV_DEAL_READING_PATH &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
           url.pathname !== PROGRAM_CONTROLLER_PATH && url.pathname !== METERING_PATH &&
@@ -1146,7 +1178,7 @@ async function handleRequest(request, env, ctx, dependencies) {
 
       const session = await sessionFor(request, env, dependencies);
       if (!session) {
-        if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
+        if (url.pathname.startsWith(USAGE_PATH) || url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
             url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
             url.pathname === METERING_PATH ||
             isBusinessApiPath(url.pathname)) {
@@ -1161,7 +1193,9 @@ async function handleRequest(request, env, ctx, dependencies) {
       }
 
       let response;
-      if (isTourInternalRequest(request) && dependencies.tourHandler?.fetch) {
+      if (url.pathname === USAGE_PATH || url.pathname === `${USAGE_PATH}/session`) {
+        response = await usageResponse(request, env, session, dependencies, guardSystemWorkPost);
+      } else if (isTourInternalRequest(request) && dependencies.tourHandler?.fetch) {
         response = await dependencies.tourHandler.fetch(request, env, ctx, session.actor, session);
       } else if (url.pathname.startsWith(ROOM_PREFIX)) {
         response = await roomRequest(request, env, session, dependencies);

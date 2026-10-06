@@ -108,6 +108,11 @@ case("bash curl to the Slack Web API is allowed",
 case("bash curl to an unrelated unknown API host is still blocked",
      bash("curl https://unlisted-api-host.example/api/auth.test"), DENY)
 
+case("DoctorCRE staging app Worker is allowed",
+     bash("curl https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev/"), ALLOW)
+case("unrelated workers.dev Worker is still blocked",
+     bash("curl https://unrelated-worker.joe-bookout-carr-us.workers.dev/"), DENY)
+
 # DoctorCRE's production app is a fixed CARR-owned domain. Its gated board
 # route must be reachable for a live, unauthenticated sign-in check.
 case("DoctorCRE app production route is allowed",

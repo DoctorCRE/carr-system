@@ -69,6 +69,15 @@ class RoomFake {
     }
     if (sql.includes("from v_partner_room_turn")) {
       this.reads.push(params);
+      if (sql.includes("partner-room:latest-head")) {
+        const latest = this.rows.filter((r) => r.room_id === params[0]).at(-1);
+        return { rows: [{ seq: latest?.seq ?? null }] };
+      }
+      if (sql.includes("partner-room:latest-page")) {
+        const [room, before, mode, limit] = params;
+        return { rows: this.rows.filter((r) => r.room_id === room && (before === null || r.seq < before)
+          && (mode === "all" || r.kind === "turn")).sort((a, b) => b.seq - a.seq).slice(0, limit) };
+      }
       if (sql.includes("partner-room:queue")) {
         return { rows: this.rows.filter((r) => r.room_id === params[0] && r.kind === "receipt").sort((a, b) => b.seq - a.seq) };
       }
@@ -105,6 +114,20 @@ test("add-room-turn: a partner's turn lands verbatim, attributed to the verified
   assert.deepEqual([room, sponsor, seat, kind, body, originChannel, originActor],
     ["partner-line", "joe", "claude", "turn", "raw text, exactly as spoken", "mcp", "joe"]);
   assert.equal(typeof msgId, "string");
+});
+
+test("read-room-latest returns the newest window in conversation order without changing the poll cursor", async () => {
+  const rows = [1, 2, 3, 4].map((seq) => ({ seq, room_id: "model-room", kind: "turn", body: `turn ${seq}` }));
+  const db = new RoomFake({ rows });
+  const latest = await TOOLS["read-room-latest"].handler(db, joe, { room: "model-room", limit: 2 });
+  assert.deepEqual(latest.turns.map((row) => row.seq), [3, 4]);
+  assert.equal(latest.latest_seq, 4);
+  assert.equal(latest.before_seq, 3);
+  assert.equal(latest.more, true);
+  const older = await TOOLS["read-room-latest"].handler(db, joe, { room: "model-room", before_seq: 3, limit: 2 });
+  assert.deepEqual(older.turns.map((row) => row.seq), [1, 2]);
+  const poll = await TOOLS["read-room"].handler(db, joe, { room: "model-room", after_seq: 0, limit: 2 });
+  assert.deepEqual(poll.turns.map((row) => row.seq), [1, 2]);
 });
 
 test("add-room-turn: provenance is server-derived MCP identity, never a claimed human seat", async () => {

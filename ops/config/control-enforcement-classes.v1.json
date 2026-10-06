@@ -49,7 +49,6 @@
     "settings_change": "deny_gate",
     "shared_rename_absence": "schema",
     "staged_gate_bless": "deny_gate",
-    "stale_claim": "stop_gate",
     "stale_count": "schema",
     "trigger_grant": "schema",
     "vault_salvage": "judgment_ambient",

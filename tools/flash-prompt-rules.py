@@ -4,14 +4,16 @@
 Joe's direction 2026-09-24: Flash should get the taught rules it needs at the right
 time, picked by Jev. flash-run does that once per scripted task (pick_rules); this does
 it for interactive sessions (the flash command, T3 Code, the Model Room seat), once per
-message, because each message can be a different task.
+message, because each message can be a different task. Both go through the same
+pick_rules, so the roster and the failure reporting cannot drift apart.
 
 Wired only in Flash's own config (~/.claude-local/settings.json), never in the Claude
 adapter: Claude sessions already get rules through standing-context and JIT triggers.
 
 It never blocks. A slash command, a message too short to judge, nothing binding, a Jev
 outage or bad input all mean no output and exit 0. Every judged message leaves a row in
-out/flash-prompt-rules.jsonl so the picks can be read back.
+out/flash-prompt-rules.jsonl, carrying the degraded-judgment note when there is one, so
+an outage reads differently from "no rule binds".
 """
 
 from __future__ import annotations
@@ -32,8 +34,9 @@ SITUATION = ("A local coding model (Flash) is in an interactive coding session f
              "Joe's message: ")
 
 
-def _load(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
+def _flash_run():
+    path = os.path.join(REPO, "tools", "flash-run.py")
+    spec = importlib.util.spec_from_file_location("flash_run", path)
     if spec is None or spec.loader is None:
         raise ImportError(path)
     module = importlib.util.module_from_spec(spec)
@@ -50,24 +53,22 @@ def _log(row):
         pass
 
 
-def build_output(prompt, selector=None):
-    """The hook's JSON output for one message, or None when nothing should be added."""
+def build_output(prompt, **judge):
+    """The hook's JSON output for one message, or None when nothing should be added.
+    `judge` passes through to flash-run's pick_rules (tests inject the paid requests)."""
     text = (prompt or "").strip()
     if text.startswith("/") or len(text) < MIN_CHARS:
         return None
     row = {"at": datetime.now(timezone.utc).isoformat(), "prompt": text[:300]}
     try:
-        selector = selector or _load(os.path.join(REPO, "ops", "jev_rule_select.py"),
-                                     "jev_rule_select")
-        flash_run = _load(os.path.join(REPO, "tools", "flash-run.py"), "flash_run")
-        rules = list(selector.advise(SITUATION + text[:2000]))[:flash_run.MAX_TASK_RULES]
+        flash_run = _flash_run()
+        rules, note = flash_run.pick_rules(text[:2000], situation=SITUATION, **judge)
         block = flash_run.rules_block(rules)
     except Exception as exc:
-        # Fail open, but visibly: the row says the message went unjudged.
-        row["error"] = f"{type(exc).__name__}: {exc}"[:300]
-        _log(row)
-        return None
+        rules, note, block = [], f"{type(exc).__name__}: {exc}"[:300], None
     row["rules"] = [r.get("id") for r in rules]
+    if note:
+        row["error"] = note
     _log(row)
     if not block:
         return None
@@ -75,13 +76,13 @@ def build_output(prompt, selector=None):
                                    "additionalContext": block}}
 
 
-def main(stdin_text=None, selector=None):
+def main(stdin_text=None, **judge):
     try:
         payload = json.loads(sys.stdin.read() if stdin_text is None else stdin_text)
         prompt = payload.get("prompt") if isinstance(payload, dict) else None
     except (ValueError, OSError):
         return 0
-    out = build_output(prompt, selector=selector)
+    out = build_output(prompt, **judge)
     if out:
         print(json.dumps(out))
     return 0

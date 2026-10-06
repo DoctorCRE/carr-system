@@ -59,6 +59,8 @@ import uuid
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "tools"))
+import flashlib
 OUT = os.path.join(REPO, "out")
 RUNS_LOG = os.path.join(OUT, "flash-runs.jsonl")
 EXAMPLES_LOG = os.path.join(OUT, "flash-examples.jsonl")
@@ -472,17 +474,32 @@ RULE_SITUATION = ("A local coding model (Flash) is about to write code for ONE s
                   "applies the patch). It only reads, edits and runs tests. The task: ")
 
 
-def pick_rules(task, selector=None):
-    """Jev's pick of the taught rules that bind to this one task: (rules, error_note).
+def pick_rules(task, situation=RULE_SITUATION, **judge):
+    """Return authoritative rules and a visible note for pending semantic advice.
 
-    Fails open: a Jev outage or a partially judged roster costs the attempt its rules,
-    never the attempt itself, and the note lands in the run log so the gap is visible."""
+    Flash has no boot load or enforcing hooks, so the selector considers the whole
+    active corpus. Injected judgment arguments use the same bounded batch interface.
+    """
     try:
-        selector = selector or _lib("jev_rule_select")
-        rules = selector.advise(RULE_SITUATION + task)
-        return list(rules)[:MAX_TASK_RULES], None
+        selector = _lib("rule_trigger_delivery")
+        corpus = selector.load_rules()
+        picked, report = selector.judge_budgeted(situation + task, corpus, [], **judge)
     except Exception as exc:
         return [], f"{type(exc).__name__}: {exc}"[:300]
+    by_id = {rule["id"]: rule for rule in corpus}
+    rules = [{**by_id[row["id"]], **row}
+             for row in sorted(picked.values(), key=lambda r: (-r["probability"], r["id"]))]
+    gaps = [f"{key}={report[key]}" for key, healthy in
+            (("rank_status", ("ok", "not_needed", "deterministic_shortlist")),
+             ("bind_status", ("judged", "none")))
+            if report.get(key) not in healthy]
+    if report.get("deadline_hit"):
+        gaps.append(f"deadline hit, unjudged={report.get('unjudged', [])}")
+    if report.get("review_required"):
+        candidates = ", ".join(sorted(report.get("advisory_candidates") or {}))
+        gaps.append(f"review required for rule suggestions: {candidates}")
+    note = ("rule judgment degraded: " + "; ".join(gaps))[:300] if gaps else None
+    return rules[:MAX_TASK_RULES], note
 
 
 def rules_block(rules):
@@ -563,17 +580,21 @@ def run_attempt(n, cwd, prompt, test_cmd, effort, workdir, think=True, rules_tex
             "--tools", *ATTEMPT_TOOLS, *extra, "--allowedTools", *allowed]
     reads, execs, port = _dep_reads(cwd), [os.path.join(cwd, ".venv", "bin")], flash_port()
     gitdir = gitdir_for(dest)
-    if sandbox:
-        execs = [*execs, *agent_execs()]
-        # The agent runs model-driven code, so it is sandboxed: writes only inside this attempt copy (never git
-        # metadata), no reads under home except its deps and its read-only git dir, network only to the local Flash
-        # port. A throwaway HOME keeps its config writable. It runs contained, so nothing it starts outlives it.
-        argv = sandbox_wrap(argv, dest, reads=[*reads, gitdir], execs=execs, port=port)
-        env = dict(_sandbox_env(env or os.environ, dest), GIT_DIR=gitdir, GIT_WORK_TREE=dest)
-        code, transcript = bounded_run(argv, dest, ATTEMPT_TIMEOUT, env=env)
-    else:
-        env = dict(env or os.environ, GIT_DIR=gitdir, GIT_WORK_TREE=dest)
-        code, transcript = _sh(argv, dest, ATTEMPT_TIMEOUT, env=env)
+    try:
+        with flashlib.request_scope(os.environ.get("CARR_FLASH_URL", flashlib.LOCAL_URL)):
+            if sandbox:
+                execs = [*execs, *agent_execs()]
+                # The agent runs model-driven code, so it is sandboxed: writes only inside this attempt copy (never git
+                # metadata), no reads under home except its deps and its read-only git dir, network only to the local Flash
+                # port. A throwaway HOME keeps its config writable. It runs contained, so nothing it starts outlives it.
+                argv = sandbox_wrap(argv, dest, reads=[*reads, gitdir], execs=execs, port=port)
+                env = dict(_sandbox_env(env or os.environ, dest), GIT_DIR=gitdir, GIT_WORK_TREE=dest)
+                code, transcript = bounded_run(argv, dest, ATTEMPT_TIMEOUT, env=env)
+            else:
+                env = dict(env or os.environ, GIT_DIR=gitdir, GIT_WORK_TREE=dest)
+                code, transcript = _sh(argv, dest, ATTEMPT_TIMEOUT, env=env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        code, transcript = 1, f"Flash unavailable: {exc}"
     elapsed = round(time.monotonic() - started, 1)
     test_code, test_out = (None, "")
     if test_cmd:
@@ -754,6 +775,11 @@ def cmd_run(a):
 
     amb = intake.check_ambiguity(task)
     row["ambiguity"] = amb.get("verdict")
+    if amb.get("verdict") in ("review_required", "unavailable") or (amb.get("escalate") and amb.get("verdict") != "ambiguous"):
+        row.update(outcome="intake_review_required", intake_advice=amb)
+        _say("ambiguity judgment requires review: " + json.dumps(amb.get("detail"))[:600])
+        _append(RUNS_LOG, row)
+        return 3
     if amb.get("verdict") == "ambiguous" and not a.force:
         _say("the task looks ambiguous: " + json.dumps(amb.get("detail"))[:600])
         _say("clarify it, or pass --force to run anyway")
@@ -764,6 +790,11 @@ def cmd_run(a):
     files = [f for f in _tracked_files(cwd)][:4000]
     route = intake.route_task(task, files=None, has_tests=bool(a.test))
     row["route"] = route.get("verdict")
+    if route.get("verdict") in ("review_required", "unavailable") or (route.get("escalate") and route.get("verdict") != "escalate"):
+        row.update(outcome="route_review_required", intake_advice=route)
+        _say("route judgment requires review: " + json.dumps(route.get("detail"))[:600])
+        _append(RUNS_LOG, row)
+        return 4
     if route.get("verdict") == "escalate" and not a.force:
         _say("routed away from the local model: " + json.dumps(route.get("detail"))[:600])
         row["outcome"] = "routed_escalate"
@@ -772,7 +803,13 @@ def cmd_run(a):
         _append(RUNS_LOG, row)
         return 4
 
-    effort = a.effort or intake.pick_effort(task).get("verdict")
+    effort_check = None if a.effort else intake.pick_effort(task)
+    if effort_check and (effort_check.get("escalate") or effort_check.get("verdict") not in ("low", "medium", "high")):
+        row.update(outcome="effort_review_required", intake_advice=effort_check)
+        _say("effort judgment requires review: " + json.dumps(effort_check.get("detail"))[:600])
+        _append(RUNS_LOG, row)
+        return 4
+    effort = a.effort or effort_check.get("verdict")
     if effort not in ("low", "medium", "high"):
         effort = "low"
     ctx = intake.pick_context(task, cwd)
@@ -822,8 +859,14 @@ def cmd_run(a):
         chosen_id = best.get("verdict")
         row["selection"] = {"verdict": chosen_id, "confidence": best.get("confidence"),
                             "escalate": best.get("escalate"),
+                            "advice": best.get("detail"),
                             "attempts": [{"id": c["id"], "test_exit_code": c["test_exit_code"],
                                           "elapsed_s": c["elapsed_s"]} for c in candidates]}
+        if best.get("escalate") or chosen_id == "review_required":
+            row["outcome"] = "selection_review_required"
+            _say("candidate selection requires review; evidence retained in the run log")
+            _append(RUNS_LOG, row)
+            return 5
         chosen = next((c for c in candidates if c["id"] == chosen_id), None)
         if chosen is None and attempts == 1 and candidates and candidates[0]["patch"].strip() \
                 and not a.test:

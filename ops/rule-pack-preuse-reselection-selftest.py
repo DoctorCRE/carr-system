@@ -503,7 +503,7 @@ claude_rows = [group for group in claude["PreToolUse"]
                if any(command in hook.get("command", "") for hook in group.get("hooks", []))]
 codex_rows = [group for group in codex["PreToolUse"]
               if any(command in hook.get("command", "") for hook in group.get("hooks", []))]
-CLAUDE_MATCHER = "Bash|Write|Edit|MultiEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*"
+CLAUDE_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*"
 CODEX_MATCHER = ".*"  # Codex local tools use canonical names, including apply_patch.
 check("Claude wiring is exact and unique, widened for the generalized rail (S9)",
       len(claude_rows) == 1 and claude_rows[0]["matcher"] == CLAUDE_MATCHER)
@@ -1037,20 +1037,9 @@ def fake_adviser(_situation):
              "binding_model": "jev-test-binder"}]
 
 
-def fake_build_adviser(situation):
-    return {"schema": "jev-build-advisory-skipped/v1", "status": "skipped",
-            "reason": "boundary_deferred", "effect": "no_prompt_obligation"}
-
-
-check("default prompt build adviser defers without a Jev call",
-      rail._build_adviser("Inspect the hook configuration read-only.") ==
-      fake_build_adviser(""))
-
-
 semantic_runner = Runner(gen_selector_result(packs=semantic_packs, ids=[semantic_id]))
 semantic_output = rail.process(prompt_payload(), runner=semantic_runner,
-                               adviser=fake_adviser,
-                               build_adviser=fake_build_adviser)
+                               adviser=fake_adviser)
 semantic_row = json.loads(context(semantic_output))
 check("UserPromptSubmit asks Jev once about the partner message",
       semantic_row["schema"] == contract.SEMANTIC_RECEIPT_SCHEMA
@@ -1065,8 +1054,6 @@ check("semantic receipt uses authoritative text and keeps the Jev probability",
       semantic_row["rules"] == [{"id": semantic_id,
                                   "statement": f"binding jit rule {semantic_id}"}]
       and semantic_row["probabilities"] == {semantic_id: 0.91}
-      and semantic_row["build_receipt"]["advisory"]["effect"] == "no_prompt_obligation"
-      and semantic_row["build_receipt"]["semantic_rule_delivery"] == "delivered"
       and semantic_row["model_provenance"] == {
           semantic_id: {"ranking_model": "jev-test-ranker",
                         "binding_model": "jev-test-binder"}})
@@ -1099,7 +1086,7 @@ check("Claude cannot replay a valid semantic receipt onto a different prompt",
 codex_semantic = rail.process(
     prompt_payload(client="codex"),
     runner=Runner(gen_selector_result(packs=semantic_packs, ids=[semantic_id])),
-    adviser=fake_adviser, build_adviser=fake_build_adviser)
+    adviser=fake_adviser)
 check("Codex semantic receipt binds the native turn",
       json.loads(context(codex_semantic))["turn_id"] == "turn-prompt")
 codex_semantic_context = codex_context(context(codex_semantic))
@@ -1122,12 +1109,8 @@ check("tampered semantic context cannot claim a loaded pack",
 no_bind_runner = Runner()
 no_bind_output = rail.process(
     prompt_payload(prompt="hello"), runner=no_bind_runner,
-    adviser=lambda _situation: [], build_adviser=fake_build_adviser)
-check("no rule binding still produces the automatic build advisory",
-      json.loads(context(no_bind_output))["schema"] == contract.BUILD_RECEIPT_SCHEMA
-      and contract.validate_build_receipt(json.loads(context(no_bind_output)), repo=REPO)
-      and json.loads(context(no_bind_output))["semantic_rule_delivery"] == "not_applicable"
-      and no_bind_runner.calls == [])
+    adviser=lambda _situation: [])
+check("no binding produces no annotation or store call", no_bind_output is None and no_bind_runner.calls == [])
 
 layer0_id = next(short for short, entry in MAP["rule_load_layers"].items()
                  if entry.get("load_layer") == "layer0")
@@ -1137,63 +1120,11 @@ layer0_output = rail.process(
     adviser=lambda _situation: [{"id": layer0_id,
                                  "probability": 0.99,
                                  "ranking_model": None,
-                                 "binding_model": "jev-test"}],
-    build_adviser=fake_build_adviser)
-check("already-loaded layer0 rules are not redelivered but build advice remains",
-      json.loads(context(layer0_output))["schema"] == contract.BUILD_RECEIPT_SCHEMA
-      and json.loads(context(layer0_output))["semantic_rule_delivery"] == "not_applicable"
-      and layer0_runner.calls == [])
-
-failed_semantic_output = rail.process(
-    prompt_payload(client="codex"),
-    runner=Runner(returncode=1, stderr="token=SUPER-SECRET"),
-    adviser=fake_adviser, build_adviser=fake_build_adviser)
-failed_build_receipt = json.loads(context(failed_semantic_output))
-check("semantic rule failure preserves a validated visible build receipt",
-      failed_build_receipt["schema"] == contract.BUILD_RECEIPT_SCHEMA
-      and failed_build_receipt["semantic_rule_delivery"] == "failed"
-      and failed_build_receipt["client"] == "codex"
-      and failed_build_receipt["turn_id"] == "turn-prompt"
-      and failed_build_receipt["failure_stage"] == "selector_call"
-      and failed_build_receipt["failure_reason"] == "nonzero"
-      and contract.validate_build_receipt(failed_build_receipt, repo=REPO)
-      and "SUPER-SECRET" not in context(failed_semantic_output))
-
-for name, runner, stage, reason in (
-        ("timeout", Runner(error=subprocess.TimeoutExpired("secret-command", 1)),
-         "selector_call", "timeout"),
-        ("not-ok", Runner(result={"ok": False, "detail": "SUPER-SECRET"}),
-         "selector_call", "not_ok"),
-        ("invalid-store-response", Runner(result=gen_selector_result(
-            packs=semantic_packs, ids=[], mode="shadow")),
-         "selector_response", "invalid_data")):
-    output = rail.process(prompt_payload(client="codex"), runner=runner,
-                          adviser=fake_adviser, build_adviser=fake_build_adviser)
-    row = json.loads(context(output))
-    check("Codex semantic failure classifies " + name + " without exception text",
-          row["failure_stage"] == stage and row["failure_reason"] == reason
-          and contract.validate_build_receipt(row, repo=REPO)
-          and "SUPER-SECRET" not in context(output)
-          and "secret-command" not in context(output))
-
-def fail_adviser(_situation):
-    raise RuntimeError("SUPER-SECRET")
-
-adviser_failed = json.loads(context(rail.process(
-    prompt_payload(client="codex"), runner=Runner(), adviser=fail_adviser,
-    build_adviser=fake_build_adviser)))
-check("semantic adviser failures carry a redacted stage and reason",
-      adviser_failed["failure_stage"] == "semantic_adviser"
-      and adviser_failed["failure_reason"] == "invalid_data"
-      and "SUPER-SECRET" not in json.dumps(adviser_failed))
-
-for wrong_stage, wrong_reason in (("unbounded-secret", "nonzero"),
-                                  ("selector_call", "unbounded-secret")):
-    tampered = dict(failed_build_receipt, failure_stage=wrong_stage,
-                    failure_reason=wrong_reason)
-    tampered["receipt_id"] = contract.receipt_id(tampered)
-    check("unrecognized failure taxonomy is rejected",
-          not contract.validate_build_receipt(tampered, repo=REPO))
+                                 "binding_model": "jev-test"}])
+check("already-loaded rules produce no annotation", layer0_output is None and layer0_runner.calls == [])
+failed = rail.process(prompt_payload(client="codex"), runner=Runner(returncode=1, stderr="SUPER-SECRET"), adviser=fake_adviser)
+check("rule failure stays visible and redacts provider output",
+      "RULE DELIVERY FAILED: selector_call (nonzero)" in context(failed) and "SUPER-SECRET" not in context(failed))
 
 # The verdict cache is keyed on the hook payload's OWN session id — never the
 # environment, never a shared default — so the default adviser must carry it.
@@ -1208,8 +1139,7 @@ def recording_adviser(situation: str, session_id: str | None = None) -> list[dic
 
 rail._semantic_adviser = recording_adviser
 try:
-    rail.process(prompt_payload(prompt="hello"), runner=Runner(),
-                 build_adviser=fake_build_adviser)
+    rail.process(prompt_payload(prompt="hello"), runner=Runner())
 finally:
     rail._semantic_adviser = _real_semantic_adviser
 with tempfile.TemporaryDirectory() as fake_repo:
@@ -1251,12 +1181,7 @@ oversize = rail.process(
     prompt_payload(prompt="x" * (rail.MESSAGE_LIMIT_CHARS + 1)),
     runner=Runner(),
     adviser=oversize_adviser)
-check("oversized prompts fail open visibly instead of judging truncated text",
-      json.loads(context(oversize))["schema"] == contract.BUILD_RECEIPT_SCHEMA
-      and json.loads(context(oversize))["semantic_rule_delivery"] == "not_attempted_oversize"
-      and json.loads(context(oversize))["advisory"]["schema"]
-          == contract.BUILD_ADVISORY_UNAVAILABLE_SCHEMA
-      and oversize_adviser_calls == [])
+check("oversized prompts fail open visibly", "RULE DELIVERY NOT ATTEMPTED" in context(oversize) and oversize_adviser_calls == [])
 
 forged_selector = copy.deepcopy(semantic_row)
 forged_selector["selector_digest"] = "0" * 64
@@ -1319,29 +1244,6 @@ leaky = [row["trigger_id"] for row in prompt_rows
 check("prompt_regex rows never fire on a PreToolUse payload", leaky == [], leaky)
 check("the trigger table with prompt_regex rows still loads for the PreToolUse rail",
       len(contract.load_trigger_table(REPO)) == len(TRIGGER_TABLE["triggers"]))
-
-# A background-task notification gets the real advisory's skip, not a Jev
-# call, and the receipt it rides on still validates and requires nothing.
-build_module = load("jev_build_advisory_hooktest", REPO / "ops/jev_build_advisory.py")
-def billing_build_adviser(_prompt):
-    raise build_module.AdvisoryUnavailable("billing_exhausted")
-
-billing_output = rail.process(prompt_payload(client="codex"), runner=Runner(),
-                              adviser=lambda _t: [], build_adviser=billing_build_adviser)
-billing_row = json.loads(context(billing_output))
-check("Codex build receipt names billing exhaustion without a provider body",
-      billing_row["advisory"]["reason"] == "billing_exhausted"
-      and "Joe must add credits" in billing_row["advisory"]["instruction"]
-      and contract.validate_build_receipt(billing_row, repo=REPO))
-notification = ("<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n"
-                "<summary>Agent \"x\" finished</summary>\n</task-notification>")
-skip_output = rail.process(prompt_payload(prompt=notification), runner=Runner(),
-                           adviser=lambda _t: [], build_adviser=build_module.advise)
-skip_row = json.loads(context(skip_output))
-check("a task notification's build receipt carries the skipped advisory and validates",
-      skip_row["schema"] == contract.BUILD_RECEIPT_SCHEMA
-      and skip_row["advisory"] == build_module.skipped()
-      and contract.validate_build_receipt(skip_row, repo=REPO))
 
 # One clock for the whole prompt hook: a hook that has already spent 15 s
 # gives the standing-context door only what is left of its 18 s, not 15 s.

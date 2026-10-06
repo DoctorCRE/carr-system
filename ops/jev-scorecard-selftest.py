@@ -24,6 +24,15 @@ sc = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sc)
 
 
+import os as _sem_os
+import tempfile as _sem_tmp
+from unittest.mock import patch as _sem_patch
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+
 class _FakeResponse:
     def __init__(self, payload):
         self._body = json.dumps(payload).encode("utf-8")
@@ -72,7 +81,7 @@ MUTATION_TASK = {
 }
 
 
-class ExtractCodeTests(unittest.TestCase):
+class ExtractCodeTests(SemanticTestCase):
     def test_pulls_the_fenced_block(self):
         text = "here you go\n```python\ndef f():\n    return 1\n```\nthanks"
         self.assertIn("def f():", sc.extract_code(text, lang="py"))
@@ -95,7 +104,7 @@ class ExtractCodeTests(unittest.TestCase):
         self.assertIn("console.log", sc.extract_code(text, lang="js"))
 
 
-class LoadSuiteTests(unittest.TestCase):
+class LoadSuiteTests(SemanticTestCase):
     def test_the_real_suite_loads_and_is_not_empty(self):
         tasks = sc.load_suite()
         self.assertGreater(len(tasks), 5)
@@ -110,7 +119,7 @@ class LoadSuiteTests(unittest.TestCase):
                 self.assertIn("test", task)
 
 
-class GradeImplTests(unittest.TestCase):
+class GradeImplTests(SemanticTestCase):
     def test_python_returned_containers_preserve_caller_owned_aliases(self):
         task = {'lang': 'py', 'test': '''data = [1]
 check("nested caller identity", lambda: wrap(data)[0] is data)
@@ -323,7 +332,7 @@ process.exit(0);
         self.assertFalse(result["pass"])
 
 
-class GradeMutationTests(unittest.TestCase):
+class GradeMutationTests(SemanticTestCase):
     def test_a_thorough_suite_kills_every_mutant_and_passes(self):
         suite = (
             "import unittest\nfrom solution import f\n"
@@ -346,7 +355,7 @@ class GradeMutationTests(unittest.TestCase):
         self.assertFalse(result["pass"])
 
 
-class RunTaskTests(unittest.TestCase):
+class RunTaskTests(SemanticTestCase):
     def test_a_passing_reply_is_graded_and_reported(self):
         opener = _chat_opener_returning("```python\ndef add(a, b):\n    return a + b\n```")
         out = sc.run_task(IMPL_TASK, attempts=1, chat_opener=opener)
@@ -377,7 +386,7 @@ class RunTaskTests(unittest.TestCase):
         self.assertFalse(out["any_pass"])
 
 
-class GradeFuzzyTests(unittest.TestCase):
+class GradeFuzzyTests(SemanticTestCase):
     class _FakeJudge:
         JudgeUnavailable = RuntimeError
         SHADOW_LOG = "unused-in-tests"
@@ -394,7 +403,7 @@ class GradeFuzzyTests(unittest.TestCase):
                 raise self.JudgeUnavailable("synthetic outage")
             answers = {qid: {"type": "noul", "noul": self.probs.get(qid, 0.5)}
                        for qid in questions}
-            return {"model": "fake", "answers": answers}
+            return {"model": "jev-1.13.0", "answers": answers}
 
         def record(self, *a, **kw):
             self.records.append((a, kw))
@@ -409,15 +418,15 @@ class GradeFuzzyTests(unittest.TestCase):
         judge = self._FakeJudge({"c0": 0.95, "c1": 0.9})
         out = sc.grade_fuzzy("some output", ["mentions X", "is polite"],
                               client=self._FakeClient, judge=judge)
-        self.assertTrue(out["verdict"])
-        self.assertFalse(out["escalate"])
+        self.assertEqual(out["verdict"], "review_required")
+        self.assertTrue(out["escalate"])
         self.assertEqual(len(judge.calls), 1, "every sub-check batched into one request")
 
     def test_one_failing_subcheck_makes_the_verdict_false(self):
         judge = self._FakeJudge({"c0": 0.95, "c1": 0.1})
         out = sc.grade_fuzzy("some output", ["mentions X", "is polite"],
                               client=self._FakeClient, judge=judge)
-        self.assertFalse(out["verdict"])
+        self.assertEqual(out["verdict"], "review_required")
 
     def test_an_ambiguous_subcheck_escalates(self):
         judge = self._FakeJudge({"c0": 0.5})
@@ -428,7 +437,7 @@ class GradeFuzzyTests(unittest.TestCase):
     def test_no_subchecks_is_vacuously_true_and_does_not_ask_jev(self):
         judge = self._FakeJudge(fail=True)
         out = sc.grade_fuzzy("some output", [], client=self._FakeClient, judge=judge)
-        self.assertTrue(out["verdict"])
+        self.assertIs(out["verdict"], True)
         self.assertEqual(len(judge.calls), 0)
 
     def test_an_outage_reports_unavailable_not_an_exception(self):
@@ -439,7 +448,7 @@ class GradeFuzzyTests(unittest.TestCase):
         self.assertTrue(out["escalate"])
 
 
-class SummarizeTests(unittest.TestCase):
+class SummarizeTests(SemanticTestCase):
     def test_counts_by_category_and_overall(self):
         results = [
             {"category": "parser", "any_pass": True, "first_pass": True},
@@ -456,7 +465,7 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(out["overall"], {"n": 0, "any_pass": 0, "first_pass": 0})
 
 
-class EntrypointTests(unittest.TestCase):
+class EntrypointTests(SemanticTestCase):
     def test_the_module_is_not_a_script_entrypoint(self):
         import re as _re
         source = MODULE_PATH.read_text(encoding="utf-8")

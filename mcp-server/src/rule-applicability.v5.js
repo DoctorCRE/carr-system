@@ -11,9 +11,9 @@
 // possibly-binding bucket, the never-omit rule on a possible binding
 // constraint, `read_only_exploration_permitted` and
 // `consequential_action_permitted` are all computed by deriveRuleApplicability
-// below. context-assembly.v5.js owns Q050 and Q068 outright, and owns the
-// budget and mode half of Q065. The settled-decision table for ALL SEVEN sits
-// here because this is the lower module and one home beats two copies.
+// below. Q050, Q068, and the budget and mode half of Q065 require context
+// assembly that this module does not implement. Their settled decisions stay
+// in this table as requirements; retaining them does not claim an implementation.
 //
 // `decision` NEVER READS ALLOW ON A BLOCKED RECEIPT. It has three values:
 // "allow" only when `consequential_action_permitted` is true; "read_only" when
@@ -395,9 +395,8 @@ function assertTenant(value, path) {
 
 /**
  * The guards, exported once as a frozen namespace rather than twenty named
- * exports. context-assembly.v5.js is the only consumer: the two halves of F05
- * validate inputs identically because they share this object, not because two
- * copies were kept in step by hand.
+ * exports. rule-context-runtime.v5.js consumes this namespace so applicability
+ * and runtime delivery validate inputs with the same guards.
  */
 export const V5_F05_GUARDS = Object.freeze({
   fail, isPlainObject, deepFreeze, snapshot,

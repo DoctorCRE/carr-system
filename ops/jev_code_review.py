@@ -296,12 +296,12 @@ def _review(region, task, client=None, api_key=None):
     questions = {qid: tsc.noul(text) for qid, text in QUESTIONS.items()}
     state = {"region": {"path": region["path"], "line": region["line"],
                         "why_it_was_flagged": region["kind"],
-                        "code": region["code"]}}
+                        "code": region["code"][:6000]}}
     if task:
         for qid, (text, true, false) in TASK_QUESTIONS.items():
             questions[qid] = tsc.noul(text, true=true, false=false)
-        state["task"] = {"latest_human_request": task}
-    answer = tsc.ask(state, questions, timeout=TIMEOUT_SECONDS, api_key=api_key)
+        state["task"] = {"latest_human_request": task[:3000]}
+    answer = _semantic().ask(state, questions, caller="jev_code_review", version="vendor-v1", client=tsc, timeout=TIMEOUT_SECONDS, api_key=api_key)
     scores = {qid: answer_value(body)
               for qid, body in (answer.get("answers") or {}).items()}
     model = answer.get("model")
@@ -384,18 +384,8 @@ def findings(results, floor=REPORT_AT):
 # questions below read the change against the most recent human request. They
 # ride in the SAME request as the questions above.
 #
-# JOE, 2026-09-24 (decision 5ec806a4, "every jev check in the system too is
-# not a shadow"): this check now ACTS on its judgment. When the top task-fit
-# probability clears TASK_FIT_ACT_AT, review_for_edit() returns `_would_block`
-# and hooks/lint-gate.py surfaces it as a real finding the session must
-# address, through the same findings channel the hook already uses -- not
-# folded into the advisory-only list. What stays, per the ruling: the
-# threshold keeps its shadow-era value as the starting point rather than
-# being re-guessed; a judgment failure is recorded as an error row and
-# RE-RAISED, so the hook falls back to its existing "unavailable" receipt
-# (the abstention path) instead of an affirmative pass or fail; and every
-# judgment, acted on or not, is still recorded to out/jev-judge.jsonl under
-# TASK_FIT_KIND so the log stays the audit trail.
+# Task fit shares the region request. Its provisional floor selects advice for
+# review; no labeled threshold receipt authorizes a required action.
 
 TASK_FIT_KIND = "post_write_task_fit"
 TASK_FIT_ACT_AT = 0.85            # starting point carried over from the shadow era
@@ -483,17 +473,10 @@ def _judge_module():
 
 
 def review_for_edit(region, payload, client=None, api_key=None, log_path=None):
-    """review_one for the post-write hook, plus the acting task-fit check.
+    """Return region advice and optional task-fit review advice from one batch.
 
-    Returns what review_one returns, plus `_would_block` (the highest task-fit
-    probability) only when it clears TASK_FIT_ACT_AT -- the caller (lint-gate)
-    treats that as a real finding, not an advisory one. The task-fit answers
-    are removed from the scores, and underscored keys never become advisory
-    findings, so the hook's advisory-only output is unchanged apart from that
-    one signal. A judgment failure is recorded as an error row and RE-RAISED
-    -- the abstention path -- so the hook falls back to its existing
-    "unavailable" receipt instead of any affirmative verdict. With no
-    transcript, only the existing questions are asked and nothing is recorded.
+    A transport failure propagates to the existing unavailable receipt. Without
+    task evidence, only the region questions are asked.
     """
     payload = payload if isinstance(payload, dict) else {}
     task = latest_task(payload.get("transcript_path"))
@@ -528,8 +511,15 @@ def review_for_edit(region, payload, client=None, api_key=None, log_path=None):
                       and isinstance(value, (int, float)) and value >= ADVISORY_AT)
     record(dict(subject, would_block=would_block, threshold=TASK_FIT_ACT_AT,
                 task_scores=task_scores),
-           answer, {"advisory_findings": advisory, "effect": "required"},
+           answer, {"advisory_findings": advisory, "effect": "advisory"},
            note="agreed" if would_block == bool(advisory) else "disagreed")
     if would_block:
-        scores["_would_block"] = top
+        scores["_review_task_fit"] = top
     return scores
+
+
+def _semantic():
+    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

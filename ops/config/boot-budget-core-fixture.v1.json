@@ -2,13 +2,20 @@
   "schema_version": 1,
   "work_request": "WR-000019",
   "slice": "s11",
-  "note": "A SNAPSHOT, not a live read. ops/boot-budget-check.py runs with no database and no network -- the same repository-content-only class as the other checks in ops/ci.sh's inventory loop -- so it cannot call standing-context itself. These numbers were measured by calling the real mcp__carr__standing-context verb (bare, and again with rule_ids for the 20 ids in ops/config/rule-triage.v1.json's `home: \"core\"` set) and reading the byte lengths of the JSON it returned. Refresh this file by hand after any change to the active rule set, the core classification, or the pack index whose size would move the measurement -- there is no automated sync for it the way ops/sync-core-rule-ids.py syncs the id list itself, because producing a fresh reading needs a live call this offline check cannot make.",
-  "measured_at": "2026-08-27",
-  "measured_by": "manual standing-context call, WR-000019 slice S11",
-  "current_full_recitation_bytes": 24452,
-  "current_full_recitation_rule_count": 205,
+  "note": "Offline snapshot of live default standing-context summary/pack-index bytes and the mandatory boot full-text/index bytes. Refresh through the live verb when delivery changes. These are different payloads and corpus size is not a loaded-rule count.",
+  "measured_at": "2026-10-05",
+  "measured_by": "live standing-context default response, retro candidate 11",
+  "delivered_summary_bytes": 505,
+  "delivered_summary_rule_count": 6,
   "pack_index_bytes": 3053,
-  "core_rules_full_text_bytes": 48091,
-  "core_rule_count": 20,
-  "projection_note": "current_full_recitation_bytes + pack_index_bytes is what standing-context loads TODAY (shadow mode, unchanged by this slice) -- that pairing is what ops/boot-budget-check.py's core_payload sub-budget measures, because that is what every session actually receives right now and the ceiling this check enforces has to hold against reality. core_rules_full_text_bytes is the SEPARATE, larger number slice S13's flip would introduce (see standing-context's core_preview) -- it is NOT part of the enforced budget yet because the flip has not happened; refresh this fixture and revisit the budget once it does, per Joe's own call (see ops/config/boot-budget.v1.json's note)."
+  "projection_note": "delivered_summary_bytes measures delivered SUMMARY text in the default scoped response, not full text. Pack index is routing metadata. Mandatory detail=boot full text plus corpus index are separately capped by rule-boot-classes-check; neither corpus size nor core_preview is a loaded-rule count.",
+  "rule_boot_full_text_bytes": 91806,
+  "rule_boot_corpus_index_bytes": 31920,
+  "rule_boot_digest": "sha256:c3e5629bfb406b198e062252ad4169879c4b520fb7105c3cffe38a0a6a668fb6",
+  "rule_boot_counts": {
+    "rules": 197,
+    "always_on": 69,
+    "index": 197,
+    "unclassified": 2
+  }
 }

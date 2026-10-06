@@ -19,6 +19,8 @@
       "id": "jev-judgments",
       "description": "Jev question families, typed-judgment prompts and the TypeSafe client that carries them.",
       "globs": [
+        "jevlint.json",
+        "ops/jevlint_review.py",
         "ops/jev_*.py",
         "ops/typesafe_client.py",
         "tools/judge/interface.py",
@@ -28,7 +30,9 @@
         "hooks/jev-supervisor.py",
         "lib/jev_required_actions.py",
         "ops/config/rule-jev-triggers.v1.json",
-        "ops/config/jev-cost-guard.v1.json"
+        "ops/config/jev-cost-guard.v1.json",
+        "ops/config/jev-call-sites.v1.json",
+        "ops/command_precheck.py"
       ]
     },
     {
@@ -78,6 +82,8 @@
         "hooks/model-floor-gate.py",
         "hooks/rule-shape-gate.py",
         "hooks/stop_latch.py",
+        "hooks/conduct-stop-gate.py",
+        "hooks/escalation-gate.py",
         "hooks/conduct_patterns.py",
         "ops/config/hooks.json",
         "ops/config/codex-hooks.json",
@@ -112,7 +118,7 @@
         "bin/precheck.sh",
         "mcp-server/src/bot-brief.js",
         "tools/room-bridge/engineering_dispatch_adapter.py",
-        "tools/room-bridge/evaluation_rubrics.py",
+        "tools/room-bridge/evaluation_kernel.py",
         "tools/doc-convo/prompt",
         "tools/doc-convo/prompt/**",
         "ops/config/job-watchdog.json",
@@ -128,9 +134,7 @@
         "ops/config/engineering-codex-desk.v1.json",
         "ops/config/codex-permissions.toml",
         "mcp-server/src/model-routing.v5.js",
-        "mcp-server/src/model-routing-adapter.v5.js",
         "mcp-server/src/model-role-store.v5.js",
-        "mcp-server/src/model-qualification-kernel.v5.js",
         "tools/room-bridge/desks.py"
       ]
     }

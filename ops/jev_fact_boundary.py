@@ -409,6 +409,8 @@ def build_request(claims, evidence, tsc):
     state = {"claims": {}}
     questions = {}
     for claim in claims:
+        if claim['type'] == 'numeric_fact':
+            continue  # prose is not a typed numeric source; route exact verification to review
         passages = evidence.get(claim["id"])
         if not passages:
             continue
@@ -432,7 +434,7 @@ def decide_claim(label, confidence, claim_type, boundary):
     """Code, not Jev, decides the action for one judged claim."""
     conf = confidence if isinstance(confidence, (int, float)) else None
     if label == "contradicted":
-        return "block" if conf is not None and conf >= BLOCK_AT else "flag"
+        return "flag"  # unvalidated semantic contradiction routes to review
     if label == "unsupported":
         # A record write persists the claim; a completion report only says it.
         if boundary == RECORD_WRITE and conf is not None and conf >= UNSUPPORTED_FLAG_AT:
@@ -496,6 +498,9 @@ def check_boundary(boundary, *, store=None, client=None, judge_module=None,
                  "confidence": None, "action": "pass", "sources": [p["ref"] for p in evidence.get(c["id"], [])]}
                 for c in claims]
         base.update(claims=rows, dropped_passages=dropped[:20])
+        for row in rows:
+            if row['type'] == 'numeric_fact' and row['sources']:
+                row.update(label='numeric_review_required', action='flag', confidence=None)
         if errors:
             base["retrieval_errors"] = errors[:5]
         if not evidence:
@@ -510,8 +515,11 @@ def check_boundary(boundary, *, store=None, client=None, judge_module=None,
         if left < 1.0:
             return _result("unavailable", kind, dict(base, reason="budget_spent_before_judgment"))
         try:
-            answer = jj.judge(state, questions, client=client, timeout=min(JUDGE_TIMEOUT_SECONDS, left),
-                              retries=0)
+            if not questions:
+                return _result('flag', kind, dict(base, reason='numeric_source_verification_required'),
+                               advice=_advice(kind, rows), escalate=True)
+            answer = _sibling("jev_semantic").ask(state, questions, client=client, timeout=min(JUDGE_TIMEOUT_SECONDS, left),
+                              retries=0, caller="jev_fact_boundary", version="vendor-v1", transport=jj.judge)
         except Exception as exc:
             try:
                 jj.record("supervise.fact_boundary", str(boundary.get("ref"))[:200], {}, None,

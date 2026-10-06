@@ -366,12 +366,20 @@ def compile_rule(rule, *, all_rules, pack_keywords, verbs, history, client, ask)
     cands, near = candidates(rule, all_rules=all_rules, pack_keywords=pack_keywords,
                              verbs=verbs, history=history)
     questions, state, index = questions_for(rule, cands, near, client)
-    answer = ask(state, questions, facets=["semantic_creation"])
-    return interpret(rule, answer, index, model=answer.get("model") or "unknown")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
+    semantic = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(semantic)
+    answer = semantic.ask(state, questions, transport=ask, caller="rule_trigger_compile",
+                          version="vendor-v1", facets=["semantic_creation"] )
+    proposal = interpret(rule, answer, index, model=answer.get("model") or "unknown")
+    return dict(proposal, proposed_mode=proposal.get("mode"), mode="review_required")
 
 
 def document(entries):
-    rules = {e["id"]: e for e in sorted(entries, key=lambda e: e["id"])}
+    entries = sorted(entries, key=lambda e: e["id"])
+    rules = {e["id"]: e for e in entries if e.get("mode") != "review_required"}
+    proposals = {e["id"]: e for e in entries if e.get("mode") == "review_required"}
     counts = Counter(e["mode"] for e in rules.values())
     return {
         "schema": SCHEMA,
@@ -384,6 +392,7 @@ def document(entries):
                        "always_on_at": ALWAYS_ON_AT, "no_cue_at": NO_CUE_AT},
         "counts": {"rules": len(rules), **{k: counts[k] for k in sorted(counts)}},
         "rules": rules,
+        "proposals": proposals,
     }
 
 
@@ -412,7 +421,8 @@ def stale_or_missing(doc, rules):
     out = []
     for rule in rules:
         entry = compiled.get(rule["id"])
-        if not isinstance(entry, dict) or entry.get("statement_sha256") != sha256_text(rule["statement"]):
+        if (not isinstance(entry, dict) or entry.get("mode") not in {"triggered", "residual", "always_on"}
+                or entry.get("statement_sha256") != sha256_text(rule["statement"])):
             out.append(rule["id"])
     return sorted(out)
 
@@ -423,6 +433,8 @@ def coverage_problems(doc, rules):
     residual (judged at run time). Returns human-readable problems."""
     problems = [f"{rid}: not compiled against its current statement"
                 for rid in stale_or_missing(doc, rules)]
+    problems += [f"{rid}: proposal requires independent review"
+                 for rid in sorted((doc or {}).get("proposals") or {})]
     compiled = (doc or {}).get("rules") or {}
     live = {r["id"] for r in rules}
     for rid, entry in sorted(compiled.items()):
@@ -468,7 +480,7 @@ def trigger_rows(doc):
     path_pattern join the existing PreToolUse rail unchanged."""
     rows = []
     for rid, entry in sorted(((doc or {}).get("rules") or {}).items()):
-        if entry.get("mode") == "always_on":
+        if entry.get("mode") not in {"triggered", "residual"}:
             continue
         trig = entry.get("triggers") or {}
         packs = sorted(entry.get("packs") or [])

@@ -77,3 +77,13 @@ test("slice 4 defaults neither revised route seam to public execution nor incomp
   assert.match(migration, /route acceptance requires at least one active stop/i);
   assert.match(migration, /route acceptance requires an explicit transition for every new route stop/i);
 });
+
+// The successor adds only the stored subject fields to the deployed projection.
+test("internal detail subject successor preserves the prior read and its authorization predicates", () => {
+  const prior = fs.readFileSync(path.join(root, "migrations/0759_tour_reviewed_route_digest.sql"), "utf8");
+  const next = fs.readFileSync(path.join(root, "migrations/0813_tour_internal_subject_read.sql"), "utf8");
+  const functionBody = text => text.slice(text.indexOf("create or replace function ops.read_tour_internal_detail")).split("$$;")[0];
+  assert.equal(functionBody(next).replace("'subject_type',t.subject_type,'subject_id',t.subject_id,\n    ", ""), functionBody(prior));
+  const contract = JSON.parse(fs.readFileSync(path.join(root, "workspace/contracts/tour-operations-foundation.v1.json")));
+  assert.deepEqual(contract.internal_detail_subject.fields, ["subject_type", "subject_id"]);
+});

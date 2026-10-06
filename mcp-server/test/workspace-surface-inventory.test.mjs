@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
+import { DEAL_ROOM_FIELDS } from "../src/dealroom.js";
 import { BENCHMARK_SLO_THRESHOLDS } from "../src/benchmark-minimum.v5.js";
 import { BUSINESS_API_PREFIX, BUSINESS_ASSET_PATH, CLIENTS_ROUTE, VENDORS_ROUTE, isBusinessApiPath } from "../src/workspace-business-read.js";
 import { COMMAND_CENTER_PATH } from "../src/workspace-command-center.js";
@@ -457,11 +458,8 @@ test("the acknowledgement endpoints are exactly the verbs the board actually wri
 
   // The board's patchable fields travel on one of these verbs, so the axis covers
   // every cell the Deal Room can change.
-  const tools = await read("mcp-server/src/tools.js");
-  const fields = tools.match(/const DEAL_ROOM_FIELDS = Object\.freeze\(\[([^\]]*)\]\)/)?.[1] || "";
-  assert.notEqual(fields, "", "DEAL_ROOM_FIELDS not found in tools.js");
   assert.ok(COMMAND_WRITE_VERBS.includes("patch-deal-field") && COMMAND_WRITE_VERBS.includes("revert-deal-field"));
-  assert.ok([...fields.matchAll(/"([a-z_]+)"/g)].length >= 5);
+  assert.deepEqual(DEAL_ROOM_FIELDS, ["phase", "owner", "attention", "next_date", "operating_state"]);
 
   // One acknowledgement subject per verb, on the one mount that carries them.
   assert.equal(ACKNOWLEDGEMENT_ENDPOINTS.length, COMMAND_WRITE_VERBS.length);

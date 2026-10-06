@@ -48,7 +48,26 @@ def _client():
     # Production-shaped fake transports exercise real reservation code, but
     # their synthetic attempts must never read or change the live counter.
     mod.JEV_DAILY_CAP_LOG = Path(tempfile.mkdtemp(dir=_FIXTURE_STORAGE.name)) / "jev-calls.jsonl"
+    # Admission (registry, attribution, fixture refusal) is covered by
+    # ops/jev-call-sites-selftest.py; this suite tests the transport beneath it.
+    site = {"caller": "*", "trigger": "selftest", "runs_in": "selftest",
+            "attribution": "session_or_job", "unattended": "allowed",
+            "hourly_budget": 10**9, "daily_budget": 10**9, "owner": "selftest",
+            "value": "selftest", "sources": ["ops/typesafe_client.py"]}
+    mod.load_call_sites = lambda path=None: {"hourly_paid_call_cap": 10**9, "sites": {"*": site}}
+    mod.call_site = lambda caller, registry: site
+    # Hermetic credentials, as on a hosted runner: the Worker route signs with
+    # a fixture admission secret and no local vendor key exists to fall back on.
+    mod.read_admission_secret = lambda: "fixture-admission-secret"
+    def no_local_vendor_key(*_args):
+        raise mod.TypeSafeError("fixture holds no local vendor key")
+    mod.read_api_key = no_local_vendor_key
     return mod
+
+
+for _name in ("CARR_JEV_OFFLINE", "CARR_HOOK_FIXTURE", "CARR_JEV_WORKER"):
+    os.environ.pop(_name, None)
+os.environ["CARR_JEV_JOB"] = "jev-server-receipts-selftest"
 
 class _Proc:
     def __init__(self, code, out="", err=""):
@@ -78,7 +97,9 @@ def client_routes_through_the_worker():
     finally:
         os.unlink(log)
     ok = (seen.get("verb") == "ask-jev" and seen["args"]["purpose"] == "call"
-          and seen["args"]["facets"] == ["diagnosis"] and seen["args"]["idempotency_key"]
+          and seen["args"]["facets"] == ["diagnosis"]
+          and seen["args"]["idempotency_key"].startswith("jev1.")
+          and "fixture-admission-secret" not in json.dumps(seen)
           and result["server_receipt"]["receipt_id"] == "srv-1"
           and result["answers"]["diagnosis_q"]["noul"] == 0.7
           and result["usage"] == {"input_tokens": 3, "output_tokens": 1}
@@ -245,7 +266,7 @@ def in_hook_calls_skip_the_server_but_the_advisory_does_not():
           and advisory.get("server_receipt", {}).get("receipt_id") == "srv-h"
           and rows and rows[0]["server_error"] == "in_hook_direct")
     return report(ok, "a hook's own Jev call goes direct and is marked uncredited "
-                      "(in_hook_direct); the build advisory still takes the server path")
+                      "(in_hook_direct); other explicit callers still take the server path")
 
 
 class ReviewRegressions(unittest.TestCase):

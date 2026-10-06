@@ -12,6 +12,7 @@ visible when PostgreSQL executes the claim CTE.
 from __future__ import annotations
 
 import hashlib
+from itertools import count
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,9 @@ from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connec
 
 
 RUNTIME_ROLE = "carr_jobs"
+# A transaction shares now(); random UUID prefixes can pick the same due slot.
+# Every fixture in this interpreter instead receives its own microsecond offset.
+_FIXTURE_SCHEDULE_OFFSETS = count()
 STALE_PLAN_REF = "PLAN-954b03dd464d-v1"
 STALE_PLAN_HASH = "sha256:954b03dd464dab9986bc705d01fdb197edd29b23ad10ca673da53ad0ac03c27d"
 
@@ -286,7 +290,7 @@ def fixture(cur, mutate_envelope=None, *, session_state: str = "claimed", lease_
              (definition_key,definition_version,idempotency_key,scheduled_for,max_attempts,timeout_seconds,mode,payload)
              values ('engineering-slice',1,%s,now()-interval '10 minutes'+%s*interval '1 microsecond',2,300,'shadow',%s)
              returning id""",
-        (f"engineering-claim:{token}", int(token[:8], 16) % 1_000_000, Jsonb({"work_request": f"WR-ENGINEERING-CLAIM-{token}",
+        (f"engineering-claim:{token}", next(_FIXTURE_SCHEDULE_OFFSETS), Jsonb({"work_request": f"WR-ENGINEERING-CLAIM-{token}",
                                                    "slice_ref": slice_ref, "plan_digest": plan_digest, "generation": 1})),
     )[0]
     envelope_digest = "sha256:" + token * 2

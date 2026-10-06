@@ -1,132 +1,53 @@
-"""Which tolls does THIS change owe, read off the diff before it is pushed.
+"""Verification obligations derived from changed paths and contract dependencies.
 
-WHY THIS EXISTS. Hosted CI on one branch refused three times in a row on
-2026-09-18, and not one refusal was about whether the code worked. Each was a
-TOLL this repository charges for a kind of change, paid late or not at all:
-
-  · a gate was edited and its baseline was re-blessed -- correctly -- but the
-    source-inventory seal was derived BEFORE the last edit, so the seal
-    described a file that no longer existed by the time it was committed.
-  · the branch fell behind main and the pull request went CONFLICTING, which
-    draws ZERO checks, so "no checks reported" looked like a slow runner for
-    twenty minutes.
-  · the conflict was in two derived files, where taking either side whole
-    silently drops the other side's rows and the seal still verifies.
-
-These are knowable from the changed-file list. They were not caught because
-knowing them depends on a session remembering nine separate lessons at the
-moment it types git push, and a rule that asks for memory fires sometimes.
-
-THE SHAPE. Each toll is an INDEPENDENT yes-or-no about one change, so each is
-its own question and all of them go in ONE request -- independent questions
-about a single subject are asked together, and each is still scored on its own.
-There is no ranking here and nothing competes, so this is not a pick-one.
-
-IT ADVISES AND DOES NOT DECIDE. It prints what looks owed and why. It cannot
-block a push, because it returns probabilities and the deterministic checks are
-the ones allowed to refuse. Being wrong here costs a reader thirty seconds;
-being authoritative here would cost a correct change that could not ship.
+No model or result cache: a selected verifier's result is the only reason to
+hold a push. A path match never asserts that a seal or a contract has drifted.
 """
-
-from __future__ import annotations
-
-import importlib.util
+import hashlib
 import json
 import os
 import subprocess
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TIMEOUT_SECONDS = 60.0
-VERIFY_AT = 0.60   # a check worth RUNNING is a lower bar than a remedy worth printing
+VERIFY_AT = 0.60
 WARN_AT = 0.55
-
-# Every toll below was paid late or missed at least once, and each names the
-# concrete remedy rather than the principle, because a session reading this
-# output is about to push and needs the command, not the lesson.
 TOLLS = {
-    "inventory_reseal": (
-        "The changed files are in `change.files`. Does this change edit an MCP "
-        "verb -- its definition, input schema or write/human-only/authority "
-        "flags under mcp-server/src/ -- a NEW worker route or side-write, or a "
-        "scheduled job definition? Those rows are still sealed, because the "
-        "server refuses a verb whose contract drifts from the generated "
-        "registry. Editing server files such as mcp.js or index.js without "
-        "changing a verb contract needs no seal. Script entrypoints "
-        "(hooks/, bin/, tools/, pipelines/, ops/ scripts), GitHub workflows "
-        "and launchd plists are NOT sealed any more (decision 05e144eb, "
-        "2026-09-24): editing or adding one needs no registry successor.",
-        "only for a verb or job-definition change: cut a registry successor "
-        "by copying the most recent one (`git log --oneline -1 -i "
-        "--grep='as SCAC v[0-9]'`) and read the digest back from the "
-        "assertion, AFTER your last edit: node --input-type=module -e "
-        "\"import {assertCurrentSourceInventoryMatchesFixture} from "
-        "'./ops/scac-mutation-inventory.mjs'; import {TOOLS} from "
-        "'./mcp-server/src/tools.js'; "
-        "assertCurrentSourceInventoryMatchesFixture(TOOLS)\". A script, "
-        "workflow or plist edit needs nothing"),
-
-    "new_ingress_admitted": (
-        "Does this change ADD a new MCP verb or a new scheduled job "
-        "definition? A new verb is a new sealed row and costs a registry "
-        "successor. A new script, workflow or plist costs nothing any more "
-        "(decision 05e144eb, 2026-09-24).",
-        "for a new verb, cut a registry successor; for anything else, "
-        "nothing is owed"),
-
-    "gate_rebless": (
-        "Does this change edit a file under hooks/ that is one of the gates the "
-        "baseline tracks? A gate's bytes are pinned, so an edited gate and its "
-        "baseline must move in the SAME commit.",
-        "run `hooks/gate-integrity.py --bless hooks/<the-gate>.py` and commit "
-        "ops/config/gate-baseline.json alongside the gate"),
-
-    "paired_selftest": (
-        "Does this change edit a gate under hooks/ WITHOUT changing the "
-        "matching ops/<same-name>-selftest.py? A gate and its paired suite are "
-        "meant to change together; a gate that gains behaviour its suite does "
-        "not exercise has stopped being covered.",
-        "add cases to ops/<gate-name>-selftest.py for the behaviour you added"),
-
-    "ci_sh_reseal": (
-        "Does this change edit ops/ci.sh itself? Editing it pulls further "
-        "obligations than editing an ordinary script, because other checks read "
-        "its contents back out.",
-        "a COUNT change in ops/ci.sh pulls three more places -- run "
-        "ops/ci-selftest.py and read what it names"),
-
-    "judgment_without_caller": (
-        "Does this change ADD a module under ops/ that reaches a model -- one "
-        "importing typesafe_client or jev_judge -- without any file under "
-        "hooks/, bin/, tools/, pipelines/ or mcp-server/src/ calling it?",
-        "wire it to a door that already fires, or add it to DECLARED_INERT in "
-        "ops/judgment-wiring-selftest.py with a reason and a loop number"),
-
-    "derived_file_hand_merged": (
-        "Do the changed files include a DERIVED artifact -- a seal, a baseline, "
-        "a generated registry or fixture -- alongside a merge of another "
-        "branch? Resolving one of those by choosing a side silently discards "
-        "the other side's rows, and the file still verifies afterwards, so "
-        "nothing catches it.",
-        "union the rows from both sides, then re-derive EVERY row against the "
-        "merged tree rather than carrying any of them over"),
-
-    "settings_matcher_change": (
-        "Does this change touch a settings file that registers hooks, or add a "
-        "hook that needs a tool matcher it does not yet have? A hook registered "
-        "on no matcher never fires, and a bad path there blocks every tool at "
-        "once.",
-        "check the matcher actually names the tool, and pair matchers to hooks "
-        "programmatically rather than reading the two lists in order"),
-}
+    "inventory_reseal": ("sealed contract dependency changed", "run the sealed source inventory verifier; rederive if its contract changed"),
+    "new_ingress_admitted": ("new sealed contract source", "verify new sealed rows and derive a registry successor when needed"),
+    "gate_rebless": ("baseline-tracked gate changed", "re-bless the changed gate and commit ops/config/gate-baseline.json with it"),
+    "paired_selftest": ("gate changed without paired suite", "add regression cases to its paired selftest"),
+    "ci_sh_reseal": ("CI runner changed", "run ops/ci-selftest.py"),
+    "judgment_without_caller": ("judgment wiring changed", "run ops/judgment-wiring-selftest.py"),
+    "derived_file_hand_merged": ("derived artifact merged", "union both intents and rederive against the merged tree"),
+    "settings_matcher_change": ("hook registration changed", "verify tool matchers and installed hook paths")}
+CONTRACT_PREFIXES = ("mcp-server/src/", "ops/scac-", "ops/config/scheduled-jobs")
+SETTINGS_PATHS = {".claude/settings.json", "ops/config/hooks.json", "ops/config/codex-hooks.json",
+                  "ops/config/claude-continuity-hooks.json", "ops/config/delegation-gate-hook.json"}
+DERIVED_PATHS = {"ops/config/gate-baseline.json", "ops/config/scac-registry-source-inventory-fixtures.v1.json",
+                 "ops/config/rule-enforcement-map.json"}
 
 
-def _client():
-    spec = importlib.util.spec_from_file_location(
-        "typesafe_client", os.path.join(REPO, "ops", "typesafe_client.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _contract_sources():
+    """Conservative dependency edges from the reviewed inventory's locators.
 
+    Historical locators remain edges: an extra verifier is safe, whereas a
+    missing edge can hide a drifted seal. The verifier decides current drift.
+    """
+    with open(os.path.join(REPO, "ops/config/scac-registry-source-inventory-fixtures.v1.json")) as handle:
+        fixture = json.load(handle)
+    sources = set()
+    def visit(value):
+        if isinstance(value, dict):
+            locator = value.get("source_locator")
+            if isinstance(locator, str):
+                sources.add(locator.split("#", 1)[0].split(":", 1)[0])
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+    visit(fixture)
+    return sources
 
 def change(base="origin/main", repo=REPO):
     """The changed-file list, plus the two facts the questions cannot see.
@@ -226,36 +147,20 @@ def change(base="origin/main", repo=REPO):
     merged = subprocess.run(
         ["git", "log", "--merges", "--oneline", f"{base}..HEAD"],
         capture_output=True, text=True, cwd=repo, timeout=60).stdout.strip()
+    contents = {}
+    for rel in sorted(set(added + edited)):
+        try:
+            with open(os.path.join(repo, rel), "rb") as fh:
+                contents[rel] = hashlib.sha256(fh.read()).hexdigest()
+        except OSError:
+            contents[rel] = None
     return {"files": {"added": added, "edited": edited, "deleted": deleted},
+            "file_content_sha256": contents,
             "added_files_with_a_shebang_or_main_guard": shebangs,
             "edited_files_that_are_script_entrypoints": edited_entrypoints,
             "this_branch_merged_another_branch": bool(merged)}
 
 
-# ── what proves a toll paid ──────────────────────────────────────────────────
-#
-# WHY THIS EXISTS, and it is a specific failure on 2026-09-18 rather than a
-# general worry. This advisory scored `inventory_reseal` at 0.94 on a push, in
-# the session's own terminal, naming the exact remedy. The session read it and
-# pushed anyway. Hosted CI failed 25 minutes later on precisely that, and the
-# whole cycle had to be spent again. The judgment was not missing, not wrong
-# and not quiet -- it simply had no consequence attached to it.
-#
-# THE SHAPE OF THE FIX, which keeps the model out of the blocking decision.
-# Rule 'judgment advises beside the deterministic layer, never decides inside
-# it' still holds: a probability must not be what refuses a push. So the model
-# does not block anything. It CHOOSES WHICH DETERMINISTIC CHECK IS WORTH
-# RUNNING, and that check's own exit code decides. A toll the model scores
-# high is a check that gets run; the check passes or fails on bytes.
-#
-# This also settles what a false positive costs. The advisory has scored
-# `gate_rebless` at 0.71 on changes that owed no rebless. Under this design
-# that costs running gate-integrity.py, which takes under a second and passes.
-# A wrong judgment buys a few seconds of checking, never a blocked afternoon,
-# which is the trade that makes running these at all safe.
-#
-# A toll with no verifier stays purely advisory. Printing a remedy nobody can
-# check mechanically is still worth doing; it just cannot hold a push.
 VERIFIERS = {
     "inventory_reseal": (
         ["node", "--input-type=module", "-e",
@@ -276,8 +181,9 @@ VERIFIERS = {
 }
 
 
+
 def verify(state=None, *, floor=None, client=None, api_key=None, repo=REPO):
-    """Run the deterministic check behind every toll the model scores high.
+    """Run every verifier selected by the path/contract dependency graph.
 
     Returns [(name, probability, reason, output)] for checks that FAILED. An
     empty list means either nothing was flagged or everything flagged is
@@ -311,16 +217,41 @@ def verify(state=None, *, floor=None, client=None, api_key=None, repo=REPO):
     return failures
 
 
+
 def owed(state=None, *, client=None, api_key=None, floor=WARN_AT):
-    tsc = client or _client()
-    state = state if state is not None else change()
-    questions = {name: tsc.noul(text) for name, (text, _) in TOLLS.items()}
-    answer = tsc.ask({"change": state}, questions, timeout=TIMEOUT_SECONDS,
-                     api_key=api_key)
-    out = []
-    for name, body in (answer.get("answers") or {}).items():
-        probability = float(body.get(body.get("type"), 0.0))
-        if probability >= floor:
-            out.append((probability, name, TOLLS[name][1]))
-    out.sort(reverse=True)
-    return out
+    state = change() if state is None else state
+    files = state.get("files",{})
+    if isinstance(files,list):
+        files = {"edited":files}
+    touched = set(files.get("added",[]) + files.get("edited",[]) + files.get("deleted",[]))
+    added = set(files.get("added",[]))
+    try:
+        with open(os.path.join(REPO,"ops/config/gate-baseline.json")) as fh:
+            baseline = json.load(fh)
+        tracked = {"hooks/" + name for name in baseline.get("hashes",{})}
+    except (OSError,ValueError):
+        tracked = set()
+    selected = set()
+    try:
+        sealed_sources = _contract_sources()
+    except (OSError, ValueError):
+        # A missing dependency graph needs verification; never infer no toll.
+        sealed_sources = touched
+    if touched & sealed_sources or any(path.startswith(CONTRACT_PREFIXES) for path in touched):
+        selected.add("inventory_reseal")
+    if any(path.startswith(CONTRACT_PREFIXES) for path in added):
+        selected.add("new_ingress_admitted")
+    gates = {path for path in touched if path in tracked}
+    if gates:
+        selected.add("gate_rebless")
+    if any("ops/"+os.path.basename(p).removesuffix(".py")+"-selftest.py" not in touched for p in gates):
+        selected.add("paired_selftest")
+    if "ops/ci.sh" in touched:
+        selected.add("ci_sh_reseal")
+    if any(path.startswith("ops/jev_") or path in {"ops/typesafe_client.py","ops/judgment-wiring-selftest.py"} for path in touched):
+        selected.add("judgment_without_caller")
+    if state.get("this_branch_merged_another_branch") and touched & DERIVED_PATHS:
+        selected.add("derived_file_hand_merged")
+    if touched & SETTINGS_PATHS:
+        selected.add("settings_matcher_change")
+    return [(1.0,name,TOLLS[name][1]) for name in sorted(selected) if 1.0 >= floor]

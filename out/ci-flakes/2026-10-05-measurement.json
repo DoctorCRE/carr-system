@@ -1,0 +1,166 @@
+{
+  "schema": "ci-flake-measurement/v1",
+  "measured_at": "2026-10-05",
+  "reports": [
+    {
+      "repo": "jbookout/carr-system",
+      "since": "2026-08-06T00:00:00+00:00",
+      "until": "2026-10-05T18:47:44.818359+00:00",
+      "runs": 10603,
+      "ci_runs": 7498,
+      "candidate_runs": 56,
+      "log_attempts": 95,
+      "log_gaps": [],
+      "rows": [
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/machine-converge-selftest.py",
+          "tree": "95290d048d479ffaf32d9e7a110243b2322fe8b2",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/33314989751/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/33314989751/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/machine-converge-selftest.py",
+          "tree": "9dee9b0f01a23905995f346d6edb0b29a15aa5c0",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/33351518992/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/33351518992/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "d747026880c88c8cc42933498c0b315d68a3e15f",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/33474439526/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/33474439526/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/machine-converge-selftest.py",
+          "tree": "7ed5f5ce85f0ebc0ec48581038eed054f1a1fda7",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/33973923672/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/33973923672/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "9c57c5f1f78804fabb7e62114a5325ca31bb27f7",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/33984219568/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/33984219568/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "2fd0dcd468e913707bc6bf1f0680cba9211195be",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34052583141/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34052583141/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "8f6ba5f2559122f2128d7f158bdba6bec90f2fd7",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34060418811/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34060418811/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "e887465658524af46ca1f7fe600876e2152adc30",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34124861185/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34124861185/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "56949acaf333b2777b07aa553f6c11c1b82568c4",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34144947924/attempts/2",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34144947924/attempts/3"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/rule-pack-preuse-reselection-selftest.py",
+          "tree": "56949acaf333b2777b07aa553f6c11c1b82568c4",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34144947924/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34144947924/attempts/3"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "291b0655abe227c5605856163be926b41865e642",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34223611874/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34223611874/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/exact-recovery-runtime-selftest.py",
+          "tree": "9cecf8b39af9cbc851668d13e807fecb3807200c",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34238089355/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34238089355/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/rule-pack-preuse-reselection-selftest.py",
+          "tree": "42f9a0e2dbf7369f5b3b84b7cfb0f7c5b1390270",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/34272841117/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/34272841117/attempts/2"
+        },
+        {
+          "repo": "jbookout/carr-system",
+          "test": "ops/tailscale-health-selftest.py",
+          "tree": "1b61f762b61f234ae654c6920a0d2b01b2049ee7",
+          "workflow": "CI",
+          "fail_url": "https://github.com/jbookout/carr-system/actions/runs/37087163788/attempts/1",
+          "pass_url": "https://github.com/jbookout/carr-system/actions/runs/37087163788/attempts/2"
+        }
+      ],
+      "identity": "Checked-out commit from job git log -1 --format=%H; exact commit equality implies exact tree equality."
+    },
+    {
+      "repo": "jbookout/doctorcre-app",
+      "since": "2026-08-06T00:00:00+00:00",
+      "until": "2026-10-05T18:47:45.448183+00:00",
+      "runs": 720,
+      "ci_runs": 709,
+      "candidate_runs": 1,
+      "log_attempts": 2,
+      "log_gaps": [],
+      "rows": [],
+      "identity": "Checked-out commit from job git log -1 --format=%H; exact commit equality implies exact tree equality."
+    }
+  ],
+  "fix_loops": [
+    {
+      "test": "ops/exact-recovery-runtime-selftest.py",
+      "loop": "https://github.com/jbookout/carr-system/issues/1583",
+      "owner": "qa-engineer"
+    },
+    {
+      "test": "ops/machine-converge-selftest.py",
+      "loop": "https://github.com/jbookout/carr-system/issues/1584",
+      "owner": "qa-engineer"
+    },
+    {
+      "test": "ops/rule-pack-preuse-reselection-selftest.py",
+      "loop": "https://github.com/jbookout/carr-system/issues/1585",
+      "owner": "qa-engineer"
+    },
+    {
+      "test": "ops/tailscale-health-selftest.py",
+      "loop": "https://github.com/jbookout/carr-system/issues/1586",
+      "owner": "qa-engineer"
+    }
+  ],
+  "quarantine_policy": "Explicit suite paths only; proposed loops do not edit the list; every active entry requires owner, fix-loop URL and UTC expiry."
+}

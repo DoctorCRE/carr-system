@@ -60,7 +60,7 @@ const TURNS = [
 ];
 
 function handlerWith(overrides = {}) {
-  const calls = { reads: [], writes: [] };
+  const calls = { reads: [], latest: [], writes: [] };
   const handler = createDealroomHandler({
     exchangeGoogleCodeFn: async () => ({ id_token: "stub" }),
     verifyGoogleIdTokenFn: async () => ({ email: JOE, email_verified: true, sub: `sub:${JOE}` }),
@@ -74,6 +74,11 @@ function handlerWith(overrides = {}) {
       return { ok: true, room: "partner-line", turns,
         latest_seq: turns.length ? turns.at(-1).seq : after, more: false };
     },
+    roomLatestFn: async (_env, params) => {
+      calls.latest.push(params);
+      return { ok: true, room: "model-room", mode: params.mode, turns: TURNS,
+        latest_seq: "71", before_seq: "70", more: false };
+    },
     roomWriteFn: async (_env, params) => {
       calls.writes.push(params);
       return { ok: true, room: "partner-line", seq: 99, at: "2026-08-22T15:00:00+00:00",
@@ -84,6 +89,19 @@ function handlerWith(overrides = {}) {
   });
   return { handler, calls };
 }
+
+test("newest room endpoint is authenticated and returns a fresh window", async () => {
+  const { handler, calls } = handlerWith();
+  const environment = env();
+  assert.equal((await handler.fetch(new Request(`${ORIGIN}/api/room/latest`), environment, {})).status, 401);
+  const cookie = await signedIn(handler, environment);
+  const response = await handler.fetch(new Request(`${ORIGIN}/api/room/latest?limit=80&mode=conversation`,
+    { headers: { cookie } }), environment, {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(calls.latest[0], { before_seq: undefined, limit: 80, mode: "conversation" });
+  assert.equal((await response.json()).latest_seq, "71");
+});
 
 async function signedIn(handler, environment) {
   const start = await handler.fetch(new Request(`${ORIGIN}/auth/login?return_to=/room.html`), environment, {});

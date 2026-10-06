@@ -3,6 +3,7 @@
 // always-on in full, sponsor scoping, determinism, the verb door.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { executeRegisteredTool } from "../src/tools.js";
 import { RULE_BOOT_CLASSES } from "../src/rule-boot-classes.js";
 import { paginate, renderRuleBoot, ruleBootPage, RULE_BOOT_PAGE_CHARS } from "../src/rule-boot.js";
@@ -11,7 +12,7 @@ const JOE = { id: "11111111-1111-4111-8111-111111111111", slug: "joe", human: tr
 
 const classified = Object.keys(RULE_BOOT_CLASSES).sort();
 const alwaysOnId = classified.find(id => RULE_BOOT_CLASSES[id].on && !RULE_BOOT_CLASSES[id].personal_to);
-const indexOnlyId = classified.find(id => !RULE_BOOT_CLASSES[id].on && !RULE_BOOT_CLASSES[id].personal_to);
+const actionId = classified.find(id => RULE_BOOT_CLASSES[id].cls === "b" && !RULE_BOOT_CLASSES[id].personal_to);
 const joePersonalId = classified.find(id => RULE_BOOT_CLASSES[id].personal_to === "joe");
 
 function row(short, statement, personalTo = null) {
@@ -62,18 +63,37 @@ test("index: every active rule in scope has exactly one index line", () => {
     const lines = index.split("\n").filter(l => l.startsWith(`${id} | `));
     assert.equal(lines.length, 1, `${id} must have exactly one index line`);
   }
-  assert.match(index, new RegExp(`^${indexOnlyId} \\| ${RULE_BOOT_CLASSES[indexOnlyId].cls.toUpperCase()} \\| `, "m"));
+  assert.match(index, new RegExp(`^${actionId} \\| ${RULE_BOOT_CLASSES[actionId].cls.toUpperCase()} \\| `, "m"));
   assert.match(index, /^ffff0001 \| U \| /m, "an unclassified rule is indexed as U");
 });
 
-test("always-on: full statements for always-on and unclassified rules, none for index-only rules", () => {
+test("boot retains action rules until a replacement is proven, including newly taught rules", () => {
   const rows = corpus();
   const { text, always_on_ids: on } = renderRuleBoot(rows, "joe");
   const part1 = text.split("## PART 2")[0];
   assert.ok(on.includes(alwaysOnId));
   assert.ok(part1.includes(rows.find(r => r.id.startsWith(alwaysOnId)).statement), "full text, not a summary");
   assert.ok(part1.includes("END-ffff0001"), "unclassified rules are recall-safe: full text");
-  assert.ok(!part1.includes(`END-${indexOnlyId}`), "an index-only rule is not spent in Part 1");
+  assert.ok(part1.includes(`END-${actionId}`), "an action route is not proof of delivery");
+});
+
+test("standing team ownership reaches Joe, Dell and unsponsored boots without task keywords", async () => {
+  // The committed selection corpus preserves the live binding statement. Class
+  // metadata remains separate, so a summary cannot silently replace this fact.
+  const fixture = JSON.parse(readFileSync(new URL("../../ops/config/rule-selection-corpus.v1.json", import.meta.url), "utf8"))
+    .rules.find(r => r.id === "725dff46");
+  assert.ok(fixture, "vendor-network ownership fixture is required");
+  assert.match(fixture.statement, /vendor network is the TEAM's/);
+  for (const sponsor of ["joe", "dell", null]) {
+    const rows = [row(fixture.id, fixture.statement)];
+    const { text, always_on_ids: on } = renderRuleBoot(rows, sponsor);
+    assert.ok(on.includes(fixture.id), `${sponsor || "unsponsored"}: ownership is always on`);
+    assert.ok(text.split("## PART 2")[0].includes(fixture.statement), "Part 1 contains every byte of the fact");
+    assert.match(text.split("## PART 2")[1], /^725dff46 \| A \| /m);
+    const page = await ruleBootPage(rows, sponsor, 1);
+    const amended = await ruleBootPage([row(fixture.id, fixture.statement + " amended")], sponsor, 1);
+    assert.notEqual(page.digest, amended.digest, "standing text participates in the boot digest");
+  }
 });
 
 test("sponsor scoping: another sponsor's personal rule never renders", () => {
@@ -128,7 +148,7 @@ test("verb door: standing-context detail=boot serves pages for the authenticated
     e => JSON.stringify(e.payload || e.message || e).includes("page_out_of_range"));
 });
 
-test("the real classification fits the 40k-token budget with every shared rule present", async () => {
+test("the retained classification fits its explicit token budget with every shared rule present", async () => {
   // Lengths only: statements are synthetic, sized from nothing committed. This
   // pins the renderer's overhead, not the corpus; ops/sync-rule-boot-classes.py
   // --check guards the corpus-sized budget in CI.

@@ -1,3 +1,4 @@
+import { readRegistryArtifact } from '../../ops/registry-history.mjs';
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -75,7 +76,7 @@ test("broker feedback distinguishes removed projection from unavailable read", a
 });
 
 test("migration binds feedback to sealed current projection, member property, active grant and idempotent request", () => {
-  const migration = fs.readFileSync(path.join(root, "migrations/0749_tour_client_feedback.sql"), "utf8");
+  const migration = readRegistryArtifact(path.join(root, "migrations/0749_tour_client_feedback.sql"), "utf8");
   for (const name of ["write_tour_share_shortlist", "write_tour_share_comment", "read_tour_share_feedback", "read_tour_feedback"])
     assert.match(migration, new RegExp(`create (?:or replace )?function ops\\.${name}\\(`, "i"));
   assert.match(migration, /tour_share_session_grant\(p_session_digest,'shortlist'\)/);
@@ -86,19 +87,4 @@ test("migration binds feedback to sealed current projection, member property, ac
   assert.match(migration, /idempotency_key/);
   assert.match(migration, /unique \(organization_tenant_id,share_grant_id,idempotency_key\)/);
   assert.doesNotMatch(migration, /update ops\.tour_property|update ops\.tour_field_assertion/i);
-});
-
-test("Tour feedback successor follows current main without reusing its seal or migration", () => {
-  const successor = fs.readFileSync(path.join(root, "migrations/0750_tour_client_feedback_scac_successor.sql"), "utf8");
-  const runtime = fs.readFileSync(path.join(root, "mcp-server/src/scac-mutation-registry.v98.generated.js"), "utf8");
-  const selector = fs.readFileSync(path.join(root, "mcp-server/src/mutation-registry.js"), "utf8");
-  assert.match(successor, /0748_codex_session_read_scac_successor\.sql/);
-  assert.match(successor, /0749_tour_client_feedback\.sql/);
-  assert.match(successor, /scac-mutation-registry\.v97/);
-  assert.match(successor, /scac-mutation-registry\.v98/);
-  assert.match(runtime, /scac-mutation-registry\.v98/);
-  assert.match(selector, /scac-mutation-registry\.v104\.generated\.js/);
-  const migration = fs.readFileSync(path.join(root, "migrations/0749_tour_client_feedback.sql"));
-  const digest = createHash("sha256").update(migration).digest("hex");
-  assert.match(successor, new RegExp(`filename='0749_tour_client_feedback\\.sql' and sha256='${digest}'`));
 });

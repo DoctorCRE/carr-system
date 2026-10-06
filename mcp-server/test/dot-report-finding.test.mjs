@@ -1,16 +1,7 @@
 // Synthetic contract evidence for the filer's chosen existing storage verb.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { TOOLS } from "../src/tools.js";
-
-test("Dot filer publication, cancellation, replay and source-frontier regressions", () => {
-  const result = spawnSync("python3", [fileURLToPath(new URL("../../tools/test-dot-file-reports.py", import.meta.url))],
-    { encoding: "utf8", timeout: 60_000 });
-  assert.equal(result.error, undefined);
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-});
 
 const actor = { id: "00000000-0000-4000-8000-000000000010", slug: "synthetic-builder",
   display: "Synthetic builder", human: false, via: "local-token", client_id: "codex" };

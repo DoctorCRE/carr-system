@@ -23,9 +23,8 @@ tools carry a comment about it; none of that reached the moment of reading.
 
 ANNOUNCE, NEVER DENY, and that is forced by evidence rather than caution: real
 consumers read this directory on purpose. tools/calendar-touch-matcher.py and
-tools/mail-touch-matcher.py both load the roster and registry from it, and
-tools/parity-lead-board.py compares the draft against the live copy, which is the
-whole point of a draft. A deny would break working code to prevent a reading
+tools/mail-touch-matcher.py both load the roster and registry from it.
+A deny would break working code to prevent a reading
 mistake.
 
 WHAT MAKES IT ACTIONABLE is the AGE, not the warning. "This is a draft" is a

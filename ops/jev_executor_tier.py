@@ -1,18 +1,4 @@
-"""Which model tier should run this subagent? Jev's pick, with its confidence.
-
-Loop 615, fifth use (Joe, audit ruling 7 of 8, decision 62ceae36): every
-subagent is chosen by who is qualified AND by token efficiency, and Jev is the
-planned chooser. This module asks ONE pick-one question over the spawn's task
-text and returns the tier and the probability Jev put on it. It writes nothing
-and decides nothing: hooks/executor-tier-gate.py folds the answer into its
-refusal when no model was named, and into an advisory when a named model is
-dearer than a confident cheaper pick. Every judgment is logged beside what the
-session chose, so the threshold is calibrated on real spawns before anything
-enforces on it.
-
-Fails open by construction: any failure returns None and the gate behaves
-exactly as it did before this existed.
-"""
+"""One bounded cached Choice recommends an executor tier. The pinned model is advisory: ACT_AT is above the probability domain until independently labeled calibration validates an automatic policy."""
 
 from __future__ import annotations
 
@@ -46,9 +32,9 @@ RUBRICS = {
         "future sessions. Never a default."),
 }
 
-ACT_AT = 0.60          # below this the pick is advice nobody should act on
+ACT_AT = 1.01          # below this the pick is advice nobody should act on
 TIMEOUT_SECONDS = 8.0  # a spawn waiting on a judgment has a person behind it
-MAX_TASK_CHARS = 12000  # Jev reads 32k tokens; a brief longer than this is trimmed
+MAX_TASK_CHARS = 4000  # Jev reads 32k tokens; a brief longer than this is trimmed
 
 
 def _sibling(name):
@@ -76,8 +62,8 @@ def recommend(description, prompt, subagent_type="", *, judge=None, client=None,
             "subagent_type": subagent_type or "",
             "prompt": (prompt or "")[:MAX_TASK_CHARS]}
     try:
-        answer = judge.judge({"task": task}, {"tier": question(client)},
-                             timeout=TIMEOUT_SECONDS, client=client, api_key=api_key)
+        answer = _sibling("jev_semantic").ask({"task": task}, {"tier": question(client)},
+                             timeout=TIMEOUT_SECONDS, client=client, api_key=api_key, caller="jev_executor_tier", version="vendor-v1", transport=judge.judge)
         probabilities = answer["answers"]["tier"].get("probabilities") or {}
     except Exception as exc:
         try:

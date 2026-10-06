@@ -245,4 +245,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("with no origin/main to compare it never blocks", rc == 0,
           f"rc={rc}: {out[:200]}")
 
+with tempfile.TemporaryDirectory() as tmp:
+    origin, repo = make_repo(tmp)
+    git(repo, "checkout", "-q", "-b", "mine", must=True)
+    write(repo, "readme.txt", "branch work\n")
+    git(repo, "add", "readme.txt", must=True)
+    git(repo, "commit", "-q", "-m", "branch work", must=True)
+    advance_main(tmp, origin, '{"gates": {"a": "2"}}\n')
+    git(repo, "fetch", "-q", "origin", "main", must=True)
+    git(repo, "cherry-pick", "origin/main", must=True)
+    check("cherry-picked identical generated content is allowed", run(repo)[0] == 0)
+    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    git(repo, "commit", "-q", "-m", "stale overwrite", must=True)
+    check("a differing stale overwrite still refuses after cherry-pick", run(repo)[0] == 2)
+
 sys.exit(CHECKER.summary())

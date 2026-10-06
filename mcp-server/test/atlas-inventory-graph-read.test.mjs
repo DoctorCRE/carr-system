@@ -1,9 +1,10 @@
+import { CURRENT_REGISTRY_VERSION } from "../../ops/scac-mutation-inventory.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { TOOLS } from "../src/tools.js";
-import { SCAC_MUTATION_OPERATIONS } from "../src/scac-mutation-registry.v35.generated.js";
+import { ATLAS_MUTATION_DECLARATIONS as SCAC_MUTATION_OPERATIONS } from "../src/atlas-mutation-declarations.generated.js";
 import { AUTHENTICATED_SURFACES } from "../src/workspace-surface-inventory.js";
 import {
   assertReadOnly, ATLAS_GRAPH_PATH, ATLAS_KNOWN_GAPS, ATLAS_LEGS, ATLAS_LIMIT_MAX,
@@ -371,7 +372,7 @@ test("the bundle digest tracks the declared bundle and not the clock", async () 
   assert.notEqual(a.observed_at, b.observed_at);
   assert.match(a.version.bundle_digest, /^[0-9a-f]{64}$/);
   assert.equal(a.version.bundle_digest, await bundleDigest(DECLARED_LAYER));
-  assert.equal(a.version.registry_version, "scac-mutation-registry.v104");
+  assert.equal(a.version.registry_version, CURRENT_REGISTRY_VERSION);
 
   // Changing the TOOLS key set MUST move the digest. The tools list is injectable
   // for exactly this: a digest that could not change would prove nothing.

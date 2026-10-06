@@ -3,13 +3,41 @@ import assert from "node:assert/strict";
 import { ToolError, executeRegisteredTool, TOOLS } from "../src/tools.js";
 import { callTool } from "../src/mcp.js";
 import fs from "node:fs";
-import { answerDistribution, canonicalJson, canonicalSha256, jevAskBinding, modelIsPinned,
+import { createHmac } from "node:crypto";
+import { answerDistribution, canonicalJson, canonicalSha256, jevAskBinding as rawJevAskBinding, modelIsPinned,
   prefetchJevAnswer, PROBABILITY_SUM_TOLERANCE, reserveJevCallAttempt, sha256Hex }
   from "../src/jev-call-receipt.js";
 
 const AGENT = { id: "10000000-0000-0000-0000-000000000031", slug: "joe", human: true, via: "test" };
 const OTHER = { id: "10000000-0000-0000-0000-000000000032", slug: "dell", human: true, via: "test" };
 const KEY = "ts_test_key_do_not_leak_4f1c9e";
+const ADMISSION = "admission_secret_fixture_7d2a";
+const WORKER_ENV = { TYPESAFE_API_KEY: KEY, JEV_ADMISSION_SECRET: ADMISSION };
+
+// `now` is the signer's clock, which may run ahead of or behind the Worker's.
+function admission(session = "fixture", now = Date.now(), key = ADMISSION) {
+  const payload = Buffer.from(JSON.stringify([1, Math.floor(now / 1000) + 30,
+    crypto.randomUUID(), "adhoc:fixture", session])).toString("base64url");
+  return `jev1.${payload}.${createHmac("sha256", key).update(payload).digest("hex")}`;
+}
+
+// Transport fixtures receive the same signed, single-attempt admission as
+// production. Admission refusal tests use the raw binding below.
+function jevAskBinding(env, fetchImpl, options = {}) {
+  const binding = rawJevAskBinding({ JEV_ADMISSION_SECRET: ADMISSION, ...env }, fetchImpl, { ...options,
+    reserveAttempt: options.reserveAttempt ?? (async () => ({ key: "fixture", receipt_id: "fixture" })),
+  });
+  if (!binding) return binding;
+  const ask = async request => {
+    const session_id = request.session_id ?? "fixture";
+    const result = await binding({ ...request, session_id,
+      idempotency_key: admission(session_id, options.now?.() ?? Date.now()) });
+    if (!options.reserveAttempt) delete result.attempt;
+    return result;
+  };
+  ask.cacheAfterCommit = binding.cacheAfterCommit;
+  return ask;
+}
 
 async function rejected(fn) {
   try { await fn(); assert.fail("expected refusal"); }
@@ -42,9 +70,89 @@ function fakeFetch(responses) {
 const ANSWERS = { q1: { noul: 0.82 }, q2: { choice: "b", probabilities: { a: 0.1, b: 0.9 } } };
 const QUESTIONS = {
   q1: { type: "noul", instructions: "Is the plan sound?" },
-  q2: { type: "choice", instructions: "Which option?", choices: ["a", "b"] },
+  q2: { type: "choice", instructions: "Which option?", criteria: { a: "A", b: "B" } },
 };
 const ACTORS = new Map([[AGENT.slug, AGENT.id], [OTHER.slug, OTHER.id]]);
+
+test("Worker paid entries without shared admission refuse before transport", async () => {
+  for (const transport_mode of [undefined, "paid_once"]) {
+    const fetchImpl = fakeFetch([jsonResponse(200, { model: "m", answers: ANSWERS })]);
+    const ask = rawJevAskBinding(WORKER_ENV, fetchImpl, {
+      cache: null, reserveAttempt: async () => ({ key: "k", receipt_id: "r" }),
+    });
+    const out = await prefetchJevAnswer(askArgs({ transport_mode }), ask);
+    assert.equal(out.ok, false);
+    assert.equal(out.error.error, "jev_admission_required");
+    assert.equal(fetchImpl.calls.length, 0);
+  }
+});
+
+test("expired, forged, vendor-key-signed and wrong-session admissions never reserve or fetch", async () => {
+  const now = Date.now();
+  for (const token of [admission("fixture", now - 31000), admission("other", now),
+    admission("fixture", now, "wrong-key"), admission("fixture", now, KEY), "jev1.invalid.invalid"]) {
+    const fetchImpl = fakeFetch([]);
+    let reservations = 0;
+    const ask = rawJevAskBinding(WORKER_ENV, fetchImpl, {
+      cache: null, now: () => now, reserveAttempt: async () => { reservations++; },
+    });
+    const payload = await rejected(() => ask({ state: "s", model: "m", questions: QUESTIONS,
+      idempotency_key: token, session_id: "fixture" }));
+    assert.equal(payload.error, "jev_admission_required");
+    assert.equal(reservations, 0);
+    assert.equal(fetchImpl.calls.length, 0);
+  }
+});
+
+test("a signer clock ahead of the Worker is admitted", async () => {
+  const now = Date.now();
+  for (const skew of [0, 700, 1000, 5000]) {
+    const fetchImpl = fakeFetch([jsonResponse(200, { model: "m", answers: ANSWERS })]);
+    const ask = rawJevAskBinding(WORKER_ENV, fetchImpl, { cache: null, now: () => now,
+      reserveAttempt: async () => ({ key: "k", receipt_id: "r" }) });
+    const out = await ask({ state: "s", model: "m", questions: QUESTIONS,
+      idempotency_key: admission("fixture", now + skew), session_id: "fixture" });
+    assert.equal(out.model, "m", `skew ${skew}ms`);
+    assert.equal(fetchImpl.calls.length, 1);
+  }
+});
+
+test("a Worker without the admission secret refuses paid calls before transport", async () => {
+  const fetchImpl = fakeFetch([jsonResponse(200, { model: "m", answers: ANSWERS })]);
+  const ask = rawJevAskBinding({ TYPESAFE_API_KEY: KEY }, fetchImpl, {
+    cache: null, reserveAttempt: async () => ({ key: "k", receipt_id: "r" }) });
+  const out = await prefetchJevAnswer(askArgs({ idempotency_key: admission("session-abc") }), ask);
+  assert.equal(out.ok, false);
+  assert.equal(out.error.error, "jev_admission_required");
+  assert.equal(fetchImpl.calls.length, 0);
+});
+
+test("the in-Worker runtime class is admitted by the Worker; ingress classes need a proof", async () => {
+  for (const [workClass, admitted] of [["app_runtime", true], ["system_work", false]]) {
+    const fetchImpl = fakeFetch([jsonResponse(200, { model: "m", answers: ANSWERS })]);
+    let reservations = 0;
+    const ask = rawJevAskBinding(WORKER_ENV, fetchImpl, { cache: null,
+      reserveAttempt: async () => { reservations++; return { key: "k", receipt_id: "r" }; } });
+    // Deal Room's caller: an ordinary UUID, no client reservation to prove.
+    const out = await prefetchJevAnswer(askArgs({ idempotency_key: crypto.randomUUID() }), ask, workClass);
+    assert.equal(out.ok, admitted, workClass);
+    assert.equal(fetchImpl.calls.length, admitted ? 1 : 0, workClass);
+    assert.equal(reservations, admitted ? 1 : 0, "the durable attempt ledger still precedes the fetch");
+    if (!admitted) assert.equal(out.error.error, "jev_admission_required");
+  }
+});
+
+test("the existing attempt ledger consumes a reservation proof once", async () => {
+  const client = new JevReceiptFake();
+  const args = askArgs({ idempotency_key: admission("session-abc"), transport_mode: "paid_once" });
+  const fetchImpl = fakeFetch([jsonResponse(200, {model:"m", answers:ANSWERS})]);
+  const ask = rawJevAskBinding(WORKER_ENV, fetchImpl, {
+    cache:null, reserveAttempt:() => reserveJevCallAttempt(client, AGENT, args),
+  });
+  assert.equal((await prefetchJevAnswer(args, ask)).ok, true);
+  assert.equal((await prefetchJevAnswer(args, ask)).ok, false);
+  assert.equal(fetchImpl.calls.length, 1);
+});
 
 test("the cap successor changes only ask-jev's bound schema and preserves the predecessor", async () => {
   const inventory = await import("../../ops/scac-mutation-inventory.mjs");
@@ -55,8 +163,11 @@ test("the cap successor changes only ask-jev's bound schema and preserves the pr
   assert.equal(changed.length, 1);
   assert.equal(changed[0].ingress_key, "mcp-tool:ask-jev");
   assert.equal(inventory.assertCurrentSourceInventoryMatchesFixture(TOOLS), true);
-  assert.equal((await import("../src/mutation-registry.js")).SCAC_MUTATION_REGISTRY_VERSION,
-    "scac-mutation-registry.v104");
+  const { SCAC_MUTATION_REGISTRY_VERSION } = await import("../src/mutation-registry.js");
+  assert.equal(SCAC_MUTATION_REGISTRY_VERSION, inventory.CURRENT_REGISTRY_VERSION);
+  const activeRows = inventory.boundInventoryRows(inventory.frozenInventory(SCAC_MUTATION_REGISTRY_VERSION));
+  assert.deepEqual(activeRows.find(row => row.ingress_key === "mcp-tool:ask-jev"),
+    newRows.find(row => row.ingress_key === "mcp-tool:ask-jev"));
 });
 
 test("budgeted cache-only misses never reserve or fetch, including a broken cache", async () => {
@@ -215,9 +326,12 @@ class JevReceiptFake {
 }
 
 function fakeJevAsk(result = { model: "jev-1.14.0", answers: ANSWERS, usage: { input_tokens: 10 } }) {
-  const calls = [];
-  const fn = async request => { calls.push(request); return structuredClone(result); };
+  const calls = [], contexts = [];
+  const fn = async (request, context) => {
+    calls.push(request); contexts.push(context); return structuredClone(result);
+  };
   fn.calls = calls;
+  fn.contexts = contexts;
   return fn;
 }
 
@@ -272,7 +386,9 @@ test("ask-jev purpose call: records the prefetched answer with the server-derive
   const args = askArgs({ facets: ["diagnosis"] });
   const result = await askVia(client, AGENT, args, jevAsk);
   assert.equal(jevAsk.calls.length, 1);
-  assert.deepEqual(jevAsk.calls[0], { state: { plan: "ship it" }, model: "jev-latest", questions: QUESTIONS });
+  assert.deepEqual(jevAsk.calls[0], { state: { plan: "ship it" }, model: "jev-latest", questions: QUESTIONS,
+    idempotency_key: args.idempotency_key, session_id: args.session_id });
+  assert.deepEqual(jevAsk.contexts[0], { workClass: "system_work" });
   assert.equal(result.ok, true);
   assert.equal(result.purpose, "call");
   assert.equal(result.session_id, "session-abc");
@@ -577,39 +693,15 @@ test("an unreceipted billable answer is never cached; failed attempt reservation
   assert.equal(fetchImpl.calls.length, 2);
 });
 
-test("jevAskBinding retries 429 once inside a 10s total budget", async () => {
-  let clock = 0;
-  const now = () => clock;
-  const sleeps = [];
-  const sleep = async ms => { sleeps.push(ms); clock += ms; };
-  const ok = () => jsonResponse(200, { model: "m", answers: {} });
-  // One retry honouring retry-after (capped at 5s).
-  let fetchImpl = fakeFetch([jsonResponse(429, "slow", { "retry-after": "60" }), ok()]);
-  let out = await jevAskBinding({ TYPESAFE_API_KEY: KEY }, fetchImpl, { sleep, now })(
-    { state: "s", model: "m", questions: QUESTIONS });
-  assert.equal(out.model, "m");
-  assert.equal(out.usage, null);
-  assert.equal(fetchImpl.calls.length, 2);
-  assert.deepEqual(sleeps, [5000]);
-
-  // Never a second retry.
-  clock = 0; sleeps.length = 0;
-  fetchImpl = fakeFetch([jsonResponse(429, "a"), jsonResponse(429, "b"), ok()]);
-  let payload = await rejected(() => jevAskBinding({ TYPESAFE_API_KEY: KEY }, fetchImpl, { sleep, now })(
-    { state: "s", model: "m", questions: QUESTIONS }));
-  assert.equal(payload.error, "jev_upstream_failed");
-  assert.equal(payload.status, 429);
-  assert.equal(fetchImpl.calls.length, 2);
-  assert.equal(sleeps.length, 1);
-
-  // No retry when the wait would leave under a second of the budget.
-  clock = 0; sleeps.length = 0;
-  fetchImpl = fakeFetch([async () => { clock += 6000; return jsonResponse(429, "late", { "retry-after": "4" }); }, ok()]);
-  payload = await rejected(() => jevAskBinding({ TYPESAFE_API_KEY: KEY }, fetchImpl, { sleep, now })(
-    { state: "s", model: "m", questions: QUESTIONS }));
-  assert.equal(payload.status, 429);
-  assert.equal(fetchImpl.calls.length, 1);
-  assert.deepEqual(sleeps, []);
+test("one admission permits one Worker fetch even for legacy mode and 429", async () => {
+  for (const transport_mode of [undefined, "paid_once"]) {
+    const fetchImpl = fakeFetch([jsonResponse(429, "slow", { "retry-after": "0" }),
+      jsonResponse(200, { model: "m", answers: {} })]);
+    const payload = await rejected(() => jevAskBinding({ TYPESAFE_API_KEY: KEY }, fetchImpl)(
+      { state: "s", model: "m", questions: QUESTIONS, transport_mode }));
+    assert.equal(payload.status, 429);
+    assert.equal(fetchImpl.calls.length, 1);
+  }
 });
 
 test("upstream failures refuse jev_upstream_failed and never carry the key", async () => {

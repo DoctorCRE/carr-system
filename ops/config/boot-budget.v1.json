@@ -7,7 +7,8 @@
   "sub_budgets_tokens": {
     "claude_md": 2500,
     "connector_instructions": 1200,
-    "core_payload": 8000
+    "core_payload": 8000,
+    "agents_md": 5000
   },
-  "note": "THE CEILING, made permanent (boot diet, WR-000019 slice S11). The total is the hard number: everything a session's standing instructions cost before it does any work, cut from ~40K tokens toward this. Sub-budgets are per-surface early warnings so an overage names WHICH surface grew, not just that the total did -- ops/boot-budget-check.py fails on either. RAISING ANY NUMBER HERE IS JOE'S CALL, NEVER A SESSION'S. The fix for an overage is consolidation: merge or retire redundant rules through the S7 triage (ops/config/rule-triage.v1.json) and the S10 amendment path (amend-rule / retire-rule), trim CLAUDE.md, or fix the connector-registration dedup (see WR-000019 slice S11's report) -- never edit this file to make a failing check pass."
+  "note": "THE CEILING, made permanent (boot diet, WR-000019 slice S11). The total is the hard number: everything a session's standing instructions cost before it does any work, cut from ~40K tokens toward this. Sub-budgets are per-surface early warnings so an overage names WHICH surface grew, not just that the total did -- ops/boot-budget-check.py fails on either. RAISING ANY NUMBER HERE IS JOE'S CALL, NEVER A SESSION'S. The fix for an overage is consolidation: merge or retire redundant rules through the S7 triage (ops/config/rule-triage.v1.json) and the S10 amendment path (amend-rule / retire-rule), trim CLAUDE.md, or fix the connector-registration dedup (see WR-000019 slice S11's report) -- never edit this file to make a failing check pass. Native standing-file cost is the larger entrypoint, not the sum: Claude is CLAUDE.md plus the SessionStart-injected AGENTS.md policy block; Codex is AGENTS.md. Mandatory full rule-boot text and corpus index are separately governed by the existing rule-boot-classes-check ceiling. Snapshot summary/index measurements are distinct from full-text delivery."
 }

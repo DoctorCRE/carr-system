@@ -37,6 +37,15 @@ SPEC.loader.exec_module(tba)
 
 # ── fakes ────────────────────────────────────────────────────────────────
 
+import os as _sem_os
+import tempfile as _sem_tmp
+from unittest.mock import patch as _sem_patch
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+
 class FakeTsc:
     """Stands in for ops/typesafe_client.py -- just enough of the surface
     timebomb-audit.py actually calls (noul/choice/ask)."""
@@ -77,7 +86,7 @@ class ScriptedAsk:
         answers = {qid: {"type": "noul", "noul": scores[qid]} if qid != "horizon"
                    else {"type": "choice", "choice": scores[qid]}
                    for qid in questions}
-        return {"model": "jev-fake", "answers": answers}
+        return {"model": "jev-1.13.0", "answers": answers}
 
 
 def bad_good_ask():
@@ -92,7 +101,7 @@ def bad_good_ask():
 
 # ── signature matching ───────────────────────────────────────────────────
 
-class SignatureTests(unittest.TestCase):
+class SignatureTests(SemanticTestCase):
     def _regions(self, text):
         lines = text.splitlines()
         found = []
@@ -146,7 +155,7 @@ class SignatureTests(unittest.TestCase):
 
 # ── ledger suppression ───────────────────────────────────────────────────
 
-class LedgerTests(unittest.TestCase):
+class LedgerTests(SemanticTestCase):
     def test_normalize_code_ignores_trailing_whitespace_and_blank_lines(self):
         a = "line one\nline two   \n\n"
         b = "\nline one\nline two\n"
@@ -192,7 +201,7 @@ class LedgerTests(unittest.TestCase):
 
 # ── deterministic headroom ───────────────────────────────────────────────
 
-class HeadroomTests(unittest.TestCase):
+class HeadroomTests(SemanticTestCase):
     TODAY = date(2026, 9, 24)
     FAST_VELOCITY = (5000, 20.0)  # 20 commits/day
 
@@ -255,32 +264,28 @@ class HeadroomTests(unittest.TestCase):
 
 # ── reader sanity check ──────────────────────────────────────────────────
 
-class ReaderCheckTests(unittest.TestCase):
+class ReaderCheckTests(SemanticTestCase):
     def test_passes_when_bad_scores_high_and_good_scores_low(self):
         ok, detail = tba.reader_sanity_check(FakeJcr(), FakeTsc(), ask=bad_good_ask())
         self.assertTrue(ok, detail)
 
     def test_fails_when_reader_returns_identical_scores(self):
-        broken = ScriptedAsk({
-            "known_bad_example.py": {"breaks_without_code_change": 0.0,
-                                      "fails_silently": 0.0, "horizon": "never"},
-            "known_good_example.py": {"breaks_without_code_change": 0.0,
-                                       "fails_silently": 0.0, "horizon": "never"},
-        })
-        ok, detail = tba.reader_sanity_check(FakeJcr(), FakeTsc(), ask=broken)
+        reader = FakeJcr()
+        reader.answer_value = lambda *args, **kwargs: 0.0
+        ok, detail = tba.reader_sanity_check(reader, FakeTsc())
         self.assertFalse(ok)
         self.assertIn("IDENTICALLY", detail)
 
-    def test_fails_loudly_when_jev_is_unreachable(self):
-        unreachable = ScriptedAsk(raises=ConnectionError("no route to host"))
+    def test_reader_sanity_never_calls_a_model(self):
+        unreachable = mock.Mock(side_effect=AssertionError("no paid sanity check"))
         ok, detail = tba.reader_sanity_check(FakeJcr(), FakeTsc(), ask=unreachable)
-        self.assertFalse(ok)
-        self.assertIn("could not reach Jev", detail)
+        self.assertTrue(ok, detail)
+        unreachable.assert_not_called()
 
 
 # ── judging + the zero-judged failure path ───────────────────────────────
 
-class JudgeRegionsTests(unittest.TestCase):
+class JudgeRegionsTests(SemanticTestCase):
     def test_all_regions_erroring_reports_zero_judged(self):
         regions = [{"path": "a.py", "line": 1, "kind": "git_log_window", "code": "x"}]
         judged, errors = tba.judge_regions(regions, FakeJcr(), FakeTsc(),
@@ -299,7 +304,7 @@ class JudgeRegionsTests(unittest.TestCase):
 
 # ── end-to-end run(): clean vs. new-findings vs. failure, filing gated on each ──
 
-class RunTests(unittest.TestCase):
+class RunTests(SemanticTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -309,6 +314,7 @@ class RunTests(unittest.TestCase):
         self._patches = [
             mock.patch.object(tba, "OUT_DIR", self.out_dir),
             mock.patch.object(tba, "TRIAGE_PATH", self.triage_path),
+            mock.patch.object(tba, "_commit_velocity", return_value=(1000, 10.0)),
         ]
         for p in self._patches:
             p.start()
@@ -352,6 +358,7 @@ class RunTests(unittest.TestCase):
             rc = tba.run(now=datetime(2026, 9, 24, tzinfo=timezone.utc))
         self.assertEqual(rc, 0)
         self.assertEqual(calls, ["record-defect", "add-room-turn"])
+        self.assertEqual(ask.calls, [], "exact headroom resolves before Jev")
 
     def test_dry_run_never_files_even_with_new_findings(self):
         region = {"path": "tools/x.py", "line": 1, "kind": "git_log_call_arg",
@@ -389,8 +396,8 @@ class RunTests(unittest.TestCase):
         call_verb.assert_not_called()
 
     def test_zero_regions_judged_despite_candidates_fails_loudly(self):
-        region = {"path": "tools/x.py", "line": 1, "kind": "git_log_call_arg",
-                  "code": "git('log', '-160')",
+        region = {"path": "tools/x.py", "line": 1, "kind": "append_only_log",
+                  "code": "append(log)",
                   "match_texts": {"git_log_call_arg": "\"log\", \"-160\""}}
         def all_error(regions, jcr, tsc):
             return [dict(r, scores={"_error": "boom"}) for r in regions], len(regions)
@@ -403,6 +410,24 @@ class RunTests(unittest.TestCase):
             rc = tba.run(now=datetime(2026, 9, 24, tzinfo=timezone.utc))
         self.assertEqual(rc, 1)
         call_verb.assert_not_called()
+
+    def test_semantic_high_score_is_review_only(self):
+        region = {"path":"tools/semantic.py", "line":1, "kind":"append_only_log",
+                  "code":"append(log)"}
+        real_judge = tba.judge_regions
+        ask = ScriptedAsk({"tools/semantic.py":{"breaks_without_code_change":.99,
+                                                    "fails_silently":.99}})
+        with self._fixed_scan([region]), \
+             mock.patch.object(tba, "load_jev_modules", return_value=(FakeJcr(),FakeTsc())), \
+             mock.patch.object(tba, "judge_regions", side_effect=lambda r,j,t: real_judge(r,j,t,ask=ask)), \
+             mock.patch.object(tba, "call_verb") as verb:
+            self.assertEqual(tba.run(now=datetime(2026,9,24,tzinfo=timezone.utc)), 0)
+        verb.assert_not_called()
+        report = json.loads((self.out_dir/"2026-09-24.json").read_text())
+        self.assertTrue(report["review_required"])
+        self.assertEqual(report["regions"], [])
+        self.assertEqual(len(report["semantic_advice"]), 1)
+        self.assertNotIn("horizon", ask.calls[0][1], "numeric runway belongs in code")
 
     def test_queue_turn_body_carries_required_grammar_and_report_ref(self):
         payload = tba.queue_enqueue_turn("2026-09-29", "out/timebomb-audit/2026-09-29.json", "defect #7")

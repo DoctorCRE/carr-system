@@ -2,8 +2,10 @@
 """selftest.py — the eval's own health checks (claude-api eval-audit sections 1, 2, 4, 5).
 
 Run before trusting any number from run_eval.py. Exits nonzero on the first
-failed check."""
+failed check. The receipt checks hold the producer, the checked-in receipt
+and ops/check-eval-receipt.py to one schema and one evidence chain."""
 import hashlib
+import importlib.util
 import json
 import os
 import sys
@@ -59,16 +61,41 @@ def main():
         with open(os.path.join(scratch, "candidate", "results.jsonl"), encoding="utf-8") as handle:
             saved = [json.loads(line) for line in handle]
         check("final test run preserves frozen train results", saved == [test_row, train_row])
-    check("receipt source commit resolves and binds shipped source", M.receipt_source_matches())
-    with open(os.path.join(HERE, "receipt.json"), encoding="utf-8") as handle:
-        forged = json.load(handle)
+    # -- receipt: one schema across producer, checked-in receipt and gate
+    with open(M.RECEIPT, encoding="utf-8") as handle:
+        receipt = json.load(handle)
+    spec = importlib.util.spec_from_file_location("check_eval_receipt", os.path.join(REPO, "ops", "check-eval-receipt.py"))
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    errs = gate.validate_receipt(receipt, M.SURFACE, __import__("pathlib").Path(REPO))
+    check("checked-in receipt passes the eval-receipt gate, recomputed from its evidence", not errs, "; ".join(errs[:3]))
+    check("receipt binds the harness on disk", receipt["evidence"]["source"] == M.manifest(M.SOURCE))
+    expectations = R.load_expectations()
+    cohorts = {arm: M.read_jsonl(os.path.join(REPO, M.COHORTS[arm])) for arm in M.COHORTS}
+    rebuilt = M.assemble_receipt(receipt, expectations, cohorts["baseline"], cohorts["candidate"],
+                                 receipt["evidence"]["source"], receipt["evidence"]["dependencies"],
+                                 measured_on=receipt["measured_on"],
+                                 session_ref=receipt["adapter"]["native_session_ref"])
+    check("producer reassembles the checked-in receipt from its cohorts", rebuilt == receipt)
     check("receipt discloses contaminated historical holdout",
-          forged.get("evaluation_status") == "exploratory_test_used_for_candidate_selection")
-    forged["source_manifest"]["lib/rule_routes.py"] = "0" * 64
-    check("receipt rejects changed shipped source", not M.receipt_source_matches(forged))
+          any("historical reuse" in note for note in receipt["notes"]))
+    short = [r for r in cohorts["candidate"] if r["case_id"] != cohorts["candidate"][0]["case_id"]]
+    try:
+        R.score_receipt(expectations, cohorts["baseline"], short)
+        check("scorer refuses a candidate cohort with a case deleted", False)
+    except R.CohortError as exc:
+        check("scorer refuses a candidate cohort with a case deleted", "missing" in str(exc))
+    try:
+        R.paired_bootstrap([{"prompt_id": "a"}, {"prompt_id": "b"}], [{"prompt_id": "a"}], lambda rs: len(rs))
+        check("paired bootstrap refuses unequal cohorts", False)
+    except R.CohortError:
+        check("paired bootstrap refuses unequal cohorts", True)
     before = snapshot()
     cases = R.load_cases("all")
-    world = R.World()
+    world = R.World(expectations)
+    check("frozen expectations match the live labels", not R.expectation_drift(world, cases, expectations))
+    fresh = [R.observe(c, R.replay(world, c)) for c in sorted(cases, key=lambda c: c["id"])]
+    check("candidate cohort is a fresh replay of this tree", fresh == cohorts["candidate"])
     review_case = {"id": "surface-review-read", "prompt": "",
                    "tool_calls": [{"tool_name": "Read", "tool_input": {
                        "file_path": os.path.join(REPO, "dealroom", "public", "index.html")}}],

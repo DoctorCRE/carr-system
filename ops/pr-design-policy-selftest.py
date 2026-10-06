@@ -15,7 +15,8 @@ class PRDesignPolicyTests(unittest.TestCase):
         claude = (REPO / "CLAUDE.md").read_text()
         agents = (REPO / "AGENTS.md").read_text()
         links = re.findall(r"\[[^\]]+\]\((AGENTS\.md#[^)]+)\)", claude)
-        self.assertEqual(links, ["AGENTS.md#before-every-pr-design-and-debt-pass"])
+        self.assertEqual(links, ["AGENTS.md#rule-lifecycle-evidence",
+                                 "AGENTS.md#before-every-pr-design-and-debt-pass"])
         self.assertEqual(agents.count(POLICY_HEADING), 1)
         self.assertNotIn("`codebase-design`", claude)
         self.assertNotIn("`zero-tech-debt`", claude)

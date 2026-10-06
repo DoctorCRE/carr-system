@@ -50,6 +50,13 @@ def covered_lines(parts):
     return out
 
 
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        from unittest.mock import patch
+        import os
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,CARR_JEV_SEMANTIC_CACHE=tmp+'/cache'):
+            return super().run(result)
+
 class FakeClient:
     def __init__(self, value=0.9, fail_on=None):
         self.value, self.fail_on, self.calls = value, fail_on, []
@@ -58,11 +65,11 @@ class FakeClient:
     def noul(instructions, true=None, false=None):
         return {"type": "noul", "instructions": instructions}
 
-    def ask(self, state, questions, timeout=None, api_key=None):
+    def ask(self, state, questions, timeout=None, api_key=None, **kwargs):
         self.calls.append((state, questions))
         if self.fail_on and self.fail_on in state["region"]["code"]:
             raise RuntimeError("vendor down")
-        return {"model": "jev-fake", "usage": {"input_tokens": 100, "output_tokens": 8},
+        return {"model": "jev-1.13.0", "usage": {"input_tokens": 100, "output_tokens": 8},
                 "answers": {qid: {"type": "noul", "noul": self.value} for qid in questions}}
 
 
@@ -122,7 +129,7 @@ JS = textwrap.dedent('''\
     ''')
 
 
-class TrackedSources(unittest.TestCase):
+class TrackedSources(SemanticTestCase):
     def test_git_inventory_preserves_unicode_and_newline_paths(self):
         names = ['café.js', 'λ.py', 'two\nlines.mjs', 'a\rb.py',
                  'a\r\nb.py', 'plain.js']
@@ -156,7 +163,7 @@ class TrackedSources(unittest.TestCase):
             self.assertEqual(set(part.tracked_sources(tmp)), set(kept))
 
 
-class PythonSpans(unittest.TestCase):
+class PythonSpans(SemanticTestCase):
     def test_functions_methods_nested_and_handlers(self):
         spans = part.python_spans(PY)
         functions = sorted((s, e) for k, s, e in spans if k == "function")
@@ -171,7 +178,7 @@ class PythonSpans(unittest.TestCase):
         self.assertIsNone(part.python_spans("def broken(:\n"))
 
 
-class JsSpans(unittest.TestCase):
+class JsSpans(SemanticTestCase):
     def test_escaped_newline_in_quoted_string_counts_toward_span(self):
         for quote in ('"', "'"):
             for newline in ('\n', '\r\n'):
@@ -195,7 +202,7 @@ class JsSpans(unittest.TestCase):
         self.assertIsNone(part.js_spans("function f() {\n  return 1;\n"))
 
 
-class PartitionText(unittest.TestCase):
+class PartitionText(SemanticTestCase):
     def test_multiline_python_handler_keeps_complete_header_through_partition(self):
         header = 'except (\n    ValueError,\n    OSError,\n):'
         body = [f'    recovered_{i} = {i}' for i in range(200)]
@@ -303,7 +310,7 @@ class PartitionText(unittest.TestCase):
         self.assertEqual(part.partition_text("x.js", JS), part.partition_text("x.js", JS))
 
 
-class DedupeAndPack(unittest.TestCase):
+class DedupeAndPack(SemanticTestCase):
     def test_distinct_string_literal_whitespace_is_not_deduped(self):
         files = {"a.py": "def label():\n    return 'a b'\n",
                  "b.py": "def label():\n    return 'a  b'\n"}
@@ -376,7 +383,7 @@ class DedupeAndPack(unittest.TestCase):
                              covered_lines([r for r in regions if r["path"] == "p.py"]))
 
 
-class Review(unittest.TestCase):
+class Review(SemanticTestCase):
     def test_context_trimming_preserves_entire_multiline_signature(self):
         source = '#' + 'x' * 2700 + '\nif os.path.exists("x"):\n    # intervening context\n    with open("x") as f:\n        consume(f.read())\n'
         with tempfile.TemporaryDirectory() as tmp:
@@ -462,7 +469,7 @@ class Review(unittest.TestCase):
         self.assertEqual(len(rows), len(regions))
 
 
-class VerifyEdit(unittest.TestCase):
+class VerifyEdit(SemanticTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = os.path.join(self.tmp.name, "repo")
@@ -553,7 +560,7 @@ class VerifyEdit(unittest.TestCase):
         self.assertLiveTreeUntouched()
 
 
-class PilotScoring(unittest.TestCase):
+class PilotScoring(SemanticTestCase):
     def items(self):
         return [{"id": "a", "path": "f.py", "line": 10, "stale": False,
                  "labels": {"failure_leaves_no_trace": True, "swallow_is_wrong_here": False}},
@@ -616,7 +623,7 @@ class PilotScoring(unittest.TestCase):
         self.assertIsNone(pilot.usage_tokens(None))
 
 
-class Corpus(unittest.TestCase):
+class Corpus(SemanticTestCase):
     def test_each_covered_anchor_is_in_code_sent_to_the_judge(self):
         data, items = pilot.load_corpus()
         regions, _ = part.partition(sorted({item["path"] for item in items}))
@@ -669,7 +676,7 @@ class Corpus(unittest.TestCase):
 
     def test_all_failed_live_requests_are_not_reported_as_measured(self):
         class DownClient(FakeClient):
-            def ask(self, state, questions, timeout=None, api_key=None):
+            def ask(self, state, questions, timeout=None, api_key=None, **kwargs):
                 self.calls.append((state, questions))
                 raise RuntimeError("vendor down")
 
@@ -683,7 +690,7 @@ class Corpus(unittest.TestCase):
 
     def test_partial_live_failure_does_not_publish_full_run_accuracy(self):
         class FlakyClient(FakeClient):
-            def ask(self, state, questions, timeout=None, api_key=None):
+            def ask(self, state, questions, timeout=None, api_key=None, **kwargs):
                 if not self.calls:
                     self.calls.append((state, questions))
                     raise RuntimeError("first request failed")
@@ -704,7 +711,7 @@ class Corpus(unittest.TestCase):
         self.assertIn("measured_at_commit", snap)
 
 
-class LibraryShape(unittest.TestCase):
+class LibraryShape(SemanticTestCase):
     def test_no_new_script_entrypoint(self):
         guard = re.compile(r"if\s+__name__\s*==\s*[\"']" + "__" + r"main__[\"']\s*:")
         for rel in ("ops/jev_code_partition.py", "ops/jev_code_pilot_eval.py"):

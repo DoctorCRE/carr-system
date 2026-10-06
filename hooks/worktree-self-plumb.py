@@ -50,50 +50,17 @@ bin/worktree.sh's own header gives for CREATE PATH FRESHNESS and --sweep:
 the fix has to live on a path every case actually walks, not a path only the
 already-correct case walks.
 
-THE ORPHAN REAPER (2026-08-18). Second job, same front door, same reasoning
-about where the fix has to live. A session that dies mid-flight — usage
-exhaustion, a crash, a closed laptop — never removes its worktree, and no
-code path ever visited them again: on 2026-08-18 a manual sweep removed 73
-such orphans (4.4GB) from .claude/worktrees and .codex-worktrees. SessionStart
-is the one event every future session actually walks, so the reaper runs here.
+THE ORPHAN REAPER. The existing --reap door now uses lib/branch_retirement.py
+for its census, ordered classification and actions. --fleet covers the three
+authorized repositories. SessionStart still spawns this same reaper. The
+watchdog also launches it hourly and registers its process and exit record.
 
-It is NOT bin/worktree.sh --sweep, and the difference is deliberate. --sweep
-answers "is this branch's WORK finished?" — it requires merged-into-origin/main
-and 48h of file idleness, because reaping an unmerged work tree early would
-hide unfinished work. The orphan reaper answers the cheaper question "is any
-SESSION still using this tree?", and for that the merge state is irrelevant:
-removing a clean worktree on a NAMED branch loses nothing (the branch ref
-lives in the main repo; `git worktree remove` never deletes it), so an
-abandoned-but-unmerged branch worktree is exactly the case --sweep can never
-reap and this can. The rules below are the exact rules the 2026-08-18 manual
-sweep proved safe, for each REGISTERED worktree (git worktree list --porcelain):
-
-  skip  the canonical checkout, and this session's own worktree
-  skip  locked worktrees (someone said keep, in git's own vocabulary)
-  skip  a .git index touched under 6h ago, OR any file inside the working
-        tree written under 6h ago — either is a possibly-live session, and
-        a build seat that writes for hours without running git only moves
-        the second one (defect a4abb972); this
-        hook also TOUCHES its own worktree's index at every boot, so a
-        resumed session re-marks itself live the moment it starts
-  skip  any tree where `git status --porcelain` shows real work or errors —
-        uncommitted work is never judged, same refusal --remove enforces;
-        "real" excludes this system's own untracked plumbing symlinks,
-        because --remove drops those before ITS dirty test (see classify)
-  reap  a named branch — via bin/worktree.sh --remove, NEVER raw
-        `git worktree remove` (rule a8c55a47: the automated path and the
-        manual path must be the same code — that path carries the
-        dirty-refusal and plumbing restore-on-refusal)
-  reap  a detached HEAD only when its commit is an ancestor of origin/main
-        (nothing unpublished at stake); no fetch first, on purpose — an
-        ancestor of a STALE origin/main is still an ancestor of the fresh
-        one, so staleness only ever keeps more, never reaps more
-  then  `git worktree prune` for entries whose directories are already gone
-
-The reaper runs DETACHED in the background (out/worktree-reap.log), because a
-boot hook must never make a session wait on 73 directory removals, and a
-hook-timeout kill halfway through a removal is worse than slow. A lock file
-(out/worktree-reap.lock) keeps two booting sessions from sweeping at once.
+Live processes, fresh writes, locked paths and uncertain ownership preserve a
+worktree. Retired trees move to _to_delete with a manifest and keep their local
+branch. Only merged remote branches can be deleted, with a pre-push check of
+the advertised tip. A superseded PR closes only after its merged successor is
+read back. Dry runs and action receipts go to out/orch. The shared maintenance
+lock remains out/worktree-reap.lock.
 
 hooks/*.py are covered by the gate-integrity.py baseline (rule: a session
 that adds or edits a hook re-blesses the baseline in the same commit) — this
@@ -104,13 +71,14 @@ session: any error anywhere in here is swallowed and the hook prints
 nothing, same discipline as hooks/session-brief.py's own nightly/loose-work
 lines.
 
-Fixtures: ops/worktree-self-plumb-selftest.py (reaper classification and
-removal, against real scratch repos).
+Fixtures: ops/worktree-self-plumb-selftest.py (boot policy) and
+ops/branch-janitor-selftest.py (retirement against isolated git state).
 """
 import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 import time
 
 # __file__ resolves through the absolute canonical path this hook is always
@@ -170,8 +138,6 @@ def emit_delivery_policy(repo):
 
 # ── orphan reaper thresholds — the 2026-08-18 sweep's proven rules ─────────
 REAP_MIN_IDLE_S = 6 * 3600     # index younger than this = possibly-live session
-REAP_LOCK_STALE_S = 2 * 3600   # a lock older than this belongs to a dead reaper
-REAP_REMOVE_TIMEOUT = 600      # one removal; big node_modules dirs are slow
 
 
 def resolve_cwd(payload):
@@ -181,8 +147,12 @@ def resolve_cwd(payload):
 
 def run_git(args, cwd, timeout=10):
     try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
+        from git_env import scrubbed_env
+        env = scrubbed_env()
+        env["GIT_OPTIONAL_LOCKS"] = "0"
         p = subprocess.run(["git", *args], cwd=cwd,
-                            capture_output=True, text=True, timeout=timeout)
+                            capture_output=True, text=True, timeout=timeout, env=env)
     except Exception:
         return None
     return p.stdout.strip() if p.returncode == 0 else None
@@ -335,158 +305,31 @@ def mark_alive(wt):
         pass
 
 
-def classify(canon, entry, skip_paths):
-    """One worktree entry -> ("reap"|"keep"|"prune", reason), or None to ignore.
-
-    Encodes exactly the 2026-08-18 sweep rules — see the module docstring.
-    Every uncertain answer (unreadable index, status error, no origin/main)
-    lands on "keep": the failure direction is always kept-too-long, never
-    reaped-too-eagerly, same as --sweep.
-    """
-    wt = entry.get("path") or ""
-    if not wt or os.path.realpath(wt) in skip_paths:
-        return None
-    if entry.get("bare"):
-        return ("keep", "bare — no working tree to judge")
-    if entry.get("locked"):
-        return ("keep", "locked")
-    if entry.get("prunable") or not os.path.isdir(wt):
-        return ("prune", "directory already gone")
-    age = index_age_s(wt)
-    if age is None:
-        return ("keep", "cannot read .git index — not judging it")
-    if age < REAP_MIN_IDLE_S:
-        return ("keep", f"index touched {age / 3600:.1f}h ago (<6h, possibly live)")
-    # Second liveness signal: the writes themselves. A build that never runs
-    # git leaves the index cold while filling the tree — defect a4abb972.
-    twork = tree_age_s(wt)
-    if twork is None:
-        return ("keep", "cannot judge working-tree mtimes — not judging it")
-    if twork < REAP_MIN_IDLE_S:
-        return ("keep", f"working tree written {twork / 3600:.1f}h ago "
-                        "(<6h, possibly a live build)")
-    age = min(age, twork)
-    status = run_git(["status", "--porcelain"], wt, timeout=30)
-    if status is None:
-        return ("keep", "git status failed — not judging it")
-    # Judge dirtiness the way bin/worktree.sh --remove will: its drop_plumbing
-    # deletes this script's own untracked .venv/out/node_modules symlinks
-    # BEFORE the dirty test, so an untracked plumbing symlink is not work.
-    # Older checkouts whose .gitignore predates mcp-server/node_modules show
-    # exactly that as `??` — found live 2026-08-18, ~20 worktrees kept for a
-    # symlink the removal door would have dropped. Anything else stays a keep,
-    # and remove_one re-judges after actually dropping, so a mismatch here
-    # can only under-reap, never over-reap.
-    def is_plumbing(line):
-        if not line.startswith("?? "):
-            return False
-        rel = line[3:].strip().strip('"').rstrip("/")
-        return rel in PLUMB_LINKS and os.path.islink(os.path.join(wt, rel))
-    work = [ln for ln in status.splitlines() if ln.strip() and not is_plumbing(ln)]
-    if work:
-        return ("keep", f"uncommitted work ({len(work)} paths)")
-    if entry.get("branch"):
-        return ("reap", f"clean, idle {age / 3600:.0f}h, branch "
-                        f"{entry['branch']} survives in the main repo")
-    head = entry.get("head") or ""
-    if not head:
-        return ("keep", "detached with no readable HEAD")
-    if run_git(["show-ref", "--verify", "--quiet",
-                "refs/remotes/origin/main"], canon) is None:
-        return ("keep", "detached and no origin/main to test ancestry against")
-    if run_git(["merge-base", "--is-ancestor", head,
-                "refs/remotes/origin/main"], canon) is None:
-        return ("keep", f"detached at {head[:8]}, NOT an ancestor of origin/main")
-    return ("reap", f"clean, idle {age / 3600:.0f}h, detached at {head[:8]} "
-                    "already on origin/main")
+def fleet_reaper(root, **kwargs):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+    from branch_retirement import FleetReaper
+    return FleetReaper(root, sys.modules[__name__], **kwargs)
 
 
 def reap_main(argv):
-    """The background sweep. `--dry-run` reports without removing; `--skip
-    <path>` protects the invoking session's worktree; `--repo <path>` retargets
-    (selftests and hand runs only — the wired hook never passes it)."""
-    def arg_after(flag):
-        if flag in argv:
-            i = argv.index(flag)
-            if i + 1 < len(argv):
-                return argv[i + 1]
-        return None
-
-    dry = "--dry-run" in argv
-    canon = canonical_root(arg_after("--repo") or REPO)
-    skip_paths = {canon}
-    skip = arg_after("--skip")
-    if skip:
-        skip_paths.add(os.path.realpath(skip))
-
-    def say(msg):
-        print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}  {msg}", flush=True)
-
-    lock = os.path.join(canon, "out", "worktree-reap.lock")
-    try:
-        os.makedirs(os.path.dirname(lock), exist_ok=True)
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        try:
-            if time.time() - os.path.getmtime(lock) < REAP_LOCK_STALE_S:
-                return 0                     # another reaper is live — quiet
-            os.unlink(lock)                  # dead reaper's leftovers
-            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except Exception:
-            return 0
-    except Exception:
-        return 0
-    with os.fdopen(fd, "w") as fh:
-        fh.write(str(os.getpid()))
-
-    try:
-        say(f"reap start ({'dry-run' if dry else 'live'}) repo={canon}")
-        reaped = kept = 0
-        for entry in worktree_entries(canon):
-            verdict = classify(canon, entry, skip_paths)
-            if verdict is None:
-                continue
-            action, reason = verdict
-            name = os.path.basename(entry.get("path") or "")
-            if action == "prune":
-                continue                     # `git worktree prune` below owns it
-            if action == "keep":
-                kept += 1
-                if dry:
-                    say(f"KEEP  {name} — {reason}")
-                continue
-            if dry:
-                say(f"would remove {name} — {reason}")
-                reaped += 1
-                continue
-            # rule a8c55a47: removal goes through the SAME door a human uses,
-            # which re-checks dirty and restores plumbing on any refusal.
-            try:
-                p = subprocess.run(
-                    ["zsh", os.path.join(canon, "bin", "worktree.sh"),
-                     "--remove", entry["path"]],
-                    cwd=canon, capture_output=True, text=True,
-                    timeout=REAP_REMOVE_TIMEOUT)
-            except Exception as exc:
-                say(f"KEEP  {name} — removal errored: {exc}")
-                kept += 1
-                continue
-            if p.returncode == 0:
-                say(f"REAPED {name} — {reason}")
-                reaped += 1
-            else:
-                detail = " ".join((p.stdout + " " + p.stderr).split())[:200]
-                say(f"KEEP  {name} — --remove refused: {detail}")
-                kept += 1
-        if not dry:
-            run_git(["worktree", "prune"], canon)
-        say(f"reap done: {reaped} {'would be ' if dry else ''}reaped, {kept} kept")
-    finally:
-        try:
-            os.unlink(lock)
-        except Exception:
-            pass
-    return 0
+    def value(flag):
+        return argv[argv.index(flag) + 1] if flag in argv else None
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+    from branch_retirement import health, repository_roots
+    roots = repository_roots()
+    canon = Path(canonical_root(value("--repo") or REPO))
+    if "--fleet" in argv and canon.resolve() != roots["jbookout/carr-system"].resolve():
+        print("fleet retirement requires the canonical CARR repository")
+        return 1
+    if "--health-row" in argv:
+        line, failed = health(canon)
+        print(line)
+        return int(failed)
+    roots = roots if "--fleet" in argv else {"jbookout/carr-system": canon}
+    report = fleet_reaper(canon).run(roots, execute="--dry-run" not in argv,
+                                    skip=[value("--skip")] if value("--skip") else [])
+    print(json.dumps({k: v for k, v in report.items() if k != "rows"}, sort_keys=True))
+    return int(bool(report["errors"]))
 
 
 def maybe_spawn_reaper(canon, current_wt):
@@ -513,12 +356,13 @@ def maybe_spawn_reaper(canon, current_wt):
             cands += 1
     if not cands:
         return 0
-    lock = os.path.join(canon, "out", "worktree-reap.lock")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+    from branch_retirement import maintenance
     try:
-        if time.time() - os.path.getmtime(lock) < REAP_LOCK_STALE_S:
-            return 0                         # a reaper is already on it
-    except OSError:
-        pass
+        with maintenance(Path(canon)):
+            pass
+    except RuntimeError:
+        return 0
     log = os.path.join(canon, "out", "worktree-reap.log")
     os.makedirs(os.path.dirname(log), exist_ok=True)
     try:
@@ -529,7 +373,7 @@ def maybe_spawn_reaper(canon, current_wt):
     with open(log, "a") as fh:
         subprocess.Popen(
             [sys.executable or "python3", os.path.abspath(__file__),
-             "--reap", "--skip", current_wt],
+             "--reap", "--fleet", "--skip", current_wt],
             cwd=canon, stdout=fh, stderr=subprocess.STDOUT,
             start_new_session=True)
     return cands

@@ -77,6 +77,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.credential_file import credential  # noqa: E402
 from lib.local_principal import LocalPrincipalError, local_partner_principal
 
 REPO = Path(__file__).resolve().parent.parent
@@ -120,27 +121,11 @@ def db_url() -> str | None:
         url = os.environ.get(name)
         if url:
             return url
-    env = Path.home() / ".config/carr/db.env"
-    if env.exists():
-        found = {}
-        for line in env.read_text().splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                k, v = line.split("=", 1)
-                # .strip("\"'") IS LOAD-BEARING — db.env values are shell-quoted so
-                # `set -a; . db.env` survives an `&` in the DSN, but this hand-rolled
-                # parser doesn't get quote-stripping for free the way bash does. Without
-                # it, psycopg gets a DSN with a literal leading/trailing quote character
-                # and fails at connection-string-parsing time with a generic
-                # ProgrammingError ("invalid connection option") before the query ever
-                # reaches the server — masking the real InsufficientPrivilege (or lack
-                # thereof) underneath. Same fix already in exporters/common.py,
-                # pipelines/brief_pack.py, lib/record_sources.py. Added 2026-08-06,
-                # loop #188: this file's copy of the parser was the one left unfixed.
-                found[k.strip()] = v.strip().strip("\"'")
-        for name in ("CARR_DB_JOBS_URL", "CARR_DB_EXPORTER_URL"):
-            # preference, not file order: db.env is a list, not a ranking
-            if found.get(name):
-                return found[name]
+    for name in ("CARR_DB_JOBS_URL", "CARR_DB_EXPORTER_URL"):
+        # preference, not file order: db.env is a list, not a ranking
+        url = credential(name, environ={})
+        if url:
+            return url
     return None
 
 

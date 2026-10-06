@@ -24,9 +24,8 @@ being WRITTEN. It tells a READER nothing, and a `grep -c` never prints it.
 
 ANNOUNCE, NEVER DENY, and this is forced by evidence rather than by caution.
 Real code reads this directory on purpose: tools/calendar-touch-matcher.py and
-tools/mail-touch-matcher.py load the roster and registry from it, and
-tools/parity-lead-board.py compares draft against live, which is what a draft is
-for. Denying would break working code to prevent a reading mistake. Same posture
+tools/mail-touch-matcher.py load the roster and registry from it.
+Denying would break working code to prevent a reading mistake. Same posture
 as gate_paths.py, and for the same reason: the property worth having is that the
 mistake cannot be made QUIETLY.
 

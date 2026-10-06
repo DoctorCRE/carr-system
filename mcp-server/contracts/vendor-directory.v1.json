@@ -1,0 +1,94 @@
+{
+  "schema": "carr-vendor-directory.v1",
+  "version": "1.1.0",
+  "transport": "authenticated same-origin /api/v1/business/{clients,vendors} and MCP update-vendor",
+  "query": {
+    "contract": "vendor-directory.v1 opts into these fields; absent selector preserves the existing v1 row and facet shapes",
+    "owner": [
+      "all",
+      "joe",
+      "dell"
+    ],
+    "sort": [
+      "name",
+      "vertical",
+      "deal_type",
+      "last_deal_desc",
+      "last_deal_asc",
+      "territory"
+    ],
+    "territory": "vendors only; exact bounded value; territories facet",
+    "paging": "stable name/id ties, 25 rows per transport page"
+  },
+  "read_fields": {
+    "clients": [
+      "deal_type",
+      "last_deal_at"
+    ],
+    "vendors": [
+      "relationship",
+      "vertical",
+      "deal_type",
+      "last_deal_at",
+      "territory"
+    ],
+    "vendor_detail": [
+      "relationship",
+      "loan_programs"
+    ]
+  },
+  "relationship": {
+    "coverage_verified_at": "timestamp or null",
+    "deals_referred": "distinct sourced deal IDs, null until verified",
+    "deals_worked": "distinct sourced worked deal IDs, null until verified",
+    "win_rate": "worked won / (worked won + worked lost); null without verified coverage or resolved deals",
+    "last_contacted_at": "latest linked mail, meeting, call or text timestamp, null if unknown",
+    "last_contact_note": "latest linked contact summary",
+    "recent_entries": "20 linked activity entries, summary with original recorded detail",
+    "introductions": "live exact party links: intro/intro_received/introduced (made), can_introduce/intro_requested (suggested)",
+    "override": "tier/reason plus server-derived recorded_by/recorded_at; null clears override"
+  },
+  "trust": {
+    "formula_version": "vendor-trust.v1",
+    "years": "(observation - earliest sourced worked-deal event) / 365.25 days",
+    "recency": "days since latest linked contact; missing contact is Infinity; future contact cannot qualify a higher tier",
+    "order": [
+      {
+        "tier": "Unrated",
+        "when": "history coverage unverified"
+      },
+      {
+        "tier": "Proven",
+        "min_years": 2,
+        "min_worked": 8,
+        "min_win_rate": 0.7,
+        "max_contact_days": 180
+      },
+      {
+        "tier": "Established",
+        "min_years": 1,
+        "min_worked": 3,
+        "min_win_rate": 0.5,
+        "max_contact_days": 365
+      },
+      {
+        "tier": "Trial",
+        "when": "verified history meets neither tier"
+      }
+    ]
+  },
+  "write": {
+    "operation": "update-vendor",
+    "required": [
+      "vendor",
+      "base_version",
+      "fields",
+      "idempotency_key"
+    ],
+    "trust_override": "only verified human Joe/Dell; tier Proven/Established/Trial and nonblank reason <=500; authority/time are never client supplied",
+    "loan_programs": "array of recorded program names or null",
+    "deal_evidence": "complete replacement array <=100; exact live deal_id, referred/worked role, occurred_at, evidence_kind mail/calendar/salesforce/entry, nonblank evidence_ref; duplicate deal/role refuses",
+    "verify_deal_history": "only verified human Joe/Dell may set true; server stamps time; any evidence replacement without verification invalidates coverage",
+    "audit": "existing version guard, transaction, idempotency envelope and field-level event history"
+  }
+}

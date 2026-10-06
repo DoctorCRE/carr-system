@@ -31,6 +31,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 MODULE_PATH = HERE / "recovery-point.py"
@@ -354,8 +355,20 @@ def main() -> int:
     check("a legacy backup-like artifact without complete provenance makes absence unknown",
           unverified["state"] == "unknown")
 
-    failed_api, _ = cloud_fixture({"api_error": "synthetic provider unavailable"})
-    check("provider API failure is unknown", failed_api["state"] == "unknown")
+    for failure in ("exit", "timeout"):
+        runner = mock.Mock(return_value=subprocess.CompletedProcess(
+            ["gh"], 1, "", "synthetic provider unavailable"))
+        if failure == "timeout":
+            runner.side_effect = subprocess.TimeoutExpired(["gh"], 30)
+        delays: list[float] = []
+        reader = rp.GitHubReader(gh="gh", runner=runner, sleep=delays.append)
+        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "jbookout/carr-system"}), \
+             mock.patch.object(rp.shutil, "which", return_value="gh"), \
+             mock.patch.object(rp, "GitHubReader", return_value=reader):
+            failed_api = rp.cloud_path(repo="/fixture")
+        check(f"provider {failure} failure is unknown", failed_api["state"] == "unknown")
+        check(f"a transient provider {failure} is retried before it reads unknown",
+              runner.call_count == 3 and delays == [5, 15])
 
     cap_fixtures = [
         provider_fixture(

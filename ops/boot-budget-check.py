@@ -13,40 +13,30 @@ Mac, and it is one of the "map checks" ops/ci.sh's inventory loop runs
 directly against THIS repo (see ops/boot-budget-check-selftest.py for the one
 that builds a synthetic fixture tree instead, per the established split).
 
-THREE SURFACES, matching ops/config/boot-budget.v1.json's sub_budgets_tokens:
-  * claude_md               -- CLAUDE.md's own byte length.
-  * connector_instructions  -- the `initialize` instructions string literal
-                                 in mcp-server/src/mcp.js (plus RULE_DELIVERY_RAIL),
-                                 measured ONCE. It is delivered a second time per
-                                 duplicate MCP registration (see WR-000019 slice
-                                 S11's report on the connector dedup finding) --
-                                 that duplication is a CLIENT-config fact this
-                                 repository-content check cannot see, so it is
-                                 reported separately, never folded into this number.
-  * core_payload            -- what standing-context loads TODAY: the full
-                                 gist recitation plus the pack/trigger index,
-                                 read from a committed SNAPSHOT
-                                 (ops/config/boot-budget-core-fixture.v1.json)
-                                 because this check has no database to call
-                                 standing-context with. NOT the same number as
-                                 standing-context's own core_preview -- that is
-                                 the LARGER, separate measurement of what an
-                                 enforced (post-S13-flip) boot would cost, and
-                                 folding it in here would fail this check before
-                                 the flip has even happened. Refresh the fixture,
-                                 and revisit this budget's sub-budget, once S13
-                                 actually flips delivery -- that is Joe's call.
+NATIVE ENTRYPOINTS: Codex reads AGENTS.md; Claude reads CLAUDE.md plus the
+AGENTS.md policy block hooks/worktree-self-plumb.py injects at SessionStart
+(measured with that hook's own extractor). Charge the larger entrypoint plus
+shared connector instructions and the default standing-context SUMMARY/pack-index
+snapshot against the existing 10K ceiling.
+AGENTS sections are printed on overage so consolidation has a named target.
+The default scoped response is not the mandatory detail=boot read. Report that
+boot's delivered full text and corpus index separately; its existing ceiling
+and parity control remains ops/rule-boot-classes-check.py. Corpus counts never
+mean rules loaded as full text. All store measurements are dated offline
+snapshots, not claims about today's database. Client duplicate registration
+costs are unobservable here and are not silently estimated.
 
 THE FAILURE MESSAGE NEVER SUGGESTS RAISING THE BUDGET. An overage means
 something is due for consolidation -- merge or retire a rule through the S7
 triage (ops/config/rule-triage.v1.json) and the S10 amendment path
-(amend-rule / retire-rule), trim CLAUDE.md, or fix a known duplication. A
+(amend-rule / retire-rule), trim the native standing file, or fix a known duplication. A
 budget raise is Joe's decision alone; this check will not word its way
 around that by suggesting one.
 
 Usage:
     ./.venv/bin/python ops/boot-budget-check.py
 """
+import importlib.util
 import json
 import os
 import re
@@ -54,23 +44,33 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLAUDE_MD_PATH = os.path.join(REPO, "CLAUDE.md")
+AGENTS_MD_PATH = os.path.join(REPO, "AGENTS.md")
 MCP_JS_PATH = os.path.join(REPO, "mcp-server", "src", "mcp.js")
 BUDGET_PATH = os.path.join(REPO, "ops", "config", "boot-budget.v1.json")
 CORE_FIXTURE_PATH = os.path.join(REPO, "ops", "config", "boot-budget-core-fixture.v1.json")
+SELF_PLUMB_PATH = os.path.join(REPO, "hooks", "worktree-self-plumb.py")
 
 CONSOLIDATION_ADVICE = (
     "This is not a signal to raise the budget. The fix is consolidation: merge or\n"
     "retire redundant/stale rules through the S7 triage (ops/config/rule-triage.v1.json)\n"
-    "and the S10 amendment path (amend-rule / retire-rule), trim CLAUDE.md, or close a\n"
+    "and the S10 amendment path (amend-rule / retire-rule), trim the native standing file, or close a\n"
     "known duplication (see the WR-000019 slice S11 connector-dedup finding). Raising\n"
     "any number in ops/config/boot-budget.v1.json is Joe's decision alone, never a\n"
     "session's -- do not edit that file to make this check pass."
 )
 
 
-def claude_md_bytes(path):
+def file_bytes(path):
     with open(path, "rb") as fh:
         return len(fh.read())
+
+
+def claude_policy_block_bytes(agents_md_path):
+    """The AGENTS.md block Claude's SessionStart hook injects, via the hook itself."""
+    spec = importlib.util.spec_from_file_location("worktree_self_plumb", SELF_PLUMB_PATH)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    return len(hook.delivery_policy_brief(os.path.dirname(agents_md_path)).encode("utf-8"))
 
 
 def instruction_concat(expression, path, rail=""):
@@ -136,7 +136,7 @@ def connector_instructions_bytes(path):
 def core_payload_bytes(fixture_path):
     with open(fixture_path) as fh:
         fixture = json.load(fh)
-    return fixture["current_full_recitation_bytes"] + fixture["pack_index_bytes"]
+    return fixture["delivered_summary_bytes"] + fixture["pack_index_bytes"]
 
 
 def load_budget(path):
@@ -145,7 +145,7 @@ def load_budget(path):
 
 
 def measure(claude_md_path=None, mcp_js_path=None,
-            core_fixture_path=None, budget_path=None):
+            core_fixture_path=None, budget_path=None, agents_md_path=None):
     """Returns (budget_dict, surface_tokens_dict, total_tokens).
 
     Defaults resolve the module-level path constants AT CALL TIME (never
@@ -154,6 +154,7 @@ def measure(claude_md_path=None, mcp_js_path=None,
     def-time would silently keep pointing at whatever the constant was when
     the module loaded, which is exactly the kind of untestable check this
     file exists to not be."""
+    agents_md_path = agents_md_path or AGENTS_MD_PATH
     claude_md_path = claude_md_path or CLAUDE_MD_PATH
     mcp_js_path = mcp_js_path or MCP_JS_PATH
     core_fixture_path = core_fixture_path or CORE_FIXTURE_PATH
@@ -161,12 +162,16 @@ def measure(claude_md_path=None, mcp_js_path=None,
     budget = load_budget(budget_path)
     bpt = float(budget.get("bytes_per_token", 3.5))
     surface_bytes = {
-        "claude_md": claude_md_bytes(claude_md_path),
+        "claude_md": file_bytes(claude_md_path),
+        "claude_policy_block": claude_policy_block_bytes(agents_md_path),
+        "agents_md": file_bytes(agents_md_path),
         "connector_instructions": connector_instructions_bytes(mcp_js_path),
         "core_payload": core_payload_bytes(core_fixture_path),
     }
     surface_tokens = {name: b / bpt for name, b in surface_bytes.items()}
-    total_tokens = sum(surface_tokens.values())
+    claude_entry = surface_tokens["claude_md"] + surface_tokens["claude_policy_block"]
+    total_tokens = (max(claude_entry, surface_tokens["agents_md"])
+                    + surface_tokens["connector_instructions"] + surface_tokens["core_payload"])
     return budget, surface_tokens, total_tokens, surface_bytes
 
 
@@ -190,7 +195,8 @@ def main(argv=None):
     budget, surface_tokens, total_tokens, surface_bytes = measure()
 
     print("BOOT BUDGET (WR-000019 slice S11)")
-    for name in ("claude_md", "connector_instructions", "core_payload"):
+    for name in ("claude_md", "claude_policy_block", "agents_md",
+                 "connector_instructions", "core_payload"):
         cap = budget.get("sub_budgets_tokens", {}).get(name)
         cap_s = f"(budget {cap})" if cap is not None else "(no sub-budget set)"
         print(f"  {name:24s} {surface_bytes[name]:7d} bytes  "
@@ -198,6 +204,21 @@ def main(argv=None):
     total_cap = budget.get("total_budget_tokens")
     print(f"  {'TOTAL':24s} {'':7s}         ~{total_tokens:8.1f} tokens  "
           f"(budget {total_cap})")
+    print("  TOTAL charges the larger native entrypoint (Claude: claude_md + "
+          "claude_policy_block; Codex: agents_md) plus shared connector and summaries.")
+    with open(CORE_FIXTURE_PATH) as fh:
+        fixture = json.load(fh)
+    print(f"  delivered summaries: {fixture['delivered_summary_bytes']} bytes; "
+          f"pack/trigger index: {fixture['pack_index_bytes']} bytes (snapshot).")
+    if "rule_boot_full_text_bytes" in fixture:
+        boot_bytes = fixture["rule_boot_full_text_bytes"] + fixture["rule_boot_corpus_index_bytes"]
+        print(f"  mandatory boot full text: {fixture['rule_boot_full_text_bytes']} bytes; "
+              f"corpus index: {fixture['rule_boot_corpus_index_bytes']} bytes (snapshot). "
+              "Their separate ceiling/parity check is ops/rule-boot-classes-check.py; "
+              "corpus entries are not rules delivered as full text.")
+        print(f"  combined snapshot estimate including mandatory boot: "
+              f"~{total_tokens + boot_bytes / float(budget.get('bytes_per_token', 3.5)):.1f} tokens; "
+              "the existing component ceilings apply separately.")
     print("  NOTE: connector_instructions is ONE registration's cost. This "
           "session's live tool list may carry it twice if the CARR connector "
           "is registered under two MCP prefixes -- see the WR-000019 slice "
@@ -209,12 +230,33 @@ def main(argv=None):
         print("\nBOOT BUDGET EXCEEDED:")
         for name, measured, cap in over:
             print(f"  {name}: ~{measured:.1f} tokens > budget {cap}")
+        for name, path in (("agents_md", AGENTS_MD_PATH), ("claude_md", CLAUDE_MD_PATH)):
+            if any(item[0] in (name, "TOTAL") for item in over):
+                print(f"  {name} contributing sections:")
+                for title, size in steering_sections(path):
+                    print(f"    {title}: {size} bytes")
         print()
         print(CONSOLIDATION_ADVICE)
         return 1
 
     print("\nOK: within budget.")
     return 0
+
+
+def steering_sections(path):
+    """Count UTF-8 bytes under each heading, including preamble and heading."""
+    sections = []
+    title, size = "preamble", 0
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if re.match(r"^#{1,6} ", line):
+                if size:
+                    sections.append((title, size))
+                title, size = line.strip(), 0
+            size += len(line.encode("utf-8"))
+    if size:
+        sections.append((title, size))
+    return sections
 
 
 if __name__ == "__main__":

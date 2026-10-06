@@ -58,6 +58,14 @@ def main() -> int:
           "ghp_1234567890ABCDEFghijklmnopqrstuvwxyz" not in redact_text(token_text)  # ci-secret-scan: allow — synthetic fixture proving redaction; no real credential
           and "plain stderr line" in redact_text(token_text))
 
+    fine_grained_token = "github" + "_pat_" + ("Ab9_" * 20) + "Z9"
+    check("redact_text masks a fine-grained GitHub token without known secrets",
+          redact_text(f"Authorization: token {fine_grained_token}\nHTTP 401")
+          == "Authorization: token [REDACTED]\nHTTP 401")
+    check("redacted_tail masks a fine-grained token crossing the cutoff",
+          redacted_tail(f"Authorization: token {fine_grained_token}\nHTTP 401", limit=50)
+          == "Authorization: token [REDACTED]\nHTTP 401")
+
     openai_text = "provider said: sk-abcdefghijklmnopqrstuvwxyz012345 was rejected"  # ci-secret-scan: allow — synthetic fixture proving redaction; no real credential
     check("redact_text masks an sk- prefixed key",
           "sk-abcdefghijklmnopqrstuvwxyz012345" not in redact_text(openai_text))  # ci-secret-scan: allow — synthetic fixture proving redaction; no real credential

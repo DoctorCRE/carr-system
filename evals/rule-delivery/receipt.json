@@ -2,11 +2,11 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:dd2ba785be0c82b48607d6d532e01bffa3f2b957123fb33cf79216a029f6af87",
+    "configuration_fingerprint": "sha256:da8595f9f67df270ab38e252c1f5ae6b92dcbb9ecc73830584e39ceaa09c369a",
     "harness_id": "evals/rule-delivery/run_eval.py",
-    "harness_version": "8e1acfe717a87e4609fc3cee183122bd29d285541ca7459108ccd70e4157bbac",
+    "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
     "model_id": "deterministic-no-model",
-    "native_session_ref": "01a100bc-f78b-7d52-932d-a1beece0d5fd",
+    "native_session_ref": "01a10f62-18c2-7a70-8adb-99a1a74992e3",
     "provider_id": "none",
     "surface": "offline_programmatic"
   },
@@ -20,7 +20,7 @@
     "total": 338,
     "train": 212
   },
-  "change": "Preserve compiled human action cues at SURFACE_AT, exclude bare house words and suppress keyword delivery on complete machine envelopes.",
+  "change": "Retain every unproven rule in full boot, close boot refusal/outage escapes, and repair missing event routes without changing frozen JIT labels.",
   "cost": {
     "baseline_usd_per_case": 0.0,
     "candidate_usd_per_case": 0.0
@@ -28,9 +28,9 @@
   "dimensions": [
     {
       "baseline": {
-        "ci_high": 0.6,
-        "ci_low": 0.0,
-        "score": 0.3
+        "ci_high": 0.844311377245509,
+        "ci_low": 0.7825503355704698,
+        "score": 0.8131101813110181
       },
       "candidate": {
         "ci_high": 1.0,
@@ -39,66 +39,174 @@
       },
       "critical": true,
       "delta": {
-        "ci_high": 1.0,
-        "ci_low": 0.4,
-        "value": 0.7
+        "ci_high": 0.21744966442953018,
+        "ci_low": 0.15568862275449102,
+        "value": 0.1868898186889819
       },
-      "dimension_id": "envelope-prompt-clean-delivery",
+      "dimension_id": "full-text-availability",
       "direction_vs_baseline": "improved",
       "evidence_refs": [
-        "evals/rule-delivery/pr1325-replay.json"
+        "evals/rule-delivery/evidence/baseline.jsonl",
+        "evals/rule-delivery/evidence/candidate.jsonl"
       ],
       "status": "passed"
     },
     {
       "baseline": {
-        "ci_high": 0.5066666666666667,
-        "ci_low": 0.288135593220339,
-        "score": 0.4
+        "ci_high": 1.0,
+        "ci_low": 1.0,
+        "score": 1.0
       },
       "candidate": {
-        "ci_high": 0.5028571428571429,
-        "ci_low": 0.2824858757062147,
+        "ci_high": 1.0,
+        "ci_low": 1.0,
+        "score": 1.0
+      },
+      "critical": true,
+      "delta": {
+        "ci_high": 0.0,
+        "ci_low": 0.0,
+        "value": 0.0
+      },
+      "dimension_id": "envelope-prompt-clean-delivery",
+      "direction_vs_baseline": "equivalent",
+      "evidence_refs": [
+        "evals/rule-delivery/evidence/baseline.jsonl",
+        "evals/rule-delivery/evidence/candidate.jsonl"
+      ],
+      "status": "passed"
+    },
+    {
+      "baseline": {
+        "ci_high": 0.4970414201183432,
+        "ci_low": 0.2810810810810811,
+        "score": 0.39375
+      },
+      "candidate": {
+        "ci_high": 0.4970414201183432,
+        "ci_low": 0.2810810810810811,
         "score": 0.39375
       },
       "critical": true,
       "delta": {
         "ci_high": 0.0,
-        "ci_low": -0.021428571428571463,
-        "value": -0.006250000000000033
+        "ci_low": 0.0,
+        "value": 0.0
       },
       "dimension_id": "human-required-recall",
       "direction_vs_baseline": "equivalent",
       "evidence_refs": [
-        "evals/rule-delivery/pr1325-replay.json"
+        "evals/rule-delivery/evidence/baseline.jsonl",
+        "evals/rule-delivery/evidence/candidate.jsonl"
       ],
       "status": "passed"
     },
     {
       "baseline": {
-        "ci_high": 0.3265895953757225,
-        "ci_low": 0.20285714285714285,
-        "score": 0.2640449438202247
+        "ci_high": 0.32608695652173914,
+        "ci_low": 0.20234604105571846,
+        "score": 0.2627118644067797
       },
       "candidate": {
-        "ci_high": 0.3251366120218579,
-        "ci_low": 0.20168067226890757,
-        "score": 0.2627118644067797
+        "ci_high": 0.3212121212121212,
+        "ci_low": 0.19937694704049844,
+        "score": 0.25895316804407714
       },
       "critical": true,
       "delta": {
         "ci_high": 0.0,
-        "ci_low": -0.005072208524128208,
-        "value": -0.0013330794134450152
+        "ci_low": -0.008830790132047656,
+        "value": -0.0037586963627025405
       },
       "dimension_id": "human-delivery-precision",
       "direction_vs_baseline": "equivalent",
       "evidence_refs": [
-        "evals/rule-delivery/pr1325-replay.json"
+        "evals/rule-delivery/evidence/baseline.jsonl",
+        "evals/rule-delivery/evidence/candidate.jsonl"
       ],
       "status": "passed"
     }
   ],
+  "evidence": {
+    "baseline": {
+      "dependencies": {
+        "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
+        "hooks/rule-pack-preuse-reselection.py": "a2b66119a644ebd84ed0e0b5da02bccd962629ac834dee406eb7f431d13bcc17",
+        "lib/claude_continuity_config.py": "9e6d1afd1c5714bd61892ca1da7de058dbcfebae84f9131fd70d24d6a91985f5",
+        "lib/claude_rule_delivery_dedupe.py": "6b37b3e0cd950410332fcc4099c17b61650d87eb63158bf550c5d259ca0540b4",
+        "lib/rule_delivery_preuse.py": "3a4e46653d2255561a2b171b4762dce6d74581eb7f2156cce6afc320e26adee2",
+        "lib/rule_delivery_shadow.py": "b39b504ff0bf77819b578a12f97821bc3da2e8226e90b5f17d3a40ccb1cb7417",
+        "lib/rule_routes.py": "e3c6a77bb3cbdfc64482cf9cee0da32857b0c019160e4e558127079dd46bb760",
+        "mcp-server/src/jev-request-contract.v1.json": "0687a4cda641c5f08bb856de5b9f234f7e8a097e21e92762b5ed3f582ddca185",
+        "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
+        "ops/config/rule-classes.v1.json": "8f8d24ddf0c1d012db9f31aa250bd30da45ee6f1156ec98bc9a194381fdc5f23",
+        "ops/config/rule-enforcement-map.json": "b4e0d6689df3d96be24fb0cb888587f545bef8ffeba79c3ee6757b447f3fb308",
+        "ops/config/rule-jev-triggers.v1.json": "cb644e0c73eb0ae68cc9ad56fb89f5654c678fce1985e422f4297f1e6a9e622f",
+        "ops/config/rule-jit-triggers.v1.json": "b0b23e68c4121e649b82f5d7f93704f1574e2a7ce798a5e3d823b1322c04dd59",
+        "ops/config/rule-routes.v1.json": "1d94a8dab3d249fd86da466743dc3b904e6e27d2cd289de108d9cbb0c9fadbb5",
+        "ops/config/rule-selection-corpus.v1.json": "90f0e31475f1cd2c445475f8742de3dc94b62a2474d581fcefb5429a5eae102f",
+        "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
+        "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
+        "ops/fixtures/rule-delivery-eval/cases.v2.json": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
+        "ops/machine_envelope.py": "749970f4dfb838af4e6cd1e6537988a278fc0006a02b32f665dfd0f943266c3f",
+        "ops/rule_delivery_eval.py": "e59e392ec3cceae4df58d9aed14887c5e901105730e06020466b261b4803efc2",
+        "ops/rule_trigger_compile.py": "26e0595e793aaba54df070f206edfa9d72f33d861f77741e0f3947bf7dbccdce",
+        "ops/rule_trigger_delivery.py": "773911b40433f70242b7b85eb33c64a487e8be20dd6c9f2ba28ac70daf10edb1",
+        "ops/typesafe_client.py": "91acd006df639e545a5fe6890712507652219fadb3d972b03b1fed42f1fa086d",
+        "tools/judge/interface.py": "2e0440cc85660f83f4456829006f3f00a956e414c4c72e8217ab1a22622f3ed2"
+      },
+      "ref": "b4dc32fde6c07be4b19497ba0a14e1fcf64c7237"
+    },
+    "cohorts": {
+      "baseline": {
+        "path": "evals/rule-delivery/evidence/baseline.jsonl",
+        "sha256": "c6f8c046991b9e453788d60a5e2e55dbd9268ef395125139b7b4a1b59e4e4d71"
+      },
+      "candidate": {
+        "path": "evals/rule-delivery/evidence/candidate.jsonl",
+        "sha256": "5c698f4df99dc6262169487b26ea705f580c8928c89ba4ca612704cb4bacacb8"
+      }
+    },
+    "dependencies": {
+      "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
+      "hooks/rule-pack-preuse-reselection.py": "454615bb28d9e345642b606ff7655d6df9be503db3f07a2b709b4f95bd46b681",
+      "lib/claude_continuity_config.py": "9e6d1afd1c5714bd61892ca1da7de058dbcfebae84f9131fd70d24d6a91985f5",
+      "lib/claude_rule_delivery_dedupe.py": "6b37b3e0cd950410332fcc4099c17b61650d87eb63158bf550c5d259ca0540b4",
+      "lib/rule_delivery_preuse.py": "3a4e46653d2255561a2b171b4762dce6d74581eb7f2156cce6afc320e26adee2",
+      "lib/rule_delivery_shadow.py": "b39b504ff0bf77819b578a12f97821bc3da2e8226e90b5f17d3a40ccb1cb7417",
+      "lib/rule_routes.py": "84f227f016caa8424bcd98bf0acb68424f22bc48437965d244de235f44f51d62",
+      "mcp-server/src/jev-request-contract.v1.json": "0687a4cda641c5f08bb856de5b9f234f7e8a097e21e92762b5ed3f582ddca185",
+      "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
+      "ops/config/rule-classes.v1.json": "b659eeb6806156b7a518ac3cdb27963de583a7c174618857ccc7951b37463968",
+      "ops/config/rule-enforcement-map.json": "b4e0d6689df3d96be24fb0cb888587f545bef8ffeba79c3ee6757b447f3fb308",
+      "ops/config/rule-jev-triggers.v1.json": "cb644e0c73eb0ae68cc9ad56fb89f5654c678fce1985e422f4297f1e6a9e622f",
+      "ops/config/rule-jit-triggers.v1.json": "b0b23e68c4121e649b82f5d7f93704f1574e2a7ce798a5e3d823b1322c04dd59",
+      "ops/config/rule-routes.v1.json": "a430be96f45260f858f9ad021064a103d0b80cb32e3fbd04b9c9782b4c64714e",
+      "ops/config/rule-selection-corpus.v1.json": "90f0e31475f1cd2c445475f8742de3dc94b62a2474d581fcefb5429a5eae102f",
+      "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
+      "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
+      "ops/fixtures/rule-delivery-eval/cases.v2.json": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
+      "ops/machine_envelope.py": "749970f4dfb838af4e6cd1e6537988a278fc0006a02b32f665dfd0f943266c3f",
+      "ops/rule_delivery_eval.py": "4783bf0a9190dfe6ebe3026b2d311b23249350e0335995981ef704b6d451fa9d",
+      "ops/rule_trigger_compile.py": "26e0595e793aaba54df070f206edfa9d72f33d861f77741e0f3947bf7dbccdce",
+      "ops/rule_trigger_delivery.py": "773911b40433f70242b7b85eb33c64a487e8be20dd6c9f2ba28ac70daf10edb1",
+      "ops/typesafe_client.py": "91acd006df639e545a5fe6890712507652219fadb3d972b03b1fed42f1fa086d",
+      "tools/judge/interface.py": "2e0440cc85660f83f4456829006f3f00a956e414c4c72e8217ab1a22622f3ed2"
+    },
+    "expectations": {
+      "path": "evals/rule-delivery/expectations.v1.json",
+      "sha256": "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa",
+      "version": "rule-delivery-expectations/v1"
+    },
+    "scorer": {
+      "function": "score_receipt",
+      "path": "evals/rule-delivery/run_eval.py"
+    },
+    "source": {
+      "evals/rule-delivery/make_report.py": "868f75651f7b80d6303d293a77ea151f4a8b69ed3ca49122cc474ac03ce86b26",
+      "evals/rule-delivery/run_eval.py": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6"
+    }
+  },
   "grader": {
     "kind": "programmatic",
     "validation": {
@@ -109,21 +217,23 @@
       "result": "pass"
     }
   },
-  "measured_on": "2026-10-03",
+  "measured_on": "2026-10-05",
   "min_useful_gain": 0.7,
   "noise_floor": 0.3,
   "notes": [
-    "Existing frozen split has historical reuse; intervals are descriptive, not new untouched holdout evidence.",
-    "Human test recall decreases 0.625 percentage points; its interval is [-2.143, 0] points. The point estimate meets the existing <=1 point constraint; this does not establish noninferiority at that margin with 95% confidence.",
-    "All-traffic recall decreases due to suppressing compiled cues on complete machine envelopes. Do not describe all-traffic recall as preserved.",
-    "No live-provider or production deployment measurement. The regression property separately exercises spent deadlines and synthetic provider failures.",
-    "Native /claude-api slash commands are unavailable in this runtime. Used the existing production-function replay and programmatic grader, without a model call. The test split was scored but no new test transcripts were read to propose the fix.",
-    "Complete-envelope prompt false deliveries: test 14 -> 0; train 40 -> 1. Both exceed the original 70% reduction target. Prompt-clean is measured before tool events."
+    "The receipt retains the established pre-PR-1325 baseline c11c1153a59ff90f7d348f11330c97a25cb0f2f9. Both arms were freshly replayed with the retained production-function harness; dependency bindings now include the retired parity-route removal.",
+    "A separate replay against reviewed PR 1546 head 388e5d9ae02bea8d572bb7a4040984c986c3bdeb measured zero change in all three dimensions, with zero provider cost. This cleanup claims no quality or cost improvement.",
+    "Existing frozen cases have historical reuse; results are descriptive regression evidence, not new untouched holdout or live-provider evidence.",
+    "Human test recall point loss against the established baseline is 0.625 percentage points; its paired interval is [-2.143, 0] points. This does not establish noninferiority at the one-point margin with 95% confidence.",
+    "All-traffic recall against that historical baseline decreases through suppression of compiled cues on complete machine envelopes; do not claim all-traffic recall is preserved against it.",
+    "The native /claude-api slash commands are unavailable in this runtime. The existing deterministic replay and programmatic grader regenerated source-bound evidence without a model call.",
+    "Frozen expectations and split remain unchanged. No production deployment or live-model quality improvement is claimed.",
+    "The merged-source replay also preserves the measured complete-envelope prompt false-delivery reduction: test 14 to 0 and train 40 to 1 against the established historical baseline."
   ],
-  "primary_dimension": "envelope-prompt-clean-delivery",
+  "primary_dimension": "full-text-availability",
   "repeats": 2,
   "rung": "regression",
-  "schema_version": 1,
+  "schema_version": 2,
   "split": {
     "method": "Existing frozen v2 split plus hard-case hash split; historical reuse disclosed in notes",
     "sealed_test": true,
@@ -132,12 +242,14 @@
   "stage_results": [
     {
       "dimension_ids": [
+        "full-text-availability",
         "envelope-prompt-clean-delivery",
         "human-required-recall",
         "human-delivery-precision"
       ],
       "evidence_refs": [
-        "evals/rule-delivery/pr1325-replay.json"
+        "evals/rule-delivery/evidence/baseline.jsonl",
+        "evals/rule-delivery/evidence/candidate.jsonl"
       ],
       "stage_id": "rule_delivery",
       "status": "passed"
@@ -146,6 +258,6 @@
   "surface": "rule-delivery",
   "verdict": {
     "decision": "ship",
-    "statement": "Envelope clean delivery improves; human recall and precision intervals include zero. Human recall point loss is within the existing one-point constraint. This is deterministic regression evidence only; historical holdout reuse and uncertainty are disclosed."
+    "statement": "Full-text availability improves on the fixed benchmark. Frozen JIT dimensions are reported separately; this source result does not prove deployed adapter invocation or model obedience."
   }
 }

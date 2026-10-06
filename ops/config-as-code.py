@@ -41,8 +41,10 @@ exactly as they bind Joe, with zero mechanical enforcement on his side today.
     ops/config-as-code.py verify-codex-continuity
     ops/config-as-code.py install-codex-continuity-mcp --apply
     ops/config-as-code.py verify-codex-continuity-mcp
-    ops/config-as-code.py install-progress-board [--repo CHECKOUT] --apply
-    ops/config-as-code.py verify-progress-board [--repo CHECKOUT]
+    ops/config-as-code.py install-progress-board [--repo CANONICAL] --apply
+    ops/config-as-code.py install-flash-on-demand [--apply]
+    ops/config-as-code.py verify-progress-board [--repo CANONICAL]
+    ops/config-as-code.py check-launchd-main-paths
     ops/config-as-code.py remove-codex-continuity --apply
 
 `check` is what belongs in run.sh health: it answers "is the live config still
@@ -72,6 +74,9 @@ from lib import launchd_calendar
 HOME = os.path.expanduser("~")
 # THE CHECKOUT THIS FILE SITS IN — the source of the tracked copies to compare.
 REPO_HERE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+LAUNCHD_DEPENDENCY_CHECKOUTS = (
+    "/opt/homebrew", "/usr/local/Homebrew", "/home/linuxbrew/.linuxbrew/Homebrew",
+)
 
 
 def _canonical_repo(here):
@@ -1545,10 +1550,81 @@ def refused_launchd_templates(repo=None):
     return out
 
 
+def launchd_path_refusal(body):
+    """Verify runtime checkouts for installation and installed-path audits."""
+    try:
+        definition = plistlib.loads(body.encode("utf-8"))
+    except (ValueError, plistlib.InvalidFileException) as exc:
+        return f"invalid LaunchAgent: {exc}"
+    if not isinstance(definition, dict):
+        return "invalid LaunchAgent: expected a dictionary"
+    arguments = definition.get("ProgramArguments") or []
+    if not isinstance(arguments, list):
+        return "invalid LaunchAgent: ProgramArguments must be an array"
+    working_directory = definition.get("WorkingDirectory") or "/"
+    if not isinstance(working_directory, str) or not os.path.isabs(working_directory):
+        return "invalid LaunchAgent: WorkingDirectory must be absolute"
+    paths = [working_directory, definition.get("Program"), *arguments]
+    for path in paths:
+        if not isinstance(path, str) or not path or path.startswith("-"):
+            continue
+        resolved = os.path.realpath(os.path.join(working_directory, path))
+        directory = resolved if os.path.isdir(resolved) else os.path.dirname(resolved)
+        # A declared script may not exist yet; inspect its closest existing
+        # ancestor so a missing file cannot hide a feature checkout.
+        while not os.path.isdir(directory) and directory != os.path.dirname(directory):
+            directory = os.path.dirname(directory)
+        try:
+            top = subprocess.run(["git", "-C", directory, "rev-parse", "--show-toplevel"],
+                                 capture_output=True, text=True, env=_git_env(), timeout=15)
+            if top.returncode:
+                if top.returncode == 128 and top.stderr.strip() == "fatal: not a git repository (or any of the parent directories): .git":
+                    continue
+                return f"cannot verify repository identity for {path}: {top.stderr.strip()}"
+            checkout = top.stdout.strip()
+            dirs = subprocess.run(["git", "-C", checkout, "rev-parse", "--path-format=absolute",
+                                   "--git-dir", "--git-common-dir"],
+                                  capture_output=True, text=True, env=_git_env(), timeout=15)
+            identities = dirs.stdout.strip().splitlines()
+            if dirs.returncode or len(identities) != 2:
+                return f"cannot verify main/worktree identity for {path}"
+            # Only named package-manager checkouts may use release branches.
+            # Standalone session clones have the same Git directory shape.
+            if identities[0] == identities[1] and os.path.realpath(checkout) in {
+                    os.path.realpath(root) for root in LAUNCHD_DEPENDENCY_CHECKOUTS}:
+                continue
+            branch = subprocess.run(["git", "-C", checkout, "symbolic-ref", "--short", "HEAD"],
+                                    capture_output=True, text=True, env=_git_env(), timeout=15)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"cannot verify main checkout for {path}: {exc}"
+        if identities[0] != identities[1] or branch.returncode or branch.stdout.strip() != "main":
+            return (f"runtime path {path} selects {branch.stdout.strip() or 'detached HEAD'}; "
+                    "point the LaunchAgent at the canonical main checkout and reinstall")
+    return None
+
+
+def cmd_check_launchd_main_paths():
+    """Read installed CARR agents without changing or reloading any plist."""
+    names = carr_plists()
+    board = "local.carr-progress-board.plist"
+    if os.path.isfile(os.path.join(LAUNCHD_SRC, board)):
+        names.append(board)
+    failures = []
+    for name in names:
+        refusal = launchd_path_refusal(read(os.path.join(LAUNCHD_SRC, name)) or "")
+        if refusal:
+            failures.append((name, refusal))
+    for name, refusal in failures:
+        print(f"launchd main-path check: REFUSED {name}: {refusal}")
+    if not failures:
+        print("launchd main-path check: runtime paths verified")
+    return 1 if failures else 0
+
+
 def launchd_template_refusal(source_text):
     """The first reason install must not render this template, or None."""
     problems = launchd_calendar.audit_template(source_text or "")
-    return problems[0] if problems else None
+    return problems[0] if problems else launchd_path_refusal(concrete(source_text or ""))
 
 
 def cmd_check():
@@ -1970,12 +2046,15 @@ def install_launchd_plist(filename, dest, body, body_matches):
 def cmd_install_progress_board(apply=False, repo=None):
     """Migrate the existing board agent to the repository wrapper, then read
     launchd's arguments back. This does not create a new schedule or label.
-    Defaults to the canonical checkout. An explicit repository checkout allows
-    the installed consumer to be verified before its PR merges; keep that
-    checkout available until migrating back to the canonical checkout. Board
-    state remains in the canonical out directory across either migration.
+    Runtime and state belong to the canonical main checkout maintained by
+    bin/fleet-sync.sh. --repo may name that checkout explicitly, but cannot
+    select a feature tree even for pre-merge verification.
     """
     runtime_repo = os.path.abspath(os.path.expanduser(repo)) if repo else REPO
+    if os.path.realpath(runtime_repo) != os.path.realpath(REPO):
+        print("progress-board: runtime must use the canonical main checkout; "
+              "feature checkout installation is refused")
+        return 1
     wrapper = os.path.join(runtime_repo, "ops", "progress-board-render.sh")
     python = os.path.join(runtime_repo, ".venv", "bin", "python")
     if not os.path.isfile(wrapper) or not os.access(python, os.X_OK):
@@ -1997,6 +2076,10 @@ def cmd_install_progress_board(apply=False, repo=None):
     desired["WorkingDirectory"] = runtime_repo
     desired["EnvironmentVariables"] = dict(current.get("EnvironmentVariables", {}))
     desired["EnvironmentVariables"]["PROGRESS_BOARD_ROOT"] = os.path.join(REPO, "out")
+    refusal = launchd_path_refusal(plistlib.dumps(desired).decode("utf-8"))
+    if refusal:
+        print(f"progress-board: REFUSED {refusal}")
+        return 1
     def registered_arguments():
         observed = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
                                   capture_output=True, text=True, check=False, timeout=15)
@@ -2882,6 +2965,15 @@ def main():
         return cmd_verify_codex_continuity()
     if mode == "install":
         return cmd_install(apply)
+    if mode == "install-flash-on-demand":
+        import argparse
+        from tools import flash_install
+        parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")
+        parser.add_argument("--apply", action="store_true")
+        options = parser.parse_args(sys.argv[2:])
+        return flash_install.configure(REPO_HERE, apply=options.apply)
+    if mode == "check-launchd-main-paths":
+        return cmd_check_launchd_main_paths()
     if mode in {"install-progress-board", "verify-progress-board"}:
         import argparse
         parser = argparse.ArgumentParser(prog=f"config-as-code.py {mode}")

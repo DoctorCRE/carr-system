@@ -23,8 +23,6 @@ adapter calls the production selection function itself:
                     (lib/rule_delivery_preuse.semantic_delivery);
   prompt_full       the same call with the budgeted Jev judgment live — what
                     the UserPromptSubmit hook actually delivers;
-  jev_rule_select   ops/jev_rule_select.select at its floor (the legacy
-                    two-stage selector; still the Flash path);
   jit_pretooluse    hooks/rule-pack-preuse-reselection.py's own
                     matched_triggers()/_matches() on each tool call;
   layered_triggers  the same hook's route rail: routed_rule_ids() over
@@ -176,6 +174,9 @@ def load_cases(path, split=None):
                       "tool_calls": calls, "gold": sorted(set(gold)),
                       "gold_doctrine": sorted(set(doctrine)),
                       "disputed": sorted(set(row.get("disputed") or [])),
+                      **({"judged_rules": row["judged_rules"]} if "judged_rules" in row else {}),
+                      "unjudged_rules": sorted(set(row.get("unjudged_rules") or [])),
+                      **({"doctrine_judged": row["doctrine_judged"]} if "doctrine_judged" in row else {}),
                       "split": row.get("split")})
     if not cases:
         raise ValueError(f"{path}: no cases in split {split!r}")
@@ -201,14 +202,14 @@ def boot_always_on_ids(repo, sponsor="joe"):
     """Ids the live boot would render in full for one sponsor.
 
     The runtime scopes active store rows first, then applies the class file's
-    always_on and personal_to fields. The committed class file contains the
-    classified active ids, so this is an offline replay of that second step.
+    personal boundary; every rule in scope keeps its full text. The committed
+    class file contains classified ids; this replays selection without store
+    access.
     """
     path = os.path.join(repo, "ops", "config", "rule-classes.v1.json")
     with open(path, "r", encoding="utf-8") as handle:
         rows = json.load(handle)["rules"]
-    return {rid for rid, row in rows.items()
-            if row.get("always_on") and row.get("personal_to") in (None, sponsor)}
+    return {rid for rid, row in rows.items() if row.get("personal_to") in (None, sponsor)}
 
 
 def universes(meta, names, *, boot_ids=None):
@@ -221,7 +222,7 @@ def universes(meta, names, *, boot_ids=None):
              "drift_shadow": pack, "drift_if_acting": pack, "boot_layer0": layer0,
              "boot_always_on": set(boot_ids or ()),
              "layered_triggers": everything,
-             "jev_rule_select": everything, "system_moment": everything,
+             "system_moment": everything,
              "system_moment_packlayer": pack,
              "system_moment_plus_drift": everything, "system_scoped_boot": everything,
              # The doctrine search door delivers doctrine only; it owes no rule.
@@ -243,8 +244,12 @@ class JevProxy:
         self.noul, self.choice, self.score = tsc.noul, tsc.choice, tsc.score
 
     def ask(self, state, questions, **kwargs):
+        kwargs.pop("caller", None)
+        kwargs.pop("version", None)
         kwargs["calls_log"] = self.calls_log
-        return self._tsc.ask(state, questions, **kwargs)
+        semantic = _load(os.path.join(os.path.dirname(os.path.dirname(__file__)), "ops", "jev_semantic.py"), "jev_semantic_eval")
+        return semantic.ask(state, questions, client=self._tsc, caller="rule_delivery_eval",
+                            version="vendor-v1", **kwargs)
 
 
 def _quiet_judge(repo, tag):
@@ -260,12 +265,7 @@ def _quiet_rule_trigger_delivery(repo, tag):
     original = rtd._sibling
 
     def sibling(name):
-        module = original(name)
-        if name == "jev_rule_select":
-            inner = module._sibling
-            module._sibling = (lambda n: _quiet_judge(repo, tag) if n == "jev_judge"
-                               else inner(n))
-        return module
+        return _quiet_judge(repo, tag) if name == "jev_judge" else original(name)
     rtd._sibling = sibling
     return rtd
 
@@ -327,7 +327,7 @@ def doctrine_search_refs(repo, prompt, limit=10):
 def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull,
                    doctrine_search=False):
     """Adapters for every path. `jev` is "off" (deterministic paths only) or
-    "live" (adds prompt_full and jev_rule_select). `client_factory(calls_log)`
+    "live" (adds prompt_full). `client_factory(calls_log)`
     returns the Jev client; default is JevProxy over ops/typesafe_client."""
     import sys
     repo = str(repo)
@@ -427,21 +427,11 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
             client_factory = lambda sink: JevProxy(tsc, sink)  # noqa: E731
         client = client_factory(calls_log)
         rtd_live = _quiet_rule_trigger_delivery(repo, "live")
-        jrs = _load(os.path.join(repo, "ops", "jev_rule_select.py"), "jrs_eval")
-        quiet = _quiet_judge(repo, "jrs")
 
         def prompt_full(case):
-            return prompt_delivery(rtd_live, case["prompt"], client=client)
+            return prompt_delivery(rtd_live, case["prompt"], client=client, ask=client.ask)
 
-        def legacy(case):
-            rows = jrs.select(case["prompt"], client=client, judge=quiet,
-                              cache_path=None, session_id=None)
-            rules = {row["id"] for row in rows if row.get("probability") is not None}
-            return {"rules": rules,
-                    "packs": {p for r in rules for p in meta.get(r, {}).get("packs", [])}}
-
-        adapters += [{"name": "prompt_full", "select": prompt_full, "jev": True},
-                     {"name": "jev_rule_select", "select": legacy, "jev": True}]
+        adapters += [{"name": "prompt_full", "select": prompt_full, "jev": True}]
     elif jev != "off":
         raise ValueError("jev must be 'off' or 'live'")
     return adapters
@@ -633,9 +623,12 @@ def score(cases, deliveries, path_universes, meta, labelled=None, classes=None, 
             gold = gold_all & universe
             raw = set(out["rules"])
             delivered = raw - disputed
-            if labelled is not None:
-                outside.update(delivered - labelled)
-                delivered &= labelled
+            case_labelled = set(case["judged_rules"]) if "judged_rules" in case else labelled
+            if case_labelled is not None:
+                outside.update(delivered - case_labelled)
+                delivered &= case_labelled
+                gold_all &= case_labelled
+                gold &= case_labelled
             tp, fp, fn = confusion(gold_all, delivered)
             fn = [rid for rid in fn if rid in universe]
             tp_u = [rid for rid in tp if rid in universe]
@@ -651,8 +644,8 @@ def score(cases, deliveries, path_universes, meta, labelled=None, classes=None, 
                 doctrine_scored = True
                 dgold = set(case.get("gold_doctrine") or ())
                 dgot = set(out.get("doctrine") or ())
-                if doctrine_labelled is not None:
-                    judged = set(doctrine_labelled.get(case_id) or ()) | dgold
+                if "doctrine_judged" in case or doctrine_labelled is not None:
+                    judged = set(case.get("doctrine_judged", (doctrine_labelled or {}).get(case_id) or ())) | dgold
                     doctrine_outside += len(dgot - judged)
                     dgot &= judged
                 dtp, dfp, dfn = confusion(dgold, dgot)
@@ -777,7 +770,7 @@ def _pct(value):
 def render_markdown(report, statements=None, *, top=10, paths=None):
     statements = statements or {}
     order = paths or [p for p in SYSTEM_ROWS + ("prompt_full",
-                                  "prompt_compiled", "jev_rule_select", "jit_pretooluse",
+                                  "prompt_compiled", "jit_pretooluse",
                                   "layered_triggers", "drift_shadow", "drift_if_acting",
                                   "boot_always_on", "boot_layer0",
                                   "doctrine_search")

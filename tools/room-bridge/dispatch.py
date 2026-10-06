@@ -62,6 +62,7 @@ TOOLS_ROOT = HERE.parent
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 import credential_env  # noqa: E402 — shared long-lived-token loader
+import flashlib
 
 DEFAULT_RESULTS = Path(
     os.environ.get(
@@ -315,6 +316,7 @@ def dispatch(
     cwd: str | None = None,
     live_desktop: bool = False,
     stream_output: bool = False,
+    retrieval: bool = False,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
 
@@ -327,7 +329,14 @@ def dispatch(
     the Sol fixer desk a throwaway copy per task (2026-09-24)."""
     registry = registry or Registry()
     results_path = Path(results_path or DEFAULT_RESULTS)
+    if name == "flash" and registry.entries().get(name, {}).get("kind") == "claude-session":
+        try:
+            flashlib.ensure_desk(lambda: desks.is_live(registry.entries()[name].get("socket", "")))
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)          # every refusal happens here
+    if retrieval and entry["kind"] != "grok-cli":
+        raise DeskError("unsupported_retrieval", "explicit source retrieval requires a Grok desk")
     if stream_output and entry["kind"] not in ("codex-session", "codex-exec"):
         raise DeskError("unsupported_stream", "stream output requires a headless Codex desk")
     stream_options = {"stream_output": True} if stream_output else {}
@@ -354,11 +363,15 @@ def dispatch(
             )
 
     if entry["kind"] == "claude-session":
-        outcome = _to_claude(entry, task, msg_id)
+        if name == "flash":
+            with flashlib.activity_scope():
+                outcome = _to_claude(entry, task, msg_id)
+        else:
+            outcome = _to_claude(entry, task, msg_id)
     elif entry["kind"] == "claude-desktop":
         outcome = _to_claude_desktop(entry, task)
     elif entry["kind"] == "grok-cli":
-        outcome = grok_wire.run_task(entry, task)
+        outcome = grok_wire.run_task(entry, task, **({"retrieval": True} if retrieval else {}))
     elif entry["kind"] == "flash-local":
         outcome = flash_wire.run_task(task)
     elif entry["kind"] == "codex-live":
@@ -732,6 +745,8 @@ def main(argv: list[str]) -> int:
                    help="start a new Codex thread instead of resuming the desk's")
     s.add_argument("--stream-output", action="store_true",
                    help="tee headless Codex events into the caller's registered job log")
+    s.add_argument("--retrieve", action="store_true",
+                   help="require public source text evidence from a Grok desk")
 
     a = p.parse_args(argv)
     reg = Registry(a.registry) if a.registry else Registry()
@@ -790,7 +805,8 @@ def main(argv: list[str]) -> int:
             return 0
 
         row = dispatch(a.name, a.task, registry=reg, results_path=results,
-                       fresh=getattr(a, "fresh", False), stream_output=a.stream_output)
+                       fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
+                       retrieval=a.retrieve)
         print(json.dumps(row, indent=2))
         return 0 if row["status"] in ("delivered", "completed") else 1
 

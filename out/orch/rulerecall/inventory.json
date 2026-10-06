@@ -1,0 +1,2846 @@
+[
+  {
+    "collection": ".config/carr/claude-rule-delivery.jsonl",
+    "rows": 35735,
+    "in_window": 35735,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/rule-trigger-delivery.jsonl",
+    "rows": 5078,
+    "in_window": 5078,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/rule-delivery-shadow.jsonl",
+    "rows": 4412,
+    "in_window": 4412,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/hook-telemetry.jsonl",
+    "rows": 11575,
+    "in_window": 11575,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/hook-telemetry.jsonl.1",
+    "rows": 39272,
+    "in_window": 39272,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/gate-decisions.jsonl",
+    "rows": 488,
+    "in_window": 488,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/conduct-gate-shadow.jsonl",
+    "rows": 360,
+    "in_window": 360,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/conduct-gate.jsonl",
+    "rows": 2228,
+    "in_window": 1967,
+    "invalid": 0
+  },
+  {
+    "collection": "carr-system/out/completion-evidence-gate.jsonl",
+    "rows": 2021,
+    "in_window": 1970,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/015e093d-0a9e-4a4a-b824-36943fb29723.jsonl",
+    "rows": 35,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/0340862a-db86-4c03-ac45-42c175734f11.jsonl",
+    "rows": 470,
+    "in_window": 304,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/037bc254-8413-4a61-9c58-28521ffe34fe.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/03bdbbde-c69a-4d96-9efd-43ea71105830.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/03fd03b5-1c6f-4a2d-9482-8a6e349f7cad.jsonl",
+    "rows": 56,
+    "in_window": 34,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/05eab9be-ac35-45f6-bf80-c2d8d063f893.jsonl",
+    "rows": 57,
+    "in_window": 35,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/06d594aa-9662-46c8-8099-56ffcb449d68.jsonl",
+    "rows": 716,
+    "in_window": 518,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/0764529b-8551-4ae9-a873-537a8e9b5dd9.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/082117c6-925d-4afa-8254-1085cb696a02.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/099fd1c2-6b86-4bea-af47-969a1bd06729.jsonl",
+    "rows": 2645,
+    "in_window": 2049,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/0ae05452-f3f4-4ebb-a4ec-3ef5fdffbb58.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/0d837e3e-05c4-487c-a7c7-f0e74672c3cf.jsonl",
+    "rows": 634,
+    "in_window": 398,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/0fd18596-e046-42ac-96e8-6b201b8f95a4.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1024c24a-1cfd-47af-a787-e68997e95b7b.jsonl",
+    "rows": 1197,
+    "in_window": 987,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/122aa3a9-dd77-4576-a056-15c703f4265a.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/129cdb23-4b7d-43bc-bbad-f2bbee7f37ce.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/136a8ddd-989e-4f74-ac34-c488c8680330.jsonl",
+    "rows": 546,
+    "in_window": 410,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1414bce0-ae1f-4031-ad2c-cb15e9f51398.jsonl",
+    "rows": 528,
+    "in_window": 374,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/152b71d0-cd03-4b9d-a2b3-8cd0e56faaa9.jsonl",
+    "rows": 948,
+    "in_window": 636,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/157cdd85-4d44-4157-88bd-15481e71ed0b.jsonl",
+    "rows": 1132,
+    "in_window": 740,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/16f9faeb-720f-4b70-9da0-3c1a70018d0c.jsonl",
+    "rows": 390,
+    "in_window": 339,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/17374d44-0c1e-4832-aef0-3249e8e2e441.jsonl",
+    "rows": 496,
+    "in_window": 336,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/188d3821-b376-4eb9-822f-72697753369c.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1891c859-8085-4bae-b65f-bde47fc646e1.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/19ddcd4c-bf5a-4051-980c-5eb9aa82d6ea.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1ad274ba-0251-4fdc-84e2-48110d3bab0a.jsonl",
+    "rows": 518,
+    "in_window": 348,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1c879c0e-c558-4fd4-af0c-8aaf312645a8.jsonl",
+    "rows": 249,
+    "in_window": 216,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1cb79723-b8e5-4bb1-a474-4250bf5b6a66.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1cdbcdc3-5bf1-429c-a0c6-226ec559cd22.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1d3d37d5-9a91-42b4-a7bc-0afba3e1d847.jsonl",
+    "rows": 224,
+    "in_window": 197,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1d706351-8d83-4b30-84c6-46a0c6733187.jsonl",
+    "rows": 4655,
+    "in_window": 3401,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1e1bdfe9-23a5-47f9-a1e1-fbc4d84fbfc9.jsonl",
+    "rows": 402,
+    "in_window": 274,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1e41a3f0-bc71-4085-800b-e98dfab56473.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/1ede58be-9799-471e-82b3-ff7059729066.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/201268be-dfd2-4609-9194-348a22818b17.jsonl",
+    "rows": 459,
+    "in_window": 279,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/20bb51a4-ec9e-4a5c-ab22-576ee3dbcffc.jsonl",
+    "rows": 622,
+    "in_window": 386,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/2374ff54-88e6-44d5-a8b2-8ef675bf2a7d.jsonl",
+    "rows": 507,
+    "in_window": 353,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/25960483-6ae8-414b-b0b4-36f4b8638bc8.jsonl",
+    "rows": 688,
+    "in_window": 561,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/266275a6-e758-42c1-aa7d-8a17a782dcd8.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/268e88a4-2e8c-4ad5-a7ae-0d48d16d3aae.jsonl",
+    "rows": 493,
+    "in_window": 333,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/26b95e55-1496-4975-b4a0-4c4e8af4769a.jsonl",
+    "rows": 290,
+    "in_window": 251,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/2769abc8-6069-472a-ab63-007ded9acb2d.jsonl",
+    "rows": 14,
+    "in_window": 7,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/28123161-6a59-4cc4-8a1c-824be771fa8e.jsonl",
+    "rows": 476,
+    "in_window": 315,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/289530af-c4a8-4888-97fa-f40eee47a67d.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/28f50183-7689-4673-9595-0841cbb5bd3b.jsonl",
+    "rows": 228,
+    "in_window": 195,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/2a24fd4b-a66c-4eef-9427-3d45c896c5de.jsonl",
+    "rows": 201,
+    "in_window": 168,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/2acd86a8-feb7-4b12-a739-45c8a070f427.jsonl",
+    "rows": 734,
+    "in_window": 556,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/2c607b59-6794-481b-bb7b-4c3bc6b0c118.jsonl",
+    "rows": 419,
+    "in_window": 279,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/2cfdf4ce-883a-4fff-87e8-46d03e191f53.jsonl",
+    "rows": 702,
+    "in_window": 484,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/2fdcb72a-25d5-4f4f-9611-ea8f00e65581.jsonl",
+    "rows": 363,
+    "in_window": 308,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/302f16cc-68fa-4b44-ba84-26ae6fae9902.jsonl",
+    "rows": 341,
+    "in_window": 215,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/32eb7823-df5f-45af-b809-2f20e3fbdb74.jsonl",
+    "rows": 203,
+    "in_window": 174,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/341763dc-73e1-44b6-9f96-a1cdff8fae46.jsonl",
+    "rows": 35,
+    "in_window": 23,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/341ad344-0345-4b85-998b-3d52047fb0dd.jsonl",
+    "rows": 210,
+    "in_window": 158,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/3516712b-5c38-4565-a152-b6c0b0e964e0.jsonl",
+    "rows": 448,
+    "in_window": 306,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/35b06dd9-9be9-4aa5-8859-39efd52f7674.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/368fcf42-97e5-4fef-8cfc-cade27a5b820.jsonl",
+    "rows": 302,
+    "in_window": 194,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/381f2e42-ebfc-462b-abc2-9f360da2313f.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/39f1c220-cb0c-470b-af3b-1b3d89086d24.jsonl",
+    "rows": 149,
+    "in_window": 109,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/3ab0268b-b8fa-444c-8df2-1eb43229a12f.jsonl",
+    "rows": 421,
+    "in_window": 271,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/3d753e79-ed7d-4c83-bb11-7aad5be95390.jsonl",
+    "rows": 8058,
+    "in_window": 6025,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/3f132ce8-b480-4023-9563-17ef1d3a4138.jsonl",
+    "rows": 439,
+    "in_window": 300,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/3fc12876-1297-433e-b32d-02e304c6673e.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/40b0b613-6f48-41f9-960f-299d0c20c702.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/40dafaa1-e449-4259-8ee3-9674ca1a032a.jsonl",
+    "rows": 284,
+    "in_window": 178,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/40df67fb-de85-473f-a04b-be0323d66927.jsonl",
+    "rows": 3093,
+    "in_window": 2263,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/4151ad78-031d-4f17-ab2c-bd366991b9af.jsonl",
+    "rows": 364,
+    "in_window": 246,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/42be5a0a-afe7-4eeb-8750-26ef6113311c.jsonl",
+    "rows": 36,
+    "in_window": 23,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/4558336e-be5b-4b53-acfe-f1ae1370b968.jsonl",
+    "rows": 309,
+    "in_window": 229,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/47c78c94-67e9-42ef-bba5-d79641fe33fc.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/47e41693-5f74-4bc2-adf0-83dd0d77943f.jsonl",
+    "rows": 445,
+    "in_window": 380,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/47f7de14-ba59-4cac-8035-8267b5bf720a.jsonl",
+    "rows": 550,
+    "in_window": 370,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/4902b3d8-d542-4edb-8d9c-6a52f4f3cb53.jsonl",
+    "rows": 277,
+    "in_window": 237,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/4ddac05f-532a-4aa2-816d-c3d714bf4966.jsonl",
+    "rows": 391,
+    "in_window": 279,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/4f059d29-512e-4f63-9714-e64bd92b6136.jsonl",
+    "rows": 106,
+    "in_window": 61,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/501f8afd-6760-4e2f-a3b8-cdb57ee4d169.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/50e41d66-8848-49ce-94ff-a0f45d73b537.jsonl",
+    "rows": 545,
+    "in_window": 421,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/517b5de9-49f1-466e-b0a4-7a07ecdbf080.jsonl",
+    "rows": 95,
+    "in_window": 56,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/51e634f0-b203-4936-825d-552f74e5d397.jsonl",
+    "rows": 284,
+    "in_window": 190,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/52474f62-2148-441b-a134-330505b8099e.jsonl",
+    "rows": 365,
+    "in_window": 256,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/54350ec5-8b7f-42f3-a13a-b1c6435ec02d.jsonl",
+    "rows": 253,
+    "in_window": 215,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/54fd6a50-0d07-44b4-a86e-e277bf2b74c4.jsonl",
+    "rows": 348,
+    "in_window": 224,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/5699c0c8-c6c7-4226-bfe6-e1823a0c2c0b.jsonl",
+    "rows": 433,
+    "in_window": 289,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/5755dd8a-3c29-40a7-adb7-1f77ab64edd3.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/5800a593-dac9-4bab-9940-0513b5d92a15.jsonl",
+    "rows": 367,
+    "in_window": 239,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/5a3b114b-096e-4df8-b5db-1f307f08a711.jsonl",
+    "rows": 184,
+    "in_window": 159,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/5a6f0894-4afb-4333-8e0b-dfd765a293e1.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/5adfdd0a-f3dc-4a3b-ac58-ecd6517486d9.jsonl",
+    "rows": 210,
+    "in_window": 181,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/5f192377-2377-47d8-bb5e-3dd0206aeb3a.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/60c3ca77-e7b2-4b5a-80a7-4cd75ef982ec.jsonl",
+    "rows": 252,
+    "in_window": 217,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/60c47646-574e-4f12-a267-eb9fb05899d7.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/60ce3eaf-50f5-4b6f-af4a-4559270b2028.jsonl",
+    "rows": 252,
+    "in_window": 174,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/61548815-16b1-4ac2-ad17-60ab386e1ec3.jsonl",
+    "rows": 300,
+    "in_window": 204,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/617d0b00-a1d5-4e3f-bf9a-76e291b21776.jsonl",
+    "rows": 577,
+    "in_window": 359,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/618f82ee-2f8d-4498-b446-9a28c5741b0e.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/61a698dd-dfa2-41bf-aef3-93ca05e5634c.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/61b04a16-aa84-47a5-99a9-8749083776a4.jsonl",
+    "rows": 650,
+    "in_window": 484,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/63d2fe85-15ca-4eeb-a282-d92327ab72b8.jsonl",
+    "rows": 492,
+    "in_window": 332,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6402c873-95c1-44db-801a-4fc54cc840c6.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6407d89c-1c73-41d2-85ea-be038b41729e.jsonl",
+    "rows": 198,
+    "in_window": 167,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/649e4d72-6e49-4c86-bcaa-b70350d69712.jsonl",
+    "rows": 197,
+    "in_window": 170,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/67578bf2-1f1e-4590-8a58-a8cf316b9d08.jsonl",
+    "rows": 353,
+    "in_window": 312,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/67cfbcd4-8efa-4946-b933-4507f29b2326.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6839c91a-0e51-456e-afc1-291942d08289.jsonl",
+    "rows": 2422,
+    "in_window": 1730,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6a87123b-7c5d-44d5-b82e-574c621c7a7f.jsonl",
+    "rows": 401,
+    "in_window": 266,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6b2f26ba-ec2c-40ea-b7d6-9ed039f6d375.jsonl",
+    "rows": 483,
+    "in_window": 405,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6d9e4c75-819c-4102-a36d-80f007c6e942.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6f0152eb-4b02-4b2b-aae8-f1ca45e907ae.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/6f624065-2694-41fb-bc2a-e895d72a18e3.jsonl",
+    "rows": 450,
+    "in_window": 287,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/745220ae-7f4d-4caa-8b91-e25639936794.jsonl",
+    "rows": 307,
+    "in_window": 217,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/75bcd5fc-0466-4ebc-9775-a623418f4ed5.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/764451cc-7574-4567-9288-f1d10785b747.jsonl",
+    "rows": 255,
+    "in_window": 220,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/787fd784-4baa-48e9-8087-0b0fd8dc1928.jsonl",
+    "rows": 489,
+    "in_window": 383,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/78f0347b-90f8-4a4d-a7cc-b47178b8ef64.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/79bc59e0-ae0b-413a-aa2e-65a25d3a9e19.jsonl",
+    "rows": 347,
+    "in_window": 224,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/7a9494ce-d083-42fe-aecc-4cd142d2d4f3.jsonl",
+    "rows": 1381,
+    "in_window": 1122,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/7ace8abc-e964-4d55-ba06-51b411fe3ae1.jsonl",
+    "rows": 584,
+    "in_window": 412,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/7b4470c8-8d1e-41ba-b196-682a55f3962f.jsonl",
+    "rows": 510,
+    "in_window": 362,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/7cae42ee-b8e0-47fc-8ee0-7438d2baf9ff.jsonl",
+    "rows": 1150,
+    "in_window": 951,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/7d0e378a-8165-499b-b0ea-dba579400d84.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/7dc0fa23-48d8-4fab-82a4-cf2b9ce942fa.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/8171c9b2-8115-4c3e-91ee-9ca2735b4a12.jsonl",
+    "rows": 459,
+    "in_window": 323,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/8380943c-d2ed-4493-9848-6562df41cd7b.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/8413abcc-b256-4745-bcc1-91ec6aa13d12.jsonl",
+    "rows": 265,
+    "in_window": 220,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/847f865c-b445-46a8-a497-d65943bd407f.jsonl",
+    "rows": 243,
+    "in_window": 210,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/850f652e-e2dd-43fa-ba2f-c8441e60e3e0.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/858b3a98-9555-4d3d-9e7c-e726fc8e5bc5.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/87d8e8a0-7e42-42f5-8767-7d98b4d6a6e3.jsonl",
+    "rows": 177,
+    "in_window": 150,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/88522496-7de2-48a9-a5b4-9eda70fff21b.jsonl",
+    "rows": 378,
+    "in_window": 243,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/88ccda45-9172-4edb-828f-d72899b8915a.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/89e8887c-8e04-4dc0-81ff-8f1302ff83ef.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/8a79472b-0bea-4e22-91a0-1edaa8c6ea22.jsonl",
+    "rows": 339,
+    "in_window": 221,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/8afaddc5-7433-4e20-b48d-e7f07be19f9d.jsonl",
+    "rows": 386,
+    "in_window": 253,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/8f5acf40-ce2f-4ab5-aca0-e0835e15c4cf.jsonl",
+    "rows": 436,
+    "in_window": 379,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/8f638c71-c2f0-41c0-b70c-2a000611eff9.jsonl",
+    "rows": 258,
+    "in_window": 221,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/903416eb-ea91-4a48-af34-b553f699145f.jsonl",
+    "rows": 457,
+    "in_window": 309,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/905e4209-eef0-4220-b8c5-68acfd1746b5.jsonl",
+    "rows": 492,
+    "in_window": 326,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/92307458-74b8-48ec-90de-696250764c8b.jsonl",
+    "rows": 330,
+    "in_window": 214,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/92ee64cc-7dc2-4c5c-b0da-442499f4ff22.jsonl",
+    "rows": 271,
+    "in_window": 165,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9481406d-c3f2-4787-ac8f-92e0b64fe296.jsonl",
+    "rows": 859,
+    "in_window": 702,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9560b6d9-596b-4ac5-8269-6e5f4d1fd704.jsonl",
+    "rows": 431,
+    "in_window": 284,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9567e0ea-fde9-4feb-b5f2-bc3c79b5cd93.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/96768c2f-b147-4806-881b-60c6f16691f1.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/978e7bbf-401f-4f4d-bc6b-0e7dfef89a62.jsonl",
+    "rows": 340,
+    "in_window": 248,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9b51c8df-e268-4158-8db6-e5ef26ee7b64.jsonl",
+    "rows": 209,
+    "in_window": 178,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9c29a621-f259-44f2-84db-681387b6d6b6.jsonl",
+    "rows": 287,
+    "in_window": 256,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9c4df37b-7573-47e7-830c-dea9f089e3e0.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9cf4e364-ab1e-487c-8482-a29f8c9f9d81.jsonl",
+    "rows": 432,
+    "in_window": 282,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9d5f9072-d1b9-40ce-89be-ed59959e40e9.jsonl",
+    "rows": 59,
+    "in_window": 37,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9de87c1e-c44c-45c7-8fcb-aa3350669d73.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9dffb045-1eb8-47b4-ac62-74caa62ad7ff.jsonl",
+    "rows": 276,
+    "in_window": 236,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9e818b9f-f3e3-4743-8f1d-0f894c6a4d06.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/9ff12346-b62f-4a99-9993-13c49b9d00bc.jsonl",
+    "rows": 243,
+    "in_window": 210,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/a133d93b-dca5-4328-a150-2853e90f8f7e.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/a5b9bf14-61df-4dd9-ad80-6957c9f4a1c8.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/a665cabe-d2a1-470d-8f7d-16a0d00b2a79.jsonl",
+    "rows": 334,
+    "in_window": 237,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/a8793a64-e79e-4462-9636-1ad6c752ea9d.jsonl",
+    "rows": 233,
+    "in_window": 200,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/abb227f1-59c2-48db-967c-e88eb3f8d628.jsonl",
+    "rows": 220,
+    "in_window": 160,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ac60c817-fe62-41a6-8a1f-7d6dd3de60e6.jsonl",
+    "rows": 312,
+    "in_window": 211,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ad406e1c-72b0-406e-b39b-a2d8df6d48b4.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/af6cb590-b66a-4903-a65d-32727c4af926.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/b569c428-3cd8-497f-986d-c5fc8ca144ee.jsonl",
+    "rows": 201,
+    "in_window": 170,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/b5f74a50-8e37-49d5-b299-eacbe0b3e5c9.jsonl",
+    "rows": 424,
+    "in_window": 261,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/bd4fbb2e-d417-4b4e-b308-4a9f57e00ee4.jsonl",
+    "rows": 160,
+    "in_window": 135,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/bee8b42a-ff1f-4b6f-8d01-e7e2b1a910a3.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/bf3c7a8c-c4e7-4583-8dfa-e93032b670c8.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/bf5aae11-84f4-4f63-a1d2-68b53db42f00.jsonl",
+    "rows": 860,
+    "in_window": 712,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/bf8a2267-2d2f-4416-8ad5-09f98c0d8b3d.jsonl",
+    "rows": 304,
+    "in_window": 246,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c13a46f4-36c5-4462-bb1f-4e11d7fdee06.jsonl",
+    "rows": 324,
+    "in_window": 281,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c24a142d-e4ec-4d6a-b00f-eddc3ed21b98.jsonl",
+    "rows": 36,
+    "in_window": 23,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c5e87e92-452b-4cc2-99f5-010f3ee186bc.jsonl",
+    "rows": 186,
+    "in_window": 156,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c61adc6e-f81e-4551-8c8e-6c364eb59af0.jsonl",
+    "rows": 295,
+    "in_window": 264,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c7752996-1ebd-411d-ad5e-551f940c1c9b.jsonl",
+    "rows": 133,
+    "in_window": 112,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c7edebe8-2c0a-4547-be44-73c6db3c409a.jsonl",
+    "rows": 401,
+    "in_window": 342,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c98f2643-e6fe-4c87-b07d-0b79419e0e99.jsonl",
+    "rows": 702,
+    "in_window": 494,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/c9d4f0d4-00ce-4f18-8b73-93e10d4c115b.jsonl",
+    "rows": 544,
+    "in_window": 465,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ca71522c-761a-4a79-95fc-b480f86579b2.jsonl",
+    "rows": 443,
+    "in_window": 388,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/cac0e4fe-6030-4385-875e-522a0e2af313.jsonl",
+    "rows": 492,
+    "in_window": 317,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/cb484b00-cf50-4434-826b-66b22cc8de06.jsonl",
+    "rows": 431,
+    "in_window": 356,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/cc59a986-2fb1-445d-a055-bcbb0f0da0e2.jsonl",
+    "rows": 40769,
+    "in_window": 29130,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ce830768-0cc2-43fd-be95-2bee8cbbc6b6.jsonl",
+    "rows": 451,
+    "in_window": 299,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/cf43d86d-eafd-4042-8b93-f372e4c5a950.jsonl",
+    "rows": 205,
+    "in_window": 176,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/cf8b0609-7451-4281-bd2e-2c6cc5dd7665.jsonl",
+    "rows": 221,
+    "in_window": 188,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d0565a8e-f05d-48d3-a7dd-0406a4fc89e6.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d096f27c-5e1e-4cbc-aa9b-8b777b42a084.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d128d3e2-0d82-4738-869c-08aeef97458b.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d140f744-29af-496a-8a3e-ed63fa0d6024.jsonl",
+    "rows": 628,
+    "in_window": 394,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d1796c18-ec66-4de9-b077-cb8676fd70df.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d18214fe-1689-414c-a22e-146cafc3ebe2.jsonl",
+    "rows": 237,
+    "in_window": 202,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d1c02703-e920-4fec-ad4f-e8b7ef628f4b.jsonl",
+    "rows": 267,
+    "in_window": 232,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d1e53f07-3389-4c0d-8cd7-314871c787a5.jsonl",
+    "rows": 250,
+    "in_window": 217,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d2e3090b-8a42-4265-b9e2-1f60160f7158.jsonl",
+    "rows": 279,
+    "in_window": 246,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d305ed7c-d4ca-414c-8de0-ed86c2602e49.jsonl",
+    "rows": 189,
+    "in_window": 163,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d412e008-9569-4fa2-960d-f6901c0d01cf.jsonl",
+    "rows": 35,
+    "in_window": 26,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d41a8925-f85d-4446-be55-d3a0f745e16e.jsonl",
+    "rows": 212,
+    "in_window": 181,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d41bdc45-2941-48e1-ba0b-b8678c884b45.jsonl",
+    "rows": 397,
+    "in_window": 307,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d4744bb5-fc37-4d55-9e6a-d0c0dd7f89f5.jsonl",
+    "rows": 181,
+    "in_window": 156,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d4d5d7c1-c040-4fa9-98d6-3d6a69cafd35.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d7d40728-864e-4cd5-94de-06a1eedfd81f.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d8812c80-ab8a-4d02-995f-6ebfe94a6949.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/d954092d-470d-4b18-9a98-caa31b718809.jsonl",
+    "rows": 103,
+    "in_window": 76,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/da2b3b52-e456-4078-aebd-bf3dad2f9c77.jsonl",
+    "rows": 195,
+    "in_window": 140,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/dc785fbc-bda5-4a69-a60b-5f832de9e81c.jsonl",
+    "rows": 35,
+    "in_window": 25,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/dcb60c20-d384-4159-9e57-9a7a28002e41.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/dd5e15ff-30df-4a5c-9ae6-a6de5b32e9e9.jsonl",
+    "rows": 244,
+    "in_window": 211,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/dedb8a66-a5ef-4312-b55f-620051db1fd4.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/dfa4bdab-b0ff-469e-bfc8-f26af8cd95aa.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e04ea5ba-761b-40ad-9cf4-5097f2ab52dc.jsonl",
+    "rows": 1598,
+    "in_window": 1322,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e05d0fcf-815e-4bfc-8e91-8863c60392cc.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e33c263f-501a-450c-bc97-430a982924f4.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e3cfb9a7-9e4c-458e-ba6d-1f3dc8f07d8d.jsonl",
+    "rows": 565,
+    "in_window": 410,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e432a79a-7a19-47f8-80f9-cb4768902a93.jsonl",
+    "rows": 35,
+    "in_window": 25,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e5155d12-9afc-45a5-b2db-334d44cecc8b.jsonl",
+    "rows": 37,
+    "in_window": 22,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e825c67f-7523-4356-9254-2f6b40270a38.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e8768a9a-7dfc-4677-88e0-d9a755c34db6.jsonl",
+    "rows": 75,
+    "in_window": 49,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/e9f78422-4c33-40cd-a12e-3ddf3edd73fb.jsonl",
+    "rows": 257,
+    "in_window": 154,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ead3fdcd-ef1b-4681-9324-f745ffec2fcb.jsonl",
+    "rows": 444,
+    "in_window": 265,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ee614a74-0d82-45bd-b62d-1ab926ccd0cf.jsonl",
+    "rows": 521,
+    "in_window": 341,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ee95ed69-2894-4545-ae3d-4ba4d81bc5c3.jsonl",
+    "rows": 356,
+    "in_window": 256,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/ef8dba61-95ab-44db-8565-03c3156263f1.jsonl",
+    "rows": 267,
+    "in_window": 166,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f193e0cf-fdd8-4e7e-bf18-14cc845da59b.jsonl",
+    "rows": 29490,
+    "in_window": 19873,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f268c906-72fd-4ccc-9abb-c6425a785592.jsonl",
+    "rows": 298,
+    "in_window": 198,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f4b84693-96f3-4829-93bf-68dc27541bdf.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f4d5b78a-e7d8-4bd1-9006-652a51fa95bb.jsonl",
+    "rows": 49098,
+    "in_window": 36263,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f505bfeb-4263-4a39-a6d3-cc4c35fb8df3.jsonl",
+    "rows": 368,
+    "in_window": 242,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f6c9436f-520c-4533-8bb8-45e16f0f19c6.jsonl",
+    "rows": 476,
+    "in_window": 394,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f73fdab1-dd01-4234-acd5-d63b3421679b.jsonl",
+    "rows": 628,
+    "in_window": 448,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f7f38add-812c-4009-8944-30e71c90583b.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f8090888-8a24-4313-8984-340dd718228e.jsonl",
+    "rows": 46,
+    "in_window": 29,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f80a9b98-8dc5-437e-8304-c959d61de41c.jsonl",
+    "rows": 248,
+    "in_window": 212,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f8272ed7-97f8-4acb-b64b-3fe330623179.jsonl",
+    "rows": 354,
+    "in_window": 222,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f8345e33-2fff-459d-9a5e-cf7781a79126.jsonl",
+    "rows": 613,
+    "in_window": 447,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f8e5055d-47f6-4520-abc3-9b92d899ce1e.jsonl",
+    "rows": 555,
+    "in_window": 379,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/f968efd7-5d5b-4b64-a8ff-e134f802c20e.jsonl",
+    "rows": 255,
+    "in_window": 222,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/fa343256-e235-4bf3-834b-6c4a38e941f3.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/fb5138c3-321b-4c3b-a781-cedd47f05580.jsonl",
+    "rows": 36,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system/fd27aac5-91e8-402f-a3fe-4b27c7e3f0ce.jsonl",
+    "rows": 221,
+    "in_window": 188,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-agent-aa2c203eb3ff0891f/58106f2e-dfe8-43c8-800f-fd15d04ade74.jsonl",
+    "rows": 101,
+    "in_window": 84,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-agent-aa2c203eb3ff0891f/5ac15b8c-2c48-4148-b31c-29eeb1599d10.jsonl",
+    "rows": 101,
+    "in_window": 84,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-agent-aa2c203eb3ff0891f/5ed94fcb-9dac-4d15-91a2-4756de2e9967.jsonl",
+    "rows": 123,
+    "in_window": 104,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-agent-aa2c203eb3ff0891f/a05d7fbd-ee83-4654-8b27-e21f3984cf42.jsonl",
+    "rows": 203,
+    "in_window": 170,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-agent-aa2c203eb3ff0891f/cb0a445b-a066-425d-8d8d-d5308b705f57.jsonl",
+    "rows": 189,
+    "in_window": 160,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-agent-aa2c203eb3ff0891f/f1303900-be02-47ed-8604-c8b1540d83ef.jsonl",
+    "rows": 136,
+    "in_window": 113,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-app-release-fix-41e98400/a0485ba1-b64b-41fd-a741-cc728ea5a919.jsonl",
+    "rows": 615,
+    "in_window": 418,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-app-release-fix-6ee447bc/d965b95b-e09b-4b39-bdb5-0ea21234e5a8.jsonl",
+    "rows": 427,
+    "in_window": 290,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-app-release-fix-t-f60e1d40/457d36a4-a263-418e-adc7-97438de32f6e.jsonl",
+    "rows": 683,
+    "in_window": 452,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-apply-twitter-thread-36bf7c/3bd401ad-df6e-40ef-9536-d044f02d8873.jsonl",
+    "rows": 1641,
+    "in_window": 1177,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-brief-check/6256a5e0-322e-4fc3-a9c6-ce085009ef5f.jsonl",
+    "rows": 912,
+    "in_window": 676,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-clear-failed-wt/46b7d4ac-2f60-453e-99d6-3aacbcee54cd.jsonl",
+    "rows": 405,
+    "in_window": 345,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-competent-pascal-57aece/8839813a-4d07-4209-ae97-9184a9128d57.jsonl",
+    "rows": 259,
+    "in_window": 178,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-determined-colden-3354cd/54e2302c-e907-46a4-b374-1f4d0ac82656.jsonl",
+    "rows": 224,
+    "in_window": 157,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0757-migration-order/3626222d-0cc8-4704-a5c7-f187dd036512.jsonl",
+    "rows": 737,
+    "in_window": 466,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0757-migration-order/54fd6a50-0d07-44b4-a86e-e277bf2b74c4.jsonl",
+    "rows": 298,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0757-migration-order/9fc8cf8f-018c-4416-8539-d91f0a43315f.jsonl",
+    "rows": 560,
+    "in_window": 356,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0757-migration-order/ee06f53c-6165-4062-964b-967f9faca004.jsonl",
+    "rows": 381,
+    "in_window": 248,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0769-0770-ledger-prefix/d4e7154f-4a83-4946-b331-0ad9f42223b2.jsonl",
+    "rows": 539,
+    "in_window": 346,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0783-ledger-prefix/0223a840-6545-43e0-8cf0-15c95af08a78.jsonl",
+    "rows": 533,
+    "in_window": 372,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0783-ledger-prefix/2877a6c8-a5bb-4b3e-a615-6f28d8d66b2d.jsonl",
+    "rows": 597,
+    "in_window": 384,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0783-ledger-prefix/8afaddc5-7433-4e20-b48d-e7f07be19f9d.jsonl",
+    "rows": 388,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0783-ledger-prefix/e58d94d7-dd6f-484d-ab03-05978f9a68b3.jsonl",
+    "rows": 500,
+    "in_window": 339,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0783-migration-order/0265f124-51b6-4194-aff6-e8a421c47661.jsonl",
+    "rows": 564,
+    "in_window": 345,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0783-migration-order/a1d722c6-e4dd-489b-b0df-b594d661156e.jsonl",
+    "rows": 498,
+    "in_window": 318,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-0783-renumber/e847828e-65e0-4360-af97-236bfeaec64a.jsonl",
+    "rows": 652,
+    "in_window": 395,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-r3-mic-test/0b3e330f-37e7-453e-91d9-5b1db81b603b.jsonl",
+    "rows": 513,
+    "in_window": 338,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare/03b01d33-0cc5-42ab-9b7c-2950e909bd41.jsonl",
+    "rows": 429,
+    "in_window": 278,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare/4ed89ced-70ec-48fc-85c7-6432b45c7af2.jsonl",
+    "rows": 455,
+    "in_window": 287,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare/65d56122-73a2-4605-a875-a2f887d56b00.jsonl",
+    "rows": 688,
+    "in_window": 429,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare/6f624065-2694-41fb-bc2a-e895d72a18e3.jsonl",
+    "rows": 453,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare/79bc59e0-ae0b-413a-aa2e-65a25d3a9e19.jsonl",
+    "rows": 350,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare/88522496-7de2-48a9-a5b4-9eda70fff21b.jsonl",
+    "rows": 380,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare-t581502f0/9b7d0310-0e26-4551-b0b2-5b50c866ece7.jsonl",
+    "rows": 457,
+    "in_window": 305,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-release-prepare-t581502f0/f8272ed7-97f8-4acb-b64b-3fe330623179.jsonl",
+    "rows": 356,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-verify-live-poll/32a8a630-9e60-413f-976b-f2288304f7ca.jsonl",
+    "rows": 434,
+    "in_window": 277,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-verify-live-poll/f68463b0-6866-43c6-85c8-5c8e59fd8eb1.jsonl",
+    "rows": 462,
+    "in_window": 309,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-verify-live-propagation/2c607b59-6794-481b-bb7b-4c3bc6b0c118.jsonl",
+    "rows": 424,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-verify-live-propagation/6602ccb5-78b0-4eac-a0de-c51fa834b62e.jsonl",
+    "rows": 442,
+    "in_window": 295,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-app-verify-live-readback/6d8ffa21-f588-4a36-9096-6ba6fbc86a43.jsonl",
+    "rows": 439,
+    "in_window": 292,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-catch-me-up-writer-grant/c8aab0fb-07be-4f3b-bb67-0d4eb1d57eb0.jsonl",
+    "rows": 428,
+    "in_window": 275,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-catch-me-up-writer-grants/2606ec60-3a73-4f18-8194-d4ba78b4528c.jsonl",
+    "rows": 565,
+    "in_window": 360,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-catchup-writer-grant/d40ed715-f404-49ab-9708-089563527550.jsonl",
+    "rows": 523,
+    "in_window": 344,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-clear-failed-worktree/5e3a8556-8e89-48ab-9bc5-06d3be2d9cb4.jsonl",
+    "rows": 293,
+    "in_window": 188,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-credential-health-gh-ratelimit/3251be84-7e4b-4da5-8bd1-c9d23f6153ab.jsonl",
+    "rows": 483,
+    "in_window": 316,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-forward-0757-order/157cdd85-4d44-4157-88bd-15481e71ed0b.jsonl",
+    "rows": 780,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-forward-0769-renumber/152b71d0-cd03-4b9d-a2b3-8cd0e56faaa9.jsonl",
+    "rows": 950,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-forward-renumber-0769-0770/d4d7429a-09df-45e4-8ad8-908c069eba3a.jsonl",
+    "rows": 613,
+    "in_window": 378,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-forward-t2fb97521/7887f5f5-cd4b-473c-be00-caa83dc3b14c.jsonl",
+    "rows": 630,
+    "in_window": 421,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-launchd-reload-kills-running-jobs/9d1bbaa1-a46e-4ebc-a8c7-5c665df94885.jsonl",
+    "rows": 541,
+    "in_window": 350,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migrate-lock-retry/1b5e7e06-0d30-470b-8cf0-858fa4d18d6a.jsonl",
+    "rows": 505,
+    "in_window": 314,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migrate-lock-retry/1f266b9c-b3c9-413c-a847-ccbfc233b1e9.jsonl",
+    "rows": 372,
+    "in_window": 240,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769/71b54582-e43c-4da2-8954-ebadb0f89183.jsonl",
+    "rows": 534,
+    "in_window": 361,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769-0770/782051bf-4ace-4ce8-9959-d1cfcc143929.jsonl",
+    "rows": 625,
+    "in_window": 417,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769-0770/905e4209-eef0-4220-b8c5-68acfd1746b5.jsonl",
+    "rows": 494,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769-0770/92307458-74b8-48ec-90de-696250764c8b.jsonl",
+    "rows": 332,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769-0770/a5418fc9-457f-47c8-ad10-2d5377f381c7.jsonl",
+    "rows": 522,
+    "in_window": 351,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769-0770/c4d53fb6-f42c-490d-9077-5af339da1942.jsonl",
+    "rows": 1214,
+    "in_window": 796,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769-0770/c907a0c8-6ce9-4b57-a86e-dc33337505dc.jsonl",
+    "rows": 559,
+    "in_window": 384,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-order-0769-0770/d539ba3d-a280-4b5e-a3ba-d81007ba4e82.jsonl",
+    "rows": 646,
+    "in_window": 433,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-prefix-0769-0770/09a6efb2-dd16-44da-89dc-1cd946191386.jsonl",
+    "rows": 502,
+    "in_window": 351,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-prefix-0769-0770/5ab269f1-40f7-475a-8649-8f140a757ac4.jsonl",
+    "rows": 539,
+    "in_window": 361,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-prefix-0769-0770/d2e89c45-3edb-459a-9aeb-1c353a5e95f0.jsonl",
+    "rows": 991,
+    "in_window": 682,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-prefix-0769-0770/de083180-6cf5-4cbc-92e2-449711fafcc0.jsonl",
+    "rows": 421,
+    "in_window": 286,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-migration-reorder-0771/439eb4f4-8ca1-4e73-af6d-42d573f3825b.jsonl",
+    "rows": 527,
+    "in_window": 346,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-release-health-8d5f00b6/76e00c4f-0897-429a-bde5-a256b11adab6.jsonl",
+    "rows": 596,
+    "in_window": 397,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-release-pipeline-stale-controller/e1d7daa8-484e-4cf7-ad39-bda7abbcb05b.jsonl",
+    "rows": 411,
+    "in_window": 244,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-release-reload-kill/1e46e5de-5294-4c64-821a-cae3ef024095.jsonl",
+    "rows": 489,
+    "in_window": 316,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-release-worktree-f5a5fab2/b39e90f4-d773-47ee-9f94-4605b7591f7e.jsonl",
+    "rows": 405,
+    "in_window": 255,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-upload-transient-retry/50c55d63-3e25-4949-ba62-2baf72a393bc.jsonl",
+    "rows": 320,
+    "in_window": 197,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-upload-transient-retry/afac27d8-824a-40e5-bee0-a804ec0e5efc.jsonl",
+    "rows": 551,
+    "in_window": 350,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-verify-loaded-no-reload/8038008f-aaf0-4775-8a08-c1f7024895d9.jsonl",
+    "rows": 516,
+    "in_window": 339,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix-worker-upload-retry/b0aeae31-145c-4665-bd65-84edbafeb5ec.jsonl",
+    "rows": 511,
+    "in_window": 332,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix19-release-credentials/dea8b79d-9ac7-4fe2-a9ea-14cfced9c06c.jsonl",
+    "rows": 477,
+    "in_window": 430,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fix8-integration/fd6f1b9b-cfee-4b16-8e94-f82147a3d226.jsonl",
+    "rows": 614,
+    "in_window": 543,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fixfwd-t-6e13e125/f8e5055d-47f6-4520-abc3-9b92d899ce1e.jsonl",
+    "rows": 554,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-fleet-sync-landed-residue/59d90c18-f224-4bbd-9c42-7fb51e6dd4d3.jsonl",
+    "rows": 916,
+    "in_window": 585,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-attempt-first-handoff/f193e0cf-fdd8-4e7e-bf18-14cc845da59b.jsonl",
+    "rows": 4130,
+    "in_window": 0,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-delete-no-value-callers/fc5d8c67-0325-4324-aeea-4695c96da40f.jsonl",
+    "rows": 777,
+    "in_window": 680,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-deterministic-checks/5e1d7f62-3f44-4383-a1be-9918e0653e66.jsonl",
+    "rows": 796,
+    "in_window": 679,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-one-budget-authority/6f112464-3e2a-46d0-9327-342821516340.jsonl",
+    "rows": 453,
+    "in_window": 390,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-one-budget-authority/89588a51-4f3d-4a0d-8050-9d1e13713958.jsonl",
+    "rows": 621,
+    "in_window": 550,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-one-budget-authority/c7c0668d-25c9-4779-9190-509be065cd1b.jsonl",
+    "rows": 402,
+    "in_window": 359,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-one-budget-authority/d9266343-3dbb-4651-bfa7-2464b1f2740e.jsonl",
+    "rows": 199,
+    "in_window": 168,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-system-audit/9c7378ff-74e6-4e2a-ae9b-31d35ab1c08a.jsonl",
+    "rows": 2552,
+    "in_window": 2155,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-unusable/bc8be775-4cce-4333-b689-7ef4190508d5.jsonl",
+    "rows": 944,
+    "in_window": 796,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-value-report/38dec663-7511-40b5-ac19-a467d7f0c7be.jsonl",
+    "rows": 376,
+    "in_window": 331,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-value-report/b7bcd29a-85fd-461a-839d-473df31f6f32.jsonl",
+    "rows": 259,
+    "in_window": 224,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-value-report/f866051a-f94a-4820-93e9-1da816e4d641.jsonl",
+    "rows": 910,
+    "in_window": 777,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-jev-vendor-conformance/f91f4bf8-ebaf-4acf-96bc-96a5c2eadef2.jsonl",
+    "rows": 643,
+    "in_window": 578,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-mac-studio-runtime-test-f14ab2/5340cb41-12fc-4fd8-98f7-de6936285fd4.jsonl",
+    "rows": 410,
+    "in_window": 312,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-model-room-orchestrator-approvals-20261001/638e27df-37d5-4a78-9c0b-be2085de0a56.jsonl",
+    "rows": 38,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-model-room-orchestrator-approvals-20261001/b3b4662f-cc6d-4c01-a520-3f6cc817c76c.jsonl",
+    "rows": 38,
+    "in_window": 21,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-motion-graphics-app-0492c7/ce5bbb41-151e-47f6-b5f7-fbf19ddb8c9c.jsonl",
+    "rows": 175,
+    "in_window": 125,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-practical-kapitsa-c60971/9300cddb-0fd7-4985-b5f8-b7fc02a2fd41.jsonl",
+    "rows": 26502,
+    "in_window": 18813,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-clear-failed-worktree/53419f21-f6a8-4e72-8318-513c144f2f45.jsonl",
+    "rows": 457,
+    "in_window": 282,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-clear-failed-worktree/6c63cf81-a64b-4cc7-b0ea-6e080a288825.jsonl",
+    "rows": 251,
+    "in_window": 150,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-controller-freshness/df1d3e80-753d-4a09-8e5a-9b4c05bc97ce.jsonl",
+    "rows": 519,
+    "in_window": 328,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-fix-acb709fe/5f1156ba-a3d0-4d70-9b4c-e0dd4ba8e5c1.jsonl",
+    "rows": 686,
+    "in_window": 437,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-fix-ee903e6e/f11b54f1-f144-4390-aa66-4f5219aa8c4e.jsonl",
+    "rows": 558,
+    "in_window": 373,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-pipeline-cleared-worktree/0559f4e1-9348-40a2-93f5-dc0150a28579.jsonl",
+    "rows": 887,
+    "in_window": 571,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-pipeline-interrupted-run/5682d238-c781-4617-a52a-5490ac9b41fc.jsonl",
+    "rows": 550,
+    "in_window": 349,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-pipeline-interrupted-run/cd302f10-57e9-430c-9972-d4689fd655fc.jsonl",
+    "rows": 400,
+    "in_window": 245,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-release-verify-live-poll/43e8b781-8980-4e7d-a80f-c548d5df2d87.jsonl",
+    "rows": 463,
+    "in_window": 298,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-reverent-swanson-66a280/1d706351-8d83-4b30-84c6-46a0c6733187.jsonl",
+    "rows": 8,
+    "in_window": 1,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-t-b52ebcbe-app-release-fix/3b9c0b3e-ce55-4109-aa74-0c69dd9ec57d.jsonl",
+    "rows": 529,
+    "in_window": 358,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-t5bf664ff-leads-read-retry/9e78bcef-6519-447f-a521-b0bfaee08062.jsonl",
+    "rows": 484,
+    "in_window": 335,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-test-3d1443/ed42b3f4-bb38-4304-aac0-4a71f8cead93.jsonl",
+    "rows": 113,
+    "in_window": 82,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-verify-pr1492-merge/76c209fd-a96d-42a4-b0dc-bdedc0c7e79c.jsonl",
+    "rows": 645,
+    "in_window": 460,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-verify-pr1492-on-main/924b48b8-2a37-4914-9e30-04280751a9c6.jsonl",
+    "rows": 542,
+    "in_window": 367,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-vigorous-antonelli-1e59c9/d356c8f3-8aec-4d20-8cf4-c24ce603fdd6.jsonl",
+    "rows": 2019,
+    "in_window": 1556,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-w3b-lead-automation-20261001/4ef173af-9208-4e3d-880b-5f8d7c36177f.jsonl",
+    "rows": 941,
+    "in_window": 816,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-w3b-lead-automation-20261001/d4f1f154-b2ec-43dd-8737-6b916542625c.jsonl",
+    "rows": 597,
+    "in_window": 542,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-w3c-audited-automation-01a10775/185e0b73-19a2-4d10-98e8-de9a509a192c.jsonl",
+    "rows": 494,
+    "in_window": 431,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-w3c-audited-automation-01a10775/df2a0abf-44c6-4ae1-85f3-53245a503ef4.jsonl",
+    "rows": 560,
+    "in_window": 485,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-w3c-audited-automation-01a10775/facfab0b-0171-4e67-ba95-b178075ffdef.jsonl",
+    "rows": 580,
+    "in_window": 513,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-wave1-local-floor/0171077a-3714-4891-b0ec-32df7386e153.jsonl",
+    "rows": 511,
+    "in_window": 441,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-wave1-release/00d72194-8b19-447d-a040-b3b99d4016d7.jsonl",
+    "rows": 480,
+    "in_window": 417,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system--claude-worktrees-wave1-release/c7ae50ae-44eb-4e59-92d9-2038e54b7182.jsonl",
+    "rows": 145,
+    "in_window": 126,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1481/097decdc-b2d8-4533-ab1a-e9f05355e5ad.jsonl",
+    "rows": 225,
+    "in_window": 194,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1481/1ad39ee9-5542-424f-bb95-f36f4910cbbf.jsonl",
+    "rows": 869,
+    "in_window": 765,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1481/7804a0d9-b04a-487e-8e2c-0e21bfe16742.jsonl",
+    "rows": 1201,
+    "in_window": 1058,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1481/b05c63d7-7fe4-4724-88db-d96e379af1cb.jsonl",
+    "rows": 576,
+    "in_window": 509,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1481/bf063da7-9d2a-48ba-b7c0-7db5ebdf0a1c.jsonl",
+    "rows": 204,
+    "in_window": 175,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1481/e894d792-97be-4af4-a137-3162895eb544.jsonl",
+    "rows": 202,
+    "in_window": 173,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1484/24ddb9dd-1bda-4b95-ba1c-5e75031933e5.jsonl",
+    "rows": 344,
+    "in_window": 301,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1484/a89c77e1-5bd8-47a6-8505-6f1ae6ed7cb2.jsonl",
+    "rows": 574,
+    "in_window": 507,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1493/0da4405f-ba00-4cc1-9b72-965248949eff.jsonl",
+    "rows": 393,
+    "in_window": 344,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1493/7db63749-c3b6-4e87-a160-0a874cff6456.jsonl",
+    "rows": 1080,
+    "in_window": 959,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1493/7e46807e-4a0d-43f9-a1ff-d4e2f6a81ee2.jsonl",
+    "rows": 408,
+    "in_window": 359,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-ci-1493/bd271218-658a-4b15-83a3-2601024df24a.jsonl",
+    "rows": 1266,
+    "in_window": 1119,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-fix-1483/d4574896-36b6-465a-94ae-a49fb0c187dc.jsonl",
+    "rows": 437,
+    "in_window": 388,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-gatefix/1c4b3467-32c8-4cba-bff5-ef3bb0882ed2.jsonl",
+    "rows": 173,
+    "in_window": 152,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-gatefix/f9f4de86-b02d-444b-aa08-6eb385d9d30f.jsonl",
+    "rows": 223,
+    "in_window": 192,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-opus-catchup-grant/5e856003-f7d5-4937-afda-04b65dd708ec.jsonl",
+    "rows": 746,
+    "in_window": 625,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-opus-eval-chain/974eb4be-5aa5-418a-89d9-660661c2b0f5.jsonl",
+    "rows": 655,
+    "in_window": 522,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-opus-ledger-prefix/3c74b748-c4d2-48fa-ac6e-78f3fd63ae2b.jsonl",
+    "rows": 372,
+    "in_window": 325,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-opus-ledger-prefix/c7474054-b7f1-4707-b7ba-cdbb6dd40171.jsonl",
+    "rows": 664,
+    "in_window": 549,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-opus-watchdog-path/21a10155-25e8-4360-a5a9-831813acfbd4.jsonl",
+    "rows": 396,
+    "in_window": 341,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-opus-watchdog-path/aabca92b-c24f-4210-a8b9-5df1f9719d22.jsonl",
+    "rows": 418,
+    "in_window": 342,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-orch/03b74050-c284-4dfb-a9a9-820c6bb3f3cd.jsonl",
+    "rows": 171,
+    "in_window": 150,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-orch/17b2458c-9bed-471b-b7fe-0db492ad8e62.jsonl",
+    "rows": 110,
+    "in_window": 95,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-orch/3347fe96-aa27-4776-bcac-dea314edeb94.jsonl",
+    "rows": 919,
+    "in_window": 820,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-orch/7dd3956e-4f89-44d1-a92a-af7b7848ac8f.jsonl",
+    "rows": 883,
+    "in_window": 794,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-orch/9bfafa2a-27ef-4cc8-b149-dd71c608f4f2.jsonl",
+    "rows": 133,
+    "in_window": 114,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-orch/e69f70eb-1367-4da0-a663-7174cab3931d.jsonl",
+    "rows": 726,
+    "in_window": 647,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-orch/f74e37f1-2c18-4ca1-ad93-28e23ea95378.jsonl",
+    "rows": 444,
+    "in_window": 399,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-out-wt-tailscale-boot/d0a9ad81-afa2-4526-a6d5-cf923af530da.jsonl",
+    "rows": 298,
+    "in_window": 249,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-pstack/62949b11-3a37-4262-8b31-1813fc0713f0.jsonl",
+    "rows": 179,
+    "in_window": 152,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-pstack/d9fb62be-b9a2-4654-8612-066d9cbbf15d.jsonl",
+    "rows": 268,
+    "in_window": 221,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-retro-context/8efc5ba1-0a19-4f5c-a0d1-ca1fd42f1cf6.jsonl",
+    "rows": 373,
+    "in_window": 322,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-retro-jev-admission/debc5f97-735a-42a5-9031-758c6be2e5bb.jsonl",
+    "rows": 1295,
+    "in_window": 1162,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-wt-pipeline-gh-retry/5714be08-8adc-4d30-9627-6c74e85e5b54.jsonl",
+    "rows": 384,
+    "in_window": 327,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-Users-booko-carr-system-wt-watchdog-gql/511bcc43-7908-4f0a-ac20-ba6f2aa73b18.jsonl",
+    "rows": 603,
+    "in_window": 518,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/058329c4-3516-430d-9f62-335c122bba81.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/05fb944b-5438-47bd-917a-f4d0b10cd928.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/0b3490a9-8b15-478a-9c97-dde1b8f6ecaf.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/0d979be6-8c4d-4665-a659-e91b991142e0.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/1d83e3a1-542c-4a6f-ba55-89cc26b834ed.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/1deaa555-c5f2-42a7-8125-4b7ee4aa229b.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/21aa76f9-531c-4075-8526-14485d55dbae.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/2435665e-bb0d-486b-a20f-ef6d6f05060e.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/278bc79f-b566-4a69-8f45-3d05b150f060.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/2db84002-45ef-4bf6-8283-926befed4614.jsonl",
+    "rows": 18,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/2fabfdac-f6bf-4897-ac4a-711c2b7adda4.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/3a8657ce-2842-4b64-b386-e5c7490eb89f.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/3e1a4656-57b3-4284-925b-e7624c29ee70.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/721f2a74-01d2-46de-af5d-1ca4ab804076.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/745bc1bf-372a-40c1-b09c-fb9825a4af50.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/747aff62-98ef-4ab3-816e-6a4f9af55dc1.jsonl",
+    "rows": 19,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/7baf698a-fcf6-4ad7-b1b4-83cccd26761b.jsonl",
+    "rows": 19,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/7f64696f-aebf-4c43-93cb-b444cc2703e7.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/8037d722-1a01-4a36-8a70-dbde05a999fe.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/835785e7-fb80-47a4-9f78-bb36d55f9b6d.jsonl",
+    "rows": 19,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/84492ab5-ea79-4afa-8969-90f41b7a924d.jsonl",
+    "rows": 18,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/90942b95-8416-4414-9c20-5229d909ea2f.jsonl",
+    "rows": 18,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/9c6e40c4-a98a-4788-9990-4c662a90e2d5.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/a3d0a974-075a-4cfd-be31-b291e1b69de4.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/a955f0d8-e737-4181-a6fc-dc66928ab490.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/b5b6eaa0-dde4-4c46-ab61-08821feb2654.jsonl",
+    "rows": 19,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/b669e4eb-8635-4050-9acb-1bbc5c4f6d82.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/b87d8ce9-0fe7-4a4f-a86a-41cb92784c69.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/b8dfae65-dbfc-4952-83a8-8778406d5526.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/c8b68c21-50f4-44d7-b262-f1a6f5ad4c5c.jsonl",
+    "rows": 18,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/c938db28-a1de-4f05-8558-e2419d65e4a9.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/ccca1435-ccc8-4be9-a228-d8e6d8b2826f.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-bench/fe937160-4fce-4d2d-a4eb-4cd41b4963f4.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/0df67f92-7c48-43a2-989f-7bc29ca6f8ab.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/102dae0c-1b11-4ecd-92e8-9445775f09b5.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/1f3d79de-4037-42c3-a498-4df10792f730.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/25d223e4-5aec-47a1-9538-408a1463c8e3.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/2add1943-622c-4682-a99d-ad5b93a08b1f.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/2c5cca15-8204-4847-b8da-cd1612c385ca.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/3eb5b0b2-7a80-4f24-b93f-fe536b813455.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/42576904-f53e-47ea-a1a7-1cd46e195e98.jsonl",
+    "rows": 18,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/4480c82f-5fcb-49f7-9c21-6863e847c451.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/4e73f7f6-5971-4f7f-958b-2d60a5575199.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/57b17f8a-4042-496f-9af3-339391ad2ca2.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/693e5fc8-4988-4492-85d8-bcf932a2c4ba.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/6c50aaa7-a05f-4fd0-a5bc-9da43d5f724e.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/72a365f6-c729-4229-80aa-f0da25a8b9c2.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/79282207-3901-4330-b4b4-e3725c9eb8dc.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/7b2a67c5-d6dd-46cf-982a-1e8acdb1aaf9.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/7cc88780-cf73-4dfd-a74a-839d987e9d49.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/7d7eff06-892d-4b47-ab38-2ee97522dcf8.jsonl",
+    "rows": 18,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/7e983468-cd03-4ea8-b9dc-b358dc3dc397.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/7f29b7e3-326a-4819-9959-073b0a13f95c.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/7fb7d075-ba1e-4788-b006-807585019ae6.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/805883ce-6b16-4d35-9a8d-514dddaea7c5.jsonl",
+    "rows": 18,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/81f66d46-f435-4de9-9c78-09fe95dfae55.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/8dee2776-10c8-4f66-a940-ac497422c49b.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/95c06be8-8021-4678-ba55-ab526772f00c.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/96c77b86-6099-4132-bc84-3e4f3ce4fa42.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/9d4309f5-6925-438c-921c-b6bec0546b5c.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/9d453408-f2ba-4889-9ebe-b2e3cb9df892.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/a3dfabc3-8319-4cfc-8253-8226afba7b0a.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/ad814b7a-475e-45b3-8621-b9aa18c6ebd3.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/b3d84e10-427b-42bf-a203-78da242b400d.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/c10169e7-8a08-4b43-af90-997f1bf00658.jsonl",
+    "rows": 18,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/d03de6a9-f600-4790-beab-92abccd5f376.jsonl",
+    "rows": 18,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/d25d6c8c-6604-469a-bb13-afaccda5c801.jsonl",
+    "rows": 18,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/dd5cf0f0-0006-4cb4-8288-62f499cfc58c.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/e30552e4-24e3-4f72-a268-a26cba6974d1.jsonl",
+    "rows": 19,
+    "in_window": 13,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/e54e6924-2624-432c-b1b7-ceef1bb00ad9.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/eda5d984-9b22-470b-ad75-bbc57a8440e6.jsonl",
+    "rows": 19,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/fbdbc93f-52e1-48f7-85b0-618f2ad3f263.jsonl",
+    "rows": 18,
+    "in_window": 12,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f193e0cf-fdd8-4e7e-bf18-14cc845da59b-scratchpad-caps/fe88ecca-becb-4caa-af23-317dd93aab5b.jsonl",
+    "rows": 17,
+    "in_window": 11,
+    "invalid": 0
+  },
+  {
+    "collection": ".claude/projects/-private-tmp-claude-501--Users-booko-carr-system-f4d5b78a-e7d8-4bd1-9006-652a51fa95bb-scratchpad/32d3a310-3fe3-4e95-ab8f-5005cf3aa647.jsonl",
+    "rows": 44,
+    "in_window": 20,
+    "invalid": 0
+  }
+]

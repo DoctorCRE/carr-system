@@ -213,5 +213,14 @@ if ! "$PY" "$REPO/ops/config-as-code.py" install --apply </dev/null; then
   exit 1
 fi
 
+# The board agent is an existing local.* label, not a com.carr.* template.
+# Repair its runtime after main advances; preserve its schedule and board state.
+if [[ -f "$HOME/Library/LaunchAgents/local.carr-progress-board.plist" ]]; then
+  if ! "$PY" "$REPO/ops/config-as-code.py" install-progress-board --apply </dev/null; then
+    print -ru2 -- "fleet-sync: canonical progress-board installation failed"
+    exit 1
+  fi
+fi
+
 print -r -- "fleet-sync: installed wiring re-rendered from $(git rev-parse --short HEAD)"
 exit 0

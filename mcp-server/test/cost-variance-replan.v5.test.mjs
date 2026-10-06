@@ -24,10 +24,6 @@ import {
   projectLedger,
 } from "../src/hierarchical-cost-ledger.v5.js";
 import {
-  V5_COST_BASIS_SCHEMA_VERSION,
-  compileCostBasis,
-} from "../src/expected-total-cost.v5.js";
-import {
   V5_VARIANCE_RESULT_SCHEMA_VERSION,
   V5_REPLAN_DIRECTIVE_SCHEMA_VERSION,
   V5_COST_BASIS_POINTS,
@@ -398,24 +394,16 @@ test("ESCALATION: an empty change list is a broken caller", () => {
 // --- Q115's five measured dimensions ---------------------------------------
 
 test("Q115: the five measured dimensions are read off the registry's own component names", () => {
-  const basis = compileCostBasis({
-    schema_version: V5_COST_BASIS_SCHEMA_VERSION,
-    basis_id: "basis:q115", basis_version: 1,
-    route: {
-      task_class: "task:x", backend_key: "backend:y", model_key: "model:z",
-      model_version: "2026-09-01", effort: "effort:standard",
-    },
-    components: {
-      adjudication_cost_units: 3, builder_cost_units: 100, context_cost_units: 7,
-      delegation_cost_units: 5, effort_cost_units: 11, escalation_cost_units: 2,
-      failure_risk_cost_units: 13, retry_cost_units: 17, review_cost_units: 19,
-      rework_cost_units: 23, tool_cost_units: 29,
-    },
-  });
-  const measured = measureQ115Dimensions(basis.components);
+  const components = {
+    adjudication_cost_units: 3, builder_cost_units: 100, context_cost_units: 7,
+    delegation_cost_units: 5, effort_cost_units: 11, escalation_cost_units: 2,
+    failure_risk_cost_units: 13, retry_cost_units: 17, review_cost_units: 19,
+    rework_cost_units: 23, tool_cost_units: 29,
+  };
+  const measured = measureQ115Dimensions(components);
   assert.deepEqual(measured.dimension_keys, [...V5_Q115_MEASURED_DIMENSIONS]);
   assert.equal(measured.measured_total_units, 3 + 100 + 17 + 19 + 23);
-  assert.ok(measured.measured_total_units < basis.expected_total_cost_units,
+  assert.ok(measured.measured_total_units < Object.values(components).reduce((total, units) => total + units, 0),
     "Q115's five are a subset of Q040's eleven, not the whole total");
 });
 

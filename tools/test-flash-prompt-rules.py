@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
-"""Contract tests for tools/flash-prompt-rules.py, the UserPromptSubmit hook that gives
-interactive Flash sessions the taught rules Jev judges to bind to each message.
+"""Contract tests for tools/flash-prompt-rules.py, interactive Flash's per-message rules.
 
-It must never block or break a turn: no rules, a slash command, a tiny message or a Jev
-outage all mean no output and exit 0.
+The installed hook (~/.claude-local/settings.json) runs this entry point by path and
+exits 0 silently when the file is missing, so a deleted or broken entry point looks
+exactly like "no rule binds". These drive the real entry point and the real selector;
+only the semantic binding transport is injected.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import sys
+import tempfile
+from contextlib import redirect_stdout
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location("flash_prompt_rules",
-                                              os.path.join(HERE, "flash-prompt-rules.py"))
-if spec is None or spec.loader is None:
-    raise ImportError("tools/flash-prompt-rules.py")
-fpr = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fpr)
-
+ENTRY = os.path.join(HERE, "flash-prompt-rules.py")
 FAILURES: list[str] = []
 
 
@@ -33,58 +31,83 @@ def check(name, fn):
         print(f"  FAIL  {name}: {exc!r}")
 
 
-class FakeSelector:
-    def __init__(self, result=None, raises=None):
-        self.result, self.raises, self.seen = result or [], raises, []
-
-    def advise(self, situation, **kwargs):
-        self.seen.append(situation)
-        if self.raises:
-            raise self.raises
-        return self.result
-
-
-RULE = {"id": "e65efc68", "gist": "WRITE THE TEST BEFORE THE THING", "probability": 0.91,
-        "statement": "The check is written and running before the implementation is finished."}
-TASK = "build a pre-push gate that refuses a push when the selftest is missing"
+assert os.path.isfile(ENTRY), "the installed interactive hook's entry point is missing"
+spec = importlib.util.spec_from_file_location("flash_prompt_rules", ENTRY)
+if spec is None or spec.loader is None:
+    raise ImportError(ENTRY)
+fpr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(fpr)
+LOG = os.path.join(tempfile.mkdtemp(), "flash-prompt-rules.jsonl")
+setattr(fpr, "LOG", LOG)  # keep fixture rows out of the real out/ log
 
 
-def binding_rules_become_additional_context():
-    sel = FakeSelector([RULE])
-    out = fpr.build_output(TASK, selector=sel)
-    assert out is not None
-    hso = out["hookSpecificOutput"]
-    assert hso["hookEventName"] == "UserPromptSubmit", hso
-    assert "e65efc68" in hso["additionalContext"], hso
-    assert TASK in sel.seen[0] and "interactive" in sel.seen[0], sel.seen[0]
+class FakeClient:
+    @staticmethod
+    def noul(instructions, true="", false=""):
+        return {"instructions": instructions, "criteria": {"true": true, "false": false}}
 
 
-def nothing_binds_means_no_output():
-    assert fpr.build_output(TASK, selector=FakeSelector([])) is None
+def judge(bind_raises=None):
+    seen = []
+
+    def rank(*args, **kwargs):
+        raise AssertionError("shortlisting must be deterministic")
+
+    def ask(state, questions):
+        seen.append(state["situation"])
+        if bind_raises:
+            raise bind_raises
+        return {"model": "jev-1.13.0", "answers": {key: {"noul": 0.9} for key in questions}}
+
+    return {"rank": rank, "ask": ask, "client": FakeClient(), "titles": {}}, seen
 
 
-def slash_commands_and_tiny_messages_are_not_judged():
-    sel = FakeSelector([RULE])
-    assert fpr.build_output("/clear", selector=sel) is None
-    assert fpr.build_output("ok thanks", selector=sel) is None
-    assert sel.seen == [], sel.seen
+def run(prompt, **kwargs):
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert fpr.main(json.dumps({"prompt": prompt}), **kwargs) == 0
+    return buf.getvalue().strip()
 
 
-def jev_outage_fails_open():
-    assert fpr.build_output(TASK, selector=FakeSelector(raises=RuntimeError("down"))) is None
+def last_log():
+    with open(LOG, encoding="utf-8") as fh:
+        return json.loads(fh.read().splitlines()[-1])
 
 
-def main_never_blocks_on_bad_input():
-    assert fpr.main(stdin_text="not json", selector=FakeSelector([RULE])) == 0
-    assert fpr.main(stdin_text=json.dumps({"prompt": TASK}),
-                    selector=FakeSelector(raises=RuntimeError("down"))) == 0
+def records_advice_without_authoritative_context():
+    kwargs, seen = judge()
+    assert run("compare the artifact against what it should be before and after", **kwargs) == ""
+    assert "may read, edit, run tests and use git" in seen[0], seen
+    row = last_log()
+    assert row["rules"] == [] and "review required" in row.get("error", ""), row
+    assert "rule suggestions:" in row["error"], row
 
 
-check("binding rules become additionalContext", binding_rules_become_additional_context)
-check("nothing binds -> no output", nothing_binds_means_no_output)
-check("slash commands and tiny messages are not judged", slash_commands_and_tiny_messages_are_not_judged)
-check("Jev outage fails open", jev_outage_fails_open)
-check("main never blocks on bad input", main_never_blocks_on_bad_input)
+def skips_slash_commands_and_short_messages():
+    kwargs, seen = judge()
+    assert run("/clear", **kwargs) == ""
+    assert run("fix it", **kwargs) == ""
+    assert seen == [], seen
+
+
+def outage_is_logged_not_silent():
+    kwargs, _ = judge(bind_raises=TimeoutError("jev timed out"))
+    assert run("add a CI check that the nightly export is non-empty", **kwargs) == ""
+    row = last_log()
+    assert row["rules"] == [] and "unavailable" in row.get("error", ""), row
+
+
+def bad_input_exits_zero():
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert fpr.main("not json") == 0
+    assert buf.getvalue() == ""
+
+
+check("records advice without authoritative context", records_advice_without_authoritative_context)
+check("skips slash commands and short messages", skips_slash_commands_and_short_messages)
+check("a judgment outage is logged, not silent", outage_is_logged_not_silent)
+check("bad input exits 0 with no output", bad_input_exits_zero)
 
 if FAILURES:
     print(f"flash-prompt-rules: {len(FAILURES)} FAILED")

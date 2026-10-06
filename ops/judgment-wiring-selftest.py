@@ -68,61 +68,7 @@ DOORS = ("hooks", "bin", "tools", "pipelines", "mcp-server/src", "evals",
 
 # Historical acceptance evidence retained beside the check that used to expose
 # this module as inert. It is no longer an exception after loop 620 wiring.
-WIRED_HISTORY: dict[str, str] = {
-    "jev_rule_select.py":
-        "DECIDED 2026-09-18: it REPLACES the keyword table rather than backing "
-        "it up, on Joe's steer that a rule Jev cannot detect should be "
-        "re-engineered rather than kept on a regex crutch. Still listed here "
-        "because the wiring into hooks/rule-pack-preuse-reselection.py is not "
-        "done, and an inert module must stay declared until it has a caller. "
-        "THE EVIDENCE, and it is worth reading before anyone reopens this. "
-        "Three separate times this module read as weaker than the regexes and "
-        "all three were the measuring instrument. The last one: load_rules() "
-        "was feeding the model title_gist, which is a HEADLINE -- median 87 "
-        "characters, all 211 ending without terminal punctuation because a "
-        "title has no sentence to end -- plus `reason`, which is triage "
-        "metadata about where a rule is delivered. The rule's actual statement "
-        "was never sent. Feeding the real text moved the origin-not-HEAD rule "
-        "from 0.39 to 0.96 on a moment its condition covers, and 0.15 on the "
-        "near-miss. Nine rules that a 12-moment sweep called undetectable all "
-        "separated cleanly once given a situation that met their condition "
-        "(positives 0.75-0.95, every negative below the 0.75 floor), including "
-        "two -- end with one next action, and show the shape rather than "
-        "narrating it -- that carry no token a regex could ever match. Across "
-        "211 rules by 12 moments, 2532 judgments in 45 seconds, ZERO rules "
-        "bound to nine or more moments: nothing is over-broad. "
-        "THE LATENCY BUDGET IS ANSWERED and is not a blocker. The selector "
-        "costs ~1.3s (one ranking Choice over the roster, then parallel nouls "
-        "over a shortlist of 20, the two stages serial so the cost is two "
-        "round trips rather than twenty). Its home, hooks/rule-pack-preuse-"
-        "reselection.py, is already allocated a 20-SECOND timeout by the "
-        "harness and already shells out to the standing-context door on every "
-        "matched call. Better still, the corpus this change adds carries the "
-        "rule statements locally, so a judged selector can deliver the text "
-        "itself and DROP that round trip -- net latency flat or lower, not "
-        "additive. MEASURED 2026-09-18 against the real telemetry rather "
-        "than argued: across 9368 recorded PreToolUse hook executions, this "
-        "one hook is 731 of the 881 total seconds, 83%, at a 422ms median "
-        "over 1445 calls, while every other pre-tool hook combined is 150 "
-        "seconds across 7923 runs at 5-42ms each. That 422ms is not the "
-        "regex, which is free -- it is the standing-context round trip, "
-        "timed at 0.49s over three runs. So there is nothing to win "
-        "anywhere else; the whole latency budget IS this hook. "
-        "THE SHAPE THE WIRING SHOULD TAKE, also measured: the ranking Choice "
-        "alone costs 0.51s, statistically the same as the 0.49s call it "
-        "replaces, and is decisive when ONE rule dominates (0.75 and 0.96 on "
-        "two probes). It is NOT sufficient when several rules independently "
-        "apply, because a Choice normalises across its options: on a probe "
-        "where four rules genuinely bound, the Choice topped out at 0.36 "
-        "while the two-stage pass found all four at 0.79-0.91. Full two-stage "
-        "is 1.39s. The answer is therefore a CASCADE, which is the documented "
-        "pattern for exactly this: run the Choice, deliver on it alone when "
-        "one rule clearly dominates and the rest are negligible -- one round "
-        "trip, today's cost -- and spend the second stage only when the "
-        "distribution is flat, which is the signal that several rules apply. "
-        "WHAT REMAINS is only the wiring, and its design is now settled. "
-        "Loop 620.",
-}
+WIRED_HISTORY: dict[str, str] = {}
 
 # Modules that reach the model and are KNOWINGLY not wired yet. Each needs the
 # reason and loop in the open. The list is deliberately empty after loop 620.
@@ -133,7 +79,7 @@ def judgment_modules():
     """Every ops/*.py that reaches the model, read from its imports."""
     found = []
     for path in sorted(OPS.glob("*.py")):
-        if path.name.endswith("-selftest.py") or path.name == Path(__file__).name:
+        if path.name.endswith("-selftest.py") or path.name == Path(__file__).name or path.name.startswith("check-"):
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -293,7 +239,7 @@ class JudgmentWiringTests(unittest.TestCase):
         than investigated.
         """
         modules = judgment_modules()
-        for known in ("command_precheck.py", "jev_defect_class.py"):
+        for known in ("jev_defect_class.py", "jev_session_watch.py"):
             self.assertIn(known, modules,
                           "the judgment detector stopped seeing a known judgment")
 

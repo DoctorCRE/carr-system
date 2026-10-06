@@ -3,7 +3,9 @@
 
 The check runs at the only point a bad repository path can still be refused
 without rewriting history: pre-commit.  It examines additions, copies and
-renames in the index, not the whole repository; established third-party trees
+renames in the index, not the whole repository. Declared vendored trees
+preserve their third-party directory depth;
+established third-party trees
 and historical filenames are not silently reclassified as a new violation.
 
 The mechanical boundary is intentionally narrow and explicit:
@@ -12,8 +14,8 @@ The mechanical boundary is intentionally narrow and explicit:
     ``_v2``, ``-v2``, ``_final`` or ``-final``. Dot-versioned machine
     contracts such as ``policy.v1.json`` are schema identifiers, not drafts.
 
-``--paths`` exists only for the hermetic selftest; ordinary use has no
-arguments and reads the staged index.
+``--paths`` accepts explicit additions for CI and the hermetic selftest;
+ordinary use has no arguments and reads the staged index.
 """
 from __future__ import annotations
 
@@ -25,11 +27,13 @@ import sys
 
 MAX_DIRECTORY_DEPTH = 4
 BAD_VERSION_NAME = re.compile(r"(?:^|[_-])(?:final|v\d+)(?:$|[_.-])", re.I)
+VENDORED_TREE_PREFIXES = ("plugins/pstack/skills/",)
 
 
 def violations(paths: list[str]) -> list[str]:
     bad = []
     for path in paths:
+        is_vendored = path.startswith(VENDORED_TREE_PREFIXES) and path == path.strip() and "\\" not in path
         path = path.strip().replace("\\", "/")
         if not path:
             continue
@@ -38,7 +42,7 @@ def violations(paths: list[str]) -> list[str]:
             bad.append(f"unsafe repository path: {path}")
             continue
         depth = len(parts) - 1
-        if depth > MAX_DIRECTORY_DEPTH:
+        if depth > MAX_DIRECTORY_DEPTH and not is_vendored:
             bad.append(f"{path}: {depth} folder levels (maximum is {MAX_DIRECTORY_DEPTH})")
         if BAD_VERSION_NAME.search(parts[-1]):
             bad.append(f"{path}: draft/final version filename is forbidden")
@@ -87,7 +91,7 @@ def staged_paths() -> list[str]:
 
 def main(argv: list[str]) -> int:
     try:
-        paths = argv[1:] if len(argv) > 1 else staged_paths()
+        paths = argv[2:] if argv[1:2] == ["--paths"] else argv[1:] if len(argv) > 1 else staged_paths()
     except Exception as exc:  # accident-stopper must not wedge every commit
         print(f"path-hygiene-check: could not read staged paths ({exc}); allowing unchecked.",
               file=sys.stderr)

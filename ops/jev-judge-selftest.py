@@ -58,6 +58,21 @@ class LibraryShapeTests(unittest.TestCase):
 
 
 class JudgeTests(unittest.TestCase):
+    def test_unavailability_retains_policy_vendor_and_local_failure_reasons(self):
+        class AvailabilityError(RuntimeError):
+            def __init__(self, code=None):
+                self.code = code
+        for error, reason in ((AvailabilityError("unattended_worker_off"), "unattended_worker_off"),
+                              (AvailabilityError("hourly_paid_call_cap"), "hourly_paid_call_cap"),
+                              (AvailabilityError(), "vendor_unavailable"),
+                              (ValueError("broken inspection"), "inspection_error")):
+            with self.subTest(reason=reason):
+                fake = FakeClient(raises=error)
+                fake.TypeSafeError = AvailabilityError
+                with self.assertRaises(judge_mod.JudgeUnavailable) as caught:
+                    judge_mod.judge({}, {}, client=fake)
+                self.assertEqual(caught.exception.reason, reason)
+
     def test_explicit_evaluated_model_reaches_client(self):
         client = FakeClient()
         judge_mod.judge({"code": "x"}, {"q": {}}, client=client, model="jev-1.13.0")

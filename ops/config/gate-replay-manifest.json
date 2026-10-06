@@ -670,7 +670,7 @@
       "wirings": [
         {
           "event": "PreToolUse",
-          "matcher": "Bash|Write|Edit|MultiEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*",
+          "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*",
           "fixtures": [
             "bash",
             "edits",
@@ -805,19 +805,6 @@
         }
       ]
     },
-    "stale-claim-gate.py": {
-      "role": "gate",
-      "wirings": [
-        {
-          "event": "Stop",
-          "matcher": "",
-          "fixtures": [
-            "advisories",
-            "scenarios"
-          ]
-        }
-      ]
-    },
     "stop_latch.py": {
       "role": "helper"
     },
@@ -894,9 +881,11 @@
     }
   },
   "lib_helpers": [
+    "lib/acceptance_checks.py",
+    "lib/credential_file.py",
+    "lib/jev_required_actions.py",
     "lib/claude_continuity_config.py",
     "lib/claude_rule_delivery_dedupe.py",
-    "lib/jev_required_actions.py",
     "lib/job_watchdog.py",
     "lib/loadpy.py",
     "lib/local_principal.py",

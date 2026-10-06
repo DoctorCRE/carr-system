@@ -1,3 +1,4 @@
+import { CURRENT_REGISTRY_VERSION } from "../../ops/scac-mutation-inventory.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError } from "../src/tools.js";
@@ -9,7 +10,7 @@ const actor = { id: "10000000-0000-0000-0000-000000000009", slug: "codex",
 
 test("v100 admits the directory's exact read contract and refuses caller scope injection", async () => {
   const tool = TOOLS["list-progress-boards"];
-  assert.equal(mutationManifestIdentity().registry_version, "scac-mutation-registry.v104");
+  assert.equal(mutationManifestIdentity().registry_version, CURRENT_REGISTRY_VERSION);
   const row = await assertRegisteredOperation("list-progress-boards", tool, {});
   assert.equal(row.write, false);
   await assert.rejects(() => assertRegisteredOperation("list-progress-boards", tool,

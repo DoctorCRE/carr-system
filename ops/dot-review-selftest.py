@@ -107,12 +107,11 @@ class DotReview(unittest.TestCase):
                 self.assertTrue(answer['pass'], answer)
 
     def test_r11_triage_generated_names_remain_unique(self):
-        mod = load('ops/jev_done_checks.py'); judge = FakeJudge()
+        mod = load('ops/jev_done_checks.py')
         paths = ['a-b.py', 'a_b.py', 'file_0_a_b.py', 'file_1_a_b.py']
-        answer = mod.triage_review(diff(paths), '', judge_module=judge, client=FakeClient)
-        self.assertEqual(len(paths), len(judge.state['files']), answer)
+        answer = mod.triage_review(diff(paths), '')
+        self.assertEqual(set(paths), set(answer['detail']['files']), answer)
         self.assertEqual(len(paths), len(answer['detail']['files']), answer)
-        self.assertEqual(len(paths), len(set(judge.state['files'].values())), answer)
 
     def test_r10_session_checkout_read_identity(self):
         gate = load('hooks/unread-artifact-gate.py')
@@ -263,9 +262,9 @@ class DotReview(unittest.TestCase):
             self.assertEqual(0, pipe.health_preflight('a'*40))
 
     def test_control_unique_triage_key_compatibility(self):
-        mod = load('ops/jev_done_checks.py'); judge = FakeJudge()
-        mod.triage_review(diff(['src/widgets.py']), '', judge_module=judge, client=FakeClient)
-        self.assertIn(mod._safe_id('src/widgets.py'), judge.state['files'])
+        mod = load('ops/jev_done_checks.py')
+        answer = mod.triage_review(diff(['src/widgets.py']), '')
+        self.assertIn('src/widgets.py', answer['detail']['files'])
 
     def test_b11_newest_ci_outcome(self):
         mod = load('ops/release-pipeline.py')
@@ -331,15 +330,14 @@ class DotReview(unittest.TestCase):
             self.assertEqual(1,gate._last_test_evidence(str(transcript)).get('test_failure_count'))
 
     def test_b18_triage_unique_paths(self):
-        mod=load('ops/jev_done_checks.py');judge=FakeJudge()
-        # src/, not ops/: ops/ is tier 3 in ops/config/review-tiers.v1.json, so
-        # it floors high without reaching the judge this test inspects.
-        answer=mod.triage_review(diff(['src/a-b.py','src/a_b.py']), '',judge_module=judge,client=FakeClient)
-        self.assertEqual(2,len(judge.state['files']),answer)
+        mod=load('ops/jev_done_checks.py')
+        # src/, not ops/: ops/ is tier 3 in ops/config/review-tiers.v1.json.
+        answer=mod.triage_review(diff(['src/a-b.py','src/a_b.py']), '')
+        self.assertEqual({'src/a-b.py','src/a_b.py'},set(answer['detail']['files']),answer)
 
     def test_b19_triage_overflow_risky_path(self):
-        mod=load('ops/jev_done_checks.py');judge=FakeJudge()
-        answer=mod.triage_review(diff(['file%d.py'%i for i in range(25)]+['auth.py']), '',judge_module=judge,client=FakeClient)
+        mod=load('ops/jev_done_checks.py')
+        answer=mod.triage_review(diff(['file%d.py'%i for i in range(25)]+['auth.py']), '')
         self.assertEqual('high',answer['detail']['files'].get('auth.py',{}).get('risk'),answer)
         self.assertNotEqual('ok',answer['verdict'])
 
@@ -456,8 +454,27 @@ class DotReview(unittest.TestCase):
         self.assertEqual('Implement validation', req._human_text({'type':'user','origin':{'kind':'human'},'message':{'content':'Implement validation'}}))
 
     def test_b17_read_loop_contract(self):
-        spend = load("ops/jev_spend_health.py")
-        self.assertEqual(3, spend._loop_version(lambda *_: {'loop':{'loop_id':'L','version':3},'amended':False,'amendments':[]}, 'L'))
+        with patch.object(sys, 'path', [str(REPO / 'tools'), *sys.path]):
+            costs = load("tools/system_costs.py")
+        calls = []
+
+        def record(name, payload):
+            calls.append((name, payload))
+            if name == 'read-loop':
+                return {'loop': {'loop_id': 'L', 'version': 3}, 'amended': False, 'amendments': []}
+            return {'ok': True}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / 'loops.json'
+            state.write_text(json.dumps({'open': {'jev': {'loop_id': 'L', 'fingerprint': 'old',
+                                                        'through': '2026-10-04'}},
+                                         'episodes': {'jev': 1}, 'pending': None}))
+            costs.reconcile({'through': '2026-10-05', 'observed_at': '2026-10-06T00:00:00Z',
+                             'providers': [], 'alerts': [{'provider': 'jev', 'kind': 'daily_spike',
+                                                         'amount_usd': 8, 'threshold_usd': 4,
+                                                         'driver': 'fixture'}]}, state, record)
+        self.assertEqual(['read-loop', 'update-loop'], [name for name, _ in calls])
+        self.assertEqual(3, calls[1][1]['base_version'])
 
     def test_b20_grader_harness_completion(self):
         score = load("ops/jev_scorecard.py")
@@ -542,21 +559,6 @@ def native_output(identity, output, kind='custom_tool_call'):
 
 def diff(paths):
     return ''.join('diff --git a/{0} b/{0}\n--- a/{0}\n+++ b/{0}\n@@ -1 +1 @@\n-old\n+new\n'.format(path) for path in paths)
-
-
-class FakeClient:
-    @staticmethod
-    def score(instructions, levels):
-        return {'type':'score','instructions':instructions,'levels':levels}
-
-
-class FakeJudge:
-    def judge(self,state,questions,**kwargs):
-        self.state=state
-        return {'answers':{key:{'score':0.1,'confidence':0.9} for key in questions},'usage':{},'model':'fixture'}
-
-    def record(self,*args,**kwargs):
-        pass
 
 
 def run_regressions(prefixes):

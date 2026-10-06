@@ -1,7 +1,8 @@
+import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -40,24 +41,24 @@ function pgBin() {
 
 test("confirm-merge executes against the current activity schema", async t => {
   const bin = pgBin();
-  const out = path.join(root, "out");
-  mkdirSync(out, { recursive: true });
-  const cluster = mkdtempSync(path.join(out, "wr182-pg-"));
-  const data = path.join(cluster, "data");
+  let postgresFixture, cluster, data;
   // Short socket path avoids macOS's Unix socket length limit for worktrees.
   const socket = "/tmp";
   const port = 20000 + process.pid % 30000;
-  const run = (command, args) => execFileSync(path.join(bin, command), args, { encoding: "utf8", stdio: "pipe" });
+  const run = (command, args) => postgresFixture.run(path.join(bin, command), args);
   let db;
-  let startAttempted = false;
+  const releaseBudget = await acquirePostgresFixtureGroup();
   try {
-    run("initdb", ["-D", data, "-U", "carr_fixture", "--auth=trust", "--encoding=UTF8", "--no-locale"]);
-    startAttempted = true;
-    run("pg_ctl", ["-D", data, "-l", path.join(cluster, "postgres.log"), "-o",
+    postgresFixture = await acquireDisposablePostgres({ prefix: "wr182-pg-", pgCtl: path.join(bin, "pg_ctl") });
+    cluster = postgresFixture.root;
+    data = path.join(cluster, "data");
+    await run("initdb", ["-D", data, "-U", "carr_fixture", "--auth=trust", "--encoding=UTF8", "--no-locale"]);
+    await run("pg_ctl", ["-D", data, "-l", path.join(cluster, "postgres.log"), "-o",
       `-h '' -k ${socket} -p ${port}`, "-w", "start"]);
     db = new pg.Client({ host: socket, port, user: "carr_fixture", database: "postgres" });
     await db.connect();
     await db.query(ddl);
+    await restoreEventIdentity(db, schema);
     const refView = schema.match(/CREATE VIEW public\.v_ref_index AS\n.*?;\n/s);
     assert.ok(refView, "current schema must define v_ref_index");
     await db.query(refView[0]);
@@ -232,10 +233,10 @@ test("confirm-merge executes against the current activity schema", async t => {
       assert.equal(Number((await db.query("select count(*) from party where merged_into is not null")).rows[0].count), 0);
     }));
   } finally {
-    if (db) await db.end();
-    if (startAttempted) run("pg_ctl", ["-D", data, "-m", "fast", "-w", "stop"]);
-    const staged = path.join(out, "_to_delete");
-    mkdirSync(staged, { recursive: true });
-    renameSync(cluster, path.join(staged, path.basename(cluster)));
+    try {
+      if (db) await db.end();
+    } finally {
+      try { await postgresFixture?.close(); } finally { await releaseBudget(); }
+    }
   }
 });

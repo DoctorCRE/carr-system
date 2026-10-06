@@ -1,69 +1,4 @@
-"""jev_defect_class.py — which existing defect class does a new defect belong to?
-
-THE DAMAGE THIS EXISTS TO STOP, read live from the store on 2026-09-18:
-
-    320 classes over 371 defects — 1.16 defects per class, 304 of them singletons.
-
-A defect class earns its keep by counting. Three sessions making the same
-mistake under three different class names is not three lessons, it is one
-lesson recorded three times in a way that can never be noticed. The
-record-defect verb already says so in its own schema text — "reuse an existing
-class where one fits ... because the count per class is the entire point" —
-and the numbers above are what that instruction achieves on its own. It asks a
-session to compare a new defect against three hundred existing names, which is
-work no session does, so every session invents a name and the ledger fragments.
-
-WHAT THIS MODULE DOES. It puts every existing class in front of ONE judgment as
-the options of a single Choice question, and hands back the few worth reading.
-It does not file anything and it does not pick.
-
-THE FIRST VERSION ASKED ONE QUESTION PER CLASS, and that was a misreading of the
-vendor's own guidance that cost 320 requests where one does better. "One request
-per candidate, no request sees another" is the RERANKING rule, and it governs a
-shortlist of thirty that a keyword search produced first. Choosing one item from
-a roster is the other shape entirely: the vendor ranks 182 agent skills and
-scores 218 document line identifiers in a single Choice. Measured here on the
-same sixteen held-out defects, same corpus, same ground truth:
-
-    one Noul per class ......... 320 requests  12.5s   38% top-1   81% top-8
-    one Choice over the roster .   1 request    0.8s   69% top-1   88% top-8
-
-Better on every axis. A second pass that re-scored the top eight with a Noul
-each — the close look the vendor's skill-selection cookbook takes — was measured
-too and made it WORSE, 56% top-1 against the Choice's own 69%, so it is not
-here. The ranking pass is the answer.
-
-WHY IT STILL RETURNS A SHORTLIST AND NEVER A PICK. 69% is much better than 38%
-and it is still not something to file a record on unattended. The remaining
-value is in reading eight names instead of three hundred, and that is what this
-returns. The none-of-these probability comes back beside them, so a reader can
-see when the judgment thinks this defect is genuinely new.
-
-THREE THINGS THAT ARE NOT OPTIONAL, each measured rather than assumed:
-
-  · THE FREE LEXICAL TRIM. A Choice carries at most 255 options and there are
-    320 classes. Splitting into two Choices is a measurement error, not a
-    workaround: probabilities sum to one WITHIN a request, so numbers from two
-    of them cannot be compared, and pooling them scored 75% top-8 against 88%
-    for a single clean request. A token-overlap trim to 254 costs nothing, runs
-    offline, and kept the true class in all sixteen held-out cases.
-
-  · TRUNCATED RUBRICS IN THE RANKING PASS. 254 options carrying a full anchor
-    defect each returns HTTP 400 max_tokens_exceeded. The cure is the vendor's
-    own: rank on short index text, keep the full text for a closer look.
-
-  · ONE ANCHOR, NOT THREE, AND NEVER THE BARE NAME. Measured separately on the
-    same data, changing only how a class was described: the name alone ranked
-    the true class 99th, the name with one earlier defect ranked it 1st, and the
-    name with three illustrations ranked it 11th. Extra examples pull the
-    category toward their own specifics and bury the name that defines it.
-
-IT IS A LIBRARY AND MUST STAY ONE. No shebang and no main guard: either turns a
-.py file into a registered script entrypoint in the sealed source inventory,
-moves the frontier and owes a forward-only registry successor. The detector is
-a regex over the whole file with no notion of docstrings, so the construct is
-described here and never spelled. ops/typesafe_client.py carries the long form.
-"""
+"""Lexically trim the class roster, then one cached Choice gives an advisory reading shortlist. Options are stable and the model is pinned; code owns exact roster/set checks. A model suggestion never files a defect."""
 
 import importlib.util
 import json
@@ -80,16 +15,16 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHORTLIST = 8
 
 # A Choice carries at most 255 options. One slot is kept for none-of-these.
-MAX_OPTIONS = 254
+MAX_OPTIONS = 40
 
-# Rank on short text. 254 full-length rubrics returns HTTP 400.
+# Rank a lexical shortlist on short text, retaining a none-of-these option.
 RUBRIC_CHARS = 110
 
 # The escape hatch. Without it a Choice must return a class for every defect,
 # and a genuinely new kind of mistake is exactly what deserves a new name.
 NONE_OF_THESE = "none of these classes fits — this is a new kind of mistake"
 
-# Long enough for a request carrying 255 options.
+# Deadline for the bounded semantic request.
 TIMEOUT_SECONDS = 40.0
 
 # Words worth counting for the offline trim. Four characters and up, which
@@ -192,7 +127,7 @@ def narrow(proposed, classes, limit=MAX_OPTIONS):
     """
     if len(classes) <= limit:
         return list(classes)
-    query = _words(proposed.get("claimed")) | _words(proposed.get("actual"))
+    query = _words(str(proposed.get("claimed") or "")[:2000]) | _words(str(proposed.get("actual") or "")[:2000])
     scored = []
     for existing in classes:
         text = (_words((existing.get("name") or "").replace("-", " "))
@@ -261,15 +196,15 @@ def shortlist(proposed, classes=None, *, limit=SHORTLIST, client=None,
     trimmed = narrow(proposed, classes)
     occurrences = {c.get("name"): c.get("occurrences") for c in trimmed}
     try:
-        answer = judge.judge(
-            {"proposed_defect": {"claimed": proposed.get("claimed"),
-                                 "actual": proposed.get("actual")}},
+        answer = _sibling("jev_semantic").ask(
+            {"proposed_defect": {"claimed": str(proposed.get("claimed") or "")[:2000],
+                                 "actual": str(proposed.get("actual") or "")[:2000]}},
             {"pick": belongs_question(trimmed, client)},
-            timeout=TIMEOUT_SECONDS, client=client, api_key=api_key)
+            timeout=TIMEOUT_SECONDS, client=client, api_key=api_key, caller="jev_defect_class", version="vendor-v1", transport=judge.judge)
         probabilities = answer["answers"]["pick"].get("probabilities") or {}
     except Exception as exc:
         try:
-            judge.record("defect_class", proposed.get("claimed"), None, None, error=exc)
+            judge.record("defect_class", str(proposed.get("claimed") or "")[:2000], None, None, error=exc)
         except Exception:
             pass
         return [], None

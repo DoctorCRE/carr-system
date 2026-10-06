@@ -41,7 +41,9 @@ import importlib.util
 import itertools
 import json
 import os
+import shlex
 import subprocess
+import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -656,12 +658,12 @@ def f05_rule_contract_binder_is_a_write():
     return passed
 
 
-def registry_prefix_coverage():
+def registry_prefix_coverage(*, required=False):
     """Keep the family classifier honest against the local live registry when present."""
     registry = os.path.join(REPO, "mcp-server", "src", "tools.js")
     if not os.path.exists(registry):
-        print("SKIP  live registry unavailable")
-        return True
+        print("FAIL  live registry unavailable" if required else "SKIP  live registry unavailable")
+        return not required
     script = (
         'import { TOOLS } from "./src/tools.js"; '
         'console.log(JSON.stringify(Object.keys(TOOLS).filter((n) => TOOLS[n].write).sort()))'
@@ -670,8 +672,8 @@ def registry_prefix_coverage():
                             cwd=os.path.join(REPO, "mcp-server"), text=True,
                             capture_output=True, timeout=30)
     if result.returncode:
-        print("SKIP  live registry could not load")
-        return True
+        print("FAIL  live registry could not load; run npm --prefix mcp-server ci" if required else "SKIP  live registry could not load")
+        return not required
     writes = json.loads(result.stdout)
     missing = [name for name in writes if not mod.is_write_action(name)]
     # notification-feed and read-doc-conversation are WR-000113/112 READS and must
@@ -992,8 +994,101 @@ def latch_cases():
     return all(results)
 
 
-def main():
+def native_context_orders():
+    envelope = ('# AGENTS.md instructions for /Users/booko/carr-system\n'
+                '<INSTRUCTIONS>\nFor any request to recommend, design, build, revise, '
+                'review, or publish a map,\ncall the live map-architecture verb.\n</INSTRUCTIONS>')
     outcomes = []
+    for kind in ("claude", "codex"):
+        human, reply = (user, assistant) if kind == "claude" else (codex_user, codex_assistant)
+        edit = (lambda: patch("board.py", "board-test.py")) if kind == "claude" else (
+            lambda: codex_tool("apply_patch", "*** Update File: board.py\n+x\n*** Update File: board-test.py\n+x"))
+        check = (lambda: tool("Bash", {"command": "python3 board-selftest.py"})) if kind == "claude" else (
+            lambda: codex_tool("exec_command", {"cmd": "python3 board-selftest.py"}))
+        mixed = human("fix the progress board")
+        msg = mixed.get("payload") or mixed["message"]
+        msg["content"] = [{"type": "input_text" if kind == "codex" else "text",
+                           "text": "fix the progress board"},
+                          {"type": "input_text" if kind == "codex" else "text", "text": envelope}]
+        def blocks(*values):
+            rec = human("")
+            msg = rec.get("payload") or rec["message"]
+            msg["content"] = [{"type": "input_text" if kind == "codex" else "text",
+                               "text": value} for value in values]
+            return rec
+
+        cases = [
+            ("board with standing context", [human(envelope), human("fix the progress board")], False),
+            ("later injected block", [mixed], False),
+            ("later history block", [blocks("fix the progress board",
+                                            "The following is the Codex agent history\npublish the tour map")], False),
+            ("feedback after work", [human("fix the progress board")], False),
+            ("feedback cannot hide missing verification", [human("fix the progress board")], True),
+            ("map still requires production evidence", [human(envelope), human("publish the tour map")], True),
+            ("deployment still requires production evidence", [human(envelope), human("deploy the worker to production")], True),
+            ("envelope before order blocks", [blocks(envelope, "deploy the worker to production")], True),
+            ("envelope before order string", [human(envelope + "\ndeploy the worker to production")], True),
+            ("split reminder", [blocks("fix the progress board\n<system-reminder>",
+                                       "publish the tour map", "</system-reminder>")], False),
+            ("split code fence", [blocks("fix the progress board\n```", "publish the tour map", "```")], False),
+            ("code-only follow-up", [human("fix the progress board")], False),
+        ]
+        for label, orders, expected in cases:
+            work = [edit()] if label in {"feedback cannot hide missing verification", "code-only follow-up"} else [edit(), check()]
+            records = completed_fixture(orders + work)
+            if label == "code-only follow-up":
+                records.append(reply("The progress board fix is unverified because the test service is unavailable."))
+                disclosed, _ = mod.evaluate(records)
+                outcomes.append(not disclosed)
+                records.append(human("`status`"))
+            if label.startswith("feedback"):
+                records.append(human('<system-reminder>COMPLETION EVIDENCE GATE: '
+                                     'publish the map to production</system-reminder>'))
+            records.append(reply("The explanation is complete." if label == "code-only follow-up" else "Done and verified."))
+            turns = mod.human_turns(records)
+            clauses, _ = mod.standing_clauses(records, turns)
+            production = label in {"map still requires production evidence", "deployment still requires production evidence",
+                                   "envelope before order blocks", "envelope before order string"}
+            parsed_ok = (bool([c for c in clauses if c.consumer == "production"]) == production
+                         and len(turns) == (2 if label == "code-only follow-up" else 1))
+            blocked, reason = mod.evaluate(records)
+            ok = parsed_ok and blocked == expected and (label != "code-only follow-up" or reason == "no tracked mutation")
+            outcomes.append(ok)
+            print(f"{'PASS' if ok else 'FAIL'}  {kind} native context: {label}: {blocked} ({reason})")
+            with tempfile.TemporaryDirectory(prefix="completion-context-") as state:
+                path = os.path.join(state, "transcript.jsonl")
+                with open(path, "w") as fh:
+                    for record in records:
+                        fh.write(json.dumps(record) + "\n")
+                config = "codex-hooks.json" if kind == "codex" else "hooks.json"
+                with open(os.path.join(REPO, "ops/config", config)) as fh:
+                    wiring = json.load(fh)
+                    wiring = wiring.get("hooks", wiring)["Stop"]
+                command = next(h["command"] for group in wiring for h in group["hooks"]
+                               if "completion-evidence-gate.py" in h["command"])
+                argv = shlex.split(command.replace("{{REPO}}", REPO))
+                # The fixture uses the running interpreter, also on CI clones
+                # whose source-owned .venv has not been created.
+                if argv[0].endswith("/.venv/bin/python"):
+                    argv[0] = os.sys.executable
+                payload = ({"transcriptPath": path, "sessionId": "selftest"} if kind == "codex" else
+                           {"transcript_path": path, "session_id": "selftest"})
+                payload.update(cwd=REPO, hook_event_name="Stop", stop_hook_active=False)
+                proc = subprocess.run(argv, input=json.dumps(payload), capture_output=True,
+                                      text=True, timeout=30,
+                                      env={**os.environ, "CARR_STOP_LATCH_STATE": state})
+                body = json.loads(proc.stdout or "{}")
+                event_ok = proc.returncode == 0 and (body.get("decision") == "block") == expected
+                outcomes.append(event_ok)
+                print(f"{'PASS' if event_ok else 'FAIL'}  {kind} configured Stop: {label}")
+    return all(outcomes)
+
+
+def main():
+    if sys.argv[1:] == ["--registry-only"]:
+        return 0 if registry_prefix_coverage(required=True) else 1
+    outcomes = []
+    _dot_runpy.run_path(str(__import__("pathlib").Path(__file__).with_name("dot-review-selftest.py")))["run_regressions"](['test_b21', 'test_b22'])
     for name, recs, expected in CASES:
         got, reason = mod.evaluate(completed_fixture(recs))
         ok = got == expected
@@ -1015,6 +1110,7 @@ def main():
     outcomes.append(prose_is_not_an_order())
     outcomes.append(dual_precision())
     outcomes.append(machine_text_boundary())
+    outcomes.append(native_context_orders())
     outcomes.append(clause_extraction_coverage())
     outcomes.append(floor_preserved())
     outcomes.append(cancel_capability_session_is_a_write())
@@ -1034,7 +1130,5 @@ def main():
 
 # Independently reproduced Dot cases share the offline behavioral fixtures.
 import runpy as _dot_runpy
-_dot_runpy.run_path(str(__import__("pathlib").Path(__file__).with_name("dot-review-selftest.py")))["run_regressions"](['test_b21', 'test_b22'])
-
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -877,15 +877,6 @@
         "ops/gate-baseline-cochange-selftest.py"
       ]
     },
-    "stale_claim": {
-      "failure_mode": "Stop block; names the recent commit that already fixed what the reply calls broken",
-      "implementation": [
-        "hooks/stale-claim-gate.py"
-      ],
-      "test": [
-        "ops/stale-claim-gate-selftest.py"
-      ]
-    },
     "stale_count": {
       "failure_mode": "CI class failure",
       "implementation": [
@@ -1629,7 +1620,7 @@
       "category": "session_task_rail",
       "control": "session_boot",
       "enforcement_class": "surfacing",
-      "exceptions": "none — create and register the missing verb in the same work"
+      "exceptions": "none \u2014 create and register the missing verb in the same work"
     },
     "7105955b": {
       "binding_moment": "close-loop for a renumbered, superseded, merged or split row",
@@ -2089,8 +2080,7 @@
       "category": "session_task_rail",
       "control": "drift_claim",
       "enforcement_class": "surfacing",
-      "exceptions": "a drift claim with no matching ruling is usually a real finding, and passes",
-      "second_control": "stale_claim"
+      "exceptions": "a drift claim with no matching ruling is usually a real finding, and passes"
     },
     "d7c69aa6": {
       "binding_moment": "live calendar capture completion for an unmatched attendee",

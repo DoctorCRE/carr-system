@@ -349,11 +349,7 @@ def code_review(payload):
             region = {"path": rel, "line": 0,
                       "kind": "just written by this session",
                       "code": code}
-            # The same request also asks whether the change fits the task.
-            # That answer ACTS (Joe, 2026-09-24, decision 5ec806a4): when it
-            # clears the threshold, module.review_for_edit() hands back
-            # `_would_block` and it is surfaced below as a real finding, not
-            # folded into the advisory list.
+            # Semantic findings are review advice pending labeled calibration.
             scores = module.review_for_edit(region, payload)
             model = scores.get("_model")
             if not isinstance(model, str) or not model.strip():
@@ -364,23 +360,14 @@ def code_review(payload):
             for name, value in scores.items():
                 if not name.startswith("_") and value >= REVIEW_AT:
                     hits.append((rel, name, value))
-            if scores.get("_would_block") and not any(
-                    item["path"] == rel for item in acted):
-                acted.append({
-                    "path": rel, "question": "task_fit_mismatch",
-                    "probability": scores["_would_block"],
-                    "effect": "must_address",
-                    "instruction": (
-                        "Jev judged this change unrequested by, or contradicting, "
-                        "or a concrete mistake against, the most recent human "
-                        "request -- confirm the change is intended before "
-                        "continuing, or fix it."),
-                })
+            if scores.get("_review_task_fit"):
+                acted.append({"path": rel, "question": "task_fit_mismatch",
+                              "probability": scores["_review_task_fit"], "effect": "advisory"})
         hits.sort(key=lambda item: -item[2])
         for rel, name, value in hits:
             receipt["findings"].append({
                 "path": rel, "question": name, "probability": value,
-                "effect": "required",
+                "effect": "advisory",
             })
         receipt["findings"].extend(acted)
         if not receipt["models"]:

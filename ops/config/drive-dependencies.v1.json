@@ -37,6 +37,34 @@
     {
       "path": "tools/doc-voice/reference/*.wav",
       "reason": "versioned voice reference audio"
+    },
+    {
+      "path": "plugins/pstack/assets/logo.png",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/design.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/overnight.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/recipes.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/router.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/understanding.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
+    },
+    {
+      "path": "plugins/pstack/docs/guide/images/verification.jpg",
+      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
     }
   ],
   "entries": [
@@ -480,9 +508,6 @@
       "sources": [
         "tools/apply-graph-colors.py",
         "tools/check.sh",
-        "tools/diff-dossier-renders.py",
-        "tools/parity-lead-board.py",
-        "tools/parity-records.py",
         "tools/smoke.sh",
         "tools/stamp-doctrine-ownership.py",
         "ops/renders-verify.py",
@@ -503,7 +528,7 @@
         "accepted_by": "joe",
         "accepted_on": "2026-08-22",
         "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "All eleven sources are covered. Six carried a hardcoded Drive root with no flag, no reason and no refusal and are now gated through lib/drive_recovery: ops/renders-verify.py, ops/vault-duplicate-sweep.py, tools/apply-graph-colors.py and tools/stamp-doctrine-ownership.py refuse with the seam named and exit 69 in normal mode (verified by running each); workflows/health-audit.workflow.js throws instead of guessing a root when none is passed; ops/vault-drift-watch.py lost its hardcoded --root default, so naming a root runs normally (what its 40-case selftest does, still passing) while omitting one means the real vault and requires --recovery --reason, and bin/refresh-rules.sh, its one sanctioned caller, now passes those controls with a fixed reason. tools/check.sh and tools/smoke.sh already carried the recovery pattern and unset the ambient root in normal mode. tools/diff-dossier-renders.py, tools/parity-lead-board.py and tools/parity-records.py are TOMBSTONED: nothing invoked them, they existed to diff the record path against the Drive path, and that second side is what this phase retires. Each tombstone names what it proved, the commit holding the implementation, and a recovery command that was run and confirmed to return the file. Drive references across the repo fell from 230 to 218 in this pass."
+        "verified": "The remaining projection tools require an explicit root or reasoned recovery through lib/drive_recovery. The uncalled dossier/parity tombstones were removed in the module deletion pass; their former implementations remain in git history at d574a443."
       }
     },
     {

@@ -14,13 +14,14 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+import functools
 import hashlib
 import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
+import time
 import sys
 import tempfile
 import urllib.request
@@ -30,6 +31,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Iterator
 from urllib.request import Request, urlopen
+from urllib.parse import urlencode
 
 
 STATUSES = ("queued", "running", "review", "blocked", "done", "failed", "superseded")
@@ -65,21 +67,22 @@ SNAPSHOT_SCHEMA = "carr-progress-board.v2"
 # publish-board-snapshot refuses JSON.stringify(snapshot).length > 262144
 # (mcp-server/src/board-answers.js): compact JSON, counted in UTF-16 units.
 SNAPSHOT_LIMIT = 262144
+SNAPSHOT_BUDGET = SNAPSHOT_LIMIT * 9 // 10
+# The app card contract, not the local job/PR diagnostic record. In particular,
+# note duplicates watchdog stderr already carried in blocked_reason.
+SNAPSHOT_TASK_FIELDS = frozenset("""
+    title status stage executor provider model effort health repo pr pr_url
+    pr_phase pr_head pr_checks pr_links question review_verdict summary blocked_reason next_action evidence
+    release_wait created_at updated_at completed_at merged_at manual_stage
+    stage_entered_at stage_history question_ids human_ref kind related
+    work_request work_request_ref
+""".split())
+BLOCKER_EXCERPT_LIMIT = 192
 
 ALL_REPOS_BOARD = "all-repos"
 GITHUB_OWNER = "jbookout"
 CORE_REPOS = ("jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")
 RECENT_MERGED = timedelta(days=7)
-OPEN_PR_FIELDS = ("number,title,body,author,headRefName,headRefOid,isDraft,createdAt,updatedAt,"
-                  "statusCheckRollup,mergeable,reviewDecision,comments,url")
-MERGED_PR_FIELDS = ("number,title,body,author,headRefName,headRefOid,createdAt,updatedAt,mergedAt,mergeCommit,"
-                    "files,changedFiles,url")
-# gh pr list pages internally up to --limit. A list that fills the limit may
-# be cut short, so it is re-read with a larger one; past the ceiling the read
-# is incomplete and fails like any other unreadable repository.
-PR_LIST_LIMIT = 1000
-PR_LIST_MAX = 16000
-
 # The repository this tool reads its release config, review rules and verbs
 # from. The launchd wrapper binds it explicitly, so a copy of the tool run from
 # anywhere else still reads the canonical checkout.
@@ -578,50 +581,347 @@ def checks_summary(payload: dict[str, Any]) -> str:
     return f"{passed} pass · {pending} pending · {failed} fail"
 
 
-# launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin, where Homebrew's
-# gh is invisible; a silent "no gh" there left every PR card frozen.
-GH_FALLBACKS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+def repo_lib(name: str) -> ModuleType:
+    """A lib/ module from the bound repository, imported when first used, so
+    an extracted copy still loads and reports what it cannot reach."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    return importlib.import_module(f"lib.{name}")
 
 
 def gh_binary() -> str | None:
     if os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         return None
-    found = shutil.which("gh")
-    if found:
-        return found
-    return next((path for path in GH_FALLBACKS if os.access(path, os.X_OK)), None)
-
-
-def gh_available() -> bool:
-    return gh_binary() is not None
+    return repo_lib("github_reader").resolve_gh()
 
 
 def log(message: str) -> None:
     print(f"progress-board: {message}", file=sys.stderr)
 
 
+# The board re-renders on a short interval and keeps the last known state when
+# a read fails, so one quick retry is worth having and a long wait is not.
+GH_RETRY_DELAYS = (2,)
+
+
+@functools.lru_cache(maxsize=None)
+def gh_reader(binary: str, timeout: int) -> Any:
+    """One lib/github_reader reader per binary and timeout for the whole run,
+    so a GitHub outage costs one retry cycle per render rather than one per read."""
+    return repo_lib("github_reader").GitHubReader(gh=binary, timeout=timeout,
+                                                  retry_delays=GH_RETRY_DELAYS)
+
+
 def gh_text(args: list[str], timeout: int = 30) -> str:
     binary = gh_binary()
     if binary is None:
         raise RuntimeError("gh CLI unavailable")
-    try:
-        result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"gh {' '.join(args[:2])} failed: {exc}") from exc
-    if result.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args[:2])} failed: {(result.stderr or result.stdout).strip()[:200]}")
-    return result.stdout
+    return gh_reader(binary, timeout).text(args)
 
 
 def gh_json(args: list[str], timeout: int = 30) -> Any:
+    binary = gh_binary()
+    if binary is None:
+        raise RuntimeError("gh CLI unavailable")
+    return gh_reader(binary, timeout).json(args)
+
+
+# All GitHub reads for a render share this pass, including the all-repos
+# refresh that follows the project board. Persisted snapshots live outside
+# board JSON so PR identity, not board identity, owns the cache.
+GITHUB_PASS: GitHubReadPass | None = None
+REST_PAGE_SIZE = 100
+REST_MAX_ROWS = 16000
+
+
+def rest_rows(path: str, key: str | None = None) -> list[dict[str, Any]]:
+    rows = []
+    for page in range(1, REST_MAX_ROWS // REST_PAGE_SIZE + 1):
+        join = "&" if "?" in path else "?"
+        payload = gh_json(["api", f"{path}{join}per_page={REST_PAGE_SIZE}&page={page}"], timeout=30)
+        batch = payload.get(key) if key and isinstance(payload, dict) else payload
+        if not isinstance(batch, list) or any(not isinstance(row, dict) for row in batch):
+            raise RuntimeError("gh returned a malformed REST list")
+        rows.extend(batch)
+        if len(batch) < REST_PAGE_SIZE:
+            return rows
+    raise RuntimeError("REST list would be incomplete at the pagination cap")
+
+
+def rest_pr(raw: Any) -> dict[str, Any]:
+    if (not isinstance(raw, dict) or raw.get("state") not in {"open", "closed"}
+            or not isinstance(raw.get("draft"), bool)
+            or not isinstance(raw.get("head"), dict) or not isinstance(raw["head"].get("sha"), str)
+            or not isinstance(raw.get("user"), dict) or not isinstance(raw["user"].get("login"), str)
+            or (raw.get("merge_commit_sha") is not None and not isinstance(raw["merge_commit_sha"], str))):
+        raise RuntimeError("gh returned a malformed PR payload")
+    merged = bool(raw.get("merged_at"))
+    if merged and not SHA_RE.fullmatch(str(raw.get("merge_commit_sha") or "")):
+        raise RuntimeError("merged PR has no valid merge commit SHA")
+    return {
+        "number": raw.get("number"), "title": raw.get("title"), "body": raw.get("body"),
+        "url": raw.get("html_url"), "createdAt": raw.get("created_at"), "updatedAt": raw.get("updated_at"),
+        "state": "MERGED" if merged else raw["state"].upper(), "isDraft": raw["draft"],
+        "headRefOid": raw["head"]["sha"], "headRefName": raw["head"].get("ref", ""),
+        "author": {"login": raw["user"]["login"]}, "mergedAt": raw.get("merged_at"),
+        # An open PR's merge_commit_sha is a test merge, never a delivered commit.
+        "mergeCommit": {"oid": raw["merge_commit_sha"]} if merged and raw.get("merge_commit_sha") else None,
+        "mergeable": ("MERGEABLE" if raw.get("mergeable") is True else
+                      "CONFLICTING" if raw.get("mergeable") is False else "UNKNOWN"),
+        "statusCheckRollup": [], "comments": [], "reviewDecision": "",
+    }
+
+
+def rest_review_decision(reviews: list[dict[str, Any]], raw: dict[str, Any], rules: dict[str, Any]) -> str:
+    # A comment-only review does not withdraw an earlier approval/request.
+    latest = {}
+    for review in sorted(reviews, key=lambda r: (str(r.get("submitted_at") or ""), int(r.get("id") or 0))):
+        if not release_pipeline().trusted_commenter(review, rules):
+            continue
+        state = str(review.get("state") or "").upper()
+        if state in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            login = (review.get("user") or {}).get("login")
+            if not isinstance(login, str):
+                raise RuntimeError("gh returned a malformed review")
+            latest[login] = state
+    if "CHANGES_REQUESTED" in latest.values():
+        return "CHANGES_REQUESTED"
+    if "APPROVED" in latest.values():
+        return "APPROVED"
+    # This equivalent keeps the board waiting for review. REST's blocked state
+    # can also name an unmet check, which the rollup handles before review.
+    return "REVIEW_REQUIRED" if raw.get("mergeable_state") == "blocked" else ""
+
+
+def rest_checks(repo: str, head: str) -> list[dict[str, Any]]:
+    checks = rest_rows(f"repos/{repo}/commits/{head}/check-runs", "check_runs")
+    if not all(valid_check(check) for check in checks):
+        raise RuntimeError("gh returned a malformed PR payload")
+    statuses = rest_rows(f"repos/{repo}/commits/{head}/statuses")
+    # REST returns status history; the board renders the latest per context.
+    contexts = {}
+    for status in statuses:
+        context = status.get("context")
+        if not isinstance(context, str) or not isinstance(status.get("state"), str):
+            raise RuntimeError("gh returned a malformed commit status")
+        if context not in contexts:
+            contexts[context] = {"__typename": "StatusContext", "context": context, "state": status["state"].upper()}
+    return [{"__typename": "CheckRun", "name": c.get("name"), "status": c["status"].upper(),
+             "conclusion": c["conclusion"].upper() if isinstance(c["conclusion"], str) else None}
+            for c in checks] + list(contexts.values())
+
+
+def pr_fresh_seconds() -> float:
+    """Seconds an open-PR observation is reused (PROGRESS_BOARD_PR_FRESH_SECONDS, default 120; 0 disables)."""
     try:
-        return json.loads(gh_text(args, timeout))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"gh {' '.join(args[:2])} returned invalid JSON") from exc
+        return max(0.0, float(os.environ.get("PROGRESS_BOARD_PR_FRESH_SECONDS", "120")))
+    except ValueError:
+        return 120.0
 
 
-PR_VIEW_FIELDS = ("state,isDraft,headRefOid,statusCheckRollup,comments,author,mergeCommit,reviewDecision,mergeable,"
-                  "files,changedFiles")
+class GitHubReadPass:
+    def __init__(self) -> None:
+        self.path = board_dir() / ".github-pr-cache.json"
+        self.saved: dict[str, dict[str, Any]] = {}
+        self.reconcile()
+        self.results: dict[str, tuple[dict[str, Any] | None, str | None]] = {}
+        # Legacy boards share identities too. Seed all their terminal facts
+        # before the first open card in any one board can rediscover that PR.
+        for path in board_dir().glob("*.json"):
+            if path.name.startswith("."):
+                continue
+            self.seed((read_json_file(path).get("tasks") or {}).values())
+
+    def reconcile(self) -> None:
+        self.saved = {identity: info for identity, info in read_json_file(self.path).items()
+                      if validated_pr(info) is not None}
+
+    def observe(self) -> int:
+        # Reserve ordering before network I/O. PR timestamps cannot order CI
+        # or mergeability observations; completion time cannot order readers.
+        with board_lock("github-pr-cache"):
+            saved = read_json_file(self.path)
+            generation = int(saved.get("_generation") or 0) + 1
+            saved["_generation"] = generation
+            atomic_write(self.path, json.dumps(saved, sort_keys=True) + "\n")
+        return generation
+
+    def save(self, identity: str, payload: dict[str, Any]) -> dict[str, Any]:
+        # Retain the winning fact in memory as well as on disk. MERGED facts
+        # are immutable except for one authenticated legacy enrichment.
+        with board_lock("github-pr-cache"):
+            saved = read_json_file(self.path)
+            old = saved.get(identity) or {}
+            terminal_conflict = (old.get("state") == "MERGED" and
+                                 (not old.get("_legacy_terminal") or payload.get("_legacy_terminal")
+                                  or payload.get("state") != "MERGED" or merge_sha(old) != merge_sha(payload)))
+            superseded = (str(old.get("updatedAt") or "") > str(payload.get("updatedAt") or "")
+                          or int(old.get("_observation") or 0) > int(payload.get("_observation") or 0))
+            if terminal_conflict or superseded:
+                winner = old
+            else:
+                winner = payload
+                saved[identity] = payload
+                atomic_write(self.path, json.dumps(saved, sort_keys=True) + "\n")
+            self.saved[identity] = winner
+            return winner
+
+    def seed(self, tasks: Any) -> None:
+        for task in tasks:
+            if task.get("pr") is None:
+                continue
+            identity = f"{task_repo(task)}#{int(task['pr'])}"
+            if identity in self.saved:
+                continue
+            if task.get("pr_phase") == "Merged" and SHA_RE.fullmatch(str(task.get("merge_sha") or "")):
+                # Already verified legacy terminal cards need no rediscovery.
+                self.save(identity, {"state": "MERGED", "isDraft": False, "_legacy_terminal": True,
+                          "headRefOid": task.get("pr_head") or "", "author": {"login": task.get("author") or ""},
+                          "mergeCommit": {"oid": task["merge_sha"]}, "statusCheckRollup": [], "comments": [],
+                          "number": int(task['pr']), "title": task.get("title") or "PR",
+                          "body": task.get("summary") or "", "headRefName": task.get("branch") or "",
+                          "url": task.get("url") or f"https://github.com/{task_repo(task)}/pull/{task['pr']}",
+                          "createdAt": task.get("created_at") or task.get("updated_at") or stamp(),
+                          "updatedAt": task.get("github_updated_at"), "mergedAt": task.get("merged_at"),
+                          "reviewDecision": "", "mergeable": "UNKNOWN"})
+            elif task.get("pr_phase") == "Closed unmerged":
+                self.save(identity, {"state": "CLOSED", "isDraft": False, "_legacy_terminal": True, "headRefOid": task.get("pr_head") or "",
+                          "author": {"login": task.get("author") or ""}, "mergeCommit": None,
+                          "statusCheckRollup": [], "comments": [], "reviewDecision": "", "mergeable": "UNKNOWN"})
+
+    def result(self, info: dict[str, Any] | None, repo: str,
+               error: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
+        # Raw observations are reusable; review trust belongs to the current policy.
+        if info and "_reviews" in info:
+            info = {**info, "reviewDecision": rest_review_decision(
+                info["_reviews"], {"mergeable_state": info.get("_mergeable_state")}, review_rules(repo))}
+        return info, error or (info.get("_refresh_error") if info else None)
+
+    @staticmethod
+    def matches_discovery(info: dict[str, Any] | None, raw: dict[str, Any] | None) -> bool:
+        return raw is None or (info is not None
+            and raw.get("state") == ("open" if info["state"] == "OPEN" else "closed")
+            and raw.get("updated_at") == info.get("updatedAt")
+            and (not isinstance(raw.get("head"), dict)
+                 or raw["head"].get("sha") == info.get("headRefOid")))
+
+    def read(self, number: int, repo: str, raw: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, str | None]:
+        repo = safe_repo(repo)
+        identity = f"{repo}#{number}"
+        self.reconcile()
+        old = self.saved.get(identity)
+        if old and old.get("state") == "MERGED" and not old.get("_legacy_terminal"):
+            return self.result(old, repo)
+        # An open PR read moments ago is reused instead of re-fetched. Every board
+        # mutation renders every open PR, so one job-watchdog scan (100+ mutations)
+        # spent the whole 5,000/hr REST pool in minutes on 2026-10-04. Discovery
+        # rows (raw) still carry their own version evidence and are checked below.
+        cached = self.results.get(identity)
+        if cached:
+            info, error = cached
+            if info and old and int(old.get("_observation") or 0) > int(info.get("_observation") or 0):
+                info, error = old, None
+            # Discovery rows are evidence: a different state, version or head
+            # invalidates even an earlier result from this same render pass.
+            if self.matches_discovery(info, raw):
+                return self.result(info, repo, error)
+        window = pr_fresh_seconds()
+        # Payload and observation time come from the same atomic cache snapshot.
+        # A losing writer never changes the winner's time; failed refreshes miss.
+        if (window and raw is None and old and not old.get("_legacy_terminal")
+                and not old.get("_refresh_error")
+                and isinstance(old.get("_observed_at"), (int, float))
+                and 0 <= time.time() - old["_observed_at"] < window):
+            return self.result(old, repo)
+        observation = self.observe()
+        observed_at = time.time()
+        discovery = raw if raw is not None else (old.get("_discovery") if old else None)
+        if old and discovery is not None and not self.matches_discovery(old, discovery):
+            hint = {key: discovery[key] for key in ("state", "updated_at", "head") if key in discovery}
+            old = self.save(identity, {**old, "_observation": observation, "_observed_at": None,
+                                      "_discovery": hint,
+                                      "_refresh_error": "PR discovery invalidated cached observation"})
+        result: tuple[dict[str, Any] | None, str | None]
+        try:
+            # Mergeability changes with the base and CI changes independently
+            # of updated_at. Neither can use PR-version invalidation.
+            raw = gh_json(["api", f"repos/{repo}/pulls/{number}"], timeout=30)
+            info = rest_pr(raw)
+            assert isinstance(raw, dict)  # rest_pr has validated the response
+            if (discovery is not None and not self.matches_discovery(info, discovery)
+                    and str(info.get("updatedAt") or "") <= str(discovery.get("updated_at") or "")):
+                kind = "closed discovery" if discovery.get("state") == "closed" else "discovery"
+                raise RuntimeError(f"PR detail disagrees with {kind}")
+            head = info["headRefOid"]
+            base = f"repos/{repo}"
+            if old and old.get("_legacy_terminal") and old["state"] == "MERGED":
+                if info["state"] != "MERGED" or merge_sha(info) != merge_sha(old):
+                    raise RuntimeError("legacy merge evidence disagrees with GitHub")
+                info["comments"] = old["comments"]
+                info["reviewDecision"] = old["reviewDecision"]
+                info["statusCheckRollup"] = old["statusCheckRollup"]
+            else:
+                info["statusCheckRollup"] = rest_checks(repo, head)
+                if (old and not old.get("_legacy_terminal") and info.get("updatedAt")
+                        and info["updatedAt"] == old.get("updatedAt")
+                        and head == old.get("headRefOid") and info["state"] == old["state"]):
+                    info["comments"] = old["comments"]
+                    reviews = old.get("_reviews")
+                else:
+                    comments = rest_rows(f"{base}/issues/{number}/comments")
+                    info["comments"] = [{"author": c.get("user"), "authorAssociation": c.get("author_association"),
+                                         "body": c.get("body"), "createdAt": c.get("created_at")} for c in comments]
+                    reviews = None
+                # Cache review observations, never the trust-policy result.
+                # Existing snapshots without raw reviews migrate on this read.
+                if reviews is None:
+                    reviews = rest_rows(f"{base}/pulls/{number}/reviews")
+                info["_reviews"] = reviews
+                info["_mergeable_state"] = raw.get("mergeable_state")
+                info["reviewDecision"] = rest_review_decision(reviews, raw, review_rules(repo))
+            if info["state"] == "MERGED":
+                files = rest_rows(f"{base}/pulls/{number}/files")
+                info["files"] = [{"path": f.get("filename")} for f in files]
+                info["changedFiles"] = raw.get("changed_files")
+                if changed_paths(info) is None:
+                    raise RuntimeError("merged PR file manifest is incomplete")
+            if validated_pr(info) is None:
+                raise RuntimeError("gh returned a malformed PR payload")
+            info["_observation"] = observation
+            info["_observed_at"] = observed_at
+            result = self.result(self.save(identity, info), repo)
+        except (RuntimeError, TypeError, ValueError, AttributeError, KeyError) as exc:
+            self.reconcile()
+            old = self.saved.get(identity) or old
+            if old:
+                old = self.save(identity, {**old, "_observation": observation,
+                                          "_observed_at": None, "_refresh_error": str(exc)})
+                result = self.result(old, repo)
+            else:
+                result = (None, str(exc))
+        self.results[identity] = result
+        return result
+
+
+@contextlib.contextmanager
+def github_read_pass() -> Iterator[GitHubReadPass]:
+    global GITHUB_PASS
+    if GITHUB_PASS is not None:
+        yield GITHUB_PASS
+        return
+    GITHUB_PASS = GitHubReadPass()
+    try:
+        yield GITHUB_PASS
+    finally:
+        GITHUB_PASS = None
+
+
+def with_github_read_pass(fn: Callable) -> Callable:
+    @functools.wraps(fn)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        with github_read_pass():
+            return fn(*args, **kwargs)
+    return wrapped
 
 
 def valid_check(check: Any) -> bool:
@@ -635,19 +935,9 @@ def valid_check(check: Any) -> bool:
 
 
 def fetch_pr(number: int, repo: str) -> tuple[dict[str, Any] | None, str | None]:
-    """The PR as GitHub reports it, or why it could not be read."""
-    if gh_binary() is None:
-        return None, "gh CLI not found (PATH or /opt/homebrew/bin)"
-    try:
-        payload = gh_json(["pr", "view", str(number), "--repo", repo, "--json", PR_VIEW_FIELDS], timeout=30)
-    except RuntimeError as exc:
-        return None, str(exc)
-    checked = validated_pr(payload)
-    return (checked, None) if checked is not None else (None, "gh returned a malformed PR payload")
-
-
-def pr_info(number: int, repo: str) -> dict[str, Any] | None:
-    return fetch_pr(number, repo)[0]
+    """REST-only cached read; errors carry the last successful observation."""
+    with github_read_pass() as reads:
+        return reads.read(number, repo)
 
 
 def validated_pr(payload: Any) -> dict[str, Any] | None:
@@ -701,7 +991,7 @@ def valid_files(payload: dict[str, Any], required: bool) -> bool:
             and all(isinstance(entry, dict) and isinstance(entry.get("path"), str) for entry in files))
 
 
-def valid_list_row(pr: Any, merged: bool) -> bool:
+def valid_open_pr(pr: Any) -> bool:
     """Every field a card is built from, with its type. One bad row fails the
     whole repository read, so a partial answer never replaces good cards."""
     if not isinstance(pr, dict) or not isinstance(pr.get("number"), int) or isinstance(pr.get("number"), bool):
@@ -715,10 +1005,6 @@ def valid_list_row(pr: Any, merged: bool) -> bool:
     author = pr.get("author")
     if author is not None and not (isinstance(author, dict) and isinstance(author.get("login"), str)):
         return False
-    if merged:
-        merge = pr.get("mergeCommit")
-        return (isinstance(pr.get("mergedAt"), str) and valid_files(pr, required=True)
-                and (merge is None or (isinstance(merge, dict) and isinstance(merge.get("oid"), str))))
     checks = pr.get("statusCheckRollup")
     return (isinstance(pr.get("isDraft"), bool) and isinstance(checks, list) and all(valid_check(c) for c in checks)
             and valid_comments(pr.get("comments"))
@@ -1161,39 +1447,70 @@ def pr_card(repo: str, pr: dict[str, Any], merged: bool) -> dict[str, Any]:
 
 def list_repositories(prior: list[str]) -> list[str]:
     try:
-        rows = gh_json(["repo", "list", GITHUB_OWNER, "--no-archived", "--limit", "200", "--json", "nameWithOwner"])
-        names = [str(row["nameWithOwner"]) for row in rows if isinstance(row, dict) and row.get("nameWithOwner")]
+        # The authenticated endpoint includes private repositories too.
+        rows = rest_rows("user/repos?affiliation=owner")
+        names = [str(row["full_name"]) for row in rows if not row.get("archived")
+                 and str(row.get("full_name") or "").startswith(GITHUB_OWNER + "/")]
     except (RuntimeError, TypeError, KeyError):
         names = prior
     extra = sorted({name for name in names if name not in CORE_REPOS and re.fullmatch(r"[\w.-]+/[\w.-]+", name)})
     return [*CORE_REPOS, *extra]
 
 
-def list_prs(repo: str, state: str, fields: str, search: str | None = None) -> list[Any]:
-    """Every matching PR, or RuntimeError: never a silently truncated list."""
-    limit = PR_LIST_LIMIT
-    while True:
-        args = ["pr", "list", "--repo", repo, "--state", state, "--limit", str(limit), "--json", fields]
-        if search:
-            args[6:6] = ["--search", search]
-        rows = gh_json(args, timeout=120)
-        if not isinstance(rows, list):
-            raise RuntimeError("gh pr list did not return a list")
-        if len(rows) < limit:
-            return rows
-        if limit >= PR_LIST_MAX:
-            raise RuntimeError(f"{repo} has at least {limit} {state} PRs; the list would be incomplete")
-        limit = min(limit * 4, PR_LIST_MAX)
-
-
 def read_repository(repo: str, since: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    open_prs = list_prs(repo, "open", OPEN_PR_FIELDS)
-    merged_prs = list_prs(repo, "merged", MERGED_PR_FIELDS, f"merged:>={since}")
-    for merged, rows in ((False, open_prs), (True, merged_prs)):
-        for index, pr in enumerate(rows):
-            if not valid_list_row(pr, merged):
-                label = f"#{pr['number']}" if isinstance(pr, dict) and isinstance(pr.get("number"), int) else f"row {index}"
-                raise RuntimeError(f"gh pr list returned a malformed {'merged' if merged else 'open'} PR ({label})")
+    """REST discovery plus shared hydration. Only authenticated merged facts
+    are immutable; closed-unmerged identities can reopen."""
+    assert GITHUB_PASS is not None
+    cursor_path = board_dir() / ".github-discovery.json"
+    cursor = read_json_file(cursor_path).get(repo) or since + "T00:00:00Z"
+    # GitHub timestamps have second resolution. Overlap the cursor by one
+    # second so a closure during this read cannot fall between two polls.
+    started = (now_utc() - timedelta(seconds=1)).isoformat(timespec="seconds")
+    open_prs = []
+    for raw in rest_rows(f"repos/{repo}/pulls?state=open&sort=updated&direction=desc"):
+        if not isinstance(raw.get("number"), int):
+            raise RuntimeError("gh returned a malformed open PR")
+        info, error = GITHUB_PASS.read(raw["number"], repo, raw)
+        if error or info is None or not valid_open_pr(info):
+            raise RuntimeError(error or "gh returned a malformed open PR")
+        if info["state"] == "OPEN":
+            open_prs.append(info)
+    # Issues support updated-since; pulls do not. They supply identities only.
+    # Each new closed identity is hydrated once to distinguish merged/closed.
+    query = urlencode({"state": "closed", "since": cursor, "sort": "updated", "direction": "asc"})
+    for issue in rest_rows(f"repos/{repo}/issues?{query}"):
+        if not issue.get("pull_request"):
+            continue
+        if not isinstance(issue.get("number"), int):
+            raise RuntimeError("gh returned a malformed closed PR identity")
+        info, error = GITHUB_PASS.read(issue["number"], repo, issue)
+        if error or info is None:
+            raise RuntimeError(error or "gh returned a malformed closed PR")
+        if info["state"] == "OPEN":
+            # Do not advance past an unaccounted closure (including GitHub
+            # replication lag). A later sweep must rediscover this identity.
+            raise RuntimeError("closed discovery disagrees with PR detail")
+    GITHUB_PASS.reconcile()
+    # Migrate legacy facts once, including unknown merge dates, before applying
+    # the recent-merge filter or verifying delivery from the changed paths.
+    for identity, info in list(GITHUB_PASS.saved.items()):
+        if identity.startswith(repo + "#") and info.get("state") == "MERGED" and info.get("_legacy_terminal"):
+            _, error = GITHUB_PASS.read(info["number"], repo)
+            if error:
+                raise RuntimeError(error)
+    GITHUB_PASS.reconcile()
+    open_prs = [GITHUB_PASS.saved.get(f"{repo}#{info['number']}", info) for info in open_prs]
+    open_prs = [info for info in open_prs if info["state"] == "OPEN"]
+    merged_prs = [info for identity, info in GITHUB_PASS.saved.items()
+                  if identity.startswith(repo + "#") and info.get("state") == "MERGED"
+                  and str(info.get("mergedAt") or "") >= since]
+    for info in merged_prs:
+        if not isinstance(info.get("number"), int):
+            raise RuntimeError("cached merged PR identity is malformed")
+    with board_lock("github-discovery"):
+        cursors = read_json_file(cursor_path)
+        cursors[repo] = max(str(cursors.get(repo) or ""), started)
+        atomic_write(cursor_path, json.dumps(cursors, sort_keys=True) + "\n")
     return open_prs, merged_prs
 
 
@@ -1205,15 +1522,16 @@ def read_json_file(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+@with_github_read_pass
 def build_all_repos() -> dict[str, Any]:
     """Rebuild the all-repos board from gh. A repo that cannot be read, or
     returns a malformed or incomplete list, keeps its previous cards and
-    names the error; when none can be read nothing is written. gh is read
-    before the board lock is taken; the merge into the board happens under it."""
-    if not gh_available():
-        raise RuntimeError("gh CLI unavailable; the all-repos board was not rebuilt")
+    names the error, including a complete outage. GitHub is read before the
+    board lock is taken; the merge into the board happens under it."""
     path = state_path(ALL_REPOS_BOARD)
     generation, unlocked = begin_refresh(ALL_REPOS_BOARD)
+    assert GITHUB_PASS is not None
+    GITHUB_PASS.seed((unlocked.get("tasks") or {}).values())
     prior_repos = [str(row.get("repo")) for row in unlocked.get("repos") or [] if isinstance(row, dict)]
     since = (now_utc() - RECENT_MERGED).date().isoformat()
     reads: dict[str, tuple[list[dict[str, Any]], list[dict[str, Any]]] | str] = {}
@@ -1222,8 +1540,6 @@ def build_all_repos() -> dict[str, Any]:
             reads[repo] = read_repository(repo, since)
         except RuntimeError as exc:
             reads[repo] = str(exc)[:200]
-    if all(isinstance(result, str) for result in reads.values()):
-        raise RuntimeError("no repository could be read from gh; the all-repos board was not rebuilt")
     for repo, result in reads.items():
         if not isinstance(result, str):
             latest_release(repo)  # any live probe happens before the lock
@@ -1259,6 +1575,8 @@ def assemble_all_repos(prior: dict[str, Any],
                 key = card_key(repo, pr["number"])
                 card = pr_card(repo, pr, merged)
                 previous = prior_tasks.get(key) or {}
+                if merged and pr.get("_legacy_terminal") and previous:
+                    card = dict(previous)
                 if task_stage(previous) == "live" and merged:
                     for field in ("status", "stage", "evidence", "completed_at"):
                         card[field] = previous[field]
@@ -1281,7 +1599,7 @@ def assemble_all_repos(prior: dict[str, Any],
         "created_at": prior.get("created_at") or at,
         "updated_at": max((str(t.get("updated_at") or "") for t in tasks.values()), default=at) or at,
         "tasks": tasks, "questions": {}, "deliverables": [], "notes": [], "repos": rows,
-        "github_sync": {"checked_at": at, "failed": failed,
+        "github_sync": {"checked_at": at, "failed": failed, "stale": bool(failed),
                         "last_verified_at": at if not failed else previous_sync.get("last_verified_at")},
     }
 
@@ -1332,6 +1650,8 @@ def sync_pr_task(task: dict[str, Any], info: dict[str, Any], at: str) -> bool:
         target["blocked_head"] = None
     facts: dict[str, Any] = {"pr_checks": checks_summary(info), "pr_head": info.get("headRefOid") or "",
                              "review_verdict": review_verdict(info, task_repo(task))}
+    if info.get("_legacy_terminal"):
+        facts = {"pr_head": task.get("pr_head") or info.get("headRefOid") or ""}
     if merge_sha(info):
         facts["merge_sha"] = merge_sha(info)
     stamped = any(task.get(field) != target.get(field) for field in DERIVED_STATE)
@@ -1438,6 +1758,7 @@ def begin_refresh(project: str) -> tuple[int, dict[str, Any]]:
         return generation, state
 
 
+@with_github_read_pass
 def render(project: str) -> None:
     """Sync every PR card from GitHub, refresh release and health facts, and
     write the JSON. GitHub is read first, without the board lock; the result
@@ -1452,6 +1773,8 @@ def render(project: str) -> None:
         return
     generation, initial = begin_refresh(project)
     tasks = initial.get("tasks", {}).values()
+    assert GITHUB_PASS is not None
+    GITHUB_PASS.seed(tasks)
     keys = {pr_key(task) for task in tasks if task.get("pr") is not None}
     fetched = {key: fetch_pr(key[1], key[0]) for key in sorted(keys)}
     # Every network and git read happens here, before the lock: the release
@@ -1499,7 +1822,7 @@ def apply_sync(state: dict[str, Any],
         if key not in fetched:
             continue  # added after GitHub was read; the next run syncs it
         info, error = fetched[key]
-        if info is None:
+        if info is None or error:
             label = f"{key[0].split('/', 1)[1]}#{key[1]}"
             log(f"sync {label} ({task_id}) failed, keeping last known state: {error}")
             failed.append({"card": task_id, "pr": label, "error": str(error)[:200]})
@@ -1512,7 +1835,7 @@ def apply_sync(state: dict[str, Any],
     if fetched and not os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         raw_sync = state.get("github_sync")
         previous: dict[str, Any] = raw_sync if isinstance(raw_sync, dict) else {}
-        state["github_sync"] = {"checked_at": at, "synced": synced, "failed": failed,
+        state["github_sync"] = {"checked_at": at, "synced": synced, "failed": failed, "stale": bool(failed),
                                 "last_verified_at": at if not failed else previous.get("last_verified_at")}
         changed = True
     return changed
@@ -1549,18 +1872,13 @@ def mutate(project: str, change: Callable[[dict[str, Any]], bool | None]) -> Non
 
 
 def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Use the existing noninteractive local-token route; no model is involved."""
-    repo = REPO_ROOT
-    result = subprocess.run(
-        [str(repo / "run.sh"), "call", verb, json.dumps(args, sort_keys=True, separators=(",", ":"))],
-        cwd=repo, capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode:
-        raise RuntimeError(f"{verb} failed: {(result.stderr or result.stdout).strip()[:500]}")
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{verb} returned invalid JSON") from exc
+    """Use the existing noninteractive local-token route; no model is involved.
+    Anything short of an explicit ok:true reply raises."""
+    record_call = repo_lib("record_call")
+    result = record_call.call_verb(verb, args, timeout=30)
+    payload = result.reply
+    if not result.ok and result.kind != record_call.REFUSED:
+        raise RuntimeError(result.describe())
     if not isinstance(payload, dict) or payload.get("ok") is not True:
         raise RuntimeError(f"{verb} refused: {payload.get('error', 'unknown result') if isinstance(payload, dict) else 'invalid result'}")
     return payload
@@ -1600,8 +1918,8 @@ def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
                  history, key=lambda k: (str(history[k].get("updated_at") or ""), k))]
     size = snapshot_size(snapshot)
     index = 0
-    while size > SNAPSHOT_LIMIT and index < len(order):
-        freed, excess = 0, size - SNAPSHOT_LIMIT
+    while size > SNAPSHOT_BUDGET and index < len(order):
+        freed, excess = 0, size - SNAPSHOT_BUDGET
         while freed < excess and index < len(order):
             kind, section, key = order[index]
             index += 1
@@ -1609,22 +1927,42 @@ def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             freed += snapshot_size({key: entry}) - 1
             snapshot["omitted"][kind] += 1
         size = snapshot_size(snapshot)
-    if size > SNAPSHOT_LIMIT:
+    if size > SNAPSHOT_BUDGET:
         raise SnapshotTooLarge(f"board {snapshot.get('project')} snapshot is {size} characters after trimming "
-                               f"every Live, Merged and History entry; the server limit is {SNAPSHOT_LIMIT}")
+                               f"every Live, Merged and History entry; the publication budget is {SNAPSHOT_BUDGET} "
+                               f"and the server limit is {SNAPSHOT_LIMIT}")
     return snapshot
 
 
-def board_snapshot(state: dict[str, Any]) -> dict[str, Any]:
-    """The versioned data contract the app page renders. Deterministic for a
-    given state, and always within the server's size limit."""
+@functools.cache
+def cost_snapshot_reader() -> Callable:
+    """Use the collector's validation contract without importing a provider client."""
+    path = Path(__file__).resolve().with_name("system_costs.py")
+    spec = importlib.util.spec_from_file_location("carr_system_costs", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("system cost snapshot reader unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.load_snapshot
+
+
+def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
+    """The versioned data contract the app page renders, including fresh local
+    cost evidence. Full diagnostics stay local; the app receives bounded cards."""
     tasks = {}
     all_tasks = state.get("tasks") or {}
     for task_id, task in all_tasks.items():
         if is_retired(task):
             continue
         provider, model, effort = task_identity(task)
-        tasks[task_id] = {**task, "provider": provider, "model": model, "effort": effort}
+        card = {key: value for key, value in task.items()
+                if key in SNAPSHOT_TASK_FIELDS and value is not None}
+        reason = card.get("blocked_reason")
+        if isinstance(reason, str) and len(reason) > BLOCKER_EXCERPT_LIMIT:
+            head = BLOCKER_EXCERPT_LIMIT // 2
+            card["blocked_reason"] = reason[:head] + "…" + reason[-(BLOCKER_EXCERPT_LIMIT - head - 1):]
+        tasks[task_id] = {**card, "provider": provider, "model": model, "effort": effort}
     decisions = [
         {"id": qid, "question": q.get("question"), "answer": q.get("answer"), "default": q.get("default"),
          "answered_at": q.get("answered_at") or q.get("updated_at")}
@@ -1649,6 +1987,7 @@ def board_snapshot(state: dict[str, Any]) -> dict[str, Any]:
         # When GitHub facts were last checked and verified, and what failed:
         # a card kept from before an outage is never shown as fresh.
         "github_sync": state.get("github_sync"),
+        "costs": costs if costs is not None else cost_snapshot_reader()(REPO_ROOT / "out" / "system-costs.json", now=now_utc()),
         "omitted": {"live": 0, "merged": 0, "history": 0},
         "updated_at": state.get("updated_at"),
     })
@@ -1665,12 +2004,47 @@ def question_revision(question: dict[str, Any], project: str) -> dict[str, Any]:
     }
 
 
-def publish_board(project: str) -> dict[str, int]:
+def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
+    """Publish immutable bounded pages before switching the manifest pointer."""
+    pages: list[dict[str, Any]] = []
+    batch: list[dict[str, Any]] = []
+    def emit(rows):
+        payload = {'items': rows}
+        encoded = json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+        digest = hashlib.sha256(encoded.encode()).hexdigest()
+        board_id = 'carr-v5-external-' + digest
+        before = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if before is None:
+            args = {'board_id': board_id, 'base_version': 0, 'snapshot': payload}
+            call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+        after = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if not after or after.get('snapshot_json') != payload:
+            raise RuntimeError('external inventory page did not read back')
+        pages.append({'board_id': board_id, 'version': int(after['version']), 'count': len(rows), 'digest': digest})
+    for row in cache['items']:
+        candidate = [*batch, row]
+        if len(json.dumps({'items': candidate}, ensure_ascii=False)) > 120000:
+            if not batch: raise RuntimeError('external inventory row exceeds page contract')
+            emit(batch)
+            batch = [row]
+            if len(json.dumps({'items': batch}, ensure_ascii=False)) > 120000:
+                raise RuntimeError('external inventory row exceeds page contract')
+        else: batch = candidate
+    if batch: emit(batch)
+    return {**{key: value for key, value in cache.items() if key not in ('items', 'pr_heads')},
+            'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
+
+
+def publish_board(project: str, *, costs=None) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
-    snapshot = board_snapshot(state)
+    snapshot = board_snapshot(state, costs=costs)
+    if board == "carr-v5":
+        from system_work_cache import cached_github
+        snapshot["external_inventory"] = publish_external_inventory(cached_github(board_dir() / "system-work-github-cache.json",
+            Path.home() / "carr-system/out/orch/dot/job13/report-G.md"))
     if remote_snapshot is None or remote_snapshot.get("snapshot_json") != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
@@ -1811,6 +2185,7 @@ def poll_board_answers(project: str) -> dict[str, int]:
 
 
 
+@with_github_read_pass
 def command_render(args: argparse.Namespace) -> None:
     if args.project == ALL_REPOS_BOARD:
         build_all_repos()
@@ -1856,7 +2231,10 @@ def command_init(args: argparse.Namespace) -> None:
     }
     with board_lock(args.project):
         create_json(state)
-    refresh_and_publish(args.project)
+    if getattr(args, "costs", None) is not None:
+        publish_board(args.project, costs=args.costs)
+    else:
+        refresh_and_publish(args.project)
 
 
 def command_task(args: argparse.Namespace) -> None:
@@ -1891,6 +2269,7 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
     derived = executor_metadata(executor)
     new_executor = args.executor is not None
     task.update({
+        "domain": args.domain or prior.get("domain") or "system",
         "title": args.title or prior.get("title"),
         "status": args.status or prior.get("status"),
         "executor": executor,
@@ -2042,6 +2421,7 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--summary")
     task.add_argument("--pr", type=int)
     task.add_argument("--repo")
+    task.add_argument("--domain", choices=("system", "deals", "unclassified"))
     task.add_argument("--stage", choices=PR_STAGES)
     task.add_argument("--health", choices=("healthy", "question", "blocked"))
     task.add_argument("--reason", help="why the task is blocked (required with blocked), or why it failed or was superseded (required for those)")

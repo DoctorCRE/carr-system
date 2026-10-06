@@ -1,0 +1,230 @@
+{
+  "version": "context-hooks-expectations/v1",
+  "baseline_ref": "b4dc32fde6c07be4b19497ba0a14e1fcf64c7237",
+  "cases": {
+    "train-Bash": {
+      "split": "train",
+      "input_sha256": "d1e9567da9a8a4b0c43da0791da1d2594cf5d7b78547fea132d06bccc1b06091",
+      "should_not_fire": false,
+      "tool": "Bash",
+      "required": true
+    },
+    "train-Write": {
+      "split": "train",
+      "input_sha256": "3f00927a719345edd4a8316599d3b328857987547f8884306861161ffa09647e",
+      "should_not_fire": false,
+      "tool": "Write",
+      "required": true
+    },
+    "train-Edit": {
+      "split": "train",
+      "input_sha256": "464c4ffd019e1e9691dcf0537c797353ef2b1c1d4833d3d463e5b74ae4547344",
+      "should_not_fire": false,
+      "tool": "Edit",
+      "required": true
+    },
+    "train-MultiEdit": {
+      "split": "train",
+      "input_sha256": "db3deb7286e6919734970e0f2050293665fb8723cfd85bfa184bb550c172843e",
+      "should_not_fire": false,
+      "tool": "MultiEdit",
+      "required": true
+    },
+    "train-NotebookEdit": {
+      "split": "train",
+      "input_sha256": "e84a697b3c982b1b2f1013f0ed96d7ce575cedbc67db03a084d9906b5c43e795",
+      "should_not_fire": false,
+      "tool": "NotebookEdit",
+      "required": true
+    },
+    "train-Agent": {
+      "split": "train",
+      "input_sha256": "11b39c93777e8f1f3983bdba7c72b22fe68cfea20c677e9de53e17cb7dbfb19f",
+      "should_not_fire": false,
+      "tool": "Agent",
+      "required": true
+    },
+    "train-WebFetch": {
+      "split": "train",
+      "input_sha256": "7bd75b80a49c80b9c40e54f35d3c6df9c52f6ad96ad5efcf3fd7250803bccc40",
+      "should_not_fire": false,
+      "tool": "WebFetch",
+      "required": true
+    },
+    "train-WebSearch": {
+      "split": "train",
+      "input_sha256": "72f859513e8da7b85424995ed45506b1362a1a49bee1467693ec8da282e3acd5",
+      "should_not_fire": false,
+      "tool": "WebSearch",
+      "required": true
+    },
+    "train-Artifact": {
+      "split": "train",
+      "input_sha256": "e06171a1c467f2d4d883a386b5323dbd1a493627030e4bc6210d6c87c49f359e",
+      "should_not_fire": false,
+      "tool": "Artifact",
+      "required": true
+    },
+    "train-AskUserQuestion": {
+      "split": "train",
+      "input_sha256": "7aca79e91fb3e78067b0803891bfbfb13859151ce50c191186d23eb4a8e7a437",
+      "should_not_fire": false,
+      "tool": "AskUserQuestion",
+      "required": true
+    },
+    "train-mcp__carr__read_doctrine": {
+      "split": "train",
+      "input_sha256": "66fec4d2eb0bb15c02c38171c6bbc1d264d70e979f54602ec5a480a16b85e560",
+      "should_not_fire": false,
+      "tool": "mcp__carr__read_doctrine",
+      "required": true
+    },
+    "train-Read": {
+      "split": "train",
+      "input_sha256": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "should_not_fire": true,
+      "tool": "Read",
+      "required": false
+    },
+    "train-Glob": {
+      "split": "train",
+      "input_sha256": "18d00f7df06218380a47197b92be111b635f44b3fe0da1e0f79f596074a8c573",
+      "should_not_fire": true,
+      "tool": "Glob",
+      "required": false
+    },
+    "train-Grep": {
+      "split": "train",
+      "input_sha256": "16970ed6824cb7411dbdf7a1f152293b9871bb12b6bda9db4e3a8234c26f6cea",
+      "should_not_fire": true,
+      "tool": "Grep",
+      "required": false
+    },
+    "train-ToolSearch": {
+      "split": "train",
+      "input_sha256": "3161b03bc700f7582fb34bc1e785a48d2920fd35979816a56dc5eabe16133116",
+      "should_not_fire": true,
+      "tool": "ToolSearch",
+      "required": false
+    },
+    "train-UnknownTool": {
+      "split": "train",
+      "input_sha256": "ad5f10c6b082bcc97f7f16268056a8f9c35abe3253665920c37c86c8e852312e",
+      "should_not_fire": true,
+      "tool": "UnknownTool",
+      "required": false
+    },
+    "test-Bash": {
+      "split": "test",
+      "input_sha256": "d1e9567da9a8a4b0c43da0791da1d2594cf5d7b78547fea132d06bccc1b06091",
+      "should_not_fire": false,
+      "tool": "Bash",
+      "required": true
+    },
+    "test-Write": {
+      "split": "test",
+      "input_sha256": "3f00927a719345edd4a8316599d3b328857987547f8884306861161ffa09647e",
+      "should_not_fire": false,
+      "tool": "Write",
+      "required": true
+    },
+    "test-Edit": {
+      "split": "test",
+      "input_sha256": "464c4ffd019e1e9691dcf0537c797353ef2b1c1d4833d3d463e5b74ae4547344",
+      "should_not_fire": false,
+      "tool": "Edit",
+      "required": true
+    },
+    "test-MultiEdit": {
+      "split": "test",
+      "input_sha256": "db3deb7286e6919734970e0f2050293665fb8723cfd85bfa184bb550c172843e",
+      "should_not_fire": false,
+      "tool": "MultiEdit",
+      "required": true
+    },
+    "test-NotebookEdit": {
+      "split": "test",
+      "input_sha256": "e84a697b3c982b1b2f1013f0ed96d7ce575cedbc67db03a084d9906b5c43e795",
+      "should_not_fire": false,
+      "tool": "NotebookEdit",
+      "required": true
+    },
+    "test-Agent": {
+      "split": "test",
+      "input_sha256": "11b39c93777e8f1f3983bdba7c72b22fe68cfea20c677e9de53e17cb7dbfb19f",
+      "should_not_fire": false,
+      "tool": "Agent",
+      "required": true
+    },
+    "test-WebFetch": {
+      "split": "test",
+      "input_sha256": "7bd75b80a49c80b9c40e54f35d3c6df9c52f6ad96ad5efcf3fd7250803bccc40",
+      "should_not_fire": false,
+      "tool": "WebFetch",
+      "required": true
+    },
+    "test-WebSearch": {
+      "split": "test",
+      "input_sha256": "72f859513e8da7b85424995ed45506b1362a1a49bee1467693ec8da282e3acd5",
+      "should_not_fire": false,
+      "tool": "WebSearch",
+      "required": true
+    },
+    "test-Artifact": {
+      "split": "test",
+      "input_sha256": "e06171a1c467f2d4d883a386b5323dbd1a493627030e4bc6210d6c87c49f359e",
+      "should_not_fire": false,
+      "tool": "Artifact",
+      "required": true
+    },
+    "test-AskUserQuestion": {
+      "split": "test",
+      "input_sha256": "7aca79e91fb3e78067b0803891bfbfb13859151ce50c191186d23eb4a8e7a437",
+      "should_not_fire": false,
+      "tool": "AskUserQuestion",
+      "required": true
+    },
+    "test-mcp__carr__read_doctrine": {
+      "split": "test",
+      "input_sha256": "66fec4d2eb0bb15c02c38171c6bbc1d264d70e979f54602ec5a480a16b85e560",
+      "should_not_fire": false,
+      "tool": "mcp__carr__read_doctrine",
+      "required": true
+    },
+    "test-Read": {
+      "split": "test",
+      "input_sha256": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "should_not_fire": true,
+      "tool": "Read",
+      "required": false
+    },
+    "test-Glob": {
+      "split": "test",
+      "input_sha256": "18d00f7df06218380a47197b92be111b635f44b3fe0da1e0f79f596074a8c573",
+      "should_not_fire": true,
+      "tool": "Glob",
+      "required": false
+    },
+    "test-Grep": {
+      "split": "test",
+      "input_sha256": "16970ed6824cb7411dbdf7a1f152293b9871bb12b6bda9db4e3a8234c26f6cea",
+      "should_not_fire": true,
+      "tool": "Grep",
+      "required": false
+    },
+    "test-ToolSearch": {
+      "split": "test",
+      "input_sha256": "3161b03bc700f7582fb34bc1e785a48d2920fd35979816a56dc5eabe16133116",
+      "should_not_fire": true,
+      "tool": "ToolSearch",
+      "required": false
+    },
+    "test-UnknownTool": {
+      "split": "test",
+      "input_sha256": "ad5f10c6b082bcc97f7f16268056a8f9c35abe3253665920c37c86c8e852312e",
+      "should_not_fire": true,
+      "tool": "UnknownTool",
+      "required": false
+    }
+  }
+}

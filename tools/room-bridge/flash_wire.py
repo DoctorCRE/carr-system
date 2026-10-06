@@ -56,6 +56,8 @@ HEALTH_TIMEOUT_S = 2.0
 # direct turn holds the bridge (TIMEOUT_S).
 SCRIPT_TIMEOUT_S = 600.0
 REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "tools"))
+import flashlib
 POLICY_PATH = REPO / "ops" / "config" / "model-routes.v1.json"
 FLASH_SCRIPT = REPO / "tools" / "flash-script.py"
 FLASH_RUN = REPO / "tools" / "flash-run.py"
@@ -105,7 +107,7 @@ def run_turn(task: str, *, url: str = FLASH_URL, model: str = FLASH_MODEL, max_t
     req = urllib.request.Request(f"{url}/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     try:
-        with opener(req, timeout=timeout) as r:
+        with flashlib.request_scope(url, opener=opener), opener(req, timeout=timeout) as r:
             reply = json.load(r)
     except TimeoutError:
         return {"status": "timed_out", "detail": f"no answer in {timeout:.0f}s"}

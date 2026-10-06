@@ -224,7 +224,14 @@ test("no read verb filters the actor table on a column carr_reader cannot read",
 
   const unclassified = found.filter(f =>
     !(CLASSIFIED[f.name] ||
+      (f.name === "relationship-network.js" && /join public\.actor a on a\.id=/.test(f.literal) && !/\ba\.(?:kind|active)\b/.test(f.literal)) ||
       (f.name === "memory.js" && memoryWriteLiteralClassified(f.literal)) ||
+      // undo-lead-move is a partner-only writer. Its predecessor association
+      // must authenticate the historical approver; no read handler uses this SQL.
+      (f.name === "lead-automation.js" &&
+        f.literal.includes("select count(*)=1 and bool_and(m.id=$2) as associated") &&
+        f.literal.includes("e.verb='approve-lead-move' and e.cause='human_stated'") &&
+        f.literal.includes("m.approved_by=e.actor_id")) ||
       (f.name === "engineering-runtime.js" && engineeringAdmissionLiteralClassified(f.literal))));
   assert.deepEqual(unclassified, [],
     `these filter the actor table on kind or active and are not classified as write-only paths. ` +

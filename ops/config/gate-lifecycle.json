@@ -794,25 +794,6 @@
       "review_date": "2026-11-24",
       "mode": "shadow"
     },
-    "stale-claim-gate.py": {
-      "failure_class": "claim asserted from stale state",
-      "catch_metric": {
-        "log_path": "out/conduct-gate.jsonl",
-        "log_format": "jsonl",
-        "ts_field": "ts",
-        "hook_filter": {
-          "field": "hook",
-          "equals": "stale-claim-gate"
-        },
-        "true_positive": {
-          "kind": "row_exists"
-        },
-        "rule_description": "every row for stale-claim-gate in out/conduct-gate.jsonl already represents a genuine detection -- either a non-empty 'classes'/'patterns' match (chat-lint-gate, conduct-stop-gate, git-writer-gate, gate-edit-gate, escalation-gate, canonical-edit-gate) or a commits+excerpt finding (stale-claim-gate, which does not always carry a 'decision' or 'register' field). This log has no 'nothing found' row shape for any of the seven, checked 2026-08-27, so presence in the window is the catch, the same convention as staging-attribution-gate.jsonl.",
-        "note": "dedicated shared log named in the S5 design guidance (conduct-gate.jsonl breakdown)."
-      },
-      "review_date": "2026-11-24",
-      "mode": "announce"
-    },
     "unread-artifact-gate.py": {
       "failure_class": "artifact referenced but never read",
       "catch_metric": {

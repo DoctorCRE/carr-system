@@ -20,6 +20,9 @@ concurrency:
   group: carr-overnight-merge-pilot
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   plan:
     name: Plan against current GitHub evidence

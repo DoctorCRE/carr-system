@@ -17,7 +17,7 @@ const migration = read("migrations/0318_tour_operations_foundation.sql");
 const rightsHardeningMigration = read("migrations/0427_tour_rights_projection_hardening.sql");
 
 test("foundation contract preserves provenance, conflicts, audit, rights versions and tenant integrity", () => {
-  assert.equal(contract.version, "1.7.0");
+  assert.equal(contract.version, "1.8.0");
   for (const field of ["organization_tenant_id", "property_id", "field_key", "source_evidence_id", "observed_at", "effective_from", "rights_receipt_id", "confidence", "data_classification"]) assert(contract.canonical_record_policy.required_fact_metadata.includes(field), field);
   for (const entity of ["FactConflict", "AuditEvent", "TourPropertyMembership", "ProjectionFact"]) assert.ok(contract.entities[entity], entity);
   assert.match(contract.entities.RightsReceipt.rule, /immutable versioned.*fail closed/i);

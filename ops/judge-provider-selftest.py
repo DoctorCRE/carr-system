@@ -53,6 +53,8 @@ class RoutingTests(unittest.TestCase):
             "system_work": "decisions", "app_runtime": "jev"}}
         class Response(io.BytesIO):
             status = 200
+        # The client refuses a question with no instructions before sending it.
+        QUESTION = {"type": "noul", "instructions": "Is this the fixture?"}
         seen = []
         def transport(request, **kwargs):
             seen.append(json.loads(request.data))
@@ -60,9 +62,9 @@ class RoutingTests(unittest.TestCase):
         options = dict(api_key="offline-test-value", opener=transport, caller="review")
         with patch.object(client.JUDGE, "provider_for", side_effect=lambda cls, config=None: "decisions" if cls == "system_work" else "jev"):
             with self.assertRaisesRegex(client.TypeSafeError, "decisions contract not yet verified / no key"):
-                client.ask("code", {"q": {"type": "noul"}}, **options)
-            result = client.ask("deal", {"q": {"type": "noul"}}, work_class="app_runtime", **options)
-        self.assertEqual(seen, [{"state": "deal", "model": "jev-latest", "questions": {"q": {"type": "noul"}}}])
+                client.ask("code", {"q": QUESTION}, **options)
+            result = client.ask("deal", {"q": QUESTION}, work_class="app_runtime", **options)
+        self.assertEqual(seen, [{"state": "deal", "model": "jev-latest", "questions": {"q": QUESTION}}])
         self.assertEqual(result["answers"]["q"]["noul"], 0.75)
         self.assertEqual(result["usage"], {"input_tokens": 10, "output_tokens": 2})
 
@@ -88,6 +90,25 @@ class RoutingTests(unittest.TestCase):
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_reused_answers_are_excluded_from_provider_repeat_metrics(self):
+        ev = load("paired_eval")
+        request = {"state": "synthetic", "model": "jev-1.13.0", "questions": {"q": {"type": "noul"}}}
+        corpus = ev.freeze([{"receipt_id": "cached-fixture", "request": request,
+                             "request_sha256": ev.digest(request), "work_class": "system_work", "gold": {"q": True}}])
+        def answer(*a, **k):
+            return {"cache_hit": True, "model": "jev-1.13.0", "answers": {"q": {"type": "noul", "noul": .9}},
+                    "usage": {"input_tokens": 1000, "output_tokens": 10}, "latency_ms": 123}
+        report = ev.run(corpus, answer, answer, repeats=2,
+                        rates={name: {"input_usd_per_million": 2, "output_usd_per_million": 4} for name in ("jev", "decisions")})
+        self.assertEqual(report["status"], "incomplete")
+        self.assertEqual(report["paired_successes"], 0)
+        for metrics in report["providers"].values():
+            self.assertEqual(metrics["successes"], 0)
+            self.assertEqual(metrics["cache_hits"], 2)
+            self.assertEqual(metrics["cost_usd"], 0)
+            self.assertIsNone(metrics["p50_latency_ms"])
+            self.assertEqual(metrics["labelled_questions"], 0)
+
     def test_score_alias_collisions_and_shadowed_invalid_values_are_not_evidence(self):
         ev = load("paired_eval")
         request = {"state": "code", "model": "jev-1.13.0", "questions": {

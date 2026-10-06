@@ -16,6 +16,9 @@ concurrency:
   group: carr-authorized-source-merge-controller
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   merge:
     if: >-

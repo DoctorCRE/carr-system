@@ -345,7 +345,7 @@ def bless(only=None):
                  "naming specific gates rewrites only those; everything else is "
                  "carried forward, so one session's bless cannot adopt another's "
                  "in-flight edit.",
-        "blessed_by": who or "unknown",
+        "blessed_by": "git-actor-sha256:" + hashlib.sha256(who.encode()).hexdigest() if who else "unknown",
         "blessed_at_rev": rev or "unknown",
         "hashes": hashes,
         "contracts": contracts,

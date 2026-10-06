@@ -34,6 +34,7 @@ REPO = Path(__file__).resolve().parent.parent
 MAP = REPO / "ops" / "config" / "rule-enforcement-map.json"
 PY = REPO / ".venv" / "bin" / "python"
 MIGRATION_0363 = REPO / "migrations" / "0363_rule_delivery_activation_digest_repin.sql"
+RETIREMENT_REPIN = REPO / "migrations" / "0837_repin_rule_delivery_activation_after_control_retirement.sql"
 PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
 CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
 # The chain has a fourth link as of 2026-09-01. Reinstating canonical_edit into
@@ -117,6 +118,8 @@ def main() -> int:
         print("rule-delivery-acceptance: CARR_LOCAL_PG_DSN required", file=sys.stderr)
         return 78
     data = json.loads(MAP.read_text())
+    _, overlay = load_validated()
+    current_map_digest = overlay["base_map_sha256"]
     layers = data["rule_load_layers"]
     scope_by_id = {rid: scope for scope, ids in data["active_rule_ids"].items() for rid in ids}
     # Scope is durable rule state, not reviewed-map configuration. Deliberately
@@ -129,17 +132,17 @@ def main() -> int:
 
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         # Observe the actual post-migration state before this acceptance mutates
-        # any fixture row. This proves the committed 0471 f7->6d, 0478
-        # 6d->eeb, and 0483 eeb->784 sequence reached its real terminal state.
+        # any fixture row. The full committed migration chain must reach the
+        # current reviewed overlay, not merely the last historical fixture.
         cur.execute(
             """select count(*),
                       count(*) filter (where map_digest=%s),
                       count(*) filter (where short_id=any(%s))
                  from ops.rule_delivery_activation_target""",
-            (POST_0772_ACTIVATION_DIGEST, sorted(EXPECTED_IDS)),
+            (current_map_digest, sorted(EXPECTED_IDS)),
         )
         post_migrate = one(cur)
-        check("the real post-migrate state is the exact eight on the 0772 map",
+        check("the real post-migrate state is the exact eight on the current map",
               post_migrate == (len(EXPECTED_IDS), len(EXPECTED_IDS), len(EXPECTED_IDS)),
               str(post_migrate))
 
@@ -469,6 +472,17 @@ def main() -> int:
         )
         check("the post-0772 fixture is the exact eight on the reviewed map",
               one(cur)[0] == len(EXPECTED_IDS))
+        # Replay the real retirement repin, including its guarded preimage.
+        # A hand-written fixture UPDATE would hide a missing/broken migration.
+        cur.execute(RETIREMENT_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
+            (current_map_digest,),
+        )
+        check("retirement repins the exact targets to the current reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
         cur.execute("""insert into actor (slug,kind,display_name) values ('joe','human','Joe')
                        on conflict (slug) do nothing returning id""")
         cur.execute("select id from actor where slug='joe'")

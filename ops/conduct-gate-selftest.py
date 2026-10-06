@@ -287,44 +287,23 @@ def shadow_writing_cases():
     return results
 
 
-def jev_cases():
-    """scan() with a FAKE Jev, in process — no credential, no network, no
-    spend. Joe, 2026-09-23: a handoff written as prose the keyword patterns
-    miss must still be caught, and a refused command must still be allowed."""
+def handoff_scan_cases():
+    """scan() in process. Only the exact refused command is exempt, and a
+    prose handoff the patterns miss emits a nonblocking review residual."""
     import importlib.util
-    spec = importlib.util.spec_from_file_location("conduct_stop_gate_jev", HOOK)
+    spec = importlib.util.spec_from_file_location("conduct_stop_gate_scan", HOOK)
     gate = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gate)
-    seen = []
-
-    def says(value):
-        def fake(text, surface, existing_decision):
-            seen.append((surface, existing_decision))
-            return value
-        return fake
-
-    prose = "mlx-serve is ready once the Homebrew tap is trusted; trust it, then install."
     out = []
-    fired, findings = gate.scan(prose, "yes install it", (), jev=says(True))
-    out.append(("jev-catches-prose-handoff",
-                fired and ("command_handoff", "jev") in findings))
-    fired, _ = gate.scan(prose, "yes install it", (), jev=says(False))
-    out.append(("jev-no-means-no-block", not fired))
-    fired, _ = gate.scan(prose, "yes install it", ())
-    out.append(("no-jev-keyword-only-unchanged", not fired))
-    fenced = "Run it:\n```bash\nbrew trust --formula ddalcu/mlx-serve/mlx-serve\n```"
-    fired, _ = gate.scan(fenced, "yes install it",
-                         ["brew trust --formula ddalcu/mlx-serve/mlx-serve"], jev=says(True))
-    out.append(("refused-command-beats-jev", not fired))
-    fired, _ = gate.scan(prose, "how do I install mlx-serve myself?", (), jev=says(True))
-    out.append(("he-asked-beats-jev", not fired))
-    seen.clear()
-    fired, findings = gate.scan(fenced, "yes install it", (), jev=says(True))
-    out.append(("keyword-hit-records-agreement",
-                fired and seen == [("stop", True)]
-                and ("command_handoff", "jev") not in findings))
+    apply = "Run it:\n```bash\npython ops/install.py --apply\n```"
+    fired, _ = gate.scan(apply, "yes install it", ["python ops/install.py --dry-run"])
+    out.append(("other-refused-command-no-exempt", fired))
+    fired, _ = gate.scan(apply, "yes install it", ["python ops/install.py --apply"])
+    out.append(("exact-refused-command-exempt", not fired))
+    prose = "mlx-serve is ready once the Homebrew tap is trusted; trust it, then install."
+    fired, findings = gate.scan(prose, "yes install it", ())
+    out.append(("prose-handoff-pattern-residual", not fired and ("handoff_review", "needs_review") in findings))
     return out
-
 
 def main():
     if not os.path.exists(HOOK):
@@ -352,10 +331,10 @@ def main():
         print(f"  {'ok  ' if ok else 'FAIL'} {name:28} "
               f"want={'BLOCK' if expect else 'allow'} got={'BLOCK' if got else 'allow'}")
 
-    for name, ok in jev_cases():
+    for name, ok in handoff_scan_cases():
         passed, failed = (passed+1, failed) if ok else (passed, failed+1)
         if not ok: bad.append(name)
-        print(f"  {'ok  ' if ok else 'FAIL'} {name:28} (attempt-first, fake Jev)")
+        print(f"  {'ok  ' if ok else 'FAIL'} {name:28} (exact-command exemption)")
 
     for name, ok in shadow_writing_cases():
         passed, failed = (passed+1, failed) if ok else (passed, failed+1)

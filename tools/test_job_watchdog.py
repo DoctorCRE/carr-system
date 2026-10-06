@@ -15,16 +15,128 @@ FIXTURES = ROOT / "tools/fixtures/job-watchdog"
 
 def setUpModule():
     from unittest.mock import patch
-    global board_publication
+    global board_publication, scheduled_machine
     board_publication = patch.dict(os.environ, {"PROGRESS_BOARD_LOCAL_ONLY": "1"})
     board_publication.start()
+    scheduled_machine = patch("scheduled_jobs.check", return_value=[])
+    scheduled_machine.start()
 
 
 def tearDownModule():
     board_publication.stop()
+    scheduled_machine.stop()
 
 
 class ReplayTests(unittest.TestCase):
+    def test_ci_replacement_attempts_restore_ready_without_false_red(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        head = "a" * 40
+        def check(name, conclusion, minute):
+            return {"__typename": "CheckRun", "name": name, "workflowName": "CI",
+                    "provider": "github-actions", "status": "COMPLETED",
+                    "conclusion": conclusion, "startedAt": f"2026-01-01T00:{minute}:00Z"}
+        checks = [check("gates", "CANCELLED", "01"), check("strict", "FAILURE", "01"),
+                  check("gates", "SUCCESS", "02"), check("strict", "SUCCESS", "02")]
+        pr = {"repo": "jbookout/carr-system", "number": 1, "headRefOid": head,
+              "updatedAt": "2026-01-01T00:00:00Z", "mergeable": "MERGEABLE",
+              "comments": [{"body": "REVIEW: APPROVED\nReviewed-SHA: " + head,
+                            "createdAt": "2026-01-01T00:03:00Z"}]}
+        for order in (checks, list(reversed(checks))):
+            with self.subTest(order=order):
+                self.assertTrue(w.green(order))
+                found = w.detect({"prs": [{**pr, "statusCheckRollup": order}]}, config, 2000000000)
+                self.assertEqual([f["kind"] for f in found], ["pr_ready"])
+
+    def test_ci_current_pending_or_failed_attempt_does_not_inherit_success(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        old = {"__typename": "CheckRun", "provider": "github-actions", "workflowName": "CI",
+               "name": "strict", "startedAt": "2026-01-01T00:01:00Z",
+               "completedAt": "2026-01-01T00:05:00Z", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        pr = {"repo": "jbookout/carr-system", "number": 1, "headRefOid": "a" * 40,
+              "updatedAt": "2026-01-01T00:00:00Z"}
+        for status, conclusion in (("IN_PROGRESS", None), ("COMPLETED", "FAILURE")):
+            with self.subTest(status=status):
+                checks = [old, {**old, "startedAt": "2026-01-01T00:02:00Z",
+                                "completedAt": None, "status": status, "conclusion": conclusion}]
+                self.assertFalse(w.green(checks))
+                kinds = {f["kind"] for f in w.detect({"prs": [{**pr, "statusCheckRollup": checks}]}, config, 2000000000)}
+                self.assertEqual("pr_ci_red" in kinds, conclusion == "FAILURE")
+
+    def test_ci_identity_keeps_providers_workflows_and_context_types_separate(self):
+        import job_watchdog as w
+        old = {"__typename": "CheckRun", "provider": "app-one", "workflowName": "CI",
+               "name": "strict", "startedAt": "2026-01-01T00:01:00Z",
+               "status": "COMPLETED", "conclusion": "FAILURE"}
+        for identity in ({"provider": "app-two"}, {"workflowName": "DB"},
+                         {"__typename": "StatusContext", "context": "strict", "state": "SUCCESS"}):
+            with self.subTest(identity=identity):
+                checks = [old, {**old, **identity, "startedAt": "2026-01-01T00:02:00Z", "conclusion": "SUCCESS"}]
+                self.assertFalse(w.green(checks))
+
+    def test_ci_gh_export_resolves_actions_reruns_and_status_contexts(self):
+        import job_watchdog as w
+        actions = {"__typename": "CheckRun", "workflowName": "CI", "name": "strict",
+                   "status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-01-01T00:01:00Z",
+                   "detailsUrl": "https://github.com/example/repo/actions/runs/100/job/101"}
+        status = {"__typename": "StatusContext", "context": "lint", "state": "ERROR",
+                  "startedAt": "2026-01-01T00:01:00Z", "targetUrl": "https://checks.example/lint/100"}
+        checks = [actions, {**actions, "conclusion": "SUCCESS", "startedAt": "2026-01-01T00:02:00Z",
+                            "detailsUrl": "https://github.com/example/repo/actions/runs/200/job/201"},
+                  status, {**status, "state": "SUCCESS", "startedAt": "2026-01-01T00:02:00Z",
+                           "targetUrl": "https://checks.example/lint/200"}]
+        self.assertTrue(w.green(checks))
+
+    def test_ci_ambiguous_attempts_stay_fail_closed_and_ids_break_time_ties(self):
+        import job_watchdog as w
+        old = {"__typename": "CheckRun", "provider": "app-one", "workflowName": "CI",
+               "name": "strict", "status": "COMPLETED", "conclusion": "FAILURE"}
+        self.assertFalse(w.green([old, {**old, "conclusion": "SUCCESS"}]))
+        self.assertFalse(w.green([]))
+        old = {**old, "startedAt": "2026-01-01T00:01:00Z", "databaseId": 1}
+        self.assertTrue(w.green([{**old, "databaseId": 2, "conclusion": "SUCCESS"}, old]))
+
+    def test_collected_ci_keeps_provider_workflow_and_head_bindings(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        head = "a" * 40
+        raw = {"__typename": "CheckRun", "name": "strict", "databaseId": 2,
+               "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-01-01T00:02:00Z",
+               "checkSuite": {"app": {"id": "app-one"},
+                              "workflowRun": {"workflow": {"id": "workflow-one"}}}}
+        response = {"data": {"repository": {"pullRequest": {"mergeQueueEntry": None,
+                    "commits": {"nodes": [{"commit": {"oid": head, "statusCheckRollup": {
+                        "contexts": {"nodes": [raw], "pageInfo": {"hasNextPage": False}}}}}]}}}}}
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}), json.dumps(response)]) as command:
+            pr = w.collect_pr("example/repo", 1, w.load_config(ROOT / "ops/config/job-watchdog.json"))
+            self.assertEqual(pr["statusCheckRollup"], [raw])
+            self.assertIn("checkSuite", command.call_args.args[0][4])
+        response["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]["oid"] = "b" * 40
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}), json.dumps(response)]):
+            with self.assertRaisesRegex(RuntimeError, "head changed"):
+                w.collect_pr("example/repo", 1, w.load_config(ROOT / "ops/config/job-watchdog.json"))
+
+    def test_merge_queue_membership_is_read_only_for_listed_repositories(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        self.assertEqual(config["github_merge_queue_repositories"], [])
+        head = "a" * 40
+        def response(entry):
+            observed = {"commits": {"nodes": [{"commit": {"oid": head, "statusCheckRollup": None}}]}}
+            return json.dumps({"data": {"repository": {"pullRequest": {**observed, **entry}}}})
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}), response({})]) as command:
+            pr = w.collect_pr("example/repo", 1, config)
+        self.assertIsNone(pr["mergeQueueEntry"])
+        self.assertNotIn("mergeQueueEntry", command.call_args.args[0][4])
+        queued = {**config, "github_merge_queue_repositories": ["example/repo"]}
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}),
+                                                     response({"mergeQueueEntry": {"id": "q"}})]) as command:
+            pr = w.collect_pr("example/repo", 1, queued)
+        self.assertEqual(pr["mergeQueueEntry"], {"id": "q"})
+        self.assertIn("mergeQueueEntry", command.call_args.args[0][4])
+
     def test_fixtures_have_only_synthetic_name_vocabulary(self):
         # No record-layer access or client-name literals. Unknown name-like
         # words form the denylist relative to this closed synthetic vocabulary.
@@ -97,12 +209,148 @@ class ReplayTests(unittest.TestCase):
             {"id": "over", "start": 1000, "limit": 999, "alive": True, "log_mtime": 2000},
             {"id": "failed", "exit_code": 1, "log_tail": "authentication required"}],
             "branches": [{"repo": "repo", "name": "claude/old", "updated": -10000}],
-            "logs": [{"type": "release", "path": "release.log", "mtime": 1000, "tail": "BLOCKED worker"}]}
+            "logs": [{"type": "release", "path": "release.log", "mtime": 1000, "tail": "release-pipeline[worker]: BLOCKED synthetic_reason — synthetic fixture"}]}
         found = w.detect(facts, c, 2000)
         self.assertEqual({f["kind"] for f in found}, {"job_dead", "job_silent", "job_over_limit", "job_failed", "branch_idle", "pipeline_blocked", "pipeline_stale"})
         self.assertEqual(next(f["needs_joe"] for f in found if f["kind"] == "job_failed"), "credentials")
         facts["jobs"][1]["log_mtime"] = 1400.1
         self.assertNotIn("job_silent", {f["kind"] for f in w.detect(facts, c, 2000)})
+
+    def test_release_block_counts_only_while_it_is_the_lane_outcome(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        tail = "\n".join([
+            "release-pipeline[app]: batch 56b686af9a0c..a49899340f8d: 331 path(s), 247 release path(s)",
+            "release-pipeline[app]: BLOCKED checks_pending — `test` still running on a49899340f8d",
+            "release-pipeline[worker]: batch c7118b067230..179741a1fb13: 252 path(s), 24 release path(s)",
+            "release-pipeline[worker]: BLOCKED github_unreadable — gh api exited 1",
+            "release-pipeline[app]: batch 56b686af9a0c..a49899340f8d: 331 path(s), 247 release path(s)",
+            "  -> app-release: npm run release:production",
+            "release-pipeline[app]: SHIPPED a49899340f8d",
+            "release-pipeline[worker]: main is f66c3f5f7799; newest green canary target is 179741a1fb13",
+            "release-pipeline[worker]: batch c7118b067230..179741a1fb13: 252 path(s), 24 release path(s)",
+        ])
+        found = w.detect({"logs": [{"type": "release", "path": "release.log", "mtime": 2000, "tail": tail}]}, c, 2000)
+        self.assertEqual([f["reason"] for f in found if f["kind"] == "pipeline_blocked"],
+                         ["release-pipeline[worker]: BLOCKED github_unreadable — gh api exited 1"])
+        shipped = tail + "\nrelease-pipeline[worker]: FAILED at staging-prepare (exit 2); log x"
+        found = w.detect({"logs": [{"type": "release", "path": "release.log", "mtime": 2000, "tail": shipped}]}, c, 2000)
+        self.assertNotIn("pipeline_blocked", {f["kind"] for f in found})
+
+    def test_release_block_survives_follow_up_lines_that_are_not_outcomes(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        blocked = "release-pipeline[worker]: BLOCKED github_unreadable — gh api exited 1"
+        # Lines the pipeline prints after BLOCKED in the same tick; none ends the lane's tick.
+        for follow_up in ("release-pipeline[worker]: could not file the loop: OSError",
+                          "release-pipeline[worker]: diagnosis dispatch FAILED: exit 1",
+                          "release-pipeline[worker]: dry run complete; nothing executed"):
+            with self.subTest(follow_up=follow_up):
+                tail = "\n".join(["release-pipeline[worker]: batch a..b: 3 path(s), 1 release path(s)",
+                                  blocked, follow_up])
+                found = w.detect({"logs": [{"type": "release", "path": "r.log", "mtime": 2000, "tail": tail}]}, c, 2000)
+                self.assertEqual([f["reason"] for f in found if f["kind"] == "pipeline_blocked"], [blocked])
+
+    def test_every_tick_ending_release_line_supersedes_block(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        for outcome in ("SHIPPED 179741a1fb13",
+                        "FAILED at staging-prepare (exit 2); log x",
+                        "UNEXPECTED KeyError: 'sha'",
+                        "main 179741a1fb13 is already released",
+                        "179741a1fb13 failed at upload; waiting for a fix-forward merge",
+                        "target 179741a1fb13 is at or before the failed 179741a1fb13 (upload); waiting for a green fix-forward",
+                        "doc/test-only batch; nothing to release",
+                        "lane worker disabled by ops/config/release-pipeline.v1.json",
+                        "disabled on this machine by /synthetic/release-pipeline.off"):
+            with self.subTest(outcome=outcome):
+                tail = "release-pipeline[worker]: BLOCKED github_unreadable — gh api exited 1\nrelease-pipeline[worker]: " + outcome
+                found = w.detect({"logs": [{"type": "release", "path": "r.log", "mtime": 2000, "tail": tail}]}, c, 2000)
+                self.assertNotIn("pipeline_blocked", {f["kind"] for f in found})
+
+    def test_every_finding_kind_is_declared_once_by_its_evidence_source(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        meta = {"collection_error", "environment", "rate_limited", "action_error", "record_error", "board_error"}
+        declared = set().union(*w.EVIDENCE.values())
+        self.assertEqual(set(c["next_actions"]), declared | meta)
+        self.assertFalse(declared & meta)
+        self.assertEqual(w.EVIDENCE_ERROR_KINDS, {"collection_error", "environment", "rate_limited"})
+
+    def test_detect_refuses_a_kind_its_source_does_not_declare(self):
+        from unittest.mock import patch
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        facts = {"branches": [{"repo": "repo", "name": "claude/old", "updated": -10000}]}
+        with patch.dict(w.EVIDENCE, {"branches": frozenset()}):
+            with self.assertRaisesRegex(ValueError, "branch_idle"):
+                w.detect(facts, c, 2000)
+
+    def test_evidence_error_must_name_its_kind_and_blinds(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        for missing in ("kind", "blinds"):
+            with self.subTest(missing=missing):
+                error = {"kind": "collection_error", "source": "s", "reason": "r", "blinds": ["branch_idle"]}
+                del error[missing]
+                with self.assertRaises(KeyError):
+                    w.detect({"errors": [error]}, c, 2000)
+        with tempfile.TemporaryDirectory() as directory:
+            unnamed = w.finding("collection_error", "s", "r", c)
+            with self.assertRaises(KeyError):
+                w.reconcile(Path(directory), c, [unnamed], None, 100)
+
+    def test_collect_names_kind_and_blinds_on_every_error(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / c["paths"]["registry"]).parent.mkdir(parents=True, exist_ok=True)
+            (root / c["paths"]["registry"]).write_text("not json\n")
+            c["repositories"] = []
+            c["paths"]["queue_logs"] = []
+            facts = w.collect(root, c)
+        self.assertEqual(facts["errors"], [{"kind": "collection_error", "source": "job registry",
+                                            "reason": facts["errors"][0]["reason"],
+                                            "blinds": sorted(w.EVIDENCE["jobs"])}])
+
+    def test_missing_tool_is_one_environment_finding(self):
+        from unittest.mock import patch
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"PATH": directory}):
+            c["paths"]["merge_queue"] = directory + "/queue.txt"
+            c["paths"]["queue_logs"] = []
+            facts = w.collect(Path(directory), c)
+        found = w.detect(facts, c, 2000)
+        self.assertEqual([(f["kind"], f["subject"]) for f in found], [("environment", "gh")])
+        self.assertIn("PATH", found[0]["reason"])
+        self.assertIn("pr_ci_red", found[0]["blinds"])
+        self.assertIn("branch_idle", found[0]["blinds"])
+        self.assertNotIn("pipeline_blocked", found[0]["blinds"])
+
+    def test_evidence_error_retains_only_the_findings_it_blinds(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        class Effects:
+            def prepare(self, action, f):
+                return True
+            def act(self, action, f):
+                return {}
+            def report(self, f):
+                return {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pipeline = w.finding("pipeline_blocked", "release.log:abc", "BLOCKED checks_pending", c)
+            red = w.finding("pr_ci_red", "repo#1@abc", "hosted CI failed", c)
+            w.reconcile(root, c, [pipeline, red], Effects(), 100)
+            missing = w.detect({"errors": [{"kind": "environment", "source": "gh", "reason": "gh missing",
+                                             "blinds": sorted(w.EVIDENCE["prs"])}]}, c, 200)
+            w.reconcile(root, c, missing, Effects(), 200)
+            state = w.read_latest(root / c["paths"]["findings"])
+            self.assertEqual(state[pipeline["key"]]["cleared_at"], w.stamp(200))
+            self.assertIsNone(state[red["key"]]["cleared_at"])
 
     def test_current_head_latest_review_and_active_fixer(self):
         import job_watchdog as w
@@ -123,6 +371,339 @@ class ReplayTests(unittest.TestCase):
         job = {"id": "fix", "card": "fix", "repo": p["repo"], "pr": 8, "head": p["headRefOid"],
                "alive": True, "start": 1999999900, "limit": 3600, "log_mtime": 2000000000}
         self.assertEqual(w.detect({"prs": [p], "jobs": [job]}, c, 2000000000), [])
+
+
+class GithubBudgetTests(unittest.TestCase):
+    """The scan spends GitHub GraphQL only on PRs whose REST listing changed."""
+
+    REPO = "jbookout/carr-system"
+
+    def setUp(self):
+        import job_watchdog as w
+        self.w = w
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["repositories"] = [self.REPO]
+        c["paths"]["merge_queue"] = "queue.txt"
+        c["paths"]["queue_logs"] = []
+        c["paths"]["release_log"] = "release.log"
+        self.c = c
+        self.listing = [{"number": 7, "head": {"sha": "a" * 40}, "updated_at": "2026-10-04T10:00:00Z"}]
+        self.calls = []
+        self.limited = False
+        self.branches = []
+
+    def gh(self, argv, config, cwd=None):
+        self.calls.append(argv)
+        target = argv[-1]
+        if "pulls?state=open" in target:
+            return json.dumps([self.listing])
+        if "branches?" in target:
+            return json.dumps([self.branches])
+        if "/commits/" in target:
+            return json.dumps({"commit": {"committer": {"date": "2026-10-01T00:00:00Z"}}})
+        if argv[:2] == ["gh", "api"] and target == "rate_limit":
+            return json.dumps({"resources": {
+                "core": {"limit": 5000, "used": 12, "remaining": 4988, "reset": 2000000000},
+                "graphql": {"limit": 5000, "used": 5000, "remaining": 0, "reset": 2000003600}}})
+        if self.limited:
+            raise RuntimeError("gh exit 1: GraphQL: API rate limit exceeded for user ID 1. ")
+        if argv[:3] == ["gh", "pr", "view"]:
+            number = int(argv[3])
+            pr = next(p for p in self.listing if p["number"] == number)
+            return json.dumps({"number": number, "headRefOid": pr["head"]["sha"], "headRefName": "claude/x",
+                               "updatedAt": pr["updated_at"], "isDraft": False, "mergeable": "MERGEABLE",
+                               "comments": [], "reviews": [], "commits": [], "mergeStateStatus": "CLEAN",
+                               "statusCheckRollup": [{"conclusion": "FAILURE", "status": "COMPLETED"}]})
+        if argv[:3] == ["gh", "api", "graphql"]:
+            return json.dumps({"data": {"repository": {"pullRequest": {"mergeQueueEntry": None}}}})
+        raise AssertionError(f"unexpected command {argv}")
+
+    def transport(self, argv, config, cwd=None):
+        """Serve self.gh's snapshot as gh does: checks arrive head-bound via GraphQL."""
+        out = self.gh(argv, config, cwd)
+        if argv[:3] == ["gh", "pr", "view"]:
+            pr = json.loads(out)
+            self.served = (pr["headRefOid"], pr.pop("statusCheckRollup"))
+            return json.dumps(pr)
+        if argv[:3] == ["gh", "api", "graphql"]:
+            reply = json.loads(out)
+            head, checks = self.served
+            reply["data"]["repository"]["pullRequest"]["commits"] = {"nodes": [{"commit": {
+                "oid": head, "statusCheckRollup": {"contexts": {
+                    "nodes": checks, "pageInfo": {"hasNextPage": False}}}}}]}
+            return json.dumps(reply)
+        return out
+
+    def collect(self, now):
+        from unittest.mock import patch
+        self.calls.clear()
+        with patch.object(self.w, "command", side_effect=self.transport):
+            return self.w.collect(self.root, self.c, now)
+
+    def graphql_calls(self):
+        return [a for a in self.calls if a[:3] in (["gh", "pr", "view"], ["gh", "api", "graphql"])]
+
+    def test_branch_dates_reuse_immutable_sha_but_retired_refs_leave_the_facts(self):
+        self.branches = [{"name": "codex/old", "commit": {"sha": "b" * 40}}]
+        first = self.collect(1000)
+        self.assertEqual(len(first["branches"]), 1)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.collect(1120)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 0)
+        dates = self.root / "out/watchdog/branch-dates.json"
+        dates.write_text(json.dumps({self.REPO + ":" + "b" * 40: float("nan")}))
+        refreshed = self.collect(1180)
+        self.assertEqual(refreshed["branches"], first["branches"])
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.branches = []
+        self.assertEqual(self.collect(1240)["branches"], [])
+
+    def test_unchanged_pr_is_not_recollected_until_the_cache_expires(self):
+        first = self.collect(1000)
+        self.assertEqual(len(self.graphql_calls()), 2, "snapshot and check identities per collected PR")
+        second = self.collect(1000 + 120)
+        self.assertEqual(self.graphql_calls(), [])
+        self.assertEqual(second["prs"], first["prs"])
+        self.assertEqual([f["kind"] for f in self.w.detect(second, self.c, 1120)], ["pr_ci_red"])
+        self.collect(1000 + self.c["thresholds"]["pr_cache_seconds"])
+        self.assertEqual(len(self.graphql_calls()), 2)
+
+    def test_changed_head_or_update_recollects(self):
+        self.collect(1000)
+        self.listing[0]["head"]["sha"] = "b" * 40
+        facts = self.collect(1120)
+        self.assertEqual(len(self.graphql_calls()), 2)
+        self.assertEqual(facts["prs"][0]["headRefOid"], "b" * 40)
+        self.listing[0]["updated_at"] = "2026-10-04T10:05:00Z"
+        self.collect(1240)
+        self.assertEqual(len(self.graphql_calls()), 2)
+
+    def test_pending_checks_recollect_on_the_short_interval(self):
+        original = self.gh
+        def pending(argv, config, cwd=None):
+            out = original(argv, config, cwd)
+            if argv[:3] == ["gh", "pr", "view"]:
+                pr = json.loads(out)
+                pr["statusCheckRollup"] = [{"status": "IN_PROGRESS", "conclusion": ""}]
+                return json.dumps(pr)
+            return out
+        self.gh = pending
+        self.collect(1000)
+        self.collect(1000 + self.c["thresholds"]["pr_cache_pending_seconds"])
+        self.assertEqual(len(self.graphql_calls()), 2)
+
+    def test_collection_reads_snapshot_then_head_bound_checks_and_queue(self):
+        self.collect(1000)
+        self.assertEqual([a[:3] for a in self.graphql_calls()], [["gh", "pr", "view"], ["gh", "api", "graphql"]])
+
+    def test_rate_limit_is_one_scan_finding_and_keeps_pr_state(self):
+        cached = self.collect(1000)
+        self.listing += [{"number": n, "head": {"sha": str(n) * 40}, "updated_at": "2026-10-04T10:00:00Z"}
+                         for n in (8, 9)]
+        self.listing[0]["head"]["sha"] = "c" * 40
+        self.limited = True
+        facts = self.collect(1120)
+        self.assertEqual(len(self.graphql_calls()), 1, "stop spending after the first rate-limit refusal")
+        found = self.w.detect(facts, self.c, 1120)
+        self.assertEqual(sorted(f["kind"] for f in found), ["pr_ci_red", "rate_limited"])
+        limit = next(f for f in found if f["kind"] == "rate_limited")
+        self.assertIn("graphql", limit["reason"])
+        self.assertIn(self.w.stamp(2000003600), limit["reason"])
+        self.assertNotIn("collection_error", [f["kind"] for f in found])
+        self.assertEqual(facts["prs"], cached["prs"], "previous PR state is kept")
+
+        class Effects:
+            def prepare(self, action, f):
+                return True
+            def act(self, action, f):
+                return {}
+            def report(self, f):
+                return {}
+        prior = self.w.finding("pr_conflict", "jbookout/carr-system#8@" + "8" * 40, "conflict", self.c)
+        self.w.reconcile(self.root, self.c, [prior], Effects(), 100)
+        self.w.reconcile(self.root, self.c, found, Effects(), 200)
+        self.assertIsNone(self.w.read_latest(self.root / self.c["paths"]["findings"])[prior["key"]]["cleared_at"])
+
+    def test_overlapping_scan_exits_cleanly_and_records_the_skip(self):
+        from unittest.mock import patch
+        lock = self.w.path_at(self.root, self.c["paths"]["scan_lock"])
+        with self.w.locked(lock, blocking=False), \
+             patch.object(self.w, "collect", side_effect=AssertionError("overlapping scan collected")):
+            self.assertEqual(self.w.scan(self.root, self.c), 0)
+        rows = [json.loads(s) for s in self.w.path_at(self.root, self.c["paths"]["scan_ledger"]).read_text().splitlines()]
+        self.assertEqual([(r["key"], r["status"]) for r in rows], [("scan_skipped", "skipped")])
+
+    def test_branch_limit_blinds_skipped_prs_and_preserves_prior_conflict(self):
+        other = "jbookout/doctorcre-app"
+        self.c["repositories"].append(other)
+        original = self.gh
+        def limited_branch(argv, config, cwd=None):
+            if f"repos/{self.REPO}/branches?" in argv[-1]:
+                self.calls.append(argv)
+                raise RuntimeError("API rate limit exceeded")
+            return original(argv, config, cwd)
+        self.gh = limited_branch
+        facts = self.collect(1000)
+        error = next(e for e in facts["errors"] if e["kind"] == "rate_limited")
+        self.assertTrue(self.w.EVIDENCE["prs"] <= set(error["blinds"]))
+        prior = self.w.finding("pr_conflict", other + "#7@" + "a" * 40, "conflict", self.c)
+        self.w.append(self.root / self.c["paths"]["findings"], {**prior, "reported": True, "cleared_at": None})
+        from unittest.mock import Mock
+        effects = Mock()
+        effects.report.return_value = {}
+        self.w.reconcile(self.root, self.c, self.w.detect(facts, self.c, 1000), effects, 1000)
+        self.assertIsNone(self.w.read_latest(self.root / self.c["paths"]["findings"])[prior["key"]]["cleared_at"])
+
+    def test_cached_readiness_does_not_consume_enqueue_before_ci_recovers(self):
+        from unittest.mock import patch
+        original = self.gh
+        state = ["SUCCESS"]
+        def approved(argv, config, cwd=None):
+            out = original(argv, config, cwd)
+            if argv[:3] == ["gh", "pr", "view"]:
+                pr = json.loads(out)
+                pr["comments"] = [{"body": "REVIEW: APPROVED\nReviewed-SHA: " + "a" * 40,
+                                   "createdAt": pr["updatedAt"]}]
+                pr["statusCheckRollup"] = [{"status": "IN_PROGRESS" if state[0] == "PENDING" else "COMPLETED",
+                                            "conclusion": state[0]}]
+                return json.dumps(pr)
+            return out
+        self.gh = approved
+        queue = self.root / "queue.txt"
+        queue.write_text(self.REPO + " 7 " + "a" * 40 + "\n")
+        self.assertEqual(self.w.detect(self.collect(1000), self.c, 1000), [])
+        queue.write_text("")
+        state[0] = "PENDING"
+        effects = self.w.Effects(self.root, self.c)
+        with patch.object(self.w, "command", side_effect=self.transport), patch.object(effects, "report", return_value={}):
+            stale = self.w.detect(self.w.collect(self.root, self.c, 1120), self.c, 1120)
+            self.assertEqual([f["kind"] for f in stale], ["pr_ready"])
+            self.w.reconcile(self.root, self.c, stale, effects, 1120)
+            self.assertEqual(self.w.read_latest(self.root / self.c["paths"]["actions"]), {})
+            self.assertEqual(queue.read_text(), "")
+            state[0] = "SUCCESS"
+            found = self.w.reconcile(self.root, self.c, stale, effects, 1240)
+            self.assertNotIn("action_error", [f["kind"] for f in found])
+            self.assertEqual(len(queue.read_text().splitlines()), 1)
+            actions = self.w.read_latest(self.root / self.c["paths"]["actions"])
+            self.assertEqual(actions[stale[0]["key"]]["status"], "done")
+            self.w.reconcile(self.root, self.c, stale, effects, 3000)
+            self.assertEqual(len(queue.read_text().splitlines()), 1)
+
+    def test_empty_checks_recollect_when_checks_are_created(self):
+        original = self.gh
+        empty = [True]
+        def checks(argv, config, cwd=None):
+            out = original(argv, config, cwd)
+            if empty[0] and argv[:3] == ["gh", "pr", "view"]:
+                pr = json.loads(out)
+                pr["statusCheckRollup"] = []
+                return json.dumps(pr)
+            return out
+        self.gh = checks
+        self.assertEqual(self.w.detect(self.collect(1000), self.c, 1000), [])
+        empty[0] = False
+        facts = self.collect(1360)
+        self.assertEqual(len(self.graphql_calls()), 2)
+        self.assertEqual([f["kind"] for f in self.w.detect(facts, self.c, 1360)], ["pr_ci_red"])
+
+    def test_unknown_check_result_uses_pending_interval(self):
+        original = self.gh
+        for index, rollup in enumerate(([{}], [{"status": "COMPLETED", "conclusion": None}])):
+            with self.subTest(rollup=rollup):
+                def unknown(argv, config, cwd=None):
+                    out = original(argv, config, cwd)
+                    if argv[:3] == ["gh", "pr", "view"]:
+                        pr = json.loads(out)
+                        pr["statusCheckRollup"] = rollup
+                        return json.dumps(pr)
+                    return out
+                self.gh = unknown
+                self.collect(5000 * (index + 1))
+                self.collect(5000 * (index + 1) + 360)
+                self.assertEqual(len(self.graphql_calls()), 2)
+
+    def test_invalid_cache_is_discarded_and_repaired(self):
+        cache = self.w.path_at(self.root, self.c["paths"]["pr_cache"])
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        for corrupt in ([], None, {self.REPO + "#7": {"version": ["a" * 40, self.listing[0]["updated_at"]]}},
+                        {self.REPO + "#7": {"version": ["a" * 40, self.listing[0]["updated_at"]],
+                                            "collected_at": 1000, "pr": {"mergeable": "MERGEABLE"}}}):
+            with self.subTest(corrupt=corrupt):
+                cache.write_text(json.dumps(corrupt))
+                facts = self.collect(1120)
+                self.assertEqual([p["number"] for p in facts["prs"]], [7])
+                self.assertEqual(facts["errors"], [])
+                self.assertIsInstance(json.loads(cache.read_text()), dict)
+                self.assertEqual(self.collect(1240)["prs"], facts["prs"])
+
+    def test_invalid_entry_does_not_prevent_later_pr_collection(self):
+        self.collect(1000)
+        cache = self.w.path_at(self.root, self.c["paths"]["pr_cache"])
+        contents = json.loads(cache.read_text())
+        contents[self.REPO + "#7"] = {"version": ["a" * 40, self.listing[0]["updated_at"]]}
+        cache.write_text(json.dumps(contents))
+        self.listing.append({"number": 8, "head": {"sha": "b" * 40}, "updated_at": self.listing[0]["updated_at"]})
+        facts = self.collect(1120)
+        self.assertEqual([p["number"] for p in facts["prs"]], [7, 8])
+        self.assertEqual(facts["errors"], [])
+
+    def test_invalid_nested_review_cache_is_recollected(self):
+        self.collect(1000)
+        cache = self.w.path_at(self.root, self.c["paths"]["pr_cache"])
+        contents = json.loads(cache.read_text())
+        contents[self.REPO + "#7"]["pr"]["reviews"] = [{"state": [], "body": ""}]
+        cache.write_text(json.dumps(contents))
+        facts = self.collect(1120)
+        self.assertEqual(len(self.graphql_calls()), 2)
+        self.assertEqual([f["kind"] for f in self.w.detect(facts, self.c, 1120)], ["pr_ci_red"])
+
+    def test_exhausted_allowance_is_diagnosed_once_and_stops_provider_reads(self):
+        self.c["repositories"].append("jbookout/doctorcre-app")
+        original = self.gh
+        def exhausted(argv, config, cwd=None):
+            if "pulls?" in argv[-1] or "branches?" in argv[-1]:
+                self.calls.append(argv)
+                raise RuntimeError("API rate limit exceeded")
+            return original(argv, config, cwd)
+        self.gh = exhausted
+        facts = self.collect(1000)
+        self.assertEqual(len([a for a in self.calls if a[-1] == "rate_limit"]), 1)
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(facts["errors"]), 1)
+        self.assertEqual(set(facts["errors"][0]["blinds"]), self.w.EVIDENCE["prs"] | self.w.EVIDENCE["branches"])
+
+    def test_partial_rate_limit_diagnostic_never_aborts_collection(self):
+        original = self.gh
+        for resources in ({"graphql": {"remaining": 0}}, {"graphql": []},
+                          {"graphql": {"remaining": 0, "used": 1, "limit": 1, "reset": "later"}}, []):
+            with self.subTest(resources=resources):
+                def partial(argv, config, cwd=None):
+                    if argv[-1] == "rate_limit":
+                        self.calls.append(argv)
+                        return json.dumps({"resources": resources})
+                    return original(argv, config, cwd)
+                self.gh = partial
+                self.limited = True
+                facts = self.collect(1000)
+                self.assertEqual(len(facts["errors"]), 1)
+                self.assertEqual(facts["errors"][0]["kind"], "rate_limited")
+                self.assertIn("unreadable", facts["errors"][0]["reason"])
+                self.assertIn("API rate limit exceeded", facts["errors"][0]["reason"])
+
+    def test_secondary_limit_preserves_provider_retry_guidance(self):
+        original = self.gh
+        def secondary(argv, config, cwd=None):
+            if argv[:3] == ["gh", "pr", "view"]:
+                self.calls.append(argv)
+                raise RuntimeError("secondary rate limit: retry after 60 seconds")
+            return original(argv, config, cwd)
+        self.gh = secondary
+        error = self.collect(1000)["errors"][0]
+        self.assertIn("secondary rate limit: retry after 60 seconds", error["reason"])
 
 
 class RunnerTests(unittest.TestCase):
@@ -177,7 +758,11 @@ class RunnerTests(unittest.TestCase):
             cp = root / "config.json"
             cp.write_text(json.dumps(config))
             env = dict(os.environ, PATH=str(executable.parent) + os.pathsep + os.environ["PATH"])
-            result = subprocess.run([sys.executable, str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"],
+            script = ("import sys, runpy; sys.path.insert(0, " + repr(str(ROOT / "lib")) + "); "
+                      "import scheduled_jobs; scheduled_jobs.check = lambda **kwargs: []; "
+                      "sys.argv = " + repr([str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"]) + "; "
+                      "runpy.run_path(sys.argv[0], run_name='__main__')")
+            result = subprocess.run([sys.executable, "-c", script],
                                     env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), "")
@@ -396,7 +981,8 @@ class StateTests(unittest.TestCase):
                     w.board_task(root, c, card, "executor", "running", "Original work in progress")
                 f = w.finding("job_hang", "synthetic-job", "Waiting for authentication...", c, card=card)
                 if mode == "collection":
-                    f = w.detect({"errors": [{"source": "synthetic-source", "reason": "evidence unavailable"}]}, c, 100)[0]
+                    f = w.detect({"errors": [{"kind": "collection_error", "source": "synthetic-source",
+                                              "reason": "evidence unavailable", "blinds": []}]}, c, 100)[0]
                     card = effects.card(f)
                 other = w.finding("job_over_limit", "synthetic-job", "another active failure", c, card=card)
                 found = [f, other] if mode == "other-finding" else [f]
@@ -477,7 +1063,8 @@ class StateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             effects = w.Effects(root, c)
-            f = w.finding("collection_error", "synthetic-source", "evidence unavailable", c, card="reopened")
+            f = w.finding("collection_error", "synthetic-source", "evidence unavailable", c,
+                          card="reopened", blinds=[])
             w.reconcile(root, c, [f], effects, 100)
             w.reconcile(root, c, [], effects, 200)
             w.board_task(root, c, "reopened", "executor", "review", "New verification in progress")
@@ -491,6 +1078,8 @@ class StateTests(unittest.TestCase):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         class Effects:
+            def prepare(self, action, f):
+                return True
             calls = []
             def act(self, action, f):
                 self.calls.append((action, f["key"]))
@@ -514,6 +1103,8 @@ class StateTests(unittest.TestCase):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         class Effects:
+            def prepare(self, action, f):
+                return True
             def act(self, action, f):
                 raise AssertionError("must never retry ambiguous intent")
             def report(self, f):
@@ -525,13 +1116,16 @@ class StateTests(unittest.TestCase):
             w.reconcile(root, c, [f], Effects(), 100)
             state = w.read_latest(root / c["paths"]["findings"])
             self.assertTrue(any(x["kind"] == "action_error" for x in state.values()))
-            w.reconcile(root, c, [w.finding("collection_error", "repo", "network unavailable", c)], Effects(), 200)
+            w.reconcile(root, c, [w.finding("collection_error", "repo", "network unavailable", c,
+                                            blinds=sorted(w.EVIDENCE["prs"]))], Effects(), 200)
             self.assertIsNone(w.read_latest(root / c["paths"]["findings"])[f["key"]]["cleared_at"])
 
     def test_second_hang_is_blocked_without_another_restart(self):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         class Effects:
+            def prepare(self, action, f):
+                return True
             calls = []
             def report(self, f):
                 self.calls.append("report")
@@ -560,6 +1154,53 @@ class StateTests(unittest.TestCase):
             digest = w.digest(root, c)
             self.assertIn("stdin", digest)
             self.assertNotIn("gone", digest)
+
+    def test_permission_denied_group_probe_still_reports_presence(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        with patch.object(w.os, "killpg", side_effect=PermissionError("synthetic group probe")):
+            self.assertTrue(w.process_group_alive(42))
+
+    def test_restart_waits_through_permission_probe_race(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        import signal
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["thresholds"]["recovery_poll_seconds"] = 0.001
+        with tempfile.TemporaryDirectory() as directory:
+            effects = w.Effects(Path(directory), c)
+            job = {"id": "old", "pid": 42, "pgid": 42, "process_identity": "old", "command": ["true"],
+                   "card": "test", "cwd": directory}
+            probes = 0
+            def probe(pgid, signum):
+                nonlocal probes
+                if signum == 0:
+                    probes += 1
+                    if probes == 1:
+                        raise PermissionError("group exiting before reaping")
+                    raise ProcessLookupError("group reaped")
+            with patch.object(w, "process_identity", return_value="old"), patch.object(w.os, "getpgid", return_value=42), patch.object(w.os, "killpg", side_effect=probe) as kill, patch.object(effects, "launch", return_value={"restarted": True}) as launch:
+                self.assertEqual(effects.restart({"job": job}), {"restarted": True})
+                launch.assert_called_once()
+            self.assertEqual([call.args[1] for call in kill.call_args_list if call.args[1]], [signal.SIGTERM])
+
+    def test_denied_group_signal_refuses_relaunch(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        import signal
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            effects = w.Effects(Path(directory), c)
+            job = {"id": "old", "pid": 42, "pgid": 42, "process_identity": "old", "command": ["true"],
+                   "card": "test", "cwd": directory}
+            def denied(pgid, signum):
+                if signum != signal.SIGTERM:
+                    raise PermissionError("synthetic denied group")
+            with patch.object(w, "process_identity", return_value="old"), patch.object(w.os, "getpgid", return_value=42), patch.object(w.os, "killpg", side_effect=denied) as kill, patch.object(w.time, "monotonic", side_effect=[0, 100]), patch.object(effects, "launch") as launch:
+                with self.assertRaises(PermissionError):
+                    effects.restart({"job": job})
+                launch.assert_not_called()
+            self.assertIn(signal.SIGKILL, [call.args[1] for call in kill.call_args_list])
 
     def test_reused_pid_is_never_killed(self):
         import job_watchdog as w
@@ -636,6 +1277,8 @@ class StateTests(unittest.TestCase):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         class Effects:
+            def prepare(self, action, f):
+                return True
             reported = []
             def report(self, f):
                 self.reported.append(f["kind"])

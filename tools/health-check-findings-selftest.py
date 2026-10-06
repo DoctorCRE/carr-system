@@ -91,12 +91,25 @@ import copy
 import json
 import tempfile
 import unittest
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HEALTH_CHECK_PATH = Path(__file__).resolve().parent / "health-check.py"
 SOURCE = HEALTH_CHECK_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(HEALTH_CHECK_PATH))
+sys.path.insert(0, str(HEALTH_CHECK_PATH.parent.parent / "lib"))
+
+
+def setUpModule():
+    from unittest.mock import patch
+    global scheduled_machine
+    scheduled_machine = patch("scheduled_jobs.check", return_value=[])
+    scheduled_machine.start()
+
+
+def tearDownModule():
+    scheduled_machine.stop()
 
 # The two names a finding-recording call inside tools/health-check.py may
 # appear under: the low-level `_canonical_finding` itself (still called
@@ -120,7 +133,7 @@ STRUCTURAL_KEYS = {
     "job_ledger", "control_state", "repo_status", "registry_integrity",
     "credential_health", "unrecorded_failure", "tailscale",
 }
-ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity"}
+ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity", "scheduled_jobs_evidence_unavailable"}
 
 
 def _find_function(name: str) -> ast.FunctionDef:
@@ -580,8 +593,11 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         ns.update(os=os, re=re, sys=sys, time=time, REPO_ROOT=str(HEALTH_CHECK_PATH.parent.parent),
                   CANONICAL_SECTION="credentials", CANONICAL_FIXTURE=None, timedelta=timedelta,
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
+                  _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
                   _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
+                  _jev_site_spend_row=lambda: "OK jev spend by site — fixture",
                   _grok_session_row=lambda: ("OK fixture Grok session", 0),
+                  flashlib=Mock(health_row=Mock(return_value="OK Flash stopped")),
                   subprocess=Mock(run=Mock(return_value=subprocess.CompletedProcess([], 0, "SKIP fixture", ""))))
         exec(compile(mod, str(HEALTH_CHECK_PATH), "exec"), ns)
         return ns
@@ -650,6 +666,21 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                 self.assertTrue(finding["hard_error"])
                 self.assertIn(error, finding["detail"])
 
+    def test_a_site_over_its_jev_budget_fails_health(self):
+        import io, contextlib
+        ns = self.namespace()
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        ns["_jev_site_spend_row"] = lambda: ("WARN jev spend by site — 2026-10-04 · 40/3000 paid attempts"
+                                             " · over budget: jev_handoff=81/80")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ns["_canonical_health"](), 1)
+        self.assertEqual([f["key"] for f in ns["_FINDINGS"]], ["jev_site_budget"])
+        ns = self.namespace()
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        ns["_jev_site_spend_row"] = lambda: "OK jev spend by site — 2026-10-04 · 40/3000 paid attempts"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ns["_canonical_health"](), 0)
+
     def test_grok_failure_remains_a_finding_with_healthy_paid_cap(self):
         ns = self.namespace()
         ns["_grok_session_row"] = lambda: ("FAIL fixture Grok session", 1)
@@ -662,6 +693,8 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         ns = self.namespace()
         snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}}
         ns.update(CANONICAL_SECTION="all", _canonical_snapshot=lambda: snap,
+                  _seat_health_rows=lambda: ["PASS seat fixture"],
+                  _branch_janitor_row=lambda: ("OK branch janitor fixture", False),
                   _canonical_now=lambda snap: datetime.now(timezone.utc),
                   _canonical_contradiction_alarm=lambda: 0,
                   _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,
@@ -714,13 +747,26 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                          ("jev_spend_alert", "failed", 1))
 
     def test_loader_errors_are_contained_in_canonical_health_and_cli(self):
+        self.assert_loader_failure_findings({"jev_cap_client", "jev_site_client"})
+
+    def test_healthy_site_loader_is_exercised_when_cap_loader_fails(self):
+        self.assert_loader_failure_findings({"jev_cap_client"})
+
+    def assert_loader_failure_findings(self, failing_loaders):
         import io, contextlib, importlib.util, runpy, sys
-        from unittest.mock import patch
+        from unittest.mock import Mock, patch
         original = importlib.util.spec_from_file_location
         def fail_cap_loader(name, *args, **kwargs):
-            if name == "jev_cap_client":
+            if name in failing_loaders:
                 raise ImportError("fixture missing client configuration")
-            return original(name, *args, **kwargs)
+            spec = original(name, *args, **kwargs)
+            if name == "jev_site_client":
+                # This CLI section also reads site budgets. Keep that independent
+                # observation healthy instead of consulting the machine's cap log.
+                spec.loader = Mock(exec_module=lambda client: setattr(
+                    client, "spend_by_site_health",
+                    lambda: "OK jev spend by site — fixture"))
+            return spec
         with patch.object(importlib.util, "spec_from_file_location", fail_cap_loader):
             ns = self.namespace()
             with contextlib.redirect_stdout(io.StringIO()) as out:
@@ -735,7 +781,15 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
             self.assertEqual(exited.exception.code, 1)
             self.assertIn("UNKNOWN jev paid cap", narrow.getvalue())
             self.assertIn("ImportError", narrow.getvalue())
-            [finding] = json.loads(findings.read_text())["findings"]
+            rows = json.loads(findings.read_text())["findings"]
+            expected = {"jev_paid_cap"}
+            if "jev_site_client" in failing_loaders:
+                expected.add("jev_site_budget")
+            else:
+                self.assertIn("OK jev spend by site — fixture", narrow.getvalue())
+            self.assertEqual({row["key"] for row in rows}, expected)
+            self.assertTrue(all(row["hard_error"] for row in rows))
+            [finding] = [row for row in rows if row["key"] == "jev_paid_cap"]
             self.assertEqual(finding["key"], "jev_paid_cap")
             self.assertTrue(finding["hard_error"])
 

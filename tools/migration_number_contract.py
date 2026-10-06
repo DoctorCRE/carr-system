@@ -194,3 +194,60 @@ def validate_migration_names(
                     f"frozen collision {slot} changed: expected {', '.join(frozen)}; "
                     f"found {', '.join(present) if present else 'none'}"
                 )
+
+
+def allocate_integration_successors(
+    main_names: Iterable[str], pending_names: Iterable[str],
+) -> dict[str, str]:
+    """Allocate a lexical pending batch only after its integration base is pinned.
+
+    Peer worktrees are deliberately absent: the serialized integration owner
+    allocates against delivered main, rather than reserving draft numbers that
+    cause every contender to move repeatedly. Applied filenames never move.
+    """
+    main = tuple(main_names)
+    validate_migration_names(main, allow_approved_interstitial_base=True)
+    pending = tuple(pending_names)
+    if len(set(pending)) != len(pending):
+        raise MigrationNumberError("duplicate pending migration identity")
+    if any(not re.fullmatch(r"\d{4}_[a-z0-9_]+\.sql", n) for n in pending):
+        raise MigrationNumberError("pending successors require ordinary numeric filenames")
+    if set(pending).intersection(main):
+        raise MigrationNumberError("applied main migration cannot be reallocated")
+    highest = max((int(match.group(1)) for n in main if (match := SLOT_RE.fullmatch(n))), default=0)
+    result = {}
+    for name in sorted(pending):
+        highest += 1
+        while highest in PERMANENTLY_BURNED_MIGRATION_SLOTS:
+            highest += 1
+        if highest > 9999:
+            raise MigrationNumberError("migration slot namespace exhausted")
+        result[name] = f"{highest:04d}{name[4:]}"
+    if len(set(result.values())) != len(result):
+        raise MigrationNumberError("pending successor names are ambiguous")
+    validate_migration_names([*main, *result.values()], allow_approved_interstitial_base=True)
+    return result
+
+
+def allocate_registry_successor(main_versions: Iterable[int]) -> tuple[int, int]:
+    """Return the exact current-main predecessor and its immediate successor."""
+    versions = tuple(main_versions)
+    if not versions or any(type(v) is not int or v < 1 for v in versions):
+        raise MigrationNumberError("current-main registry predecessor is missing or invalid")
+    predecessor = max(versions)
+    return predecessor, predecessor + 1
+
+
+def validate_integration_union(main: dict[str, str] | dict[str, bytes], candidate: dict[str, str] | dict[str, bytes]) -> None:
+    """Compare immutable main hashes/bytes before checking the union's ordering."""
+    for name, content in main.items():
+        if candidate.get(name) != content:
+            raise MigrationNumberError(f"current-main migration missing or edited: {name}")
+    validate_migration_names(candidate, allow_approved_interstitial_base=True)
+    highest = max((int(match.group(1)) for n in main if (match := SLOT_RE.fullmatch(n))), default=0)
+    for name in candidate.keys() - main.keys():
+        match = SLOT_RE.fullmatch(name)
+        if not match:
+            raise MigrationNumberError(f"invalid pending migration: {name}")
+        if int(match.group(1)) <= highest:
+            raise MigrationNumberError(f"pending migration is not a forward successor: {name}")

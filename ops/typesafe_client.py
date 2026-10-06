@@ -47,7 +47,9 @@ TRUSTS A CALLER TO REMEMBER:
      code, then send only the fields the question needs.
 
 CREDENTIAL. Read from ~/.config/carr/typesafe.env, mode 600, outside the repo,
-recorded by name in secrets-inventory.md. The value is never logged, never
+recorded by name in secrets-inventory.md; only the direct transport reads it.
+The Worker route signs its admission with JEV_ADMISSION_SECRET from
+~/.config/carr/jev-admission.env instead. The value is never logged, never
 echoed into an exception, and never written to a receipt. On an HTTP error this
 module reports the status and a truncated response body, and deliberately does
 not report the request it sent, because the request carries the bearer token.
@@ -58,8 +60,10 @@ basis. Network reachability is separate and already granted: both hosts sit in
 KNOWN_HOSTS in hooks/guard-unattended.py.
 """
 
-import hashlib
+import base64
 import glob
+import hashlib
+import hmac
 import importlib.util
 import json
 import math
@@ -70,17 +74,22 @@ import shutil
 import uuid
 import subprocess
 import sys
-from contextlib import closing
+from contextlib import closing, contextmanager
+from contextvars import ContextVar
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from collections import Counter
 from pathlib import Path
 from functools import partial
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 KEY_PATH = os.path.expanduser("~/.config/carr/typesafe.env")
+# The Worker route's admission secret: shared by the Worker and the local
+# reservation owner only, so a Worker caller never needs the vendor key.
+ADMISSION_KEY_PATH = os.path.expanduser("~/.config/carr/jev-admission.env")
+ADMISSION_KEY_NAME = "JEV_ADMISSION_SECRET"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Entry points may import with only ops/ on sys.path.
 if REPO not in sys.path:
@@ -169,24 +178,154 @@ class TypeSafeError(RuntimeError):
     """Any failure reaching or being understood by the service."""
 
 
-def read_api_key(path=KEY_PATH):
-    """The bearer token, from the 600-mode env file. Never logged."""
+class JevCallRefused(TypeSafeError):
+    """A paid call this client declined before any transport ran.
+
+    `code` is one of REFUSAL_CODES. vendor_spend_unknown declines only the
+    retry: the Worker attempt it follows is receipted separately and keeps
+    its reservation. A refusal is never billable, so it is
+    excluded from the daily-cap seed. `resets_at` is the UTC instant a budget
+    refusal lifts (None for policy refusals, which do not lift on a clock).
+    """
+
+    def __init__(self, message, *, code, site=None, scope=None, resets_at=None):
+        super().__init__(message)
+        self.code = code
+        self.site = site
+        self.scope = scope
+        self.resets_at = resets_at
+
+
+# THE CALL-SITE REGISTRY (2026-10-04 system-wide audit). Four point-fixes in
+# three days each caught one burner after the money was spent, because any
+# code path could reach the vendor and the only bound was one shared daily
+# counter. Now a paid call needs a registered site, the attribution that site
+# declares, and room in the site's own hourly and daily budget, beneath a
+# global hourly cap. All four are checked before any transport and before
+# the daily reservation, fail closed, and are logged without being paid.
+JEV_CALL_SITES_PATH = os.path.join(REPO, "ops", "config", "jev-call-sites.v1.json")
+BUDGET_REFUSALS = ("hourly_paid_call_cap", "site_hourly_budget", "site_daily_budget")
+POLICY_REFUSALS = ("fixture_offline", "unregistered_caller", "unattributed_call", "unattended_worker_off",
+                   "call_site_registry_invalid")
+# Declined because of what the vendor already said: its account is out of
+# credit (HTTP 402), or a Worker attempt may already have been billed.
+VENDOR_REFUSALS = ("vendor_credit_exhausted", "vendor_spend_unknown")
+REFUSAL_CODES = ("daily_paid_call_cap",) + BUDGET_REFUSALS + POLICY_REFUSALS + VENDOR_REFUSALS
+ATTRIBUTIONS = ("session", "session_or_job")
+UNATTENDED_POLICIES = ("off", "allowed")
+_SITE_FIELDS = {"caller", "trigger", "runs_in", "attribution", "unattended",
+                "hourly_budget", "daily_budget", "owner", "value", "sources"}
+
+
+def load_call_sites(path=None):
+    """The validated registry: {"hourly_paid_call_cap": int, "sites": {caller: entry}}.
+
+    Raises TypeSafeError on any malformed entry: an unreadable registry admits
+    nothing, which is the fail-closed direction.
+    """
+    try:
+        with open(path or JEV_CALL_SITES_PATH, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise TypeSafeError(f"Jev call-site registry unreadable ({type(exc).__name__})") from None
+    if not isinstance(raw, dict) or raw.get("schema") != "carr-jev-call-sites/v1":
+        raise TypeSafeError("Jev call-site registry has the wrong schema")
+    cap = raw.get("hourly_paid_call_cap")
+    if type(cap) is not int or cap < 0:
+        raise TypeSafeError("Jev call-site registry needs an integer hourly_paid_call_cap")
+    sites = {}
+    for entry in raw.get("sites") or []:
+        if not isinstance(entry, dict) or set(entry) != _SITE_FIELDS:
+            raise TypeSafeError(f"Jev call-site entry has the wrong fields: {entry!r:.120}")
+        caller = entry["caller"]
+        if not isinstance(caller, str) or not re.fullmatch(r"[a-z0-9_.:-]+\*?", caller):
+            raise TypeSafeError(f"Jev call-site caller is not a plain name: {caller!r}")
+        if caller in sites:
+            raise TypeSafeError(f"Jev call-site caller registered twice: {caller}")
+        if entry["attribution"] not in ATTRIBUTIONS or entry["unattended"] not in UNATTENDED_POLICIES:
+            raise TypeSafeError(f"Jev call-site {caller} has an unknown attribution or unattended policy")
+        for budget in ("hourly_budget", "daily_budget"):
+            if type(entry[budget]) is not int or entry[budget] < 0:
+                raise TypeSafeError(f"Jev call-site {caller} needs an integer {budget}")
+        if entry["hourly_budget"] > entry["daily_budget"]:
+            raise TypeSafeError(f"Jev call-site {caller} hourly budget exceeds its daily budget")
+        for text in ("trigger", "runs_in", "owner", "value"):
+            if not isinstance(entry[text], str) or not entry[text].strip():
+                raise TypeSafeError(f"Jev call-site {caller} needs a {text}")
+        if not isinstance(entry["sources"], list) or not entry["sources"] or not all(
+                isinstance(s, str) and s for s in entry["sources"]):
+            raise TypeSafeError(f"Jev call-site {caller} needs its source files")
+        sites[caller] = entry
+    return {"hourly_paid_call_cap": cap, "sites": sites}
+
+
+def call_site(caller, registry):
+    """The registry entry for `caller`: an exact name, else a `prefix:*` entry."""
+    sites = registry["sites"]
+    if caller in sites:
+        return sites[caller]
+    for name, entry in sites.items():
+        if name.endswith("*") and isinstance(caller, str) and caller.startswith(name[:-1]) \
+                and len(caller) > len(name) - 1:
+            return entry
+    return None
+
+
+def _job_label():
+    """A job label, including the existing Quill recording daemon's launch path."""
+    label = (os.environ.get("CARR_JEV_JOB") or "").strip()
+    if label:
+        return label
+    service = (os.environ.get("XPC_SERVICE_NAME") or "").strip()
+    return service if service.startswith("com.carr.") or service == "com.digimata.quill" else None
+
+
+def _unattended():
+    """The orchestrator's explicit marker for an unattended worker's environment."""
+    return os.environ.get("CARR_JEV_WORKER", "").strip().lower() == "off"
+
+
+def _truthy_env(name):
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _fixture_offline():
+    """Selftests and CI fixtures never pay. ops/ci.sh exports CARR_JEV_OFFLINE and
+    its gates class exports CARR_HOOK_FIXTURE; a hook a selftest spawns inherits
+    both. Measured 2026-10-04: a fixture prompt seen in three or more sessions
+    accounted for 20-45% of each day's paid attempts, because a selftest that
+    drops TYPESAFE_API_KEY from its environment still reaches the key FILE."""
+    return _truthy_env("CARR_JEV_OFFLINE") or _truthy_env("CARR_HOOK_FIXTURE")
+
+
+def _read_secret(path, name):
+    """One named value from a 600-mode env file. Never logged."""
     try:
         with open(path, "r", encoding="utf-8") as handle:
             lines = handle.readlines()
     except OSError as err:
         raise TypeSafeError(
-            f"cannot read the TypeSafe credential at {path}: {err.strerror}. "
+            f"cannot read the {name} credential at {path}: {err.strerror}. "
             "Joe creates it by hand; no agent holds the value."
         ) from None
     for line in lines:
         line = line.strip()
-        if line.startswith(f"{KEY_NAME}="):
+        if line.startswith(f"{name}="):
             value = line.split("=", 1)[1].strip()
             if not value:
-                raise TypeSafeError(f"{path}: {KEY_NAME} is present but empty")
+                raise TypeSafeError(f"{path}: {name} is present but empty")
             return value
-    raise TypeSafeError(f"{path}: no {KEY_NAME} line")
+    raise TypeSafeError(f"{path}: no {name} line")
+
+
+def read_api_key(path=KEY_PATH):
+    """The vendor bearer token, used only by the direct transport."""
+    return _read_secret(path, KEY_NAME)
+
+
+def read_admission_secret():
+    """The secret that signs a Worker admission; never the vendor key."""
+    return _read_secret(ADMISSION_KEY_PATH, ADMISSION_KEY_NAME)
 
 
 def noul(instructions, true=None, false=None):
@@ -208,6 +347,9 @@ def noul(instructions, true=None, false=None):
         criteria["false"] = false
     if criteria:
         question["criteria"] = criteria
+    problem = malformed_request("", {"built": question})
+    if problem:
+        raise TypeSafeError(problem)
     return question
 
 
@@ -219,9 +361,7 @@ def choice(instructions, options):
     check that the candidates actually cover the answer before blaming the
     judgment.
     """
-    if not isinstance(options, dict) or len(options) < 2:
-        raise TypeSafeError("a choice needs a mapping of at least two options")
-    return {"type": "choice", "instructions": instructions, "criteria": dict(options)}
+    return _built_question("choice", instructions, options)
 
 
 def score(instructions, levels):
@@ -232,10 +372,7 @@ def score(instructions, levels):
     for comparing against a threshold and NOT for reconstructing an exact
     number by interpolating between levels — the docs call that out directly.
     """
-    levels = list(levels)
-    if len(levels) < 2:
-        raise TypeSafeError("a score needs at least two ordered levels")
-    return {"type": "score", "instructions": instructions, "criteria": levels}
+    return _built_question("score", instructions, list(levels))
 
 
 # THE FULL DISTRIBUTION, NOT JUST THE PICK (Joe's ruling: code decides, Jev
@@ -414,6 +551,9 @@ def _dispatch_binding(transcript_path=None, session=None):
 # On Worker failure the direct fallback uses the remaining caller budget and
 # records a fixed error category with no server receipt or raw error text.
 SERVER_VERB = "ask-jev"
+# A signed admission is single-use (the Worker's attempt ledger); this only
+# bounds how long an unused one stays valid.
+ADMISSION_TTL_SECONDS = 30
 # Hooks retain the direct route to stay within their timeout. An explicitly
 # requested build advisory can still use the server log; prompt intake defers it.
 IN_HOOK_ENV = "CARR_JEV_IN_HOOK"
@@ -452,6 +592,7 @@ def _server_error_category(stderr):
             ('"unknown_tool"', "verb_not_deployed"),
             ('"jev_proxy_unconfigured"', "worker_key_unbound"),
             ('"jev_upstream_failed"', "vendor_failed_at_worker"),
+            ('"jev_admission_required"', "admission_refused_at_worker"),
             ("could not reach the deployed Worker", "worker_unreachable"),
             ("no MCP token", "local_token_missing"),
             ("refusing MCP token file", "local_token_insecure")):
@@ -460,17 +601,66 @@ def _server_error_category(stderr):
     return "server_call_failed"
 
 
+def _worker_upstream(stderr):
+    """(vendor HTTP status, reason) from local-verb's jev_upstream_failed
+    refusal, else (None, None). Only an integer status and a short snake_case
+    reason are kept; the vendor body the Worker quotes is never read."""
+    text = stderr or ""
+    start = text.find("TOOL ERROR ")
+    if start < 0:
+        return None, None
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(text, start + len("TOOL ERROR "))
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict) or payload.get("error") != "jev_upstream_failed":
+        return None, None
+    status, reason = payload.get("status"), payload.get("reason")
+    return (status if type(status) is int and 100 <= status <= 599 else None,
+            reason if isinstance(reason, str) and re.fullmatch(r"[a-z_]{1,40}", reason) else None)
+
+
+def _admission_token(secret, idempotency_key, caller, session_id):
+    """The existing idempotency key, carrying one shared reservation. The
+    Worker verifies it and its attempt ledger consumes it once."""
+    payload = base64.urlsafe_b64encode(json.dumps(
+        [1, int(time.time()) + ADMISSION_TTL_SECONDS, idempotency_key, caller, session_id],
+        ensure_ascii=False, separators=(",", ":")).encode()).decode().rstrip("=")
+    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"jev1.{payload}.{signature}"
+
+
 def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
-               transport_mode, runner=None):
+               transport_mode, runner=None, upstream=None, caller=None, admission=None):
     """Ask the Worker's ask-jev verb. Returns (result, None) on success, where
     result is {"model", "answers", "usage", "server_receipt": {...}}, or
-    (None, <category>) on any failure. Never raises."""
+    (None, <category>) on transport failure. A paid call is admitted (or uses
+    the caller's `admission`, the (registry, site) pair from _admit_paid_call)
+    and reserves its shared slot before transport; admission failures raise.
+    A passed `upstream` dict gets the Worker's vendor status and reason, and
+    `refusal` when no direct attempt may follow this one."""
     script = _local_verb_script()
     node = _node_binary()
     if runner is None and (script is None or node is None):
         return None, "node_or_local_verb_missing"
+    idempotency_key = str(uuid.uuid4())
+    probe = None
+    if transport_mode != "cache_only":
+        caller = caller or _caller_name()
+        kind = _question_kind(questions)
+        prompt = _prompt_sha256({"state": state, "model": model, "questions": questions})
+        registry, site = admission or _admit_paid_call(caller, session_id, questions, facets, kind, prompt)
+        try:
+            secret = read_admission_secret()
+        except TypeSafeError:
+            # Before the reservation: a machine without the secret takes the
+            # direct route's own reservation instead.
+            return None, "admission_secret_missing"
+        probe = _reserve_paid_call(questions, facets, caller, kind, prompt, registry, site,
+                                   session=session_id)
+        idempotency_key = _admission_token(secret, idempotency_key, caller, session_id)
     args = {
-        "idempotency_key": str(uuid.uuid4()),
+        "idempotency_key": idempotency_key,
         "session_id": session_id,
         "purpose": purpose,
         "state": state,
@@ -491,7 +681,23 @@ def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
     except Exception:
         return None, "server_call_failed"
     if proc.returncode != 0:
-        return None, _server_error_category(proc.stderr)
+        category = _server_error_category(proc.stderr)
+        refusal = None
+        if category == "vendor_failed_at_worker":
+            status, reason = _worker_upstream(proc.stderr)
+            if upstream is not None:
+                upstream["status"], upstream["reason"] = status, reason
+            try:
+                _after_worker_vendor_failure(status, reason, caller)
+            except TypeSafeError as error:
+                refusal = error
+        elif category == "admission_refused_at_worker":
+            # The reservation is spent; a direct retry would pay a second slot.
+            refusal = TypeSafeError("Jev unavailable: the Worker refused the admission "
+                                    "(jev_admission_required); not retried direct")
+        if upstream is not None and refusal is not None:
+            upstream["refusal"] = refusal
+        return None, category
     try:
         out = json.loads(proc.stdout)
     except ValueError:
@@ -500,7 +706,7 @@ def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
             or not isinstance(out.get("answers"), dict)
             or not isinstance(out.get("receipt_id"), str)):
         return None, "server_response_malformed"
-    return {
+    result = {
         "model": out.get("model"),
         "answers": out["answers"],
         "usage": out.get("usage") if isinstance(out.get("usage"), dict) else None,
@@ -508,7 +714,52 @@ def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
         "server_receipt": {k: out.get(k) for k in (
             "receipt_id", "recorded_at", "purpose", "session_id",
             "state_sha256", "prompt_sha256")},
-    }, None
+    }
+    if transport_mode != "cache_only" and not result["cache_hit"] and usable_judgment(result, questions):
+        _finish_credit_probe(probe)
+    return result, None
+
+
+# Both transports consume the same maintained request policy. Adapter code
+# only maps JSON shapes to each language's object/array predicates.
+REQUEST_CONTRACT = json.loads((Path(__file__).resolve().parent.parent /
+    "mcp-server/src/jev-request-contract.v1.json").read_text())
+
+
+def malformed_request(state, questions):
+    """A fixed diagnostic with a positional reference; never caller data."""
+    if not isinstance(state, (str, dict)):
+        return "state_invalid"
+    if not isinstance(questions, dict) or not (
+            REQUEST_CONTRACT["min_questions"] <= len(questions) <= REQUEST_CONTRACT["max_questions"]):
+        return "question_count_invalid"
+    for index, (key, question) in enumerate(questions.items()):
+        ref = f"question[{index}]"
+        if not isinstance(key, str) or not key or not isinstance(question, dict):
+            return f"{ref}: question_invalid"
+        kind = question.get("type")
+        rule = REQUEST_CONTRACT["question_types"].get(kind) if isinstance(kind, str) else None
+        if rule is None:
+            return f"{ref}: type_invalid"
+        instructions = question.get("instructions")
+        if not isinstance(instructions, str) or not instructions.strip():
+            return f"{ref}: instructions_invalid"
+        criteria = question.get("criteria")
+        if criteria is None and rule["optional"]:
+            continue
+        shape = dict if rule["criteria"] == "object" else list
+        if not isinstance(criteria, shape) or len(criteria) < rule["min_items"]:
+            return f"{ref}: criteria_invalid"
+    return None
+
+
+def _built_question(kind, instructions, criteria):
+    question = {"type": kind, "instructions": instructions, "criteria": criteria}
+    problem = malformed_request("", {"built": question})
+    if problem:
+        raise TypeSafeError(problem)
+    question["criteria"] = criteria.copy()
+    return question
 
 
 def usable_judgment(result, questions):
@@ -677,6 +928,7 @@ def _append_call_receipt(questions, facets, result, log_path, *, caller=None,
             "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "session": dispatch_binding[0] if dispatch_binding else session or _session_id(),
             "human_turn_id": dispatch_binding[1] if dispatch_binding else None,
+            "job": _job_label(),
             "question_ids_sha256": [hashlib.sha256(qid.encode("utf-8")).hexdigest()
                                     for qid in sorted(questions)],
             "caller": caller,
@@ -688,7 +940,11 @@ def _append_call_receipt(questions, facets, result, log_path, *, caller=None,
             "input_tokens": usage.get("input_tokens") if usage else None,
             "output_tokens": usage.get("output_tokens") if usage else None,
             "http_status": answered.get("http_status"),
-            "schema_valid": answered.get("schema_valid") is True,
+            # None when no answer came back to validate (a refusal, a 402, a
+            # network fault): those are transport failures, not bad answers.
+            "schema_valid": (answered["schema_valid"] if type(answered.get("schema_valid")) is bool
+                             else None),
+            "upstream_reason": answered.get("upstream_reason"),
             "usable": usable,
             "ok": bool(ok and usable and not cache_hit),
             "cache_hit": cache_hit,
@@ -738,7 +994,7 @@ def _logged_attempt_rows(log_path, day):
                     raise TypeSafeError("Jev unavailable: daily cap accounting has invalid seed fields")
                 if (stamp.astimezone(timezone.utc).strftime("%Y-%m-%d") == day
                         and not row.get("cache_hit")
-                        and row.get("error") != "daily_paid_call_cap"):
+                        and row.get("error") not in REFUSAL_CODES):
                     yield row
     except FileNotFoundError:
         pass
@@ -839,12 +1095,37 @@ def _claim_spend_alerts(db, log_path, day, previous, allowed, cap, caller):
         return []
 
 
+class AlarmSinkError(RuntimeError):
+    """A named alarm-delivery failure. str() is a fixed category, never raw output."""
+
+
+# bin/gmail-handover.py's own credential file. Read for existence only: the
+# alarm worker never opens it, so no credential crosses into this process.
+GMAIL_ENV_PATH = os.path.expanduser("~/.config/carr/gmail.env")
+# DRY-RUN SEAM. CARR_JEV_ALERT_SINK=dry-run:<path> appends each alarm, tagged
+# with the sink it would have used, to <path> and sends nothing. Tests use it;
+# so can an operator rehearsing the alarm.
+ALERT_SINK_ENV = "CARR_JEV_ALERT_SINK"
+
+
+def _dry_run_sink(alert, sink):
+    target = os.environ.get(ALERT_SINK_ENV, "")
+    if not target.startswith("dry-run:"):
+        return False
+    with open(target[len("dry-run:"):], "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"sink": sink, "threshold": alert.get("threshold"),
+                             "message": alert.get("message")}) + "\n")
+    return True
+
+
 def _emit_spend_alert(alert):
     """Reuse cutover-watch/version-sentinel's local macOS notification path.
 
     Runs in the detached delivery process, with a bounded wait.
     No prompt, answer or credential crosses into the notification.
     """
+    if _dry_run_sink(alert, "notification"):
+        return
     message = alert["message"].replace("\\", "\\\\").replace('"', '\\"')
     message = message.replace("\n", " ").replace("\r", " ")
     subprocess.run(["/usr/bin/osascript", "-e",
@@ -854,12 +1135,35 @@ def _emit_spend_alert(alert):
 
 
 def _email_spend_alert(alert):
-    """Use the existing self-mail command; it owns recipient and credentials."""
-    subprocess.run([sys.executable, os.path.join(REPO, "bin", "gmail-handover.py"),
-                    "--to", "joe", "--subject", "Jev spend alarm",
-                    "--body", alert["message"]],
-                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                   stderr=subprocess.DEVNULL, timeout=35, check=True)
+    """Use the existing self-mail command; it owns recipient and credentials.
+
+    2026-10-04: every threshold mail failed as a bare CalledProcessError because
+    this machine has no ~/.config/carr/gmail.env, so the command exited with
+    "no credential" into a discarded stderr. The precondition is now checked
+    first and every failure carries a fixed category the health line can name.
+    """
+    if _dry_run_sink(alert, "mail"):
+        return
+    if not (os.environ.get("CARR_GMAIL_USER") and os.environ.get("CARR_GMAIL_APP_PASSWORD")) \
+            and not os.path.isfile(GMAIL_ENV_PATH):
+        raise AlarmSinkError("mail_unconfigured")
+    try:
+        subprocess.run([sys.executable, os.path.join(REPO, "bin", "gmail-handover.py"),
+                        "--to", "joe", "--subject", "Jev spend alarm",
+                        "--body", alert["message"]],
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE, text=True, timeout=35, check=True)
+    except subprocess.CalledProcessError as exc:
+        text = exc.stderr or ""
+        for marker, category in (("no credential", "mail_unconfigured"),
+                                 ("missing CARR_GMAIL_USER", "mail_unconfigured"),
+                                 ("login refused", "mail_auth_refused"),
+                                 ("REFUSED", "mail_recipient_refused")):
+            if marker in text:
+                raise AlarmSinkError(category) from None
+        raise AlarmSinkError(f"mail_exit_{exc.returncode}") from None
+    except subprocess.TimeoutExpired:
+        raise AlarmSinkError("mail_timeout") from None
 
 
 def _deliver_pending_spend_alerts(path, day):
@@ -902,6 +1206,8 @@ def _deliver_pending_spend_alerts(path, day):
             mail_error = None
             try:
                 _email_spend_alert(json.loads(row[0]))
+            except AlarmSinkError as exc:
+                mail_error = str(exc)
             except Exception as exc:
                 mail_error = type(exc).__name__
             with closing(sqlite3.connect(path, timeout=1)) as db, db:
@@ -948,7 +1254,9 @@ PAID_CAP_ACTION = ("on breach: notify Joe at 50%/80%/100% via macOS notification
                    "reduce top caller/session demand; pending/failed macOS alarms recover on next "
                    "reservation, at most three attempts (stale lease after 30s); inspect "
                    "notification sink if exhausted; inspect self-mail sink and confirm inbox "
-                   "on mail failure or unconfirmed submission "
+                   "on mail failure or unconfirmed submission; errors=mail_unconfigured means "
+                   "Joe creates ~/.config/carr/gmail.env on this machine (setup in "
+                   "bin/gmail-handover.py) "
                    "· verify next UTC day below 50% "
                    "· auto-clear at UTC rollover")
 
@@ -995,50 +1303,539 @@ def paid_cap_health(*, now=None):
         return f"UNKNOWN jev paid cap — {type(exc).__name__} · {PAID_CAP_ACTION}"
 
 
-def _reserve_paid_call(questions, facets, caller, question_kind, prompt_sha256):
+def _cap_db_path():
+    return os.fspath(JEV_DAILY_CAP_LOG) + ".daily-cap.sqlite3"
+
+
+def _windows(now):
+    """(day, hour key, next hour ISO, next UTC midnight ISO) for one instant."""
+    now = now.astimezone(timezone.utc)
+    hour = now.replace(minute=0, second=0, microsecond=0)
+    midnight = hour.replace(hour=0)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    return (now.strftime("%Y-%m-%d"), hour.strftime("%Y-%m-%dT%H"),
+            (hour + timedelta(hours=1)).strftime(fmt), (midnight + timedelta(days=1)).strftime(fmt))
+
+
+_BUDGET_TABLES = (
+    "CREATE TABLE IF NOT EXISTS site_usage (day TEXT, hour TEXT, site TEXT, "
+    "count INTEGER NOT NULL, PRIMARY KEY(day,hour,site))",
+    "CREATE TABLE IF NOT EXISTS budget_seed (day TEXT PRIMARY KEY)",
+    # One refusal row per (code, site, session, window) reaches the call log;
+    # the rest are counted here, so a refused burner cannot flood the log.
+    "CREATE TABLE IF NOT EXISTS refusal_log (window TEXT PRIMARY KEY, count INTEGER NOT NULL)",
+    # Active budget pauses, read by hooks to say so once instead of per call.
+    "CREATE TABLE IF NOT EXISTS budget_pause (scope TEXT, site TEXT, resets_at TEXT, "
+    "PRIMARY KEY(scope,site,resets_at))",
+    "CREATE TABLE IF NOT EXISTS pause_notice (session TEXT, scope TEXT, resets_at TEXT, "
+    "PRIMARY KEY(session,scope,resets_at))",
+)
+
+
+def _budget_tables(db):
+    for statement in _BUDGET_TABLES:
+        db.execute(statement)
+
+
+UNATTRIBUTED_SITE = "__unattributed__"
+
+
+def _seed_site_usage(db, log_path, day, hour, registry):
+    """Upgrade/rebuild once under the reservation lock, retaining paid evidence.
+
+    Receipts use the existing validated seed parser. Existing reservations may
+    exceed receipts (a process can die before appending one), so neither the
+    daily counter nor a site bucket is reduced. Unattributed usage consumes
+    every site's allowance; an unknown time consumes the current hour too.
+    """
+    if db.execute("SELECT 1 FROM budget_seed WHERE day=?", (day,)).fetchone():
+        return
+    buckets = {}
+    for receipt in _logged_attempt_rows(log_path, day):
+        stamp = datetime.fromisoformat(receipt["ts"].replace("Z", "+00:00"))
+        name = receipt.get("caller")
+        entry = call_site(name, registry) if registry else None
+        identity = entry["caller"] if entry else UNATTRIBUTED_SITE
+        key = (_windows(stamp)[1], identity)
+        buckets[key] = buckets.get(key, 0) + 1
+    # Normalize concrete wildcard buckets before comparing them with receipts.
+    for name, bucket_hour, count in db.execute(
+            "SELECT site,hour,count FROM site_usage WHERE day=?", (day,)).fetchall():
+        entry = call_site(name, registry) if registry else None
+        identity = entry["caller"] if entry else UNATTRIBUTED_SITE
+        if identity != name:
+            db.execute("DELETE FROM site_usage WHERE day=? AND hour=? AND site=?", (day, bucket_hour, name))
+            db.execute("INSERT INTO site_usage VALUES (?,?,?,?) ON CONFLICT(day,hour,site) "
+                       "DO UPDATE SET count=count+excluded.count", (day, bucket_hour, identity, count))
+    for (bucket_hour, identity), count in buckets.items():
+        db.execute("INSERT INTO site_usage VALUES (?,?,?,?) ON CONFLICT(day,hour,site) "
+                   "DO UPDATE SET count=MAX(count,excluded.count)", (day, bucket_hour, identity, count))
+    recorded = db.execute("SELECT COALESCE(SUM(count),0) FROM site_usage WHERE day=?", (day,)).fetchone()[0]
+    row = db.execute("SELECT attempts FROM daily_cap WHERE day=?", (day,)).fetchone()
+    total = max(row[0] if row else 0, recorded)
+    if total > recorded:
+        db.execute("INSERT INTO site_usage VALUES (?,?,?,?) ON CONFLICT(day,hour,site) "
+                   "DO UPDATE SET count=count+excluded.count", (day, hour, UNATTRIBUTED_SITE, total - recorded))
+    db.execute("INSERT INTO daily_cap VALUES (?,?,0) ON CONFLICT(day) "
+               "DO UPDATE SET attempts=MAX(attempts,excluded.attempts)", (day, total))
+    db.execute("INSERT INTO budget_seed VALUES (?)", (day,))
+
+
+def _record_refusal(questions, facets, caller, question_kind, prompt_sha256, code, session, now=None):
+    """Log a refusal once per code/site/session/hour; count every one."""
+    _, hour, _, _ = _windows(now or datetime.now(timezone.utc))
+    window = json.dumps([code, caller, session or "", hour])
+    first = True
+    try:
+        with closing(sqlite3.connect(_cap_db_path(), timeout=1.0)) as db, db:
+            _budget_tables(db)
+            first = db.execute("INSERT OR IGNORE INTO refusal_log VALUES (?,1)", (window,)).rowcount == 1
+            if not first:
+                db.execute("UPDATE refusal_log SET count=count+1 WHERE window=?", (window,))
+    except (OSError, sqlite3.Error):
+        pass  # A refusal still refuses when its bookkeeping cannot be written.
+    if first:
+        _append_call_receipt(questions, facets, None, JEV_DAILY_CAP_LOG, caller=caller,
+                             question_kind=question_kind, prompt_sha256=prompt_sha256,
+                             ok=False, error=code, session=session)
+
+
+# WORKER BREAKER. On 2026-10-04 the Worker's own vendor call failed
+# (vendor_failed_at_worker) on every attempt, and each call then reserved a
+# SECOND slot for the direct fallback: 1,185 of that day's 2,775 counted
+# attempts were doomed Worker tries. One failure opens the breaker for this
+# long; while open, a cache miss goes straight to the direct route.
+WORKER_BREAKER_SECONDS = 15 * 60
+
+# CREDIT HOLD. 2026-09-28..10-03: TypeSafe answered HTTP 402 (no API credit)
+# to 16,927 calls across two windows of 22h and 18h, because nothing stopped
+# the next call after the first refusal. Every one was logged as an unusable
+# answer and reserved a daily-cap slot. One 402 now holds every paid route
+# for this long; cache hits are still served, and when it lapses the next
+# call is the probe that finds out whether credit is back.
+CREDIT_HOLD_SECONDS = 5 * 60
+CREDIT_PROBE_SECONDS = 60
+_CREDIT_STATE_UNSAFE: set[str] = set()
+
+
+def _hold_open(table):
+    """Advisory Worker breaker read; credit admission uses its transaction."""
+    try:
+        with closing(sqlite3.connect(_cap_db_path(), timeout=1.0)) as db:
+            db.execute(f"CREATE TABLE IF NOT EXISTS {table} (id INTEGER PRIMARY KEY, until REAL NOT NULL)")
+            row = db.execute(f"SELECT until FROM {table} WHERE id=1").fetchone()
+    except (OSError, sqlite3.Error):
+        if table == "credit_hold":
+            raise TypeSafeError("Jev unavailable: vendor_credit_state_untrusted") from None
+        return False
+    return bool(row) and row[0] > time.time()
+
+
+def _credit_tables(db):
+    db.execute("CREATE TABLE IF NOT EXISTS credit_hold (id INTEGER PRIMARY KEY, until REAL NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS credit_probe "
+               "(id INTEGER PRIMARY KEY, token TEXT NOT NULL, until REAL NOT NULL)")
+
+
+def _credit_marker():
+    return Path(_cap_db_path() + ".credit-unsafe")
+
+
+def _open_hold(table, seconds):
+    credit = table == "credit_hold"
+    path = _cap_db_path()
+    if credit:
+        # Persist a latch before SQLite. A failed write survives process exit;
+        # restored storage repairs the latch into a hold, never paid traffic.
+        _CREDIT_STATE_UNSAFE.add(path)
+    try:
+        if credit:
+            marker = _credit_marker()
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.touch(mode=0o600)
+        with closing(sqlite3.connect(path, timeout=1.0)) as db, db:
+            if credit:
+                _credit_tables(db)
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("DELETE FROM credit_probe WHERE id=1")
+            else:
+                db.execute(f"CREATE TABLE IF NOT EXISTS {table} (id INTEGER PRIMARY KEY, until REAL NOT NULL)")
+            db.execute(f"INSERT OR REPLACE INTO {table} VALUES (1, ?)", (time.time() + seconds,))
+        if credit:
+            _credit_marker().unlink(missing_ok=True)
+            _CREDIT_STATE_UNSAFE.discard(path)
+    except (OSError, sqlite3.Error):
+        if credit:
+            raise TypeSafeError("Jev unavailable: vendor_credit_state_untrusted; paid calls held") from None
+        # The Worker breaker is advisory; credit protection is mandatory.
+
+
+def _finish_credit_probe(token):
+    """Only a verified successful lease owner can clear the recovered hold."""
+    if token is None:
+        return
+    try:
+        with closing(sqlite3.connect(_cap_db_path(), timeout=1.0)) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("DELETE FROM credit_probe WHERE id=1 AND token=?", (token,)).rowcount:
+                db.execute("DELETE FROM credit_hold WHERE id=1")
+    except (OSError, sqlite3.Error):
+        pass  # Retain the bounded lease; an unverified clear never enables traffic.
+
+
+REJECTED_REQUEST_STATUSES = (400, 413, 422)
+
+
+def _after_worker_vendor_failure(status, reason, caller):
+    """Decide the direct retry from the vendor status the Worker saw.
+
+    1,405 vendor_failed_at_worker rows (2026-10-03..04) were each followed by
+    a second paid direct attempt, whatever the Worker had seen. Now:
+      402               -> hold for credit, refuse; the direct key is the same account
+      400/413/422       -> refuse; the request itself was rejected and would be again
+      timeout, or a 2xx
+      with a bad body   -> refuse vendor_spend_unknown; that attempt may be billed
+      429/5xx/network/
+      unknown           -> trip the breaker and allow the one direct retry
+    """
+    if status == 402:
+        _open_hold("credit_hold", CREDIT_HOLD_SECONDS)
+        raise TypeSafeError("TypeSafe returned HTTP 402 at the Worker: no API credit; "
+                            "paid calls are held") from None
+    if status in REJECTED_REQUEST_STATUSES:
+        raise TypeSafeError(f"TypeSafe returned HTTP {status} at the Worker: the request was "
+                            "rejected and is not resent") from None
+    _open_hold("worker_breaker", WORKER_BREAKER_SECONDS)
+    if reason == "timeout" or (status is not None and 200 <= status < 300):
+        raise JevCallRefused("Jev unavailable: vendor_spend_unknown (the Worker's vendor attempt "
+                             f"may have been billed: {reason or status}); not retried direct",
+                             code="vendor_spend_unknown", site=caller)
+
+
+def _site_enabled(entry):
+    return not (_unattended() and entry["unattended"] == "off")
+
+
+def call_site_enabled(caller):
+    """Whether this site's registry policy permits dispatch in this environment.
+
+    Admission still owns attribution and accounting. Advisory dispatchers use
+    this projection to avoid running checks that the same policy will refuse.
+    """
+    if not _unattended():
+        return True
+    try:
+        entry = call_site(caller, load_call_sites())
+        return entry is not None and _site_enabled(entry)
+    except TypeSafeError:
+        return False
+
+
+def _admit_paid_call(caller, session, questions, facets, question_kind, prompt_sha256):
+    """The registry gate, before any transport: the site entry, or JevCallRefused.
+
+    Ordered questions, each a deterministic predicate:
+      1. is this a fixture or CI run?             -> refuse, unlogged (never real traffic)
+      2. is the registry readable and valid?      -> else refuse everything
+      3. is `caller` a registered site?           -> else unregistered_caller
+      4. does the call carry the site's attribution (a session, or for
+         session_or_job sites a session or a scheduled job's label)?
+                                                  -> else unattributed_call
+      5. is this an unattended worker, and does the site stay off there?
+                                                  -> unattended_worker_off
+    """
+    if _fixture_offline():
+        raise JevCallRefused("Jev unavailable: fixture or CI run (CARR_JEV_OFFLINE/CARR_HOOK_FIXTURE)",
+                             code="fixture_offline", site=caller)
+    code = None
+    entry = None
+    try:
+        registry = load_call_sites()
+    except TypeSafeError:
+        code = "call_site_registry_invalid"
+    else:
+        entry = call_site(caller, registry)
+        if entry is None:
+            code = "unregistered_caller"
+        elif not session and not (entry["attribution"] == "session_or_job" and _job_label()):
+            code = "unattributed_call"
+        elif not _site_enabled(entry):
+            code = "unattended_worker_off"
+    if code:
+        _record_refusal(questions, facets, caller, question_kind, prompt_sha256, code, session)
+        raise JevCallRefused(f"Jev unavailable: {code} ({caller})", code=code, site=caller)
+    return registry, entry
+
+
+_reservation_receipt: ContextVar[dict | None] = ContextVar("jev_reservation_receipt", default=None)
+
+
+@contextmanager
+def capture_paid_reservations(*, caller, session_id, run_id):
+    """Observe committed canonical admissions for this execution context.
+
+    This receipt does not admit, refund or reconstruct spending. Each UTC day
+    count comes only from the existing reservation transaction after commit,
+    including attempts whose transport later fails. Context-local observation
+    excludes concurrent callers, sessions and runs, without a second ledger.
+    """
+    receipt = {"caller": caller, "session_id": session_id, "run_id": run_id, "utc_days": {}}
+    token = _reservation_receipt.set(receipt)
+    try:
+        yield receipt
+    finally:
+        _reservation_receipt.reset(token)
+
+
+def _reserve_paid_call(questions, facets, caller, question_kind, prompt_sha256,
+                       registry=None, site=None, *, session=None):
     """Atomically reserve one transport attempt across processes and worktrees.
 
     The small counter lives beside the canonical call log, not inside a session.
     Reservations are never refunded: uncertain delivery can have been billable.
     Cache hits reach neither this function nor the transport. Storage failure
     uses the same TypeSafeError outage contract, so hooks retain their fallback.
+
+    Four budgets, checked in one transaction in this order: the global daily
+    cap, the global hourly cap, the site's daily budget, the site's hourly
+    budget. 2026-10-04's 300-475 calls an hour overnight ran under an "hourly
+    cap" that #1502's own review had removed again; this one is the counter.
     """
     log_path = JEV_DAILY_CAP_LOG
     cap = _daily_cap_limit()
-    day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc)
+    day, hour, next_hour, next_day = _windows(now)
     notice = False
     alerts = []
+    refused = None
+    probe_token = None
+    repair_credit = False
+    site_id = site["caller"] if site is not None else caller
     try:
         os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
-        db = sqlite3.connect(os.fspath(log_path) + ".daily-cap.sqlite3", timeout=1.0)
+        db = sqlite3.connect(_cap_db_path(), timeout=1.0)
         try:
             db.execute("CREATE TABLE IF NOT EXISTS daily_cap "
                        "(day TEXT PRIMARY KEY, attempts INTEGER NOT NULL, notified INTEGER NOT NULL)")
+            _budget_tables(db)
             db.execute("BEGIN IMMEDIATE")
+            _credit_tables(db)
+            instant = time.time()
+            repair_credit = _credit_marker().exists() or _cap_db_path() in _CREDIT_STATE_UNSAFE
+            if repair_credit:
+                db.execute("INSERT OR REPLACE INTO credit_hold VALUES (1,?)",
+                           (instant + CREDIT_HOLD_SECONDS,))
+                db.execute("DELETE FROM credit_probe WHERE id=1")
+            hold = db.execute("SELECT until FROM credit_hold WHERE id=1").fetchone()
+            lease = db.execute("SELECT until FROM credit_probe WHERE id=1").fetchone()
+            credit_blocked = bool(hold and (hold[0] > instant or (lease and lease[0] > instant)))
+            _seed_site_usage(db, log_path, day, hour, registry)
             row = db.execute("SELECT attempts, notified FROM daily_cap WHERE day=?", (day,)).fetchone()
-            if row is None:
-                row = (_logged_attempts(log_path, day), 0)
-                db.execute("DELETE FROM daily_cap WHERE day < ?", (day,))
-                db.execute("INSERT INTO daily_cap VALUES (?,?,0)", (day, row[0]))
-            allowed = row[0] < cap
-            if allowed:
-                db.execute("UPDATE daily_cap SET attempts=attempts+1 WHERE day=?", (day,))
-            elif not row[1]:
+            db.execute("DELETE FROM daily_cap WHERE day < ?", (day,))
+            db.execute("DELETE FROM site_usage WHERE day < ?", (day,))
+            db.execute("DELETE FROM budget_seed WHERE day < ?", (day,))
+            db.execute("DELETE FROM budget_pause WHERE resets_at <= ?", (now.strftime("%Y-%m-%dT%H:%M:%SZ"),))
+            allowed = row[0] < cap and not credit_blocked
+            if credit_blocked:
+                refused = ("vendor_credit_exhausted", caller,
+                           datetime.fromtimestamp(max(hold[0], lease[0] if lease else 0),
+                                                  timezone.utc).isoformat())
+            if row[0] >= cap and not row[1]:
                 notice = True
                 db.execute("UPDATE daily_cap SET notified=1 WHERE day=?", (day,))
+            if allowed and registry is not None and site is not None:
+                hour_used = db.execute("SELECT COALESCE(SUM(count),0) FROM site_usage WHERE hour=?",
+                                       (hour,)).fetchone()[0]
+                # Include concrete names written before wildcard accounting was fixed.
+                rows = db.execute("SELECT site,hour,count FROM site_usage WHERE day=?", (day,)).fetchall()
+                matched = [(h, n) for name, h, n in rows
+                           if name == UNATTRIBUTED_SITE or
+                           (call_site(name, registry) or {}).get("caller", name) == site_id]
+                site_day = sum(n for _, n in matched)
+                site_hour = sum(n for h, n in matched if h == hour)
+                if hour_used >= registry["hourly_paid_call_cap"]:
+                    refused = ("hourly_paid_call_cap", "*", next_hour)
+                elif site_day >= site["daily_budget"]:
+                    refused = ("site_daily_budget", site_id, next_day)
+                elif site_hour >= site["hourly_budget"]:
+                    refused = ("site_hourly_budget", site_id, next_hour)
+                if refused:
+                    allowed = False
+                    db.execute("INSERT OR IGNORE INTO budget_pause VALUES (?,?,?)", refused)
+            if allowed:
+                if hold:
+                    probe_token = str(uuid.uuid4())
+                    db.execute("INSERT OR REPLACE INTO credit_probe VALUES (1,?,?)",
+                               (probe_token, instant + CREDIT_PROBE_SECONDS))
+                db.execute("UPDATE daily_cap SET attempts=attempts+1 WHERE day=?", (day,))
+                db.execute("INSERT INTO site_usage VALUES (?,?,?,1) ON CONFLICT(day,hour,site) "
+                           "DO UPDATE SET count=count+1", (day, hour, site_id))
             alerts = _claim_spend_alerts(db, log_path, day, row[0], allowed, cap, caller)
             db.commit()
+            receipt = _reservation_receipt.get()
+            if (allowed and receipt is not None and receipt["caller"] == caller
+                    and receipt["session_id"] == session):
+                days = receipt["utc_days"]
+                days[day] = days.get(day, 0) + 1
         finally:
             db.close()
     except (OSError, sqlite3.Error) as exc:
         raise TypeSafeError(f"Jev unavailable: daily cap accounting failed ({type(exc).__name__})") from None
+    if repair_credit:
+        try:
+            _credit_marker().unlink(missing_ok=True)
+            _CREDIT_STATE_UNSAFE.discard(_cap_db_path())
+        except OSError:
+            pass  # A durable latch that cannot be removed continues to refuse.
     _dispatch_spend_alerts(alerts)
+    if refused:
+        scope, _, resets_at = refused
+        _record_refusal(questions, facets, caller, question_kind, prompt_sha256, scope,
+                        _session_id(), now=now)
+        raise JevCallRefused(f"Jev unavailable: {scope} reached ({caller}); resets {resets_at}",
+                             code=scope, site=caller, scope=scope, resets_at=resets_at)
     if notice:
         _append_call_receipt(questions, facets, None, log_path, caller=caller,
                              question_kind=question_kind, prompt_sha256=prompt_sha256,
                              ok=False, error="daily_paid_call_cap")
     if not allowed:
-        raise TypeSafeError(f"Jev unavailable: daily paid call cap reached ({cap}, UTC {day})")
+        raise JevCallRefused(f"Jev unavailable: daily paid call cap reached ({cap}, UTC {day})",
+                             code="daily_paid_call_cap", site=caller, scope="daily_paid_call_cap",
+                             resets_at=next_day)
+    return probe_token
+
+
+def active_pause(*, sites=None, now=None):
+    """The budget pause in force now, as {"scope", "resets_at"}, or None.
+
+    Global pauses (daily cap, hourly cap) always count; a site budget pause
+    counts only for the named `sites`. Read-only; storage failures raise
+    TypeSafeError so advisory callers stay visible.
+    """
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    day, _, _, next_day = _windows(now)
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    path = Path(_cap_db_path())
+    if not path.exists():
+        return None
+    try:
+        db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
+        try:
+            row = db.execute("SELECT attempts FROM daily_cap WHERE day=?", (day,)).fetchone()
+            if row and row[0] >= _daily_cap_limit():
+                return {"scope": "daily_paid_call_cap", "resets_at": next_day}
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='budget_pause'").fetchone():
+                return None
+            registry = load_call_sites()
+            names = ["*"] + [(call_site(name, registry) or {}).get("caller", name)
+                             for name in sites or []]
+            marks = ",".join("?" * len(names))
+            found = db.execute(f"SELECT scope,resets_at FROM budget_pause WHERE resets_at > ? "
+                               f"AND site IN ({marks}) ORDER BY resets_at DESC LIMIT 1",
+                               (stamp, *names)).fetchone()
+        finally:
+            db.close()
+    except (OSError, sqlite3.Error, TypeSafeError) as exc:
+        raise TypeSafeError(f"Jev pause storage unavailable ({type(exc).__name__})") from None
+    return {"scope": found[0], "resets_at": found[1]} if found else None
+
+
+PAUSE_WORDS = {"daily_paid_call_cap": "daily paid-call cap",
+               "hourly_paid_call_cap": "hourly paid-call cap",
+               "site_daily_budget": "this check's daily budget",
+               "site_hourly_budget": "this check's hourly budget"}
+
+
+def pause_notice(session, *, sites=None, now=None):
+    """ONE line per session per pause window, then None until the next window.
+
+    Hooks call this instead of printing "[jev ...] unavailable" on every tool
+    call and Stop while a cap holds. A missing session gets no line at all.
+    """
+    pause = active_pause(sites=sites, now=now)
+    if not pause or not session:
+        return None
+    try:
+        with closing(sqlite3.connect(_cap_db_path(), timeout=1.0)) as db, db:
+            _budget_tables(db)
+            fresh = db.execute("INSERT OR IGNORE INTO pause_notice VALUES (?,?,?)",
+                               (str(session), pause["scope"], pause["resets_at"])).rowcount == 1
+    except (OSError, sqlite3.Error) as exc:
+        raise TypeSafeError(f"Jev notice storage unavailable ({type(exc).__name__})") from None
+    if not fresh:
+        return None
+    resumes = pause["resets_at"].replace("T", " ").replace(":00Z", " UTC")
+    return (f"[jev] paused: {PAUSE_WORDS.get(pause['scope'], pause['scope'])} reached; "
+            f"resumes {resumes}. Jev checks are skipped until then; this is said once.")
+
+
+def outage_notice(session, *, now=None):
+    """ONE line per session per UTC hour while Jev is unavailable for any
+    reason other than a budget pause (vendor down, credits exhausted)."""
+    if not session:
+        return None
+    _, hour, _, _ = _windows(now or datetime.now(timezone.utc))
+    try:
+        with closing(sqlite3.connect(_cap_db_path(), timeout=1.0)) as db, db:
+            _budget_tables(db)
+            fresh = db.execute("INSERT OR IGNORE INTO pause_notice VALUES (?,?,?)",
+                               (str(session), "outage", hour)).rowcount == 1
+    except (OSError, sqlite3.Error) as exc:
+        raise TypeSafeError(f"Jev notice storage unavailable ({type(exc).__name__})") from None
+    if not fresh:
+        return None
+    return ("[jev] unavailable this hour (vendor or account outage, not a cap); "
+            "Jev checks are skipped and this is said once per hour.")
+
+
+SITE_SPEND_ACTION = ("on breach (a site at its daily budget, or the day past 50% of the cap): "
+                     "owner orchestrator · remediation cut the top site's trigger to its judgment "
+                     "point or lower its budget in ops/config/jev-call-sites.v1.json · verify "
+                     "next UTC day every site under budget · auto-clear at UTC rollover")
+
+
+def spend_by_site_health(*, now=None):
+    """Today's paid attempts per registered site against its budget, one line."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    day, hour, _, _ = _windows(now)
+    try:
+        registry = load_call_sites()
+        cap = _daily_cap_limit()
+        usage, hour_used, total = {}, 0, 0
+        path = Path(_cap_db_path())
+        if path.exists():
+            db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
+            try:
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='site_usage'").fetchone():
+                    usage = dict(db.execute("SELECT site, SUM(count) FROM site_usage WHERE day=? "
+                                            "GROUP BY site", (day,)).fetchall())
+                    hour_used = db.execute("SELECT COALESCE(SUM(count),0) FROM site_usage WHERE hour=?",
+                                           (hour,)).fetchone()[0]
+                row = db.execute("SELECT attempts FROM daily_cap WHERE day=?", (day,)).fetchone() \
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE name='daily_cap'").fetchone() else None
+                total = row[0] if row else 0
+            finally:
+                db.close()
+        grouped = {}
+        for name, used in usage.items():
+            identity = (call_site(name, registry) or {}).get("caller", name)
+            grouped[identity] = grouped.get(identity, 0) + used
+        usage = grouped
+        unattributed = usage.pop(UNATTRIBUTED_SITE, 0)
+        if unattributed:
+            usage = {name: usage.get(name, 0) + unattributed for name in registry["sites"]} | {
+                name: used for name, used in usage.items() if name not in registry["sites"]}
+        over = [name for name, used in usage.items()
+                if name in registry["sites"] and used >= registry["sites"][name]["daily_budget"]]
+        status = "WARN" if over or total * 100 >= cap * 50 else "OK"
+        parts = [f"{name}={used}/{registry['sites'][name]['daily_budget'] if name in registry['sites'] else '?'}"
+                 for name, used in sorted(usage.items(), key=lambda kv: (-kv[1], kv[0]))]
+        return (f"{status} jev spend by site — UTC {day} · {total}/{cap} paid attempts · this hour "
+                f"{hour_used}/{registry['hourly_paid_call_cap']} · {' '.join(parts) or 'no site spend'}"
+                f"{' · unattributed=' + str(unattributed) + ' charged to each site' if unattributed else ''}"
+                f"{' · over budget: ' + ','.join(sorted(over)) if over else ''} · {SITE_SPEND_ACTION}")
+    except (OSError, sqlite3.Error, TypeSafeError) as exc:
+        return f"UNKNOWN jev spend by site — {type(exc).__name__} · {SITE_SPEND_ACTION}"
 
 
 def ask(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
@@ -1118,6 +1915,9 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
     """
     if not isinstance(questions, dict) or not questions:
         raise TypeSafeError("ask needs a non-empty map of questions")
+    problem = malformed_request(state, questions)
+    if problem:
+        raise TypeSafeError(f"malformed Jev request, nothing sent: {problem}")
 
     payload = {"state": state, "model": model, "questions": questions}
     body = json.dumps(payload).encode("utf-8")
@@ -1139,6 +1939,10 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
     server_error = None
     reservation_error = None
     dispatch_binding = _dispatch_binding(transcript_path, session_id)
+    registry = site = None
+    if opener is None:
+        registry, site = _admit_paid_call(caller, dispatch_binding[0], questions, facets,
+                                          question_kind, prompt_sha256)
     started = time.monotonic()
     in_hook = os.environ.get(IN_HOOK_ENV) == "1" and purpose != "build_advisory"
     if opener is None and api_key is None and not in_hook and work_class != "app_runtime":
@@ -1154,25 +1958,34 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
             timeout=server_deadline - time.monotonic(), transport_mode="cache_only", runner=server_runner)
         if served is not None and served.get("cache_hit") is not True:
             raise TypeSafeError("Jev unavailable: Worker cache-only contract violated")
-        if served is None and server_error == "cache_miss":
+        if served is None and server_error == "cache_miss" and _hold_open("worker_breaker"):
+            # The Worker's own vendor call has been failing: go direct with ONE
+            # reservation instead of paying a doomed Worker attempt first.
+            server_error = "worker_breaker_open"
+        elif served is None and server_error == "cache_miss":
             try:
-                _reserve_paid_call(questions, facets, caller, question_kind, prompt_sha256)
+                remaining = server_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TypeSafeError("deadline passed before the paid Worker attempt")
+                upstream = {}
+                served, server_error = server_ask(
+                    state, questions, model=model, facets=facets, purpose=purpose,
+                    session_id=dispatch_binding[0] or "unbound", caller=caller,
+                    timeout=remaining, transport_mode="paid_once", runner=server_runner,
+                    upstream=upstream, admission=(registry, site))
             except TypeSafeError as error:
                 # A free direct-cache answer may still exist after a Worker
                 # cache miss. No transport may run if this reservation failed.
                 reservation_error = error
             else:
-                remaining = server_deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TypeSafeError("deadline passed during daily cap accounting")
-                served, server_error = server_ask(
-                    state, questions, model=model, facets=facets, purpose=purpose,
-                    session_id=dispatch_binding[0] or "unbound",
-                    timeout=remaining, transport_mode="paid_once", runner=server_runner)
                 if served is None:
-                    _append_call_receipt(questions, facets, None, calls_log, dispatch_binding=dispatch_binding, caller=caller,
+                    status, reason = upstream.get("status"), upstream.get("reason")
+                    _append_call_receipt(questions, facets,
+                        {"http_status": status, "upstream_reason": reason}, calls_log,
+                        dispatch_binding=dispatch_binding, caller=caller,
                         question_kind=question_kind, prompt_sha256=prompt_sha256,
                         ok=False, error=server_error, server_error=server_error, session=session_id)
+                    reservation_error = upstream.get("refusal")
                 elif served.get("cache_hit") is True:
                     raise TypeSafeError("Jev unavailable: Worker paid-once contract violated")
         if served is not None:
@@ -1242,9 +2055,11 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
             if remaining <= 0:
                 raise TypeSafeError("deadline passed before the request could be sent")
             attempt_timeout = min(timeout, remaining)
+        probe_token = None
         if opener is None:
-            _reserve_paid_call(questions, facets, caller,
-                               question_kind, prompt_sha256)
+            probe_token = _reserve_paid_call(questions, facets, caller,
+                                             question_kind, prompt_sha256, registry, site,
+                                             session=dispatch_binding[0])
             # Accounting can wait on another worker's transaction. Preserve
             # the caller's absolute deadline before starting any transport.
             if deadline is not None:
@@ -1288,6 +2103,7 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
                                      server_error=server_error or "direct_call", session=session_id)
             if not usable:
                 raise TypeSafeError("TypeSafe returned an unusable judgment")
+            _finish_credit_probe(probe_token)
             if use_cache:
                 _store_cached_result(cache_path, cache_key, result,
                                      cache_ttl_seconds)
@@ -1297,9 +2113,12 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
             return result
         except urllib.error.HTTPError as err:
             if opener is None:
-                _append_call_receipt(questions, facets, None, calls_log, dispatch_binding=dispatch_binding, caller=caller,
+                _append_call_receipt(questions, facets, {"http_status": err.code}, calls_log,
+                                     dispatch_binding=dispatch_binding, caller=caller,
                                      question_kind=question_kind, prompt_sha256=prompt_sha256,
                                      ok=False, error=f"HTTP {err.code}")
+                if err.code == 402:
+                    _open_hold("credit_hold", CREDIT_HOLD_SECONDS)
             # 429 is documented as expected under load, and the service's own
             # limits "can change without notice". Honour retry-after when it is
             # sent; fall back to a short backoff when it is not.

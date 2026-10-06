@@ -29,7 +29,10 @@ Nothing is written to production logs or caches. `selftest.py` checks that.
    misses (trigger vocabulary without the action), 13 positives.
 
 `split.json` freezes every case id to train or test before any edit;
-`selftest.py` fails if it moves.
+`selftest.py` fails if it moves. `expectations.v1.json` freezes each case's
+grading labels (expected and allowed rules, envelope or human cohort, input
+hash). A change to the routes cannot move its own denominator: grading reads
+the frozen labels, and a relabel is a new expectations version.
 
 ## Grader (programmatic)
 
@@ -50,8 +53,23 @@ python3 evals/rule-delivery/run_eval.py --compare baseline v3
 python3 evals/rule-delivery/run_eval.py --verdict baseline v3 recall
 python3 evals/rule-delivery/noise.py baseline
 python3 evals/rule-delivery/explain.py                        # train split only
-python3 evals/rule-delivery/make_report.py                    # report.html + receipt.json
+python3 evals/rule-delivery/make_report.py receipt --baseline-ref <sha>   # evidence/ + receipt.json
+python3 evals/rule-delivery/make_report.py rounds             # runs/results.md (+ report.html with --builder)
+python3 evals/rule-delivery/run_eval.py --freeze-expectations # only for a new expectations version
 ```
+
+## The receipt
+
+`make_report.py receipt` replays every case through the working tree
+(candidate) and through the tree at `--baseline-ref` (baseline) with the same
+harness, and writes the raw observations to `evidence/{baseline,candidate}.jsonl`.
+`run_eval.score_receipt` grades both against `expectations.v1.json` and
+computes each dimension on the test split of its cohort: per-arm case
+bootstrap intervals and a paired-bootstrap delta over identical cohorts.
+`receipt.json` binds the harness, every tracked file the candidate replay
+read, the expectations and both cohorts by sha256; authored fields (change,
+verdict, notes, critical flags) carry over from the current receipt.
+`ops/check-eval-receipt.py` re-runs the scorer and refuses any difference.
 
 The current round command and candidate verdict read the train split only.
 Historical rounds v1-v3 used the test split to decide keep/revert; those test

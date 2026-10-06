@@ -24,7 +24,7 @@ WHAT IS PROVEN:
      rows, the drift observer, boot layer zero) run on the committed fixture
      against this checkout's real config and return only known rule ids.
   7. The Jev-backed adapters (the UserPromptSubmit judgment in
-     ops/rule_trigger_delivery.py and the legacy ops/jev_rule_select.py) run
+     ops/rule_trigger_delivery.py) run
      end to end against a FAKE client: the rule the fake says binds is
      delivered, every request carries the harness's calls-log sink, and no
      production log, cache or audit file in this checkout's out/ is created or
@@ -255,9 +255,9 @@ def test_deterministic_adapters(ev, cases, meta):
     # older enforcement-map layer0 is only a historical comparison path.
     classes = json.loads((REPO / "ops" / "config" / "rule-classes.v1.json").read_text())
     joe_boot = {rid for rid, row in classes["rules"].items()
-                if row["always_on"] and row.get("personal_to") in (None, "joe")}
+                if row.get("personal_to") in (None, "joe")}
     dell_boot = {rid for rid, row in classes["rules"].items()
-                 if row["always_on"] and row.get("personal_to") in (None, "dell")}
+                 if row.get("personal_to") in (None, "dell")}
     check("live boot contract carries a nonempty always-on set", bool(joe_boot),
           len(joe_boot))
     check("boot adapter respects the sponsor's personal boundary",
@@ -267,7 +267,7 @@ def test_deterministic_adapters(ev, cases, meta):
     check("actual boot adapter is separate from legacy layer zero",
           "boot_always_on" in deliveries, sorted(deliveries))
     if "boot_always_on" in deliveries:
-        check("actual boot adapter delivers exactly Joe's always-on ids",
+        check("actual boot retains every unproven Joe-scoped rule",
               all(out["rules"] == joe_boot for out in deliveries["boot_always_on"].values()))
         check("actual boot includes rules legacy layer zero omits",
               {"5be2f462", "fa217e48"} <= joe_boot - layer0)
@@ -313,18 +313,16 @@ class FakeClient:
                 else:
                     rid = self.by_statement.get((state or {}).get("rule"))
                 answers[qid] = {"noul": 0.93 if rid in self.binds else 0.05}
-        return {"answers": answers, "model": "fake-jev", "usage": {}}
+        return {"answers": answers, "model": "jev-1.13.0", "usage": {}}
 
 
 def test_jev_adapters(ev, meta):
     tsc = load(REPO / "ops" / "typesafe_client.py", "typesafe_client_for_eval_selftest")
     rtc = load(REPO / "ops" / "rule_trigger_compile.py", "rtc_for_eval_selftest")
-    jrs = load(REPO / "ops" / "jev_rule_select.py", "jrs_for_eval_selftest")
     pack = rtc.pack_rules()
     statements = {rule["statement"]: rule["id"] for rule in pack}
-    for rule in jrs.load_rules():
-        statements.setdefault(rule.get("statement") or rule["gist"], rule["id"])
     target = pack[0]["id"]
+    os.environ["CARR_JEV_SEMANTIC_CACHE"] = str(Path(tempfile.mkdtemp()) / "cache")
     fake = FakeClient(tsc, [target], statements)
     guarded = [REPO / "out" / name for name in ev.GUARDED_OUT_FILES]
     before = _snapshot(guarded)
@@ -333,19 +331,21 @@ def test_jev_adapters(ev, meta):
     adapters = ev.build_adapters(REPO, jev="live",
                                  client_factory=lambda calls_log: ev.JevProxy(fake, calls_log),
                                  calls_log=sink)
-    wanted = [a for a in adapters if a["name"] in ("prompt_full", "jev_rule_select")]
-    check("both Jev-backed adapters are built in live mode", len(wanted) == 2,
+    wanted = [a for a in adapters if a["name"] in ("prompt_full",)]
+    check("the single Jev-backed adapter is built in live mode", len(wanted) == 1,
           [a["name"] for a in adapters])
     case = {"id": "fake-1", "stratum": "engineering", "tool_calls": [], "gold": [target],
             "prompt": "hello, a quick question before we start"}
     deliveries, errors = ev.run_adapters([case], wanted)
     check("Jev-backed adapters did not raise", not any(errors.values()), errors)
-    check("UserPromptSubmit judgment delivers the rule the fake binds",
-          target in deliveries["prompt_full"]["fake-1"]["rules"], deliveries["prompt_full"])
-    check("legacy selector delivers the rule the fake binds",
-          target in deliveries["jev_rule_select"]["fake-1"]["rules"],
-          deliveries["jev_rule_select"])
-    check("the fake was actually asked", fake.requests >= 2, fake.requests)
+    check("uncalibrated bind does not deliver an authoritative rule",
+          target not in deliveries["prompt_full"]["fake-1"]["rules"], deliveries["prompt_full"])
+    check("one request for the residual shortlist", fake.requests == 1, fake.requests)
+    proxy = ev.JevProxy(fake,sink)
+    qs={"q":tsc.noul("Does this govern the action?")}
+    proxy.ask({"rule":pack[0]["statement"]},qs)
+    proxy.ask({"rule":pack[0]["statement"]},qs)
+    check("repeated evaluation reuses one cached pinned request",fake.requests==2,fake.requests)
     check("every Jev request carried the harness calls-log sink",
           fake.sinks and all(s == sink for s in fake.sinks), set(map(str, fake.sinks)))
     after = _snapshot(guarded)

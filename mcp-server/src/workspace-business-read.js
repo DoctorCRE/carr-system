@@ -1,3 +1,5 @@
+import { networkStatement, projectNetwork } from './relationship-network.js';
+import { vendorRelationshipJoin, enrichRelationship } from "./vendor-relationship.js";
 // Journey 1 business workspace: the Clients and Vendors READ model.
 //
 // ONE SOURCE FOR COUNT, LIST AND FILTER SEMANTICS. Every list answer — the
@@ -40,7 +42,7 @@ export const BUSINESS_ASSET_PATH = "/business.html";
 export const DATASETS = ["clients", "vendors"];
 export const SCOPES = ["team", "mine"];
 export const DEFAULT_SCOPE = "team";
-export const SORTS = ["name", "recent"];
+export const SORTS = ["name", "recent", "vertical", "deal_type", "last_deal_desc", "last_deal_asc", "territory"];
 export const DEFAULT_SORT = "name";
 export const PIPELINE_FILTERS = ["any", "active", "other", "unknown"];
 export const PAGE_SIZE = 25;
@@ -72,10 +74,10 @@ const SLUG = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const PAGE = /^[1-9][0-9]{0,3}$/;
 
 const LIST_KEYS = {
-  clients: ["viewer", "scope", "q", "status", "type", "pipeline", "sort", "page"],
-  vendors: ["viewer", "scope", "q", "category", "stage", "disposition", "sort", "page"],
+  clients: ["contract", "viewer", "scope", "q", "status", "type", "pipeline", "sort", "page", "owner"],
+  vendors: ["contract", "viewer", "scope", "q", "category", "stage", "disposition", "sort", "page", "owner", "territory"],
 };
-const RECORD_KEYS = ["viewer"];
+const RECORD_KEYS = ["viewer", "contract"];
 
 export function businessError(code, detail = null) {
   const error = new Error(code);
@@ -97,13 +99,14 @@ function classifyReadError(error) {
 export function parseBusinessApiPath(pathname) {
   if (typeof pathname !== "string" || !pathname.startsWith(BUSINESS_API_PREFIX)) return null;
   const parts = pathname.slice(BUSINESS_API_PREFIX.length).split("/");
+  if (parts.length === 1 && parts[0] === "leases") return { dataset: "leases", id: null };
   if (parts.length > 2 || !DATASETS.includes(parts[0])) return null;
   if (parts.length === 1) return { dataset: parts[0], id: null };
   return UUID.test(parts[1]) ? { dataset: parts[0], id: parts[1].toLowerCase() } : null;
 }
 
 export function isBusinessApiPath(pathname) {
-  return parseBusinessApiPath(pathname) !== null;
+  return pathname === "/api/v1/business/relationships" || parseBusinessApiPath(pathname) !== null;
 }
 
 function requireExactKeys(searchParams, allowed, viewerSlug) {
@@ -175,15 +178,24 @@ export function likeTerm(value) {
  * from this normalized query, and the payload echoes it back so the browser can
  * render exactly the filter set the server counted.
  */
+function boundedTerritory(params) {
+  const value = params.get("territory") || "";
+  if (value.length > 80 || hasControlCharacter(value)) throw businessError("QUERY_INVALID", { parameter: "territory" });
+  return value || null;
+}
+
 export function parseBusinessQuery(dataset, searchParams, viewerSlug) {
   if (!DATASETS.includes(dataset)) throw businessError("QUERY_INVALID", { parameter: "dataset" });
   const params = searchParams instanceof URLSearchParams ? searchParams : new URLSearchParams(searchParams || "");
   requireExactKeys(params, LIST_KEYS[dataset], viewerSlug);
   const base = {
     dataset,
+    ...(oneOf(params,"contract",["vendor-directory.v1"],null) ? {contract:"vendor-directory.v1"} : {}),
     scope: oneOf(params, "scope", SCOPES, DEFAULT_SCOPE),
     q: searchTerm(params),
-    sort: oneOf(params, "sort", SORTS, DEFAULT_SORT),
+    owner: oneOf(params, "owner", ["all", "joe", "dell"], "all"),
+    territory: boundedTerritory(params),
+    sort: oneOf(params, "sort", dataset === "clients" ? SORTS.filter(sort => sort !== "territory") : SORTS, DEFAULT_SORT),
     page: pageNumber(params),
     page_size: PAGE_SIZE,
   };
@@ -195,7 +207,8 @@ export function parseBusinessQuery(dataset, searchParams, viewerSlug) {
 export function parseBusinessRecordQuery(searchParams, viewerSlug) {
   const params = searchParams instanceof URLSearchParams ? searchParams : new URLSearchParams(searchParams || "");
   requireExactKeys(params, RECORD_KEYS, viewerSlug);
-  return {};
+  const contract=oneOf(params,"contract",["vendor-directory.v1"],null);
+  return contract ? {contract} : {};
 }
 
 // --------------------------------------------------------------- statements
@@ -218,6 +231,11 @@ const VIEWER_OWNER = "(select a.id from public.actor a where a.slug = $1::text)"
 const ORDER = {
   name: "lower(f.name) asc, f.id asc",
   recent: "f.updated_at desc, f.id asc",
+  vertical: "lower(f.vertical) asc nulls last, lower(f.name), f.id",
+  deal_type: "lower(f.deal_type) asc nulls last, lower(f.name), f.id",
+  last_deal_desc: "f.last_deal_at desc nulls last, lower(f.name), f.id",
+  last_deal_asc: "f.last_deal_at asc nulls last, lower(f.name), f.id",
+  territory: "lower(f.territory) asc nulls last, lower(f.name), f.id",
 };
 
 /** Append a filter value and return its placeholder; `$1` stays the actor slug. */
@@ -289,6 +307,8 @@ const CLIENT_LIST_PAYLOAD = `json_build_object(
       'recorded_client_type', c.client_type,
       'recorded_client_type_label', ct.label,
       'vertical', c.vertical,
+      'last_deal_at', (select max(d.closed_on) from public.deal d where d.client_id=c.id),
+      'deal_type', c.deal_type_label,
       'owner_label', c.owner_label,
       'owned_by_viewer', (c.owner_id is not null and c.owner_id = ${VIEWER_OWNER}),
       'updated_at', c.updated_at
@@ -320,6 +340,8 @@ const CLIENT_RECORD_PAYLOAD = `json_build_object(
       'recorded_client_type', c.client_type,
       'recorded_client_type_label', ct.label,
       'vertical', c.vertical,
+      'last_deal_at', (select max(d.closed_on) from public.deal d where d.client_id=c.id),
+      'deal_type', c.deal_type_label,
       'subtype', c.subtype,
       'acquisition_source', c.acquisition_source,
       'acquisition_detail', c.acquisition_detail,
@@ -339,6 +361,7 @@ function clientPredicates(query) {
   const where = [...CLIENT_LIVE];
   const values = [];
   if (query.scope === "mine") where.push(`c.owner_id = ${VIEWER_OWNER}`);
+  if (query.owner && query.owner !== "all") where.push(`c.owner_id = (select a.id from public.actor a where a.slug = ${bind(values, query.owner)}::text)`);
   if (query.q) {
     const term = bind(values, likeTerm(query.q));
     where.push(`(p.name ilike ${term} escape '\\' or c.roster_ref ilike ${term} escape '\\' or p.ref ilike ${term} escape '\\')`);
@@ -365,7 +388,8 @@ const VENDOR_FROM = `public.vendor v
        left join public.vendor_category vc on vc.slug = ${VENDOR_CATEGORY_KEY}
        left join public.vendor_stage vs on vs.slug = v.stage
        left join public.vendor_disposition vd on vd.slug = v.disposition
-       left join public.vendor_relationship_level vrl on vrl.level = v.relationship_level`;
+       left join public.vendor_relationship_level vrl on vrl.level = v.relationship_level
+       ${vendorRelationshipJoin}`;
 
 const VENDOR_LIVE = ["v.merged_into is null", "p.merged_into is null", "p.deleted_at is null"];
 
@@ -389,6 +413,11 @@ const VENDOR_LIST_PAYLOAD = `json_build_object(
       'is_target', v.is_target,
       'out_of_market', v.out_of_market,
       'last_touch', v.last_touch,
+      'relationship', vr.payload,
+      'vertical', nullif(array_to_string(v.verticals, ', '), ''),
+      'deal_type', vc.label,
+      'last_deal_at', vr.last_deal_at,
+      'territory', v.territory,
       'owner_label', v.owner_label,
       'owned_by_viewer', (v.owner_id is not null and v.owner_id = ${VIEWER_OWNER}),
       'updated_at', v.updated_at
@@ -430,6 +459,8 @@ const VENDOR_RECORD_PAYLOAD = `json_build_object(
       'is_target', v.is_target,
       'out_of_market', v.out_of_market,
       'last_touch', v.last_touch,
+      'relationship', vr.payload,
+      'loan_programs', v.loan_programs,
       'intro_notes', v.intro_notes,
       'links_label', v.links_label,
       'owner_label', v.owner_label,
@@ -443,6 +474,8 @@ function vendorPredicates(query) {
   const where = [...VENDOR_LIVE];
   const values = [];
   if (query.scope === "mine") where.push(`v.owner_id = ${VIEWER_OWNER}`);
+  if (query.owner && query.owner !== "all") where.push(`v.owner_id = (select a.id from public.actor a where a.slug = ${bind(values, query.owner)}::text)`);
+  if (query.territory) where.push(`v.territory = ${bind(values, query.territory)}::text`);
   if (query.q) {
     const term = bind(values, likeTerm(query.q));
     where.push(`(p.name ilike ${term} escape '\\' or v.vendor_ref ilike ${term} escape '\\' or p.ref ilike ${term} escape '\\')`);
@@ -466,7 +499,8 @@ const CLIENT_FACETS = `select
 const VENDOR_FACETS = `select
     coalesce((select json_agg(json_build_object('slug', slug, 'label', label) order by sort, slug) from public.vendor_category), '[]'::json) as categories,
     coalesce((select json_agg(json_build_object('slug', slug, 'label', label) order by sort, slug) from public.vendor_stage), '[]'::json) as stages,
-    coalesce((select json_agg(json_build_object('slug', slug, 'label', label, 'workable', workable) order by sort, slug) from public.vendor_disposition), '[]'::json) as dispositions`;
+    coalesce((select json_agg(json_build_object('slug', slug, 'label', label, 'workable', workable) order by sort, slug) from public.vendor_disposition), '[]'::json) as dispositions,
+    coalesce((select json_agg(json_build_object('slug', t.territory, 'label', t.territory) order by t.territory) from (select distinct v.territory from public.vendor v join public.party p on p.id=v.party_id where v.merged_into is null and p.merged_into is null and p.deleted_at is null and nullif(v.territory,'') is not null) t), '[]'::json) as territories`;
 
 // -------------------------------------------------------------- envelopes
 
@@ -575,7 +609,11 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
   const idColumn = clients ? "c.id" : "v.id";
   const updatedColumn = clients ? "c.updated_at" : "v.updated_at";
   const statement = pageStatement({
-    columns: `${idColumn} as id, p.name as name, ${updatedColumn} as updated_at, ${clients ? CLIENT_LIST_PAYLOAD : VENDOR_LIST_PAYLOAD} as row_payload`,
+    columns: `${idColumn} as id, p.name as name, ${updatedColumn} as updated_at,
+      ${clients ? "c.vertical" : "nullif(array_to_string(v.verticals, ', '), '')"} as vertical,
+      ${clients ? "c.deal_type_label" : "vc.label"} as deal_type,
+      ${clients ? "(select max(d.closed_on) from public.deal d where d.client_id=c.id)" : "vr.last_deal_at"} as last_deal_at,
+      ${clients ? "null::text" : "v.territory"} as territory, ${clients ? CLIENT_LIST_PAYLOAD : VENDOR_LIST_PAYLOAD} as row_payload`,
     from: clients ? CLIENT_FROM : VENDOR_FROM,
     where,
     values: [actor.slug, ...values],
@@ -616,10 +654,10 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
     query: { ...query },
     total,
     ...pageWindow(total, query.page),
-    rows,
+    rows: rows.map(row => directoryProjection(row, query.dataset, query.contract, observedAt)),
     facets: clients
       ? { statuses: rowsOf(facets.statuses) || [], types: rowsOf(facets.types) || [] }
-      : { categories: rowsOf(facets.categories) || [], stages: rowsOf(facets.stages) || [], dispositions: rowsOf(facets.dispositions) || [] },
+      : { categories: rowsOf(facets.categories) || [], stages: rowsOf(facets.stages) || [], dispositions: rowsOf(facets.dispositions) || [], ...(query.contract ? {territories: rowsOf(facets.territories) || []} : {}) },
     partial: partialSignal(dataset, rows),
     // Stated once, in the read model that produces the fields, so no rendering
     // layer has to remember it.
@@ -628,8 +666,22 @@ export async function readBusinessList({ client, actor, tenant = organizationTen
   };
 }
 
+// Expanded directory fields are opt-in. Existing v1 consumers keep their
+// exact payload shape while DoctorCRE pins the expanded contract revision.
+function directoryProjection(row, dataset, contract, observedAt) {
+  const result = {...row};
+  if (contract === 'vendor-directory.v1') {
+    if (dataset === 'vendors') result.relationship = enrichRelationship(row.relationship, observedAt);
+    return result;
+  }
+  for (const key of ['relationship','loan_programs','last_deal_at','deal_type',...(dataset==='vendors'?['vertical','territory']:[])]) delete result[key];
+  // Territory already belonged to the legacy vendor detail.
+  if (dataset==='vendors' && Object.hasOwn(row,'record_version')) result.territory=row.territory;
+  return result;
+}
+
 /** The single-record read, from the SAME audience predicate as the list. */
-export async function readBusinessRecord({ client, actor, tenant = organizationTenantForActor(actor), dataset, id, correlationId, now = () => new Date() }) {
+export async function readBusinessRecord({ client, actor, tenant = organizationTenantForActor(actor), dataset, id, contract = null, correlationId, now = () => new Date() }) {
   if (!correlationId || typeof correlationId !== "string") throw businessError("INTERNAL_ERROR");
   assertAudience(actor, tenant);
   if (!DATASETS.includes(dataset)) throw businessError("QUERY_INVALID", { parameter: "dataset" });
@@ -661,7 +713,7 @@ export async function readBusinessRecord({ client, actor, tenant = organizationT
   return {
     viewer: actor.slug,
     dataset,
-    record,
+    record: directoryProjection(record, dataset, contract, observedAt),
     partial: partialSignal(dataset, [record]),
     // Named explicitly so the panel never implies it is showing a whole
     // relationship. Assignments, negotiations, correspondence and documents are
@@ -677,19 +729,51 @@ export async function readBusinessRecord({ client, actor, tenant = organizationT
  * dealroom-web.js needs no database knowledge of its own, and so a test can
  * replace the whole reader with an injected function.
  */
+export async function readRelationshipNetwork({client,actor,tenant=organizationTenantForActor(actor),params,now=()=>new Date()}) {
+  assertAudience(actor,tenant);
+  if (params.get('contract') !== 'relationship-network.v1' || params.getAll('contract').length !== 1 || [...params.keys()].some(key => key !== 'contract')) throw businessError('QUERY_INVALID');
+  try { const result = await client.query(networkStatement); return projectNetwork(result.rows[0]?.snapshot,now().toISOString()); }
+  catch(error) { throw classifyReadError(error); }
+}
+
 export function createWorkspaceBusinessReader() {
   return async (env, actor, request, correlationId) => {
     const sql = neon(env.DATABASE_URL_READER);
     const client = { query: async (text, params = []) => ({ rows: await sql.query(text, params) }) };
     const url = new URL(request.url);
+    if (url.pathname === '/api/v1/business/relationships') {
+      return readRelationshipNetwork({client,actor,params:url.searchParams});
+    }
     const route = parseBusinessApiPath(url.pathname);
     if (!route) throw businessError("RECORD_NOT_FOUND");
     const resolved = correlationId || env.CORRELATION_ID;
+    if (route.dataset === "leases") {
+      requireExactKeys(url.searchParams, [], actor.slug);
+      return readLeaseRadar({ client, actor, correlationId: resolved });
+    }
     if (route.id) {
-      parseBusinessRecordQuery(url.searchParams, actor.slug);
-      return readBusinessRecord({ client, actor, dataset: route.dataset, id: route.id, correlationId: resolved });
+      const {contract} = parseBusinessRecordQuery(url.searchParams, actor.slug);
+      return readBusinessRecord({ client, actor, dataset: route.dataset, id: route.id, contract, correlationId: resolved });
     }
     const query = parseBusinessQuery(route.dataset, url.searchParams, actor.slug);
     return readBusinessList({ client, actor, query, correlationId: resolved });
   };
+}
+
+
+// The lease projection shares the existing authenticated business HTTP door.
+// Dates are recorded facts, never synthesized from term_months or market data.
+export const LEASE_RADAR_SQL = `select starts_on::text, ends_on::text, leases
+  from public.v_client_lease_radar`;
+
+export async function readLeaseRadar({ client, actor, tenant = organizationTenantForActor(actor), correlationId, now = () => new Date() }) {
+  assertAudience(actor, tenant);
+  if (!correlationId) throw businessError("INTERNAL_ERROR");
+  let head;
+  try { head = (await client.query(LEASE_RADAR_SQL, [])).rows?.[0]; }
+  catch (error) { throw classifyReadError(error); }
+  const leases = rowsOf(head?.leases);
+  if (!leases || !/^\d{4}-\d{2}-\d{2}$/.test(head?.starts_on) || !/^\d{4}-\d{2}-\d{2}$/.test(head?.ends_on)) throw businessError("FRESHNESS_UNKNOWN");
+  return { schema_version: "lease-radar.v1", actor: actor.slug, observed_at: now().toISOString(),
+    window: { starts_on: head.starts_on, ends_on: head.ends_on }, leases };
 }

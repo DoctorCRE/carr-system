@@ -1,0 +1,53 @@
+# Manual, default-off measurement only. Required CI/DB/canary jobs keep their
+# setup and checks. No remote cache, image change, or database-template reuse.
+name: CI setup shadow
+on:
+  workflow_dispatch:
+    inputs:
+      enabled:
+        description: Run private setup trials (never enables reuse in required jobs)
+        type: boolean
+        default: false
+        required: true
+      target:
+        description: Locked dependency root
+        type: choice
+        options: [mcp-server, practice-plugin, pip]
+        default: mcp-server
+      repeats:
+        description: Paired cold/warm samples (ten minimum to qualify for further proof)
+        type: choice
+        options: ['1', '10', '20']
+        default: '10'
+permissions:
+  contents: read
+jobs:
+  measure:
+    if: ${{ inputs.enabled }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # package checks may resolve history; retain historic fixtures
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Measure private installs and rerun package checks
+        env:
+          SHADOW_TARGET: ${{ inputs.target }}
+          SHADOW_REPEATS: ${{ inputs.repeats }}
+        run: |
+          python ops/ci-setup-shadow.py --enabled --target "$SHADOW_TARGET" \
+            --repeats "$SHADOW_REPEATS" --output "$RUNNER_TEMP/setup-shadow.json"
+      - name: Retain measurement (never consumed as a required check verdict)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: setup-shadow-${{ github.sha }}-${{ inputs.target }}
+          path: ${{ runner.temp }}/setup-shadow.json
+          if-no-files-found: error
+          retention-days: 7

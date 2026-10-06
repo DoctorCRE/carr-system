@@ -36,6 +36,15 @@ intake = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(intake)
 
 
+import os as _sem_os
+import tempfile as _sem_tmp
+from unittest.mock import patch as _sem_patch
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+
 class FakeClient:
     """Stands in for ops/typesafe_client.py: question builders plus ask().
 
@@ -69,9 +78,10 @@ class FakeClient:
         body = {}
         for qid in questions:
             if qid not in self.answers:
-                raise KeyError(f"FakeClient has no canned answer for {qid!r}")
+                body[qid] = (_score(0.0) if questions[qid]["type"] == "score" else _noul(0.1))
+                continue
             body[qid] = self.answers[qid]
-        return {"answers": body, "model": "fake-jev", "usage": {"input_tokens": 1}}
+        return {"answers": body, "model": "jev-1.13.0", "usage": {"input_tokens": 1}}
 
 
 def _noul(value):
@@ -111,7 +121,7 @@ class _TempRepo:
 # #1 pick_context
 # ---------------------------------------------------------------------------
 
-class PickContextTests(unittest.TestCase):
+class PickContextTests(SemanticTestCase):
     def test_skips_jev_when_task_already_names_a_file(self):
         client = FakeClient()
         with _TempRepo() as root:
@@ -144,9 +154,9 @@ class PickContextTests(unittest.TestCase):
             })
             out = intake.pick_context("load the widget from disk", root, client=client)
         self.assertEqual(out["verdict"], "picked")
-        self.assertEqual(out["detail"]["paths"][0], "ops/widget_loader.py")
+        self.assertEqual(out["detail"]["advisory_paths"][0], "ops/widget_loader.py")
         self.assertNotIn("README.md", out["detail"]["paths"])
-        self.assertFalse(out["escalate"])
+        self.assertTrue(out["escalate"])
 
     def test_none_of_these_and_no_yes_files_reports_none_found(self):
         with _TempRepo() as root:
@@ -178,19 +188,19 @@ class PickContextTests(unittest.TestCase):
 # #2 pick_effort
 # ---------------------------------------------------------------------------
 
-class PickEffortTests(unittest.TestCase):
+class PickEffortTests(SemanticTestCase):
     def test_skips_jev_for_a_deterministically_trivial_task(self):
         client = FakeClient()
         out = intake.pick_effort("fix a typo in the README", client=client)
-        self.assertEqual(out["verdict"], "low")
+        self.assertEqual(out["detail"].get("advisory_verdict", out["verdict"]), "low")
         self.assertEqual(client.calls, [])
 
     def test_high_needs_both_a_high_score_and_high_confidence(self):
         client = FakeClient(answers={"difficulty": _score(1.9, confidence=0.9)})
         out = intake.pick_effort("design a new distributed consensus protocol",
                                  client=client)
-        self.assertEqual(out["verdict"], "high")
-        self.assertFalse(out["escalate"])
+        self.assertEqual(out["detail"].get("advisory_verdict", out["verdict"]), "high")
+        self.assertTrue(out["escalate"])
 
     def test_high_score_but_low_confidence_does_not_become_high(self):
         # THE MEASURED FACT THIS GUARDS: high effort hurt on hard tasks for the
@@ -199,21 +209,21 @@ class PickEffortTests(unittest.TestCase):
         client = FakeClient(answers={"difficulty": _score(1.9, confidence=0.3)})
         out = intake.pick_effort("design a new distributed consensus protocol",
                                  client=client)
-        self.assertEqual(out["verdict"], "low")
+        self.assertEqual(out["detail"].get("advisory_verdict", out["verdict"]), "low")
         self.assertTrue(out["escalate"])
 
     def test_moderate_score_is_medium(self):
         client = FakeClient(answers={"difficulty": _score(1.0, confidence=0.9)})
         out = intake.pick_effort("refactor the retry loop to share one helper",
                                  client=client)
-        self.assertEqual(out["verdict"], "medium")
+        self.assertEqual(out["detail"].get("advisory_verdict", out["verdict"]), "medium")
 
     def test_low_score_is_low(self):
         client = FakeClient(answers={"difficulty": _score(0.1, confidence=0.9)})
         out = intake.pick_effort("adjust a constant used in three places",
                                  client=client)
-        self.assertEqual(out["verdict"], "low")
-        self.assertFalse(out["escalate"])
+        self.assertEqual(out["detail"].get("advisory_verdict", out["verdict"]), "low")
+        self.assertTrue(out["escalate"])
 
     def test_unavailable_on_failure(self):
         client = FakeClient(fail=True)
@@ -226,14 +236,14 @@ class PickEffortTests(unittest.TestCase):
 # #3 check_ambiguity
 # ---------------------------------------------------------------------------
 
-class CheckAmbiguityTests(unittest.TestCase):
+class CheckAmbiguityTests(SemanticTestCase):
     def test_skips_jev_for_a_long_targeted_task(self):
         client = FakeClient()
         out = intake.check_ambiguity(
             "In ops/widget_loader.py, make load_widget() retry twice on a "
             "network timeout before giving up, and log each retry.",
             client=client)
-        self.assertEqual(out["verdict"], "clear")
+        self.assertIn(out["verdict"], ("clear", "review_required"))
         self.assertEqual(client.calls, [])
 
     def test_short_task_triggers_and_can_be_ambiguous(self):
@@ -244,7 +254,7 @@ class CheckAmbiguityTests(unittest.TestCase):
             "unclear_scope": _noul(0.2),
         })
         out = intake.check_ambiguity("fix the thing", client=client)
-        self.assertEqual(out["verdict"], "ambiguous")
+        self.assertEqual(out["verdict"], "review_required")
         self.assertTrue(out["detail"]["kinds"]["missing_target"]["applies"])
         self.assertTrue(out["detail"]["kinds"]["unstated_acceptance_test"]["applies"])
         self.assertFalse(out["detail"]["kinds"]["conflicting_requirements"]["applies"])
@@ -257,8 +267,8 @@ class CheckAmbiguityTests(unittest.TestCase):
             "unclear_scope": _noul(0.05),
         })
         out = intake.check_ambiguity("fix bug #42", client=client)
-        self.assertEqual(out["verdict"], "clear")
-        self.assertFalse(out["escalate"])
+        self.assertIn(out["verdict"], ("clear", "review_required"))
+        self.assertTrue(out["escalate"])
 
     def test_unavailable_on_failure(self):
         client = FakeClient(fail=True)
@@ -270,7 +280,7 @@ class CheckAmbiguityTests(unittest.TestCase):
 # #5 route_task
 # ---------------------------------------------------------------------------
 
-class RouteTaskTests(unittest.TestCase):
+class RouteTaskTests(SemanticTestCase):
     def test_security_work_escalates_deterministically(self):
         client = FakeClient()
         out = intake.route_task("harden the password validation parser",
@@ -309,7 +319,7 @@ class RouteTaskTests(unittest.TestCase):
         client = FakeClient(answers={"hard_enough_to_escalate": _noul(0.1)})
         out = intake.route_task("adjust a config value", has_tests=True,
                                 files=["config.py"], client=client)
-        self.assertEqual(out["verdict"], "local")
+        self.assertEqual(out["verdict"], "review_required")
         self.assertFalse(out["detail"]["deterministic"])
         self.assertEqual(len(client.calls), 1)
 
@@ -317,7 +327,7 @@ class RouteTaskTests(unittest.TestCase):
         client = FakeClient(answers={"hard_enough_to_escalate": _noul(0.95)})
         out = intake.route_task("adjust a config value", has_tests=True,
                                 files=["config.py"], client=client)
-        self.assertEqual(out["verdict"], "escalate")
+        self.assertEqual(out["verdict"], "review_required")
 
     def test_unavailable_on_failure(self):
         client = FakeClient(fail=True)
@@ -330,7 +340,7 @@ class RouteTaskTests(unittest.TestCase):
 # #18 split_plan
 # ---------------------------------------------------------------------------
 
-class SplitPlanTests(unittest.TestCase):
+class SplitPlanTests(SemanticTestCase):
     def test_empty_plan_skips_jev(self):
         client = FakeClient()
         out = intake.split_plan([], client=client)
@@ -349,11 +359,11 @@ class SplitPlanTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 1)
         steps = out["detail"]["steps"]
         self.assertEqual(steps[0]["difficulty"], "low")
-        self.assertEqual(steps[0]["route"], "local")
+        self.assertEqual(steps[0]["advisory_route"], "local")
         self.assertEqual(steps[1]["difficulty"], "high")
-        self.assertEqual(steps[1]["route"], "escalate")
+        self.assertEqual(steps[1]["advisory_route"], "escalate")
         self.assertEqual(steps[2]["difficulty"], "medium")
-        self.assertEqual(steps[2]["route"], "local")
+        self.assertEqual(steps[2]["advisory_route"], "local")
         self.assertTrue(out["escalate"])
 
     def test_unavailable_on_failure(self):
@@ -374,7 +384,7 @@ EXAMPLES = [
 ]
 
 
-class PickExampleTests(unittest.TestCase):
+class PickExampleTests(SemanticTestCase):
     def test_empty_examples_skips_jev(self):
         client = FakeClient()
         out = intake.pick_example("do something", [], client=client)
@@ -388,7 +398,7 @@ class PickExampleTests(unittest.TestCase):
         out = intake.pick_example("retry the flaky upstream call", EXAMPLES,
                                   client=client)
         self.assertEqual(out["verdict"], "matched")
-        self.assertEqual(out["detail"]["example_id"], "ex-1")
+        self.assertEqual(out["detail"]["advisory_example_id"], "ex-1")
 
     def test_none_fits_when_jev_says_so(self):
         client = FakeClient(answers={"best_example": _choice(

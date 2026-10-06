@@ -1,0 +1,125 @@
+{
+  "adapter": {
+    "adapter_id": "configured-preuse-event-matrix",
+    "adapter_version": "1",
+    "configuration_fingerprint": "sha256:3468f6feff626ce6c436e64b9cf2ff1ab599f36c32374055fcdfbf7de0ca9b15",
+    "harness_id": "evals/context-hooks/score.py",
+    "harness_version": "fce4221fa9c69be3016291d5596e390dd020d14e5353cb481e6c36a0912fdcb1",
+    "model_id": "deterministic-no-model",
+    "native_session_ref": "01a10e01-1a2a-7590-b830-d1e05450f2a4",
+    "provider_id": "none",
+    "surface": "offline_programmatic"
+  },
+  "cases": {
+    "total": 32,
+    "train": 16,
+    "test": 16,
+    "should_not_fire": 10,
+    "sources": [
+      "human_judged_hard_case"
+    ]
+  },
+  "change": "Wire NotebookEdit to the existing full-text preuse rule route; preserve every included and excluded tool class.",
+  "cost": {
+    "baseline_usd_per_case": 0.0,
+    "candidate_usd_per_case": 0.0
+  },
+  "dimensions": [
+    {
+      "dimension_id": "event-route-wiring",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "improved",
+      "evidence_refs": [
+        "evals/context-hooks/evidence/baseline.jsonl",
+        "evals/context-hooks/evidence/candidate.jsonl"
+      ],
+      "baseline": {
+        "score": 0.9375,
+        "ci_low": 0.9375,
+        "ci_high": 0.9375
+      },
+      "candidate": {
+        "score": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": 0.0625,
+        "ci_low": 0.0625,
+        "ci_high": 0.0625
+      }
+    }
+  ],
+  "evidence": {
+    "scorer": {
+      "path": "evals/context-hooks/score.py",
+      "function": "score"
+    },
+    "source": {
+      "evals/context-hooks/score.py": "fce4221fa9c69be3016291d5596e390dd020d14e5353cb481e6c36a0912fdcb1",
+      "evals/context-hooks/make_report.py": "434e83d1550cb5d52cdb0c9159a525522e6364867d90cfb0d8d16ed78ae419a6"
+    },
+    "dependencies": {
+      "ops/config/hooks.json": "bf198daae1a6e42746c913f1c32229c7a540051efe515c3270c3e5dbbf5d1494"
+    },
+    "expectations": {
+      "path": "evals/context-hooks/expectations.v1.json",
+      "version": "context-hooks-expectations/v1",
+      "sha256": "a53e4b5b266be1f3c2a6035438ff0239971eab5cb422427c9d1ca3ee03b48429"
+    },
+    "cohorts": {
+      "baseline": {
+        "path": "evals/context-hooks/evidence/baseline.jsonl",
+        "sha256": "c4217e84d794d44afd28c029fb882df675de76dd90f125b1376c4fc18749f069"
+      },
+      "candidate": {
+        "path": "evals/context-hooks/evidence/candidate.jsonl",
+        "sha256": "49f0d9b1887560d4157e860568213f11398778d865fad48d5fc7db4538c23fd8"
+      }
+    }
+  },
+  "grader": {
+    "kind": "programmatic",
+    "validation": {
+      "graded_twice": true,
+      "result": "pass",
+      "agreement": 1.0,
+      "oracle_pass_rate": 1.0,
+      "null_pass_rate": 0.0
+    }
+  },
+  "measured_on": "2026-10-05",
+  "min_useful_gain": 0.01,
+  "noise_floor": 0,
+  "notes": [
+    "Exact finite-matrix intervals; no confidence claim about model obedience. Live adapter invocation remains unverified."
+  ],
+  "primary_dimension": "event-route-wiring",
+  "repeats": 2,
+  "rung": "regression",
+  "schema_version": 2,
+  "split": {
+    "method": "exhaustive finite tool-class matrix; paired semantic train/test events, no statistical generalization",
+    "seed": 0,
+    "sealed_test": true
+  },
+  "stage_results": [
+    {
+      "stage_id": "delivery",
+      "status": "passed",
+      "dimension_ids": [
+        "event-route-wiring"
+      ],
+      "evidence_refs": [
+        "evals/context-hooks/evidence/baseline.jsonl",
+        "evals/context-hooks/evidence/candidate.jsonl"
+      ]
+    }
+  ],
+  "surface": "context-hooks",
+  "verdict": {
+    "decision": "ship",
+    "statement": "The finite wiring gap closes with no regression in its complete event matrix."
+  }
+}

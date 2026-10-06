@@ -173,14 +173,6 @@ CLASSIFIER_DENIAL = re.compile(
     r"|blocked by the CARR unattended guard"
     r"|PreToolUse:.*hook error)", re.I)
 
-# Shell scaffolding carries no signal about WHICH command was denied.
-_CMD_NOISE = frozenset("""
-sudo the and for with from into then else done true false null echo cat sed awk
-grep find head tail sort uniq wc cut tee xargs bash zsh sh python python3 node
-npm cd ls rm cp mv mkdir chmod chown export local set unset print printf
-""".split())
-
-
 def denied_commands(recs, start):
     """Commands the harness refused this session permission to run, this turn.
 
@@ -220,28 +212,29 @@ def denied_commands(recs, start):
     return out
 
 
-def _signature(text):
-    """Distinctive tokens, so matching is on the command's substance."""
-    words = re.findall(r"[A-Za-z0-9_./-]{4,}", text or "")
-    return {w.lower() for w in words if w.lower() not in _CMD_NOISE}
-
-
 def handoff_was_denied(assistant, denied):
-    """True when what the session put in front of Joe is a command the harness
-    refused it. Requires real overlap on distinctive tokens, so an unrelated
-    handoff in the same turn is still caught."""
-    shown = "\n".join(re.findall(r"```(?:bash|sh|zsh|shell)?\n(.*?)```", assistant, re.S)
-                      + INLINE_CMD.findall(assistant))
-    if not shown.strip():
-        return False
-    shown_sig = _signature(shown)
-    if not shown_sig:
-        return False
-    for cmd in denied:
-        cmd_sig = _signature(cmd)
-        if not cmd_sig:
-            continue
-        overlap = len(shown_sig & cmd_sig) / max(1, min(len(shown_sig), len(cmd_sig)))
-        if overlap >= 0.5:
-            return True
-    return False
+    """A denial exempts only the exact command shown to the human.
+
+    Token overlap can excuse a different action (for example --apply after a
+    refused --dry-run). Prose without a command remains semantic review.
+    """
+    shown = re.findall(r"```(?:bash|sh|zsh|shell)?\n(.*?)```", assistant, re.S) + INLINE_CMD.findall(assistant)
+    normalize = lambda command: re.sub(r"^\./", "", command.strip())
+    commands = {normalize(line) for block in shown for line in block.splitlines() if line.strip()}
+    return bool(commands & {normalize(cmd) for cmd in denied if isinstance(cmd,str)})
+
+
+# A vocabulary cue only selects prose for review. It never proves a handoff,
+# an available capability, or a missing attempt, and cannot block execution.
+HANDOFF_REVIEW_CUE = re.compile(r"\b(?:install|trust|configure|deploy|migrate|authenticate|sign[ -]in|enable|grant)\b", re.I)
+HANDOFF_REVIEW_MESSAGE = (
+    "handoff_review: needs_review — possible prose handoff; exact action, "
+    "attempt and capability evidence is unavailable. Review who must act; "
+    "this advisory does not establish an unattempted permitted command.")
+
+
+def handoff_needs_review(text, human_last, denied=()):
+    """Select an unresolved prose action for a visible, nonblocking advisory."""
+    return bool(text.strip() and HANDOFF_REVIEW_CUE.search(text)
+                and not (human_last and HUMAN_WANTS_COMMAND.search(human_last))
+                and not (denied and handoff_was_denied(text, denied)))

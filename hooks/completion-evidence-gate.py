@@ -165,6 +165,9 @@ WRITE_ACTION_PREFIXES = {
     "update", "write",
 }
 WRITE_ACTION_EXACT = {
+    "undo-invoice-close",
+    "undo-lead-move",
+    "advance-leads",  # evidence-driven stages and approval-only drafts
     "whats-new",  # explicit mark_seen persists the authenticated partner's watermark
     "acknowledge-board-answer",  # durable Received receipt for a board answer
     "answer-board-question",      # human partner records a durable answer
@@ -346,6 +349,7 @@ WRITE_ACTION_EXACT = {
     "run-migration-shadow",
 }
 HUMAN_ONLY_WRITE_ACTION_EXACT = {
+    "advance-leads",  # evidence-driven stages and approval-only drafts
     "acknowledge-ready-plan-amendment",  # WR-000126 authenticated human-only notice write.
 }
 # The three reason classes that carry a latch identity. Named constants rather
@@ -355,17 +359,13 @@ HUMAN_ONLY_WRITE_ACTION_EXACT = {
 CLAUSE_REASON = "unaccounted clause"
 FLOOR_REASONS = ("terminal completion claim has no fresh verification",
                  "delivery claim names no recipient")
-JEV_REQUIREMENT_REASON = "jev requirement judged unmet"
+JEV_REQUIREMENT_REASON = "explicit acceptance criterion unmet"
 
 CARR_MCP_PREFIXES = ("mcp__carr__", "mcp__carr_records__", "mcp__carr-continuity__")
 NESTED_CARR_CALL = re.compile(
     r"(?:tools\.)?(mcp__carr(?:_records|-continuity)?__([A-Za-z0-9_-]+))")
 CALL_VERB = re.compile(r"\b(?:verb|name)\s*[:=]\s*['\"]([A-Za-z0-9_-]+)['\"]", re.I)
-SYNTHETIC_CODEX_USER_PREFIXES = (
-    "The following is the Codex agent history",
-    "<environment_context>",
-    "<app-context>",
-)
+CODEX_HISTORY_PREFIX = "The following is the Codex agent history"
 CARR_PATH_MARKERS = (
     "/carr-system/", "/carr-system", "my drive/carr ai", "my\\ drive/carr\\ ai",
 )
@@ -406,30 +406,6 @@ def text(rec, roles):
                          if isinstance(block, dict) and block.get("type") in
                          {"text", "input_text", "output_text"})
     return ""
-
-
-def is_synthetic_user_record(rec):
-    """Exclude a Codex history/environment wrapper from task-window selection.
-
-    The first eligible text block is decisive: a genuine user instruction may
-    legitimately be followed by injected environment context, so a later
-    synthetic block must not erase that instruction.
-    """
-    msg = message(rec)
-    if (msg.get("role") or rec.get("type")) not in {"user", "human"}:
-        return False
-    content = msg.get("content")
-    if isinstance(content, str):
-        return content.lstrip().startswith(SYNTHETIC_CODEX_USER_PREFIXES)
-    if not isinstance(content, list):
-        return False
-    for block in content:
-        if not isinstance(block, dict) or block.get("type") not in {"text", "input_text", "output_text"}:
-            continue
-        value = block.get("text")
-        if isinstance(value, str):
-            return value.lstrip().startswith(SYNTHETIC_CODEX_USER_PREFIXES)
-    return False
 
 
 def has_carr_path_marker(value):
@@ -577,13 +553,6 @@ def verification(name, value):
         return not write_verb(name, value)
     return name == "functions.exec" and any(not is_write_action(action)
                                               for action in nested_carr_actions(value))
-
-
-def last_human_index(recs):
-    for idx in range(len(recs) - 1, -1, -1):
-        if not is_synthetic_user_record(recs[idx]) and text(recs[idx], {"user", "human"}).strip():
-            return idx
-    return -1
 
 
 def valid_disclosure(final):
@@ -735,13 +704,47 @@ MACHINE_LINE = re.compile(
 
 
 CODE_SPAN = re.compile(r"```.*?```|~~~.*?~~~|`[^`\n]+`", re.S)
+AGENTS_ENVELOPE = re.compile(
+    r"^[ \t]*# AGENTS\.md instructions for [^\n]*\n\s*<INSTRUCTIONS>"
+    r".*?(?:</INSTRUCTIONS>|\Z)", re.I | re.M | re.S)
+
+
+def machine_free_text(value):
+    """Remove bounded injected envelopes from an assembled message."""
+    value = AGENTS_ENVELOPE.sub(" ", value or "")
+    return MACHINE_LINE.sub(" ", MACHINE_TAG.sub(" ", value))
 
 
 def order_text(value):
-    """What the human actually typed, with injected machine text removed."""
-    value = MACHINE_TAG.sub(" ", value or "")
-    value = CODE_SPAN.sub(" ", value)
-    return MACHINE_LINE.sub(" ", value)
+    """Human prose eligible for clause extraction, excluding quoted code."""
+    return CODE_SPAN.sub(" ", machine_free_text(value))
+
+
+def human_text(rec):
+    """Human-turn content, including code, with injected machine text removed."""
+    msg = message(rec)
+    if (msg.get("role") or rec.get("type")) not in {"user", "human"}:
+        return ""
+    content = msg.get("content")
+    if isinstance(content, list):
+        parts = [block["text"] for block in content
+                 if isinstance(block, dict)
+                 and block.get("type") in {"text", "input_text", "output_text"}
+                 and isinstance(block.get("text"), str)]
+        # A leading history banner owns the record; later history blocks own
+        # only their block. Assemble the remaining text before parsing markup.
+        if parts and parts[0].lstrip().startswith(CODEX_HISTORY_PREFIX):
+            return ""
+        content = "\n".join(part for part in parts
+                            if not part.lstrip().startswith(CODEX_HISTORY_PREFIX))
+    if not isinstance(content, str) or content.lstrip().startswith(CODEX_HISTORY_PREFIX):
+        return ""
+    return machine_free_text(content)
+
+
+def human_order_text(rec):
+    """Clause text; code-only human turns still count for task-window selection."""
+    return CODE_SPAN.sub(" ", human_text(rec))
 
 
 class Clause:
@@ -960,7 +963,7 @@ def order_clauses(value, turn=0):
 def human_turns(recs):
     """Absolute indices of genuine human turns, oldest first."""
     return [idx for idx, rec in enumerate(recs)
-            if not is_synthetic_user_record(rec) and text(rec, {"user", "human"}).strip()]
+            if human_text(rec).strip()]
 
 
 def receipt_index(recs):
@@ -1057,7 +1060,7 @@ def standing_clauses(recs, turns):
     """
     if not turns:
         return [], {}
-    said = [order_text(text(recs[idx], {"user", "human"})) for idx in turns]
+    said = [human_order_text(recs[idx]) for idx in turns]
     bounds, clauses = {}, []
     for position, idx in enumerate(turns):
         end = (turns[position + 1] - 1) if position + 1 < len(turns) else len(recs) - 1
@@ -1356,13 +1359,11 @@ def evaluate(recs, ledger=None):
 
 
 def jev_requirements_advisory(payload, recs):
-    """ops/jev_requirements.py asks Jev whether each requirement of the last
-    human request is met by this turn's diff, records the answer in
-    out/jev-judge.jsonl, and returns None or {"advisory": str|None, "unmet":
-    [...]}. It decides nothing itself -- main() is what turns an `unmet`
-    requirement into a reopened turn, and only when the close does not
-    already name that requirement as not done. Every failure returns None,
-    the abstention path: no requirement report is ever read as met."""
+    """Evaluate the last request's explicit criteria against its artifacts.
+
+    Semantic acceptance returns a review advisory. A missing report never
+    establishes acceptance. main() owns the reopened-turn decision.
+    """
     try:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
@@ -1395,14 +1396,8 @@ def main():
         blocked, reason = evaluate(recs, ledger)
         jev = jev_requirements_advisory(payload, recs)
 
-        # JEV ACTS BELOW LOW_AT (Joe, 2026-09-24, decision 5ec806a4: "every
-        # jev check in the system too is not a shadow"). Only tried when the
-        # deterministic layer above did not already reopen the turn for its
-        # own reason -- one reopening is enough, and the deterministic finding
-        # is reported first because it is what the session actually changed,
-        # not a probability about it. The ONE escape is the same one the
-        # clause layer gives: the close already says the requirement is not
-        # done, reusing RESIDUAL/terms_match rather than a second detector.
+        # Failed explicit criteria reopen only when the clause layer has not
+        # already done so. Naming the residual uses the same predicate.
         jev_identity = None
         if not blocked and isinstance(jev, dict):
             final = ledger.get("final", "")
@@ -1415,8 +1410,8 @@ def main():
                     continue
                 jev_identity = candidate
                 blocked = True
-                reason = (f'requirement judged unmet by Jev (p={item["probability"]:.2f}): '
-                          f'"{item["text"]}" — no receipt and the close does not say '
+                reason = (f'explicit acceptance criterion unmet: '
+                          f'"{item["text"]}" ({item.get("reason", "receipt missing")}) — the close does not say '
                           "it is not done")
                 break
 

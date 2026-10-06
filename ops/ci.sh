@@ -66,8 +66,27 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
+# NO CI RUN PAYS FOR JEV. ops/typesafe_client.py refuses every paid call while
+# this is set, and every hook a selftest spawns inherits it. Measured
+# 2026-10-04: selftest fixtures run from local CI and pre-push made 20-45% of
+# each day's paid Jev attempts, because a fixture that drops TYPESAFE_API_KEY
+# from its environment still reaches the credential FILE. Offline injected
+# transports are unaffected; only the real paid path is refused.
+export CARR_JEV_OFFLINE=1
+
 PY="$REPO/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
+export CARR_CI_PYTHON="$PY"
+# Explicit review preflight/admission uses the same class implementations.
+# This opt-in path never adds a full suite to an ordinary pre-push invocation.
+case "${1:-}" in
+  --review-floor|--review-admit)
+    _review_command=collect
+    [ "$1" = --review-admit ] && _review_command=admit
+    shift
+    exec "$PY" "$REPO/ops/local-review-evidence.py" "$_review_command" "$@"
+    ;;
+esac
 # Every gate selftest is an untrusted child: it may exercise a deliberately
 # failing fixture, and a hung fixture must not hold the whole CI run forever.
 # 120s is below the observed 249–317s full-run budget while leaving room for
@@ -77,6 +96,7 @@ CI_TIMEOUT_HELPER="$REPO/bin/with-timeout.py"
 
 STRICT=0
 ONLY=""
+RESULT_FILE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --strict) STRICT=1 ;;
@@ -86,6 +106,8 @@ while [ "$#" -gt 0 ]; do
     # cheaper suite of its own that could then drift from the one CI runs.
     # Commas are translated to spaces so both spellings work.
     --only)   ONLY="$ONLY $(echo "${2:-}" | tr ',' ' ')"; shift ;;
+    --result-file) RESULT_FILE="${2:?--result-file needs a path}"; shift ;;
+    --pr-body-file) export CARR_PR_BODY_FILE="${2:?--pr-body-file needs a path}"; shift ;;
     --list)   LIST=1 ;;
     -h|--help) sed -n '1,40p' "$0"; exit 0 ;;
     *) echo "ci.sh: unknown argument: $1" >&2; exit 64 ;;
@@ -107,7 +129,7 @@ done
 # pushfloor is FIRST deliberately. It is the cheapest class and the one the
 # local pre-push hook runs, so when a push is going to be refused it is refused
 # in the first seconds rather than after the expensive classes have run.
-CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness"
+CLASS_ORDER="pushfloor unit types contract gates replay secret dependency migration binding artifact freshness"
 
 class_desc() {
   case "$1" in
@@ -117,6 +139,7 @@ class_desc() {
     types)      echo "seeded shape mistake in a data hand-off" ;;
     contract)   echo "seeded auth/schema contract break" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
+    replay)     echo "real-fixture gate verdict regression" ;;
     secret)     echo "seeded credential in the tree" ;;
     dependency) echo "seeded unpinned or vulnerable dependency" ;;
     migration)  echo "seeded bad migration / trigger permission" ;;
@@ -151,6 +174,13 @@ RAN=0
 # "real defect" vs "environment skew" without opening forty logs. Plain string,
 # not an associative array — see the bash 3.2 note above CLASS_ORDER.
 CLASS_TIMINGS=""
+CLASS_RESULTS=""
+# Coverage a class announced but did not deliver: a suite that answered 78, a
+# quarantined check, a probe with no credential. The class still reads OK here
+# (that policy is the header's, and unchanged), but its --result-file row says
+# partial, so a receipt can never certify checks that did not run.
+INCOMPLETE=0
+incomplete() { INCOMPLETE=$((INCOMPLETE+1)); }
 
 ok()   { RAN=$((RAN+1)); printf '  \033[32mOK\033[0m    %-11s %s\n' "$1" "${2:-}"; }
 bad()  { RAN=$((RAN+1)); printf '  \033[31mFAIL\033[0m  %-11s %s\n' "$1" "${2:-}"; FAILED=$((FAILED+1)); FAILED_CLASSES="$FAILED_CLASSES $1"; }
@@ -162,8 +192,12 @@ run_quiet() {  # run_quiet <logfile> <cmd...>  — capture output, return status
   "$@" >"$log" 2>&1
 }
 
-LOGDIR="$(mktemp -d)"
+# A template is required: macOS mktemp without one ignores $TMPDIR and writes
+# under /var/folders, which a sandboxed session cannot touch.
+LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
 trap 'rm -rf "$LOGDIR"' EXIT
+
+"$PY" ops/ci-quarantine.py validate || exit 1
 
 # ------------------------------------------- inherited-from-main short-circuit
 # 2026-08-22, 01:38-02:17 UTC: six unrelated branches failed the SAME gates-class
@@ -300,7 +334,7 @@ fail_tail() {  # fail_tail <logfile>
   local log="$1" lines window
   lines="$(wc -l < "$log" 2>/dev/null | tr -d ' ')"
   [ -n "$lines" ] || lines=0
-  window="$(mktemp)"
+  window="$(mktemp "${TMPDIR:-/tmp}/carr-ci-tail.XXXXXX")"
   if [ "$lines" -lt 200 ]; then cat "$log" >"$window" 2>/dev/null
   else tail -80 "$log" >"$window" 2>/dev/null; fi
   if "$PY" ops/ci-secret-scan.py --redact <"$window" >"$window.redacted" 2>/dev/null; then
@@ -338,6 +372,7 @@ check_unit() {
       echo "--- $pkg ---" >&2
       tail -25 "$LOGDIR/unit-$pkg.log" >&2
     fi
+    "$PY" ops/ci-quarantine.py report "$LOGDIR/unit-$pkg.log"
   done
   if [ -n "$failed_pkgs" ]; then
     bad unit "node suites failed:$failed_pkgs"
@@ -462,6 +497,7 @@ check_contract() {
     run_quiet "$LOGDIR/contract-capture-verb.log" "$PY" ops/capture-verb-reachability.py
     crc=$?
     if [ "$crc" -eq 78 ]; then
+      incomplete
       printf '        \033[33mnot run\033[0m  capture-verb-reachability — %s\n' \
         "$(tail -1 "$LOGDIR/contract-capture-verb.log" 2>/dev/null)" >&2
     elif [ "$crc" -ne 0 ]; then
@@ -474,6 +510,15 @@ check_contract() {
   else
     ok contract "workspace + control-room contracts validate"
   fi
+}
+
+tree_fingerprint() {
+  printf '%s\n' "$(git rev-parse HEAD 2>/dev/null)"
+  # Tracked modifications and the staged index. Untracked files are excluded
+  # deliberately: out/ is gitignored and every class in this file writes logs
+  # there, so counting them would fail the class on its own bookkeeping.
+  git status --porcelain --untracked-files=no 2>/dev/null
+  git diff --cached --name-only 2>/dev/null
 }
 
 # ---------------------------------------------------------------- gates
@@ -517,18 +562,10 @@ check_gates() {
   # under pre-push is the session's own worktree — never a hardcoded canonical
   # path — so it makes exactly the assertion the same recommendation demands
   # everywhere else.
-  tree_fingerprint() {
-    printf '%s\n' "$(git rev-parse HEAD 2>/dev/null)"
-    # Tracked modifications and the staged index. Untracked files are excluded
-    # deliberately: out/ is gitignored and every class in this file writes logs
-    # there, so counting them would fail the class on its own bookkeeping.
-    git status --porcelain --untracked-files=no 2>/dev/null
-    git diff --cached --name-only 2>/dev/null
-  }
   local tree_before; tree_before="$(tree_fingerprint)"
 
   # Exceptions come from ops/config/ci-check-scope.json and are ANNOUNCED, never
-  # applied silently. A quarantined check is skipped everywhere; a local_only one
+  # applied silently. Quarantine executes through ci-quarantine.py; a local_only one
   # is skipped only where its dependency genuinely cannot exist (a runner has no
   # Google Drive vault). Both print their reason on every single run, so the
   # coverage this class actually delivers is visible in the output rather than
@@ -540,9 +577,6 @@ check_gates() {
 import json, sys
 scope, name, portable = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 d = json.load(open(scope))
-for e in d.get("quarantined", []):
-    if e["check"] == name:
-        print("QUARANTINED: " + e["reason"]); sys.exit(0)
 if portable:
     for e in d.get("local_only", []):
         if e["check"] == name:
@@ -612,19 +646,23 @@ PYEOF
   # meaning — "several times slower than the slowest honest run is a hang" —
   # at every pool size, and width 1 restores today's exact 120s.
   local pooled_timeout=$(( CI_SELFTEST_TIMEOUT_SECONDS * ${CARR_CI_GATE_JOBS:-4} ))
+  "$PY" ops/ci-quarantine.py snapshot >"$LOGDIR/source-identity.json" || { hard gates "source identity unreadable"; return; }
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
   # -n1 with the path as $1, NOT -I{}: BSD xargs -I substitutes into the whole
   # script and refuses with "command line cannot be assembled, too long".
   printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
     b="$(basename "$1")"
-    "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
-      >"$LOGDIR/gate-$b.log" 2>&1
+    "$PY" ops/ci-quarantine.py run --print-log --test "$1" --log "$LOGDIR/gate-$b.log" \
+      --identity-file "$LOGDIR/source-identity.json" -- \
+      "$PY" "$CI_TIMEOUT_HELPER" "$pooled_timeout" "$PY" "$1" \
+      >"$LOGDIR/gate-$b.report" 2>&1
     echo $? >"$LOGDIR/gate-$b.rc"
   ' _
   local grc
   for t in $eligible; do
     base="$(basename "$t")"
     grc="$(cat "$LOGDIR/gate-$base.rc" 2>/dev/null || echo 1)"
+    cat "$LOGDIR/gate-$base.report"
     # EXIT 78 IS "NOT CONFIGURED HERE", NOT A FAILURE. It is EX_CONFIG, and it is
     # already the repo's convention: bin/type-check.sh's header states it and the
     # types class above honours it. This loop counted every nonzero the same, so
@@ -668,8 +706,9 @@ PYEOF
       continue
     fi
     count=$((count+1))
-    run_quiet "$LOGDIR/gate-$sbase.log" "$PY" "$CI_TIMEOUT_HELPER" \
-      "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
+    "$PY" ops/ci-quarantine.py run --print-log --test "$t" --log "$LOGDIR/gate-$sbase.log" \
+      --identity-file "$LOGDIR/source-identity.json" -- \
+      "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
     grc=$?
     if [ "$grc" -eq 124 ]; then
       failures="$failures TIMEOUT:$sbase"
@@ -760,7 +799,7 @@ PYEOF
   # any rule the two sides classify structurally differently. It does not
   # require full coverage between the files, so it stays cheap and honest on a
   # freshly-seeded, mostly-empty export exactly as it will on a fully synced one.
-  # boot-budget-check and core-rule-ids-check JOINED HERE (WR-000019 slice
+  # boot-budget-check and sync-core-rule-ids --check JOINED HERE (WR-000019 slice
   # S11, boot diet). Same kind again: repository content only, no machine
   # state, no database. boot-budget-check reads CLAUDE.md, the connector's
   # initialize instructions block in mcp-server/src/mcp.js, and a committed
@@ -768,11 +807,11 @@ PYEOF
   # fixture.v1.json, refreshed by hand -- this check has no database to call
   # standing-context with) against ops/config/boot-budget.v1.json's ceiling,
   # and fails the push the same way an overage would go unnoticed otherwise:
-  # silently, at the next session's boot. core-rule-ids-check is the parity
+  # silently, at the next session's boot. sync-core-rule-ids --check is the parity
   # gate for mcp-server/src/core-rule-ids.js against ops/config/rule-
   # triage.v1.json's `home: "core"` set -- the generated module doctrine.js
   # reads because a Cloudflare Worker has no filesystem at request time.
-  # rule-boot-classes-check JOINED 2026-09-26 (gated rule boot): the same
+  # sync-rule-boot-classes --check JOINED 2026-09-26 (gated rule boot): the same
   # parity shape for mcp-server/src/rule-boot-classes.js against
   # ops/config/rule-classes.v1.json, plus the rule boot's token budget (fails
   # naming the largest always-on rules; never truncates).
@@ -794,47 +833,33 @@ PYEOF
   # status checks force update-branch before merge, and update-branch raises
   # `synchronize`, a PR that fell behind main re-runs this and turns red until
   # renumbered. An unreadable base exits 2, which fails like any nonzero.
+  # migration-safety-gate JOINED 2026-10-05 (gap #18): every ADDED migration
+  # carries a rollback note in its header and declares any destructive or
+  # long-locking statement (expand-contract / lock-review line), and
+  # db/schema.sql's ledger names every migration with its runner checksum, so the
+  # reference schema cannot fall behind the migrations again. Static, no DB; the
+  # migration class proves the snapshot by actually building it.
   for inv in enforcement-coverage-check audit-queue-freshness-check map-row-evidence-check \
              rule-enforcement-map-check rule-load-layer-check rule-classification-parity-check \
              reachability-check selftest-git-isolation-check \
              drive-dependency-inventory drive-retirement-readiness-gate \
              mechanism-doctrine-gate scheduler-cutover-coverage-gate \
-             boot-budget-check core-rule-ids-check rule-route-coverage \
-             rule-boot-classes-check check-eval-receipt migration-order-gate; do
+             boot-budget-check sync-core-rule-ids rule-route-coverage \
+             sync-rule-boot-classes check-eval-receipt migration-order-gate \
+             migration-safety-gate check-jev-conformance; do
     [ -f "ops/$inv.py" ] || continue
-    run_quiet "$LOGDIR/gate-$inv.log" "$PY" "ops/$inv.py" \
-      || { inherited_abort "$inv" "$PY" "ops/$inv.py"
+    local inv_args=()
+    case "$inv" in
+      sync-core-rule-ids|sync-rule-boot-classes) inv_args=(--check) ;;
+    esac
+    if [ "$inv" = check-eval-receipt ] && [ -n "${CARR_PR_BODY_FILE:-}" ]; then
+      inv_args=(--pr-body-file "$CARR_PR_BODY_FILE")
+    fi
+    # bash 3.2 treats an empty array as unset under `set -u`.
+    run_quiet "$LOGDIR/gate-$inv.log" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"} \
+      || { inherited_abort "$inv" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"}
            failures="$failures $inv"; tail -12 "$LOGDIR/gate-$inv.log" >&2; }
   done
-
-  # GATE REPLAY JOINED 2026-09-24 (defect class capability-reported-live-
-  # before-first-human-use: PR #1224's Stop gate never fired on 803 real
-  # receipts, PR #1225's shell regexes were proven only on invented commands).
-  # ops/gate-replay.py RUNS every gate in hooks/ over the committed real
-  # fixtures in ops/fixtures/real-replay/, the way the harness runs it, and
-  # compares every verdict with the committed snapshot there. It computes
-  # nothing from a base ref: it runs everything, every time. It is outside the
-  # loop above for two reasons: it takes about a minute, so it gets its own
-  # timeout, and it may answer 78 (NOT CONFIGURED) on a local interpreter
-  # without requirements.lock, which is announced like any other skip. On a
-  # hosted runner it never answers 78; a missing dependency there is a failure.
-  if [ -f ops/gate-replay.py ]; then
-    "$PY" "$CI_TIMEOUT_HELPER" 900 "$PY" ops/gate-replay.py >"$LOGDIR/gate-gate-replay.log" 2>&1
-    local rrc=$?
-    if [ "$rrc" -eq 78 ]; then
-      skiplist="$skiplist gate-replay.py"
-      printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
-        gate-replay.py "$(tail -1 "$LOGDIR/gate-gate-replay.log" 2>/dev/null)" >&2
-    elif [ "$rrc" -ne 0 ]; then
-      inherited_abort gate-replay "$PY" ops/gate-replay.py
-      failures="$failures gate-replay"; tail -40 "$LOGDIR/gate-gate-replay.log" >&2
-    else
-      # A pass prints its invocation count, runtime and verdict totals, so the
-      # hosted log shows the replay ran and how long it took.
-      grep -E '^gate-replay: [0-9]+ invocations|^  verdicts: |^gate-replay: OK' \
-        "$LOGDIR/gate-gate-replay.log" >&2
-    fi
-  fi
 
   # Did the suite move the tree it was invoked in? See tree_fingerprint() above.
   if [ "$(tree_fingerprint)" != "$tree_before" ]; then
@@ -856,12 +881,46 @@ PYEOF
     bad gates "failed:$failures"
     gates_name_the_move $failures
   elif [ -n "$skiplist" ]; then
+    incomplete
     # Deliberately NOT a plain OK. The class ran with reduced coverage, and the
     # summary line says so — an exception that reads as a clean pass is how a
     # bounded check gets mistaken for a complete one.
     ok gates "$count suites + baseline integrity · NOT RUN:$skiplist"
   else
     ok gates "$count selftest suites + baseline integrity"
+  fi
+}
+
+# ---------------------------------------------------------------- replay
+# The real-fixture replay runs in an independent hosted job. PR1546 spent
+# 295s here after the gate suites, then exhausted the job budget in cleanup.
+# Keep the same replay, watchdog and strict failure handling in local CI.
+check_replay() {
+  export CARR_HOOK_FIXTURE=1
+  local tree_before="$(tree_fingerprint)"
+  if [ -f ops/gate-replay.py ]; then
+    "$PY" "$CI_TIMEOUT_HELPER" 900 "$PY" ops/gate-replay.py >"$LOGDIR/gate-gate-replay.log" 2>&1
+    local rrc=$?
+    if [ "$rrc" -eq 78 ]; then
+      skip replay "NOT CONFIGURED (exit 78): gate-replay.py"
+      printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
+        gate-replay.py "$(tail -1 "$LOGDIR/gate-gate-replay.log" 2>/dev/null)" >&2
+    elif [ "$rrc" -ne 0 ]; then
+      inherited_abort gate-replay "$PY" ops/gate-replay.py
+      bad replay "gate-replay failed (exit $rrc)"; tail -40 "$LOGDIR/gate-gate-replay.log" >&2
+    else
+      # A pass prints its invocation count, runtime and verdict totals, so the
+      # hosted log shows the replay ran and how long it took.
+      grep -E '^gate-replay: [0-9]+ invocations|^  verdicts: |^gate-replay: OK' \
+        "$LOGDIR/gate-gate-replay.log" >&2
+      ok replay "real-fixture verdicts match the committed snapshot"
+    fi
+  else
+    skip replay "ops/gate-replay.py not present"
+  fi
+
+  if [ "$(tree_fingerprint)" != "$tree_before" ]; then
+    bad replay "tree-mutated-by-replay"
   fi
 }
 
@@ -998,6 +1057,36 @@ check_pushfloor() {
     fi
   fi
 
+  if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
+      '^(migrations/|tools/migration_number_contract\.py$|ops/migration-order-gate\.py$)'; then
+    ran="$ran migration-structure"
+    run_quiet "$LOGDIR/pushfloor-migration-structure.log" \
+      "$PY" ops/migration-order-gate.py \
+      || { tail -15 "$LOGDIR/pushfloor-migration-structure.log" >&2
+           floor_fail migration-structure \
+             "reserve a forward migration number and repair every reference before push"; }
+  fi
+
+  if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
+      '^(mcp-server/src/|hooks/completion-evidence-gate\.py$)'; then
+    ran="$ran registry-coverage"
+    run_quiet "$LOGDIR/pushfloor-registry-coverage.log" \
+      "$PY" ops/completion-evidence-gate-selftest.py --registry-only \
+      || { tail -12 "$LOGDIR/pushfloor-registry-coverage.log" >&2
+           floor_fail registry-coverage \
+             "classify the registry's new writes in the completion gate and retain read exclusions"; }
+  fi
+
+  if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
+      '(^ops/ci\.sh$|(^|/)(test[^/]*|[^/]*selftest[^/]*)\.(py|sh|mjs|js)$)'; then
+    ran="$ran test-collection"
+    run_quiet "$LOGDIR/pushfloor-test-collection.log" \
+      "$PY" ops/ci-selftest.py --collection-only \
+      || { tail -12 "$LOGDIR/pushfloor-test-collection.log" >&2
+           floor_fail test-collection \
+             "include the new test in CI's collection or its named decision exception"; }
+  fi
+
   # ── predictor: typed Python ──────────────────────────────────────────────
   # CI's `types` class is `mypy pipelines tools exporters lib generators shared
   # fill-engine bin hooks ops` under the repo's mypy.ini. This is the SAME binary
@@ -1019,17 +1108,18 @@ check_pushfloor() {
       [ -f "$f" ] && existing_py="$existing_py $f"
     done
     if [ -n "$existing_py" ]; then
-      local MYPY="$REPO/.venv/bin/mypy"
-      [ -x "$MYPY" ] || MYPY="$(command -v mypy 2>/dev/null || true)"
-      if [ -n "$MYPY" ] && [ -x "$MYPY" ]; then
-        ran="$ran types"
-        # shellcheck disable=SC2086
-        run_quiet "$LOGDIR/pushfloor-types.log" "$MYPY" $existing_py \
-          || { tail -20 "$LOGDIR/pushfloor-types.log" >&2
-               floor_fail types \
-                 "mypy on the files this push changes. Fix them, or iterate with: .venv/bin/mypy$existing_py"; }
-      else
+      local type_rc=0
+      # shellcheck disable=SC2086
+      run_quiet "$LOGDIR/pushfloor-types.log" ./bin/type-check.sh --files $existing_py || type_rc=$?
+      if [ "$type_rc" -eq 78 ]; then
+        incomplete
         printf '        \033[33mnot run\033[0m  types — mypy absent; the hosted types class still covers this\n' >&2
+      else
+        ran="$ran types"
+        if [ "$type_rc" -ne 0 ]; then
+          tail -20 "$LOGDIR/pushfloor-types.log" >&2
+          floor_fail types "mypy on this push's changed files. Iterate with: ./bin/type-check.sh --files$existing_py"
+        fi
       fi
     fi
   fi
@@ -1133,6 +1223,7 @@ check_pushfloor() {
     # note would only advise running something already running.
     if [ -n "$unclassified" ] && [ -n "$ONLY" ] && ! selected gates; then
       ran="$ran gates-deferred"
+      incomplete
       printf '        \033[33mdeferred\033[0m   gates — no paired selftest for:%s — the full class runs hosted (required check on main)\n' \
         "$unclassified" >&2
       printf '                   run it locally now: ops/ci.sh --only gates · durable fix: add ops/<gate>-selftest.py\n' >&2
@@ -1206,6 +1297,11 @@ check_dependency() {
 # requirement means no environment variable, typo or copied DSN can aim it at
 # production. There is no override flag on purpose.
 check_migration() {
+  if ! run_quiet "$LOGDIR/migration-structure.log" "$PY" ops/migration-order-gate.py; then
+    tail -15 "$LOGDIR/migration-structure.log" >&2
+    bad migration "migration ordering or slot collision failed before database work; reserve a forward number"
+    return
+  fi
   local dsn="${CARR_CI_DATABASE_URL:-}"
   if [ -z "$dsn" ]; then
     skip migration "no CARR_CI_DATABASE_URL (CI provides a throwaway Postgres)"
@@ -1295,6 +1391,13 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   # disposable database after pending migrations apply. Each proof rolls back
   # every fixture row and must be independently green.
   _mstep migrate
+  if ! CARR_INVOICE_TEST_DATABASE_URL="$dsn" CARR_INVOICE_TEST_REQUIRED=1 \
+       run_quiet "$LOGDIR/invoice-tracker-transaction.log" \
+       node --test mcp-server/test/invoice-tracker-transaction.test.mjs; then
+    tail -30 "$LOGDIR/invoice-tracker-transaction.log" >&2
+    bad migration "the registered invoice receipt replay and atomic rollback proof failed"
+    return
+  fi
   local tour_pg_proof tour_pg_log
   for tour_pg_proof in \
     mcp-server/test/tour-operations-slice2-postgres.sql \
@@ -1304,7 +1407,8 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     mcp-server/test/tour-client-share-allowlist-postgres.sql \
     mcp-server/test/assurance-health-store-postgres.sql \
     mcp-server/test/work-portfolio-postgres.sql \
-    mcp-server/test/local-deals-postgres.sql; do
+    mcp-server/test/local-deals-postgres.sql \
+    mcp-server/test/invoice-tracker-postgres.sql; do
     [ -f "$tour_pg_proof" ] || continue
     tour_pg_log="$LOGDIR/$(basename "$tour_pg_proof" .sql).log"
     if ! run_quiet "$tour_pg_log" \
@@ -1495,7 +1599,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   # V5-RW02 joins it: the evidence store's replay projection, its typed
   # conflict and its write-time refusal of malformed or double-counted
   # readback evidence only exist on real rows as carr_writer.
-  for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres; do
+  for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
     if [ -f "mcp-server/test/$proof.test.mjs" ]; then
       if ! DATABASE_URL="$dsn" CARR_COST_LEDGER_DB_REQUIRED=1 \
            CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -1505,6 +1609,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
            CARR_V5_A03_DB_REQUIRED=1 \
            CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
            CARR_RW02_DB_REQUIRED=1 \
+           CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
            run_quiet "$LOGDIR/$proof-db.log" \
            node --test "mcp-server/test/$proof.test.mjs"; then
         tail -30 "$LOGDIR/$proof-db.log" >&2
@@ -1831,24 +1936,12 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     local dsn_read='environ\.get\("(CARR_CI_)?DATABASE_URL"|environ\["(CARR_CI_)?DATABASE_URL"\]|getenv\("(CARR_CI_)?DATABASE_URL"'
     local db_gate_failures="" db_gate_count=0 db_gate_unmarked="" db_gate_declared=""
     _mstep sync
-    local db_gate_timings="" _gt0
+    local db_gates=""
     for g in ops/*-gate.py; do
       [ -f "$g" ] || continue
       if grep -q '^# ci: db-gate' "$g"; then
         db_gate_count=$((db_gate_count+1))
-        _gt0="$(date +%s)"
-        if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/db-gate-$(basename "$g").log" \
-             "$PY" "$g"; then
-          db_gate_failures="$db_gate_failures $(basename "$g")"
-          tail -20 "$LOGDIR/db-gate-$(basename "$g").log" >&2
-        fi
-        # A gate may print a `db-gate-proof:` line saying what it actually
-        # exercised (for example how many race scenarios ran). run_quiet keeps
-        # a passing gate's output in its log file, so surface just that line:
-        # a gate that returned 0 without running anything must not be
-        # indistinguishable from one that passed.
-        grep -h '^db-gate-proof:' "$LOGDIR/db-gate-$(basename "$g").log" 2>/dev/null || true
-        db_gate_timings="$db_gate_timings $(basename "$g" .py)=$(( $(date +%s) - _gt0 ))s"
+        db_gates="$db_gates $g"
       elif grep -qE "$dsn_read" "$g"; then
         # A gate that reads a DSN and carries no marker really is unrun, and
         # this is now a FAILURE rather than a line in the margin. The whole
@@ -1863,6 +1956,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
         db_gate_declared="$db_gate_declared\n            $(basename "$g"): $(sed -n 's/^# ci: runs-outside-ci *— *//p' "$g" | head -1)"
       fi
     done
+    if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" $db_gates; then
+      db_gate_failures="isolated/serial DB gate runner (see named failures above)"
+    fi
     _mstep gates
     # Two greppable lines, same contract as ci-timing: which STEP of this class
     # grew, and which GATE PROGRAM grew. Seconds, sorted slowest first. Added
@@ -1870,7 +1966,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     # while reproducing at 48s on a Mac, and nothing in the hosted log could
     # say which of the ~60 silent children was responsible.
     echo "migration-step-timing:${MIGRATION_STEP_TIMINGS}"
-    echo "db-gate-timing:$(printf '%s\n' $db_gate_timings | sort -t= -k2,2 -rn | tr '\n' ' ' | sed 's/ $//')"
     if [ -n "$db_gate_declared" ]; then
       printf '        \033[33moutside CI\033[0m  gate(s) declared to run elsewhere:%b\n' \
         "$db_gate_declared" >&2
@@ -1884,7 +1979,31 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       return
     fi
 
-    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; $db_gate_count db acceptance gate program(s) pass (each program reports its own assertions)"
+    # THE SHADOW RUN (gap #18, 2026-10-05). Once db/schema.sql must carry every
+    # migration, nothing is pending above it, so the load above cannot test a
+    # new migration. ops/migration-shadow.py starts from the BASE branch's
+    # snapshot (production's structure) on its own PostgreSQL 18 cluster,
+    # applies this change's migrations, and requires the committed snapshot to
+    # be exactly the result. PostgreSQL 18 because production runs 18; a 17
+    # server drops production's named NOT NULL constraints from the dump.
+    local shadow_rc=0 shadow_note
+    "$PY" ops/migration-shadow.py ${CARR_SHADOW_ARTIFACT_DIR:+--artifact-dir "$CARR_SHADOW_ARTIFACT_DIR"} \
+      > "$LOGDIR/migration-shadow.log" 2>&1 || shadow_rc=$?
+    _mstep shadow
+    case "$shadow_rc" in
+      0) shadow_note="; $(sed -n 's/^migration-shadow: \([0-9]* pending migration(s) applied\).*/\1/p' "$LOGDIR/migration-shadow.log" | head -1) on a PostgreSQL 18 shadow and db/schema.sql matches" ;;
+      3) if [ "$STRICT" = "1" ]; then
+           cat "$LOGDIR/migration-shadow.log" >&2
+           bad migration "the migration shadow needs PostgreSQL 18 server binaries (CI installs postgresql-18)"
+           return
+         fi
+         shadow_note="; migration shadow not run (no PostgreSQL 18 here)" ;;
+      *) tail -60 "$LOGDIR/migration-shadow.log" >&2
+         bad migration "migration shadow: pending migrations did not apply over the base snapshot, or db/schema.sql is not what they produce"
+         return ;;
+    esac
+
+    ok migration "committed schema loads; ${n:-0} pending migration(s) apply; app-role grants verified live; trigger reads granted; $db_gate_count db acceptance gate program(s) pass (each program reports its own assertions)$shadow_note"
   else
     tail -15 "$LOGDIR/migration-grants.log" >&2
     bad migration "the app roles' grants did not survive into the built database"
@@ -2052,6 +2171,7 @@ check_artifact() {
       # against the same ledger and fails closed, so the deploy is where a shrink
       # is actually stopped.
       if [ "${CARR_CI_PORTABLE_ONLY:-0}" = "1" ]; then
+        incomplete
         ok artifact "$shipping verbs; shrink guard not run here (portable runner has no ledger credential — the deploy enforces it)"
       else
         skip artifact "$shipping verbs counted, but no ledger credential — the shrink comparison did not run"
@@ -2094,10 +2214,39 @@ for c in $CLASS_ORDER; do
   # belonged. Restoring `c` also keeps anything after this loop honest.
   _class_name="$c"
   _class_t0="$(date +%s)"
+  _class_failed=$FAILED
+  _class_skipped=$SKIPPED
+  _class_ran=$RAN
+  _class_incomplete=$INCOMPLETE
   "check_$c"
+  _class_status=passed
+  [ "$SKIPPED" -gt "$_class_skipped" ] && _class_status=partial
+  [ "$INCOMPLETE" -gt "$_class_incomplete" ] && _class_status=partial
+  [ "$FAILED" -gt "$_class_failed" ] && _class_status=refused
+  CLASS_RESULTS="$CLASS_RESULTS$_class_name $_class_status $((RAN - _class_ran))
+"
   CLASS_TIMINGS="$CLASS_TIMINGS $_class_name=$(( $(date +%s) - _class_t0 ))s"
   c="$_class_name"
 done
+
+# A receipt consumer reads these measured outcomes, never the final exit code
+# alone (known gaps can exit zero while a class remains red).
+if [ -n "$RESULT_FILE" ]; then
+  "$PY" - "$RESULT_FILE" "$STRICT" "$CLASS_RESULTS" <<'PYRESULT'
+import json, os, sys, tempfile
+from pathlib import Path
+target = Path(sys.argv[1]).resolve()
+rows = [line.split() for line in sys.argv[3].splitlines() if line.strip()]
+data = {"schema": "carr-ci-result/v1", "strict": sys.argv[2] == "1",
+        "classes": [{"name": name, "status": status, "checks": int(count)}
+                    for name, status, count in rows]}
+fd, temp = tempfile.mkstemp(dir=target.parent, prefix=".ci-result-")
+with os.fdopen(fd, "w") as out:
+    json.dump(data, out)
+os.replace(temp, target)
+PYRESULT
+  [ "$?" -eq 0 ] || exit 2
+fi
 
 # One greppable line each, every run, pass or fail — this is the raw material
 # for the failure taxonomy and the duration budget. `ci-timing` answers "which

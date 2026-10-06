@@ -94,7 +94,7 @@ import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps,
 import { pipelineChanges } from "./dealroom.js";
 import { authorizeProgram6Action, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
 import { createProgram6RoutineController } from "./program6-routine-controller.js";
-import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomQueue, readRoomTurns } from "./partner-room.js";
+import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomLatest, readRoomQueue, readRoomTurns } from "./partner-room.js";
 import { createCaptureHandler } from "./capture.js";
 import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
@@ -656,6 +656,11 @@ const dealroomHandler = createDealroomHandler({
     const sql = neon(env.DATABASE_URL_READER);
     const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
     return readRoomTurns(client, { room: OBSERVATORY_ROOM, ...params });
+  },
+  roomLatestFn: (env, params) => {
+    const sql = neon(env.DATABASE_URL_READER);
+    const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
+    return readRoomLatest(client, { room: OBSERVATORY_ROOM, ...params });
   },
   queueReadFn: (env, params) => {
     const sql = neon(env.DATABASE_URL_READER);

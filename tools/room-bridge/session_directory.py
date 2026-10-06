@@ -152,6 +152,11 @@ def refresh(data: dict, *, now: str, host: str, probe) -> list[str]:
                 live = bool(probe(entry))
             except Exception:  # noqa: BLE001 — a failed probe is a dead probe
                 live = False
+            # Codex CLI sessions share one long-lived Desktop process PID. A
+            # live process therefore says nothing about an individual thread.
+            # Its own check-in is the only bounded liveness evidence.
+            if entry.get("runtime") == "codex" and entry.get("surface") == "codex-cli":
+                live = live and _age(entry.get("beat_at"), now) <= LOCAL_STALE_S
             entry["live"] = live
             if live:
                 entry["last_live_at"] = now

@@ -1,0 +1,22 @@
+{
+  "schema": "carr-jevlint-install/v1",
+  "repository": "https://github.com/codegirl-007/jevlint",
+  "commit": "73a7a94ab08a4e314709d68c2863687a4646f29b",
+  "go_module_build": "mod\tgithub.com/codegirl-007/jevlint\tv0.2.0\th1:5eYNEreAuBc0isFIb+xDuZS3mbKvoNKDC03wlEOSSd0=",
+  "license": "MIT",
+  "license_file": "ops/jevlint.LICENSE",
+  "requirements": ["Go >= 1.26", "CGO enabled", "C compiler"],
+  "install": ["python3", "ops/jevlint_review.py", "--install"],
+  "review": ["python3", "ops/jevlint_review.py", "--repo", "<PR-worktree>", "--base", "<PR-base-SHA>", "--head", "<PR-head-SHA>", "--pr", "jbookout/carr-system/<number>", "--session", "<native-session-id>"],
+  "eval": ["python3", "ops/jevlint_review.py", "--evals", "jevlint-evals.json", "--pr", "calibration", "--session", "<native-session-id>"],
+  "interface": {
+    "stdout": "carr-jevlint-review/v1 JSON: upstream findings, exact source bindings, cache counts and paid reservations",
+    "exit_codes": {"0": "no findings", "1": "advisory findings for reviewer judgment", "2": "unavailable, invalid input or budget refused; never treat as clean"},
+    "paid_call_authority": "ops/typesafe_client.py and its canonical daily-cap SQLite ledger",
+    "local_endpoint": "http://127.0.0.1:18741/v1/systemone",
+    "loopback_marker": "public non-credential marker; upstream process holds no vendor key",
+    "cache": "scratch workspace under ~/.cache/carr-jevlint keyed by the shared Git directory, plus a fixed endpoint, retains upstream content/rule cache across PR worktrees; original worktree/index are read only",
+    "hosted_ci": "ops/ci.sh discovers ops/jevlint-selftest.py; recorded vendor response and isolated temporary ledger; no paid check in Actions",
+    "limits": ["Full changed files are evaluated, including unchanged functions in those files.", "Deleted files and unsupported extensions make zero calls.", "Localization and callee expansion are disabled.", "Explicit diff checks and bounded evals only; no schedule.", "Confidence floors describe a small deletion corpus, not production precision."]
+  }
+}

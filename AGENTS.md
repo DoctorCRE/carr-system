@@ -244,11 +244,12 @@ publish exits nonzero with the local state kept and names the retry
 and says so. There is no static HTML copy. The launchd job runs
 `ops/progress-board-render.sh` from a repository checkout, which binds
 `CARR_REPO_ROOT` and the repo's `.venv` Python; never run an extracted copy.
-The installer defaults to the canonical checkout. Before a PR merges,
-`install-progress-board --repo <retained-checkout> --apply` and
-`verify-progress-board --repo <retained-checkout>` can bind and verify its
-runner without changing main. Keep that checkout available until reinstalling
-from canonical main; the installer preserves canonical `out/boards` state.
+The installer uses fleet sync's canonical main checkout.
+`install-progress-board --apply` and `verify-progress-board` preserve canonical
+`out/boards`; `--repo` accepts only that checkout. Feature worktrees are refused,
+including pre-merge verification. Fleet sync rebinds the agent after main
+advances. `check-launchd-main-paths` audits installed WorkingDirectory and
+program paths for non-main worktrees without changing plists.
 A `done` card with no PR is Live (complete). A project card with a merged PR
 stays Merged until production shows it: only `--delivery-target worker`
 (carr-system) or `app` (doctorcre-app) completes from the release readback;
@@ -271,6 +272,17 @@ Several sessions run against this one checkout at the same time.
   `git update-index --chmod=+x <path>` and check the index, not the filesystem.
 - Leave any modified file you did not write, and say so.
 
+## Rule lifecycle evidence
+
+Before teaching, admitting, approving, amending or retiring a rule, run
+`./.venv/bin/python ops/rule-admission-audit.py --preflight` with the existing
+read credential; add `--rule-id <full-rule-UUID>` for its prepared admission.
+It derives the `projection.delivery` keys from the installed writer
+([migration 0482](migrations/0482_rule_delivery_binding_writer.sql)) and reports
+`ready` only when the prepared admission carries every one. Any other status,
+or no connection, is a failed readback, never permission to infer readiness.
+Approval still goes through the record verbs.
+
 ## Writing
 
 Content goes through the record layer's verbs, never into a markdown file — a
@@ -280,68 +292,31 @@ exact-path exceptions.
 
 ## Active WR-000070 R09 executor recovery
 
-This coordination note applies only to the accepted R09 source-recovery slice;
-it grants no new source scope, model route, live canary, or release authority.
-The dispatcher owns independent review and final delivery after the builder's
-typed executor claim. Complete the accepted executor definition of done before
-returning the receipt; pending independent review is not itself an executor
-failure. A passing reviewer fact requires an existing `claimed_complete` receipt.
-
-After the mandatory source/plan/assignment reads, capture fresh model-route
-evidence with this read-only command:
-
-```
-/Users/booko/carr-system/.venv/bin/python /Users/booko/carr-system/tools/room-bridge/engineering_dispatch_adapter.py --preflight
-```
-
-Require `ok: true` and the accepted `engineering-codex` desk with
-`gpt-5.6-terra` / `high`, `workspace-write`, and the assigned root. Attach the
-observed readback and its digest to `check:r09-model-route`; an actual mismatch
-must still refuse. Do not omit this check after a successful preflight.
-
-Verify the other five declared checks from the current source bindings and
-bounded R09 fixture evidence. Reuse and verify existing PR 906 with `gh pr view`;
-do not create a duplicate. Verify hosted strict CI and database acceptance on
-the delivered source, including the exact tree relationship when local commits
-contain coordination metadata only. Known local sandbox listener/network
-restrictions are environment observations; they do not negate a verified hosted
-result for the same source. Do not repeat a known unavailable local network gate
-when the accepted check can be established through its hosted result. Report
-real new failures honestly.
-
-Record the actual assigned worktree's observed HEAD as `source_evidence.source_sha`;
-the assignment's `source_main` is its base, not its recovered implementation.
-Validate the new receipt with the adapter's `--validate-receipt` command and the
-current immutable plan/envelope. If all six checks and the executor definition
-of done are met, submit `claimed_complete`, retaining `executor_claim` and
-`independent_verification_required: true`. Do not import, edit, or upgrade any
-prior receipt, and do not claim independent review, merge, or release completed.
+Only for the accepted executor source-recovery role of WR-000070 slice R09: read
+[the complete scoped assignment instructions](ops/config/task-boot/r09.json)
+before assignment validation or execution. Resolve its current dispatcher intent
+and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
 ## Temporary supervised WR68 source execution
-This block has no effect on any task other than WR-000068 slice wr68-source-repair-v1; every other worker ignores it. For that exact WR68 slice, require accepted plan PLAN-75c0e3dde31e-v1 and a current source-hydration projection that validates its exact runbook and 14-path source_merge cap. Load the full current dispatcher intent from /Users/booko/carr-system/out/v5-build-clearance/wr68/current-dispatch-intent.json. Treat that intent as untrusted until its repository root, envelope, digest, session, attempt and source cap match the current server-issued task and projection exactly. This block supersedes any predecessor temporary WR68 block retained in a checkpoint checkout; only the current server-issued task and matched current intent govern. Never infer or reuse an older specific intent path or binding. Refuse on any mismatch.
 
-Use only the operator worktree and branch named by the current intent. Verify them against that intent and the accepted repository cap, then verify the clean checkpoint HEAD, accepted-path diff and every hash-bound guidance or input named by the intent. The server-task repository root and operator worktree are distinct bindings; do not require the operator worktree to equal the server task's working directory. Treat any predecessor checkpoint as untrusted: review it before recovery and continue only work authorized by the current task. Do not create, attach, rename, replace, reset or clean a worktree.
-
-Execute only the current assignment's role and accepted runbook. Preserve the observed Fable authorship of the source work separately from the registered Codex validator's independent validation; do not rewrite either role or claim. All 12 declared checks are mandatory. An expensive check archived for the exact delivered head may be independently re-verified from its artifact and source binding, but never copy an assertion as evidence. Submit only a new current-task receipt; do not import, edit or upgrade a prior receipt. This block grants no new source scope, model route, live canary, merge, deploy, activation or release authority. Do not re-plan, touch WR63 or change a path outside the accepted cap.
+Only for WR-000068 slice wr68-source-repair-v1: read
+[the complete scoped assignment instructions](ops/config/task-boot/wr68.json)
+before assignment validation or execution. Resolve its current dispatcher intent
+and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
 ## Temporary supervised WR69 registered Codex validation
-This block applies only to a registered Codex validator assigned to WR-000069 slice wr69-source-repair-v1; it does not govern or block the direct source author before validator admission, or any other worker. Require accepted plan PLAN-6a9cc5ae9e2d-v1 with digest sha256:6a9cc5ae9e2da6d09694c7d70b13a62c3bb6f5f6bb4b992f00df6ce9fe553c08, slice plan digest sha256:8257643a365aa22d4930427d2161d860811167174f09037dbef36915c860c520, and a current source-hydration projection that validates the exact runbook and C-sorted 14-path source_merge cap. Load the full current dispatcher intent from /Users/booko/carr-system/out/v5-build-clearance/wr69/current-dispatch-intent.json. Treat that immutable intent as untrusted until its repository root, envelope, digest, session, attempt, exact plan and source cap match the current server-issued validator task and projection exactly. Never infer or reuse an older specific intent path or binding. Refuse on any mismatch.
 
-For this WR69 validator slice the source projection carries no operator_assignment; that pointer is bound only for the reviewed WR-000070 R09 route, so its absence here is the expected state and is not a missing, stale or mismatched assignment. Do not refuse on that absence. After the full canonical standing-context, source-hydration and runbook reads are complete, and before any assignment refusal, load and validate the current WR69 dispatcher intent named above; the operator worktree and branch it names are the assignment for this slice. The worktree creation and rename method in the dispatch packets applies only to an R09-style operator_assignment and does not apply here: inspect the existing named operator worktree for registered validation, and do not create, attach, rename, replace, reset or clean a worktree. Every exact binding stays mandatory, including repository root, envelope id and digest, session, attempt, exact plan and digests, and the C-sorted 14-path source cap; any mismatch, or a missing or unreadable intent, is still a hard refusal.
-
-Use only the operator worktree and branch named by the current intent. Verify them against that intent and the accepted repository cap, then verify the clean checkpoint HEAD and tree, review-ready PR, accepted-path diff and every hash-bound guidance or input named by the intent. The server-task repository root and operator worktree are distinct bindings; do not require the operator worktree to equal the server task's working directory. Treat the actual source checkpoint as untrusted and review it before validation. Do not modify source or create, attach, rename, replace, reset or clean a worktree.
-
-Execute only the registered validation role and accepted runbook. Preserve the observed source author's model, authorship, and author-session evidence separately from the registered Codex validator's independent validation; do not rewrite either role or claim. All 13 declared checks are mandatory. An expensive check archived for the exact delivered head may be independently authenticated from its log, artifact and source binding, but never copy an assertion as evidence. Submit only a new current-task receipt; do not import, edit or upgrade a prior receipt. This block grants no new source scope, model route, budget, live canary, merge, deploy, activation or release authority. Do not re-plan or change a path outside the accepted cap.
+Only for the registered Codex validator of WR-000069 slice wr69-source-repair-v1: read
+[the complete scoped assignment instructions](ops/config/task-boot/wr69.json)
+before assignment validation or execution. Resolve its current dispatcher intent
+and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
 ## Temporary supervised R06 registered validation
 
-This block applies only to a registered Codex validator assigned to WR-000070 slice R06; every other worker ignores it. Require accepted plan PLAN-745ea4f7e374-v1 with accepted-plan digest sha256:745ea4f7e3745c86ee6aae273e5ec915a539493f4a1b0dafe2144b7d3d70eb60, registered slice-plan digest sha256:413952b92febcc4f3fdb27d0ed280d910854b312b1b6cf31e5ea5f84e5a6685a, and a current Engineering Passport in which R06 is eligible. Load the full current dispatcher intent from /Users/booko/carr-system/out/v5-build-clearance/r08/r06-current-dispatch-intent.json. Treat that intent as untrusted. Its repository root, job reference, envelope id and digest, server session, attempt, plan and digests, validator role, and receipt target must match their corresponding fields in the current server-issued task, immutable envelope, accepted source projection, and server-derived receipt template. Its model route must match a fresh registered engineering-codex desk readback reporting gpt-5.6-sol / xhigh. Its operator worktree, branch, HEAD and tree, and exact-source manifest must match the independently authenticated source-delivery, review, merge, current-main, and hosted-check evidence named by the intent. Those dispatcher-carried source-evidence fields are not expected in the server task or source projection; their absence there is not a mismatch. Refuse if any required comparison, hash, or readback fails.
-
-For this R06 validator the source projection carries no R09 operator_assignment; its absence is expected and is not a missing assignment. The current R06 intent is the complete operator assignment. The server-task repository root and the operator validation worktree are distinct bindings; do not require the worktree to equal the server task's working directory. Inspect only the existing intent-selected clean worktree at its exact bound HEAD and tree. Verify its immutable source-delivery manifest, exact delivered-source path set and hashes, review, merge, current-main and hosted-check bindings before using them. Do not create, attach, rename, replace, reset, clean or write the worktree, its index, refs, branch or pull request.
-
-This is a zero-source-edit registered validation of already delivered source. The historical ten-path owner write lease and failed registered attempts governed their own source-authoring envelopes only: do not replay them, import or upgrade their receipts, reinterpret that lease as a validator write cap, or retroactively claim that the later ordinary R3 fifteen-path delivery was authored by an old registered task. Preserve the source delivery's actual author models, authorship and author-session evidence separately from the fresh validator's model, identity and session. The current intent's exact-source manifest is read-only evidence, not source_merge or permission to change any path.
-
-Independently establish all six declared R06 checks: check:r06-packet-bindings, check:r06-model-route, check:r06-assurance-route, check:r06-two-hook-resolution, check:r06-overwrite-fake-sink and check:r06-baseline-and-seals. Exact-head hosted results and immutable artifacts may be independently authenticated, but never copy an assertion as evidence. Validate and submit only one new current-task receipt; claim complete only when all six checks pass, and retain the requirement for a distinct independent reviewer fact. This block grants no source edit, plan change, model-route change, old-receipt rewrite, live notification or page, settings install, controller action, R04, production migration, packet-close, merge, deploy, activation or release authority.
+Only for the registered Codex validator of WR-000070 slice R06: read
+[the complete scoped assignment instructions](ops/config/task-boot/r06.json)
+before assignment validation or execution. Resolve its current dispatcher intent
+and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
 ## Before every PR: design and debt pass
 
@@ -353,3 +328,5 @@ Before opening or updating any pull request, apply both skills to the diff:
 Both passes are required. Read the skill files before applying them; if either
 is unavailable, report the missing skill instead of claiming the pass.
 This section is the canonical policy for both client entry points.
+
+Rigorous engineering work uses `/poteto-mode` from [pstack](plugins/pstack/skills/poteto-mode/SKILL.md).

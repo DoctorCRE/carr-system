@@ -1188,6 +1188,8 @@ def _stub_git_answering_the_floor(changed_paths, *, main_paths=None, added_paths
     quoted_main = " ".join(shlex.quote(path) for path in main_paths)
     quoted_added = " ".join(shlex.quote(path) for path in added_paths)
     quoted_tree = " ".join(shlex.quote(path) for path in main_tree_paths)
+    quoted_main_added = " ".join(shlex.quote(path) for path in added_paths
+                                  if path in main_paths and path not in main_tree_paths)
     main_exit = "" if main_readable else "exit 7; "
     with tempfile.TemporaryDirectory(prefix="ci-selftest-stub-git-") as td:
         stub = pathlib.Path(td) / "git"
@@ -1195,6 +1197,8 @@ def _stub_git_answering_the_floor(changed_paths, *, main_paths=None, added_paths
             "#!/bin/sh\n"
             'case " $* " in *" diff --name-only origin/main HEAD "*)\n'
             f'  {main_exit}printf "%s\\n" {quoted_main}; exit 0 ;;\n'
+            '  *" diff --diff-filter=A --name-only origin/main -- "*)\n'
+            f'  {main_exit}printf "%s\\n" {quoted_main_added}; exit 0 ;;\n'
             '  *" ls-tree -r --name-only origin/main "*)\n'
             f'  {main_exit}printf "%s\\n" {quoted_tree}; exit 0 ;;\n'
             f'*" {FIXTURE_RANGE} "*)\n'
@@ -1209,6 +1213,16 @@ def _stub_git_answering_the_floor(changed_paths, *, main_paths=None, added_paths
         )
         stub.chmod(0o755)
         yield {"PATH": f"{td}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+
+def test_migration_structure_is_checked_before_slow_work():
+    floor = _push_floor_body()
+    migration = _ci_function_body("check_migration", "check_binding")
+    command = '"$PY" ops/migration-order-gate.py'
+    check("migration structure runs in the push floor before gate closure",
+          command in floor and floor.index(command) < floor.index('local gate_surface='))
+    check("migration structure runs before schema loading and the database probe",
+          command in migration and migration.index(command) < migration.index('local dsn='))
 
 
 def test_push_floor_defers_the_gates_class_instead_of_running_it():
@@ -1381,6 +1395,11 @@ def test_hosted_migration_budget_covers_observed_acceptance_runtime():
     Both workflows run the canonical migration class; its budget must also
     cover the separate database lane. Read the actual job/matrix wiring,
     so an unused budget cannot pass.
+
+    The database lane runs that class and then its own acceptance programs.
+    On 2026-10-04 it routinely took 22-24 minutes, and six branches
+    (PR 1470's run 37182226032 among them) were cancelled at a 25-minute cap
+    after every check had passed. It needs the same headroom.
     """
     job = _hosted_workflow()["jobs"]["classes"]
     groups = job["strategy"]["matrix"]["classes"]
@@ -1398,12 +1417,56 @@ def test_hosted_migration_budget_covers_observed_acceptance_runtime():
     check("hosted migration budget covers the database lane budget",
           isinstance(database_budget, int) and migration_budget >= database_budget > 0,
           {"migration_minutes": migration_budget, "database_minutes": database_budget})
+    bounded_headroom = range(30, 36)
+    check("database lane has bounded headroom over its observed 24-minute run",
+          database_budget in bounded_headroom, database_budget)
     migration = [migration_budget for group in groups if group == "migration"]
     check("migration job has bounded headroom over the observed 24-minute run",
-          len(migration) == 1 and 30 <= migration[0] <= 35, migration)
+          len(migration) == 1 and migration[0] in bounded_headroom, migration)
     other = [other_budget for group in groups if group != "migration"]
     check("other class groups retain their 20-minute budgets",
-          len(other) == 2 and all(budget == 20 for budget in other), other)
+          bool(other) and all(budget == 20 for budget in other), other)
+
+
+def test_gate_replay_has_an_independent_required_class():
+    """PR1546's gates passed at 1101s, then cleanup hit the 20-minute cap.
+
+    Its 295s replay must run in a separate required job, preserving the cap
+    and every check instead of making the already long job wait for replay.
+    """
+    src = CI.read_text()
+    order = re.search(r'^CLASS_ORDER="([^"]+)"', src, re.M)
+    check("full local CI includes the replay class",
+          order is not None and "replay" in order.group(1).split())
+    gates_body = src.split("check_gates() {", 1)[1].split("\ncheck_", 1)[0]
+    check("gates no longer serializes the real-fixture replay",
+          '"$PY" ops/gate-replay.py' not in gates_body)
+    job = _hosted_workflow()["jobs"]["classes"]
+    groups = job["strategy"]["matrix"]["classes"]
+    check("hosted replay runs once as its own required matrix job",
+          groups.count("replay") == 1)
+    check("gates and replay retain the existing 20-minute cap",
+          job["timeout-minutes"] == "${{ matrix.classes == 'migration' && 35 || 20 }}")
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = pathlib.Path(tmp) / "gate-replay.py"
+        fixture.write_text("import os,sys\n"
+                           "print('gate-replay: OK replay fixture ran')\n"
+                           "sys.exit(int(os.environ['REPLAY_FIXTURE_RC']))\n")
+        # Invoke the class through ci.sh's normal --only interface. Replace
+        # only the replay program with a cheap fixture, keeping its handling.
+        script = pathlib.Path(tmp) / "ci.sh"
+        body = src.replace('"$PY" ops/gate-replay.py', f'"$PY" {shlex.quote(str(fixture))}')
+        # The script resolves the repository from its own path.
+        body = re.sub(r'^REPO=.*$', f'REPO={shlex.quote(str(REPO))}', body, flags=re.M)
+        script.write_text(body)
+        for child_rc, expected_rc in ((0, 0), (1, 1), (78, 1), (124, 1)):
+            out = subprocess.run(["bash", str(script), "--strict", "--only", "replay"],
+                                 cwd=REPO, env=scrubbed_env(dict(os.environ,
+                                     REPLAY_FIXTURE_RC=str(child_rc))),
+                                 capture_output=True, text=True, timeout=10)
+            check(f"strict replay propagates child exit {child_rc}",
+                  out.returncode == expected_rc and "replay fixture ran" in out.stdout + out.stderr,
+                  out.stdout + out.stderr)
 
 
 def test_hosted_zsh_setup_does_not_refresh_working_indexes():
@@ -1485,7 +1548,10 @@ def test_release_database_proof_runs_in_migration_class():
           proof in db_proofs, proof.relative_to(REPO))
 
 
-def main():
+def main(argv=None):
+    if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
+        test_every_test_file_in_the_tree_is_collected()
+        return 1 if any(not ok for _, ok, _ in RESULTS) else 0
     for fn in (test_no_green_without_running,
                test_class_table_is_complete,
                test_strict_turns_skip_into_failure,
@@ -1509,11 +1575,13 @@ def main():
                test_fail_tail_withholds_the_window_when_it_cannot_redact,
                test_gates_treats_only_78_as_not_configured,
                test_gates_selftests_have_a_process_group_watchdog,
+               test_migration_structure_is_checked_before_slow_work,
                test_push_floor_defers_the_gates_class_instead_of_running_it,
                test_push_floor_distinguishes_imported_main_paths_from_branch_changes,
                test_strict_still_owns_the_gates_class,
                test_hosted_ci_runs_classes_in_parallel_behind_one_required_context,
                test_hosted_migration_budget_covers_observed_acceptance_runtime,
+               test_gate_replay_has_an_independent_required_class,
                test_hosted_zsh_setup_does_not_refresh_working_indexes):
         try:
             fn()

@@ -16,7 +16,7 @@ range) -- which is why this pipeline has three layers rather than one:
      fields, exact counts pinned to growth, unbounded LIMITs, append-only
      logs, fixed-width migration numbers. Deliberately ambiguous -- each
      signature also matches the safe case, which is what leaves anything
-     for Jev or deterministic headroom to judge.
+     for deterministic headroom or a semantic review suggestion.
 
   2. DETERMINISTIC HEADROOM (compute_headroom) -- for the two signature
      families where "how close is this to tripping" is computable without
@@ -28,8 +28,8 @@ range) -- which is why this pipeline has three layers rather than one:
      deterministic clock or counter.
 
   3. JEV JUDGMENT (judge_regions) -- ops/typesafe_client.py's ask(), asking
-     three questions per region in ONE request (breaks_without_code_change,
-     fails_silently, horizon), the same shape as the one-off scan
+     two semantic questions per residual region in ONE cached request
+     (breaks_without_code_change, fails_silently), the same shape as the one-off scan
      (scratchpad/timebomb/scan.py) and reusing ops/jev_code_review.py's
      answer_value() reader UNCHANGED -- that reader shipped a real bug once
      (read body["probability"], which does not exist, and scored 426
@@ -61,7 +61,7 @@ bin/run-scheduled.sh) already uses to reach a verb from an unattended
 script: a subprocess call to `run.sh call <verb> '<json>'`, never the
 generic MCP call-verb passthrough tool (see CLAUDE.md's fallback-door
 doctrine). A clean run (nothing new since the ledger) stays silent and
-writes nothing to the record; a run with new findings files exactly ONE
+writes nothing to the record; a run with new deterministic findings files exactly ONE
 record-defect summarising them (never one per region -- the defect log
 wants classes and counts, not a row flood) and, in the same run, posts ONE
 `@queue enqueue` turn to the partner room's Hermes queue asking a session
@@ -118,10 +118,11 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(os.environ.get("CARR_TIMEBOMB_REPO") or Path(__file__).resolve().parent.parent)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib import record_call  # noqa: E402
 OUT_DIR = Path(os.environ.get("CARR_TIMEBOMB_OUT_DIR") or (REPO / "out" / "timebomb-audit"))
 TRIAGE_PATH = Path(os.environ.get("CARR_TIMEBOMB_TRIAGE_PATH")
                     or (REPO / "ops" / "config" / "timebomb-triage.v1.json"))
-RUN_SH = REPO / "run.sh"
 
 # ── SCAN ─────────────────────────────────────────────────────────────────
 # Ported from scratchpad/timebomb/find_candidates.py's tightened pass
@@ -520,23 +521,7 @@ def build_questions(tsc):
                  "stale value that looks like a normal successful run.",
             false="It would fail loudly and visibly (an exception, a clear error "
                   "message, a CI failure) or it does not trip at all."),
-        "horizon": tsc.choice(
-            "Given only what `region.code` itself shows -- a numeric bound, a hardcoded "
-            "date, an exact count, a window size -- how much runway is left before it "
-            "trips, in the ordinary course of this kind of repository's growth "
-            "(commits, rows, log lines, days)? Judge from the number's size and what it "
-            "is bounding, not from information not present in the snippet.",
-            {
-                "already_broken": "The snippet's own bound already looks passed or "
-                                   "violated as written.",
-                "days": "The bound looks tight enough to trip within days of ordinary use.",
-                "weeks": "The bound looks tight enough to trip within weeks.",
-                "months": "The bound looks like it has months of headroom.",
-                "years": "The bound looks like it has years of headroom, or requires "
-                         "very heavy growth to reach.",
-                "never": "There is no real bound here at all, or it is generous enough "
-                         "that reaching it is not practically possible.",
-            }),
+
     }
 
 
@@ -556,30 +541,9 @@ def reader_sanity_check(jcr, tsc, ask=None) -> tuple[bool, str]:
     `ask` is an injection seam for the selftest (a fake client's .ask, or a
     bound tsc.ask); production callers leave it default.
     """
-    ask = ask or tsc.ask
-    known_bad = {
-        "path": "known_bad_example.py", "line": 1,
-        "code": ("def find_pre_feature_commit(repo):\n"
-                 "    # Walk back until we find the commit before the feature landed.\n"
-                 "    # 160 is comfortably more than we've ever needed.\n"
-                 "    for sha in git('log', '-160', '--format=%H').split():\n"
-                 "        if not has_feature_at(repo, sha):\n"
-                 "            return sha\n"
-                 "    raise RuntimeError('no pre-feature commit found in the window')\n"),
-    }
-    known_good = {
-        "path": "known_good_example.py", "line": 1,
-        "code": ("def recent_activity_page(items, page_size=20):\n"
-                 "    \"\"\"Intentionally truncated for display -- callers page "
-                 "further with an offset.\"\"\"\n"
-                 "    return items[:page_size]\n"),
-    }
-    questions = build_questions(tsc)
-    try:
-        bad_answer = ask({"region": known_bad}, questions, timeout=JUDGE_TIMEOUT_SECONDS)
-        good_answer = ask({"region": known_good}, questions, timeout=JUDGE_TIMEOUT_SECONDS)
-    except Exception as exc:  # noqa: BLE001 -- reported, never swallowed
-        return False, f"reader check could not reach Jev: {type(exc).__name__}: {exc}"
+    # Offline typed fixtures check the reader, not the provider's semantics.
+    bad_answer = {"answers": {"breaks_without_code_change": {"type":"noul", "noul":0.9}}}
+    good_answer = {"answers": {"breaks_without_code_change": {"type":"noul", "noul":0.1}}}
 
     bad = {qid: jcr.answer_value(body) for qid, body in (bad_answer.get("answers") or {}).items()}
     good = {qid: jcr.answer_value(body) for qid, body in (good_answer.get("answers") or {}).items()}
@@ -607,12 +571,14 @@ def judge_regions(regions: list[dict], jcr, tsc, ask=None) -> tuple[list[dict], 
     """Returns (regions with a "scores" key added, error_count)."""
     ask = ask or tsc.ask
     questions = build_questions(tsc)
+    semantic = _load_module("jev_semantic", REPO / "ops" / "jev_semantic.py")
 
     def one(region):
         state = {"region": {"path": region["path"], "line": region["line"],
-                             "why_it_was_flagged": region["kind"], "code": region["code"]}}
+                             "why_it_was_flagged": region["kind"], "code": region["code"][:6000]}}
         try:
-            answer = ask(state, questions, timeout=JUDGE_TIMEOUT_SECONDS)
+            answer = semantic.ask(state, questions, transport=ask, caller="timebomb-audit",
+                                  version="region-v2", timeout=JUDGE_TIMEOUT_SECONDS)
         except Exception as exc:  # noqa: BLE001 -- a per-region failure, not a crash
             return region, None, f"{type(exc).__name__}: {exc}"[:200]
         scores = {qid: jcr.answer_value(body) for qid, body in (answer.get("answers") or {}).items()}
@@ -636,28 +602,16 @@ def judge_regions(regions: list[dict], jcr, tsc, ask=None) -> tuple[list[dict], 
 
 
 # ── RECORD-LAYER FILING ──────────────────────────────────────────────────
-# Same call path tools/cutover-watch.py uses (a subprocess to `run.sh call
-# <verb> '<json>'`, never the generic MCP call-verb passthrough).
+# lib/record_call: `run.sh call <verb> '<json>'`, never the generic MCP
+# call-verb passthrough.
 
 def call_verb(verb: str, args: dict) -> tuple[bool, object]:
-    """Never raises -- a verb call that fails is a finding, not a crash."""
-    if not RUN_SH.exists():
-        return False, f"no such file: {RUN_SH}"
+    """Never raises -- a verb call that fails is a finding, not a crash. Only
+    an ok outcome is success: a refused write is reported, never accepted."""
     child_env = {"HOME": os.environ.get("HOME", ""), "PATH": os.environ.get("PATH", ""),
                  "LANG": os.environ.get("LANG", "C")}
-    try:
-        proc = subprocess.run([str(RUN_SH), "call", verb, json.dumps(args)],
-                               cwd=str(REPO), env=child_env, capture_output=True,
-                               text=True, timeout=120)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"subprocess failed: {type(exc).__name__}: {exc}"
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        return False, f"run.sh call {verb} exit {proc.returncode}: {tail[-1] if tail else '(no output)'}"
-    try:
-        return True, json.loads(proc.stdout)
-    except ValueError:
-        return False, f"non-JSON stdout from {verb}: {proc.stdout[:200]!r}"
+    result = record_call.call_verb(verb, args, env=child_env, timeout=120)
+    return (True, result.reply) if result.ok else (False, result.describe())
 
 
 def summarize_findings(findings: list[dict]) -> str:
@@ -786,7 +740,8 @@ def run(*, dry_run: bool = False, use_jev: bool = True, now: datetime | None = N
 
     jcr = tsc = None
     errors = 0
-    if use_jev:
+    semantic_regions = [r for r in new_regions if r["headroom"] is None]
+    if use_jev and semantic_regions:
         try:
             jcr, tsc = load_jev_modules(REPO)
         except Exception as exc:  # noqa: BLE001
@@ -802,32 +757,26 @@ def run(*, dry_run: bool = False, use_jev: bool = True, now: datetime | None = N
                   "clean run's clothes", file=sys.stderr)
             return 1
 
-        if new_regions:
-            judged, errors = judge_regions(new_regions, jcr, tsc)
+        if semantic_regions:
+            judged, errors = judge_regions(semantic_regions, jcr, tsc)
             by_key = {r["_ledger_key"]: r for r in judged}
             new_regions = [by_key.get(r["_ledger_key"], r) for r in new_regions]
-            judged_ok = len(new_regions) - errors
+            judged_ok = len(semantic_regions) - errors
             if judged_ok == 0:
-                print(f"timebomb-audit: FAIL -- {len(new_regions)} region(s) needed "
+                print(f"timebomb-audit: FAIL -- {len(semantic_regions)} region(s) needed "
                       f"judgment and ZERO were judged successfully; this must never "
                       f"look like a clean run", file=sys.stderr)
                 return 1
 
-    findings = []
-    for r in new_regions:
-        score = (r.get("scores") or {}).get("breaks_without_code_change")
-        jev_flag = isinstance(score, (int, float)) and score >= REPORT_AT
-        headroom_flag = bool((r.get("headroom") or {}).get("deterministic_finding"))
-        if jev_flag or headroom_flag:
-            findings.append(r)
-
-    deterministic_only = [r for r in findings
-                           if (r.get("headroom") or {}).get("deterministic_finding")
-                           and not (isinstance((r.get("scores") or {}).get("breaks_without_code_change"),
-                                                (int, float))
-                                    and (r["scores"]["breaks_without_code_change"] >= REPORT_AT))]
-
-    report = build_report(run_date, findings, errors, deterministic_only)
+    # Numeric/date headroom is the only automatic filing authority. Semantic
+    # suggestions remain in the report for review until a labeled threshold exists.
+    findings = [r for r in new_regions
+                if (r.get("headroom") or {}).get("deterministic_finding")]
+    semantic_advice = [dict(r, review_required=True) for r in new_regions
+                       if r.get("scores") and not r["scores"].get("_error")]
+    report = build_report(run_date, findings, errors, findings)
+    report["semantic_advice"] = semantic_advice
+    report["review_required"] = bool(semantic_advice)
     report_path = write_report(report, OUT_DIR, run_date)
     print(f"timebomb-audit: {len(all_regions)} region(s) scanned, "
           f"{len(new_regions)} new/changed vs. the ledger, {len(findings)} finding(s). "

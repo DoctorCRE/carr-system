@@ -21,6 +21,15 @@ bo = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bo)
 
 
+import os as _sem_os
+import tempfile as _sem_tmp
+from unittest.mock import patch as _sem_patch
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+
 class FakeJudge:
     """Stands in for ops/jev_judge.py: same .judge()/.record() surface."""
 
@@ -38,7 +47,7 @@ class FakeJudge:
         self.calls.append((subject, questions))
         if self.fail:
             raise self.JudgeUnavailable("synthetic outage")
-        return {"model": "fake-jev",
+        return {"model": "jev-1.13.0",
                 "answers": {"pick": {"type": "choice", "choice": self.choice,
                                        "confidence": self.confidence}}}
 
@@ -74,7 +83,7 @@ def _candidate(cid, *, passes=None, probes=None, output=None):
     return row
 
 
-class PrefilterTests(unittest.TestCase):
+class PrefilterTests(SemanticTestCase):
     def test_exactly_one_passing_candidate_is_chosen_without_asking_jev(self):
         candidates = [_candidate("a", passes=False), _candidate("b", passes=True),
                       _candidate("c", passes=False)]
@@ -90,14 +99,16 @@ class PrefilterTests(unittest.TestCase):
         judge = FakeJudge(choice="a", confidence=0.9)
         out = bo.select_candidate("do the thing", candidates, judge=judge, client=FakeClient)
         self.assertEqual(len(judge.calls), 1)
-        self.assertEqual(out["verdict"], "a")
+        self.assertEqual(out["verdict"], "review_required")
+        self.assertEqual(out["detail"]["advisory_candidate_id"], "a")
 
     def test_zero_passing_candidates_falls_through_to_jev(self):
         candidates = [_candidate("a", passes=False), _candidate("b", passes=False)]
         judge = FakeJudge(choice="b", confidence=0.9)
         out = bo.select_candidate("do the thing", candidates, judge=judge, client=FakeClient)
         self.assertEqual(len(judge.calls), 1)
-        self.assertEqual(out["verdict"], "b")
+        self.assertEqual(out["verdict"], "review_required")
+        self.assertEqual(out["detail"]["advisory_candidate_id"], "b")
 
     def test_no_candidates_is_a_none_verdict_with_no_jev_call(self):
         judge = FakeJudge(fail=True)
@@ -107,7 +118,7 @@ class PrefilterTests(unittest.TestCase):
         self.assertEqual(len(judge.calls), 0)
 
 
-class EvidenceChoiceTests(unittest.TestCase):
+class EvidenceChoiceTests(SemanticTestCase):
     def test_evidence_free_candidates_are_still_sent_to_jev(self):
         """No probe_results, no test_output anywhere: still asked, per the
         module's 'still ask' instruction — a caller decides what to do with
@@ -137,12 +148,13 @@ class EvidenceChoiceTests(unittest.TestCase):
         self.assertEqual(len(judge.calls), 1)
 
 
-class NoneVerdictTests(unittest.TestCase):
+class NoneVerdictTests(SemanticTestCase):
     def test_none_of_these_escalates_and_is_never_coerced_to_a_candidate(self):
         candidates = [_candidate("a", passes=False), _candidate("b", passes=False)]
         judge = FakeJudge(choice=bo.NONE_RIGHT, confidence=0.7)
         out = bo.select_candidate("task", candidates, judge=judge, client=FakeClient)
-        self.assertEqual(out["verdict"], "none")
+        self.assertEqual(out["verdict"], "review_required")
+        self.assertIsNone(out["detail"]["advisory_candidate_id"])
         self.assertTrue(out["escalate"])
 
     def test_never_defaults_to_attempt_1_on_a_missing_choice(self):
@@ -152,11 +164,11 @@ class NoneVerdictTests(unittest.TestCase):
         candidates = [_candidate("a", passes=False), _candidate("b", passes=False)]
         judge = FakeJudge(choice=None, confidence=None)
         out = bo.select_candidate("task", candidates, judge=judge, client=FakeClient)
-        self.assertEqual(out["verdict"], "none")
+        self.assertEqual(out["verdict"], "unavailable")
         self.assertNotEqual(out["verdict"], "a")
 
 
-class ConfidenceTests(unittest.TestCase):
+class ConfidenceTests(SemanticTestCase):
     def test_low_confidence_still_returns_the_chosen_id(self):
         """The measured lesson: median confidence of RIGHT picks was 0.33 in
         the comparison run. A caller must still get the id, with escalate=True
@@ -165,24 +177,26 @@ class ConfidenceTests(unittest.TestCase):
         judge = FakeJudge(choice="b", confidence=0.20)
         out = bo.select_candidate("task", candidates, judge=judge, client=FakeClient,
                                    conf_escalate_at=bo.CONF_ESCALATE_AT)
-        self.assertEqual(out["verdict"], "b")
+        self.assertEqual(out["verdict"], "review_required")
+        self.assertEqual(out["detail"]["advisory_candidate_id"], "b")
         self.assertTrue(out["escalate"])
 
     def test_confidence_at_or_above_the_floor_does_not_escalate(self):
         candidates = [_candidate("a", passes=False), _candidate("b", passes=False)]
         judge = FakeJudge(choice="a", confidence=bo.CONF_ESCALATE_AT)
         out = bo.select_candidate("task", candidates, judge=judge, client=FakeClient)
-        self.assertFalse(out["escalate"])
+        self.assertTrue(out["escalate"])
 
     def test_missing_confidence_escalates(self):
         candidates = [_candidate("a", passes=False), _candidate("b", passes=False)]
         judge = FakeJudge(choice="a", confidence=None)
         out = bo.select_candidate("task", candidates, judge=judge, client=FakeClient)
-        self.assertEqual(out["verdict"], "a")
+        self.assertEqual(out["verdict"], "review_required")
+        self.assertEqual(out["detail"]["advisory_candidate_id"], "a")
         self.assertTrue(out["escalate"])
 
 
-class UnavailableTests(unittest.TestCase):
+class UnavailableTests(SemanticTestCase):
     def test_an_outage_reports_unavailable_not_an_exception(self):
         candidates = [_candidate("a", passes=False), _candidate("b", passes=False)]
         judge = FakeJudge(fail=True)
@@ -197,7 +211,7 @@ class UnavailableTests(unittest.TestCase):
         self.assertEqual(sorted(out["detail"]["passing_ids"]), ["a", "b"])
 
 
-class ShapeTests(unittest.TestCase):
+class ShapeTests(SemanticTestCase):
     def test_every_result_has_the_required_keys(self):
         candidates = [_candidate("a", passes=True)]
         judge = FakeJudge(fail=True)
@@ -207,7 +221,7 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(out["check"], "best_of")
 
 
-class EntrypointTests(unittest.TestCase):
+class EntrypointTests(SemanticTestCase):
     def test_the_module_is_not_a_script_entrypoint(self):
         """Uses the sealed inventory's own detector, not a substring search. A
         shebang or a main guard here would move the frontier and owe a

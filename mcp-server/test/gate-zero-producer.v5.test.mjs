@@ -1019,7 +1019,7 @@ test("DIGEST: each bound digest stands on its own stamped artifact", async () =>
   for (const [field, described] of [
     ["candidate_digest", { head_revision: REVISION_ALL_SUCCEED,
       declared_checks: ["local-db-ci --class migration",
-        "main canary (gates, migration, types, freshness)", "ops/ci.sh --strict"] }],
+        "main canary", "ops/ci.sh --strict"] }],
     ["environment_manifest_digest", { tenant: "carr-internal",
       subject_environment: "candidate", evidence_scope: "candidate-and-test" }],
     ["fixture_set_digest", { service_key: "gate-zero-canary" }],

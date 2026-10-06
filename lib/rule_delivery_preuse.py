@@ -48,48 +48,12 @@ TRIGGER_KINDS = frozenset({"verb", "bash_family", "path_pattern", "content_regex
 # selected by semantic judgment rather than by a compiled trigger row. Its
 # candidates must still resolve through the reviewed load-layer map and the
 # authenticated standing-context door before any rule text is injected.
-SEMANTIC_RECEIPT_SCHEMA = "rule-jev-message-delivery/v2"
+SEMANTIC_RECEIPT_SCHEMA = "rule-jev-message-delivery/v3"
 SEMANTIC_RECEIPT_KEYS = frozenset({
     "schema", "receipt_id", "client", "session_id", "turn_id",
     "prompt_sha256", "packs", "corpus_digest", "selector_digest",
     "map_digest", "source_digest", "identity", "rule_ids", "rules",
-    "probabilities", "model_provenance", "rule_delivery", "build_receipt",
-})
-BUILD_ADVISORY_SCHEMA = "jev-build-advisory/v2"
-BUILD_ADVISORY_UNAVAILABLE_SCHEMA = "jev-build-advisory-unavailable/v1"
-BUILD_RECEIPT_SCHEMA = "jev-build-turn-receipt/v1"
-BUILD_ADVISORY_FACETS = frozenset({
-    "architecture_or_design", "semantic_creation", "diagnosis",
-    "verification_selection", "evidence_matching", "next_action_priority",
-})
-BUILD_ADVISORY_KEYS = frozenset({
-    "schema", "partner_request_sha256", "model", "facets", "usage",
-})
-BUILD_ADVISORY_UNAVAILABLE_KEYS = frozenset({
-    "schema", "status", "reason", "effect", "instruction",
-})
-BUILD_ADVISORY_UNAVAILABLE_REASONS = frozenset({
-    "billing_exhausted", "auth_failed", "rate_limited", "timeout", "network",
-    "server_5xx", "unknown",
-})
-# A background-task notification, cross-session message, Stop-hook reopen or
-# other machine envelope is not a partner request, so no build advice is
-# asked for it. Measured 2026-09-25: most prompts in a long orchestration
-# session are such envelopes. The skip is its own schema, never "unavailable",
-# and the build receipt carries no prompt-time obligation.
-BUILD_ADVISORY_SKIPPED_SCHEMA = "jev-build-advisory-skipped/v1"
-BUILD_ADVISORY_SKIPPED_KEYS = frozenset({"schema", "status", "reason", "effect"})
-BUILD_RECEIPT_KEYS = frozenset({
-    "schema", "receipt_id", "client", "session_id", "turn_id",
-    "prompt_sha256", "adviser_digest", "configuration_digest",
-    "source_digest", "semantic_rule_delivery", "advisory",
-})
-BUILD_FAILURE_STAGES = frozenset({
-    "semantic_adviser", "candidate_selection", "selector_call",
-    "selector_response", "receipt_assembly",
-})
-BUILD_FAILURE_REASONS = frozenset({
-    "timeout", "nonzero", "invalid_json", "not_ok", "invalid_data", "exception",
+    "probabilities", "model_provenance", "rule_delivery",
 })
 POSTWRITE_RECEIPT_SCHEMA = "jev-post-write-review/v2"
 POSTWRITE_RECEIPT_KEYS = frozenset({
@@ -100,8 +64,6 @@ POSTWRITE_RECEIPT_KEYS = frozenset({
 })
 CORPUS_RELATIVE = "ops/config/rule-selection-corpus.v1.json"
 SELECTOR_SOURCE_PATHS = (
-    "ops/jev_rule_select.py",
-    "ops/jev_build_advisory.py",
     "ops/jev_judge.py",
     "ops/typesafe_client.py",
     # The verdict cache and envelope test decide what is reused and skipped,
@@ -116,86 +78,6 @@ SELECTOR_SOURCE_PATHS = (
     "ops/config/rule-jev-triggers.v1.json",
     "ops/config/rule-jit-triggers.v1.json",
 )
-
-
-def validate_build_advisory(row: object, *, prompt_sha256: str) -> bool:
-    """Validate the advisory or its fixed visible abstention."""
-    # Decision c136a8e1-c135-4553-9e50-64c9640d12b7 (2026-09-25) narrows
-    # 0b11c89b to judgment points; the 2026-10-02 orchestrator ruling on
-    # PR 1407 retires per-turn required_actions, authority, guidance and
-    # deterministic_exclusions. v2 is an exact advisory-only contract:
-    # legacy v1 obligations and extra authority fields are rejected, while
-    # hooks/jev-supervisor.py owns the batched boundary judgments.
-    if not isinstance(row, dict):
-        return False
-    if row.get("schema") == BUILD_ADVISORY_UNAVAILABLE_SCHEMA:
-        return (set(row) == BUILD_ADVISORY_UNAVAILABLE_KEYS
-                and row.get("status") == "unavailable"
-                and row.get("reason") in BUILD_ADVISORY_UNAVAILABLE_REASONS
-                and row.get("effect") == "visible_advisory_abstention"
-                and _nonempty(row.get("instruction")))
-    if row.get("schema") == BUILD_ADVISORY_SKIPPED_SCHEMA:
-        return (set(row) == BUILD_ADVISORY_SKIPPED_KEYS
-                and row.get("status") == "skipped"
-                and (row.get("reason"), row.get("effect")) in {
-                    ("machine_envelope", "no_advice_required"),
-                    ("boundary_deferred", "no_prompt_obligation"),
-                })
-    if set(row) != BUILD_ADVISORY_KEYS or row.get("schema") != BUILD_ADVISORY_SCHEMA:
-        return False
-    if (row.get("partner_request_sha256") != prompt_sha256
-            or not _nonempty(row.get("model"))
-            or not isinstance(row.get("usage"), dict)):
-        return False
-    facets = row.get("facets")
-    if not isinstance(facets, dict) or set(facets) != BUILD_ADVISORY_FACETS:
-        return False
-    try:
-        if any(not 0.0 <= float(value) <= 1.0 for value in facets.values()):
-            return False
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
-def validate_build_receipt(row: object, *, repo: Path) -> bool:
-    """Validate the turn-bound build receipt even when no semantic rule binds."""
-    if not isinstance(row, dict) or set(row) not in {
-            BUILD_RECEIPT_KEYS,
-            BUILD_RECEIPT_KEYS | {"failure_stage", "failure_reason"}}:
-        return False
-    if row.get("schema") != BUILD_RECEIPT_SCHEMA:
-        return False
-    if row.get("client") not in {"claude", "codex"}:
-        return False
-    if not all(_nonempty(row.get(key)) for key in (
-            "receipt_id", "session_id", "prompt_sha256", "adviser_digest",
-            "configuration_digest", "source_digest")):
-        return False
-    turn_id = row.get("turn_id")
-    if ((row["client"] == "codex" and not _nonempty(turn_id))
-            or (row["client"] == "claude" and turn_id is not None)):
-        return False
-    if row.get("semantic_rule_delivery") not in {
-            "delivered", "not_applicable", "failed", "not_attempted_oversize"}:
-        return False
-    has_failure = "failure_stage" in row
-    if has_failure and (row["semantic_rule_delivery"] != "failed"
-                        or row["failure_stage"] not in BUILD_FAILURE_STAGES
-                        or row["failure_reason"] not in BUILD_FAILURE_REASONS):
-        return False
-    expected_config = digest({
-        relative: file_sha256(repo / relative)
-        for relative in ("ops/config/hooks.json", "ops/config/codex-hooks.json")
-    })
-    if (row["adviser_digest"] != semantic_selector_digest(repo)
-            or row["configuration_digest"] != expected_config
-            or row["source_digest"] != source_sha256(repo)):
-        return False
-    if not validate_build_advisory(
-            row.get("advisory"), prompt_sha256=row["prompt_sha256"]):
-        return False
-    return row["receipt_id"] == receipt_id(row)
 
 
 def postwrite_reviewer_digest(repo: Path) -> str:
@@ -416,13 +298,6 @@ def validate_semantic_receipt(row: object, *, repo: Path) -> bool:
         return False
     if row["source_digest"] != source_sha256(repo):
         return False
-    if (not validate_build_receipt(row.get("build_receipt"), repo=repo)
-            or row["build_receipt"]["prompt_sha256"] != row["prompt_sha256"]
-            or row["build_receipt"]["client"] != row["client"]
-            or row["build_receipt"]["session_id"] != row["session_id"]
-            or row["build_receipt"]["turn_id"] != row["turn_id"]
-            or row["build_receipt"]["semantic_rule_delivery"] != "delivered"):
-        return False
     return row["receipt_id"] == receipt_id(row)
 
 
@@ -622,13 +497,6 @@ def receipt_from_envelope(record: object) -> dict | None:
                 and record.get("sessionId") == row.get("session_id")):
             return row
         if (row and row.get("client") == "claude"
-                and row.get("schema") == BUILD_RECEIPT_SCHEMA
-                and attachment.get("hookEvent") == "UserPromptSubmit"
-                and attachment.get("hookName") == "UserPromptSubmit"
-                and "toolUseID" not in attachment
-                and record.get("sessionId") == row.get("session_id")):
-            return row
-        if (row and row.get("client") == "claude"
                 and row.get("schema") == POSTWRITE_RECEIPT_SCHEMA
                 and attachment.get("hookEvent") == "PostToolUse"
                 and attachment.get("hookName") == f"PostToolUse:{row.get('tool_name')}"
@@ -774,11 +642,9 @@ def contains_receipt_marker(value: object) -> bool:
     if isinstance(value, dict):
         return (value.get("schema") == RECEIPT_SCHEMA
                 or value.get("schema") == SEMANTIC_RECEIPT_SCHEMA
-                or value.get("schema") == BUILD_RECEIPT_SCHEMA
                 or value.get("schema") == POSTWRITE_RECEIPT_SCHEMA
                 or any(contains_receipt_marker(item) for item in value.values()))
     if isinstance(value, list):
         return any(contains_receipt_marker(item) for item in value)
     return (isinstance(value, str)
-            and (RECEIPT_SCHEMA in value or SEMANTIC_RECEIPT_SCHEMA in value
-                 or BUILD_RECEIPT_SCHEMA in value or POSTWRITE_RECEIPT_SCHEMA in value))
+            and (RECEIPT_SCHEMA in value or SEMANTIC_RECEIPT_SCHEMA in value or POSTWRITE_RECEIPT_SCHEMA in value))

@@ -111,6 +111,12 @@ def main():
             expected_preamble + "\n\n\n" + conditional.group("body").strip()
             if conditional and conditional_gate else None
         )
+    # Once 0756 is absorbed, the generated bootstrap also carries Dot's
+    # passwordless role before role-bound policies from pg_dump.
+    dot = re.search(r"cat >> \"\$TMP\" <<'DOT_READER_ROLES'\n(?P<body>.*?)\nDOT_READER_ROLES", generator, re.S)
+    dot_applied = re.search(r"^0756_dot_reader\.sql\t[0-9a-f]{64}\t", sql, re.M) is not None
+    if expected_preamble is not None and dot_applied:
+        expected_preamble = expected_preamble + "\n" + dot.group("body").strip() if dot else None
     preamble_end = sql.find("--\n-- PostgreSQL database dump")
     check("the snapshot generator carries the exact checked-in role preamble",
           expected_preamble is not None and preamble_end > 0
@@ -169,6 +175,23 @@ def main():
           and "emit_carr_backup_policy(words[3], words[5])" in generator
           and 'print "do $carr_backup_snapshot_policy$"' in generator
           and 'pg_dump\'s exit status cannot be hidden behind a' in generator)
+
+    policy_filter = re.search(r"if ! awk '\n(function emit_carr_backup_policy.*?)\n' \"\$SCHEMA_BODY\"", generator, re.S)
+    for existing in (False, True):
+        fixture = ""
+        for policy, table in (("carr_backup_full_read", "ops.work_request"),
+                              ("carr_backup_full_read_memory_item", "public.memory_item")):
+            schema, name = table.split(".")
+            if existing:
+                fixture += f"CREATE POLICY {policy} ON {table} FOR SELECT TO carr_backup USING (true);\n"
+            fixture += f"-- Name: {name}; Type: ROW SECURITY; Schema: {schema}; Owner: -\n"
+        filtered = subprocess.run(["awk", policy_filter.group(1)] if policy_filter else ["false"],
+                                  input=fixture, text=True, capture_output=True, check=False)
+        check(f"the generator preserves both backup policies exactly once (existing={existing})",
+              filtered.returncode == 0
+              and filtered.stdout.count("create policy carr_backup_full_read on ops.work_request") == 1
+              and filtered.stdout.count("create policy carr_backup_full_read_memory_item on public.memory_item") == 1
+              and filtered.stdout.count("if exists (select 1 from pg_roles") == 2)
 
     # The schema body installs deferred policy-epoch triggers before the
     # appended data seeds are restored.  The migration ledger arrives before

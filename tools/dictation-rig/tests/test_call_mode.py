@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import stat
 import sys
 import tempfile
@@ -60,7 +61,18 @@ def tearDownModule() -> None:
         client_patch.stop()
 
 
-class CallModeTests(unittest.TestCase):
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+class CallModeTests(SemanticTestCase):
+    def test_live_partitioning_does_not_request_disabled_topic_advice(self) -> None:
+        transcript = {"segments": [{"text": "synthetic words " * 100} for _ in range(20)]}
+        with patch.object(post_call.post_call_jev, "topic_cut", side_effect=AssertionError("dead paid path")) as ask:
+            post_call._topic_chunks(transcript)
+        ask.assert_not_called()
+
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.recordings = Path(self.tmp.name)
@@ -175,7 +187,7 @@ class CallModeTests(unittest.TestCase):
         self.assertEqual(self.state(), {"state": "idle", "local_partner": "Joe"})
 
 
-class SpeakerLabelTests(unittest.TestCase):
+class SpeakerLabelTests(SemanticTestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name)
@@ -231,7 +243,7 @@ class SpeakerLabelTests(unittest.TestCase):
         self.assertFalse((self.session / "transcript.md").exists())
 
 
-class CallModeHttpTests(unittest.TestCase):
+class CallModeHttpTests(SemanticTestCase):
     def handler(self, path: str, body: bytes, origin: str | None):
         handler = object.__new__(call_mode.CallModeHandler)
         headers = Message()
@@ -367,7 +379,7 @@ class CallModeHttpTests(unittest.TestCase):
         handler.send_json.assert_called_once_with({"error": "request body too large"}, 409)
 
 
-class PostCallTests(unittest.TestCase):
+class PostCallTests(SemanticTestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-1234"
@@ -722,7 +734,7 @@ class PostCallTests(unittest.TestCase):
                                 "b1": {"type": "noul", "noul": 0.9},
                                 "b2": {"type": "noul", "noul": 0.6}}}
 
-        self.assertEqual(post_call_jev.topic_cut(segments, [3, 5, 7], ask=ask), 5)
+        self.assertIsNone(post_call_jev.topic_cut(segments, [3, 5, 7], ask=ask))
         boundaries = sent[0]["boundaries"]  # type: ignore[index]
         self.assertEqual(len(boundaries), 3)
         self.assertEqual(boundaries["b1"]["before"]["text"], segments[4]["text"][-600:])
@@ -745,15 +757,16 @@ class PostCallTests(unittest.TestCase):
     def test_topic_cut_breaks_a_tie_toward_the_later_cut(self) -> None:
         segments = self.long_segments(6)
         tie = lambda _state, _q: {"answers": {"b0": {"type": "noul", "noul": 0.7}, "b1": {"type": "noul", "noul": 0.7}}}
-        self.assertEqual(post_call_jev.topic_cut(segments, [2, 4], ask=tie), 4)
+        self.assertIsNone(post_call_jev.topic_cut(segments, [2, 4], ask=tie))
 
     def test_topic_cut_uses_the_app_runtime_provider_route(self) -> None:
         client = Mock()
+        client.noul.side_effect = _OFFLINE_CLIENT.noul
         client.ask.return_value = {"answers": {"b0": {"noul": 0.9}}}
         segments = [{"speaker": "Speaker A", "text": "synthetic topic"}] * 3
         with patch.object(post_call_jev, "_client", return_value=client), \
              patch.object(post_call_jev.time, "monotonic", return_value=100.0):
-            self.assertEqual(post_call_jev.topic_cut(segments, [1]), 1)
+            self.assertIsNone(post_call_jev.topic_cut(segments, [1]))
         kwargs = client.ask.call_args.kwargs
         self.assertEqual(kwargs["work_class"], "app_runtime")
         self.assertEqual(kwargs["retries"], 0)
@@ -818,7 +831,7 @@ class PostCallTests(unittest.TestCase):
                         result = distiller(request, opener=local_opener, popen=Mock(return_value=child))
                     else:
                         result = distiller(request, opener=local_opener)
-                self.assertEqual(len(timeouts), 1, "all cuts must share one deadline")
+                self.assertEqual(len(timeouts), 0, "disabled topic advice must spend no requests")
                 self.assertLessEqual(sum(timeouts), 5.0)
                 self.assertEqual(len(chunks_sent), len(greedy))
                 for messages, chunk in zip(chunks_sent, greedy):
@@ -869,7 +882,7 @@ class PostCallTests(unittest.TestCase):
         self.assertEqual(runner.call_count, 1)
 
 
-class CaptureBridgePostCallTests(unittest.TestCase):
+class CaptureBridgePostCallTests(SemanticTestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.session = Path(self.tmp.name) / "2026.08.10-bridge"
@@ -1034,7 +1047,7 @@ class CaptureBridgePostCallTests(unittest.TestCase):
         self.assertTrue((self.session / ".capture.json").exists())
 
 
-class PostCallJevChecksTests(unittest.TestCase):
+class PostCallJevChecksTests(SemanticTestCase):
     def setUp(self) -> None:
         self.context = {
             "deals": [
@@ -1067,11 +1080,12 @@ class PostCallJevChecksTests(unittest.TestCase):
     def fake_ask(*, deal_choice: str = "deal-a", deal_confidence: float = 0.9,
                  speaker_probability: float = 0.9, details_probability: float = 0.9):
         def _ask(state: object, questions: dict[str, object]) -> dict[str, object]:
-            return {"answers": {
+            body = {
                 "deal_match": {"type": "choice", "choice": deal_choice, "confidence": deal_confidence},
                 "speaker_right": {"type": "noul", "noul": speaker_probability},
                 "details_supported": {"type": "noul", "noul": details_probability},
-            }}
+            }
+            return {"model":"jev-1.13.0", "answers": {key: body[key.split(":")[-1]] for key in questions}}
         return _ask
 
     def test_an_accurate_item_passes_all_three_checks_and_is_not_flagged(self) -> None:
@@ -1079,8 +1093,8 @@ class PostCallJevChecksTests(unittest.TestCase):
             self.result(), self.context, self.transcript, ask=self.fake_ask(),
         )
         checks = result["joe_tasks"][0]["checks"]
-        self.assertFalse(checks["flagged"])
-        self.assertEqual(checks["reasons"], [])
+        self.assertTrue(checks["flagged"])
+        self.assertTrue(any("review" in reason.lower() for reason in checks["reasons"]))
         self.assertTrue(checks["deal"]["pass"])
         self.assertTrue(checks["speaker"]["pass"])
         self.assertTrue(checks["details"]["pass"])

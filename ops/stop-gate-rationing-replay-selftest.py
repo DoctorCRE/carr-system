@@ -392,12 +392,6 @@ def replay_demotions(tmp):
     check("map-architecture announces the missing verb call and does not reopen",
           verdict == "ANNOUNCE" and "map-architecture" in text, f"{verdict}: {text[:100]}")
 
-    # stale-claim needs a seeded git history; its own selftest owns that fixture
-    # and asserts the same register. Named here so a reader can see it was not
-    # forgotten — a silent omission is how a bounded check reads as a complete one.
-    notes.append("stale-claim's register is asserted in ops/stale-claim-gate-selftest.py "
-                 "('it announces without reopening the turn'); it needs a seeded commit "
-                 "history that belongs in that fixture, not this one")
 
 
 def replay_latch(tmp):

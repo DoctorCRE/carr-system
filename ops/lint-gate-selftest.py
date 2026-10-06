@@ -18,8 +18,7 @@ What it holds:
     traceback and no lint message.
   * the post-write Jev review receipt is schema jev-post-write-review/v2, carries
     exactly POSTWRITE_RECEIPT_KEYS, passes validate_postwrite_receipt, and its
-    findings report effect "required" -- never the retired "advisory_only" or
-    "shadow_would_block_advisory_only" (PR #1224).
+    uncalibrated findings report effect "advisory_only" and cannot block writes.
 """
 
 from __future__ import annotations
@@ -63,11 +62,11 @@ FAKE_CLIENT = '''
 import json, os
 def noul(instructions, true=None, false=None):
     return {"type": "noul", "instructions": instructions}
-def ask(state, questions, timeout=None, api_key=None):
+def ask(state, questions, timeout=None, api_key=None, **kwargs):
     cfg = json.loads(os.environ["LINT_GATE_FAKE_JEV"])
     if cfg.get("error"):
         raise TimeoutError("fake outage")
-    return {"model": "jev-stub", "answers": {
+    return {"model": "jev-1.13.0", "answers": {
         q: {"type": "noul", "noul": cfg["value"]} for q in questions}}
 '''
 SITECUSTOMIZE = '''
@@ -168,6 +167,7 @@ class HookFixture(unittest.TestCase):
             "HOME": str(self.home), "CARR_ROOT": str(self.carr),
             "CARR_HOOK_GUARD_LOG": str(self.guard_log),
             "PYTHONPATH": str(stub),
+            "CARR_JEV_SEMANTIC_CACHE": str(self.root / "semantic-cache.json"),
             "LINT_GATE_FAKE_CLIENT": str(stub / "typesafe_client.py"),
             "LINT_GATE_FAKE_JEV": json.dumps({"value": 0.1}),
         })
@@ -321,17 +321,17 @@ class PostWriteReceiptTests(HookFixture):
         self.assertTrue(validate_postwrite_receipt(receipt, repo=REPO), receipt)
         return receipt
 
-    def test_confident_findings_report_effect_required(self):
+    def test_confident_findings_report_effect_advisory(self):
         target = self.make_repo()
         out = self.spawn(self.write_payload(target),
                          LINT_GATE_FAKE_JEV=json.dumps({"value": 0.95}))
         receipt = self.only_receipt(out)
         self.assertEqual(receipt["status"], "reviewed")
-        self.assertEqual(receipt["models"], ["jev-stub"], "the stub, not a live call")
+        self.assertEqual(receipt["models"], ["jev-1.13.0"], "the stub, not a live call")
         self.assertEqual(receipt["paths"][0]["status"], "jev_reviewed")
         self.assertTrue(receipt["findings"])
         effects = {f["effect"] for f in receipt["findings"]}
-        self.assertEqual(effects, {"required"})
+        self.assertEqual(effects, {"advisory"})
         self.assertFalse(effects & RETIRED_EFFECTS)
 
     def test_below_threshold_is_reviewed_with_no_findings(self):
