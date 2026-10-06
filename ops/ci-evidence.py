@@ -30,10 +30,36 @@ def contract_digest(root=ROOT):
     return digest.hexdigest()
 
 
+def shards_complete(groups):
+    """True when every sharded class has all of its shards: 1..N, one N.
+
+    A group like "gates --shard 1/2" is HALF a class. Reusing PR evidence needs
+    the whole class to have run, so a workflow (or a receipt) naming only some of
+    a class's shards must never count as that class having run. Unsharded groups
+    are untouched; a malformed --shard group is incomplete, never ignored."""
+    shards = {}
+    for group in groups:
+        if '--shard' not in group:
+            continue
+        match = re.fullmatch(r'(\w+) --shard (\d+)/(\d+)', group)
+        if not match:
+            return False
+        shards.setdefault(match.group(1), []).append((int(match.group(2)), int(match.group(3))))
+    for parts in shards.values():
+        totals = {total for _, total in parts}
+        if len(totals) != 1 or sorted(index for index, _ in parts) != list(range(1, totals.pop() + 1)):
+            return False
+    return True
+
+
 def can_reuse(run, jobs, receipt, *, tree, head_tree, tested_tree, contract, groups):
+    # The gates class runs as shards ("gates --shard i/N"), each its own job named
+    # 'ops/ci.sh --strict --only gates --shard i/N'. Requiring every group's job
+    # below therefore requires EVERY shard green; shards_complete() makes sure the
+    # list of groups itself is not missing one.
     required = {'ops/ci.sh --strict', *('ops/ci.sh --strict --only ' + g for g in groups)}
     green = {j.get('name') for j in jobs if j.get('conclusion') == 'success'}
-    return (run.get('name') == 'CI' and run.get('event') == 'pull_request'
+    return (shards_complete(groups) and run.get('name') == 'CI' and run.get('event') == 'pull_request'
             and run.get('status') == 'completed' and run.get('conclusion') == 'success'
             and required <= green and receipt.get('schema') == 'carr-ci-evidence/v1'
             and receipt.get('run_id') == run.get('id')

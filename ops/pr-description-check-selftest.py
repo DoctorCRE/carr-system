@@ -28,7 +28,8 @@ class PRDescriptionCheckTest(unittest.TestCase):
         steps = workflow["jobs"]["classes"]["steps"]
         step = next(step for step in steps if step.get("run") == "python3 ops/pr-description-check.py")
         self.assertIn("github.event_name == 'pull_request'", step["if"])
-        self.assertIn("matrix.classes == 'gates'", step["if"])
+        # gates is sharded; the check runs once, on the first shard.
+        self.assertIn("startsWith(matrix.classes, 'gates --shard 1/')", step["if"])
 
     def test_empty_and_template_only_fail(self):
         spec = importlib.util.spec_from_file_location("pr_description_check", SCRIPT)

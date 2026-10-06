@@ -49,7 +49,8 @@ jobs:
       matrix:
         classes:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
-          - "gates"
+          - "gates --shard 1/2"
+          - "gates --shard 2/2"
           - "replay"
           - "migration"
     timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
@@ -167,7 +168,28 @@ jobs:
           # next step uploads it when the class fails, so a stale snapshot is
           # one download and one commit away from fixed.
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
-        run: ops/ci.sh --strict --only "${{ matrix.classes }}"
+          # The gates class writes its per-test seconds here; the upload step below
+          # ships them and ops/ci-gate-durations-refresh.py turns them into the
+          # durations file the next run's shard split is balanced from.
+          CARR_CI_TIMINGS_DIR: ${{ runner.temp }}/ci-timings
+        # A matrix entry is "<classes>" or "gates --shard i/N". ops/ci.sh takes the
+        # shard as its own flag, so the entry is split here, never re-parsed there.
+        run: |
+          group="${{ matrix.classes }}"
+          shard=""
+          case "$group" in
+            *" --shard "*) shard="${group##* --shard }"; group="${group%% --shard *}" ;;
+          esac
+          ops/ci.sh --strict --only "$group" ${shard:+--shard "$shard"}
+      - name: Upload this shard's per-test timings
+        if: ${{ always() && contains(matrix.classes, 'gates') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-gate-timings-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/ci-timings
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
       - name: Upload the migration shadow's regenerated db/schema.sql
         if: ${{ failure() && contains(matrix.classes, 'migration') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

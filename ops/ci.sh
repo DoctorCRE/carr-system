@@ -55,6 +55,15 @@ fi
 #   ops/ci.sh --only secret         # one class, by name
 #   ops/ci.sh --only secret,pushfloor   # several, comma- or space-separated
 #   ops/ci.sh --list                # the classes and what each one is the gate for
+#   ops/ci.sh --only gates --shard 2/3  # shard 2 of 3 of the gates class (hosted CI)
+#
+# --shard i/N SPLITS ONLY THE gates CLASS, balanced by measured selftest
+# durations. ops/ci-gate-shards.py decides the split (greedy longest-processing-
+# time over ops/config/ci-gate-durations.v1.json, which CI itself refreshes) and
+# every selftest runs in exactly one shard; without --shard, or with 1/1, the
+# class is exactly what it always was. CARR_CI_TIMINGS_DIR=<dir> makes the gates
+# class write its per-test wall seconds there, which is what the durations file
+# is regenerated from (ops/ci-gate-durations-refresh.py).
 #
 # CARR_CI_RANGE=<A>..<B> narrows the scopeable classes to the commits in that
 # range instead of the whole repository. ops/githooks/pre-push sets it to the
@@ -97,6 +106,7 @@ CI_TIMEOUT_HELPER="$REPO/bin/with-timeout.py"
 STRICT=0
 ONLY=""
 RESULT_FILE=""
+SHARD=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --strict) STRICT=1 ;;
@@ -106,6 +116,7 @@ while [ "$#" -gt 0 ]; do
     # cheaper suite of its own that could then drift from the one CI runs.
     # Commas are translated to spaces so both spellings work.
     --only)   ONLY="$ONLY $(echo "${2:-}" | tr ',' ' ')"; shift ;;
+    --shard)  SHARD="${2:?--shard needs i/N, e.g. 1/2}"; shift ;;
     --result-file) RESULT_FILE="${2:?--result-file needs a path}"; shift ;;
     --pr-body-file) export CARR_PR_BODY_FILE="${2:?--pr-body-file needs a path}"; shift ;;
     --list)   LIST=1 ;;
@@ -114,6 +125,18 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+
+# --shard is refused unless it is well formed AND the gates class is among those
+# selected: a shard of nothing would run zero selftests and report green, the
+# silent-success shape this file's selftest exists to catch.
+if [ -n "$SHARD" ]; then
+  "$PY" "$REPO/ops/ci-gate-shards.py" select --shard "$SHARD" </dev/null >/dev/null \
+    || { echo "ci.sh: --shard $SHARD is not a valid i/N (1 <= i <= N)" >&2; exit 64; }
+  case " $ONLY " in
+    "  "|*" gates "*) ;;
+    *) echo "ci.sh: --shard splits the gates class; select it with --only gates" >&2; exit 64 ;;
+  esac
+fi
 
 # Class -> the doctrine seeded-failure class it is the gate for.
 # These names are the vocabulary the acceptance test uses, so a seeded defect can
@@ -634,9 +657,41 @@ PYEOF
       printf '        \033[33mnot run\033[0m  %s — %s\n' "$base" "$why" >&2
       continue
     fi
-    count=$((count+1))
     eligible="$eligible $t"
   done
+  # SHELL TESTS are enumerated here too, so ONE assignment covers every suite in
+  # the class and the exclusion notice prints once. They run after the pool.
+  local eligible_sh=""
+  for t in tools/test-*.sh tools/test_*.sh; do
+    [ -f "$t" ] || continue
+    local sbase; sbase="$(basename "$t")"
+    local swhy; swhy="$(excluded_reason "$sbase")"
+    if [ -n "$swhy" ]; then
+      skiplist="$skiplist $sbase"
+      printf '        \033[33mnot run\033[0m  %s — %s\n' "$sbase" "$swhy" >&2
+      continue
+    fi
+    eligible_sh="$eligible_sh $t"
+  done
+  # SHARDING. Unset means the whole class, byte for byte today's behaviour.
+  # Otherwise ONE call to ops/ci-gate-shards.py picks this shard's suites out of
+  # the full list (plus the class's static-checks pseudo-unit, so no shard is
+  # silently the one that also carries them). If that call fails the class FAILS:
+  # running everything or nothing on a broken split would both be silent.
+  local static_here=1
+  if [ -n "$SHARD" ]; then
+    local picked
+    picked="$(printf '%s\n' $eligible $eligible_sh "ci:gates-static-checks" \
+      | "$PY" ops/ci-gate-shards.py select --shard "$SHARD")" \
+      || { hard gates "shard $SHARD: assignment failed"; return; }
+    picked=" $(echo $picked) "
+    local kept="" kept_sh=""
+    for t in $eligible; do case "$picked" in *" $t "*) kept="$kept $t" ;; esac; done
+    for t in $eligible_sh; do case "$picked" in *" $t "*) kept_sh="$kept_sh $t" ;; esac; done
+    eligible="$kept"; eligible_sh="$kept_sh"
+    case "$picked" in *" ci:gates-static-checks "*) ;; *) static_here=0 ;; esac
+  fi
+  for t in $eligible $eligible_sh; do count=$((count+1)); done
   # THE POOLED CAP SCALES WITH THE POOL (2026-09-02). The 120s per-suite cap
   # was calibrated for a suite running alone; four suites sharing four hosted
   # vCPUs stretch wall time roughly by the pool width, and the first canary
@@ -650,7 +705,9 @@ PYEOF
   export CI_TIMEOUT_HELPER CI_SELFTEST_TIMEOUT_SECONDS LOGDIR PY pooled_timeout
   # -n1 with the path as $1, NOT -I{}: BSD xargs -I substitutes into the whole
   # script and refuses with "command line cannot be assembled, too long".
-  printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
+  # An empty shard must not reach xargs: GNU xargs runs the command once on empty
+  # input, which would execute bash with no path.
+  [ -n "$eligible" ] && printf '%s\n' $eligible | xargs -P "${CARR_CI_GATE_JOBS:-4}" -n1 bash -c '
     b="$(basename "$1")"
     "$PY" ops/ci-quarantine.py run --print-log --test "$1" --log "$LOGDIR/gate-$b.log" \
       --identity-file "$LOGDIR/source-identity.json" -- \
@@ -696,16 +753,8 @@ PYEOF
   # Python wrapper around them would only shell out to the same script.
   # Everything else is identical to the loop above: same exclusion scope, same
   # counting, same captured log and the same fail_tail print on failure.
-  if [ "$gates_timed_out" -eq 0 ]; then for t in tools/test-*.sh tools/test_*.sh; do
-    [ -f "$t" ] || continue
+  if [ "$gates_timed_out" -eq 0 ]; then for t in $eligible_sh; do
     local sbase; sbase="$(basename "$t")"
-    local swhy; swhy="$(excluded_reason "$sbase")"
-    if [ -n "$swhy" ]; then
-      skiplist="$skiplist $sbase"
-      printf '        \033[33mnot run\033[0m  %s — %s\n' "$sbase" "$swhy" >&2
-      continue
-    fi
-    count=$((count+1))
     "$PY" ops/ci-quarantine.py run --print-log --test "$t" --log "$LOGDIR/gate-$sbase.log" \
       --identity-file "$LOGDIR/source-identity.json" -- \
       "$PY" "$CI_TIMEOUT_HELPER" "$CI_SELFTEST_TIMEOUT_SECONDS" "$t"
@@ -738,6 +787,13 @@ PYEOF
   # THIS IS THE ONLY LAYER THAT CAN CATCH THAT OVERWRITE. The pre-commit
   # co-change check cannot: the clobber happens inside GitHub's merge, where no
   # local hook runs.
+  #
+  # SHARDING: this block and the inventory loop below are repository-wide, not
+  # per-suite, so exactly ONE shard runs them (the one ops/ci-gate-shards.py
+  # assigned the static-checks unit to). The tree-mutation check after them runs
+  # in every shard, because every shard's selftests can move its own tree.
+  local static_t0; static_t0="$(date +%s)"
+  if [ "$static_here" -eq 1 ]; then
   run_quiet "$LOGDIR/gate-integrity.log" "$PY" hooks/gate-integrity.py --strict \
     || { inherited_abort gate-integrity "$PY" hooks/gate-integrity.py --strict
          failures="$failures gate-integrity"; tail -12 "$LOGDIR/gate-integrity.log" >&2; }
@@ -860,6 +916,9 @@ PYEOF
       || { inherited_abort "$inv" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"}
            failures="$failures $inv"; tail -12 "$LOGDIR/gate-$inv.log" >&2; }
   done
+  fi
+  local static_secs=""
+  [ "$static_here" -eq 1 ] && static_secs="$(( $(date +%s) - static_t0 ))"
 
   # Did the suite move the tree it was invoked in? See tree_fingerprint() above.
   if [ "$(tree_fingerprint)" != "$tree_before" ]; then
@@ -877,6 +936,20 @@ PYEOF
     } >&2
   fi
 
+  # THE TIMINGS THE NEXT SPLIT IS BUILT FROM. Written whether or not the class
+  # passed (a failing run still measured its suites), and never able to change
+  # the verdict: a failure here is announced and ignored.
+  if [ -n "${CARR_CI_TIMINGS_DIR:-}" ]; then
+    printf '%s\n' $eligible $eligible_sh \
+      | "$PY" ops/ci-gate-shards.py record --logdir "$LOGDIR" \
+          --out "$CARR_CI_TIMINGS_DIR/gates-timings-$(printf '%s' "${SHARD:-all}" | tr '/' '-').json" \
+          ${static_secs:+--static-seconds "$static_secs"} \
+      || echo "ci.sh: gates timings were not written (verdict unaffected)" >&2
+  fi
+
+  # What this run covered, said in the summary line. Unsharded keeps today's text.
+  local scope_note="selftest suites + baseline integrity"
+  [ -n "$SHARD" ] && { scope_note="selftest suites (shard $SHARD)"; [ "$static_here" -eq 1 ] && scope_note="$scope_note + baseline integrity"; }
   if [ -n "$failures" ]; then
     bad gates "failed:$failures"
     gates_name_the_move $failures
@@ -887,7 +960,7 @@ PYEOF
     # bounded check gets mistaken for a complete one.
     ok gates "$count suites + baseline integrity · NOT RUN:$skiplist"
   else
-    ok gates "$count selftest suites + baseline integrity"
+    ok gates "$count $scope_note"
   fi
 }
 

@@ -34,6 +34,7 @@ purpose, to the exact artifact that proved why.
 
 import atexit
 import contextlib
+import importlib.util
 import inspect
 import json
 import os
@@ -1373,14 +1374,23 @@ def test_hosted_ci_runs_classes_in_parallel_behind_one_required_context():
         job = jobs.get(n) or {}
         groups = ((job.get("strategy") or {}).get("matrix") or {}).get("classes") or []
         for g in groups:
-            ran.extend(str(g).replace(",", " ").split())
+            # "gates --shard i/N" is one shard of a class; the class counts once
+            # per shard, and ops/ci-evidence.py shards_complete() (checked below)
+            # proves the shards are all there.
+            ran.extend(str(g).split(" --shard ")[0].replace(",", " ").split())
         run_lines = " ".join(str(st.get("run", "")) for st in job.get("steps", []))
         check(f"class job '{n}' runs ops/ci.sh --strict --only its matrix classes",
               "ops/ci.sh --strict --only" in run_lines and "matrix.classes" in run_lines,
               run_lines[-160:])
-    check("every CLASS_ORDER class runs in exactly one class job",
-          sorted(ran) == sorted(classes) and len(ran) == len(set(ran)),
+    shard_free = [c for c in ran if c != "gates"]
+    check("every CLASS_ORDER class runs in exactly one class job (gates once per shard)",
+          sorted(set(ran)) == sorted(classes) and len(shard_free) == len(set(shard_free)),
           {"ran": ran, "order": classes})
+    ev = importlib.util.spec_from_file_location("ci_evidence_for_selftest", REPO / "ops" / "ci-evidence.py")
+    ev_mod = importlib.util.module_from_spec(ev)
+    ev.loader.exec_module(ev_mod)
+    check("a sharded class lists every one of its shards",
+          ev_mod.shards_complete(ev_mod.class_groups()), ev_mod.class_groups())
 
 
 def test_hosted_migration_budget_covers_observed_acceptance_runtime():

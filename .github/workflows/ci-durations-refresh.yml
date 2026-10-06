@@ -1,0 +1,77 @@
+# doctrine: engineering-workflow-sop
+# Keeps the gates shard split balanced with no human editing a list.
+#
+# Every hosted gates job uploads its per-test seconds (ci-gate-timings-*). Weekly,
+# or by hand, this job takes the last green main-canary runs, writes the median per
+# test into ops/config/ci-gate-durations.v1.json and opens a pull request when that
+# file changed. ops/ci-gate-shards.py reads the file; a stale or missing one only
+# makes the split less even, never smaller, so this job being late is harmless.
+#
+# GITHUB_TOKEN-authored pushes do not start pull_request workflows, so the last step
+# dispatches ci.yml on the refresh branch. The required context `ops/ci.sh --strict`
+# is reported by that run's check runs on the same commit. By hand:
+#   gh workflow run ci-durations-refresh.yml
+# or, with no GitHub at all: ops/ci-gate-durations-refresh.py --from-dir <timings>
+name: CI gate durations refresh
+
+on:
+  schedule:
+    - cron: "40 7 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-durations-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  refresh:
+    name: Refresh gates durations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - name: Regenerate the durations file from recent canary timings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ops/ci-gate-durations-refresh.py --runs 5
+      - name: Open a pull request when the file changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          file=ops/config/ci-gate-durations.v1.json
+          if git diff --quiet -- "$file"; then
+            echo "durations unchanged; nothing to propose"
+            exit 0
+          fi
+          branch=ci/gate-durations-refresh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add "$file"
+          git commit -m "Refresh gates shard durations from recent main canary runs"
+          git push --force origin "$branch"
+          cat > "$RUNNER_TEMP/body.md" <<'EOF'
+          Regenerates ops/config/ci-gate-durations.v1.json, the measured per-test
+          seconds that ops/ci-gate-shards.py uses to balance the gates shards.
+
+          The values are the median over the last green main-canary runs, produced by
+          ops/ci-gate-durations-refresh.py from the ci-gate-timings-* artifacts. No test
+          is added or dropped by hand: tests that no longer exist in the tree are
+          pruned. A bad file can only unbalance the split; every test still runs in
+          exactly one shard.
+          EOF
+          gh pr create --base main --head "$branch" \
+            --title "Refresh gates shard durations" --body-file "$RUNNER_TEMP/body.md" \
+            || echo "a refresh pull request is already open; its branch was updated"
+          gh workflow run ci.yml --ref "$branch"

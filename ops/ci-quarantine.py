@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = REPO / 'ops/config/ci-quarantine.json'
@@ -64,8 +65,13 @@ def run(args):
     log = Path(args.log)
     log.parent.mkdir(parents=True, exist_ok=True)
     identity = json.loads(Path(args.identity_file).read_text()) if args.identity_file else source_identity(args.repo)
+    started = time.monotonic()
     with log.open('w') as output:
         first = subprocess.run(args.command, stdout=output, stderr=subprocess.STDOUT).returncode
+    # Wall seconds of the first attempt, for the gates shard balancer
+    # (ops/ci-gate-shards.py record). A side file, so the receipt shape that
+    # ci-flakes.py parses does not change.
+    Path(str(log) + '.secs').write_text(f'{time.monotonic() - started:.3f}\n')
     status = 'passed' if first == 0 else 'failed'
     effective = first
     rerun = None

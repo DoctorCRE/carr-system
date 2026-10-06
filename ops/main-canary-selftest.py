@@ -156,8 +156,7 @@ def test_role_migration_fixtures_have_postgresql_17_server_binaries():
         check(f"{path.name} exposes PG17 binaries to the shared discovery helper",
               'echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"' in y)
         check(f"{path.name} provisions PG17 before check execution",
-              0 <= install < y.find("run: ops/ci.sh --strict") if path == CI_YML else
-              0 <= install < y.find("run: ops/ci.sh --strict"))
+              0 <= install < y.find('ops/ci.sh --strict --only "$group"'))
 
 
 def test_a_red_canary_stays_red_and_names_main():
