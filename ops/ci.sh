@@ -715,6 +715,20 @@ PYEOF
       >"$LOGDIR/gate-$b.report" 2>&1
     echo $? >"$LOGDIR/gate-$b.rc"
   ' _
+  # THE TIMINGS THE NEXT SPLIT IS BUILT FROM. Written as soon as the pool has
+  # finished, BEFORE any verdict is read: a failing suite can end this run early
+  # (an inherited-from-main abort exits the script), and a failing run still
+  # measured its suites. It can never change the verdict: a failure here is
+  # announced and ignored. Called again at the end to add the static-checks time.
+  write_gate_timings() {  # write_gate_timings [static_seconds]
+    [ -n "${CARR_CI_TIMINGS_DIR:-}" ] || return 0
+    printf '%s\n' $eligible $eligible_sh \
+      | "$PY" ops/ci-gate-shards.py record --logdir "$LOGDIR" \
+          --out "$CARR_CI_TIMINGS_DIR/gates-timings-$(printf '%s' "${SHARD:-all}" | tr '/' '-').json" \
+          ${1:+--static-seconds "$1"} \
+      || echo "ci.sh: gates timings were not written (verdict unaffected)" >&2
+  }
+  write_gate_timings
   local grc
   for t in $eligible; do
     base="$(basename "$t")"
@@ -936,16 +950,9 @@ PYEOF
     } >&2
   fi
 
-  # THE TIMINGS THE NEXT SPLIT IS BUILT FROM. Written whether or not the class
-  # passed (a failing run still measured its suites), and never able to change
-  # the verdict: a failure here is announced and ignored.
-  if [ -n "${CARR_CI_TIMINGS_DIR:-}" ]; then
-    printf '%s\n' $eligible $eligible_sh \
-      | "$PY" ops/ci-gate-shards.py record --logdir "$LOGDIR" \
-          --out "$CARR_CI_TIMINGS_DIR/gates-timings-$(printf '%s' "${SHARD:-all}" | tr '/' '-').json" \
-          ${static_secs:+--static-seconds "$static_secs"} \
-      || echo "ci.sh: gates timings were not written (verdict unaffected)" >&2
-  fi
+  # Again, now that the static checks are timed too (the first write, right after
+  # the pool, already covered every suite).
+  write_gate_timings "$static_secs"
 
   # What this run covered, said in the summary line. Unsharded keeps today's text.
   local scope_note="selftest suites + baseline integrity"
