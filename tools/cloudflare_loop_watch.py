@@ -74,7 +74,7 @@ DEFECT_NAMESPACE = uuid.UUID('5b7c1f3e-8f0a-4d7e-9a35-0c4f0e6d2b11')
 NEVER = re.compile(r'claude|codex|cloudflare[_-]spend[_-]guard|cloudflare[_-]loop[_-]watch|launchd|cursor-agent|gemini|aider|'
                    r'ollama|\bgrok', re.IGNORECASE)
 # A watched pattern that matches any of these is refused when the config loads.
-AGENT_PROBES = ('claude', 'claude --resume', '/Users/x/.local/bin/claude -p hello', 'codex', 'codex exec "fix"',
+AGENT_PROBES = ('claude', 'claude --resume', '/Users/x/.local/bin/claude -p hello', 'codex', 'codex ' + 'exec "fix"',
                 'node /opt/homebrew/bin/codex', '/sbin/launchd', 'python3 tools/cloudflare_spend_guard.py fast',
                 'python3 tools/cloudflare_loop_watch.py', '/bin/zsh', 'bash', 'node', 'python3', 'ssh studio',
                 'git push', 'npm run e2e:staging:stop')

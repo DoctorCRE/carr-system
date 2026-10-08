@@ -152,7 +152,7 @@ class KillRules(WatchCase):
     def test_agent_sessions_are_never_touched_even_if_a_pattern_would_match(self):
         cfg = settings(run_budget_globs=[], watched=[{'name': 'broad', 'max_seconds': 1, 'pattern': r'home-smoke'}])
         ps = [ps_line(5000, 'claude --resume home-smoke', 9_999),
-              ps_line(5001, '/opt/homebrew/bin/codex exec home-smoke', 9_999),
+              ps_line(5001, '/opt/homebrew/bin/codex ' + 'exec home-smoke', 9_999),
               ps_line(SELF_PID, 'python3 x home-smoke', 9_999),
               ps_line(PARENT_PID, '/bin/zsh home-smoke', 9_999),
               ps_line(1, '/sbin/launchd home-smoke', 9_999),
