@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "_note": "The ONLY source of the Cloudflare spend guard's thresholds and targets (tools/cloudflare_spend_guard.py). There are no environment or command-line overrides by design. Cloudflare has no native hard spending cap: budget alerts 'are informational only. They do not pause or cap usage' (https://developers.cloudflare.com/billing/manage/budget-alerts/), so this guard is the kill switch.",
+  "account_id": "12ccca77eb49142a6be8eb84c0d6a3a0",
+  "token_name": "CLOUDFLARE_SPEND_GUARD_TOKEN",
+  "state_dir": "~/.local/state/carr/cloudflare-spend-guard",
+  "request_timeout_seconds": 20,
+  "max_usage_age_hours": 54,
+  "e2e_max_evaluation_age_hours": 30,
+  "thresholds": {
+    "warn_allowance_fraction": 0.5,
+    "stop_allowance_fraction": 0.8,
+    "stop_metered_usd_above": 0
+  },
+  "staging_workers": ["doctorcre-app-staging", "carr-mcp-staging"],
+  "production_workers": ["carr-mcp", "doctorcre-app"],
+  "stop_production_workers": false,
+  "_production_note": "Report-only by default; Joe decides whether to turn this on. Even when on, disabling workers.dev does not stop production traffic: carr-mcp serves api.doctorcre.com and other custom domains, and doctorcre-app has workers_dev=false. A real production stop would need a different control.",
+  "_allowances_note": "Included per billing period, from the cited pricing pages. service_names must match the Billable Usage API's ServiceName exactly. Only 'Workers Standard' is taken from Cloudflare's published schema example; the other names are unverified until the first live read, which reports every unmapped service with usage as a WARN naming it. Copy those exact names here. A service with no allowance (Stream minutes delivered, Images delivered/stored) is covered by the metered-dollar rule instead.",
+  "allowances": [
+    {"key": "workers-requests", "service_names": ["Workers Standard"], "consumed_unit": "", "included_per_period": 10000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "workers-cpu-ms", "service_names": [], "consumed_unit": "", "included_per_period": 30000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "kv-reads", "service_names": [], "consumed_unit": "", "included_per_period": 10000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "kv-writes", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "kv-deletes", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "kv-lists", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "durable-objects-requests", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "durable-objects-duration-gb-s", "service_names": [], "consumed_unit": "", "included_per_period": 400000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
+    {"key": "r2-storage-gb-month", "service_names": [], "consumed_unit": "", "included_per_period": 10, "source": "https://developers.cloudflare.com/r2/pricing/"},
+    {"key": "r2-class-a", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/r2/pricing/"},
+    {"key": "r2-class-b", "service_names": [], "consumed_unit": "", "included_per_period": 10000000, "source": "https://developers.cloudflare.com/r2/pricing/"}
+  ],
+  "sources": {
+    "billable_usage": "GET /accounts/{account_id}/billable-usage and /billable-usage/info (Version 1, Alpha), https://github.com/cloudflare/api-schemas/blob/main/openapi.json",
+    "workers_subdomain": "GET/POST /accounts/{account_id}/workers/scripts/{script_name}/subdomain, same schema; token group Workers Scripts Write",
+    "billing_cycle": "Monthly included limits reset on the subscription renewal date, https://developers.cloudflare.com/workers/platform/pricing/"
+  }
+}
