@@ -1271,6 +1271,7 @@ def _calendar_prebrief_unknowns(now, path=CALENDAR_PREBRIEF_LAST_RUN):
 PROVISIONING_PENDING = {
     "production_uptime": "carr-uptime monitor unreachable (Worker/secrets not provisioned)",
     "system_costs": "billing readers unavailable (cost collector not provisioned)",
+    "cloudflare_spend": "Cloudflare spend guard not yet run (token and schedule held for review)",
 }
 
 
@@ -1346,6 +1347,24 @@ def _seat_health_rows():
     except (OSError, ValueError):
         report = {}
     return health_rows(report)
+
+
+def _cloudflare_spend_row():
+    """(line, failed, not_run) from the Cloudflare spend guard's local receipt; no network.
+
+    A guard that has never run is provisioning-pending (soft); a STOP, RUNAWAY or
+    UNKNOWN it did report is hard."""
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "cloudflare_spend_guard", os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                   "cloudflare_spend_guard.py"))
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        return guard.health_row(guard.load_config())
+    except Exception as exc:
+        return (f"UNKNOWN cloudflare spend · health row unavailable ({type(exc).__name__}) · on breach: owner joe "
+                "· fix: restore tools/cloudflare_spend_guard.py · verify: rerun health "
+                "· auto-clear: next readable receipt"), True, False
 
 
 def _tailscale_row():
@@ -1993,6 +2012,13 @@ def _canonical_health():
             _unprovisioned = ("production_uptime" in PROVISIONING_PENDING
                               and "monitor unreachable" in line)
             rc = _red("production_uptime", line, subject="carr-uptime", hard_error=not _unprovisioned)
+
+    if CANONICAL_SECTION == "all" and not CANONICAL_FIXTURE:
+        line, failed, not_run = _cloudflare_spend_row()
+        print("  " + line)
+        if failed:
+            rc = _red("cloudflare_spend", line, subject="cloudflare-account",
+                      hard_error=not (not_run and "cloudflare_spend" in PROVISIONING_PENDING))
 
     if CANONICAL_SECTION in ("all", "tailscale"):
         try:

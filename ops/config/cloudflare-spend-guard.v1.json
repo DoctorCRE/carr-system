@@ -7,32 +7,229 @@
   "request_timeout_seconds": 20,
   "max_usage_age_hours": 54,
   "e2e_max_evaluation_age_hours": 30,
+  "loop_watch_heartbeat_stale_seconds": 300,
   "thresholds": {
     "warn_allowance_fraction": 0.5,
     "stop_allowance_fraction": 0.8,
     "stop_metered_usd_above": 0
   },
-  "staging_workers": ["doctorcre-app-staging", "carr-mcp-staging"],
-  "production_workers": ["carr-mcp", "doctorcre-app"],
+  "staging_workers": [
+    "doctorcre-app-staging",
+    "carr-mcp-staging"
+  ],
+  "production_workers": [
+    "carr-mcp",
+    "doctorcre-app"
+  ],
   "stop_production_workers": false,
   "_production_note": "Report-only by default; Joe decides whether to turn this on. Even when on, disabling workers.dev does not stop production traffic: carr-mcp serves api.doctorcre.com and other custom domains, and doctorcre-app has workers_dev=false. A real production stop would need a different control.",
-  "_allowances_note": "Included per billing period, from the cited pricing pages. service_names must match the Billable Usage API's ServiceName exactly. Only 'Workers Standard' is taken from Cloudflare's published schema example; the other names are unverified until the first live read, which reports every unmapped service with usage as a WARN naming it. Copy those exact names here. A service with no allowance (Stream minutes delivered, Images delivered/stored) is covered by the metered-dollar rule instead.",
+  "_allowances_note": "Included per billing period, from the cited pricing pages. service_names must match the Billable Usage API's ServiceName exactly. Only 'Workers Standard' is taken from Cloudflare's published schema example; the other names are unverified until the first live read. A service with usage that no allowance maps is a STOP (fail closed), so run `./run.sh cloudflare-spend-guard map-services` once the token exists and copy the exact names here before activating. A service with no allowance (Stream minutes delivered, Images delivered/stored) is covered by the metered-dollar rule.",
   "allowances": [
-    {"key": "workers-requests", "service_names": ["Workers Standard"], "consumed_unit": "", "included_per_period": 10000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "workers-cpu-ms", "service_names": [], "consumed_unit": "", "included_per_period": 30000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "kv-reads", "service_names": [], "consumed_unit": "", "included_per_period": 10000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "kv-writes", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "kv-deletes", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "kv-lists", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "durable-objects-requests", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "durable-objects-duration-gb-s", "service_names": [], "consumed_unit": "", "included_per_period": 400000, "source": "https://developers.cloudflare.com/workers/platform/pricing/"},
-    {"key": "r2-storage-gb-month", "service_names": [], "consumed_unit": "", "included_per_period": 10, "source": "https://developers.cloudflare.com/r2/pricing/"},
-    {"key": "r2-class-a", "service_names": [], "consumed_unit": "", "included_per_period": 1000000, "source": "https://developers.cloudflare.com/r2/pricing/"},
-    {"key": "r2-class-b", "service_names": [], "consumed_unit": "", "included_per_period": 10000000, "source": "https://developers.cloudflare.com/r2/pricing/"}
+    {
+      "key": "workers-requests",
+      "service_names": [
+        "Workers Standard"
+      ],
+      "consumed_unit": "",
+      "included_per_period": 10000000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "workers-cpu-ms",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 30000000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "kv-reads",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 10000000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "kv-writes",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 1000000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "kv-deletes",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 1000000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "kv-lists",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 1000000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "durable-objects-requests",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 1000000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "durable-objects-duration-gb-s",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 400000,
+      "source": "https://developers.cloudflare.com/workers/platform/pricing/"
+    },
+    {
+      "key": "r2-storage-gb-month",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 10,
+      "source": "https://developers.cloudflare.com/r2/pricing/"
+    },
+    {
+      "key": "r2-class-a",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 1000000,
+      "source": "https://developers.cloudflare.com/r2/pricing/"
+    },
+    {
+      "key": "r2-class-b",
+      "service_names": [],
+      "consumed_unit": "",
+      "included_per_period": 10000000,
+      "source": "https://developers.cloudflare.com/r2/pricing/"
+    }
   ],
+  "fast_path": {
+    "_note": "The 15-minute fast path (`fast`): ONE POST to the GraphQL endpoint per run, one account scope, every node capped at query_limit rows and at most max_query_span_days per node. Docs: https://developers.cloudflare.com/analytics/graphql-api/limits/ (1 account per account-scoped query; 300 GraphQL queries per 5-minute window per user), https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/ (workersInvocationsAdaptive; 'up to one month of data'), https://developers.cloudflare.com/workers/observability/metrics-and-analytics/ ('maximum increments of one week'; 'a slight delay in aggregation and metrics delivery' in the last few minutes). cpu_time_unit 'microseconds' is the schema's description of cpuTimeP99 as reported secondhand; the docs read here state no unit, so confirm it by schema introspection before activation. The CPU figure is requests x cpuTimeP99 per hour bucket: conservative, but NOT a strict upper bound, because the slowest 1% of requests run above P99 by definition.",
+    "cpu_time_unit": "microseconds",
+    "max_query_span_days": 7,
+    "query_limit": 10000,
+    "burst_window_minutes": 15,
+    "burst_requests_staging": 20000,
+    "r2_class_b_actions": [
+      "HeadBucket",
+      "HeadObject",
+      "GetObject",
+      "UsageSummary",
+      "GetBucketEncryption",
+      "GetBucketLocation",
+      "GetBucketCors",
+      "GetBucketLifecycleConfiguration"
+    ],
+    "r2_free_actions": [
+      "DeleteObject",
+      "DeleteBucket",
+      "AbortMultipartUpload"
+    ],
+    "_r2_note": "From https://developers.cloudflare.com/r2/pricing/ (Class A/B/free operation lists). An R2 actionType in neither list counts as Class A, the smaller allowance. A KV actionType other than read/write/delete/list counts as a write.",
+    "allowances": [
+      {
+        "key": "workers-requests",
+        "metric": "workers.requests",
+        "included_per_period": 10000000
+      },
+      {
+        "key": "workers-cpu-ms",
+        "metric": "workers.cpu_ms_upper_bound",
+        "included_per_period": 30000000
+      },
+      {
+        "key": "kv-reads",
+        "metric": "kv.read",
+        "included_per_period": 10000000
+      },
+      {
+        "key": "kv-writes",
+        "metric": "kv.write",
+        "included_per_period": 1000000
+      },
+      {
+        "key": "kv-deletes",
+        "metric": "kv.delete",
+        "included_per_period": 1000000
+      },
+      {
+        "key": "kv-lists",
+        "metric": "kv.list",
+        "included_per_period": 1000000
+      },
+      {
+        "key": "r2-class-a",
+        "metric": "r2.class_a",
+        "included_per_period": 1000000
+      },
+      {
+        "key": "r2-class-b",
+        "metric": "r2.class_b",
+        "included_per_period": 10000000
+      },
+      {
+        "key": "durable-objects-requests",
+        "metric": "do.requests",
+        "included_per_period": 1000000
+      }
+    ]
+  },
+  "runaway": {
+    "_note": "Item 12, read from the same GraphQL request as the fast path (no extra call). Per Worker, the last burst_window_minutes against the same window on each of the previous history_days days. RUNAWAY when requests >= spike_multiple x that median AND >= floor_requests, or when more than error_ratio_above of more than error_min_requests requests error. Fewer than min_history_days days with traffic: the floor alone decides, and the output line says so. A staging Worker's workers.dev is disabled; any other Worker is alert-only.",
+    "floor_requests": 2000,
+    "spike_multiple": 5,
+    "history_days": 7,
+    "min_history_days": 3,
+    "error_ratio_above": 0.5,
+    "error_min_requests": 500
+  },
+  "loop_watch": {
+    "_note": "Items 13-15: tools/cloudflare_loop_watch.py, run by launchd once a minute (template tools/cloudflare-spend-guard/launchd/, NOT installed). Local only: ps, the E2E RunBudget ledgers, its own state. Ledger format from doctorcre-app PR 197 scripts/e2e-staging/run-budget.mjs (schema e2e-run-budget.v1); that file fixes the ledger at <checkout>/.e2e/run-budget/, so the globs cover every doctorcre-app checkout and worktree plus the ~/.local/state/doctorcre-e2e path the brief named. Watched patterns may never match an agent session; the code refuses claude, codex, launchd, the guard and itself regardless.",
+    "run_budget_globs": [
+      "~/doctorcre-app/.e2e/run-budget",
+      "~/doctorcre-app-*/.e2e/run-budget",
+      "~/doctorcre-app-worktrees/*/.e2e/run-budget",
+      "~/.local/state/doctorcre-e2e/run-budget"
+    ],
+    "ledger_deadline_grace_seconds": 10,
+    "respawn_max_starts": 5,
+    "respawn_window_seconds": 600,
+    "time_bound_grace_seconds": 60,
+    "sigkill_after_seconds": 10,
+    "self_alarm_seconds": 10,
+    "max_kills_per_run": 3,
+    "max_kills_per_hour": 10,
+    "breaker_consecutive_errors": 5,
+    "receipt_rotate_bytes": 1048576,
+    "lock_stale_seconds": 30,
+    "report_timeout_seconds": 10,
+    "report_max_per_run": 5,
+    "outbox_stale_seconds": 900,
+    "defect_episode_hours": 24,
+    "watched": [
+      {
+        "name": "e2e-home-smoke",
+        "max_seconds": 120,
+        "pattern": "^\\S*node\\s+(\\S+\\s+)*\\S*scripts/e2e-staging/home-smoke\\.mjs(\\s|$)"
+      },
+      {
+        "name": "e2e-explore",
+        "max_seconds": 120,
+        "pattern": "^\\S*node\\s+(\\S+\\s+)*\\S*scripts/e2e-staging/explore\\.mjs(\\s|$)"
+      },
+      {
+        "name": "e2e-sweep",
+        "max_seconds": 120,
+        "pattern": "^\\S*node\\s+(\\S+\\s+)*\\S*scripts/e2e-staging/sweep\\.mjs(\\s|$)"
+      }
+    ]
+  },
   "sources": {
     "billable_usage": "GET /accounts/{account_id}/billable-usage and /billable-usage/info (Version 1, Alpha), https://github.com/cloudflare/api-schemas/blob/main/openapi.json",
-    "workers_subdomain": "GET/POST /accounts/{account_id}/workers/scripts/{script_name}/subdomain, same schema; token group Workers Scripts Write",
-    "billing_cycle": "Monthly included limits reset on the subscription renewal date, https://developers.cloudflare.com/workers/platform/pricing/"
+    "workers_subdomain": "GET/POST /accounts/{account_id}/workers/scripts/{script_name}/subdomain, same schema; token group Workers Scripts Write. The schema marks it x-fern-availability: deprecated (sdk group workers.legacy.scripts.subdomain) and names no successor; the GA PATCH /accounts/{account_id}/workers/workers/{worker_id} carries a subdomain {enabled, previews_enabled} field and is a candidate only.",
+    "billing_cycle": "Monthly included limits reset on the subscription renewal date, https://developers.cloudflare.com/workers/platform/pricing/",
+    "fast_path": "POST /client/v4/graphql; token permission Account > Account Analytics > Read (https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth/)"
   }
 }
