@@ -703,6 +703,27 @@ class LivenessTests(unittest.TestCase):
             f.doCleanups()
         record_fault('dot_author_timeout')
 
+    def test_enqueue_readback_fault_preserves_review_without_rearming(self):
+        f = fixture_module.QueueTests()
+        f.setUp()
+        try:
+            f.pr()
+            entry = f.q.enqueue(mq.REPOS[0], 1, f.approved)
+            with f.q.db:
+                f.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
+            original = mq.command
+            def command(argv, **kwargs):
+                if argv[:2] == ['gh', 'api'] and argv[2] == f'repos/{mq.REPOS[0]}/pulls/1':
+                    raise mq.WaitExpired('PR read transport deadline expired')
+                return original(argv, **kwargs)
+            with patch.object(mq, 'command', side_effect=command):
+                with self.assertRaises(mq.WaitExpired):
+                    f.q.enqueue(mq.REPOS[0], 1, f.approved)
+            self.assertEqual(f.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'review')
+            record_fault('persistent_effects', ('main.py:Queue.pr:call:1',))
+        finally:
+            f.doCleanups()
+
     def test_wait_registry_is_complete_and_rejects_a_missing_site(self):
         validate_wait_registry(ROOT / 'tools/merge_queue')
         sites = dict(mq.WAIT_SITES)
