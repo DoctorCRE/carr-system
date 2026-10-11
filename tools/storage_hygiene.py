@@ -285,9 +285,8 @@ def _previous_run(path: Path) -> dict:
         return {}
 
 
-def _finding_payload(plan: CleanupPlan, *, episode_key: str,
-                     disk_used: int | None = None) -> dict:
-    facts = {
+def _finding_facts(plan: CleanupPlan, disk_used: int | None) -> dict:
+    return {
         "removable": len(plan.removable),
         "protected": len(plan.protected),
         "unrecognized": plan.unrecognized_count,
@@ -295,6 +294,16 @@ def _finding_payload(plan: CleanupPlan, *, episode_key: str,
         "disk_used": disk_used,
         "stop_reason": plan.stop_reason,
     }
+
+
+def _finding_body(facts: dict) -> str:
+    return ("Storage hygiene finding: " + json.dumps(facts, sort_keys=True)
+            + ". Bound action: investigate the producer or capacity breach, preserve "
+              "open paths, and rerun tools/storage_hygiene.py --dry-run until clear.")
+
+
+def _finding_payload(plan: CleanupPlan, *, episode_key: str,
+                     disk_used: int | None = None) -> dict:
     return {
         "idempotency_key": str(uuid.uuid5(
             uuid.NAMESPACE_URL, "carr-storage-hygiene:" + episode_key)),
@@ -304,20 +313,41 @@ def _finding_payload(plan: CleanupPlan, *, episode_key: str,
         "marker": "none",
         "blocker": "other_lane",
         "blocker_detail": "Orchestrator source-owner investigation and bounded cleanup",
-        "body": ("Storage hygiene finding: " + json.dumps(facts, sort_keys=True)
-                 + ". Bound action: investigate the producer or capacity breach, preserve "
-                   "open paths, and rerun tools/storage_hygiene.py --dry-run until clear."),
+        "body": _finding_body(_finding_facts(plan, disk_used)),
     }
 
 
 def _record_finding(payload: dict) -> dict:
     from lib.record_call import call_verb
     result = call_verb("add-loop", payload, timeout=30)
+    reply = result.reply if isinstance(result.reply, dict) else {}
+    return {"ok": result.ok, "status": result.kind, "detail": result.describe(),
+            "loop_id": reply.get("loop_id")}
+
+
+def _update_finding(loop: dict, body: str) -> dict:
+    """Refresh an existing episode loop with a fresh mutation key.
+
+    The creation call is replayed unchanged (same key, same payload), so the
+    changed facts travel only through update-loop, never through a reused key.
+    """
+    from lib.record_call import call_verb
+    loop_id = loop.get("loop_id")
+    if not loop_id:
+        return {"ok": False, "status": "refused", "detail": "no loop_id to update"}
+    read = call_verb("read-loop", {"loop_id": loop_id}, timeout=30)
+    if not read.ok or not isinstance(read.reply, dict) or "version" not in read.reply:
+        return {"ok": False, "status": read.kind, "detail": read.describe()}
+    result = call_verb("update-loop", {
+        "idempotency_key": str(uuid.uuid4()), "loop_id": loop_id,
+        "base_version": read.reply["version"], "body": body}, timeout=30)
     return {"ok": result.ok, "status": result.kind, "detail": result.describe()}
 
 
 def apply_plan(plan: CleanupPlan, *, dry_run: bool, ledger_path: Path,
-               record_finding: Callable[[dict], dict], disk_used: int | None = None,
+               record_finding: Callable[[dict], dict],
+               update_finding: Callable[[dict, str], dict] = _update_finding,
+               disk_used: int | None = None,
                disk_threshold: int = DATA_THRESHOLD_BYTES,
                eligible_logical_bytes: int | None = None,
                is_open: Callable[[Path], bool] = path_has_open_files,
@@ -371,12 +401,27 @@ def apply_plan(plan: CleanupPlan, *, dry_run: bool, ledger_path: Path,
                            and isinstance(previous_episode, str))
                        else at)
     status = "skipped-dry-run" if dry_run else "not-needed"
+    creation: dict | None = None
+    if findings:
+        carried = previous.get("finding_creation")
+        creation = (carried if (episode_key == previous.get("finding_episode")
+                                and isinstance(carried, dict)) else None)
     if findings and not dry_run:
         assert episode_key is not None
         try:
-            answer = record_finding(_finding_payload(
-                plan, episode_key=episode_key, disk_used=disk_used))
+            # The creation payload is immutable for the episode: it is built
+            # once, kept in the ledger, and replayed byte-for-byte. A changed
+            # body under the same key is rejected as key_reuse.
+            if creation is None:
+                creation = _finding_payload(
+                    plan, episode_key=episode_key, disk_used=disk_used)
+            answer = record_finding(dict(creation))
             status = "recorded" if answer.get("ok") else "record-failed"
+            fresh = _finding_body(_finding_facts(plan, disk_used))
+            if status == "recorded" and fresh != creation["body"]:
+                refreshed = update_finding(answer, fresh)
+                if not refreshed.get("ok"):
+                    status = "record-failed"
         except Exception:
             status = "record-failed"
     row = {
@@ -395,6 +440,7 @@ def apply_plan(plan: CleanupPlan, *, dry_run: bool, ledger_path: Path,
         "disk_used_bytes": disk_used,
         "finding_count": findings,
         "finding_episode": episode_key,
+        "finding_creation": creation,
         "stop_reason": plan.stop_reason,
         "record_status": status,
     }
