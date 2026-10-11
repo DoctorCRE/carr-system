@@ -101,7 +101,7 @@ class Controls(unittest.TestCase):
         remote=Mock();remote.snapshot.return_value=(run,job,pr)
         checks=Mock();dispatch=Mock()
         mod.rerun(remote,123,456,'a'*40,policy,checks,dispatch)
-        checks.assert_called_once_with('gates');dispatch.assert_called_once_with(123,456,1)
+        checks.assert_called_once_with('gates');dispatch.assert_called_once_with(123,456,1,'a'*40)
         checks.side_effect=mod.Refusal('local CI failed');dispatch.reset_mock()
         with self.assertRaises(mod.Refusal): mod.rerun(remote,123,456,'a'*40,policy,checks,dispatch)
         dispatch.assert_not_called()
@@ -131,6 +131,9 @@ class Controls(unittest.TestCase):
                     ('jbookout/doctorcre-app', ['--repo', 'jbookout/doctorcre-app']),
                     ('jbookout/software-factory', ['--repo', 'jbookout/software-factory'])):
                 with self.subTest(repo=repo, options=options), tempfile.TemporaryDirectory(dir=temp) as attempt:
+                    candidate = 'a'*40 if repo == mod.REPO else 'b'*40
+                    run['head_sha'] = candidate
+                    pr['head']['sha'] = candidate
                     calls = []
                     def execute(command, **kwargs):
                         calls.append(command)
@@ -161,10 +164,68 @@ class Controls(unittest.TestCase):
                     receipts = list(Path(attempt).rglob('123-1.json'))
                     self.assertEqual(len(receipts), 1)
                     self.assertEqual(json.loads(receipts[0].read_text())['repo'], repo)
+                    self.assertEqual(json.loads(receipts[0].read_text())['head_sha'], candidate)
                     if repo == 'jbookout/carr-system':
                         self.assertEqual(receipts[0].parent, Path(attempt) / 'carr-ci-rerun')
                     else:
                         self.assertEqual(receipts[0].parent.name, repo.replace('/', '--'))
+
+    def test_rerun_head_mismatch_refused(self):
+        mod = load('ci-rerun')
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml',
+               'event':'pull_request', 'status':'completed', 'conclusion':'failure',
+               'head_sha':'b'*40, 'run_attempt':1, 'pull_requests':[{'number':1665}]}
+        job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
+               'status':'completed', 'conclusion':'failure'}
+        for repo, pr_head in ((mod.REPO, 'b'*40),
+                              ('jbookout/doctorcre-app', 'c'*40),
+                              ('jbookout/doctorcre-app', None),
+                              ('jbookout/software-factory', 'c'*40)):
+            with self.subTest(repo=repo, pr_head=pr_head), tempfile.TemporaryDirectory() as temp:
+                remote = Mock()
+                remote.snapshot.return_value = (run, job, {'state':'open', 'head':{'sha':pr_head}})
+                def git_output(command, **kwargs):
+                    return 'a'*40 if command[1] == 'rev-parse' else ''
+                with patch.object(sys, 'argv', ['ci-rerun.py','123','--job','456','--repo',repo]), \
+                        patch.object(mod.tempfile, 'gettempdir', return_value=temp), \
+                        patch.object(mod, 'GitHub', return_value=remote), \
+                        patch.object(mod.subprocess, 'check_output', side_effect=git_output), \
+                        patch.object(mod.subprocess, 'run') as dispatch, \
+                        patch.object(mod, 'authorize_metered_execution') as meter, \
+                        patch.object(mod, 'local_checks') as checks:
+                    self.assertEqual(mod.main(), 1)
+                checks.assert_not_called()
+                meter.assert_not_called()
+                dispatch.assert_not_called()
+                self.assertEqual(list(Path(temp).rglob('123-1.json')), [])
+
+    def test_rerun_remote_head_metering_and_recheck(self):
+        mod = load('ci-rerun')
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml',
+               'event':'pull_request', 'status':'completed', 'conclusion':'failure',
+               'head_sha':'b'*40, 'run_attempt':1}
+        job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
+               'status':'completed', 'conclusion':'failure'}
+        pr = {'state':'open', 'head':{'sha':'b'*40}}
+        remote = Mock()
+        remote.snapshot.return_value = (run, job, pr)
+        policy = json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
+        checks, dispatch = Mock(), Mock()
+        with patch.object(mod, 'authorize_metered_execution',
+                          wraps=mod.authorize_metered_execution) as meter:
+            mod.rerun(remote, 123, 456, None, policy, checks, dispatch)
+        checks.assert_called_once_with('gates')
+        meter.assert_called_once_with(policy, 'github-actions-remote-ci',
+                                      {'candidate_sha':'b'*40, 'local_checks_green':True})
+        dispatch.assert_called_once_with(123, 456, 1, 'b'*40)
+        for current in ((run, job, {**pr, 'head':{'sha':'c'*40}}),
+                        ({**run, 'head_sha':'c'*40}, job, {**pr, 'head':{'sha':'c'*40}})):
+            with self.subTest(current=current):
+                dispatch.reset_mock()
+                remote.snapshot.side_effect = [(run, job, pr), current]
+                with self.assertRaises(mod.Refusal):
+                    mod.rerun(remote, 123, 456, None, policy, checks, dispatch)
+                dispatch.assert_not_called()
 
     def test_rerun_unknown_repository_refused_before_validation(self):
         mod = load('ci-rerun')
