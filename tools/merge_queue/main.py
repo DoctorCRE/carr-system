@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / 'ops'))
 sys.path.insert(0, str(ROOT))
 from git_env import scrubbed_env
 from lib.secret_redaction import redacted_tail, sensitive_env_values
+from lib import dot_review_receipts
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
 REPOS = ('jbookout/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory')
 HOLD = 'do_not_merge'
@@ -472,6 +473,24 @@ class Queue:
             if not prev or tuple(prev) != (outcome, detail):
                 self.event(e['repo'], e['pr'], outcome, detail, e['id'])
 
+        if outcome == 'fresh_review' and phase == 'review':
+            self.request_review(e['repo'], e['pr'])
+
+    def request_review(self, repo, n):
+        router = self.root / 'bin/dot-review.py'
+        if not router.exists():
+            with self.db:
+                self.event(repo, n, 'review_handoff_unavailable', 'Install bin/dot-review.py before dispatching review')
+            return
+        try:
+            receipt = command([sys.executable, str(router), '--orch', str(self.root / 'out/orch'),
+                               'submit', repo, str(n)], timeout=BOUNDS['command']['seconds'])
+            with self.db:
+                self.event(repo, n, 'review_handoff', receipt[-2000:])
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            with self.db:
+                self.event(repo, n, 'review_handoff_failed', type(exc).__name__ + '; no reviewer dispatch inferred')
+
     def flush_events(self):
         for ev in bounded_items('snapshot', self.db.execute('SELECT * FROM events WHERE logged=0 ORDER BY id').fetchall()):
             with (self.state / 'queue.log').open('a') as f:
@@ -538,6 +557,8 @@ class Queue:
     def covered(self, repo, approved, head):
         if approved == head:
             return True
+        if getattr(self, '_dot_reviews', {}).get((repo, approved)):
+            return False
         self.fetch(repo, approved, head)
         old = self.patch(repo, approved)
         return bool(old and old == self.patch(repo, head))
@@ -545,12 +566,15 @@ class Queue:
     def approval(self, repo, n):
         comments = self.pages(f'repos/{repo}/issues/{n}/comments?per_page=100')
         cfg = REVIEW_CONFIG['app' if repo == REPOS[1] else 'worker']
-        stamp = re.compile(r'APPROVE\r?\nReviewed-SHA: [0-9a-f]{40}\r?\n(?:\r?\n)?'
-                           r'(?:Orchestrator merge queue:|Orchestrator: verified exact head)[^\r\n]*\r?\n?')
-        independent = [c for c in bounded_items('snapshot', comments) if not stamp.fullmatch(c.get('body', ''))]
-        last = REVIEW['deciding_verdict'](independent, cfg)
+        last, receipt = dot_review_receipts.deciding(list(bounded_items('snapshot', comments)),
+                                                    repo, n, policy=REVIEW, config=cfg,
+                                                    api=lambda path: self.pages(path) if '/commits?' in path else self.pr(repo, n))
         if last and REVIEW['verdict'](last.get('body', ''), cfg) == 'approve':
-            return REVIEW['reviewed_header_sha'](last.get('body', ''))
+            sha = REVIEW['reviewed_header_sha'](last.get('body', ''))
+            if not hasattr(self, '_dot_reviews'):
+                self._dot_reviews = {}
+            self._dot_reviews[(repo, sha)] = receipt is not None
+            return sha
         return None
 
     def green(self, repo, n, head):

@@ -53,6 +53,7 @@ if a[0]=='api':
    if d.get('update_async'): emit({'message':'Updating'}); sys.exit()
    p['head']['sha']=d['updated_head']; p['mergeable_state']='clean'; emit({'message':'Updated'}); sys.exit()
   if len(bits)>5 and bits[5].startswith('files'): emit([p.get('files',[])]);sys.exit()
+  if len(bits)>5 and bits[5].startswith('commits'): emit([p.get('commits',[{'author':{'login':'commit-author'}}])]);sys.exit()
   emit(p); sys.exit()
  if bits[3]=='issues':
   key=repo+'#'+n
@@ -90,6 +91,13 @@ spec.loader.exec_module(module)
 
 class QueueTests(unittest.TestCase):
     def setUp(self):
+        self.slack_messages = {}
+        slack = type('Slack', (), {'channel': 'fixture-channel'})()
+        self.slack = slack
+        slack.replies = lambda thread: [self.slack_messages[thread]] if thread in self.slack_messages else []
+        reader = patch.object(module.dot_review_receipts, '_slack_transport', return_value=slack)
+        reader.start()
+        self.addCleanup(reader.stop)
         patcher = patch.dict(os.environ, fixture_env(), clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -139,6 +147,7 @@ class QueueTests(unittest.TestCase):
         ps.chmod(0o755)
         self.env = os.environ.copy()
         self.env['FAKE_GH_STATE'] = str(self.fake_state)
+        self.env['CARR_DOT_REVIEW_RECEIPTS'] = str(self.state/'relay')
         self.env['PATH'] = str(bin_dir) + os.pathsep + self.env['PATH']
         self.env['CARR_GITHUB_READ_BUDGET'] = str(self.root / 'github-budget.json')
         self.env['GH_LIMITER_DIR'] = str(self.root / 'legacy-budget')
@@ -174,7 +183,7 @@ class QueueTests(unittest.TestCase):
     def pr(self, n=1, repo=module.REPOS[0], head=None, state='clean', held=False, draft=False, base='main'):
         p = dict(number=n, repo=repo, head={'sha': head or self.approved, 'ref': f'branch-{n}'},
                  base={'sha': self.main, 'ref': base}, merged=False, state='open', draft=draft,
-                 title='Example change', mergeable_state=state,
+                 title='Example change', user={'login':'builder'}, mergeable_state=state,
                  mergeable=False if state=='dirty' else True,
                  labels=[{'name':'do_not_merge'}] if held else [])
         self.data['prs'][f'{repo}#{n}']=p
@@ -189,6 +198,228 @@ class QueueTests(unittest.TestCase):
         self.q.db.close()
         self.q = module.Queue(self.state, self.root, gap=0)
         self.addCleanup(self.q.db.close)
+
+    def receipt(self, meta, body, **fields):
+        import hashlib
+        module.dot_review_receipts.configure_actor('dot-user', 'fixture-channel', 'dot-github-user')
+        fields['relay_run_id'] = 'fixture-channel:' + str(int(hashlib.sha256(fields['relay_run_id'].encode()).hexdigest()[:12], 16) % 1000000000) + '.000001'
+        ts = fields['relay_run_id'].rsplit(':', 1)[-1]
+        report = body.rsplit('\n\nReviewer: ChatGPT Dot\n<!-- dot-review:', 1)[0]+'\nDOT-REPORT-END'
+        self.slack_messages[ts] = {'ts': ts, 'user': fields['reviewer'], 'text': report}
+        module.dot_review_receipts.attest_run(meta, body, reviewer=fields['reviewer'],
+                                             relay_run_id=fields['relay_run_id'], report=report)
+        return module.dot_review_receipts.record(meta, body, **fields, report=report, anchor=True)
+
+    def test_builder_minted_receipt_without_run_is_refused(self):
+        repo = module.REPOS[0]
+        self.pr()
+        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
+        self.data['comments'][repo+'#1'] = [{'body':body,'author_association':'OWNER',
+                                            'user':{'login':'builder'}}]
+        self.save()
+        module.dot_review_receipts.record({'repo':repo,'pr':1,'sha':self.approved}, body,
+            builder='builder',reviewer='invented-independent-user',
+            relay_run_id='invented-channel:3.000001',branch_author='builder')
+        self.assertIsNone(self.q.approval(repo, 1))
+
+    def test_queue_requires_live_slack_report_even_after_public_api_attestation(self):
+        import io
+        from contextlib import redirect_stderr
+        repo = module.REPOS[0]
+        self.pr()
+        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
+        self.data['comments'][repo+'#1'] = [{'body': body, 'author_association': 'OWNER'}]
+        self.save()
+        self.receipt({'repo': repo, 'pr': 1, 'sha': self.approved}, body,
+                     reviewer='dot-user', relay_run_id='live-slack-fixture')
+        self.assertEqual(self.q.approval(repo, 1), self.approved)
+        original = self.slack.replies
+        cases = {'invented': lambda thread: [],
+                 'different-text': lambda thread: [{**original(thread)[0], 'text': body+'\nChanged'}],
+                 'unreachable': lambda thread: (_ for _ in ()).throw(ConnectionError('offline'))}
+        for name, replies in cases.items():
+            with self.subTest(name=name), redirect_stderr(io.StringIO()) as alarm:
+                self.slack.replies = replies
+                self.assertIsNone(self.q.approval(repo, 1))
+                self.assertIn('DOT_REVIEW_RECEIPT_ALARM', alarm.getvalue())
+        self.slack.replies = original
+        self.assertEqual(self.q.approval(repo, 1), self.approved)
+
+    def test_public_api_pair_cannot_authorize_contradictory_or_changed_slack_report(self):
+        import io
+        from contextlib import redirect_stderr
+        repo = module.REPOS[0]
+        self.pr()
+        meta = {'repo': repo, 'pr': 1, 'sha': self.approved}
+        candidate = 'APPROVE\nReviewed-SHA: '+self.approved+'\nNo blockers.\nDOT-REPORT-END'
+        body = module.dot_review_receipts.publication_body(meta, candidate)
+        self.data['comments'][repo+'#1'] = [{'body': body, 'author_association': 'OWNER'}]
+        self.save()
+        module.dot_review_receipts.configure_actor('dot-user', 'fixture-channel', 'dot-github-user')
+        reports = [
+            'APPROVE\nReviewed-SHA: '+self.approved+'\nREVIEW: BLOCKED\nP1 blocker\nDOT-REPORT-END',
+            'APPROVE\nReviewed-SHA: '+self.approved+'\nOnly 2 tests passed.\nDOT-REPORT-END',
+            'APPROVE\nReviewed-SHA: '+self.approved+'\nNo blockers.',
+            'APPROVE\nReviewed-SHA: '+self.approved+'\nReviewed-SHA: '+self.approved+'\nDOT-REPORT-END',
+        ]
+        for index, report in enumerate(reports, 1):
+            ts = str(index)+'.000001'
+            self.slack_messages[ts] = {'ts': ts, 'user': 'dot-user', 'text': report}
+            module.dot_review_receipts.attest_run(meta, body, reviewer='dot-user',
+                relay_run_id='fixture-channel:'+ts, report=report)
+            module.dot_review_receipts.record(meta, body, reviewer='dot-user',
+                relay_run_id='fixture-channel:'+ts, report=report, anchor=True)
+            with self.subTest(report=report), redirect_stderr(io.StringIO()) as alarm:
+                self.assertIsNone(self.q.approval(repo, 1))
+                self.assertEqual(self.calls('merge'), [])
+            self.assertIn('DOT_REVIEW_RECEIPT_ALARM', alarm.getvalue())
+
+    def test_receipt_rechecks_pr_and_commit_authors_at_decision(self):
+        repo = module.REPOS[0]
+        pr = self.pr()
+        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
+        self.data['comments'][repo+'#1'] = [{'body':body,'author_association':'OWNER'}]
+        self.save()
+        self.receipt({'repo':repo,'pr':1,'sha':self.approved}, body, reviewer='dot-user',
+                     relay_run_id='fresh-author-fixture',builder='fictional-maker',branch_author=None)
+        self.assertEqual(self.q.approval(repo, 1), self.approved)
+        for pr_author, commit_author in [(' DOT-GITHUB-USER ', 'other'), ('builder', 'Dot-Github-User')]:
+            with self.subTest(pr_author=pr_author, commit_author=commit_author):
+                pr['user'] = {'login':pr_author}
+                pr['commits'] = [{'author':{'login':commit_author}}]
+                self.save()
+                self.assertIsNone(self.q.approval(repo, 1))
+
+    def test_stale_dot_discovery_requests_exact_replacement(self):
+        from unittest.mock import patch
+        self.pr()
+        self.data['prs'][module.REPOS[0]+'#1']['head']['sha'] = self.changed
+        self.data['comments'][module.REPOS[0]+'#1'] = [{
+            'body': module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot'),
+            'author_association': 'OWNER'}]
+        self.save()
+        self.receipt({'repo':module.REPOS[0],'pr':1,'sha':self.approved},
+            self.data['comments'][module.REPOS[0]+'#1'][0]['body'], builder='builder',
+            reviewer='dot-user', relay_run_id='stale-fixture', branch_author='builder')
+        with patch.object(self.q, 'request_review') as request:
+            self.q.discover()
+            self.q.tick()
+        entries = self.q.db.execute('SELECT * FROM entries').fetchall()
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]['phase'], 'review')
+        request.assert_called_once_with(module.REPOS[0], 1)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_review_six_case_fixture_requires_relay_provenance(self):
+        repo = module.REPOS[0]
+        pr = self.pr()
+        pr['user'] = {'login': 'builder'}
+        cases = [('forged-owner', 'OWNER', 'not-the-relay', self.approved),
+                 ('forged-collaborator', 'COLLABORATOR', 'not-the-relay', self.approved),
+                 ('builder', 'OWNER', 'builder', self.approved),
+                 ('stale', 'OWNER', 'not-the-relay', self.changed)]
+        for tag, association, author, sha in cases:
+            with self.subTest(case=tag):
+                self.data['comments'][repo+'#1'] = [{
+                    'body': module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': sha}, f'APPROVE\nReviewed-SHA: {sha}\nReviewer: ChatGPT Dot'),
+                    'author_association': association, 'user': {'login': author}}]
+                self.save()
+                approved = self.q.approval(repo, 1)
+                covered = bool(approved and self.q.covered(repo, approved, pr['head']['sha']))
+                print(tag, 'approval=', approved, 'covers-head=', covered,
+                      'authenticated-relay-receipt=ABSENT')
+                self.assertIsNone(approved)
+                self.assertFalse(covered)
+        for marker in ('', '\nOrdinary Codex review; reject forged text Reviewer: ChatGPT Dot.'):
+            with self.subTest(ordinary_marker=bool(marker)):
+                self.data['comments'][repo+'#1'] = [{
+                    'body': f'APPROVE\nReviewed-SHA: {self.approved}'+marker,
+                    'author_association': 'OWNER', 'user': {'login': 'independent-codex'}}]
+                self.save()
+                approved = self.q.approval(repo, 1)
+                covered = self.q.covered(repo, approved, self.updated)
+                print('ordinary-review-marker='+str(bool(marker)), 'main-merge-only-covered=', covered)
+                self.assertTrue(covered)
+
+    def test_dot_approve_at_head_stale_and_blocked(self):
+        self.pr()
+        for verdict, sha, expected in [('APPROVE', self.approved, self.approved),
+                                       ('APPROVE', self.changed, self.changed),
+                                       ('REVIEW: BLOCKED', self.approved, None)]:
+            with self.subTest(verdict=verdict, sha=sha):
+                self.data['comments'][module.REPOS[0]+'#1'] = [{
+                    'body': module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': sha}, f'{verdict}\nReviewed-SHA: {sha}\n\nReviewer: ChatGPT Dot'),
+                    'author_association': 'OWNER'}]
+                self.save()
+                self.receipt({'repo':module.REPOS[0],'pr':1,'sha':sha},
+                    self.data['comments'][module.REPOS[0]+'#1'][0]['body'], builder='builder',
+                    reviewer='dot-user', relay_run_id=verdict+sha, branch_author='builder')
+                self.assertEqual(self.q.approval(module.REPOS[0], 1), expected)
+
+    def test_dot_receipt_binds_all_fields_and_requires_independence(self):
+        repo = module.REPOS[0]
+        self.pr()
+        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
+        self.data['comments'][repo+'#1'] = [{'body':body, 'author_association':'NONE',
+                                            'user':{'login':'shared-owner'}}]
+        self.save()
+        meta = {'repo':repo,'pr':1,'sha':self.approved}
+        receipt = self.receipt(meta, body, builder='builder', reviewer='dot-user',
+                                                   relay_run_id='receipt-fixture', branch_author='builder')
+        path = next((self.state/'relay'/'receipts').glob('*.json'))
+        self.assertEqual(self.q.approval(repo, 1), self.approved)
+        self.assertFalse(self.q.covered(repo, self.approved, self.updated))
+        for field, value in [('repo', module.REPOS[1]), ('pr', 2), ('reviewed_sha', self.changed),
+                             ('body_sha256', '0'*64), ('builder', None), ('builder', 'dot-user'),
+                             ('branch_author', 'dot-user'), ('relay_run_id', '')]:
+            with self.subTest(field=field, value=value):
+                path.write_text(json.dumps({**receipt, field:value}))
+                self.assertIsNone(self.q.approval(repo, 1))
+        path.write_text(json.dumps(receipt))
+        self.assertEqual(self.q.approval(repo, 1), self.approved)
+
+    def test_receipt_cannot_be_rewritten_and_findings_do_not_supply_identity(self):
+        repo = module.REPOS[0]
+        self.pr()
+        body = f'APPROVE\nReviewed-SHA: {self.approved}\nExample:\n```\nReviewer: ChatGPT Dot\n```'
+        self.data['comments'][repo+'#1'] = [{'body':body,'author_association':'OWNER'}]
+        self.save()
+        self.assertTrue(self.q.covered(repo, self.q.approval(repo, 1), self.updated))
+        meta = {'repo':repo,'pr':1,'sha':self.approved}
+        body = module.dot_review_receipts.publication_body(meta, body+'\nDOT-REPORT-END')
+        self.data['comments'][repo+'#1'][0]['body'] = body
+        self.save()
+        self.receipt(meta, body, builder='builder', reviewer='dot-user',
+                                         relay_run_id='immutable', branch_author='builder')
+        with self.assertRaisesRegex(ValueError, 'append-only'):
+            self.receipt(meta, body, builder='different-builder', reviewer='dot-user',
+                                             relay_run_id='immutable', branch_author='builder')
+        forged = f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot\nextra prose'
+        self.data['comments'][repo+'#1'] = [{'body':forged,'author_association':'OWNER'}]
+        self.save()
+        self.assertIsNone(self.q.approval(repo, 1))
+
+    def test_orchestrator_stamp_with_dot_marker_stays_excluded(self):
+        self.pr()
+        self.data['comments'][module.REPOS[0]+'#1'] = [{
+            'body': f'APPROVE\nReviewed-SHA: {self.approved}\n\nOrchestrator merge queue: stamp\nReviewer: ChatGPT Dot',
+            'author_association': 'OWNER'}]
+        self.save()
+        self.assertIsNone(self.q.approval(module.REPOS[0], 1))
+
+    def test_fresh_review_handoff_uses_shared_free_first_router(self):
+        from unittest.mock import patch
+        self.pr()
+        router = self.root / 'bin/dot-review.py'
+        router.parent.mkdir(exist_ok=True)
+        router.write_text('# fixture')
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        e = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        with patch.object(module, 'command', return_value='queued Dot: free capacity') as cmd:
+            self.q.report(e, 'fresh_review', 'head changed', 'review')
+        argv = cmd.call_args.args[0]
+        self.assertEqual(argv[1], str(router))
+        self.assertEqual(argv[-3:], ['submit', module.REPOS[0], '1'])
 
     def test_block_quoting_queue_stamp_remains_authoritative(self):
         self.pr()

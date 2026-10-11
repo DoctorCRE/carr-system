@@ -321,10 +321,10 @@
       "shape": "self.pages",
       "scenario": "transport_timeout"
     },
-    "main.py:Queue.approval:comprehension:1": {
-      "bound": "snapshot",
-      "shape": "bounded_items('snapshot', comments)",
-      "scenario": "snapshot_cap"
+    "main.py:Queue.approval:call:2": {
+      "bound": "command",
+      "shape": "self.pages",
+      "scenario": "dot_author_timeout"
     },
     "main.py:Queue.green:call:1": {
       "bound": "command",
@@ -710,6 +710,11 @@
       "bound": "installer",
       "shape": "subprocess.run",
       "scenario": "installer_timeout"
+    },
+    "main.py:Queue.request_review:call:1": {
+      "bound": "command",
+      "shape": "command",
+      "scenario": "review_handoff"
     }
   }
 }
