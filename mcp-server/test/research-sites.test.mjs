@@ -99,7 +99,78 @@ test("adding a host already in the index returns the row without writing", async
   const out = await TOOLS["add-research-site"].handler(fake, joe, {
     idempotency_key: "site-add-dup", host: "www.cbre.com", topics: ["cre-market"] });
   assert.equal(out.already_listed, true);
-  assert.ok(!fake.calls.some(([sql]) => sql.includes("insert into research_site")));
+  assert.ok(!fake.calls.some(([sql]) => sql.includes("insert into event")), "a no-op add wrote an audit event");
+});
+
+// ── Fix-forward of the #1646 post-merge review (P1 #7, P2 #5, P2 #10) ─────────
+// Synthetic values only: none of these is a real credential.
+const CREDENTIAL_URLS = [
+  "https://reviewer:synthetic-pw@data.example.org/tables",
+  "https://reviewer@data.example.org/tables",
+  "https://data.example.org/tables?token=synthetic-value",
+  "https://data.example.org/tables?api_key=synthetic-value",
+  "https://data.example.org/tables?page=2&X-Amz-Signature=synthetic-value",
+  "https://data.example.org/tables?client_secret=synthetic-value",
+  "https://data.example.org/tables?password=synthetic-value",
+  "https://data.example.org/tables?sig=synthetic-value",
+  "https://data.example.org/tables#access_token=synthetic-value",
+];
+
+test("a credential-bearing start url is refused before SQL and never echoed", async () => {
+  for (const url of CREDENTIAL_URLS) {
+    const fake = new Fake();
+    const error = await TOOLS["add-research-site"].handler(fake, joeLocal, {
+      idempotency_key: "site-add-cred", host: "data.example.org", topics: ["demographics"], url,
+    }).then(() => null, e => e);
+    assert.equal(error?.payload?.error, "research_site_url_credential", url);
+    assert.equal(fake.calls.length, 0, `${url} reached SQL`);
+    assert.ok(!JSON.stringify(error.payload).includes("synthetic"), `${url} echoed in the error`);
+  }
+  // The same-host check refuses without echoing the url either.
+  const other = await TOOLS["add-research-site"].handler(new Fake(), joe, {
+    idempotency_key: "site-add-other", host: "www.cbre.com", topics: ["cre-market"],
+    url: "https://evil.example/x?token=synthetic-value" }).then(() => null, e => e);
+  assert.ok(!JSON.stringify(other.payload).includes("synthetic"));
+  // A credential pasted as the host is not echoed.
+  assert.throws(() => normalizeResearchHost("reviewer:synthetic-pw@data.example.org"),
+    e => e.payload.error === "research_site_host_invalid" && e.payload.host === null);
+});
+
+test("a public start url with ordinary query fields is stored as given", async () => {
+  for (const url of ["https://data.example.org/tables?keyword=office&page=2",
+    "https://data.example.org/monkey-report?zipcode=36601", "http://data.example.org/"]) {
+    const fake = new Fake({ "insert into research_site": [{ id: "30000000-0000-0000-0000-000000000002",
+      host: "data.example.org", added_at: "2026-10-11T12:00:00Z" }] });
+    const out = await TOOLS["add-research-site"].handler(fake, joeLocal, {
+      idempotency_key: "site-add-public", host: "data.example.org", topics: ["demographics"], url });
+    assert.equal(out.ok, true, url);
+    assert.equal(fake.calls.find(([sql]) => sql.includes("insert into research_site"))[1][1], url);
+  }
+});
+
+test("a concurrent add of the same absent host returns the winner's row, not a unique violation", async () => {
+  // The loser's insert hits the active-host index and does nothing; it must
+  // then read the committed winner and write no audit event of its own.
+  const fake = new Fake({ "select id, host, topics, url, note from research_site":
+    [{ id: "30000000-0000-0000-0000-000000000003", host: "data.example.org", topics: ["demographics"] }] });
+  const out = await TOOLS["add-research-site"].handler(fake, joeLocal, {
+    idempotency_key: "site-add-race-2", host: "data.example.org", topics: ["demographics"] });
+  assert.equal(out.already_listed, true);
+  assert.equal(out.id, "30000000-0000-0000-0000-000000000003");
+  const insert = fake.calls.find(([sql]) => sql.includes("insert into research_site"));
+  assert.match(insert[0], /on conflict \(host\) where removed_at is null do nothing/);
+  assert.ok(!fake.calls.some(([sql]) => sql.includes("insert into event")));
+  assert.ok(!fake.calls.some(([sql]) => /for update/.test(sql)));
+});
+
+test("free-text search treats % and _ literally", async () => {
+  for (const [input, pattern] of [["%", "%\\%%"], ["_", "%\\_%"], ["a\\b", "%a\\\\b%"], ["Office", "%office%"]]) {
+    const fake = new Fake();
+    await TOOLS["list-research-sites"].handler(fake, joe, { text: input });
+    const [sql, params] = fake.calls[0];
+    assert.deepEqual(params, [pattern], input);
+    assert.equal((sql.match(/like \$1 escape '\\'/g) || []).length, 3, sql);
+  }
 });
 
 test("any caller removes a site softly, recording who and why", async () => {

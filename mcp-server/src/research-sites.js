@@ -24,17 +24,18 @@ export function normalizeResearchHost(value) {
   const labels = host.split(".");
   if (!HOST_OK.test(host) || host.length > 253 || labels.some(l => l.length > 63) ||
       /^[0-9.]+$/.test(host) || NON_PUBLIC_SUFFIX.has(labels[labels.length - 1]))
-    throw new ToolError({ error: "research_site_host_invalid", host: value ?? null,
+    // Echo the rejected value only when it is plainly a hostname attempt: a
+    // user:pass@ authority or a pasted URL may carry a credential.
+    throw new ToolError({ error: "research_site_host_invalid",
+      host: typeof value === "string" && /^[\w.-]{0,253}$/.test(value) ? value : null,
       hint: "give one exact public hostname such as www.example.com, with no scheme, path, port, wildcard or IP address. Put a specific starting page in url." });
   return host;
 }
 
-export function normalizeTopics(value, { required = true } = {}) {
-  if (value === undefined || value === null) {
-    if (required) throw new ToolError({ error: "research_site_topics_required",
+export function normalizeTopics(value) {
+  if (value === undefined || value === null)
+    throw new ToolError({ error: "research_site_topics_required",
       hint: "tag what the site is good for, e.g. [\"cre-market\", \"medical-office\"]" });
-    return null;
-  }
   const list = Array.isArray(value) ? value : [value];
   const topics = [...new Set(list.map(t => typeof t === "string" ? t.trim().toLowerCase().replace(/[\s_]+/g, "-") : ""))];
   if (!topics.length || topics.length > 12 || topics.some(t => !TOPIC_OK.test(t) || t.length > 40))
@@ -50,16 +51,40 @@ function text(value, field, { optional = false, max = 1000 } = {}) {
   return value.trim();
 }
 
-function startUrl(value, host) {
+// A query or fragment field whose name says it carries a credential. Matched
+// against each field NAME (split on - _ .), so "keyword" or "monkey" pass while
+// "api_key", "access-token", "X-Amz-Signature" and "sig" do not.
+const SENSITIVE_PARAM = /^(?:.*[-_.])?(?:token|key|apikey|secret|signature|sig|password|passwd|pwd|pass|auth|authorization|credential|credentials|session|sessionid|sid|jwt|bearer)(?:[-_.].*)?$/i;
+
+function sensitiveFields(params) {
+  return [...params.keys()].some(name => SENSITIVE_PARAM.test(name));
+}
+
+// A starting page on the listed host. It is stored and returned to every
+// caller, and the add writes it into the audit event, so it must carry no
+// credential: no user:pass@ authority and no token/key/secret/signature/password
+// field in the query or fragment. Errors never echo the rejected url.
+export function startUrl(value, host) {
   const url = text(value, "url", { optional: true, max: 2000 });
   if (url === null) return null;
   let parsed;
   try { parsed = new URL(url); } catch { parsed = null; }
   if (!parsed || !["http:", "https:"].includes(parsed.protocol) ||
       parsed.hostname.toLowerCase().replace(/\.$/, "") !== host)
-    throw new ToolError({ error: "research_site_url_invalid", url,
+    throw new ToolError({ error: "research_site_url_invalid",
       hint: "url must be an http(s) address on the same host as `host`" });
+  const authority = url.replace(/^[a-z]+:\/\//i, "").split(/[/?#]/, 1)[0];
+  const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ""));
+  if (parsed.username || parsed.password || authority.includes("@") ||
+      sensitiveFields(parsed.searchParams) || sensitiveFields(fragment))
+    throw new ToolError({ error: "research_site_url_credential",
+      hint: "url may not carry credentials: drop any user:password@ and any token, key, secret, signature or password field, then add the plain public page" });
   return url;
+}
+
+// LIKE treats % and _ as wildcards; a free-text filter means the literal text.
+function likeLiteral(value) {
+  return `%${value.replace(/[\\%_]/g, "\\$&")}%`;
 }
 
 const SITE_COLUMNS = `s.host, s.url, s.topics, s.note, a.slug as added_by, s.added_at,
@@ -81,9 +106,10 @@ export function researchSiteTools({ withEnvelope, writeEvent }) {
           where.push(`s.topics @> array[$${params.length}]::text[]`);
         }
         if (args.text !== undefined) {
-          params.push(`%${text(args.text, "text", { max: 200 }).toLowerCase()}%`);
-          where.push(`(s.host like $${params.length} or lower(coalesce(s.note,'')) like $${params.length}
-                       or array_to_string(s.topics,' ') like $${params.length})`);
+          params.push(likeLiteral(text(args.text, "text", { max: 200 }).toLowerCase()));
+          const p = `$${params.length}`;
+          where.push(`(s.host like ${p} escape '\\' or lower(coalesce(s.note,'')) like ${p} escape '\\'
+                       or array_to_string(s.topics,' ') like ${p} escape '\\')`);
         }
         const r = await c.query(
           `select ${SITE_COLUMNS}
@@ -115,13 +141,21 @@ export function researchSiteTools({ withEnvelope, writeEvent }) {
         const url = startUrl(args.url, host);
         const note = text(args.note, "note", { optional: true, max: 2000 });
         return withEnvelope(c, actor, "add-research-site", args, async () => {
-          const listed = await c.query(
-            "select id, host, topics, url, note from research_site where host=$1 and removed_at is null for update", [host]);
-          if (listed.rows.length)
-            return { ok: true, already_listed: true, ...listed.rows[0] };
+          // The partial unique index is the serialization point: a concurrent
+          // add of the same absent host (a different idempotency key, so the
+          // envelope does not serialize it) waits on the winner's row and then
+          // does nothing, and the read below returns the winner's committed row.
+          // No row is inserted, so no audit event is written for the loser.
           const r = await c.query(
             `insert into research_site (host, url, topics, note, added_by_actor_id)
-             values ($1,$2,$3,$4,$5) returning id, host, added_at`, [host, url, topics, note, actor.id]);
+             values ($1,$2,$3,$4,$5)
+             on conflict (host) where removed_at is null do nothing
+             returning id, host, added_at`, [host, url, topics, note, actor.id]);
+          if (!r.rows.length) {
+            const listed = await c.query(
+              "select id, host, topics, url, note from research_site where host=$1 and removed_at is null", [host]);
+            return { ok: true, already_listed: true, ...listed.rows[0] };
+          }
           await writeEvent(c, actor, "add-research-site", "research_site", r.rows[0].id, {
             field: "host", new: { host, topics, url, note }, idempotency_key: args.idempotency_key });
           return { ok: true, id: r.rows[0].id, host, topics, added_at: r.rows[0].added_at };
