@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import venv
 from unittest.mock import patch
 
 from git_env import fixture_env
@@ -474,6 +475,15 @@ RESULT
         receipt["ci"]["classes"][0]["failure"] = "hidden refusal"
         with self.assertRaises(self.adapter.Refusal):
             self.adapter.verify(self.root, "origin/main", "", receipt)
+
+    def test_live_admission_cli_from_a_different_selftest_interpreter(self):
+        with tempfile.TemporaryDirectory(prefix="review-floor-interpreter-") as td:
+            venv.EnvBuilder(with_pip=False).create(td)
+            run = subprocess.run(
+                [str(Path(td) / "bin/python"), str(Path(__file__).resolve()),
+                 "Admission.test_live_admission_cli_rechecks_provider_head_base_and_body_without_leaks"],
+                env=fixture_env(), capture_output=True, text=True, timeout=90)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
     def test_live_admission_cli_rechecks_provider_head_base_and_body_without_leaks(self):
         provider = Path(self.tmp.name) / "provider.json"
