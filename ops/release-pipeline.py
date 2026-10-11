@@ -1549,10 +1549,13 @@ class Pipeline:
     def ci_run(self, gh: Any, lane_cfg: dict, pr: int, head_sha: str) -> int:
         ci = [r for r in gh.runs_for(head_sha)
               if r.get("name") == lane_cfg["ci_workflow_name"] and r.get("event") == "pull_request"]
+        # A cancelled or skipped run carries no verdict on the code; a newer
+        # failure (or any other non-success) still blocks.
+        ci = [r for r in ci if r.get("conclusion") not in ("cancelled", "skipped")]
         if not ci:
             raise Blocked("ci_not_green", f"PR #{pr} has no successful {lane_cfg['ci_workflow_name']} run")
-        run_id = max(int(r["id"]) for r in ci)
         newest = max(ci, key=lambda r: (int(r["id"]), int(r.get("run_attempt", 1))))
+        run_id = int(newest["id"])
         if newest.get("conclusion") != "success":
             raise Blocked("ci_not_green", f"PR #{pr} newest CI run {run_id} is not successful")
         jobs = gh.jobs(run_id)
