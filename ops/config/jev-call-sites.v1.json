@@ -241,6 +241,20 @@
       "sources": [
         "ops/jevlint_review.py"
       ]
+    },
+    {
+      "caller": "brief_check",
+      "trigger": "ops/brief-check.py --jev: one batched request per PR check, a noul per brief requirement the deterministic probes left as needs judgment; opt-in per run, never the default",
+      "runs_in": "bin/brief-check, the tracked opt-in command for the orchestrator's pre-review step",
+      "attribution": "session_or_job",
+      "unattended": "allowed",
+      "hourly_budget": 10,
+      "daily_budget": 40,
+      "owner": "orchestrator",
+      "value": "Advisory read on the brief requirements code cannot decide; never moves a verdict",
+      "sources": [
+        "ops/brief-check.py"
+      ]
     }
   ]
 }
