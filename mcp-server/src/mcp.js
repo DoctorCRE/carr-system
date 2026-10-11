@@ -323,6 +323,9 @@ export const PROFILES = {
     // detected -> triaged with a next action and provisional impact; it cannot
     // set severity, root cause, recovery evidence, or a closed state.
     "open-incident", "triage-incident",
+    // The research-site index (#1646): the weekly research runs add a source
+    // they found useful and retire a dead one. Both are keyed; removal is soft.
+    "add-research-site", "remove-research-site",
   ]),
 
   // AWAY MODE, added 2026-08-03 on Joe's ruling. The scheduled CEO session that
@@ -358,6 +361,7 @@ export const PROFILES = {
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
     "record-signal", "record-branch-evidence", "record-defect", "open-incident", "triage-incident",
+    "add-research-site", "remove-research-site",
     // plus: close what it opened, advance the book, draft, and keep the record honest
     "close-loop", "update-deal", "add-premises", "record-counter",
     "prepare-document", "update-document-status",
