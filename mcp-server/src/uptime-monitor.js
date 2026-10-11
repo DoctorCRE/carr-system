@@ -31,11 +31,17 @@ function rpcValue(value) {
   return JSON.parse(content?.text);
 }
 
-function digestShape(value) {
-  const rows = rpcValue(value)?.digest;
-  if (!Array.isArray(rows)) return false;
-  const counts = rows.find((row) => row.line === "row_counts")?.value;
-  return ["deals", "leads", "clients", "vendors"].every((key) => Number.isInteger(counts?.[key]) && counts[key] >= 0);
+// The round trip proves bearer auth, verb dispatch and a real Worker->Neon read
+// without aggregating business tables every minute: read-profiles is one
+// SELECT over the small agent_profile roster (migration 0300 seeds eight rows).
+export const ROUND_TRIP_VERB = "read-profiles";
+const PROFILE_STATUSES = ["active", "unstaffed", "parked"];
+
+function profilesShape(value) {
+  const read = rpcValue(value);
+  const rows = read?.profiles;
+  return read?.ok === true && Array.isArray(rows) && rows.length > 0 && read.total === rows.length &&
+    rows.every((row) => text(row?.profile_key) && text(row.display_name) && PROFILE_STATUSES.includes(row.status));
 }
 
 async function request(url, options, fetcher, timeoutMs, decode) {
@@ -64,7 +70,7 @@ export async function probeProduction(env, fetcher = fetch, timeoutMs = 8000) {
   const targets = [
     ["api-release", `${API_ORIGIN}/release`, {}, apiShape],
     ["app-release", `${APP_ORIGIN}/app-release`, {}, appShape],
-    ["verb-round-trip", `${API_ORIGIN}/mcp`, rpcOptions(env.CARR_MCP_PROBE_TOKEN, "integrity-digest"), digestShape],
+    ["verb-round-trip", `${API_ORIGIN}/mcp`, rpcOptions(env.CARR_MCP_PROBE_TOKEN, ROUND_TRIP_VERB), profilesShape],
   ];
   const checks = await Promise.all(targets.map(async ([name, url, options, shape]) => {
     const start = Date.now();
