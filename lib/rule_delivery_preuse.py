@@ -66,6 +66,7 @@ POSTWRITE_RECEIPT_KEYS = frozenset({
 CORPUS_RELATIVE = "ops/config/rule-selection-corpus.v1.json"
 SELECTOR_SOURCE_PATHS = (
     "ops/jev_judge.py",
+    "ops/jev_semantic.py",
     "ops/typesafe_client.py",
     # The verdict cache and envelope test decide what is reused and skipped,
     # so a change to either must invalidate old receipts too.
@@ -85,7 +86,8 @@ def postwrite_reviewer_digest(repo: Path) -> str:
     return digest({
         relative: file_sha256(repo / relative)
         for relative in (
-            "hooks/lint-gate.py", "ops/jev_code_review.py", "ops/typesafe_client.py",
+            "hooks/lint-gate.py", "ops/jev_code_review.py", "ops/jev_semantic.py",
+            "ops/typesafe_client.py",
         )
     })
 

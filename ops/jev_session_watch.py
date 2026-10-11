@@ -86,23 +86,9 @@ def _record(jj, check_id, subject_ref, answer, existing_decision, *, error=None,
         pass
 
 
-def _noul_value(answer, key):
-    import math
-    value = float(answer["answers"][key]["noul"])
-    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
-        raise ValueError(f"{key}: invalid noul probability")
-    return value
-
-
 def _choice_value(answer, key):
-    import math
     body = answer["answers"][key]
-    confidence = body.get("confidence")
-    if confidence is not None:
-        confidence = float(confidence)
-        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
-            raise ValueError(f"{key}: invalid choice confidence")
-    return body.get("choice"), confidence
+    return body.get("choice"), _module("jev_semantic").choice_confidence(answer, key)
 
 
 def _tail_lines(path, tail_bytes=TAIL_BYTES):
@@ -471,9 +457,11 @@ def locate_bug(source_text, path, failure_output, *, client=None, log_path=None)
     subject_ref = {"path": path, "trigger": "traceback_seen", "mentioned_lines": mentioned,
                    "window_lines": len(window_lines)}
     try:
-        answer = _module("jev_semantic").ask(
+        semantic = _module("jev_semantic")
+        answer = semantic.evaluate(semantic.JudgmentRequest(
             subject, {"culprit_line": question}, caller="jev_session_watch",
-            version="bug-locator-v1", client=client, transport=jj.judge, retries=0)
+            version="bug-locator-v1", retries=0),
+            adapter=semantic.LiveAdapter(client=client, transport=jj.judge)).unwrap()
     except Exception as exc:
         _record(jj, check_id, subject_ref, {}, None, error=exc, log_path=log_path)
         return _result(check_id, "unavailable", None, True, subject_ref)
@@ -803,22 +791,14 @@ def inspect_tool_event(tool_name, tool_input, output, exit_code, task_text, repo
     subject_digest = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
     jj = judge_module or _judge()
     try:
-        answer = _module("jev_semantic").ask(
+        semantic = _module("jev_semantic")
+        answer = semantic.evaluate(semantic.JudgmentRequest(
             state, questions, caller="jev_session_watch", version="tool-result-v1",
-            client=client, transport=jj.judge, retries=0)
-        bodies = answer.get("answers") or {}
-        if not all(k in bodies for k in questions):
-            raise ValueError("missing typed boundary answer")
-        for key, question in questions.items():
-            if question["type"] == "noul":
-                _noul_value(answer, key)
-            else:
-                chosen, _ = _choice_value(answer, key)
-                if chosen not in question["criteria"]:
-                    raise ValueError(f"{key}: choice outside offered options")
+            retries=0, validate_confidence=True),
+            adapter=semantic.LiveAdapter(client=client, transport=jj.judge)).unwrap()
         status = "answered"
     except Exception as exc:
-        answer, bodies, status = {}, {}, "unavailable"
+        answer, status = {}, "unavailable"
         results.append(_result("boundary_judgment", "unavailable", None, True,
                                {"reason": getattr(exc, "reason", "inspection_error"),
                                 "advice": "Jev boundary judgment unavailable; inspect this result manually"}))

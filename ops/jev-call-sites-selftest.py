@@ -815,7 +815,8 @@ console.log(JSON.stringify({calls,refused}));'''
 
 # Files that make up the transport itself, or call it only through a site
 # that is registered. Anything else that reaches a paid call must be listed.
-INFRASTRUCTURE = {"ops/typesafe_client.py", "ops/jev_judge.py", "tools/judge/interface.py"}
+INFRASTRUCTURE = {"ops/typesafe_client.py", "ops/jev_judge.py", "ops/jev_semantic.py",
+                  "tools/judge/interface.py"}
 
 
 # ask-jev in a dispatch position: an in-Worker callTool, `run.sh call ask-jev`
