@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -34,7 +35,7 @@ def loop_owners() -> set[str]:
     return owners
 
 
-def plan(removable: int = 1, clones: int = 1) -> "sh.CleanupPlan":
+def plan(removable: int = 1, clones: int = 1) -> Any:
     p = sh.CleanupPlan()
     p.removable = [sh.Candidate("clone", Path(f"/nonexistent/c{i}"), 1.0)
                    for i in range(removable)]
