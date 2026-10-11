@@ -883,6 +883,39 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(ledger[-1]["status"], "completed")
             self.assertEqual(ledger[-1]["findings"], 0)
 
+    def test_board_github_opt_out_survives_re_registration(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = root / "github-calls"
+            gh = root / "gh"
+            gh.write_text("#!" + sys.executable + "\nfrom pathlib import Path\n"
+                          + "Path(" + repr(str(calls)) + ").open('a').write('call\\n')\n"
+                          + "print('{}')\n")
+            gh.chmod(0o755)
+            config_path = root / "config.json"
+            c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+            c["board_github_enabled"] = False
+            config_path.write_text(json.dumps(c))
+            real_run = subprocess.run
+            observed_env = []
+            def observe(argv, **kwargs):
+                observed_env.append(kwargs["env"])
+                return real_run(argv, **kwargs)
+            with patch.object(w.subprocess, "run", side_effect=observe), patch.dict(os.environ, {"PATH": str(root) + os.pathsep + os.environ["PATH"],
+                                         "PROGRESS_BOARD_SKIP_GH": "0"}):
+                for status in ("running", "review"):
+                    # Every registration starts from disk, without an inherited opt-out.
+                    w.board_task(root, w.load_config(config_path), "synthetic-card", "executor",
+                                 status, "Synthetic evidence", pr=7, repo="fixture/repository")
+            self.assertTrue(observed_env)
+            self.assertTrue(all(e.get("PROGRESS_BOARD_SKIP_GH") == "1" for e in observed_env))
+            self.assertFalse(calls.exists(), "re-registration must spend zero GitHub requests")
+            board = json.loads((root / "out/boards/carr-v5.json").read_text())
+            self.assertEqual(board["tasks"]["synthetic-card"]["status"], "review")
+            self.assertFalse(w.load_config(ROOT / "ops/config/job-watchdog.json")["board_github_enabled"])
+
     def test_command_gets_eof_and_exit_is_recorded_on_board(self):
         with tempfile.TemporaryDirectory() as directory:
             env = dict(os.environ, CARR_JOB_ROOT=directory, CARR_JOB_BOARD="test")

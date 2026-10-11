@@ -488,6 +488,8 @@ def board_task(root, config, card, executor, status, note, project=None, pr=None
     project = project or config["board"]
     board = root / "out/boards" / (project + ".json")
     env = dict(os.environ, PROGRESS_BOARD_ROOT=str(root / "out"), PROGRESS_BOARD_LOCAL_ONLY="1")
+    if not config.get("board_github_enabled", True):
+        env["PROGRESS_BOARD_SKIP_GH"] = "1"
     with locked(root / "out/watchdog/board.lock"):
         if not board.exists():
             result = subprocess.run([sys.executable, str(SOURCE / "tools/progress_board.py"), "init",
