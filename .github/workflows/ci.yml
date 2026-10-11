@@ -92,7 +92,9 @@ name: CI
 # workdays for either partner, so that is exactly the window with no other cover.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    # Metadata events must not create a skipped suite on an already tested head.
+    # After a base retarget, reopen the PR to test its new merge ref.
+    types: [opened, synchronize, reopened]
   schedule:
     # 06:20 UTC daily. Sits after the nightly backup (02:35 UTC) and the 05:10
     # edge-liveness slot, and before the automerge pilot (08:30 UTC weekdays), so
@@ -101,10 +103,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Metadata edits get a unique group and skip jobs: even cancel=false replaces
-  # a pending run in the same group. Base edits validate in their new base group.
   # Only synchronize supersedes older heads on the same PR/base.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.action == 'edited' && !github.event.changes.base.ref && github.run_id || github.event.pull_request.base.ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.base.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action == 'synchronize' }}
 
 permissions:
@@ -112,7 +112,6 @@ permissions:
 
 jobs:
   classes:
-    if: ${{ github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base.ref }}
     name: ops/ci.sh --strict --only ${{ matrix.classes }}
     runs-on: ubuntu-24.04
     strategy:
@@ -317,14 +316,13 @@ jobs:
     # success into a red context. Without `always()` a failed group would
     # leave this job skipped, and a required check that never reports blocks
     # the merge silently instead of saying why.
-    # A skipped metadata job must not publish the required success context.
-    name: ${{ github.event_name == 'pull_request' && github.event.action == 'edited' && !github.event.changes.base.ref && 'CI metadata edit ignored' || 'ops/ci.sh --strict' }}
+    name: ops/ci.sh --strict
     runs-on: ubuntu-24.04
     needs: classes
     permissions:
       contents: read
       actions: read
-    if: ${{ always() && (github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base.ref) }}
+    if: ${{ always() }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
