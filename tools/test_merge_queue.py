@@ -1738,6 +1738,8 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(any('/pulls/2/update-branch' in str(a) for a in self.load()['calls']))
 
     def test_single_running_agent_owns_the_state(self):
+        self.pr(held=True)
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         p=subprocess.Popen([sys.executable,str(ENTRY),'--state',str(self.state),'run','--no-discover','--poll','0.05'])
         try:
             import time
