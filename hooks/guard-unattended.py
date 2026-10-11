@@ -49,6 +49,7 @@ import os
 import re
 import shlex
 import sys
+import tempfile
 from urllib.parse import urlsplit
 
 # The shared "tell a command apart from the prose it carries" helper, already
@@ -1154,12 +1155,20 @@ def is_send_context(cmd):
 #   - every operand, and --url, is an http(s) URL (a bare host reads as http);
 #   - every other stage is a known pure filter (_FETCH_FILTERS) — anything else,
 #     an interpreter, sed/awk, xargs, chmod, a ./path, is refused;
-#   - a curl that writes a file carries -g (--globoff) and no output name holds
-#     '#', so URL globbing cannot rewrite the destination after it is judged;
-#   - every file the command writes (-o, curl -O's URL name, wget's default or
-#     -O name, a > redirect, tee) resolves — symlinks included — to a NEW,
-#     non-dot file under the working directory or a temp directory, and never
-#     inside a git work tree;
+#   - a curl that writes a file carries -g (--globoff), so URL globbing cannot
+#     rewrite the destination after it is judged;
+#   - NO DIRECTORY CHANGE AT ALL: a cd, pushd or popd anywhere in the command
+#     (a subshell, a brace group, builtin/command/eval forms) refuses it, and
+#   - a file is written ONLY by curl -o / wget -O naming a LITERAL ABSOLUTE
+#     path directly under FETCH_SCRATCH_ROOT (see _fetch_destination_refusal).
+#     Three review rounds of PR 1695 each found a new way to make a relative
+#     destination land somewhere other than where it was judged (curl URL
+#     globbing, a cd that failed or took an option, shell globs in the word,
+#     logical versus physical '..', CDPATH). Following shell semantics one
+#     trick at a time did not converge, so the guard no longer follows any:
+#     the destination word must already be the place the bytes land. curl -O,
+#     wget's default naming, a > redirect to anything but /dev/null and tee to
+#     a file are all refused; stdout into a filter stage stays allowed;
 #   - nothing the guard cannot read: no $-expansion, backtick or process
 #     substitution anywhere in the command, so the URL seen is the URL sent;
 #   - no interpreter network client and no scp/rsync remote target;
@@ -1173,8 +1182,9 @@ def is_send_context(cmd):
 # is the same residual channel WebFetch has had since 2026-08-09. DNS rebinding
 # is not caught, as for WebFetch. curl -L and wget follow redirects, so a public
 # host can bounce a GET to a loopback address; that GET still carries only the
-# URL out. The new-file check runs before the command, so a file created between
-# the check and the write is not seen — a race only a concurrent writer can win.
+# URL out. The new-file and no-symlink checks run before the command, so a
+# path created or swapped between the check and the write is not seen — a race
+# only a concurrent writer can win.
 READ_ONLY_FETCHERS = frozenset({"curl", "wget"})
 _UNREADABLE = re.compile(r"[`]|\$[({A-Za-z_0-9@*#?$!-]|<\(|>\(")
 # curl/wget short options that consume the rest of the cluster (or the next word)
@@ -1219,8 +1229,18 @@ _FETCH_FILTERS = {
     "sort": re.compile(r"^(?:-[^-]*[oT]|--[oct])"),
     "uniq": "one-operand",
 }
-_SAFE_DEVICES = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "-"})
-_TEMP_ROOTS = ("/tmp", "/private/tmp", "/var/folders")
+# The ONE directory a read-only fetch to an unlisted host may write into: the
+# system temp directory, spelled as its realpath (/tmp on Linux; on macOS the
+# /private/var/folders/.../T form, since /var is a symlink there).
+FETCH_SCRATCH_ROOT = os.path.realpath(tempfile.gettempdir())
+# Outputs that write no file: curl -o - / wget -O - (stdout) and /dev/null.
+_NO_FILE_OUTPUTS = frozenset({"-", "/dev/null"})
+# A destination word is plain characters only: no glob (* ? [ ] { }), no ~, $,
+# backquote, '#', quote, backslash, space or parenthesis — so the word the
+# shell hands curl/wget is exactly the word judged here.
+_LITERAL_PATH = re.compile(r"^/[A-Za-z0-9._,+=@%:/-]+$")
+# Directory changers, refused anywhere in a fetch command (no cd is followed).
+_DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd", "chdir"})
 
 
 def _inside_git_tree(path):
@@ -1234,41 +1254,31 @@ def _inside_git_tree(path):
         path = parent
 
 
-def _fetch_destination_refusal(path, cwd=None):
-    """None if untrusted downloaded bytes may land at `path`, else why not.
-    `cwd` may be a list of candidate directories (a followed cd may have failed,
-    been skipped or run in a subshell): the path must pass in every one."""
-    if isinstance(cwd, (list, tuple)):
-        for one in cwd:
-            why = _fetch_destination_refusal(path, one)
-            if why:
-                return why
-        return None
-    return _fetch_destination_refusal_one(path, cwd)
+def _fetch_destination_refusal(path):
+    """None if untrusted downloaded bytes may be written to `path`, else why not.
 
-
-def _fetch_destination_refusal_one(path, cwd=None):
-    """None if untrusted downloaded bytes may land at `path` judged from `cwd`.
-
-    Allowed: a harmless device, or a NEW non-dot file whose real parent (every
-    symlink resolved) is the working directory, below it, or a temp directory,
-    and is not inside any git work tree. Never ~, an existing file, a dangling
-    symlink, a directory, or anywhere in a repository."""
-    if path in _SAFE_DEVICES:
-        return None
-    if not path or path.startswith("~"):
-        return f"would write fetched bytes to {path or '(an unnamed file)'}"
-    base = os.path.realpath(cwd or os.getcwd())
-    full = os.path.join(base, path)
-    name = os.path.basename(full)
-    if not name or name.startswith(".") or any(p == ".." for p in path.split("/")):
-        return f"would write fetched bytes to a dotfile or parent path ({path})"
-    if os.path.lexists(full):
+    The only file a fetch may write is a NEW, non-dot file named by a literal
+    absolute path under FETCH_SCRATCH_ROOT, with no glob, ~, $, backquote, '#'
+    or '..', no symlink anywhere on its parent path, outside every git work
+    tree. Nothing is resolved against a working directory, so no cd, glob or
+    '..' semantics can move the write away from the word judged."""
+    root = FETCH_SCRATCH_ROOT
+    rule = f"a fetch may write only a new file named by a literal absolute path under {root}"
+    if not _LITERAL_PATH.match(path or ""):
+        return (f"would write fetched bytes to {path or '(an unnamed file)'!r}: {rule} "
+                f"(no relative path, glob, ~, $, backquote or #)")
+    parts = path.split("/")[1:]
+    if any(p in ("", ".", "..") for p in parts):
+        return f"would write fetched bytes to {path!r}: {rule} (no '..', '.' or empty component)"
+    if parts[-1].startswith("."):
+        return f"would write fetched bytes to a dotfile ({path})"
+    parent = os.path.dirname(path)
+    if root in ("", "/") or not (parent == root or parent.startswith(root + "/")):
+        return f"would write fetched bytes outside the scratch root ({path}): {rule}"
+    if os.path.realpath(parent) != parent or not os.path.isdir(parent):
+        return f"would write fetched bytes through a symlink or missing directory ({path}): {rule}"
+    if os.path.lexists(path):
         return f"would overwrite an existing path ({path})"
-    parent = os.path.realpath(os.path.dirname(full))
-    roots = [base] + [os.path.realpath(t) for t in _TEMP_ROOTS]
-    if not any(parent == r or parent.startswith(r.rstrip("/") + "/") for r in roots):
-        return f"would write fetched bytes outside the working and temp directories ({path})"
     if _inside_git_tree(parent):
         return f"would write fetched bytes inside a repository ({path})"
     return None
@@ -1286,12 +1296,7 @@ def _fetch_url_refusal(word):
     return why.replace("WebFetch ", "the fetch ").split(" — blocked")[0] if why else None
 
 
-def _remote_name(url):
-    """The local name curl -O / a plain wget gives a download."""
-    return urlsplit(url if "://" in url else f"http://{url}").path.rsplit("/", 1)[-1]
-
-
-def _fetch_grammar_refusal(tool, words, cwd=None):
+def _fetch_grammar_refusal(tool, words):
     """None when one curl/wget invocation is configuration-free, uses only the
     read-only grammar, names only acceptable URLs, and writes only to safe new
     files; otherwise the reason it is not."""
@@ -1370,19 +1375,22 @@ def _fetch_grammar_refusal(tool, words, cwd=None):
         why = _fetch_url_refusal(url)
         if why:
             return why
+    # A name taken from the URL (curl -O, wget without -O) is relative to a
+    # working directory the guard does not follow: refused outright.
+    if remote_name:
+        return (f"curl -O names the file from the URL; write with -o <absolute path under "
+                f"{FETCH_SCRATCH_ROOT}> instead")
+    if tool == "wget" and not wget_named and not spider:
+        return (f"wget without -O names the file itself; use -O - or -O <absolute path under "
+                f"{FETCH_SCRATCH_ROOT}>")
     # curl expands {a,b} and [1-9] in a URL and substitutes the match for #N in
-    # -o, so the path judged here would not be the path written: a curl that
-    # writes a file (anything but /dev/null or stdout) must turn globbing off,
-    # and no output name may carry '#'.
-    if tool == "curl" and not globoff and (
-            remote_name or any(o not in _SAFE_DEVICES for o in outputs)):
+    # -o, so a curl that writes a file must turn globbing off.
+    if tool == "curl" and not globoff and any(o not in _NO_FILE_OUTPUTS for o in outputs):
         return "curl writing a file needs -g (--globoff) so URL globbing cannot rename the destination"
-    if any("#" in o for o in outputs):
-        return f"{tool} output name carries '#', which curl globbing rewrites"
-    if remote_name or (tool == "wget" and not wget_named and not spider):
-        outputs += [_remote_name(u) or ("index.html" if tool == "wget" else "") for u in urls]
     for path in outputs:
-        why = _fetch_destination_refusal(path, cwd)
+        if path in _NO_FILE_OUTPUTS:
+            continue
+        why = _fetch_destination_refusal(path)
         if why:
             return f"{tool} {why}"
     return None
@@ -1402,7 +1410,7 @@ def _filter_refusal(exe, words):
     return None
 
 
-def read_only_fetch_refusal(cmd, cwd=None):
+def read_only_fetch_refusal(cmd):
     """None if `cmd` is a plain read-only fetch whose unlisted URLs all pass the
     open-read policy; otherwise the reason it is not."""
     if NET_CLIENT.search(cmd):
@@ -1415,6 +1423,13 @@ def read_only_fetch_refusal(cmd, cwd=None):
         tokens = shell_tokens(cmd)
     except ValueError:
         return "the command could not be parsed"
+    # No directory change is followed, so none is allowed: in any position, in
+    # a subshell or brace group, behind builtin/command/eval or a quote.
+    for t in tokens:
+        for piece in re.split(r"[\s;&|(){}<>!]+", t):
+            if piece.lstrip("\\").lower() in _DIRECTORY_CHANGERS:
+                return (f"a fetch to an unlisted host may not change directory ({piece}); "
+                        f"name an absolute destination under {FETCH_SCRATCH_ROOT} instead")
     segments, current = [], []
     for t in tokens:
         if t in SHELL_BOUNDARIES:
@@ -1423,7 +1438,6 @@ def read_only_fetch_refusal(cmd, cwd=None):
         else:
             current.append(t)
     segments.append(current)
-    cwds = [os.path.realpath(cwd or os.getcwd())]
     fetches = 0
     for seg in segments:
         words = [w for w in seg if w not in ("(", ")", "{", "}")]
@@ -1442,40 +1456,16 @@ def read_only_fetch_refusal(cmd, cwd=None):
         except ValueError:
             return "the command could not be parsed"
         for path in redirects:
-            why = _fetch_destination_refusal(path, cwds)
-            if why:
-                return f"the command {why}"
+            if path != "/dev/null":
+                return (f"a fetch to an unlisted host may redirect output only to /dev/null, "
+                        f"not {path!r}; write with curl -o / wget -O <absolute path under "
+                        f"{FETCH_SCRATCH_ROOT}>")
         if not words:
             continue
         exe = os.path.basename(words[0]).lower()
-        if exe in ("cd", "pushd", "popd"):
-            # Follow a directory change so an output path is judged where it
-            # lands. The cd may fail, be skipped (||, a false &&) or run in a
-            # pipeline subshell, so every later destination is judged against
-            # every candidate directory: the original cwd and each target.
-            if exe == "popd":
-                return "popd moves to a directory the guard cannot see"
-            operands = words[1:]
-            if any(a.startswith(("-", "+")) for a in operands):
-                return f"{exe} options are not followed; name the directory alone"
-            if len(operands) > 1:
-                return f"{exe} with more than one operand is not followed"
-            if not operands and exe == "pushd":
-                return "pushd without a directory swaps to one the guard cannot see"
-            target = os.path.expanduser(operands[0] if operands else "~")
-            moved = [os.path.realpath(os.path.join(c, target)) for c in cwds]
-            moved = [m for m in moved if os.path.isdir(m)]
-            if not moved:
-                return f"{exe} target {operands[0] if operands else '~'} is not an existing directory"
-            cwds += [m for m in moved if m not in cwds]
-            continue
         if exe == "tee":
-            if any(a.startswith("-") and a != "-" for a in words[1:]):
-                return "tee options are not part of a plain fetch"
-            for path in words[1:]:
-                why = _fetch_destination_refusal(path, cwds)
-                if why:
-                    return f"tee {why}"
+            if len(words) > 1:
+                return "tee may not write a file in a fetch command; use curl -o / wget -O"
             continue
         if exe in COMMAND_WRAPPERS and _SENDER_NAMES.intersection(command_executables(words)):
             return f"a network client run through {exe} is not a plain fetch"
@@ -1484,7 +1474,7 @@ def read_only_fetch_refusal(cmd, cwd=None):
                 return f"{exe} is not a plain fetch"
             if words[0] != exe:
                 return f"{exe} must be named as a bare word, not {words[0]}, so the program run is the one judged"
-            why = _fetch_grammar_refusal(exe, words[1:], cwds)
+            why = _fetch_grammar_refusal(exe, words[1:])
             if why:
                 return why
             fetches += 1
@@ -2099,13 +2089,16 @@ def check(cmd, cwd=None):
         # allowlist-only, by design.
         unlisted = [h for h in hosts_in(cmd) if not host_allowlisted(h)]
         if unlisted:
-            why = read_only_fetch_refusal(cmd, cwd)
+            why = read_only_fetch_refusal(cmd)
             if why is not None:
                 return (f"network send to an unrecognised host ({unlisted[0]}) — blocked by the "
                         f"CARR unattended guard: {why}. A plain curl/wget GET or download "
                         f"(no body, upload, header, cookie, credential or $-expansion) may reach "
-                        f"any public host, spelled `curl -q ...` (plus -g when it writes a file) or "
-                        f"`wget --no-config --no-netrc ...`; a command that SENDS data needs the host in KNOWN_HOSTS.")
+                        f"any public host, spelled `curl -q ...` or `wget --no-config --no-netrc ...`, "
+                        f"with no cd; it may write a file only with `curl -q -g -o <path>` or "
+                        f"`wget ... -O <path>` where <path> is a new file named by a literal absolute "
+                        f"path under {FETCH_SCRATCH_ROOT} (no glob, ~, $, # or '..', no symlink, not in "
+                        f"a repository); a command that SENDS data needs the host in KNOWN_HOSTS.")
 
     reason = render_write_target(cmd)
     if reason:
