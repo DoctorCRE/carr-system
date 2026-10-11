@@ -136,9 +136,33 @@ test("a credential-bearing start url is refused before SQL and never echoed", as
     e => e.payload.error === "research_site_host_invalid" && e.payload.host === null);
 });
 
+// PR 1695 round 2: camelCase and run-together credential names (S3 v2 pre-signed
+// AWSAccessKeyId among them) were accepted because the name was split only on
+// - _ and . — they are matched on the lowercased, separator-stripped name now.
+const CAMEL_CREDENTIAL_NAMES = ["accessToken", "apiToken", "authToken", "privateToken",
+  "clientSecret", "AWSAccessKeyId", "accesstoken", "ApiKey", "x-apiKey"];
+
+test("a camelCase credential field in a start url is refused", async () => {
+  for (const name of CAMEL_CREDENTIAL_NAMES) {
+    for (const url of [`https://data.example.org/tables?page=2&${name}=synthetic-value`,
+      `https://data.example.org/tables#${name}=synthetic-value`]) {
+      const fake = new Fake();
+      const error = await TOOLS["add-research-site"].handler(fake, joeLocal, {
+        idempotency_key: "site-add-camel", host: "data.example.org", topics: ["demographics"], url,
+      }).then(() => null, e => e);
+      assert.equal(error?.payload?.error, "research_site_url_credential", url);
+      assert.equal(fake.calls.length, 0, `${url} reached SQL`);
+      assert.ok(!JSON.stringify(error.payload).includes("synthetic"), `${url} echoed in the error`);
+    }
+  }
+});
+
 test("a public start url with ordinary query fields is stored as given", async () => {
   for (const url of ["https://data.example.org/tables?keyword=office&page=2",
-    "https://data.example.org/monkey-report?zipcode=36601", "http://data.example.org/"]) {
+    "https://data.example.org/monkey-report?zipcode=36601", "http://data.example.org/",
+    // Words that merely contain a credential word stay acceptable field names.
+    "https://data.example.org/tables?monkey=1&sortOrder=asc",
+    "https://data.example.org/tables?searchKeywords=office&author=cbre"]) {
     const fake = new Fake({ "insert into research_site": [{ id: "30000000-0000-0000-0000-000000000002",
       host: "data.example.org", added_at: "2026-10-11T12:00:00Z" }] });
     const out = await TOOLS["add-research-site"].handler(fake, joeLocal, {

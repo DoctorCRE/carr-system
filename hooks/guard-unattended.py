@@ -1140,18 +1140,22 @@ def is_send_context(cmd):
 # `curl -n`, `wget --post-d=` (a GNU-getopt abbreviation), a .curlrc POST,
 # `| awk -f /dev/stdin`, `chmod +x` then execute, and `--output-dir hooks -O`,
 # each through a flag or stage the deny-list had never named. Now:
-#   - every network executable in command position is curl or wget, called
-#     directly (not through xargs/sudo/env, which hide the URL or the method);
+#   - every network executable in command position is curl or wget, named as a
+#     bare word (not ./curl or a path) and called directly (not through
+#     xargs/sudo/env, which hide the URL or the method);
 #   - it runs CONFIGURATION-FREE: curl's first argument is -q (or --disable),
-#     wget carries --no-config, so no ~/.curlrc, $CURL_HOME or wgetrc can add a
-#     body, header or credential the command text does not show; and no leading
-#     assignment may set a proxy, a home or a curl/wget/SSL variable;
+#     wget carries --no-config and --no-netrc, so no ~/.curlrc, $CURL_HOME,
+#     wgetrc or ~/.netrc can add a body, header or credential the command text
+#     does not show; and the command carries no variable assignment at all
+#     (SSLKEYLOGFILE= writes anywhere, PATH=. picks a local curl);
 #   - every option is one of _FETCH_GRAMMAR's read-only options, spelled in
 #     FULL (an abbreviation, alias or unknown option is refused, so a getopt
 #     prefix can never reach a send option);
 #   - every operand, and --url, is an http(s) URL (a bare host reads as http);
 #   - every other stage is a known pure filter (_FETCH_FILTERS) — anything else,
 #     an interpreter, sed/awk, xargs, chmod, a ./path, is refused;
+#   - a curl that writes a file carries -g (--globoff) and no output name holds
+#     '#', so URL globbing cannot rewrite the destination after it is judged;
 #   - every file the command writes (-o, curl -O's URL name, wget's default or
 #     -O name, a > redirect, tee) resolves — symlinks included — to a NEW,
 #     non-dot file under the working directory or a temp directory, and never
@@ -1196,15 +1200,12 @@ _FETCH_GRAMMAR = {
              frozenset()),
     "wget": (frozenset("qS46"), frozenset("OTt"),
              frozenset({"quiet", "no-verbose", "server-response", "spider", "no-clobber",
-                        "no-config", "inet4-only", "inet6-only"}),
+                        "no-config", "no-netrc", "inet4-only", "inet6-only"}),
              frozenset({"output-document", "timeout", "tries", "max-redirect", "read-timeout",
                         "connect-timeout", "dns-timeout"}),
              frozenset({"-nv", "-nc"})),
 }
 _NUMERIC_VALUE = re.compile(r"^\d+(?:\.\d+)?[kKmMgG]?$")
-# A leading assignment on a fetch that would change where or how it connects.
-_FETCH_ENV = re.compile(r"(?i)^(?:[a-z_]*proxy|home|xdg_config_home|curl_[a-z_]*|wget[a-z_]*|"
-                        r"ssl_[a-z_]*|ld_[a-z_]*|dyld_[a-z_]*)\+?=")
 # Downstream stages a fetch may feed: pure filters that neither write a file nor
 # run a program, each with the options that would break that (refused) or the
 # operand count that would. Anything not listed is refused.
@@ -1213,9 +1214,9 @@ _FETCH_FILTERS = {
     "egrep": None, "fgrep": None, "jq": None, "cat": None, "nl": None, "fold": None,
     "column": None, "rev": None, "tac": None, "sha256sum": None, "shasum": None,
     "md5sum": None, "echo": None, "printf": None, "true": None, "false": None,
-    # sort -o/--output writes and --compress-program runs a program; uniq's
-    # second operand is an output file.
-    "sort": re.compile(r"^(?:-[^-]*o|--[oc])"),
+    # sort -o/--output writes, -T/--temporary-directory writes scratch files
+    # and --compress-program runs a program; uniq's second operand is an output file.
+    "sort": re.compile(r"^(?:-[^-]*[oT]|--[oct])"),
     "uniq": "one-operand",
 }
 _SAFE_DEVICES = frozenset({"/dev/null", "/dev/stdout", "/dev/stderr", "-"})
@@ -1285,8 +1286,10 @@ def _fetch_grammar_refusal(tool, words, cwd=None):
         return "curl must start with -q so no .curlrc can add a body, header or credential"
     if tool == "wget" and "--no-config" not in words:
         return "wget needs --no-config so no wgetrc can add a body, header or credential"
+    if tool == "wget" and "--no-netrc" not in words:
+        return "wget needs --no-netrc so no ~/.netrc entry answers a server's login challenge"
     short_flag, short_value, long_flag, long_value, whole = _FETCH_GRAMMAR[tool]
-    outputs, urls, remote_name, wget_named, spider = [], [], False, False, False
+    outputs, urls, remote_name, wget_named, spider, globoff = [], [], False, False, False, False
     i, operands_only = (1 if tool == "curl" else 0), False
     while i < len(words):
         w = words[i]
@@ -1304,6 +1307,7 @@ def _fetch_grammar_refusal(tool, words, cwd=None):
             if name in long_flag and not eq:
                 remote_name |= name == "remote-name"
                 spider |= name == "spider"
+                globoff |= name == "globoff"
                 continue
             if name not in long_value:
                 return f"{tool} --{name} is not in the read-only fetch grammar"
@@ -1318,6 +1322,7 @@ def _fetch_grammar_refusal(tool, words, cwd=None):
             for k, ch in enumerate(cluster):
                 if ch in short_flag:
                     remote_name |= tool == "curl" and ch == "O"
+                    globoff |= tool == "curl" and ch == "g"
                     continue
                 if ch not in short_value:
                     return f"{tool} -{ch} is not in the read-only fetch grammar"
@@ -1342,6 +1347,8 @@ def _fetch_grammar_refusal(tool, words, cwd=None):
         elif opt in ("w", "write-out"):
             if "output" in value.lower():
                 return "curl --write-out %output writes a file"
+            if value.startswith("@"):
+                return "curl --write-out @file reads a local file into the output"
         elif not _NUMERIC_VALUE.match(value):
             return f"{tool} {opt} takes a number, not {value!r}"
     if not urls:
@@ -1350,6 +1357,15 @@ def _fetch_grammar_refusal(tool, words, cwd=None):
         why = _fetch_url_refusal(url)
         if why:
             return why
+    # curl expands {a,b} and [1-9] in a URL and substitutes the match for #N in
+    # -o, so the path judged here would not be the path written: a curl that
+    # writes a file (anything but /dev/null or stdout) must turn globbing off,
+    # and no output name may carry '#'.
+    if tool == "curl" and not globoff and (
+            remote_name or any(o not in _SAFE_DEVICES for o in outputs)):
+        return "curl writing a file needs -g (--globoff) so URL globbing cannot rename the destination"
+    if any("#" in o for o in outputs):
+        return f"{tool} output name carries '#', which curl globbing rewrites"
     if remote_name or (tool == "wget" and not wget_named and not spider):
         outputs += [_remote_name(u) or ("index.html" if tool == "wget" else "") for u in urls]
     for path in outputs:
@@ -1402,6 +1418,11 @@ def read_only_fetch_refusal(cmd, cwd=None):
             if _ASSIGNMENT.match(words[0]):
                 assignments.append(words[0])
             words = words[1:]
+        # No assignment anywhere in a fetch command, even alone in its own
+        # segment: SSLKEYLOGFILE= appends to any path and PATH=. runs a local curl.
+        if assignments:
+            return (f"a variable assignment ({assignments[0].split('=', 1)[0]}=) can change "
+                    f"how a fetch connects or where it writes")
         try:
             words, redirects = shell_operands(words)
         except ValueError:
@@ -1431,8 +1452,8 @@ def read_only_fetch_refusal(cmd, cwd=None):
         if exe in _SENDER_NAMES:
             if exe not in READ_ONLY_FETCHERS:
                 return f"{exe} is not a plain fetch"
-            if any(_FETCH_ENV.match(a) for a in assignments):
-                return f"an environment assignment changes how {exe} connects"
+            if words[0] != exe:
+                return f"{exe} must be named as a bare word, not {words[0]}, so the program run is the one judged"
             why = _fetch_grammar_refusal(exe, words[1:], cwd)
             if why:
                 return why
@@ -2053,7 +2074,8 @@ def check(cmd, cwd=None):
                 return (f"network send to an unrecognised host ({unlisted[0]}) — blocked by the "
                         f"CARR unattended guard: {why}. A plain curl/wget GET or download "
                         f"(no body, upload, header, cookie, credential or $-expansion) may reach "
-                        f"any public host; a command that SENDS data needs the host in KNOWN_HOSTS.")
+                        f"any public host, spelled `curl -q ...` (plus -g when it writes a file) or "
+                        f"`wget --no-config --no-netrc ...`; a command that SENDS data needs the host in KNOWN_HOSTS.")
 
     reason = render_write_target(cmd)
     if reason:

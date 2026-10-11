@@ -51,13 +51,27 @@ function text(value, field, { optional = false, max = 1000 } = {}) {
   return value.trim();
 }
 
-// A query or fragment field whose name says it carries a credential. Matched
-// against each field NAME (split on - _ .), so "keyword" or "monkey" pass while
-// "api_key", "access-token", "X-Amz-Signature" and "sig" do not.
-const SENSITIVE_PARAM = /^(?:.*[-_.])?(?:token|key|apikey|secret|signature|sig|password|passwd|pwd|pass|auth|authorization|credential|credentials|session|sessionid|sid|jwt|bearer)(?:[-_.].*)?$/i;
+// A query or fragment field whose name says it carries a credential. Two tests:
+// each WORD of the name (split on - _ . and at camelCase humps) against the
+// short credential words, so "api_key", "X-Amz-Signature", "sortKey" and "sig"
+// are refused; and the lowercased, separator-stripped name against the longer
+// words as substrings, so run-together "accesstoken", "clientsecret" and
+// "AWSAccessKeyId" are refused too. BENIGN_PARAM keeps ordinary words that
+// only contain one ("monkey" ends in "key") acceptable.
+const SENSITIVE_WORD = /^(?:token|key|keys|apikey|secret|signature|sig|password|passwd|pwd|pass|auth|authorization|credential|credentials|session|sessionid|sid|jwt|bearer)$/i;
+const SENSITIVE_FLAT = /token|secret|passw|credential|signature|authorization|bearer|sessionid|key(?:s|id)?$/;
+const BENIGN_PARAM = new Set(["keyword", "keywords", "monkey", "turkey", "hockey", "jockey", "whiskey", "donkey"]);
+
+function sensitiveName(name) {
+  const flat = name.toLowerCase().replace(/[-_.]/g, "");
+  if (BENIGN_PARAM.has(flat)) return false;
+  const words = name.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").split(/[\s\-_.]+/);
+  return words.some(word => SENSITIVE_WORD.test(word)) || SENSITIVE_FLAT.test(flat);
+}
 
 function sensitiveFields(params) {
-  return [...params.keys()].some(name => SENSITIVE_PARAM.test(name));
+  return [...params.keys()].some(sensitiveName);
 }
 
 // A starting page on the listed host. It is stored and returned to every
