@@ -12,7 +12,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
-import { RESEARCH_SITE_WRITE_VERBS, normalizeResearchHost, normalizeTopics } from "../src/research-sites.js";
+import { RESEARCH_SITE_WRITE_VERBS, normalizeResearchHost, normalizeTopics, startUrl } from "../src/research-sites.js";
 
 const joe = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", display: "Joe",
   human: true, via: "oauth", client_id: "claude-ai" };
@@ -154,6 +154,31 @@ test("a camelCase credential field in a start url is refused", async () => {
       assert.equal(fake.calls.length, 0, `${url} reached SQL`);
       assert.ok(!JSON.stringify(error.payload).includes("synthetic"), `${url} echoed in the error`);
     }
+  }
+});
+
+// PR 1695 round 3: a key name ending in a digit, PHP session ids, passcodes,
+// short pw fields and one-time / SSO values (OAuth code, otp, CAS ticket,
+// SAMLResponse) were accepted.
+const ROUND3_CREDENTIAL_NAMES = ["apiKey1", "key2", "api_key2", "X-Api-Key2", "keys3",
+  "PHPSESSID", "sessid", "passcode", "pw", "code", "otp", "ticket", "SAMLResponse"];
+
+test("a digit-suffixed key, session id, passcode or one-time value in a start url is refused", () => {
+  for (const name of ROUND3_CREDENTIAL_NAMES) {
+    for (const url of [`https://data.example.org/tables?page=2&${name}=synthetic-value`,
+      `https://data.example.org/tables#${name}=synthetic-value`]) {
+      const error = (() => { try { startUrl(url, "data.example.org"); return null; } catch (e) { return e; } })();
+      assert.equal(error?.payload?.error, "research_site_url_credential", url);
+      assert.ok(!JSON.stringify(error.payload).includes("synthetic"), `${url} echoed in the error`);
+    }
+  }
+});
+
+test("ordinary words that contain a credential word stay acceptable start url fields", () => {
+  for (const name of ["tokenizer", "tokenize", "tokenizers", "turnkey", "hotkey",
+    "keyword", "keywords", "monkey", "author", "authors", "zipcode"]) {
+    const url = `https://data.example.org/tables?${name}=office&page=2`;
+    assert.equal(startUrl(url, "data.example.org"), url, name);
   }
 });
 

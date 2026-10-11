@@ -57,10 +57,13 @@ function text(value, field, { optional = false, max = 1000 } = {}) {
 // are refused; and the lowercased, separator-stripped name against the longer
 // words as substrings, so run-together "accesstoken", "clientsecret" and
 // "AWSAccessKeyId" are refused too. BENIGN_PARAM keeps ordinary words that
-// only contain one ("monkey" ends in "key") acceptable.
-const SENSITIVE_WORD = /^(?:token|key|keys|apikey|secret|signature|sig|password|passwd|pwd|pass|auth|authorization|credential|credentials|session|sessionid|sid|jwt|bearer)$/i;
-const SENSITIVE_FLAT = /token|secret|passw|credential|signature|authorization|bearer|sessionid|key(?:s|id)?$/;
-const BENIGN_PARAM = new Set(["keyword", "keywords", "monkey", "turkey", "hockey", "jockey", "whiskey", "donkey"]);
+// only contain one ("monkey" ends in "key") acceptable. A trailing number
+// ("apiKey1", "api_key2") does not hide a word, and one-time and SSO values
+// (code, otp, ticket, SAMLResponse) count as credentials.
+const SENSITIVE_WORD = /^(?:token|key|keys|apikey|secret|signature|sig|password|passwd|pwd|pw|pass|passcode|auth|authorization|credential|credentials|session|sessionid|sessid|sid|jwt|bearer|code|otp|ticket)\d*$/i;
+const SENSITIVE_FLAT = /token|secret|passw|passcode|credential|signature|authorization|bearer|sessionid|sessid|samlresponse|key(?:s|id)?\d*$/;
+const BENIGN_PARAM = new Set(["keyword", "keywords", "monkey", "turkey", "hockey", "jockey", "whiskey", "donkey",
+  "tokenizer", "tokenizers", "tokenize", "turnkey", "hotkey", "hotkeys"]);
 
 function sensitiveName(name) {
   const flat = name.toLowerCase().replace(/[-_.]/g, "");
