@@ -66,13 +66,32 @@ function rpcOptions(token, name, args = {}) {
   };
 }
 
-export async function probeProduction(env, fetcher = fetch, timeoutMs = 8000) {
+// Production Neon sleeps overnight (Joe, 2026-10-11: ~0.5s cold start accepted).
+// Neon suspends compute after 5 idle minutes and any query wakes it, so inside
+// [QUIET_START_HOUR, QUIET_END_HOUR) America/Chicago wall-clock time the monitor
+// skips every probe that reaches Postgres. Intl resolves the offset per instant,
+// so the window follows CST/CDT across both DST transitions.
+export const QUIET_TIME_ZONE = "America/Chicago";
+export const QUIET_START_HOUR = 1;
+export const QUIET_END_HOUR = 6;
+const quietHour = new Intl.DateTimeFormat("en-US", { timeZone: QUIET_TIME_ZONE, hour: "numeric", hourCycle: "h23" });
+
+export function inQuietWindow(time) {
+  const hour = Number(quietHour.formatToParts(new Date(time)).find((part) => part.type === "hour").value);
+  return hour >= QUIET_START_HOUR && hour < QUIET_END_HOUR;
+}
+
+// db: true marks a probe that reaches production Postgres. /release reads
+// v_schema_ledger and doctrine_meta (release.js); the verb runs a SELECT.
+// /app-release is built from Worker vars alone (doctorcre-app src/worker.js).
+export async function probeProduction(env, fetcher = fetch, timeoutMs = 8000, { quiet = false } = {}) {
   const targets = [
-    ["api-release", `${API_ORIGIN}/release`, {}, apiShape],
-    ["app-release", `${APP_ORIGIN}/app-release`, {}, appShape],
-    ["verb-round-trip", `${API_ORIGIN}/mcp`, rpcOptions(env.CARR_MCP_PROBE_TOKEN, ROUND_TRIP_VERB), profilesShape],
+    ["api-release", `${API_ORIGIN}/release`, {}, apiShape, true],
+    ["app-release", `${APP_ORIGIN}/app-release`, {}, appShape, false],
+    ["verb-round-trip", `${API_ORIGIN}/mcp`, rpcOptions(env.CARR_MCP_PROBE_TOKEN, ROUND_TRIP_VERB), profilesShape, true],
   ];
-  const checks = await Promise.all(targets.map(async ([name, url, options, shape]) => {
+  const checks = await Promise.all(targets.map(async ([name, url, options, shape, db]) => {
+    if (quiet && db) return { name, ok: null, skipped: true, reason: "skipped_quiet_window", elapsed_ms: 0 };
     const start = Date.now();
     try {
       if (name === "verb-round-trip" && !env.CARR_MCP_PROBE_TOKEN) throw new Error("missing_CARR_MCP_PROBE_TOKEN");
@@ -83,7 +102,8 @@ export async function probeProduction(env, fetcher = fetch, timeoutMs = 8000) {
       return { name, ok: false, reason, elapsed_ms: Date.now() - start };
     }
   }));
-  return { ok: checks.every((check) => check.ok), checks };
+  const ran = checks.filter((check) => !check.skipped);
+  return { ok: ran.every((check) => check.ok), complete: ran.length === checks.length, checks };
 }
 
 const iso = (time) => new Date(time).toISOString();
@@ -180,22 +200,33 @@ export async function runMinute(storage, env, scheduledTime, fetcher = fetch, no
   const slot = Math.floor(scheduledTime / 60000);
   if (slot < state.last_slot || (slot === state.last_slot && state.finalized_slot === slot)) return state;
   if (slot > state.last_slot) {
-    if (slot > state.last_slot + 1) { state.failures = 0; state.first_failure_at = null; }
-    const sample = await probeProduction(env, fetcher);
+    if (slot > state.last_slot + 1) { state.failures = 0; state.first_failure_at = null; state.failing_checks = []; }
+    const sample = await probeProduction(env, fetcher, undefined, { quiet: inQuietWindow(scheduledTime) });
     state.last_slot = slot;
     state.scheduled_at = iso(scheduledTime);
     state.checked_at = iso(now());
     state.probes_ok = sample.ok;
     state.checks = sample.checks;
     state.ok = false;
+    // A skipped probe is neither a pass nor a failure. A partial (quiet-window)
+    // pass ends the streak only when it re-observed every check that was failing;
+    // otherwise the streak holds, so failures at 00:59 and 06:00 stay consecutive.
+    // Recovery always needs a complete sample: an incident open at 01:00 stays open
+    // until the first full probe after the window.
+    const ran = new Set(sample.checks.filter((check) => !check.skipped).map((check) => check.name));
     if (sample.ok) {
-      state.failures = 0;
-      state.first_failure_at = null;
-      if (state.active_incident) {
+      state.failing_checks = sample.complete ? [] : (state.failing_checks || []).filter((name) => !ran.has(name));
+      if (!state.failing_checks.length) {
+        state.failures = 0;
+        state.first_failure_at = null;
+      }
+      if (sample.complete && state.active_incident) {
         state.incidents.find((item) => item.id === state.active_incident).recovered_at = state.checked_at;
         state.active_incident = null;
       }
     } else {
+      state.failing_checks = [...new Set([...(state.failing_checks || []).filter((name) => !ran.has(name)),
+        ...sample.checks.filter((check) => check.ok === false).map((check) => check.name)])];
       if (!state.failures) state.first_failure_at = state.checked_at;
       state.failures++;
       if (state.failures >= 3 && !state.active_incident) {
@@ -212,6 +243,7 @@ export async function runMinute(storage, env, scheduledTime, fetcher = fetch, no
     await storage.put(STATE_KEY, state);
   }
   await deliverAlerts(storage, state, env, fetcher);
+  // Incident loops are CARR verbs (Postgres), so a skipped round trip defers them too.
   if (state.checks.find((check) => check.name === "verb-round-trip").ok) await deliverRecord(storage, state, env, fetcher);
   const finished = state.incidents.filter(complete).slice(-20);
   state.incidents = state.incidents.filter((incident) => !complete(incident) || finished.includes(incident));
