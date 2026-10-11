@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { probeProduction, runMinute as tickMinute, STATE_KEY } from "../src/uptime-monitor.js";
+import { probeProduction, ROUND_TRIP_VERB, runMinute as tickMinute, STATE_KEY } from "../src/uptime-monitor.js";
 import worker, { UptimeLedger } from "../uptime-worker.js";
 import { build } from "esbuild";
 import { Miniflare, Response as WorkerResponse, convertV4MiniflareOptions } from "miniflare";
@@ -17,7 +17,10 @@ const APP = {
   provider_version_id: "fixture-app", carr_contract: { schema: "doctorcre-carr-interface.v1", version: "1.43.0" },
   route_contract: { schema: "doctorcre-app-routes.v1", version: "1.20.0" },
 };
-const DIGEST = { digest: [{ line: "row_counts", value: { deals: 0, leads: 0, clients: 0, vendors: 0 } }] };
+const PROFILES = { ok: true, total: 2, profiles: [
+  { profile_key: "builder", display_name: "Builder", charter: [], current_model: "fixture", current_desk: "hermes-desktop", sponsor_scope: "shared", status: "active", version: "2" },
+  { profile_key: "doc", display_name: "Doc", charter: [], current_model: null, current_desk: null, sponsor_scope: "shared", status: "unstaffed", version: "1" },
+] };
 const rpc = (value) => ({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify(value) }] } });
 const env = { CARR_MCP_PROBE_TOKEN: "fixture-probe", UPTIME_RECORD_TOKEN: "fixture-record", UPTIME_HEALTHCHECKS_PING_URL: "https://hc-ping.com/00000000-0000-4000-8000-000000000021" };
 const START = Date.parse("2026-10-05T19:00:00Z");
@@ -27,7 +30,7 @@ function harness() {
   const values = new Map();
   const calls = [];
   const h = {
-    calls, down: false, api: API, app: APP, digest: rpc(DIGEST),
+    calls, down: false, api: API, app: APP, profiles: rpc(PROFILES),
     storage: {
       async get(key) { return structuredClone(values.get(key)); },
       async put(key, value) { values.set(key, structuredClone(value)); },
@@ -39,7 +42,7 @@ function harness() {
       if (url.endsWith("/release")) return Response.json(h.api);
       if (url.endsWith("/app-release")) return Response.json(h.app);
       const name = JSON.parse(options.body).params.name;
-      if (name === "integrity-digest") return Response.json(h.digest);
+      if (name === "read-profiles") return Response.json(h.profiles);
       if (name === "add-loop") return Response.json(rpc({ ok: true, loop_id: "00000000-0000-4000-8000-000000000001" }));
       if (name === "read-loop") return Response.json(rpc({ loop_id: "00000000-0000-4000-8000-000000000001", version: 1, status: "open" }));
       if (name === "close-loop") return Response.json(rpc({ ok: true }));
@@ -56,7 +59,9 @@ test("validates all three production contracts, including the read-only verb", a
   assert.deepEqual(result.checks.map(({ name, ok }) => ({ name, ok })), [
     { name: "api-release", ok: true }, { name: "app-release", ok: true }, { name: "verb-round-trip", ok: true },
   ]);
-  assert.equal(JSON.parse(h.calls[2].body).params.name, "integrity-digest");
+  assert.equal(ROUND_TRIP_VERB, "read-profiles");
+  assert.deepEqual(JSON.parse(h.calls[2].body).params, { name: "read-profiles", arguments: {} });
+  assert.equal(h.calls[2].headers.Authorization, "Bearer fixture-probe");
 });
 
 test("confirms on third failure, alerts once through a prolonged outage, then recovers and files one timed loop", async () => {
@@ -89,15 +94,84 @@ test("confirms on third failure, alerts once through a prolonged outage, then re
 test("HTTP 200 with wrong release, app, or nested RPC shape fails the respective probe", async () => {
   for (const [field, fixture, check] of [
     ["api", { ok: true }, "api-release"], ["app", { service: "doctorcre-app" }, "app-release"],
-    ["digest", { jsonrpc: "2.0", id: 1, result: {} }, "verb-round-trip"],
-    ["digest", rpc({ digest: [] }), "verb-round-trip"],
-    ["digest", { ...rpc(DIGEST), result: { ...rpc(DIGEST).result, isError: true } }, "verb-round-trip"],
+    ["profiles", { jsonrpc: "2.0", id: 1, result: {} }, "verb-round-trip"],
+    ["profiles", rpc({ ok: true, total: 0, profiles: [] }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, ok: false }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, total: 3 }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, profiles: [{ ...PROFILES.profiles[0], status: "retired" }] }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, profiles: [{ ...PROFILES.profiles[0], profile_key: "" }] }), "verb-round-trip"],
+    ["profiles", rpc({ digest: [{ line: "row_counts", value: { deals: 0, leads: 0, clients: 0, vendors: 0 } }] }), "verb-round-trip"],
+    ["profiles", { ...rpc(PROFILES), result: { ...rpc(PROFILES).result, isError: true } }, "verb-round-trip"],
   ]) {
     const h = harness(); h[field] = fixture;
     const result = await probeProduction(env, h.fetch);
     assert.equal(result.ok, false);
     assert.equal(result.checks.find((item) => item.name === check).ok, false);
   }
+});
+
+const DB_FAILURES = [
+  ["database error surfaced as a tool error", () => Response.json({ jsonrpc: "2.0", id: 1,
+    result: { isError: true, content: [{ type: "text", text: JSON.stringify({ error: "internal_error" }) }] } }), "invalid_json_or_transport"],
+  ["JSON-RPC error", () => Response.json({ jsonrpc: "2.0", id: 1, error: { code: -32603, message: "fixture" } }), "invalid_json_or_transport"],
+  ["wrong shape", () => Response.json(rpc({ ok: true, total: 0, profiles: [] })), "wrong_shape"],
+  ["HTTP 500", () => new Response("fixture", { status: 500 }), "http_500"],
+  ["HTTP 401", () => new Response("fixture", { status: 401 }), "http_401"],
+];
+
+test("a broken verb round trip alone fails the sample with its own reason", async () => {
+  for (const [label, respond, reason] of DB_FAILURES) {
+    const h = harness();
+    const fetcher = async (url, options = {}) => (url.endsWith("/mcp") ? (h.calls.push({ url, ...options }), respond()) : h.fetch(url, options));
+    const result = await probeProduction(env, fetcher);
+    assert.equal(result.ok, false, label);
+    assert.deepEqual(result.checks.map(({ name, ok }) => ({ name, ok })), [
+      { name: "api-release", ok: true }, { name: "app-release", ok: true }, { name: "verb-round-trip", ok: false },
+    ], label);
+    assert.equal(result.checks[2].reason, reason, label);
+  }
+});
+
+test("three verb-round-trip failures confirm one incident, alert once, and recovery files and closes one loop", async () => {
+  for (const [label, respond] of DB_FAILURES) {
+    const h = harness();
+    let broken = true;
+    const fetcher = async (url, options = {}) => {
+      if (broken && url.endsWith("/mcp") && JSON.parse(options.body).params.name === "read-profiles") {
+        h.calls.push({ url, ...options });
+        return respond();
+      }
+      return h.fetch(url, options);
+    };
+    for (let minute = 0; minute < 4; minute++) {
+      await runMinute(h.storage, env, START + minute * 60000, fetcher);
+      assert.equal(h.calls.filter((call) => call.url.endsWith("/fail")).length, minute < 2 ? 0 : 1, label);
+    }
+    let state = await h.storage.get(STATE_KEY);
+    assert.equal(state.incidents.length, 1, label);
+    assert.equal(state.incidents[0].checks.find((check) => check.name === "verb-round-trip").ok, false, label);
+    // The record writer is gated on a healthy round trip, so no loop is attempted while it is down.
+    assert.equal(state.incidents[0].loop_id, null, label);
+    broken = false;
+    await runMinute(h.storage, env, START + 4 * 60000, fetcher);
+    state = await h.storage.get(STATE_KEY);
+    assert.equal(state.active_incident, null, label);
+    assert.equal(state.incidents[0].loop_closed, true, label);
+    assert.equal(state.incidents[0].recovery_sent, true, label);
+  }
+});
+
+test("the minute probe never calls integrity-digest, healthy or failing", async () => {
+  const h = harness();
+  for (let minute = 0; minute < 3; minute++) await runMinute(h.storage, env, START + minute * 60000, h.fetch);
+  h.down = true;
+  for (let minute = 3; minute < 7; minute++) await runMinute(h.storage, env, START + minute * 60000, h.fetch);
+  h.down = false;
+  await runMinute(h.storage, env, START + 7 * 60000, h.fetch);
+  const verbs = h.calls.filter((call) => call.url.endsWith("/mcp")).map((call) => JSON.parse(call.body).params.name);
+  assert.equal(verbs.filter((name) => name === "read-profiles").length, 8);
+  assert.equal(verbs.includes("integrity-digest"), false);
+  assert.deepEqual([...new Set(verbs)].sort(), ["add-loop", "close-loop", "read-loop", "read-profiles"]);
 });
 
 test("slow response headers and slow JSON bodies both time out", async () => {
