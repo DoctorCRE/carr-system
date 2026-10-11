@@ -541,7 +541,11 @@ _SCRATCH_ROOT = os.path.realpath(tempfile.gettempdir())
 _FAKEREPO = os.path.join(OUTSIDE, "fakerepo")
 os.makedirs(os.path.join(_FAKEREPO, "sub"), exist_ok=True)
 os.makedirs(os.path.join(OUTSIDE, "sub"), exist_ok=True)  # the ./sub the old follower judged
-subprocess.run(["git", "init", "-q", _FAKEREPO], check=True)
+# fixture_env(): git exports GIT_DIR into hooks and it overrides cwd, so a bare
+# `git init` here could land in the live checkout (ops/selftest-git-isolation-check.py).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from git_env import fixture_env  # noqa: E402
+subprocess.run(["git", "init", "-q", _FAKEREPO], check=True, env=fixture_env())
 with open(os.path.join(_FAKEREPO, "run.sh"), "w") as _fh:
     _fh.write("#!/bin/sh\n")
 os.symlink(_FAKEREPO, os.path.join(OUTSIDE, "l"))
