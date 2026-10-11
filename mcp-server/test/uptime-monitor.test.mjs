@@ -518,6 +518,8 @@ test("inside the window only the DB-free app probe runs, and skips are neither f
   assert.equal(state.incidents.length, 0);
   assert.equal(state.probes_ok, true);
   assert.equal(state.ok, true);
+  assert.equal(state.quiet_window, true);
+  assert.equal(state.complete, false);
   assert.deepEqual(state.checks.map(({ name, ok, skipped, reason }) => ({ name, ok, skipped, reason })), [
     { name: "api-release", ok: null, skipped: true, reason: "skipped_quiet_window" },
     { name: "app-release", ok: true, skipped: undefined, reason: "ok" },
@@ -533,7 +535,10 @@ test("boundary minutes: 00:59 and 06:00 probe the database, 01:00 and 05:59 do n
     await runMinute(h.storage, env, at(stamp), h.fetch);
     assert.equal(dbCalls(h).length, db, stamp);
     assert.equal(appCalls(h).length, 1, stamp);
-    assert.equal((await h.storage.get(STATE_KEY)).ok, true, stamp);
+    const sampled = await h.storage.get(STATE_KEY);
+    assert.equal(sampled.ok, true, stamp);
+    assert.equal(sampled.quiet_window, db === 0, stamp);
+    assert.equal(sampled.complete, db !== 0, stamp);
   }
 });
 

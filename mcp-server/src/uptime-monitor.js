@@ -206,6 +206,8 @@ export async function runMinute(storage, env, scheduledTime, fetcher = fetch, no
     state.scheduled_at = iso(scheduledTime);
     state.checked_at = iso(now());
     state.probes_ok = sample.ok;
+    state.complete = sample.complete;
+    state.quiet_window = !sample.complete;
     state.checks = sample.checks;
     state.ok = false;
     // A skipped probe is neither a pass nor a failure. A partial (quiet-window)
