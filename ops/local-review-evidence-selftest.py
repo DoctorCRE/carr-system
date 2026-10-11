@@ -497,10 +497,14 @@ RESULT
             "base": {"sha": self.git("rev-parse", "origin/main"), "ref": "main",
                      "repo": {"full_name": "jbookout/carr-system"}}}
         receipt = Path(self.tmp.name) / "receipt.json"
-        with patch.dict(os.environ, {"PATH": str(bin_dir) + os.pathsep + os.environ["PATH"], "FIXTURE_PR": str(provider),
-                                     "CARR_JEV_OFFLINE": "1",
-                                     "CARR_CI_PYTHON": str(ROOT / ".venv/bin/python") if (ROOT / ".venv/bin/python").is_file() else "python3"}):
-            receipt.write_text(json.dumps(self.collect()))
+        body = Path(self.tmp.name) / "body"
+        body.write_text("")
+        with patch.dict(os.environ, {"PATH": str(bin_dir) + os.pathsep + os.environ["PATH"], "FIXTURE_PR": str(provider)}):
+            collected = subprocess.run(
+                ["bash", str(ROOT / "ops/ci.sh"), "--review-floor", "--root", str(self.root),
+                 "--body-file", str(body), "--receipt", str(receipt)],
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(collected.returncode, 0, collected.stdout + collected.stderr)
             argv = ["bash", str(ROOT / "ops/ci.sh"), "--review-admit", "--root", str(self.root),
                     "--receipt", str(receipt), "--pr", "7"]
             provider.write_text(json.dumps(data))
