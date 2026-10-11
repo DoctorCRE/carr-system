@@ -23,7 +23,10 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / 'ops'))
 import pii_guard
 ORIGINAL = '98080b3c11b7aa7adcc22f4dda81e851178e1b21'
-REVIEWED = 'b919c806bae16dd3951ae0b523925316492c35c1'
+# The reviewed anonymized table from PR 1436's branch commit b919c806. That
+# commit never reached main (the PR was squash-merged), so a fresh clone cannot
+# `git show` it; the table is kept here byte-for-byte instead.
+REVIEWED = REPO / 'tools/fixtures/public-routing/rule-jit-triggers.reviewed.json'
 
 
 def at(rev, name):
@@ -39,7 +42,7 @@ def selected(table, prompt, rule):
 
 def measure():
     path = 'ops/config/rule-jit-triggers.v1.json'
-    oracle, baseline = at(ORIGINAL, path), at(REVIEWED, path)
+    oracle, baseline = at(ORIGINAL, path), json.loads(REVIEWED.read_text())
     candidate = json.loads((REPO / path).read_text())
     rules = at(ORIGINAL, 'ops/config/rule-jev-triggers.v1.json')['rules']
     corpus = pii_guard.load_corpus(REPO / 'ops/config/public-source-identities.v1.json')
