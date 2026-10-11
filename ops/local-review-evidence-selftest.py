@@ -18,7 +18,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from git_env import fixture_env
+from git_env import clone_index_fixture, fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -172,8 +172,17 @@ class CheckArtifacts(unittest.TestCase):
 
 
 class Admission(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.oracle_tmp = tempfile.TemporaryDirectory(prefix="review-floor-oracle-")
+        cls.addClassCleanup(cls.oracle_tmp.cleanup)
+        cls.oracle = Path(cls.oracle_tmp.name) / "repo"
+        # Pooled CI suites seed faults in the live checker files. Admission
+        # must bind a stable real checker revision throughout each fixture.
+        clone_index_fixture(ROOT, cls.oracle)
+
     def setUp(self):
-        spec = importlib.util.spec_from_file_location("review_evidence", ROOT / "ops/local-review-evidence.py")
+        spec = importlib.util.spec_from_file_location("review_evidence", self.oracle / "ops/local-review-evidence.py")
         self.adapter = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.adapter)
         self.tmp = tempfile.TemporaryDirectory(prefix="review-floor-source-")
@@ -368,18 +377,25 @@ RESULT
             self.adapter.verify(self.root, "origin/main", "", receipt)
 
     def test_inherited_scan_range_cannot_narrow_the_real_secret_scan(self):
+        self.enterContext(patch.dict(os.environ))
+        os.environ.pop('PYTHONDONTWRITEBYTECODE', None)
+        os.environ.pop('PYTHONPYCACHEPREFIX', None)
         copy_ci(self.root)
-        shutil.copy(ROOT / "ops/ci-secret-scan.py", self.root / "ops/ci-secret-scan.py")
+        for relative in ("ops/ci-secret-scan.py", "ops/pii_guard.py",
+                         "ops/config/public-source-identities.v1.json"):
+            shutil.copy(ROOT / relative, self.root / relative)
         (self.root / "bin").mkdir()
         shutil.copy(ROOT / "bin/with-timeout.py", self.root / "bin/with-timeout.py")
         for stub in ["hooks/gate-integrity.py", "ops/no-client-deliverables-gate.py", "ops/stale-config-check.py"]:
             (self.root / stub).write_text("raise SystemExit(0)\n")
-        self.git("add", "ops", "bin", "hooks")
+        (self.root / ".gitignore").write_text("__pycache__/\n")
+        self.git("add", "ops", "bin", "hooks", ".gitignore")
         self.git("commit", "-qm", "real floor")
         self.git("update-ref", "refs/remotes/origin/main", self.git("rev-parse", "HEAD"))
         self.edit("README.md", "clean candidate\n")
         with patch.dict(os.environ, {"CARR_CI_RANGE": "HEAD..HEAD"}):
             receipt = self.collect()  # control: a clean tree passes the full scan
+        self.assertTrue(list((self.root / "ops/__pycache__").glob("pii_guard.*.pyc")))
         self.adapter.verify(self.root, "origin/main", "", receipt)
         self.edit("README.md", "-----BEGIN " + "OPENSSH PRIVATE KEY-----\n")
         with patch.dict(os.environ, {"CARR_CI_RANGE": "HEAD..HEAD"}):

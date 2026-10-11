@@ -34,7 +34,7 @@ class ReportTests(unittest.TestCase):
                     patch.object(runner, "_tree", return_value="baseline"), \
                     patch.object(runner, "_load", side_effect=lambda tree: tree), \
                     patch.object(runner, "observe", observe), contextlib.redirect_stdout(io.StringIO()):
-                code = runner.main(["--report", "--base", "fixture"])
+                code = runner.main(["--report", "--base", "HEAD"])
             return code, json.loads((output / "receipt.json").read_text())
 
     def test_critical_retention_regression_blocks_ship_and_exits_failure(self):
@@ -58,7 +58,7 @@ class ReportTests(unittest.TestCase):
 
 def runner_label(case):
     # Independent audit labels, as held in the committed expectations.
-    expectations = json.loads((HERE / "expectations.v1.json").read_text())
+    expectations = json.loads((HERE / "expectations.v2.json").read_text())
     return next(e["should_not_fire"] for e in expectations["cases"].values() if e["input"] == case)
 
 

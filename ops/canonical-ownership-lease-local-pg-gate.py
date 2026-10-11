@@ -492,8 +492,8 @@ def insert_review(cur, fixture_row, receipt_id) -> None:
     cur.execute(
         """insert into ops.engineering_reviewer_fact
              (receipt_id,work_request_id,slice_ref,reviewer_actor_id,
-              reviewer_session_ref,state,fact,idempotency_key)
-           values (%s,%s,%s,%s,%s,'passed',%s,%s)""",
+              reviewer_session_ref,state,fact,idempotency_key,created_at)
+           values (%s,%s,%s,%s,%s,'passed',%s,%s,clock_timestamp())""",
         (
             receipt_id,
             work_request_id,

@@ -3408,6 +3408,31 @@ fi
 normalise_eof < "$TMP" > "$TMP.clean"
 mv "$TMP.clean" "$TMP"
 
+# Public exports project identity prose through the same hash-only corpus as
+# CI. Executable SQL, applied-migration bytes/checksums and sealed registry rows
+# are never rewritten. Only comments and retrieval-proposal reference prose
+# receive synthetic stand-ins; unexpected identity locations refuse the export.
+if ! "$CATALOG_PY" - "$REPO" "$TMP" <<'PUBLIC_SNAPSHOT_PROJECTION'
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "ops"))
+import pii_guard
+
+path = pathlib.Path(sys.argv[2])
+try:
+    corpus = pii_guard.load_corpus(
+        pathlib.Path(sys.argv[1]) / "ops/config/public-source-identities.v1.json")
+    projected = pii_guard.sanitize_snapshot(path.read_bytes().decode("utf-8"), corpus)
+except (OSError, ValueError):
+    print("db/schema.sql:1", file=sys.stderr)
+    raise SystemExit(1)
+path.write_bytes(projected.encode("utf-8"))
+PUBLIC_SNAPSHOT_PROJECTION
+then
+  exit 1
+fi
+
 if [ "$VERIFY_ONLY" = "1" ]; then
   echo "schema snapshot: disposable candidate valid; tracked snapshot unchanged"
   exit 0

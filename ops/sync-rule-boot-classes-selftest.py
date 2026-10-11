@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded semantic regression for the rule boot class generator."""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -144,6 +145,14 @@ class StandingFactsTests(unittest.TestCase):
 
 
 class RetainedTextTests(unittest.TestCase):
+    def test_committed_route_gap_evidence_binds_current_candidate_replay(self):
+        evidence = json.loads(boot.GAPS_PATH.read_text())
+        candidate = "evals/rule-delivery/evidence/candidate.jsonl"
+        self.assertEqual(evidence["inputs"][candidate],
+                         hashlib.sha256((REPO / candidate).read_bytes()).hexdigest(),
+                         "regenerate route-gap evidence after the final candidate replay")
+        self.assertEqual(evidence, boot.gap_evidence(boot.load()))
+
     def test_gaps_include_hard_required_but_not_acceptable_gold(self):
         cases = [
             {"id": "v2", "gold": ["0e22e34a"], "split": "test", "source": "v2"},

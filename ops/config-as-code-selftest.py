@@ -719,8 +719,12 @@ def main():
         # reconciler INTENDS, which the dry run answers in full.
         canary_plist = "com.carr.gate-zero-canary.plist"
         canary_released = canary_plist not in mod.launchd_hold.DEFINITION_ONLY
+        # This tests hold reconciliation against the built fixture programs.
+        # Rendering the real checkout path makes a feature clone fail and a
+        # canonical checkout pass for reasons outside this test's subject.
         (launchd / canary_plist).write_text(
-            (Path(REPO) / "ops" / "launchd" / canary_plist).read_text(encoding="utf-8"),
+            (Path(REPO) / "ops" / "launchd" / canary_plist).read_text(encoding="utf-8").replace(
+                "{{REPO}}", str(repo)),
             encoding="utf-8")
         # The wrapper and the canary script itself: missing_targets() skips any
         # agent whose program was never built, so without these the plan would

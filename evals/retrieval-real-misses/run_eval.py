@@ -333,7 +333,10 @@ def main():
     parser.add_argument('--replay', type=Path, help='Rescore a refs-only run without calling production')
     args = parser.parse_args()
     try:
-        cases = validate_fixture(json.loads(args.fixture.read_text()))
+        fixture = json.loads(args.fixture.read_text())
+        cases = validate_fixture(fixture)
+        if fixture.get('requires_private_fixture') and not args.replay:
+            parser.error('live evaluation requires --fixture with private source queries')
         saved = None
         if args.replay:
             saved = json.loads(args.replay.read_text())

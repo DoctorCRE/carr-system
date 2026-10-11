@@ -2,11 +2,11 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:d4a8129d85975792d4829be238f0b1a077e7c0757aa8d2d250b4413e4787f4b6",
+    "configuration_fingerprint": "sha256:6789e862d84da74dfeca2219c0fbb41f2c1eff96168371c620028dc0dde79e5c",
     "harness_id": "evals/rule-delivery/run_eval.py",
     "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
     "model_id": "deterministic-no-model",
-    "native_session_ref": "01a12862-afea-7a60-ae78-86083532e126",
+    "native_session_ref": "01a12901-c908-7513-b43b-21aa1c012fea",
     "provider_id": "none",
     "surface": "offline_programmatic"
   },
@@ -165,7 +165,7 @@
       },
       "candidate": {
         "path": "evals/rule-delivery/evidence/candidate.jsonl",
-        "sha256": "a506488a45fa4f362123bf8ba3debebd14c7d1e446a79c1a8292d6c50b0e7397"
+        "sha256": "194f50dbe67786ccb7045fe5ec6664bbb47714969c52edf242fd8ac83b35300f"
       }
     },
     "dependencies": {
@@ -181,10 +181,10 @@
       "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
       "ops/config/rule-classes.v1.json": "c419bb0cfda3fd1a614eab166fec1744c0234b92dd2d912c8caf7285332ed384",
       "ops/config/rule-enforcement-map.json": "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490bac4a76f4",
-      "ops/config/rule-jev-triggers.v1.json": "b51679ed1288c439edd18d0b97f763a88513367f8a3d0bff771f62c49591291a",
-      "ops/config/rule-jit-triggers.v1.json": "366643d404e9203970d784337c54a4809f97a87796ca026aa565d378dd9aa2e1",
+      "ops/config/rule-jev-triggers.v1.json": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
+      "ops/config/rule-jit-triggers.v1.json": "5e160660cef1292d0998521d9fab32357913cfa4563f6569e2e1b71e6287356d",
       "ops/config/rule-routes.v1.json": "a7d07fd53511114bb4b380074f27628ff945f133be01ead9b46c7ad2f1baac75",
-      "ops/config/rule-selection-corpus.v1.json": "c21d05d993f6b3aa8265653f4f2e62f3a242803b3302059711cdc6a317cbf491",
+      "ops/config/rule-selection-corpus.v1.json": "9d9aa0d84329fa29790ee36825caf22924b33717ee152f15c02e81d6872a7454",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
       "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
       "ops/fixtures/rule-delivery-eval/cases.v2.json": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
@@ -223,7 +223,7 @@
   "min_useful_gain": 0.7,
   "noise_floor": 0.3,
   "notes": [
-    "The receipt retains the established pre-PR-1325 baseline c11c1153a59ff90f7d348f11330c97a25cb0f2f9. Both arms were freshly replayed with the retained production-function harness; dependency bindings now include the retired parity-route removal.",
+    "The receipt preserves merged main's reviewed full-text baseline 2106816ed392fe7bcac30d171d8c115cba10735f. Both arms were replayed with the repository production-function harness. Public source sanitization retains every protected gold occurrence and the accepted D/E boot tradeoff.",
     "A separate replay against reviewed PR 1546 head 388e5d9ae02bea8d572bb7a4040984c986c3bdeb measured zero change in all three dimensions, with zero provider cost. This cleanup claims no quality or cost improvement.",
     "Existing frozen cases have historical reuse; results are descriptive regression evidence, not new untouched holdout or live-provider evidence.",
     "Human test recall point loss against the established baseline is 0.625 percentage points; its paired interval is [-2.143, 0] points. This does not establish noninferiority at the one-point margin with 95% confidence.",

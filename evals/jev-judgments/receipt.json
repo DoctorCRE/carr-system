@@ -2,39 +2,39 @@
  "adapter": {
   "adapter_id": "jev-judgments-admission-replay",
   "adapter_version": "1",
-  "configuration_fingerprint": "sha256:32f83b2e600afa820e53cb0ed5968a0ef1fa0e57d72e06cb8572a1b0613877dd",
+  "configuration_fingerprint": "sha256:b4d5fbadb39fd415d460cf67ac481baf875de8349421c08bedf7888cf6cb705f",
   "harness_id": "evals/jev-judgments/run_eval.py",
-  "harness_version": "7f01a76fc80a762cad46e74b30aec8ac473bd1ddae311999c8a9c64a2723621f",
+  "harness_version": "59954080b83a8ae9eb1eb9a5fe61b2297493880e024c112560cb4d4802010011",
   "model_id": "deterministic-no-model",
-  "native_session_ref": "9300cddb-0fd7-4985-b5f8-b7fc02a2fd41",
+  "native_session_ref": "01a12901-c908-7513-b43b-21aa1c012fea",
   "provider_id": "none",
   "surface": "offline_programmatic"
  },
  "cases": {
-  "should_not_fire": 92,
+  "should_not_fire": 204,
   "sources": [
    "human_judged_hard_case",
    "production_trace"
   ],
-  "test": 102,
-  "total": 196,
-  "train": 94
+  "test": 117,
+  "total": 226,
+  "train": 109
  },
  "change": "Admit a paid Jev call only from a registered call site with its declared attribution, outside fixtures/CI and unattended workers its site excludes, within per-site and global hourly budgets.",
  "cost": {
   "baseline_usd_per_case": 2.52e-05,
-  "candidate_usd_per_case": 1.33714e-05
+  "candidate_usd_per_case": 2.4531e-06
  },
  "dimensions": [
   {
    "baseline": {
-    "ci_high": 0.06758198857654187,
+    "ci_high": 0.03345010469339235,
     "ci_low": 0.0,
     "score": 0.0
    },
    "candidate": {
     "ci_high": 1.0,
-    "ci_low": 0.932418011423458,
+    "ci_low": 0.9665498953066078,
     "score": 1.0
    },
    "critical": true,
@@ -54,12 +54,12 @@
   {
    "baseline": {
     "ci_high": 1.0,
-    "ci_low": 0.9273021807795035,
+    "ci_low": 0.6096657120978346,
     "score": 1.0
    },
    "candidate": {
     "ci_high": 1.0,
-    "ci_low": 0.9273021807795035,
+    "ci_low": 0.6096657120978346,
     "score": 1.0
    },
    "critical": true,
@@ -81,40 +81,39 @@
   "cohorts": {
    "baseline": {
     "path": "evals/jev-judgments/evidence/baseline.jsonl",
-    "sha256": "7617f53d1265714d39e9923b6e4920a37c230e1125312fb3d08739863d6a423b"
+    "sha256": "76fdd7e7cb518323cd49d448aa67672bf0627902c2451d518fcad8f6085f1d88"
    },
    "candidate": {
     "path": "evals/jev-judgments/evidence/candidate.jsonl",
-    "sha256": "778a91cf695edb7d5bd9c0f2dad1f8512bfdc760ef3c468ee719eab9b402a219"
+    "sha256": "ea6277320f54a1c85ded160efd6926e21f4fa813e2d92631556c06837eed85e2"
    }
   },
   "dependencies": {
-   "evals/jev-judgments/expectations.v1.json": "fbf78aaede01d2871dd055f2c66e625b5e00f816915ca19a5ce67cc7a9b34211",
-   "lib/jev_required_actions.py": "23be831932b418a6540bb25da42b9954090a232c85a8697cfa47d2410b82ddcd",
+   "evals/jev-judgments/expectations.v2.json": "99154320b185beab088bf93b1bb1a89a2572efc6ebfd1cbd006dc0507eab1155",
+   "lib/jev_required_actions.py": "7b5b005de56094eefd18cbef6be5ebfea9e8f33fc419beb3785f73892b0e7171",
    "lib/transcript_read.py": "17f34e6288557340d70e5cff18927a6274f61b5c802afb5848b7d71c3f1210a2",
    "mcp-server/src/jev-request-contract.v1.json": "0687a4cda641c5f08bb856de5b9f234f7e8a097e21e92762b5ed3f582ddca185",
    "mcp-server/src/judge-providers.v1.json": "48b8ca8b4defec4b82fd36f708498c707eab5f861ae0046f857ae06ae8d981ab",
-   "ops/config/jev-call-sites.v1.json": "805ce9f514cc9bbb9f354389af038f1bde05674e90edf9dadf4a6228cac36ad8",
-   "ops/config/jev-cost-guard.v1.json": "f8da9d20d6019c5bd9528683c61594dca09f07488d66ce998c53ae8bc3c24089",
-   "ops/typesafe_client.py": "b5a0555d7b2a787ae18629882664f308153fcb1ff3aae1d587b56e169eeb5641",
+   "ops/config/jev-call-sites.v1.json": "b89f644611c0930c7321c9bb7d51e7f5fb6a4e892ee275477fcb9e80e8061f8a",
+   "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
+   "ops/typesafe_client.py": "91acd006df639e545a5fe6890712507652219fadb3d972b03b1fed42f1fa086d",
    "tools/judge/interface.py": "2e0440cc85660f83f4456829006f3f00a956e414c4c72e8217ab1a22622f3ed2",
    "tools/room-bridge/design_kernel.py": "7545fd6ec1d18f7df2b14cc67a65eae1190d3369fc00a96a5297fe71d5b34f80",
-   "tools/room-bridge/evaluation_kernel.py": "3b5084bf92946fbbbb6b8190eb8c5a7503080950c380f0b12106d6874155dc34",
-   "tools/room-bridge/evaluation_rubrics.py": "315a8f800989a7eebe6a9c5ceeee087893858593bb1e0460f951919cb7f9279a",
+   "tools/room-bridge/evaluation_kernel.py": "8ffeac75e4db3275206b65df031a48419e04f6ef140dd12ffe34e39a228ea499",
    "tools/room-bridge/execution_contract.py": "d02dd4f4211bd59afe8b6a834f9791bf2bbf04d98d30630c68425c12989334cc",
    "tools/room-bridge/policy_learning.py": "61929dddb0ab1ebac091871f8f0e2f2f692bd047b36d0a35edcb967ea1ab7aac"
   },
   "expectations": {
-   "path": "evals/jev-judgments/expectations.v1.json",
-   "sha256": "fbf78aaede01d2871dd055f2c66e625b5e00f816915ca19a5ce67cc7a9b34211",
-   "version": "jev-judgments-expectations/v1"
+   "path": "evals/jev-judgments/expectations.v2.json",
+   "sha256": "99154320b185beab088bf93b1bb1a89a2572efc6ebfd1cbd006dc0507eab1155",
+   "version": "jev-judgments-expectations/v2"
   },
   "scorer": {
    "function": "score",
    "path": "evals/jev-judgments/score.py"
   },
   "source": {
-   "evals/jev-judgments/run_eval.py": "7f01a76fc80a762cad46e74b30aec8ac473bd1ddae311999c8a9c64a2723621f",
+   "evals/jev-judgments/run_eval.py": "59954080b83a8ae9eb1eb9a5fe61b2297493880e024c112560cb4d4802010011",
    "evals/jev-judgments/score.py": "71511dc3ab33fc63455ada0e3f26f2d1a3cd0b09dfa21fcd121a5835cff4ca65"
   }
  },
@@ -128,10 +127,12 @@
    "result": "pass"
   }
  },
- "measured_on": "2026-10-04",
+ "measured_on": "2026-10-10",
  "min_useful_gain": 0.5,
- "noise_floor": 0.099,
+ "noise_floor": 0.0925,
  "notes": [
+  "The v1 audit labels remain frozen. This v2 successor follows the reviewed caller retirements in #1529, #1531, #1543, #1545 and #1576.",
+  "Baseline client revision: 98080b3c11b7aa7adcc22f4dda81e851178e1b21.",
   "Production cases replay the call site, session presence and fixture provenance of real out/jev-calls.jsonl rows; a fixture row is replayed under CARR_HOOK_FIXTURE=1, which is how ops/ci.sh's gates class ran it (other classes now export CARR_JEV_OFFLINE).",
   "Fixture provenance is inferred: a prompt hash seen in three or more sessions. Ad-hoc explicit callers are excluded from the trace sample and covered by hand-written hard cases.",
   "Budgets (site hourly/daily, global hourly) do not bind at this sample size; ops/jev-call-sites-selftest.py exercises them.",
@@ -142,7 +143,7 @@
  "rung": "regression",
  "schema_version": 2,
  "split": {
-  "method": "random, stratified by first tag (call site)",
+  "method": "v1 random stratified split retained; current caller controls pair interactive training with worker test inputs",
   "sealed_test": true,
   "seed": 11
  },
@@ -162,6 +163,6 @@
  "surface": "jev-judgments",
  "verdict": {
   "decision": "ship",
-  "statement": "Test split: wasted calls refused 0.00 -> 1.00 (delta +1.00, 95% [+1.00, +1.00]); judgment points still paid 1.00 -> 1.00. Paid share of all cases 1.00 -> 0.53. Measured improvement with passing critical dimensions and controls."
+  "statement": "Test split: wasted calls refused 0.00 -> 1.00 (delta +1.00, 95% [+1.00, +1.00]); judgment points still paid 1.00 -> 1.00. Paid share of all cases 1.00 -> 0.10. Measured improvement with passing critical dimensions and controls."
  }
 }

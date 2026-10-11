@@ -95,10 +95,13 @@ check() {
   fi
 }
 
-# The double's own fixture file: synthetic, and only the ball-probe subject,
-# so partner mode still exercises the fixed-key completion path (WR-000049
+# The double's own synthetic fixture file supplies the ball subject and
+# frozen links request so partner mode exercises both write paths (WR-000049
 # moved that real deal name out of the tracked script).
-printf '%s\n' 'SMOKE_BALL_PROBE_REF="Synthetic Closed Deal"' > "$TMP_ROOT/fixtures.env"
+cat > "$TMP_ROOT/fixtures.env" <<'FIXTURES'
+SMOKE_BALL_PROBE_REF="Synthetic Closed Deal"
+SMOKE_LINKS_PROBE_ARGS='{"idempotency_key":"smoke-links-probe-permanent","ref":"V-BNK-013","kind":"note","summary":"smoke links probe — edge already exists, replayed for ever after","links":[{"from_ref":"V-BNK-013","to_ref":"C-SYNTHETIC","kind":"intro"}]}'
+FIXTURES
 
 run_smoke() {
   local mode="$1" output="$2" calls="$3"

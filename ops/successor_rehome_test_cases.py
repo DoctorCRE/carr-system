@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from git_env import fixture_env
+from git_env import clone_index_fixture, fixture_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,8 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class SuccessorCommands(unittest.TestCase):
     def test_generated_successor_rehome_uses_all_current_main_predecessor_inputs(self):
         from unittest.mock import patch
-        subprocess.run(['git', 'clone', '--quiet', '--shared', str(ROOT), str(self.repo / 'source')],
-                       env=self.env, check=True, capture_output=True)
+        clone_index_fixture(ROOT, self.repo / 'source')
         self.repo = self.repo / 'source'
         self.git('config', 'user.name', 'Fixture')
         self.git('config', 'user.email', 'fixture@example.invalid')

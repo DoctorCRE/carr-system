@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from policy_epoch_fixture import analyze_rule_projection
+
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -90,6 +92,7 @@ def seed_reviewed_rule_projection(cur, *, slug: str, title: str, rule_label: str
     # The last insert uses the actual constraint trigger, proving it observes
     # the complete projection after restoration rather than a manual refresh.
     insert_layer(*layers[-1])
+    analyze_rule_projection(cur)
     cur.execute("set constraints ops.scac_epoch_rule_load_layer immediate")
     cur.execute("set constraints all immediate")
     cur.execute("set constraints all deferred")

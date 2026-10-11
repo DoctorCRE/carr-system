@@ -21,7 +21,7 @@ mistake shows up as a failed case rather than a self-fulfilling label:
   lacks the attribution its site requires, or ran in an unattended worker at a
   site whose verdict nobody consumes.
 
-`--report` runs both arms over expectations.v1.json and writes the cohorts and
+`--report` runs both arms over expectations.v2.json and writes the cohorts and
 receipt. No model is called and nothing is sent anywhere.
 """
 
@@ -45,8 +45,8 @@ REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO / "tools" / "room-bridge"))
 import evaluation_kernel as kernel
 
-EXPECTATIONS = HERE / "expectations.v1.json"
-VERSION = "jev-judgments-expectations/v1"
+EXPECTATIONS = HERE / "expectations.v2.json"
+VERSION = "jev-judgments-expectations/v2"
 WINDOW = ("2026-09-28", "2026-10-05")
 PER_SITE = 14
 SEED = 11
@@ -70,15 +70,16 @@ PREFIX_SITES = (("bind_", "rule_trigger_delivery"), ("req_", "jev_requirements")
                 ("risk_", "jev_done_checks"), ("test_", "jev_session_watch"))
 DIRECT_CALLERS = {"jev_change_tolls", "jev_code_review", "jev_build_advisory", "jev_deal_read"}
 
-# The audit's decisions (PR body table), restated as labels.
-REMOVED = {"command_precheck", "jev_build_advisory"}
-JOB_ATTRIBUTED = {"jev_change_tolls", "jev_code_review", "headless_tasks", "jev_model_route",
-                  "jev_deal_read", "post_call_jev", "slice-done-marker"}
-UNATTENDED_OK = {"jev_requirements", "jev_change_tolls", "headless_tasks", "jev_model_route",
-                 "jev_deal_read", "post_call_jev", "slice-done-marker", "adhoc:"}
-KNOWN = {"rule_trigger_delivery", "jev_rule_select", "jev_session_watch", "jev_done_checks",
-         "jev_requirements", "jev_handoff", "stale_claim_judge", "jev_defect_class",
-         "jev_executor_tier"} | JOB_ATTRIBUTED | REMOVED
+# Independent policy oracle: mechanical callers were disabled by #1529;
+# retained callers were reviewed in #1531, #1543, #1545 and #1576. Do not
+# derive these labels from the registry being tested. The v1 labels stay frozen.
+REMOVED = {"command_precheck", "jev_build_advisory", "rule_trigger_delivery",
+           "jev_session_watch", "jev_defect_class", "jev_executor_tier", "jev_code_review"}
+JOB_ATTRIBUTED = {"seat_health", "jev_model_route", "jev_deal_read", "post_call_jev"}
+UNATTENDED_OK = JOB_ATTRIBUTED | {"adhoc:", "jevlint_review"}
+KNOWN = {"jev_fact_boundary", "jev_intake", "jev_scorecard", "jev_best_of", "flash-script",
+         "rule_gold_label", "rule_delivery_eval", "judge_paired_eval", "rule_trigger_compile",
+         "timebomb-audit", "jevlint_review"} | JOB_ATTRIBUTED
 
 HARD_CASES = (  # (tag, input), judged during the audit
     ("adhoc", {"site": "adhoc:review-brief", "session": True, "worker": True}),
@@ -96,7 +97,8 @@ HARD_CASES = (  # (tag, input), judged during the audit
     ("rule_trigger_delivery", {"site": "rule_trigger_delivery", "session": True, "worker": True}),
     ("jev_build_advisory", {"site": "jev_build_advisory", "session": True}),
     ("jev_executor_tier", {"site": "jev_executor_tier", "session": True}),
-)
+) + tuple((site, {"site": site, "session": True, "worker": worker})
+          for site in sorted(KNOWN) for worker in (False, True))
 
 
 def label(case):
@@ -295,7 +297,7 @@ def report(base_ref):
                                        "evals/jev-judgments/evidence/candidate.jsonl"], **m})
     policy_files = [f"tools/room-bridge/{name}.py" for name in
                     ("evaluation_kernel", "execution_contract", "design_kernel", "policy_learning")]
-    deps = [p for p in ARM_FILES if (REPO / p).exists()] + policy_files + ["evals/jev-judgments/expectations.v1.json"]
+    deps = [p for p in ARM_FILES if (REPO / p).exists()] + policy_files + [str(EXPECTATIONS.relative_to(REPO))]
     fingerprint = hashlib.sha256("".join(_sha(REPO / p) for p in ARM_FILES if (REPO / p).exists())
                                  .encode()).hexdigest()
     harness = _sha(HERE / "run_eval.py")
@@ -313,7 +315,8 @@ def report(base_ref):
         "cases": {"total": len(cases), "train": len(cases) - len(test), "test": len(test),
                   "should_not_fire": sum(1 for e in cases.values() if e["should_not_fire"]),
                   "sources": sorted({e["source"] for e in cases.values()})},
-        "split": {"method": "random, stratified by first tag (call site)", "seed": SEED, "sealed_test": True},
+        "split": {"method": "v1 random stratified split retained; current caller controls pair interactive training with worker test inputs",
+                  "seed": SEED, "sealed_test": True},
         "repeats": 1,
         "grader": {"kind": "programmatic", "validation": {
             "graded_twice": True, "agreement": agreement, "result": "pass" if agreement == 1.0 and
@@ -328,6 +331,8 @@ def report(base_ref):
                  "candidate_usd_per_case": round(paid["candidate"] * PRICE_PER_CALL_USD, 10)},
         "verdict": {"decision": "ship", "statement": ""},
         "notes": [
+            "The v1 audit labels remain frozen. This v2 successor follows the reviewed caller retirements in #1529, #1531, #1543, #1545 and #1576.",
+            f"Baseline client revision: {subprocess.check_output(['git', 'rev-parse', base_ref], cwd=REPO, text=True).strip()}.",
             "Production cases replay the call site, session presence and fixture provenance of real "
             "out/jev-calls.jsonl rows; a fixture row is replayed under CARR_HOOK_FIXTURE=1, which is how "
             "ops/ci.sh's gates class ran it (other classes now export CARR_JEV_OFFLINE).",
@@ -343,7 +348,7 @@ def report(base_ref):
             "source": {"evals/jev-judgments/score.py": _sha(HERE / "score.py"),
                        "evals/jev-judgments/run_eval.py": harness},
             "dependencies": {p: _sha(REPO / p) for p in deps},
-            "expectations": {"path": "evals/jev-judgments/expectations.v1.json", "version": VERSION,
+            "expectations": {"path": str(EXPECTATIONS.relative_to(REPO)), "version": VERSION,
                              "sha256": _sha(EXPECTATIONS)},
             "cohorts": {arm: {"path": f"evals/jev-judgments/evidence/{arm}.jsonl",
                               "sha256": _sha(HERE / "evidence" / f"{arm}.jsonl")} for arm in cohorts}},

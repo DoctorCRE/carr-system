@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "surface": "rule-delivery",
+  "change": "Restore non-private routing cues and probabilities lost during identity anonymization",
+  "measured_on": "2026-10-11",
+  "rung": "regression",
+  "adapter": {
+    "surface": "offline_programmatic",
+    "adapter_id": "public-routing-census",
+    "adapter_version": "1",
+    "harness_id": "python-stdlib-regex",
+    "harness_version": "3.14.6",
+    "provider_id": "local",
+    "model_id": "none-programmatic",
+    "native_session_ref": "01a12901-c908-7513-b43b-21aa1c012fea",
+    "configuration_fingerprint": "sha256:5e160660cef1292d0998521d9fab32357913cfa4563f6569e2e1b71e6287356d"
+  },
+  "cases": {
+    "total": 1960,
+    "train": 980,
+    "test": 980,
+    "should_not_fire": 218,
+    "sources": [
+      "human_judged_hard_case",
+      "synthesized"
+    ]
+  },
+  "split": {
+    "method": "paired variants, hash-random stratification by rule and cue, seed SHA256(rule,index)",
+    "seed": 1436,
+    "sealed_test": true
+  },
+  "repeats": 2,
+  "grader": {
+    "kind": "programmatic",
+    "validation": {
+      "graded_twice": true,
+      "agreement": 1.0,
+      "oracle_pass_rate": 1.0,
+      "null_pass_rate": 0.0,
+      "result": "pass"
+    }
+  },
+  "noise_floor": 0.0,
+  "min_useful_gain": 0.0056122448979591955,
+  "primary_dimension": "public-cue-routing",
+  "dimensions": [
+    {
+      "dimension_id": "public-cue-routing",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "improved",
+      "evidence_refs": [
+        "tools/test-public-routing.py",
+        "github:jbookout/carr-system/1436#blocking-finding-7"
+      ],
+      "baseline": {
+        "score": 0.9887755102040816,
+        "ci_low": 0.9887755102040816,
+        "ci_high": 0.9887755102040816
+      },
+      "candidate": {
+        "score": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": 0.011224489795918391,
+        "ci_low": 0.011224489795918391,
+        "ci_high": 0.011224489795918391
+      }
+    }
+  ],
+  "stage_results": [
+    {
+      "stage_id": "judgment",
+      "status": "passed",
+      "dimension_ids": [
+        "public-cue-routing"
+      ],
+      "evidence_refs": [
+        "tools/test-public-routing.py",
+        "github:jbookout/carr-system/1436#blocking-finding-7"
+      ]
+    }
+  ],
+  "cost": {
+    "baseline_usd_per_case": 0.0,
+    "candidate_usd_per_case": 0.0
+  },
+  "verdict": {
+    "decision": "ship",
+    "statement": "Public cue routing restored with zero finite-set regressions."
+  },
+  "notes": [
+    "Exact finite-set census intervals; no claim about unseen prompts or model quality.",
+    "Baseline is the reviewed PR head; oracle is merged main 98080b3c11b7aa7adcc22f4dda81e851178e1b21; private identities are excluded before case generation.",
+    "receipt.json preserves current production-function replay evidence; this census measures public cues only.",
+    "Programmatic regression and second-pass measurement; no external model-work call is needed."
+  ]
+}

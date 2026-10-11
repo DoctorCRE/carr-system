@@ -1,7 +1,7 @@
 {
   "baseline_ref": "2106816ed392fe7bcac30d171d8c115cba10735f",
   "inputs": {
-    "evals/rule-delivery/evidence/candidate.jsonl": "a506488a45fa4f362123bf8ba3debebd14c7d1e446a79c1a8292d6c50b0e7397",
+    "evals/rule-delivery/evidence/candidate.jsonl": "194f50dbe67786ccb7045fe5ec6664bbb47714969c52edf242fd8ac83b35300f",
     "evals/rule-delivery/expectations.v1.json": "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa",
     "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
     "ops/config/rule-classes.v1.json": "c419bb0cfda3fd1a614eab166fec1744c0234b92dd2d912c8caf7285332ed384",

@@ -1161,7 +1161,7 @@ async function resolveSubject(client, ref) {
   }
   // BARE PARTIES ARE A FALLBACK, NEVER A COMPETITOR (0056, 2026-08-02). Migration
   // 0056 put every party in v_ref_index, which is what finally makes an org like
-  // Henry Schein — 17 rows, no lead/client/vendor among them — resolvable at all.
+  // Example Organization 25 — 17 rows, no lead/client/vendor among them — resolvable at all.
   // But this is the WRITE path: folding parties into the query above would let a
   // bare party outrank the client or vendor a name resolves to today and quietly
   // move where writes land. So the role query runs first and unchanged, and this
@@ -1282,7 +1282,7 @@ const WHO_PATH_CAP = 25;
 // [loop #132] How many RETIRED refs `find` lists per organisation group.
 //
 // A tombstone list is navigation, not an answer. 0059 consolidated 415 org rows
-// into 306 survivors plus 109 tombstones and one name alone (Henry Schein) carries
+// into 306 survivors plus 109 tombstones and one name alone (Example Organization 25) carries
 // sixteen of them; the useful facts are "sixteen exist" and "here is where to look
 // them up", not sixteen refs spending the whole payload. The COUNT is always exact
 // and never truncated — only the ref list is capped, and the row says so.
@@ -2465,8 +2465,8 @@ export const TOOLS = {
          order by merged, similarity(display_name,$1) desc limit 10`, [q, `%${q}%`]);
       // ORGS AND UNLINKED PEOPLE, GROUPED (0056, 2026-08-02). Until migration 0056
       // v_ref_index held only role records, so 415 org parties were invisible here:
-      // `find "Henry Schein"` returned "Henry Prescott" — a trigram hit on one word —
-      // and none of the 17 rows literally named Henry Schein.
+      // `find "Example Organization 25"` returned "Henry Prescott" — a trigram hit on one word —
+      // and none of the 17 rows literally named Example Organization 25.
       // GROUPED BY NAME ON PURPOSE. Those 17 rows are one company minted 17 times,
       // once per rep, and listing them raw would spend the whole 10-row budget on
       // copies of one answer and push every other match out. One row per name, with
@@ -2477,7 +2477,7 @@ export const TOOLS = {
       // LIVE AND RETIRED ARE COUNTED SEPARATELY, AND THE BLEND WAS THE BUG (loop
       // #132, 2026-08-02). This grouping shipped in b0fda91, BEFORE 0059 consolidated
       // the orgs, and it was never taught about merged_into. Afterwards it kept
-      // reporting `duplicate_rows: 17` for Henry Schein and `13` for Cadence Studio —
+      // reporting `duplicate_rows: 17` for Example Organization 25 and `13` for Cadence Studio —
       // both of which are ONE live row plus sixteen and twelve tombstones. That
       // number then read as "the book is still full of duplicates", which is the
       // opposite of what 0059 did, and every ref in the list read as a live target.
@@ -2754,13 +2754,13 @@ export const TOOLS = {
         // 'party' INCLUDED (0056, 2026-08-02). This block is the verb's honesty
         // guarantee — "exists but has no edges" must never collapse into "no such
         // person". Restricted to role records it was breaking exactly that promise:
-        // asked for Henry Schein, which is 17 party rows, it answered "No record and
+        // asked for Example Organization 25, which is 17 party rows, it answered "No record and
         // no graph node matches that name", which was simply false. A read-only
         // existence check has no reason to be narrower than the record.
         // MATCHING_RECORDS IS LIVE-ONLY, AND THE COUNT OF TOMBSTONES TRAVELS BESIDE
         // IT (loop #132). Unordered and capped at five, this block handed back five
-        // tombstones for "Cadence Studio" — P-0840, P-1044, P-0909, P-0796 — as
-        // selectable records while the survivor P-0111 never appeared. A caller that
+        // tombstones for "Cadence Studio" — P-900040, P-900048, P-900044, P-900039 — as
+        // selectable records while the survivor P-900029 never appeared. A caller that
         // links or writes to one of those defeats the merge. So: survivors in
         // matching_records, tombstones as a COUNT only (find lists them with their
         // refs; that is find's job, and it is where they stay navigable), and the
@@ -4226,7 +4226,7 @@ export const TOOLS = {
       }
       // THE GENERATOR, CLOSED (0059, 2026-08-02). This line used to INSERT an org
       // unconditionally with no lookup, so every contact minted a private copy of
-      // their own employer: Henry Schein existed as 17 org rows, one per rep,
+      // their own employer: Example Organization 25 existed as 17 org rows, one per rep,
       // Patterson Dental as 10, and all 415 org rows had exactly one inbound person
       // — a distribution with a single bucket, which is the signature. That is why
       // "who do we know at X" could not be answered: there was no X, only copies.
@@ -4255,7 +4255,7 @@ export const TOOLS = {
         if (g.conflict)
           return { needs_confirm: true, candidates: g.conflict,
                    hint: "a live organisation with this exact normalised identity already exists — " +
-                         "reuse it, or disambiguate the NAME (the way 'Carr Riggs Ingram (advisory)' " +
+                         "reuse it, or disambiguate the NAME (the way 'Example Organization 116 (advisory)' " +
                          "does); the identity key is never weakened, even under force_new" };
         row = g.row;
       } else {

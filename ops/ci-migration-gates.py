@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 import importlib.util
 import os
 from pathlib import Path
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -16,7 +16,7 @@ from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lib.disposable_pg_fixture import DisposablePostgres
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 ROLLBACK_ONLY_GATES = {'siep12-policy-epoch-local-pg-gate.py', 'siep18-reference-monitor-local-pg-gate.py'}
 
 
@@ -27,12 +27,6 @@ def postgres_binaries():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module.find_postgres_binaries().initdb.parent
-
-
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
 
 
 def quarantine(root):
@@ -86,20 +80,28 @@ def run_gate(gate, dsn, log, env):
 def run_isolated(gate, image, log, env):
     bins, fixture, owner = image
     root = fixture.root
-    port = free_port()
-    bootstrap = f'postgres://{quote(owner, safe="")}@127.0.0.1:{port}/postgres'
+    connection = f'postgres://{quote(owner, safe="")}@/{{database}}?host={quote(str(root), safe="")}'
+    bootstrap = connection.format(database='postgres')
     data = root / 'data'
     try:
         fixture.run([bins / 'initdb', '-D', data, '-U', owner,
                  '--auth=trust', '--encoding=UTF8', '--no-locale'], check=True, capture_output=True, timeout=120)
         fixture.run([bins / 'pg_ctl', '-D', data, '-l', root / 'postgres.log',
-                 '-o', f'-h 127.0.0.1 -p {port} -k {root}', '-w', 'start'], check=True, capture_output=True, timeout=120)
+                 '-o', f"-h '' -k {root}", '-w', 'start'], check=True, capture_output=True, timeout=120)
         checked([bins / 'psql', '-d', bootstrap, '-v', 'ON_ERROR_STOP=1',
                  '-f', root / 'roles.sql'], env)
         checked([bins / 'createdb', '--maintenance-db', bootstrap, '-O', owner, 'carr_ci'], env)
-        dsn = f'postgres://{quote(owner, safe="")}@127.0.0.1:{port}/carr_ci'
+        dsn = connection.format(database='carr_ci')
         checked([bins / 'pg_restore', '--exit-on-error', '-d', dsn, root / 'database.dump'], env)
         return run_gate(gate, dsn, log, env)
+    except subprocess.CalledProcessError as exc:
+        with log.open('wb') as output:
+            output.write(exc.stdout or b'')
+            output.write(exc.stderr or b'')
+            if (root / 'postgres.log').exists():
+                output.write((root / 'postgres.log').read_bytes())
+        print(log.read_text(errors='replace')[-4000:], file=sys.stderr)
+        raise RuntimeError(f'isolated PostgreSQL startup failed; see {log}') from None
     finally:
         fixture.close()
 
@@ -114,16 +116,24 @@ def run_gates(dsn, gates, logdir, *, rollback_only=ROLLBACK_ONLY_GATES):
     env.pop('PGSERVICE', None)
     env.pop('PGSERVICEFILE', None)
     results = []
-    pending = []
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        for gate in gates:
-            log = logdir / f'db-gate-{gate.name}.log'
-            if gate.name in rollback_only:
+    isolated = []
+    for gate in gates:
+        log = logdir / f'db-gate-{gate.name}.log'
+        if gate.name in rollback_only:
+            isolated.append((gate, log))
+        else:
+            results.append(run_gate(gate, dsn, log, env))
+    if isolated:
+        with postgres_fixture_group(), ExitStack() as fixtures:
+            images = []
+            for gate, log in isolated:
                 image = snapshot(dsn, env)
-                pending.append(pool.submit(run_isolated, gate, image, log, env))
-            else:
-                results.append(run_gate(gate, dsn, log, env))
-        results.extend(f.result() for f in pending)
+                fixtures.callback(image[1].close)
+                images.append((gate, image, log))
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                pending = [pool.submit(run_isolated, gate, image, log, env)
+                           for gate, image, log in images]
+                results.extend(f.result() for f in pending)
     failures = []
     for gate, rc, seconds, log in sorted(results):
         lines = log.read_text(errors='replace').splitlines()

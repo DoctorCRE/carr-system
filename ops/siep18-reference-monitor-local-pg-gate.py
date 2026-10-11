@@ -20,6 +20,7 @@ from psycopg.types.json import Jsonb
 from rule_projection_fixture import seed_reviewed_rule_projection as seed_rule_projection
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
 
+
 REPO = Path(__file__).resolve().parents[1]
 
 from registry_chain import registry_chain

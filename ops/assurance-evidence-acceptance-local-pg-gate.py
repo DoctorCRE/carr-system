@@ -1398,6 +1398,10 @@ def main() -> int:
             # The review's default now() must start after terminal evidence completion.
             conn.commit()
             a2.insert_review(cur, fixture, receipt_id)
+            check("review fact timestamp follows terminal evidence in a long transaction",
+                  one(cur, """select date_trunc('second',created_at)>=%s
+                    from ops.engineering_reviewer_fact where receipt_id=%s""",
+                      (terminal_evidence_time, receipt_id))[0])
             released_at = one(cur, "select released_at from ops.canonical_ownership_lease where id=%s",
                               (lease["lease_id"],))[0]
             check("0532a releases the A2 lease before terminal assurance append",

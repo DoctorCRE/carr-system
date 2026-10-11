@@ -4,11 +4,14 @@ import contextlib
 import importlib.util
 import io
 import json
+import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
 SPEC = importlib.util.spec_from_file_location('real_misses', REPO / 'evals/retrieval-real-misses/run_eval.py')
 assert SPEC is not None and SPEC.loader is not None
 EVAL = importlib.util.module_from_spec(SPEC)
@@ -24,6 +27,44 @@ def observation(case_id='a', refs=None, **extra):
 
 
 class ScoringTests(unittest.TestCase):
+    def test_public_fixtures_have_no_record_identities(self):
+        from ops.pii_guard import identity_spans, load_corpus
+        corpus = load_corpus(REPO / 'ops/config/public-source-identities.v1.json')
+        for name in ['questions.v1.json', 'resolved-refs.json']:
+            text = (REPO / 'evals/retrieval-real-misses' / name).read_text()
+            self.assertEqual(identity_spans(text, corpus), [], name)
+
+    def test_public_projection_cannot_measure_live_retrieval(self):
+        fixture = json.loads((REPO / 'evals/retrieval-real-misses/questions.v1.json').read_text())
+        fixture['requires_private_fixture'] = True
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = Path(directory) / 'fixture.json', Path(directory) / 'result.json'
+            source.write_text(json.dumps(fixture))
+            with patch.object(EVAL.sys, 'argv', ['eval', '--fixture', str(source), '--output', str(output)]), \
+                    patch.object(EVAL, 'run_cases', return_value=[]) as run, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    EVAL.main()
+                self.assertEqual(error.exception.code, 2)
+                run.assert_not_called()
+                self.assertFalse(output.exists())
+
+    def test_explicit_private_fixture_can_measure_live_retrieval(self):
+        fixture = json.loads((REPO / 'evals/retrieval-real-misses/questions.v1.json').read_text())
+        fixture.pop('requires_private_fixture', None)
+        cases = EVAL.validate_fixture(fixture)
+        rows = [{'case_id': c['id'], 'candidates': [EVAL.candidate(c['expected_refs'])],
+                 'live_rows': c.get('expected_live_rows')} for c in cases]
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = Path(directory) / 'fixture.json', Path(directory) / 'result.json'
+            source.write_text(json.dumps(fixture))
+            with patch.object(EVAL.sys, 'argv', ['eval', '--fixture', str(source), '--output', str(output)]), \
+                    patch.object(EVAL, 'run_cases', return_value=rows) as run, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(EVAL.main(), 0)
+                run.assert_called_once_with(cases)
+                self.assertEqual(json.loads(output.read_text())['report']['overall']['hit_rate_at_5'], 1)
+
     def test_rank_five_hits_and_rank_six_misses(self):
         cases = [case(), case('b')]
         rows = [observation(refs=['P-1', 'P-2', 'P-3', 'P-4', 'P-0055']),

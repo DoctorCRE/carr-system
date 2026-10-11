@@ -131,6 +131,34 @@ def rendered_fixture(path: Path, lane: tuple[str, uuid.UUID, uuid.UUID, uuid.UUI
     return source
 
 
+def binding_preflight(source: str, path: Path) -> str:
+    """Reuse the fixture's exact setup functions, without running its case corpus."""
+    if path == POSTGRES_FIXTURES[0]:
+        lane_table, next_marker = "f03_lane", "create temporary table f03_seam_case("
+        functions = ("f03_extra_slice", "f03_run_seam_case")
+        probe = "select pg_temp.f03_run_seam_case('engineering-slice-plan.v2','short','adapter:codex-desktop','single',true);"
+    elif path == POSTGRES_FIXTURES[1]:
+        lane_table, next_marker = "f03p_lane", "create function pg_temp.f03p_bound_plan("
+        functions = ("f03p_slice", "f03p_dependency_state")
+        probe = "select pg_temp.f03p_dependency_state('engineering-slice-plan.v2',true);"
+    else:
+        raise AssertionError("unrecognized F03 PostgreSQL fixture")
+    chunks = ["\\set ON_ERROR_STOP on", "\n".join(
+        line for line in source.splitlines() if line.startswith("\\set lane_")), "begin;"]
+    start = source.index("create temporary table " + lane_table + "(")
+    chunks.append(source[start:source.index(next_marker, start)])
+    for name in functions:
+        start = source.index("create function pg_temp." + name + "(")
+        match = re.search(r"\bas\s+(\$[a-zA-Z_0-9]*\$)", source[start:])
+        assert match, "fixture function must have a dollar-quoted body"
+        tag = match.group(1)
+        body_start = start + match.end()
+        end = source.index(tag + ";", body_start) + len(tag) + 1
+        chunks.append(source[start:end])
+    chunks.extend([probe, "rollback;"])
+    return "\n".join(chunks) + "\n"
+
+
 def run_sql_fixture(
     dsn: str,
     psql: str,
@@ -140,30 +168,21 @@ def run_sql_fixture(
     import psycopg
 
     rendered = rendered_fixture(path, lane)
-    with tempfile.NamedTemporaryFile("w", suffix=".sql", encoding="utf-8") as handle:
-        handle.write(rendered)
-        handle.flush()
-
-        def invoke() -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
-                [psql, dsn, "-v", "ON_ERROR_STOP=1", "-f", handle.name],
-                cwd=REPO,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-
-        completed = invoke()
-        output = completed.stdout + completed.stderr
+    with tempfile.NamedTemporaryFile("w", suffix=".sql", encoding="utf-8") as preflight:
+        preflight.write(binding_preflight(rendered, path))
+        preflight.flush()
+        prepared = subprocess.run(
+            [psql, dsn, "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-f", preflight.name],
+            cwd=REPO, text=True, capture_output=True, check=False,
+        )
+        preparation_output = prepared.stdout + prepared.stderr
+        assert prepared.returncode == 0, preparation_output[-4000:]
         digest_matches = set(re.findall(
-            r"set the lane job payload plan_digest to (sha256:[0-9a-f]{64})",
-            output,
+            r'(?:set the lane job payload plan_digest to |"lane_digest_mismatch"\s*:\s*")(sha256:[0-9a-f]{64})',
+            preparation_output,
         ))
-        # A first pass may both report the exact lane digest and expose an
-        # independent corpus failure later in the same fixture. Rebind the one
-        # reported digest and rerun once; the terminal run must then be fully
-        # green and contain no skip.
-        if "SKIPPED" in output and len(digest_matches) == 1:
+        assert len(digest_matches) <= 1, "fixture preflight returned ambiguous lane digests"
+        if digest_matches:
             required_digest = digest_matches.pop()
             with psycopg.connect(dsn) as conn:
                 conn.execute(
@@ -171,8 +190,14 @@ def run_sql_fixture(
                     (required_digest, lane[1]),
                 )
                 conn.commit()
-            completed = invoke()
-            output = completed.stdout + completed.stderr
+    with tempfile.NamedTemporaryFile("w", suffix=".sql", encoding="utf-8") as handle:
+        handle.write(rendered)
+        handle.flush()
+        completed = subprocess.run(
+            [psql, dsn, "-v", "ON_ERROR_STOP=1", "-f", handle.name],
+            cwd=REPO, text=True, capture_output=True, check=False,
+        )
+        output = completed.stdout + completed.stderr
         assert completed.returncode == 0, output[-4000:]
         assert "SKIPPED" not in output, output[-4000:]
         assert "FAIL" not in output, output[-4000:]
