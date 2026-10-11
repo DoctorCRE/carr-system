@@ -1236,6 +1236,19 @@ def _inside_git_tree(path):
 
 def _fetch_destination_refusal(path, cwd=None):
     """None if untrusted downloaded bytes may land at `path`, else why not.
+    `cwd` may be a list of candidate directories (a followed cd may have failed,
+    been skipped or run in a subshell): the path must pass in every one."""
+    if isinstance(cwd, (list, tuple)):
+        for one in cwd:
+            why = _fetch_destination_refusal(path, one)
+            if why:
+                return why
+        return None
+    return _fetch_destination_refusal_one(path, cwd)
+
+
+def _fetch_destination_refusal_one(path, cwd=None):
+    """None if untrusted downloaded bytes may land at `path` judged from `cwd`.
 
     Allowed: a harmless device, or a NEW non-dot file whose real parent (every
     symlink resolved) is the working directory, below it, or a temp directory,
@@ -1410,6 +1423,7 @@ def read_only_fetch_refusal(cmd, cwd=None):
         else:
             current.append(t)
     segments.append(current)
+    cwds = [os.path.realpath(cwd or os.getcwd())]
     fetches = 0
     for seg in segments:
         words = [w for w in seg if w not in ("(", ")", "{", "}")]
@@ -1428,22 +1442,38 @@ def read_only_fetch_refusal(cmd, cwd=None):
         except ValueError:
             return "the command could not be parsed"
         for path in redirects:
-            why = _fetch_destination_refusal(path, cwd)
+            why = _fetch_destination_refusal(path, cwds)
             if why:
                 return f"the command {why}"
         if not words:
             continue
         exe = os.path.basename(words[0]).lower()
-        if exe in ("cd", "pushd"):
-            # Follow a directory change so an output path is judged where it lands.
-            target = os.path.expanduser(words[1]) if len(words) > 1 else os.path.expanduser("~")
-            cwd = os.path.join(cwd or os.getcwd(), target)
+        if exe in ("cd", "pushd", "popd"):
+            # Follow a directory change so an output path is judged where it
+            # lands. The cd may fail, be skipped (||, a false &&) or run in a
+            # pipeline subshell, so every later destination is judged against
+            # every candidate directory: the original cwd and each target.
+            if exe == "popd":
+                return "popd moves to a directory the guard cannot see"
+            operands = words[1:]
+            if any(a.startswith(("-", "+")) for a in operands):
+                return f"{exe} options are not followed; name the directory alone"
+            if len(operands) > 1:
+                return f"{exe} with more than one operand is not followed"
+            if not operands and exe == "pushd":
+                return "pushd without a directory swaps to one the guard cannot see"
+            target = os.path.expanduser(operands[0] if operands else "~")
+            moved = [os.path.realpath(os.path.join(c, target)) for c in cwds]
+            moved = [m for m in moved if os.path.isdir(m)]
+            if not moved:
+                return f"{exe} target {operands[0] if operands else '~'} is not an existing directory"
+            cwds += [m for m in moved if m not in cwds]
             continue
         if exe == "tee":
             if any(a.startswith("-") and a != "-" for a in words[1:]):
                 return "tee options are not part of a plain fetch"
             for path in words[1:]:
-                why = _fetch_destination_refusal(path, cwd)
+                why = _fetch_destination_refusal(path, cwds)
                 if why:
                     return f"tee {why}"
             continue
@@ -1454,7 +1484,7 @@ def read_only_fetch_refusal(cmd, cwd=None):
                 return f"{exe} is not a plain fetch"
             if words[0] != exe:
                 return f"{exe} must be named as a bare word, not {words[0]}, so the program run is the one judged"
-            why = _fetch_grammar_refusal(exe, words[1:], cwd)
+            why = _fetch_grammar_refusal(exe, words[1:], cwds)
             if why:
                 return why
             fetches += 1
