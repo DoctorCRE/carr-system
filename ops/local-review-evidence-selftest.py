@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import venv
 from unittest.mock import patch
 
 from git_env import clone_index_fixture, fixture_env
@@ -491,6 +492,15 @@ RESULT
         with self.assertRaises(self.adapter.Refusal):
             self.adapter.verify(self.root, "origin/main", "", receipt)
 
+    def test_live_admission_cli_from_a_different_selftest_interpreter(self):
+        with tempfile.TemporaryDirectory(prefix="review-floor-interpreter-") as td:
+            venv.EnvBuilder(with_pip=False).create(td)
+            run = subprocess.run(
+                [str(Path(td) / "bin/python"), str(Path(__file__).resolve()),
+                 "Admission.test_live_admission_cli_rechecks_provider_head_base_and_body_without_leaks"],
+                env=fixture_env(), capture_output=True, text=True, timeout=90)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
     def test_live_admission_cli_rechecks_provider_head_base_and_body_without_leaks(self):
         provider = Path(self.tmp.name) / "provider.json"
         bin_dir = Path(self.tmp.name) / "bin"
@@ -503,10 +513,14 @@ RESULT
             "base": {"sha": self.git("rev-parse", "origin/main"), "ref": "main",
                      "repo": {"full_name": "jbookout/carr-system"}}}
         receipt = Path(self.tmp.name) / "receipt.json"
-        with patch.dict(os.environ, {"PATH": str(bin_dir) + os.pathsep + os.environ["PATH"], "FIXTURE_PR": str(provider),
-                                     "CARR_JEV_OFFLINE": "1",
-                                     "CARR_CI_PYTHON": str(ROOT / ".venv/bin/python") if (ROOT / ".venv/bin/python").is_file() else "python3"}):
-            receipt.write_text(json.dumps(self.collect()))
+        body = Path(self.tmp.name) / "body"
+        body.write_text("")
+        with patch.dict(os.environ, {"PATH": str(bin_dir) + os.pathsep + os.environ["PATH"], "FIXTURE_PR": str(provider)}):
+            collected = subprocess.run(
+                ["bash", str(ROOT / "ops/ci.sh"), "--review-floor", "--root", str(self.root),
+                 "--body-file", str(body), "--receipt", str(receipt)],
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(collected.returncode, 0, collected.stdout + collected.stderr)
             argv = ["bash", str(ROOT / "ops/ci.sh"), "--review-admit", "--root", str(self.root),
                     "--receipt", str(receipt), "--pr", "7"]
             provider.write_text(json.dumps(data))
