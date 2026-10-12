@@ -108,7 +108,21 @@ from lib.rule_delivery_preuse import (  # noqa:E402
 from lib.rule_delivery_shadow import (  # noqa:E402
     WINDOW_SOURCE_PATHS, file_sha256, source_sha256,
 )
-from lib.claude_rule_delivery_dedupe import should_deliver, transcript_path_digest  # noqa:E402
+
+
+# Imported on first use: only a delivery reaches the dedupe store, and its
+# import chain (tempfile, dataclasses, the continuity config) was about a
+# quarter of this hook's CPU on every call that delivers nothing (2026-10-12).
+def should_deliver(*args, **kwargs):
+    from lib.claude_rule_delivery_dedupe import should_deliver as _should_deliver
+    return _should_deliver(*args, **kwargs)
+
+
+def transcript_path_digest(*args, **kwargs):
+    from lib.claude_rule_delivery_dedupe import transcript_path_digest as _digest
+    return _digest(*args, **kwargs)
+
+
 from lib import rule_routes  # noqa:E402
 
 

@@ -219,30 +219,6 @@
       "role": "gate",
       "wirings": [
         {
-          "event": "PostToolUse",
-          "matcher": "",
-          "fixtures": [
-            "bash",
-            "edits",
-            "reads",
-            "scenarios"
-          ],
-          "env": {
-            "CARR_CONTEXT_HOOK_EVENT": "PostToolUse"
-          },
-          "executions": [
-            {
-              "source": "ops/config/hooks.json",
-              "group": 0,
-              "order": 0,
-              "matcher_present": false,
-              "type": "command",
-              "command": "CARR_CONTEXT_HOOK_EVENT=PostToolUse {{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/context-handoff-gate.py",
-              "timeout": 20
-            }
-          ]
-        },
-        {
           "event": "PreCompact",
           "matcher": "",
           "fixtures": [
@@ -647,7 +623,7 @@
           "executions": [
             {
               "source": "ops/config/hooks.json",
-              "group": 3,
+              "group": 2,
               "order": 0,
               "matcher_present": true,
               "type": "command",
@@ -742,7 +718,7 @@
           "executions": [
             {
               "source": "ops/config/hooks.json",
-              "group": 1,
+              "group": 0,
               "order": 0,
               "matcher_present": true,
               "type": "command",
@@ -971,7 +947,7 @@
           "executions": [
             {
               "source": "ops/config/hooks.json",
-              "group": 4,
+              "group": 3,
               "order": 0,
               "matcher_present": true,
               "type": "command",
@@ -1257,7 +1233,7 @@
           "executions": [
             {
               "source": "ops/config/hooks.json",
-              "group": 2,
+              "group": 1,
               "order": 1,
               "matcher_present": true,
               "type": "command",
@@ -1302,7 +1278,7 @@
           "executions": [
             {
               "source": "ops/config/hooks.json",
-              "group": 2,
+              "group": 1,
               "order": 0,
               "matcher_present": true,
               "type": "command",
@@ -1438,7 +1414,7 @@
           "executions": [
             {
               "source": "ops/config/hooks.json",
-              "group": 2,
+              "group": 1,
               "order": 2,
               "matcher_present": true,
               "type": "command",
@@ -1482,7 +1458,7 @@
           "executions": [
             {
               "source": "ops/config/hooks.json",
-              "group": 2,
+              "group": 1,
               "order": 3,
               "matcher_present": true,
               "type": "command",

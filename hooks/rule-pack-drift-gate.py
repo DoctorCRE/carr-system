@@ -43,6 +43,24 @@ only thing that could measure it was a door a human had to open).
 
 A MISS is the row that matters: a rule this turn's work needed, that a scoped
 boot would not have delivered. Enforcement flips on at zero unexplained misses.
+
+ONE PASS PER BYTE (2026-10-12). Every Stop used to re-read the whole transcript
+and re-walk every prior record for every standing-context result: 437 fires in
+seven fleet days, last-48-hour p90 16.4 s and max 19.6 s per turn end against a
+20 s timeout, on transcripts that reach 39 MB here. Now a per-session cursor
+(out/rule-pack-drift-cursor/) keeps the byte offset it has read to and what the
+records before it decided: the delivery accumulators (DeliveryState) and the
+turn-boundary tracker (TurnTracker). Each Stop reads only the bytes appended
+since, then re-reads the current turn to observe its work. The verdict is the
+same function of the same records (evaluate_turn()); only the bookkeeping is
+carried. The cursor is discarded and the transcript re-read from byte 0 when
+the file shrinks, its inode changes, the bytes just before the offset differ,
+or any input the verdict reads (CURSOR_INPUTS) changes. A duplicated record
+uuid or a parent that arrives after its child would let an old boundary change
+meaning, so either sends that transcript to the original whole-file evaluation.
+SCAN_CAP_BYTES bounds the bytes read per Stop; when it binds, the turn is not
+judged, the session sees a one-line notice, the shadow ledger gets a
+scan-capped error row, and the cursor resumes from where it stopped.
 """
 from __future__ import annotations
 
@@ -58,11 +76,14 @@ from pathlib import Path
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from lib.rule_delivery_preuse import (  # noqa:E402
-    contains_receipt_marker, has_background_tool_call, preuse_delivery,
+    SELECTOR_SOURCE_PATHS, TRIGGER_TABLE_RELATIVE, CORPUS_RELATIVE,
+    _claude_user_text, contains_receipt_marker, has_background_tool_call,
+    preuse_delivery, receipt_from_envelope, tool_calls as _receipt_tool_calls,
 )
+from lib.transcript_read import TAMPER_EVENT  # noqa:E402
 from lib.rule_delivery_shadow import (  # noqa:E402
-    append_locked, file_sha256, make_error_observation, make_observation,
-    source_sha256, stamp,
+    WINDOW_SOURCE_PATHS, append_locked, file_sha256, make_error_observation,
+    make_observation, source_sha256, stamp,
 )
 MAP = os.path.join(REPO, "ops", "config", "rule-enforcement-map.json")
 LOG = os.path.join(REPO, "out", "rule-delivery-shadow.jsonl")
@@ -556,40 +577,123 @@ def delivery_state(records):
     and the omission list come from the LATEST call, because those describe the
     policy and the payload as they stand now.
     """
-    mode, declared, omit = None, set(), []
-    for index, record in enumerate(records):
-        found = preuse_delivery(record, records[:index], repo=Path(REPO))
-        if found is None:
-            if "rule_delivery" not in serialized(record):
-                continue
-            found = standing_result_delivery(record, records[:index])
+    state = DeliveryState()
+    for record in records:
+        state.feed(record)
+    return state.result()
+
+
+class DeliveryState:
+    """delivery_state() fed one record at a time, so a cursor can carry it.
+
+    What a record credits depends on the records before it in three ways only,
+    and each is kept here instead of the records: the standing-context call ids
+    opened so far (a service result is credited only against one), every tool
+    call id with what matched_tool_call() reads of it, and the latest user text
+    matched_prompt() binds a semantic receipt to. preuse_delivery() is handed
+    stub records rebuilt from that index, so the receipt rules themselves are
+    the library's and unchanged. Until 2026-10-12 both lookups re-walked every
+    prior record per candidate: 26 s on one 50 MB transcript.
+    """
+
+    def __init__(self, data=None):
+        data = data if isinstance(data, dict) else {}
+        self.mode = data.get("mode")
+        self.declared = set(data.get("declared") or [])
+        self.omit = list(data.get("omit") or [])
+        self.calls = set(data.get("calls") or [])
+        self.tools = {key: list(value) for key, value in (data.get("tools") or {}).items()}
+        self.last_user = data.get("last_user")
+
+    def to_json(self):
+        return {"mode": self.mode, "declared": sorted(self.declared), "omit": list(self.omit),
+                "calls": sorted(c for c in self.calls if isinstance(c, str)),
+                "tools": self.tools, "last_user": self.last_user}
+
+    def result(self):
+        return self.mode, sorted(self.declared), self.omit
+
+    def _prior(self, row):
+        stubs = []
+        tool_id = row.get("tool_use_id") if isinstance(row, dict) else None
+        for entry in self.tools.get(tool_id, []) if isinstance(tool_id, str) else []:
+            name, tool_input, context = entry if entry else (None, None, None)
+            stubs.append({"type": "assistant", "sessionId": context, "message": {
+                "role": "assistant", "content": [{"type": "tool_use", "id": tool_id,
+                                                  "name": name, "input": tool_input}]}})
+        if self.last_user is not None:
+            session, text = self.last_user
+            stubs.append({"type": "user", "sessionId": session,
+                          "message": {"role": "user", "content": text}})
+        return stubs
+
+    def feed(self, record, raw=None):
+        found = None
+        row = receipt_from_envelope(record)
+        if row is not None:
+            found = preuse_delivery(record, self._prior(row), repo=Path(REPO))
+        if found is None and _may_name_rule_delivery(record, raw):
+            found = _standing_result(record, self.calls)
         if found:
             mode, packs, omit = found
-            declared.update(packs)
-    return mode, sorted(declared), omit
+            self.mode, self.omit = mode, list(omit)
+            self.declared.update(packs)
+        self.calls |= _standing_call_ids(record)
+        for tool_id, name, tool_input, context in _receipt_tool_calls(record):
+            if not isinstance(tool_id, str):
+                continue  # a receipt names a non-empty string id; nothing else can match
+            background = isinstance(tool_input, dict) and tool_input.get("run_in_background") is True
+            # Only a background call can satisfy matched_tool_call(); any other
+            # entry still counts toward "exactly one call with this id".
+            self.tools.setdefault(tool_id, []).append(
+                [name, tool_input, context] if background else None)
+        text = _claude_user_text(record)
+        if text is not None:
+            self.last_user = [record.get("sessionId"), text]
+
+
+def _may_name_rule_delivery(record, raw):
+    """serialized(record) can contain "rule_delivery" only if the raw JSON line
+    does, unless the line spells characters as \\u escapes. Exact, and it skips
+    stringifying nearly every record."""
+    if raw is not None and "rule_delivery" not in raw and "\\u" not in raw:
+        return False
+    return "rule_delivery" in serialized(record)
+
+
+def _standing_call_ids(record):
+    """The standing-context call ids this one record opens."""
+    calls = set()
+    native = record.get("payload")
+    native = native if isinstance(native, dict) else {}
+    if (record.get("type") == "response_item" and native.get("type") in {'function_call', 'custom_tool_call'}
+            and ("standing_context" in str(native.get("name", ""))
+                 or "standing-context" in str(native.get("name", ""))
+                 or _native_standing_invocation(native))):
+        calls.add(native.get("call_id"))
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        name = str(block.get("name", ""))
+        arguments = block.get('input') or {}
+        if "standing-context" in name or "standing_context" in name or (
+                name == "Bash" and isinstance(arguments, dict)
+                and _shell_standing_invocation(arguments.get('command', ''))):
+            calls.add(block.get("id"))
+    return calls
 
 
 def standing_result_delivery(record, prior):
     """Credit service results only when tied to a standing-context call."""
     calls = set()
     for previous in prior:
-        native = previous.get("payload") or {}
-        if (previous.get("type") == "response_item" and native.get("type") in {'function_call', 'custom_tool_call'}
-                and ("standing_context" in str(native.get("name", ""))
-                     or "standing-context" in str(native.get("name", ""))
-                     or _native_standing_invocation(native))):
-            calls.add(native.get("call_id"))
-        message = previous.get("message") or {}
-        content = message.get("content")
-        for block in content if isinstance(content, list) else []:
-            if not isinstance(block, dict) or block.get("type") != "tool_use":
-                continue
-            name = str(block.get("name", ""))
-            arguments = block.get('input') or {}
-            if "standing-context" in name or "standing_context" in name or (
-                    name == "Bash" and isinstance(arguments, dict)
-                    and _shell_standing_invocation(arguments.get('command', ''))):
-                calls.add(block.get("id"))
+        calls |= _standing_call_ids(previous)
+    return _standing_result(record, calls)
+
+
+def _standing_result(record, calls):
     message = record.get("message") or {}
     content = message.get("content")
     for block in content if isinstance(content, list) else []:
@@ -980,8 +1084,12 @@ def observed_packs(turn, triggers):
 
 
 def evaluate(records, triggers, members):
-    turn = current_turn(records)
-    mode, declared, omit = delivery_state(records)
+    return evaluate_turn(current_turn(records), delivery_state(records), triggers, members)
+
+
+def evaluate_turn(turn, delivery, triggers, members):
+    """The verdict. The whole-file path and the cursor both end here."""
+    mode, declared, omit = delivery
     hits = observed_packs(turn, triggers)
     needed = sorted(hits)
     loaded = sorted({str(p).strip().lower() for p in declared})
@@ -1027,6 +1135,337 @@ def block_reason(result):
             "what you DID rather than on what you said you would do.")
 
 
+# ── the per-session cursor ────────────────────────────────────────────────────
+
+CURSOR_SCHEMA = "rule-pack-drift-cursor/v1"
+CURSOR_DIR = os.path.join(REPO, "out", "rule-pack-drift-cursor")
+CURSOR_KEEP_SECONDS = 14 * 86400
+TAIL_CHECK_BYTES = 4096
+# About half a second of parsing on this hardware; a 39 MB transcript seen for
+# the first time catches up over three turn ends instead of one 16 s stall.
+SCAN_CAP_BYTES = 16 * 1024 * 1024
+# Every file the verdict reads besides the transcript. A change to any of them
+# can change what an old receipt is worth, so it discards the cursor. The
+# selftest records the files a full evaluation actually opens and fails if one
+# is missing here.
+CURSOR_INPUTS = tuple(sorted(set(WINDOW_SOURCE_PATHS) | set(SELECTOR_SOURCE_PATHS) | {
+    "ops/config/rule-enforcement-map.json", TRIGGER_TABLE_RELATIVE, CORPUS_RELATIVE,
+    "ops/config/rule-routes.v1.json", "ops/config/rule-classification.v1.csv",
+    "ops/config/rule-classes.v1.json", "ops/config/hooks.json",
+    "ops/config/codex-hooks.json", "ops/config/rule-delivery-activation-overlay.v1.json",
+    "ops/config/control-enforcement-classes.v1.json", "ops/config/gate-baseline.json",
+    "ops/scheduled-tasks/engineering-slice.SKILL.md",
+    "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+    "control-room/contracts/engineering-slice-receipt.v1.schema.json",
+    "lib/rule_routes.py", "lib/rule_delivery_preuse.py", "lib/rule_delivery_shadow.py",
+    "lib/transcript_read.py", "hooks/rule-pack-drift-gate.py", "hooks/lint-gate.py",
+    "mcp-server/src/mutation-registry.js",
+}))
+
+
+def cursor_inputs_fingerprint(repo=REPO):
+    """Size and mtime of every verdict input; any change discards the cursor."""
+    rows = []
+    for relative in CURSOR_INPUTS:
+        try:
+            st = os.stat(os.path.join(repo, relative))
+            rows.append((relative, st.st_size, st.st_mtime_ns))
+        except OSError:
+            rows.append((relative, None, None))
+    return hashlib.sha256(json.dumps(rows).encode("utf-8")).hexdigest()
+
+
+def _uuid_key(value):
+    return hashlib.sha256(value.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _injection_shaped(record):
+    """The child-row shape _skill_injection_record_ids() can mark injected."""
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return (record.get("type") == "user" and not record.get("origin")
+            and isinstance(content, list) and len(content) == 1
+            and isinstance(content[0], dict) and content[0].get("type") == "text")
+
+
+def _skeleton(record):
+    """What _skill_injection_record_ids() reads of a chain parent, nothing else."""
+    message = record.get("message") if isinstance(record.get("message"), dict) else {}
+    content = message.get("content")
+    blocks = [{key: block.get(key) for key in ("type", "name", "id", "tool_use_id")
+               if key in block} if isinstance(block, dict) else block
+              for block in content] if isinstance(content, list) else content
+    keep = {key: record[key] for key in ("type", "uuid", "parentUuid", "promptId",
+                                         "sourceToolAssistantUUID", "origin") if key in record}
+    keep["message"] = {"role": message.get("role"), "content": blocks}
+    return keep
+
+
+class TurnTracker:
+    """current_turn()'s answer, kept as the byte offset of the latest boundary.
+
+    A boundary is a genuine or synthetic user turn that is not a Skill body
+    Claude injected. Whether a row is injected depends on its chain parents (a
+    Skill tool_use and its tool_result), which precede it, and on every uuid in
+    the chain appearing once. Skill chain rows are kept as skeletons and the
+    real _skill_injection_record_ids() judges [assistant, result, row]. Two
+    things could make an old answer wrong later, and either one sets
+    `whole_file`: a uuid seen twice, or a parent that arrives after a row that
+    named it.
+    """
+
+    def __init__(self, data=None):
+        data = data if isinstance(data, dict) else {}
+        self.turn_start = data.get("turn_start")
+        self.uuids = set(data.get("uuids") or [])
+        self.pending = set(data.get("pending") or [])
+        self.skeletons = dict(data.get("skeletons") or {})
+        self.whole_file = bool(data.get("whole_file"))
+
+    def to_json(self):
+        return {"turn_start": self.turn_start, "uuids": sorted(self.uuids),
+                "pending": sorted(self.pending), "skeletons": self.skeletons,
+                "whole_file": self.whole_file}
+
+    def _seen(self, value):
+        return isinstance(value, str) and _uuid_key(value) in self.uuids
+
+    def _expect(self, value):
+        if isinstance(value, str) and not self._seen(value):
+            self.pending.add(_uuid_key(value))
+
+    def feed(self, record, offset):
+        own = record.get("uuid")
+        if isinstance(own, str):
+            key = _uuid_key(own)
+            if key in self.uuids or key in self.pending:
+                self.whole_file = True
+            self.uuids.add(key)
+        if genuine_user_task(record) or synthetic_turn_boundary(record):
+            injected = False
+            if _injection_shaped(record):
+                result = self.skeletons.get(record.get("parentUuid"))
+                assistant = self.skeletons.get(result.get("parentUuid")) if result else None
+                if result is None:
+                    self._expect(record.get("parentUuid"))
+                elif assistant is None:
+                    self._expect(result.get("parentUuid"))
+                else:
+                    injected = id(record) in _skill_injection_record_ids(
+                        [assistant, result, record])
+            if not injected:
+                self.turn_start = offset
+        message = record.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        single = (content[0] if isinstance(content, list) and len(content) == 1
+                  and isinstance(content[0], dict) else {})
+        if not isinstance(own, str):
+            return
+        if record.get("type") == "assistant" and single.get("type") == "tool_use" \
+                and single.get("name") == "Skill":
+            self.skeletons[own] = _skeleton(record)
+        elif record.get("type") == "user" and single.get("type") == "tool_result":
+            parent = record.get("parentUuid")
+            if parent in self.skeletons or (isinstance(parent, str) and not self._seen(parent)):
+                self.skeletons[own] = _skeleton(record)
+                self._expect(parent)
+
+
+def read_records(path, start, end, *, size, line_number, session=None, log_path=None):
+    """(offset, record) for every JSON-object line in [start, end), the offset
+    reading stopped at, and the line count there. Bad lines are skipped and
+    logged exactly as lib/transcript_read.py does. When `end` is short of the
+    file, only whole lines are taken; a trailing line with no newline is taken
+    only once it parses (a writer still appending it is read next time)."""
+    with open(path, "rb") as handle:
+        handle.seek(start)
+        data = handle.read(max(0, end - start))
+        if end < size:
+            cut = data.rfind(b"\n") + 1
+            if cut == 0:  # one line longer than the cap: read to its end
+                rest = b""
+                while b"\n" not in rest:
+                    chunk = handle.read(1 << 20)
+                    if not chunk:
+                        break
+                    rest += chunk
+                data += rest[:rest.find(b"\n") + 1] if b"\n" in rest else rest
+                cut = data.rfind(b"\n") + 1 or len(data)
+            data = data[:cut]
+    if data and not data.endswith(b"\n"):
+        head, _, tail = data.rpartition(b"\n")
+        try:
+            json.loads(tail.decode("utf-8", errors="replace"))
+        except ValueError:
+            data = head + b"\n" if head else b""
+    parts = data.split(b"\n")
+    if data.endswith(b"\n"):
+        parts.pop()
+    records, bad, position = [], [], start
+    for raw in parts:
+        offset, position = position, position + len(raw) + 1
+        line_number += 1
+        if not raw.strip():
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        try:
+            record = json.loads(text)
+        except ValueError:
+            bad.append(line_number)
+            continue
+        if isinstance(record, dict):
+            records.append((offset, record, text))
+        else:
+            bad.append(line_number)
+    if bad and log_path and session != "selftest":
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            from datetime import datetime, timezone
+            with open(log_path, "a", encoding="utf-8") as out:
+                out.write(json.dumps({
+                    "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "event": TAMPER_EVENT, "hook": "rule-pack-drift-gate", "session": session,
+                    "transcript_path": path, "skipped_lines": len(bad),
+                    "first_line_numbers": bad[:10]}) + "\n")
+        except Exception:
+            pass
+    return records, start + len(data), line_number
+
+
+def _tail_digest(path, offset):
+    begin = max(0, offset - TAIL_CHECK_BYTES)
+    with open(path, "rb") as handle:
+        handle.seek(begin)
+        return hashlib.sha256(handle.read(offset - begin)).hexdigest()
+
+
+def cursor_path(session, transcript):
+    key = f"{session}\0{os.path.realpath(transcript)}"
+    return os.path.join(CURSOR_DIR, hashlib.sha256(key.encode("utf-8", "replace")).hexdigest()[:32] + ".json")
+
+
+def load_cursor(state_path, transcript, st, inputs):
+    """The saved cursor, or None (with the reason) when it cannot be trusted."""
+    try:
+        with open(state_path, encoding="utf-8") as handle:
+            state = json.load(handle)
+    except FileNotFoundError:
+        return None, "new"
+    except (OSError, ValueError):
+        return None, "unreadable"
+    if not isinstance(state, dict) or state.get("schema") != CURSOR_SCHEMA:
+        return None, "schema"
+    if state.get("transcript") != os.path.realpath(transcript):
+        return None, "path"
+    if (state.get("dev"), state.get("ino")) != (st.st_dev, st.st_ino):
+        return None, "inode"
+    offset = state.get("offset")
+    if not isinstance(offset, int) or offset < 0 or offset > st.st_size:
+        return None, "shrunk"
+    if state.get("inputs") != inputs:
+        return None, "inputs"
+    try:
+        if state.get("tail") != _tail_digest(transcript, offset):
+            return None, "rewritten"
+    except OSError:
+        return None, "unreadable"
+    return state, "resumed"
+
+
+def save_cursor(state_path, state):
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
+    tmp = f"{state_path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, separators=(",", ":"))
+    os.replace(tmp, state_path)
+    try:  # a count cap is not a size cap: age out cursors of finished sessions
+        horizon = __import__("time").time() - CURSOR_KEEP_SECONDS
+        for name in os.listdir(os.path.dirname(state_path)):
+            full = os.path.join(os.path.dirname(state_path), name)
+            if os.path.getmtime(full) < horizon:
+                os.unlink(full)
+    except OSError:
+        pass
+
+
+class Scan:
+    """What one Stop learned: the turn and delivery to judge, or why not."""
+
+    def __init__(self, turn=None, delivery=None, capped=None, read=(0, 0), reason="",
+                 reread=None):
+        self.turn, self.delivery, self.capped = turn, delivery, capped
+        # read: the new bytes this Stop consumed; reread: where the current
+        # turn's already-consumed records were read again from, if anywhere.
+        self.read, self.reason, self.reread = read, reason, reread
+
+
+def scan_transcript(path, session, *, cap=None, log_path=None):
+    """Advance this session's cursor to the end of `path`, at most `cap` bytes.
+
+    Returns a Scan whose turn/delivery feed evaluate_turn(), or whose `capped`
+    names why this Stop is not judged. The cursor is saved either way."""
+    cap = SCAN_CAP_BYTES if cap is None else cap
+    st = os.stat(path)
+    size = st.st_size
+    inputs = cursor_inputs_fingerprint()
+    state_path = cursor_path(session, path)
+    saved, reason = load_cursor(state_path, path, st, inputs)
+    state = saved or {}
+    delivery = DeliveryState(state.get("delivery"))
+    tracker = TurnTracker(state.get("tracker"))
+    start = int(state.get("offset") or 0)
+    lines = int(state.get("lines") or 0)
+
+    def persist(offset, line_number):
+        save_cursor(state_path, {
+            "schema": CURSOR_SCHEMA, "transcript": os.path.realpath(path),
+            "dev": st.st_dev, "ino": st.st_ino, "offset": offset, "lines": line_number,
+            "tail": _tail_digest(path, offset), "inputs": inputs,
+            "delivery": delivery.to_json(), "tracker": tracker.to_json()})
+
+    offset = start
+    if not tracker.whole_file:
+        records, offset, lines = read_records(
+            path, start, min(size, start + cap), size=size, line_number=lines,
+            session=session, log_path=log_path)
+        for record_offset, record, raw in records:
+            tracker.feed(record, record_offset)
+            delivery.feed(record, raw)
+        persist(offset, lines)
+        if offset < size and min(size, start + cap) < size:
+            return Scan(capped=f"{(size - offset) / 1048576:.1f} MB of the transcript is still "
+                        "unread", read=(start, offset), reason=reason)
+        if not tracker.whole_file:
+            turn_start = tracker.turn_start or 0
+            if size - turn_start > cap:
+                return Scan(capped=f"this turn spans {(size - turn_start) / 1048576:.1f} MB",
+                            read=(start, offset), reason=reason)
+            turn = [record for record_offset, record, _ in records if record_offset >= turn_start]
+            if turn_start < start:
+                earlier, _, _ = read_records(path, turn_start, start, size=size,
+                                             line_number=0, session=None, log_path=None)
+                turn = [record for _, record, _ in earlier] + turn
+            return Scan(turn=turn, delivery=delivery.result(), read=(start, offset),
+                        reason=reason, reread=turn_start if turn_start < start else None)
+    # A duplicated uuid or a late parent: the original whole-file evaluation.
+    if size > cap:
+        persist(offset, lines)
+        return Scan(capped=f"this transcript needs a whole-file read of {size / 1048576:.1f} MB",
+                    read=(0, 0), reason="whole_file")
+    records, offset, line_count = read_records(path, 0, size, size=size, line_number=0,
+                                               session=session, log_path=None)
+    plain = [record for _, record, _ in records]
+    persist(offset, line_count)
+    return Scan(turn=current_turn(plain), delivery=delivery_state(plain), read=(0, offset),
+                reason="whole_file")
+
+
+def capped_notice(scan):
+    return (f"rule-pack-drift-gate did not check this turn: {scan.capped}, over the "
+            f"{SCAN_CAP_BYTES // 1048576} MB it reads per turn end. Nothing was blocked; "
+            "it resumes from where it stopped at the next turn end.")
+
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.hook_runtime import decision, run
 
@@ -1066,19 +1505,25 @@ def decide(payload):
         path = payload.get("transcript_path") or payload.get("transcriptPath")
         if not path or not os.path.exists(path):
             return 0
-        # One bad line in the session's own transcript must not switch the
-        # gate off (bypass hunt, PR #1224): lib/transcript_read.py skips it
-        # and records a transcript_tamper event instead of raising.
-        # Logged beside the other gates' tamper events rather than into this
-        # gate's own schema-bound rule-delivery-shadow.jsonl.
-        records = payload.transcript(
-            hook="rule-pack-drift-gate",
-            log_path=os.path.join(REPO, "out", "jev-required-actions-gate.jsonl"))
-        triggers, members, local_map_digest = load_packs()
-        result = evaluate(records, triggers, members)
         raw_session = payload.get("session_id") or payload.get("sessionId")
         session = raw_session if isinstance(raw_session, str) and raw_session.strip() \
             else "unavailable"
+        # One bad line in the session's own transcript must not switch the
+        # gate off (bypass hunt, PR #1224): read_records() skips it and
+        # records a transcript_tamper event instead of raising, logged beside
+        # the other gates' tamper events rather than into this gate's own
+        # schema-bound rule-delivery-shadow.jsonl.
+        scan = scan_transcript(
+            path, session,
+            log_path=os.path.join(REPO, "out", "jev-required-actions-gate.jsonl"))
+        triggers, members, local_map_digest = load_packs()
+        if scan.capped:
+            audit(make_error_observation(
+                session=session, error="scan-capped", detail=scan.capped,
+                map_digest=local_map_digest, source_digest=source_sha256(Path(REPO))))
+            print(json.dumps({"systemMessage": capped_notice(scan)}))
+            return 0
+        result = evaluate_turn(scan.turn, scan.delivery, triggers, members)
         row = make_observation(
             session=session, map_digest=local_map_digest,
             source_digest=source_sha256(Path(REPO)), result=result)

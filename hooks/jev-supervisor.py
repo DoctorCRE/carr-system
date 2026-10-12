@@ -27,10 +27,31 @@ TWO MODES, chosen by the CARR_JEV_SUPERVISOR environment variable:
                      CARR_JEV_SUPERVISOR=shadow explicitly to go back to this.
 
 EVENTS
-  PostToolUse: one boundary request batches triggered security, failure,
-               path, bug, duplicate, and test questions. A quiet tool result
-               may run the throttled progress watch.
+  PostToolUse: one boundary request batches triggered failure, path, bug,
+               duplicate, and test questions. A quiet tool result may run the
+               progress watch.
   Stop: one request batches a new done claim and new diff review.
+
+THE PER-CALL TAX (2026-10-12). PostToolUse fires on nearly every tool call:
+2,143 fires in seven fleet days at about 252 ms each, with zero catches,
+because every call loaded ops/typesafe_client.py, parsed a 4 MB transcript
+tail for the progress watch and the task text, and spawned git, before the
+library's own triggers decided there was nothing to ask. Now two cheap
+predicates run first, with nothing under ops/ loaded:
+  tool_event_due()  the same deterministic triggers inspect_tool_event()
+                    owns (a failed or erroring Bash, a missing-path message,
+                    an edit that adds text). Anything else returns [] there
+                    and records nothing, so skipping it changes no verdict.
+  progress_due()    a per-session ring of the last LOOP_WINDOW call
+                    fingerprints, cut by a successful edit. The full watch
+                    runs only when this call repeats one in the ring at least
+                    LOOP_REPEAT_MIN - 1 times, when its output carries a
+                    failure marker, or when the caller supplies a budget or
+                    artifact pair. A repetition can only appear with the call
+                    that repeats, so the stuck verdict still fires on time.
+ops/jev-supervisor-selftest.py holds both predicates to the library: the
+regexes and thresholds must equal jev_session_watch's, and every event they
+skip must yield nothing from the real inspect_tool_event().
 
 Budget: each Jev call carries its own short timeout inside the library, and
 the whole hook stops starting new checks once BUDGET_SECONDS is spent, so a slow
@@ -40,8 +61,8 @@ import importlib.util
 import json
 import os
 import re
+import hashlib
 import shlex
-import subprocess
 import sys
 import time
 
@@ -74,7 +95,34 @@ def _lib(name):
     return module
 
 
-POLICY = _lib("typesafe_client")
+class _LazyLib:
+    """A library loaded on first attribute use, so a skipped event never pays
+    for ops/typesafe_client.py. Tests patch the module attribute as before."""
+
+    def __init__(self, name, loader):
+        self._name = name
+        self._loader = loader  # bound now: a test replacing _lib must not reach here
+        self._module = None
+
+    def __getattr__(self, attr):
+        if self._module is None:
+            self._module = self._loader(self._name)
+        return getattr(self._module, attr)
+
+
+POLICY = _LazyLib("typesafe_client", _lib)
+
+# Mirrors of ops/jev_session_watch.py, read without loading it. The selftest
+# fails if either side moves without the other.
+WATCH_FAILURE_MARKERS = re.compile(
+    r"Traceback \(most recent call last\)|AssertionError|FAILED |ERROR\b|Error:")
+INSPECT_MISSING = re.compile(r"No such file or directory|does not exist|File not found|ENOENT", re.I)
+LOOP_WINDOW = 12
+LOOP_REPEAT_MIN = 3
+WATCH_EDIT_TOOLS = {"edit", "write", "notebookedit"}
+INSPECT_EDIT_TOOLS = {"edit", "write", "multiedit"}
+INSPECT_PATH_TOOLS = {"read", "edit", "write", "multiedit", "bash"}
+RING_DIR = os.path.join(REPO, "out", "jev-session-watch-state")
 
 
 def _text(value):
@@ -102,7 +150,84 @@ def _exit_code(response):
     return None
 
 
+def _added_text(name, tool_input):
+    added = str(tool_input.get("content") or tool_input.get("new_string") or "")
+    if name == "multiedit":
+        added = "\n".join(str(e.get("new_string") or "") for e in tool_input.get("edits") or []
+                          if isinstance(e, dict))
+    return added
+
+
+def tool_event_due(payload):
+    """Whether inspect_tool_event() has any trigger that can fire on this event.
+
+    The same three deterministic triggers the library owns, evaluated on the
+    same text. False means the library would return [] and record nothing.
+    """
+    name = (payload.get("tool_name") or "").lower()
+    tool_input = payload.get("tool_input")
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    response = payload.get("tool_response")
+    if name in INSPECT_EDIT_TOOLS and _added_text(name, tool_input):
+        return True
+    output = _text(response)[-MAX_OUTPUT_CHARS:]
+    if name == "bash" and (_exit_code(response) not in (None, 0)
+                           or WATCH_FAILURE_MARKERS.search(output)):
+        return True
+    return name in INSPECT_PATH_TOOLS and bool(INSPECT_MISSING.search(output))
+
+
+def _ring_path(payload):
+    key = "\0".join(str(payload.get(k) or "") for k in ("session_id", "transcript_path"))
+    token = hashlib.sha256(key.encode("utf-8", "replace")).hexdigest()[:32]
+    return os.path.join(RING_DIR, token + ".ring.json")
+
+
+def progress_due(payload, ring_path=None):
+    """Whether the stuck-and-drift watch could fire on this call.
+
+    Keeps a ring of the last LOOP_WINDOW call fingerprints for the session
+    (tool, input, output), cut at each successful edit the way the watch cuts
+    its window. Any state error answers True: the full watch decides then.
+    """
+    if any(payload.get(k) is not None for k in
+           ("elapsed_seconds", "budget_seconds", "artifact_before", "artifact_after")):
+        return True
+    name = (payload.get("tool_name") or "").lower()
+    response = payload.get("tool_response")
+    output = _text(response)[-MAX_OUTPUT_CHARS:]
+    if WATCH_FAILURE_MARKERS.search(output):
+        return True
+    try:
+        tool_input = json.dumps(payload.get("tool_input"), sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        tool_input = str(payload.get("tool_input"))
+    fingerprint = hashlib.sha256("\0".join((name, tool_input, output)).encode(
+        "utf-8", "replace")).hexdigest()[:24]
+    path = ring_path or _ring_path(payload)
+    try:
+        import fcntl
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a+", encoding="utf-8") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            fh.seek(0)
+            raw = fh.read()
+            ring = json.loads(raw) if raw.strip() else []
+            if not isinstance(ring, list):
+                ring = []
+            seen = ring.count(fingerprint)
+            edited = (name in WATCH_EDIT_TOOLS and _exit_code(response) in (None, 0))
+            ring = [] if edited else (ring + [fingerprint])[-LOOP_WINDOW:]
+            fh.seek(0)
+            fh.truncate()
+            fh.write(json.dumps(ring))
+    except (OSError, ValueError):
+        return True
+    return seen >= LOOP_REPEAT_MIN - 1
+
+
 def _git_root(cwd):
+    import subprocess
     try:
         out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd or ".",
                              capture_output=True, text=True, timeout=5)
@@ -364,6 +489,7 @@ def _last_test_evidence(transcript):
 
 
 def stop(payload, run):
+    import subprocess
     transcript = payload.get("transcript_path") or ""
     final = str(payload.get("last_assistant_message") or "")
     cwd = payload.get("cwd") or os.getcwd()
@@ -515,16 +641,27 @@ from lib.hook_runtime import decision, run
 def decide(payload):
     if not isinstance(payload, dict) or MODE == "off" or payload.get("session_id") == "selftest":
         return 0
+    event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
+    inspect = progress_watch = False
+    if event == "PostToolUse":
+        # Cheap predicates first, before anything under ops/ is loaded: an
+        # event no check can fire on costs interpreter start-up and no more.
+        inspect = tool_event_due(payload)
+        progress_watch = progress_due(payload)
+        fact_on = os.environ.get("CARR_JEV_FACT_BOUNDARY", "off").strip().lower() == "on"
+        if not (inspect or progress_watch or fact_on):
+            return 0
     # The registry/client owns each site's policy, including mixed policies.
     enabled = {site for site in SUPERVISOR_SITES if POLICY.call_site_enabled(site)}
-    event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
     if event == "Stop" and payload.get("stop_hook_active"):
         return 0
     run = Run()
     try:
         if event == "PostToolUse":
-            progress(payload, run)
-            if "jev_session_watch" in enabled and judgment_point(event, payload):
+            if progress_watch:
+                progress(payload, run)
+            if (inspect and "jev_session_watch" in enabled
+                    and judgment_point(event, payload)):
                 post_tool_use(payload, run)
             # The optional fact library owns its record-write trigger, including
             # successful acknowledgements through Bash and MCP.
