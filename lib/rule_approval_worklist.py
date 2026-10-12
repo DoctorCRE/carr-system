@@ -328,9 +328,11 @@ def render(rows: list[dict], tot: dict) -> str:
         lines.append("held by control: " + ", ".join(f"{k} {v}" for k, v in tot["held_by_control"].items()))
     unbound = sum(1 for r in rows if r["readiness"] == "ready" and not r["control_bound"])
     if unbound:
-        lines.append(f"note: {unbound} ready rule(s) are ACTIVE with no rule_control_binding; "
+        lines.append(f"note: {unbound} ready rule(s) are ACTIVE with no rule_control_binding. "
                      "ops.bind_rule_controls verifies, never creates, a binding on an active rule, "
-                     "so approve-rule may refuse them — --apply records the refusal verbatim.")
+                     "so approve-rule refuses them today ('active rule <id> lacks its immutable "
+                     "exact control binding', measured 2026-10-12; WR-000262 asks for the "
+                     "adoption path). --apply records each refusal verbatim.")
     lines.append("(dry run — pass --apply to run approve-rule for the ready rows)")
     return "\n".join(lines)
 
@@ -347,7 +349,7 @@ def main(argv: list[str] | None = None, *, db: Mapping | None = None,
     ap.add_argument("--limit", type=int, default=None, help="apply to at most N ready rows")
     ap.add_argument("--max-refusals", type=int, default=3,
                     help="stop after N refusals (default 3); the rest are counted as not attempted")
-    ap.add_argument("--runtime-root", default=os.environ.get("CARR_RUNTIME_ROOT", str(SOURCE)),
+    ap.add_argument("--runtime-root", default=str(SOURCE),
                     help="checkout whose tools/db-tap.py and run.sh carry the runtime "
                          "(default: this checkout)")
     ap.add_argument("--log", default=None, help="result log (default <runtime-root>/out/rule-approvals.jsonl)")
