@@ -1203,7 +1203,7 @@ async function resolveLoop(client, args, opts = {}) {
   if (args.loop_id) {
     const r = await client.query(
       `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-              li.close_outcome, lb.block_key as section
+              li.close_outcome, li.blocker_class, lb.block_key as section
          from loop_item li join loop_block lb on lb.id = li.block_id
         where li.id = $1`, [args.loop_id]);
     if (!r.rows.length) throw new ToolError({ error: "not_found", loop_id: args.loop_id });
@@ -1214,7 +1214,7 @@ async function resolveLoop(client, args, opts = {}) {
       hint: "pass loop_id, or number (plus kind when the number is shared across kinds)" });
   const r = await client.query(
     `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-            li.close_outcome, lb.block_key as section, lb.rel_path
+            li.close_outcome, li.blocker_class, lb.block_key as section, lb.rel_path
        from loop_item li join loop_block lb on lb.id = li.block_id
       where li.number = $1 and (${anyStatus ? "true" : "li.status = 'open'"})
         and ($2::text is null or li.kind = $2)`, [args.number, args.kind || null]);
@@ -2130,6 +2130,77 @@ const LOOP_KINDS = Object.freeze(["open_loop", "team_loop", "action_required", "
 // is a whole detail that reads "revisit later", not a passing mention of a word.
 const VAGUE_BLOCKER_RE =
   /\b(?:later|someday|some day|eventually|when (?:there(?:'s| is) )?(?:more )?time|when time (?:permits|allows)|time permitting|revisit|circle back|down the (?:road|line)|at some point|in (?:the )?future|future session|next session|tbd|to be determined|n\/?a|low priority|nice to have|opportunistically|as time allows|no rush|whenever)\b/i;
+
+// ── THE RESIDUE GATE (Joe 2026-10-12, decision cbe91287) ───────────────────
+// On 2026-10-12 the governance queue counted 150 loops labelled as waiting on
+// Joe, median age 53 days. 75 were filed human_only and 53 ruling, yet most
+// were internal engineering steps any session may take: nothing at filing time
+// asked what exactly only Joe can do, so the needs-Joe view had to exclude
+// them after the fact. Joe's ruling: only an act a provider or the OS reserves
+// to the account holder may wait on him. A write that claims a class which
+// waits on a person therefore names that act from this closed list, plus the
+// provider or host that reserves it.
+//
+// Internal work is system_decides: the session does it now, or files it under
+// a class that does not wait on Joe (other_lane, external_event, counterparty),
+// which the needs-Joe view already excludes. Rows filed before this gate are
+// not rewritten; the requirement binds when a write claims the class.
+const RESIDUE_KINDS = Object.freeze([
+  "provider_login",  // a login with two-factor that the provider reserves to the account holder
+  "os_password",     // an operating-system password or biometric prompt
+  "physical_act",    // a signature, a site visit, a device in hand
+  "money_movement",  // money is spent, paid or committed
+  "external_send",   // something leaves the house to a client, counterparty or the public
+  "joe_only_fact",   // a fact only Joe holds: what was said on a call, what he wants
+]);
+
+// The blocker classes that wait on a person. `credential` is not a stored
+// class: a credential block is filed as capability with residue_kind
+// provider_login or os_password.
+const RESIDUE_CLASSES = Object.freeze(["human_only", "ruling", "capability"]);
+
+const RESIDUE_FALLBACK_HINT =
+  "if no provider or OS reserves this act to the account holder, it is internal work and " +
+  "the system decides it (system_decides): do it now, or file it under a class that does " +
+  "not wait on Joe (other_lane, external_event, counterparty).";
+
+// Returns the residue a write must store for `blocker`, or null for a class
+// that carries none. Refuses a claimed class without a valid residue, and a
+// residue on a class that cannot carry one (stored-and-inert is a lie).
+function blockerResidue(blocker, args) {
+  const given = args.residue_kind !== undefined || args.residue_host !== undefined;
+  if (!RESIDUE_CLASSES.includes(blocker)) {
+    if (given)
+      throw new ToolError({ error: "residue_not_carried_by_class", blocker: blocker ?? null,
+        residue_classes: RESIDUE_CLASSES,
+        hint: `a residue names what still waits on Joe, so only ${RESIDUE_CLASSES.join(", ")} ` +
+              "carry one. Drop residue_kind and residue_host, or name the class it belongs to." });
+    return null;
+  }
+  if (args.residue_kind === undefined || args.residue_kind === null)
+    throw new ToolError({ error: "residue_required", blocker, residue_kinds: RESIDUE_KINDS,
+      hint: `blocker '${blocker}' says this waits on a person. Name the act a provider or the ` +
+            "OS reserves to the account holder in residue_kind, and who reserves it in " +
+            `residue_host. Otherwise ${RESIDUE_FALLBACK_HINT}` });
+  if (!RESIDUE_KINDS.includes(args.residue_kind))
+    throw new ToolError({ error: "unknown_residue_kind", got: args.residue_kind,
+      residue_kinds: RESIDUE_KINDS,
+      hint: `the list is closed. If none of these fits, ${RESIDUE_FALLBACK_HINT}` });
+  const host = typeof args.residue_host === "string" ? args.residue_host.trim() : "";
+  if (host.length < 2)
+    throw new ToolError({ error: "residue_host_required", got: host || null,
+      residue_kind: args.residue_kind,
+      hint: "name the provider or host that reserves the act: 'github.com', 'macOS on Joe's " +
+            "MacBook', 'Chase', 'Joe's call with Sanders'. A residue nobody can locate cannot be done." });
+  return { kind: args.residue_kind, host };
+}
+
+const RESIDUE_SCHEMA = {
+  residue_kind: { type: "string", enum: RESIDUE_KINDS,
+    description: "REQUIRED when blocker is human_only, ruling or capability: the act only the account holder can perform, from a closed list. provider_login = a login with two-factor the provider reserves · os_password = an OS password or biometric prompt · physical_act = a signature, site visit or device in hand · money_movement = money spent, paid or committed · external_send = something sent to a client, counterparty or the public · joe_only_fact = a fact only Joe holds. Internal work has no residue: the system decides it, so do it or file it under other_lane, external_event or counterparty." },
+  residue_host: { type: "string",
+    description: "REQUIRED with residue_kind: the provider or host that reserves the act, e.g. 'github.com', 'macOS on Joe's MacBook', 'Chase'." },
+};
 
 // ── THE OWNERSHIP GATE (Joe 2026-08-10) ────────────────────────────────────
 // Joe asked why the backlog never falls. The measured answer: intake is
@@ -7005,9 +7076,10 @@ export const TOOLS = {
       number: { type: "string", description: "override the auto-assigned ref. Only pass this to reproduce a number that already exists somewhere; the files already contain collisions." },
       since: { type: "string", description: "YYYY-MM-DD; defaults to today" },
       blocker: { type: "string", enum: BLOCKER_CLASSES,
-        description: "REQUIRED on kind open_loop: why THIS session cannot do the work now. Every value is a state of the world outside the session, and the list is closed on purpose — there is no value meaning 'later'. human_only = needs Joe or Dell in person (a call, a signature, a site visit, a login only he holds) · counterparty = waiting on someone outside (name the landlord, broker, client or vendor) · ruling = needs Joe's decision (state the question) · external_event = a dated event must arrive first (name the date) · other_lane = depends on another lane's in-flight deliverable (name it) · capability = a credential, gate or verb this session cannot hold (name it). IF NONE OF THESE FIT, DO NOT FILE THE LOOP — do the work. Not asked for team_loop or action_required (the blocker is the other partner by construction) or for idea (parked by design)." },
+        description: "REQUIRED on kind open_loop: why THIS session cannot do the work now. Every value is a state of the world outside the session, and the list is closed on purpose — there is no value meaning 'later'. human_only = needs Joe or Dell in person (a call, a signature, a site visit, a login only he holds) · counterparty = waiting on someone outside (name the landlord, broker, client or vendor) · ruling = needs Joe's decision (state the question) · external_event = a dated event must arrive first (name the date) · other_lane = depends on another lane's in-flight deliverable (name it) · capability = a credential this session cannot hold (name it). human_only, ruling and capability also REQUIRE residue_kind and residue_host: only an act a provider or the OS reserves to the account holder may wait on Joe. IF NONE OF THESE FIT, DO NOT FILE THE LOOP — do the work. Not asked for team_loop or action_required (the blocker is the other partner by construction) or for idea (parked by design)." },
       blocker_detail: { type: "string",
-        description: "REQUIRED whenever `blocker` is set: the SPECIFIC thing, named. 'the landlord' is not a counterparty; 'Sanders, the listing broker on C-112' is. 'a ruling' is not a ruling; 'whether the 3% escalation cap applies to renewal years' is." } },
+        description: "REQUIRED whenever `blocker` is set: the SPECIFIC thing, named. 'the landlord' is not a counterparty; 'Sanders, the listing broker on C-112' is. 'a ruling' is not a ruling; 'whether the 3% escalation cap applies to renewal years' is." },
+      ...RESIDUE_SCHEMA },
       required: ["idempotency_key", "kind", "owner"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-loop", args, async () => {
       // kind decides EVERYTHING downstream — the deferral gate, the tier, and
@@ -7071,7 +7143,8 @@ export const TOOLS = {
       // (a write verb accepted a field and silently discarded it), found by the
       // sweep loop #476 asked for. Refuse instead: the caller either meant a
       // different kind or did not need the field.
-      if (!blockerGated && (args.blocker !== undefined || args.blocker_detail !== undefined))
+      if (!blockerGated && (args.blocker !== undefined || args.blocker_detail !== undefined
+          || args.residue_kind !== undefined || args.residue_host !== undefined))
         throw new ToolError({ error: "blocker_not_carried_by_kind",
           kind: args.kind, blocker: args.blocker || null,
           hint: "only an open_loop carries a blocker — on every other kind the field would be " +
@@ -7085,7 +7158,10 @@ export const TOOLS = {
         if (!BLOCKER_CLASSES.includes(args.blocker))
           throw new ToolError({ error: "unknown_blocker_class",
             got: args.blocker, classes: BLOCKER_CLASSES,
-            hint: "the list is closed — every entry is a state of the world outside this session" });
+            hint: args.blocker === "credential"
+              ? "a credential block is filed as blocker:'capability' with residue_kind " +
+                "'provider_login' or 'os_password' and the residue_host that holds it"
+              : "the list is closed — every entry is a state of the world outside this session" });
         const detail = (args.blocker_detail || "").trim();
         if (detail.length < 12)
           throw new ToolError({ error: "blocker_detail_required", got: detail || null,
@@ -7095,6 +7171,8 @@ export const TOOLS = {
           throw new ToolError({ error: "blocker_detail_vague", matched: vague[0],
             hint: `"${vague[0]}" names a feeling about time, not a blocker. Say who or what has to happen first — and if nothing has to, do the work now instead of filing this.` });
       }
+      // ── THE RESIDUE GATE ── see RESIDUE_KINDS above.
+      const residue = blockerGated ? blockerResidue(args.blocker, args) : null;
       // capability_no_decider and internal_decision_parked (bypass audit
       // C33/C34, ported from hooks/blocker-decider-gate.py and
       // hooks/escalation-gate.py) are enforced in this module's
@@ -7165,15 +7243,17 @@ export const TOOLS = {
         `insert into loop_item (kind, number, block_id, render_seq, title, body, owner,
            since_text, unblocks, source_note, marker, marker_literal, due_on,
            drift_critical, status, tier, personal_to, created_by, updated_by, domain,
-           blocker_class, blocker_detail)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open',$15,$16,$17,$17,$18,$19,$20)
+           blocker_class, blocker_detail, extra_cells)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open',$15,$16,$17,$17,$18,$19,$20,
+                 $21::jsonb)
          returning id`,
         [args.kind, num, block.id, seq, args.title || null, args.body || null, args.owner,
          args.since || new Date().toISOString().slice(0, 10), args.unblocks || null,
          args.source_note || null, marker, literal, args.due_on || null,
          args.drift_critical === true, tier, personal, actor.id, args.domain || null,
          blockerGated ? args.blocker : null,
-         blockerGated ? args.blocker_detail.trim() : null]);
+         blockerGated ? args.blocker_detail.trim() : null,
+         JSON.stringify(residue ? { blocker_residue: residue } : {})]);
 
       // The blocker goes on the EVENT as well as the row: an open_loop that was
       // filed under a blocker which later turns out to be false is a thing Joe
@@ -7183,11 +7263,13 @@ export const TOOLS = {
         { new: { number: num, kind: args.kind, section: wantKey, marker,
                  due_on: args.due_on || null, owner: args.owner, domain: args.domain || null,
                  blocker_class: blockerGated ? args.blocker : null,
-                 blocker_detail: blockerGated ? args.blocker_detail.trim() : null },
+                 blocker_detail: blockerGated ? args.blocker_detail.trim() : null,
+                 blocker_residue: residue },
           idempotency_key: args.idempotency_key });
       return { ok: true, loop_id: r.rows[0].id, number: num, kind: args.kind,
                section: wantKey, renders_into: block.rel_path,
-               blocker: blockerGated ? args.blocker : null };
+               blocker: blockerGated ? args.blocker : null,
+               ...(residue ? { residue } : {}) };
     }),
   },
 
@@ -7213,9 +7295,10 @@ export const TOOLS = {
         "the marker and is why a careful caller still walked into it — defect e34d2b88, 46 " +
         "writes lost on 2026-08-20." },
       drift_critical: { type: "boolean" },
-      blocker: { type: "string", enum: ["human_only","counterparty","ruling","external_event","other_lane","capability"],
-        description: "REVISE what the loop is waiting on. add-loop refuses a loop without a blocker, but until 2026-08-09 nothing could change one, so a blocker named on day one was permanent even after the real obstacle turned out to be different — found on loop #295, whose blocker read human_only until building it revealed the actual block was a missing corpus (other_lane). Changing this requires blocker_detail too: a reclassification with the old specifics attached is worse than the original, because it reads as current and is not." },
+      blocker: { type: "string", enum: BLOCKER_CLASSES,
+        description: "REVISE what the loop is waiting on. add-loop refuses a loop without a blocker, but until 2026-08-09 nothing could change one, so a blocker named on day one was permanent even after the real obstacle turned out to be different — found on loop #295, whose blocker read human_only until building it revealed the actual block was a missing corpus (other_lane). Changing this requires blocker_detail too: a reclassification with the old specifics attached is worse than the original, because it reads as current and is not. Reclassifying to human_only, ruling or capability also requires residue_kind and residue_host; reclassifying to any other class clears the stored residue." },
       blocker_detail: { type: "string", description: "the SPECIFIC thing, restated for the new class: which person, which ruling, which date, which prerequisite. Required whenever blocker changes; may also be passed alone to sharpen the detail without reclassifying." },
+      ...RESIDUE_SCHEMA,
       renumber_reason: { type: "string", description: "REQUIRED whenever number changes: why, and where the old number still appears. Rule 7105955b binds here — a renumbered row is not an abandoned one, and the note recording the change has to say so in its first words, because the old number lives on in other rows' prose and in every generated render." },
       last_surfaced: { type: "string", description: "IDEA ROWS ONLY: stamp the idea bank's 'Last surfaced' column, YYYY-MM-DD. This is what the monthly resurface writes when a parked idea is presented and KEPT — the column its own rotation reads to pick the oldest ideas next month. Blank or '—' means never surfaced, so leaving it unwritten is not neutral: it keeps re-presenting the same rows." },
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
@@ -7237,6 +7320,10 @@ export const TOOLS = {
       for (const f of ["title", "body", "owner", "unblocks", "source_note", "domain"])
         if (args[f] !== undefined) set(f, args[f]);
       if (args.drift_critical !== undefined) set("drift_critical", args.drift_critical === true);
+      // extra_cells is one jsonb column several fields merge into; each edit
+      // wraps this expression and it is assigned once, below.
+      const extraCellsBase = "coalesce(extra_cells,'{}'::jsonb)";
+      let extraCells = extraCellsBase;
 
       // A blocker may be REVISED, because what a loop is waiting on is a finding
       // and findings change. Reclassifying without restating the specifics is
@@ -7249,6 +7336,20 @@ export const TOOLS = {
           throw new ToolError({ error: "blocker_detail_required",
             hint: "changing the blocker class means restating the specific thing it is now waiting on. Pass blocker_detail in the same call." });
         set("blocker_class", args.blocker);
+      }
+      // THE RESIDUE GATE on the edit path, so a row cannot be filed clean and
+      // reclassified onto Joe without naming what only he can do. A residue
+      // passed alone (no reclassification) is checked against the row's
+      // current class: that is how a legacy human_only row gains one.
+      if (args.blocker !== undefined || args.residue_kind !== undefined
+          || args.residue_host !== undefined) {
+        const residue = blockerResidue(args.blocker !== undefined ? args.blocker : cur.blocker_class, args);
+        if (residue) {
+          vals.push(JSON.stringify(residue));
+          extraCells = `(${extraCells} || jsonb_build_object('blocker_residue', $${vals.length}::jsonb))`;
+        } else {
+          extraCells = `(${extraCells} - 'blocker_residue')`;
+        }
       }
       if (args.blocker_detail !== undefined) set("blocker_detail", args.blocker_detail);
 
@@ -7312,9 +7413,9 @@ export const TOOLS = {
             hint: "YYYY-MM-DD. The rotation sorts on this text, so a free-form date " +
                   "silently sorts wrong and the same ideas keep coming back." });
         vals.push(args.last_surfaced);
-        sets.push("extra_cells=coalesce(extra_cells,'{}'::jsonb) || " +
-                  `jsonb_build_object('last_surfaced', $${vals.length}::text)`);
+        extraCells = `(${extraCells} || jsonb_build_object('last_surfaced', $${vals.length}::text))`;
       }
+      if (extraCells !== extraCellsBase) sets.push(`extra_cells=${extraCells}`);
 
       if (args.marker !== undefined || args.due_on !== undefined) {
         const marker = args.marker !== undefined ? args.marker : cur.marker;

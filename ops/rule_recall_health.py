@@ -68,7 +68,7 @@ def check_recall(rows, rules, state_path, run, *, now=None):
                 loop = state.get(warning)
                 if wanted and not loop:
                     request = ("add-loop", {"kind": "open_loop", "domain": "system", "owner": "claude",
-                               "marker": "none", "body": body, "blocker": "capability",
+                               "marker": "none", "body": body, "blocker": "other_lane",
                                "blocker_detail": BLOCKER_DETAIL})
                 elif wanted and warning == "silence" and loop.get("zero") != zero:
                     request = ("update-loop", {"loop_id": loop["loop_id"],

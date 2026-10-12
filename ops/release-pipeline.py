@@ -858,6 +858,8 @@ def blocker_loop(capability: str, detail: str, *, remedy: str = "", recovery: st
     repair_lane = health_repair or capability == CONTROLLER_STALE
     args = {"kind": "open_loop", "owner": "Claude" if repair_lane else "Joe", "domain": "system", "marker": "none",
             "blocker": "other_lane" if repair_lane else "capability", "blocker_detail": blocker_detail,
+            **({} if repair_lane else {"residue_kind": "provider_login",
+                                       "residue_host": capability.split(":", 1)[0]}),
             "body": (f"The scripted release pipeline (ops/release-pipeline.py) cannot run "
                      f"unattended: {detail}. {continuation} {remedy}".rstrip()),
             "unblocks": "unattended Worker/app release on every merge to main"}
