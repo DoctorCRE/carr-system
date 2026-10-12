@@ -177,16 +177,6 @@
           },
           {
             "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/staging-attribution-gate.py",
-            "timeout": 20
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/staging-observation-tracker.py",
-            "timeout": 20
-          },
-          {
-            "type": "command",
             "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/settings-change-gate.py"
           },
           {
@@ -290,11 +280,6 @@
       {
         "matcher": "Bash",
         "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/staging-observation-tracker.py",
-            "timeout": 20
-          },
           {
             "type": "command",
             "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/settings-change-gate.py"
