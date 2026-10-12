@@ -91,12 +91,12 @@ def liveness(status: dict | None, config: dict) -> dict:
 
     Each host row is {'state': 'online'|'offline'|'unknown', 'last_seen': str|None,
     'self': bool}. Only a Running backend can say anything but unknown."""
-    hosts = {name: {"state": "unknown", "last_seen": None, "self": False}
-             for name in config["hosts"]}
+    hosts: dict[str, dict] = {name: {"state": "unknown", "last_seen": None, "self": False}
+                              for name in config["hosts"]}
     backend = status.get("BackendState") if isinstance(status, dict) else None
-    result = {"backend": backend if isinstance(backend, str) else "unreadable",
-              "self": None, "hosts": hosts}
-    if backend != "Running":
+    result: dict = {"backend": backend if isinstance(backend, str) else "unreadable",
+                    "self": None, "hosts": hosts}
+    if not isinstance(status, dict) or backend != "Running":
         return result
     by_dns = {_dns(spec.get("dns_name")): name for name, spec in config["hosts"].items()
               if isinstance(spec, dict)}
@@ -184,6 +184,6 @@ if __name__ == "__main__":
     import sys
     config = load_config()
     printed = rows(observe(config=config), config)
-    for line, _, _ in printed:
-        print(line)
-    sys.exit(int(any(failed for _, failed, _ in printed)))
+    for row in printed:
+        print(row[0])
+    sys.exit(int(any(row[1] for row in printed)))

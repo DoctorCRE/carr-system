@@ -1338,7 +1338,7 @@ def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=Fal
     return 1
 
 
-_HOST_LIVENESS = []
+_HOST_LIVENESS: list = []
 
 
 def _host_liveness():
