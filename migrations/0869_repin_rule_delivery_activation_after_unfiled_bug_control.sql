@@ -4,7 +4,7 @@
 -- digest. The eight pack-cutover contracts stay unchanged, so advance only
 -- their guarded identity from the post-0859 map to the post-registration map.
 -- rollback: repin the same eight targets to v_old after verifying the exact v_new preimage
-do $rule_delivery_0868$
+do $rule_delivery_0869$
 declare
   v_old constant text := 'f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e';
   v_new constant text := '21241f16f01d82f32e8d46610288684de34c00eee7d51304da5f54c0b7df403a';
@@ -56,12 +56,12 @@ begin
   )
   select count(*) into v_count from differences;
   if v_count<>0 then
-    raise exception '0868 REFUSED: exact activation-target contract preimage is absent';
+    raise exception '0869 REFUSED: exact activation-target contract preimage is absent';
   end if;
   update ops.rule_delivery_activation_target set map_digest=v_new
     where short_id=any(v_ids) and map_digest=v_old;
   get diagnostics v_count=row_count;
   if v_count<>cardinality(v_ids) then
-    raise exception '0868 REFUSED: changed % targets, expected %',v_count,cardinality(v_ids);
+    raise exception '0869 REFUSED: changed % targets, expected %',v_count,cardinality(v_ids);
   end if;
-end $rule_delivery_0868$;
+end $rule_delivery_0869$;

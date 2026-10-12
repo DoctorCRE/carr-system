@@ -49,7 +49,7 @@ TRACKER_RETIREMENT_REPIN_MIGRATION_SOURCE = (
     ROOT / "migrations" / TRACKER_RETIREMENT_REPIN_MIGRATION
 ).read_text(encoding="utf-8")
 UNFILED_BUG_REPIN_MIGRATION = (
-    "0868_repin_rule_delivery_activation_after_unfiled_bug_control.sql"
+    "0869_repin_rule_delivery_activation_after_unfiled_bug_control.sql"
 )
 UNFILED_BUG_REPIN_MIGRATION_SOURCE = (
     ROOT / "migrations" / UNFILED_BUG_REPIN_MIGRATION
