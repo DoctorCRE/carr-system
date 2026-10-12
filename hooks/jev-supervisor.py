@@ -538,9 +538,15 @@ def decide(payload):
         return 0
     if MODE != "advise":
         return 0
-    # Stop lines reach Joe's screen, so they keep only results that name something to do.
-    keep = _notable if event == "PostToolUse" else _joe_facing
-    lines = _quiet_unavailable([r for r in run.results if keep(r)], payload.get("session_id"))
+    # Only results that name something to do are printed, on BOTH events. The
+    # Stop line reaches Joe's screen; the PostToolUse line reaches the model's
+    # context, where a bare needs_review is the same nothing-to-do at a higher
+    # price: the Orchestrator.macbook session (2026-10-10 to 10-12) carried 199
+    # of them in one transcript — "[jev stuck_and_drift] needs_review: No
+    # artifact delta observed" after nearly every Bash call — against 23 lines
+    # that named a code bug, an environment fault or a failed CI result. The
+    # result still lands in the receipt either way.
+    lines = _quiet_unavailable([r for r in run.results if _joe_facing(r)], payload.get("session_id"))
     if not lines:
         return 0
     text = "\n".join(lines[:4])

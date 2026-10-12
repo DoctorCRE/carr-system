@@ -1428,6 +1428,69 @@ class PublishAndAnswers(BoardCase):
         self.assertIn("gh unavailable", err.getvalue())
 
 
+class SharedBoardRoot(unittest.TestCase):
+    """board_dir() resolves to the MAIN working tree from inside a linked
+    worktree, so every worktree of one checkout reads one board.
+
+    2026-10-12: the merge queue, run from an orchestrator worktree, logged
+    `board does not exist: carr-v5; run init first` four times per event because
+    the board lived under the worktree's own empty out/."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "ops"))
+        from git_env import fixture_env  # noqa: E402
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.main = Path(self.tempdir.name).resolve() / "main"
+        self.main.mkdir()
+        self.env = dict(fixture_env(), HOME=self.tempdir.name)
+        self.env.pop("PROGRESS_BOARD_ROOT", None)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "fixture@example.com")
+        self.git("config", "user.name", "Fixture")
+        (self.main / "README.md").write_text("fixture\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "seed")
+        self.worktree = Path(self.tempdir.name).resolve() / "linked"
+        self.git("worktree", "add", "-q", str(self.worktree), "-b", "linked")
+        self.cwd = os.getcwd()
+        self.saved_root = os.environ.pop("PROGRESS_BOARD_ROOT", None)
+        self.addCleanup(self.restore)
+
+    def git(self, *args):
+        subprocess.run(["git", "-C", str(self.main), *args], check=True, env=self.env,
+                       capture_output=True, text=True)
+
+    def restore(self):
+        os.chdir(self.cwd)
+        if self.saved_root is not None:
+            os.environ["PROGRESS_BOARD_ROOT"] = self.saved_root
+        BOARD.shared_checkout_root.cache_clear()
+        self.tempdir.cleanup()
+
+    def resolve_from(self, directory):
+        os.chdir(directory)
+        BOARD.shared_checkout_root.cache_clear()
+        with patch.dict(os.environ, self.env, clear=False):
+            return BOARD.board_dir()
+
+    def test_linked_worktree_reads_the_main_trees_board(self):
+        self.assertEqual(self.resolve_from(self.worktree), self.main / "out" / "boards")
+
+    def test_main_tree_reads_its_own_board(self):
+        self.assertEqual(self.resolve_from(self.main), self.main / "out" / "boards")
+
+    def test_outside_git_falls_back_to_the_current_directory(self):
+        plain = Path(self.tempdir.name).resolve() / "plain"
+        plain.mkdir()
+        self.assertEqual(self.resolve_from(plain), plain / "out" / "boards")
+
+    def test_explicit_root_still_wins(self):
+        os.chdir(self.worktree)
+        BOARD.shared_checkout_root.cache_clear()
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": self.tempdir.name}):
+            self.assertEqual(BOARD.board_dir(), Path(self.tempdir.name).resolve() / "boards")
+
+
 class NeedsJoePublication(unittest.TestCase):
     def test_local_publication_failures_do_not_interrupt_other_boards(self):
         import needs_joe_local

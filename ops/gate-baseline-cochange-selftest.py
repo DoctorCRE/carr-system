@@ -268,6 +268,12 @@ with tempfile.TemporaryDirectory() as tmp:
           blessed_hash(repo, "new-gate.py"))
     check("auto-blessing a new gate carried the existing entries forward",
           blessed_hash(repo, "demo-gate.py") == sha256_of("print('v5')\n"))
+    # The auto path and hooks/gate-integrity.py --bless must write the SAME
+    # attribution: a hashed actor. The raw address failed the jev selftest's
+    # attribution test at pre-push on every auto-blessed commit (2026-10-12).
+    blessed_by = committed_baseline(repo)["blessed_by"]
+    check("auto-bless attributes a hashed actor, never a raw address",
+          blessed_by.startswith("git-actor-sha256:") and "@" not in blessed_by, blessed_by)
 
     # ── 5. contracts are gates by another name ──────────────────────────────
     contract = repo / "ops" / "config" / "rule-enforcement-map.json"

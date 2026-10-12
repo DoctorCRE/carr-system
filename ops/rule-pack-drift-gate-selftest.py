@@ -1055,6 +1055,33 @@ xcom = run([user("pull the metrics from x.com for last week"),
 check("x.com fires the joe-comms pack despite the word boundary",
       "joe-comms" in xcom["needed"], str(xcom["needed"]))
 
+# ── the shell-invocation test is memoised, so a long transcript stays linear ──
+# 2026-10-12: delivery_state() asks "is this Bash command a standing-context
+# call?" once per (standing result x prior record). On the Orchestrator.macbook
+# transcript that was 209,805 shlex.split calls and 58 s against a 20 s Stop
+# timeout, so the gate failed open on every turn. Same string, one split.
+import shlex as _shlex
+_split_calls: list[str] = []
+_real_split = _shlex.split
+
+
+def _counting_split(s, *a, **k):
+    _split_calls.append(s)
+    return _real_split(s, *a, **k)
+
+
+_shlex.split = _counting_split
+try:
+    gate._SHELL_STANDING_CACHE.clear()
+    repeated = "cd /tmp && ./run.sh call standing-context '{\"detail\":\"boot\",\"page\":1}'"
+    answers = {gate._shell_standing_invocation(repeated) for _ in range(500)}
+    check("a standing-context Bash call is recognised", answers == {True}, str(answers))
+    check("500 asks of one command split it once", len(_split_calls) == 1, f"{len(_split_calls)} splits")
+    check("an ordinary command is not a standing-context call",
+          gate._shell_standing_invocation("ls -la") is False, "ls read as standing-context")
+finally:
+    _shlex.split = _real_split
+
 if FAILURES:
     print("rule-pack-drift-gate-selftest: FAIL", file=sys.stderr)
     for line in FAILURES:

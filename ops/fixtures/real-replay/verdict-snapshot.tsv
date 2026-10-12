@@ -724,25 +724,8 @@ guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e15de7ccac12	deny	network sen
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e3c7b98b9e56	deny	private key material — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	scenarios:5c0000000005	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	tool_calls:f53afacc66e2	deny	WebFetch to a non-standard port (#) on a host outside KNOWN_HOSTS — blocked by the CARR guard.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	(all)	counts	allow=423 announce=18
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:005d482ca566	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:0a64781c385b	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:0ebaefe865cb	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:2846baa603e1	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:37a4a6b3751c	announce	[jev duplicate_function] needs_review: Review existing definitions.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:50d0da61a891	announce	[jev duplicate_function] needs_review: Review existing definitions.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:5f1136cb8536	announce	[jev duplicate_function] needs_review: Review existing definitions.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:6d024df913ba	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:77ec78177980	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:7f53c2334c84	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:936ead460a28	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:9c08586d67cf	announce	[jev duplicate_function] needs_review: Review existing definitions.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:d1f3ea015436	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:e4504e612dc7	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:e87f7bda8743	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:f5c0deb10c61	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:f66adb22dbc7	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	edits:fd26ca56df4b	announce	[jev test_quality] needs_review: Test behavioral coverage needs review.
+jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	(all)	counts	allow=441 announce=1
+jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	scenarios:9e7000000001	announce	[jev failure_triage] code_bug: Read the traceback and fix the code at the location it points to.
 jev-supervisor.py	Stop	(all)	counts	allow=87 announce=1
 jev-supervisor.py	Stop	scenarios:e1a5c0de0001	announce	[jev done_claim] unsupported: Completion criteria are not met.
 job-watchdog-digest.py	UserPromptSubmit	(all)	counts	allow=6

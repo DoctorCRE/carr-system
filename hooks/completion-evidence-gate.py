@@ -109,6 +109,7 @@ from datetime import datetime, timezone
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from turn_origin import is_harness_injected  # noqa: E402
 from stop_latch import (  # noqa: E402
     claim_identity, latched, record_fire, record_satisfied)
 
@@ -730,6 +731,14 @@ def human_text(rec):
     if (msg.get("role") or rec.get("type")) not in {"user", "human"}:
         return ""
     content = msg.get("content")
+    # A record the harness injected in the user role is not an order: stop-hook
+    # feedback (isMeta), peer relays, task notifications and, the one that bit
+    # (2026-10-12), the compaction summary, whose bullet list of standing
+    # rulings read as fresh production clauses. One detector, hooks/turn_origin.py,
+    # shared with ledger-sweep and weekend-quiet-gate; the markup strip below
+    # stays as depth for exports that lost their flags.
+    if is_harness_injected(rec, content if isinstance(content, str) else ""):
+        return ""
     if isinstance(content, list):
         parts = [block["text"] for block in content
                  if isinstance(block, dict)

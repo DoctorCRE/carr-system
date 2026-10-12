@@ -156,7 +156,37 @@ def board_dir() -> Path:
     configured = os.environ.get("PROGRESS_BOARD_ROOT")
     if configured:
         return Path(configured).expanduser().resolve() / "boards"
-    return Path.cwd() / "out" / "boards"
+    return shared_checkout_root() / "out" / "boards"
+
+
+@functools.lru_cache(maxsize=1)
+def shared_checkout_root() -> Path:
+    """The checkout whose out/ holds the boards: the main working tree when
+    the current directory is a linked git worktree, else the current directory.
+
+    A board is per-project state, not per-worktree state. Resolving it from
+    the current directory meant every worktree had its own empty out/boards,
+    so the merge queue run from the 2026-10-10 orchestrator worktree logged
+    `board does not exist: carr-v5; run init first`, four attempts per event,
+    on every event, until its attempts were exhausted. `git rev-parse
+    --git-common-dir` names the shared .git of a worktree family; its parent
+    is the main working tree. Outside git, or when git is unavailable, the
+    current directory stands, as before."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--git-common-dir"], capture_output=True,
+                             text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return Path.cwd()
+    common = out.stdout.strip()
+    if out.returncode != 0 or not common:
+        return Path.cwd()
+    common_dir = Path(common)
+    if not common_dir.is_absolute():
+        common_dir = Path.cwd() / common_dir
+    common_dir = common_dir.resolve()
+    if common_dir.name != ".git":
+        return Path.cwd()  # a bare or unusual layout; do not guess a root
+    return common_dir.parent
 
 
 def safe_project(project: str) -> str:

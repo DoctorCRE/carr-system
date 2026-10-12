@@ -663,9 +663,17 @@ class RemainingReviewTests(unittest.TestCase):
                     code, advisory = run_main(self.hook, self.event(command, {"stdout": output}))
                     self.assertEqual(code, 0)
                     self.assertEqual(self.client.calls, [])
-                    self.assertIn('code_bug' if 'AssertionError' in output else 'needs_review', advisory)
+                    if 'AssertionError' in output:
+                        self.assertIn('code_bug', advisory)
+                    else:
+                        # A needs_review verdict is not Joe-facing at PostToolUse
+                        # (it only asks the model to look again); the hook stays
+                        # silent on it and speaks only through actionable lines.
+                        self.assertNotIn('needs_review', advisory)
                     if command.startswith("pytest"):
                         self.assertIn("failed", advisory)
+                    else:
+                        self.assertNotIn("[jev ci_result]", advisory)
 
     def test_ordinary_evidence_text_does_not_spend_on_failure(self):
         code, advisory = run_main(self.hook, self.event("printf text", {"stdout": "Evidence: NEVER skip CI"}))
