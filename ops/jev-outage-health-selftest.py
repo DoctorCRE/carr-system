@@ -247,6 +247,28 @@ class OutageTests(unittest.TestCase):
                 self.assertEqual(health.reconcile(recovered, state,
                     lambda name, payload: {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open"}), "cleared")
 
+    def test_every_outage_payload_satisfies_the_add_loop_residue_gate(self):
+        # add-loop refuses human_only/ruling/capability without a residue
+        # (mcp-server/src/tools.js RESIDUE_CLASSES, RESIDUE_KINDS). Read the
+        # contract from the verb's own source, so a drift fails here.
+        import re
+        source = (Path(__file__).resolve().parents[1] / "mcp-server/src/tools.js").read_text()
+        def frozen(name):
+            body = re.search(name + r" = Object\.freeze\(\[(.*?)\]\)", source, re.S).group(1)
+            return set(re.findall(r'"([a-z_]+)"', body))
+        classes, kinds, owners = frozen("RESIDUE_CLASSES"), frozen("RESIDUE_KINDS"), frozen("LOOP_OWNERS")
+        self.assertEqual(classes, {"human_only", "ruling", "capability"})
+        for reason in ("billing_exhausted", "auth_failed", "rate_limited", "timeout", "log_unreadable"):
+            with self.subTest(reason=reason):
+                fields = health.outage_blocker(reason)
+                self.assertIn(fields["owner"].lower(), owners)
+                self.assertGreaterEqual(len(fields["blocker_detail"].strip()), 12)
+                if fields["blocker"] in classes:
+                    self.assertIn(fields["residue_kind"], kinds)
+                    self.assertGreaterEqual(len(fields["residue_host"].strip()), 2)
+                else:
+                    self.assertNotIn("residue_kind", fields)
+
     def test_one_loop_then_auto_close_after_success(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"
