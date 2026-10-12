@@ -376,6 +376,51 @@ function validateOutcomeProposal(args, ToolError) {
     throw new ToolError({ error: "inconsistent_outcome_feedback" });
 }
 
+const BIND_EVIDENCE_FIELDS = new Set(["idempotency_key", "human_ref", "criterion_id", "receipt_ref"]);
+
+function validateCriterionEvidence(args, ToolError) {
+  if (Object.keys(args).some(k => !BIND_EVIDENCE_FIELDS.has(k)) || !UUID.test(args.idempotency_key || "") ||
+      !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") || !CRITERION_ID.test(args.criterion_id || "") ||
+      !text(args.receipt_ref) || text(args.receipt_ref).length > 300)
+    throw new ToolError({ error: "invalid_criterion_evidence",
+      hint: "bind one acceptance criterion (its id, e.g. SHIPPED) of a ready sourced Work Request (WR-000201) " +
+            "to one server receipt: ops.run:<uuid>, ops.deployment:<uuid>, defect-resolution:<uuid> or " +
+            "incident:<ref>. Nothing was written." });
+}
+
+// COMPLETION ON BOUND EVIDENCE (0858, decision cbe91287). The database decides,
+// in ops.complete_sourced_work_request_on_bound_evidence: it writes the
+// acceptance receipt only when the latest proposal is criteria_met and every
+// acceptance criterion carries a receipt that resolves now. This only reports
+// what it answered; it never infers a completion the database did not write.
+async function completeOnBoundEvidence(c, actor, writeEvent, verb, ref, idempotencyKey) {
+  const row = (await c.query(
+    `select * from ops.complete_sourced_work_request_on_bound_evidence($1::text,$2::uuid)
+       /* work-request-intake:complete-on-bound-evidence */`, [ref, idempotencyKey])).rows[0];
+  const completed = row?.completed === true;
+  if (completed && row.replayed !== true)
+    await writeEvent(c, actor, verb, "ops_work_request", row.work_request_id, {
+      field: "outcome_feedback_completed_on_bound_evidence",
+      new: { receipt_id: row.receipt_id, feedback_ref: row.feedback_ref, feedback_hash: row.feedback_hash,
+        acceptance_basis: row.acceptance_basis, bound_receipt_refs: row.bound_receipt_refs },
+      idempotency_key: idempotencyKey,
+    });
+  return {
+    completed,
+    missing: completed ? [] : (Array.isArray(row?.missing) ? row.missing : []),
+    receipt_id: completed ? row.receipt_id : null,
+    feedback_ref: row?.feedback_ref || null,
+    feedback_hash: row?.feedback_hash || null,
+    acceptance_basis: completed ? row.acceptance_basis : null,
+    bound_receipt_refs: completed ? row.bound_receipt_refs : null,
+    accepted_by_actor_slug: completed ? row.accepted_by_actor_slug : null,
+    accepted_at: completed ? row.accepted_at : null,
+    summary: completed
+      ? `completed on bound evidence: ${(row.bound_receipt_refs || []).map(r => `${r.criterion_id}=${r.receipt_ref}`).join(", ")}`
+      : "not complete: every acceptance criterion needs a bound receipt and the latest proposal must be criteria_met",
+  };
+}
+
 function validateOutcomeAcceptance(args, ToolError) {
   if (Object.keys(args).some(k => !ACCEPT_OUTCOME_FIELDS.has(k))) throw new ToolError({ error: "invalid_accept_outcome_fields" });
   if (!UUID.test(args.idempotency_key || "") || !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") ||
@@ -1223,7 +1268,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     },
     "propose-outcome-feedback": {
       write: true,
-      description: "Propose evidence-bound outcome feedback for one accepted sourced ready plan. It creates no success claim, state transition, execution, assignment, dispatch, approval, or completion.",
+      description: "Propose evidence-bound outcome feedback for one accepted sourced ready plan. It creates no state transition, execution, assignment, dispatch or approval. COMPLETION ON BOUND EVIDENCE (decision cbe91287): when the proposal is criteria_met and every acceptance criterion already carries a bound receipt (bind-work-request-criterion-evidence), the database accepts it in the same call, with no human accept-outcome-feedback, and the acceptance receipt records 'completed_on_bound_evidence' with the receipt ids (status completed_on_bound_evidence). Otherwise it stays pending_human_acceptance and the completion field says what is missing.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" }, base_version: { type: "integer", minimum: 1 },
@@ -1248,9 +1293,14 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           await writeEvent(c, actor, "propose-outcome-feedback", "ops_work_request", row.work_request_id, {
             field: "outcome_feedback_proposed", new: { feedback_ref: row.feedback_ref, feedback_hash: row.feedback_hash, proposed_outcome: row.outcome, blocker_code: row.blocker_code }, idempotency_key: args.idempotency_key,
           });
+          // A criteria_met proposal over criteria that already carry bound
+          // receipts completes here, with no human accept-outcome-feedback call.
+          const completion = await completeOnBoundEvidence(c, actor, writeEvent, "propose-outcome-feedback",
+            row.ref, args.idempotency_key);
           return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), plan_ref: row.plan_ref,
             plan_hash: row.plan_hash, feedback_ref: row.feedback_ref, feedback_hash: row.feedback_hash,
-            status: "pending_human_acceptance", proposed_outcome: row.outcome, criterion_results: row.criterion_results,
+            status: completion.completed ? "completed_on_bound_evidence" : "pending_human_acceptance", completion,
+            proposed_outcome: row.outcome, criterion_results: row.criterion_results,
             evidence_refs: row.evidence_refs, blocker_code: row.blocker_code, result_summary: row.result_summary,
             observed_minutes: Number(row.observed_minutes), interaction_surface: row.interaction_surface,
             heavy_session_used: row.heavy_session_used, manual_context_transfers: Number(row.manual_context_transfers) };
@@ -1282,6 +1332,48 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
             result_summary: row.result_summary, observed_minutes: Number(row.observed_minutes), interaction_surface: row.interaction_surface,
             heavy_session_used: row.heavy_session_used, manual_context_transfers: Number(row.manual_context_transfers),
             accepted_by_actor_slug: row.accepted_by_actor_slug, accepted_at: row.accepted_at };
+        });
+      },
+    },
+    "bind-work-request-criterion-evidence": {
+      write: true,
+      description: "Bind ONE acceptance criterion of a ready sourced Work Request to ONE server receipt the database resolves itself: ops.run:<uuid> that succeeded, ops.deployment:<uuid> that completed, defect-resolution:<uuid> (close-defect's receipt) or incident:<ref> that is resolved. A caller's words never count; an unresolvable receipt is refused. Append-only: one receipt per criterion, the same receipt again is the same act, a different one is refused. THEN IT TRIES TO COMPLETE (decision cbe91287): when every acceptance criterion is bound and the latest outcome proposal (propose-outcome-feedback) is criteria_met, the request reaches its done state in this call with no human accept-outcome-feedback; the acceptance receipt records 'completed_on_bound_evidence' and the receipt ids. The completion field says either that or what is still missing.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
+        human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
+        criterion_id: { type: "string", pattern: "^[A-Z][A-Z0-9-]{1,63}$" },
+        receipt_ref: { type: "string", minLength: 1, maxLength: 300 },
+      }, required: ["idempotency_key", "human_ref", "criterion_id", "receipt_ref"] },
+      handler: async (c, actor, args) => {
+        validateCriterionEvidence(args, ToolError);
+        // Serialize a same-key first attempt before the envelope's replay read.
+        await c.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [String(args.idempotency_key).toLowerCase()]);
+        return withEnvelope(c, actor, "bind-work-request-criterion-evidence", args, async () => {
+          let row;
+          try {
+            row = (await c.query(
+              `select * from ops.bind_work_request_criterion_evidence($1::text,$2::text,$3::text,$4::uuid)
+                 /* work-request-intake:bind-criterion-evidence */`,
+              [args.human_ref, args.criterion_id, text(args.receipt_ref), args.idempotency_key])).rows[0];
+          } catch (err) {
+            throw new ToolError({ error: "criterion_evidence_refused", human_ref: args.human_ref,
+              criterion_id: args.criterion_id, detail: String(err?.message || err) });
+          }
+          if (!row) throw new ToolError({ error: "criterion_evidence_refused", human_ref: args.human_ref });
+          if (row.replayed !== true)
+            await writeEvent(c, actor, "bind-work-request-criterion-evidence", "ops_work_request", row.work_request_id, {
+              field: "criterion_evidence_bound",
+              new: { criterion_id: row.criterion_id, receipt_ref: row.receipt_ref, receipt_kind: row.receipt_kind,
+                binding_id: row.binding_id },
+              idempotency_key: args.idempotency_key,
+            });
+          const completion = await completeOnBoundEvidence(c, actor, writeEvent,
+            "bind-work-request-criterion-evidence", row.ref, args.idempotency_key);
+          return { ok: true, bound: true, human_ref: row.ref, criterion_id: row.criterion_id,
+            receipt_ref: row.receipt_ref, receipt_kind: row.receipt_kind, binding_id: row.binding_id,
+            bound_by_actor_slug: row.bound_by_actor_slug, bound_at: row.created_at,
+            already_bound: row.replayed === true,
+            state: completion.completed ? "done" : "ready", completion };
         });
       },
     },

@@ -230,6 +230,82 @@ function formatWindow(date) {
 }
 
 /**
+ * Is this incident's evidence COMPLETE, judged only from its own rows?
+ * (decision cbe91287, 2026-10-12: the system closes what it can prove.)
+ *
+ * This is the predicate behind close-incident's evidence route, the route a
+ * sponsored agent uses with no root cause of its own. It is deterministic and
+ * pure, like closePreconditions: the caller reads the rows, this decides. Four
+ * checks, each answerable from what the ledger already holds:
+ *
+ *   evidence_attached    recovery evidence is on the incident (a collector or
+ *                        pr-evidence wrote it; nothing the caller typed)
+ *   watch_elapsed        the incident is monitoring and its window has run out.
+ *                        open-incident moves a recurrence back to detected, so
+ *                        monitoring means no failure since the recovery
+ *   cause_recorded       a confirmed hypothesis, or a linked defect, says what
+ *                        was wrong
+ *   remediation_receipt  something fixed it: a linked defect's close receipt, a
+ *                        linked deployment that completed, or a merged pull
+ *                        request that named this incident (pr-evidence)
+ *
+ * A duplicate of an incident that already closed is complete on that
+ * incident's record, the same arm closePreconditions gives a partner.
+ *
+ * `snapshot` = { incident, now, confirmedHypotheses: [text],
+ *   linkedDefects: [{ id, defect_class, claimed, actual, resolution|null }],
+ *   completedDeployments: [id], mergedPullRequests: [fact text],
+ *   canonical: { ref, state, root_cause } | null }.
+ */
+export function incidentEvidenceVerdict(snapshot) {
+  const inc = snapshot?.incident || {};
+  const verdict = (complete, missing, extra = {}) => ({ complete, missing, root_cause: null,
+    followup_disposition: null, evidence_ref: null, ...extra });
+  if (inc.state === "resolved" || inc.state === "reviewed") return verdict(false, ["open_incident"]);
+
+  const canonical = snapshot.canonical;
+  if (inc.duplicate_of && canonical && (canonical.state === "resolved" || canonical.state === "reviewed"))
+    return verdict(true, [], {
+      root_cause: `the same operational event as ${canonical.ref}, which closed with root cause: ` +
+                  `${canonical.root_cause || "(none recorded)"}`,
+      followup_disposition: `remediated with ${canonical.ref}; nothing further owed on the duplicate`,
+      evidence_ref: inc.recovery_evidence_ref || `ops.incident:${canonical.ref}`,
+    });
+
+  const hypotheses = (snapshot.confirmedHypotheses || []).map(t => String(t).trim()).filter(Boolean);
+  const defects = snapshot.linkedDefects || [];
+  const resolved = defects.filter(d => d.resolution);
+  const deployments = snapshot.completedDeployments || [];
+  const pullRequests = (snapshot.mergedPullRequests || []).map(t => String(t).trim()).filter(Boolean);
+  const until = inc.monitoring_until ? new Date(inc.monitoring_until).getTime() : null;
+  const now = snapshot.now ? new Date(snapshot.now).getTime() : NaN;
+
+  const checks = {
+    evidence_attached: Boolean(String(inc.recovery_evidence_ref || "").trim()),
+    watch_elapsed: inc.state === "monitoring" && until !== null && Number.isFinite(now) && until <= now,
+    cause_recorded: hypotheses.length > 0 || defects.length > 0,
+    remediation_receipt: resolved.length > 0 || deployments.length > 0 || pullRequests.length > 0 ||
+      /^pr:[1-9][0-9]*$/.test(String(inc.recovery_evidence_ref || "")),
+  };
+  const missing = Object.keys(checks).filter(k => !checks[k]);
+  if (missing.length) return verdict(false, missing);
+
+  const causes = hypotheses.length ? hypotheses
+    : defects.map(d => `defect ${d.defect_class}: claimed "${d.claimed}", actually "${d.actual}"`);
+  const receipts = [
+    ...resolved.map(d => `defect-resolution:${d.resolution.id} (${d.resolution.evidence_kind} ${d.resolution.evidence_ref})`),
+    ...deployments.map(id => `ops.deployment:${id}`),
+    ...pullRequests,
+    ...(/^pr:/.test(inc.recovery_evidence_ref) ? [`merged ${inc.recovery_evidence_ref}`] : []),
+  ];
+  return verdict(true, [], {
+    root_cause: causes.join("; "),
+    followup_disposition: `remediated: ${receipts.join("; ")}`,
+    evidence_ref: inc.recovery_evidence_ref,
+  });
+}
+
+/**
  * (ok, error, fields, facts) — the partner's reclassification of one incident.
  *
  * Severity, owner and duplicate-of, which is exactly the set both council
@@ -479,6 +555,90 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
       throw new ToolError({ error: "no_such_incident", ref,
         hint: "incident refs look like INC-20260823-01; list them with incident-board" });
     return r.rows[0];
+  };
+
+  /** Every row the evidence predicate reads, from the incident's own ledger. */
+  const evidenceSnapshot = async (c, inc) => {
+    const [hypotheses, defects, deployments, pullRequests, canonical] = await Promise.all([
+      c.query(`select text from ops.incident_hypothesis
+                where incident_id = $1 and settled_as = 'confirmed' order by recorded_at`, [inc.id]),
+      c.query(`select d.id, d.defect_class, d.claimed, d.actual,
+                      r.id as resolution_id, r.evidence_kind, r.evidence_ref
+                 from ops.incident_link l
+                 join public.defect d on d.id::text = l.ref
+                 left join public.defect_resolution r on r.defect_id = d.id
+                where l.incident_id = $1 and l.kind = 'defect' order by d.occurred_on, d.id`, [inc.id]),
+      c.query(`select d.id from ops.incident_link l
+                 join ops.deployment d on d.id::text = l.ref
+                where l.incident_id = $1 and l.kind = 'deployment' and d.state = 'complete'
+                order by d.id`, [inc.id]),
+      // pr-evidence (tools/ops-record.py) writes this fact only for a MERGED
+      // pull request whose title or body names the incident.
+      c.query(`select text from ops.incident_fact
+                where incident_id = $1 and source_ref = 'ops-record.py pr-evidence'
+                order by recorded_at`, [inc.id]),
+      inc.duplicate_of_id
+        ? c.query("select ref, state, root_cause from ops.incident where id = $1", [inc.duplicate_of_id])
+        : { rows: [] },
+    ]);
+    return {
+      incident: inc, now: inc.db_now,
+      confirmedHypotheses: hypotheses.rows.map(r => r.text),
+      linkedDefects: defects.rows.map(r => ({ id: r.id, defect_class: r.defect_class, claimed: r.claimed,
+        actual: r.actual, resolution: r.resolution_id
+          ? { id: r.resolution_id, evidence_kind: r.evidence_kind, evidence_ref: r.evidence_ref } : null })),
+      completedDeployments: deployments.rows.map(r => r.id),
+      mergedPullRequests: pullRequests.rows.map(r => r.text),
+      canonical: canonical.rows[0] || null,
+    };
+  };
+
+  /** close-incident with no root_cause: the incident's own rows decide. */
+  const closeOnEvidence = (c, actor, args) => {
+    // NO STORY FROM THE CALLER. ops.clear_recovered_incident takes the same
+    // posture for the collectors: the sentence written on a closed row is built
+    // from what was verified, never from what the closer said.
+    for (const field of ["evidence", "allow_early"])
+      if (String(args[field] || "").trim())
+        throw new ToolError({ error: "evidence_route_takes_no_story", field,
+          hint: "closing on complete evidence reads only the incident's own rows. To close on your own " +
+                "evidence or reason, use the partner route: pass root_cause with it." });
+    return withEnvelope(c, actor, "close-incident", args, async () => {
+      const inc = await loadIncident(c, args.ref);
+      const verdict = incidentEvidenceVerdict(await evidenceSnapshot(c, inc));
+      if (!verdict.complete)
+        throw new ToolError({ error: "evidence_incomplete", ref: inc.ref, state: inc.state,
+          missing: verdict.missing,
+          hint: "the incident's own rows do not yet show it is safe to close. Supply what is missing " +
+                "(a confirmed hypothesis or linked defect for the cause; close-defect, a complete deployment " +
+                "or a merged PR for the remediation; a green run and an elapsed watch for the recovery), or " +
+                "close it on the partner route with a root_cause. Nothing was written." });
+
+      // CLOSED AND ADJUDICATED IN ONE ACT. A partner close leaves 'review and
+      // record a followup disposition' behind, which is a second human pile;
+      // here the disposition is the remediation receipt itself, so it is written.
+      await c.query(
+        `update ops.incident
+            set state = 'reviewed', resolved_at = now(), reviewed_at = now(),
+                monitoring_until = coalesce(monitoring_until, now()),
+                recovery_evidence_ref = $1, root_cause = $2, followup_disposition = $3,
+                next_action = 'none: closed and reviewed on complete evidence'
+          where ref = $4 and state not in ('resolved','reviewed')`,
+        [verdict.evidence_ref, verdict.root_cause, verdict.followup_disposition, inc.ref]);
+      const fact = `closed on complete evidence — cause: ${verdict.root_cause} — ${verdict.followup_disposition}`;
+      await c.query(
+        "insert into ops.incident_fact (incident_id, text, source_ref) values ($1,$2,$3)",
+        [inc.id, fact, `verb:close-incident:${actor.slug}`]);
+      await writeEvent(c, actor, "close-incident", "incident", inc.id, {
+        field: "state", old: { state: inc.state },
+        new: { state: "reviewed", closed_on: "complete_evidence" },
+        idempotency_key: args.idempotency_key,
+        agent_rationale: verdict.root_cause,
+      });
+      return { ref: inc.ref, state: "reviewed", closed_on: "complete_evidence",
+        root_cause: verdict.root_cause, followup_disposition: verdict.followup_disposition,
+        recovery_evidence_ref: verdict.evidence_ref, recorded_facts: [fact] };
+    });
   };
 
   return {
@@ -979,16 +1139,26 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
         "already produced one, otherwise from you; and an incident still inside its monitoring window " +
         "does not close, because a green run says the symptom stopped rather than that the cause is " +
         "understood — pass allow_early with a reason, which is RECORDED ON THE INCIDENT as a fact. Read " +
-        "get-incident first: the root cause is in the evidence trail.",
+        "get-incident first: the root cause is in the evidence trail. " +
+        "OMIT root_cause TO CLOSE ON COMPLETE EVIDENCE (decision cbe91287): a deterministic check of the " +
+        "incident's own rows decides, with no story from the caller — recovery evidence attached, " +
+        "monitoring window elapsed with no recurrence, the cause recorded (a confirmed hypothesis or a " +
+        "linked defect), and a remediation receipt (a linked defect's close-defect receipt, a linked " +
+        "complete deployment, or a merged pull request naming the incident); or a duplicate of an " +
+        "incident already closed. When it holds, the incident is closed AND adjudicated in one act: " +
+        "resolved, reviewed, root cause and followup disposition written from those rows. When it does " +
+        "not, the call is refused naming what is missing and nothing is written; the partner route " +
+        "above, with a root_cause, stays open for everything the check cannot settle.",
       inputSchema: { type: "object", properties: {
         idempotency_key: { type: "string" },
         ref: { type: "string", description: "the incident ref, e.g. INC-20260823-01" },
-        root_cause: { type: "string", description: "REQUIRED: what actually caused it, in your words. Not 'fixed' — what was wrong." },
-        evidence: { type: "string", description: "what shows it is safe to close, when the incident carries none of its own: a run ref, a commit, a check name" },
-        allow_early: { type: "string", description: "a reason the monitoring window cannot apply. Recorded as a fact on the incident, not merely accepted." },
-      }, required: ["idempotency_key", "ref", "root_cause"] },
+        root_cause: { type: "string", description: "the partner route: what actually caused it, in your words. Not 'fixed' — what was wrong. Omit it to close on complete evidence instead." },
+        evidence: { type: "string", description: "partner route only: what shows it is safe to close, when the incident carries none of its own: a run ref, a commit, a check name" },
+        allow_early: { type: "string", description: "partner route only: a reason the monitoring window cannot apply. Recorded as a fact on the incident, not merely accepted." },
+      }, required: ["idempotency_key", "ref"] },
       handler: async (c, actor, args) => {
         requirePartner(actor);
+        if (!String(args.root_cause || "").trim()) return closeOnEvidence(c, actor, args);
         return withEnvelope(c, actor, "close-incident", args, async () => {
           const inc = await loadIncident(c, args.ref);
           const verdict = closePreconditions(
