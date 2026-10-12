@@ -91,7 +91,7 @@ if [ "${1:-}" = "--preflight" ]; then
     bin/sync-settings.sh bin/type-check.sh ops/store-markup-scan.py
     generators/build-open-items-dashboard.py ops/nightly-verb-probe.py
     bin/smoke-and-record.sh tools/ops-record.py ops/staging-observed-prune.py
-    tools/health-check.py tools/health_breach.py ops/jev_spend_health.py ops/grok_session.py
+    tools/health-check.py ops/jev_spend_health.py ops/grok_session.py tools/health_breach.py
     # bin/routine-canonical-seam-refusal.sh came off this list on 2026-08-23: the
     # chain stopped launching it when the refusals became tombstones, and a
     # preflight that requires a file no step runs is checking the wrong thing.
