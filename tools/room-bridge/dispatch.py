@@ -68,6 +68,7 @@ if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 import credential_env  # noqa: E402 — shared long-lived-token loader
 import flashlib
+import seat_gate  # noqa: E402 — offline host / failed seat refusal at send time
 
 DEFAULT_RESULTS = Path(
     os.environ.get(
@@ -919,6 +920,9 @@ def main(argv: list[str]) -> int:
     rc = sub.add_parser('reconcile', help='verify and recover held ownership claims; unknown writers stay stuck')
     rc.add_argument('--claim', help='one job msg_id; otherwise examine held claims')
     rc.add_argument('--limit', type=int, default=20, help='maximum claims per call (1..100)')
+    rc.add_argument('--older-than-hours', type=float, metavar='H',
+                    help='sweep only claims whose writer is verifiably gone or that are older '
+                         'than H hours; a young claim with a live writer is left alone')
 
     s = sub.add_parser("send", help="dispatch one task to one desk")
     s.add_argument("name")
@@ -945,7 +949,8 @@ def main(argv: list[str]) -> int:
 
     try:
         if a.cmd == 'reconcile':
-            claims = write_ownership.reconcile(a.claim, limit=a.limit)
+            claims = write_ownership.reconcile(a.claim, limit=a.limit,
+                                               older_than_hours=a.older_than_hours)
             print(json.dumps({'ledger': str(write_ownership.LEDGER), 'claims': claims}, indent=2))
             return 1 if any(row['ownership_state'] == 'held' for row in claims) else 0
         if a.cmd == "where":
@@ -1004,6 +1009,13 @@ def main(argv: list[str]) -> int:
         task = sys.stdin.read() if a.task == "-" else a.task
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
+        # An offline host or a seat whose last probe failed is refused here,
+        # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
+        desk_entry = reg.entries().get(a.name)
+        if isinstance(desk_entry, dict):
+            blocked = seat_gate.check({**desk_entry, "name": a.name})
+            if blocked:
+                raise DeskError(*blocked)
         row = dispatch(a.name, task, registry=reg, results_path=results,
                        fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
                        retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
