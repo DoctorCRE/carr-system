@@ -107,10 +107,6 @@ class SendResult:
     dedupe_key: str
     detail: str = ""
 
-    @property
-    def sent(self) -> bool:
-        return self.outcome == SENT
-
 
 @dataclass(frozen=True)
 class KillSwitch:
@@ -429,13 +425,13 @@ class Sender:
         try:
             used = self.sends_today(attempt.channel, live=live)
         except OSError as exc:
-            self.ledger.release(key, attempt.attempt_id)
+            self._release(key, attempt)
             return self._finish(attempt, REFUSED, "receipts_unreadable", type(exc).__name__)
         if used >= cap:
-            self.ledger.release(key, attempt.attempt_id)
+            self._release(key, attempt)
             return self._finish(attempt, REFUSED, "daily_cap", f"{used}/{cap} today")
         if not live:
-            self.ledger.release(key, attempt.attempt_id)
+            self._release(key, attempt)
             return self._finish(attempt, WOULD_SEND, "shadow",
                                 f"live_from {self.config.get('live_from')}")
 
@@ -444,12 +440,24 @@ class Sender:
         except Exception as exc:   # a transport that raised may have sent: hold the key
             delivery = _Delivery("unknown", f"transport raised {type(exc).__name__}")
         if delivery.state == "sent":
-            self.ledger.settle(key, attempt.attempt_id, self._now())
-            return self._finish(attempt, SENT, "sent", delivery.detail, ref=delivery.ref)
+            detail = delivery.detail
+            try:
+                self.ledger.settle(key, attempt.attempt_id, self._now())
+            except (LedgerError, OSError) as exc:
+                # The message went. The receipt must still be written; the key
+                # stays claimed, which refuses a resend: the safe side.
+                detail += f"; ledger settle failed ({type(exc).__name__}), key left claimed"
+            return self._finish(attempt, SENT, "sent", detail, ref=delivery.ref)
         if delivery.state == "not_sent":
-            self.ledger.release(key, attempt.attempt_id)
+            self._release(key, attempt)
             return self._finish(attempt, FAILED, "transport_refused", delivery.detail)
         return self._finish(attempt, UNKNOWN, "transport_ambiguous", delivery.detail)
+
+    def _release(self, key: str, attempt: _Attempt) -> None:
+        """Release after a definite non-send. A ledger that broke since the
+        claim leaves the key held, which can only refuse a later resend."""
+        with contextlib.suppress(LedgerError, OSError):
+            self.ledger.release(key, attempt.attempt_id)
 
     # ── (c) allowlists ──
 

@@ -453,6 +453,20 @@ def test_corrupt_ledger_refuses() -> None:
               (r.outcome, r.reason) == (ss.REFUSED, "ledger_unreadable") and env.fakes.outlook_calls == [], r)
     finally:
         env.close()
+    env = Env()
+    try:
+        ledger = env.root / "out/system-sender-ledger.json"
+
+        def send_then_break_ledger(url: str, title: str) -> str:
+            ledger.write_text("{not json")
+            return "SENT"
+        env.fakes.outlook = send_then_break_ledger  # type: ignore[method-assign]
+        r = env.mail()
+        check("ledger: a ledger that breaks mid-send still yields SENT and a receipt",
+              r.outcome == ss.SENT and "key left claimed" in r.detail
+              and [x["outcome"] for x in env.receipts()] == ["sent"], (r, env.receipts()))
+    finally:
+        env.close()
 
 
 # ── (e) caps ─────────────────────────────────────────────────────────────────
