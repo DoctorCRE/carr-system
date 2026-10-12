@@ -53,7 +53,6 @@ import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
 
 SOURCE = Path(__file__).resolve().parents[1]
 if str(SOURCE) not in sys.path:
@@ -200,12 +199,13 @@ def normalize(node: dict, *, now: _dt.datetime, window_days: int = WINDOW_DAYS) 
     author = (node.get("author") or {}).get("login") or ""
     branch = node.get("headRefName") or ""
     last = commit.get("committedDate") or node.get("createdAt")
+    last_at = _parse(last)
     lane = lane_for(branch, author)
     facts = {
         "number": node["number"], "title": node.get("title") or "", "url": node.get("url") or "",
         "branch": branch, "author": author, "lane": lane, "owner": owner_for(lane),
         "created_at": node.get("createdAt"), "last_commit_at": last,
-        "idle_hours": round((now - _parse(last)).total_seconds() / 3600, 1) if last else None,
+        "idle_hours": round((now - last_at).total_seconds() / 3600, 1) if last_at else None,
         "draft": bool(node.get("isDraft")),
         "github_mergeable": (node.get("mergeable") or "UNKNOWN").upper(),
         "merge_state": (node.get("mergeStateStatus") or "UNKNOWN").upper(),
@@ -232,7 +232,7 @@ def _git(repo_path: str, *args: str, env: Mapping[str, str] | None, timeout: int
 
 
 def probe_conflicts(repo_path: str, base: dict, prs: list[dict], *, remote: str = "origin",
-                    env: Mapping[str, str] | None = None, fetch: bool = True) -> dict[int, dict]:
+                    env: Mapping[str, str] | None = None) -> dict[int, dict]:
     """{number: {verdict clean|conflict|unknown, files, behind, source}}.
 
     One `git fetch --no-write-fetch-head` brings main's tip and every
@@ -243,20 +243,19 @@ def probe_conflicts(repo_path: str, base: dict, prs: list[dict], *, remote: str 
     """
     out: dict[int, dict] = {}
     base_oid = base.get("oid")
-    if fetch:
-        refspecs = [f"refs/heads/{base.get('name') or 'main'}"] + [f"refs/pull/{p['number']}/head" for p in prs]
-        # --refmap= switches off git's opportunistic remote-tracking update,
-        # so not even refs/remotes/origin/main moves.
-        flags = ("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--refmap=")
-        got = _git(repo_path, *flags, remote, *refspecs, env=env, timeout=600)
-        if got.returncode != 0:
-            # One unreadable PR ref (say, a deleted fork) fails the whole batch;
-            # retry one at a time so the rest still get a real verdict.
-            for spec in refspecs:
-                _git(repo_path, *flags, remote, spec, env=env, timeout=120)
+    refspecs = [f"refs/heads/{base.get('name') or 'main'}"] + [f"refs/pull/{p['number']}/head" for p in prs]
+    # --refmap= switches off git's opportunistic remote-tracking update,
+    # so not even refs/remotes/origin/main moves.
+    flags = ("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--refmap=")
+    got = _git(repo_path, *flags, remote, *refspecs, env=env, timeout=600)
+    if got.returncode != 0:
+        # One unreadable PR ref (say, a deleted fork) fails the whole batch;
+        # retry one at a time so the rest still get a real verdict.
+        for spec in refspecs:
+            _git(repo_path, *flags, remote, spec, env=env, timeout=120)
     for p in prs:
         head = p.get("head_oid")
-        verdict = {"verdict": "unknown", "files": [], "behind": None, "source": "merge-tree"}
+        verdict: dict = {"verdict": "unknown", "files": [], "behind": None, "source": "merge-tree"}
         if base_oid and head:
             mt = _git(repo_path, "merge-tree", "--write-tree", "--name-only", "--no-messages",
                       base_oid, head, env=env)
@@ -523,7 +522,8 @@ def file_loops(board: dict, call: Callable[[str, dict], dict]) -> list[dict]:
     actions = []
     for lane in sorted(set(stale_by_lane) | set(existing)):
         stale, loop = stale_by_lane.get(lane, []), existing.get(lane)
-        if not stale:
+        payload: dict
+        if not stale and loop:
             verb = "close-loop"
             payload = {"loop_id": loop["loop_id"], "base_version": int(loop["version"]), "resolution": "done",
                        "outcome": f"No stale pull requests left in the {lane} lane ({board['generated_at']})."}
