@@ -597,6 +597,9 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
                   _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
                   _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
+                  # The breach consumer reaches the record layer; its own
+                  # hermetic suite is ops/health-act-selftest.py.
+                  _breach_consumer=lambda: None,
                   _jev_site_spend_row=lambda: "OK jev spend by site — fixture",
                   _grok_session_row=lambda: ("OK fixture Grok session", 0),
                   flashlib=Mock(health_row=Mock(return_value="OK Flash stopped")),
