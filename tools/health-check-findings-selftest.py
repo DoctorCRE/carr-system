@@ -716,6 +716,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _canonical_contradiction_alarm=lambda: 0,
                   _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,
                   _tailscale_row=lambda: ("OK fixture node", False),
+                  _claude_continuity_spool_row=lambda drain: ("OK continuity spool depth — fixture", 0),
                   _build_duration_row=lambda: ("OK fixture build duration", 0),
                   _health_sub=Mock(classify_loose_status=Mock(return_value={
                       "actionable_tracked": [], "actionable_untracked": [],
@@ -754,6 +755,20 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                 self.assertIn("HEALTH_COMPLETE", out.getvalue())
                 self.assertEqual([row["key"] for row in ns["_FINDINGS"]],
                                  [] if line.startswith("OK") else ["jev_paid_cap"])
+
+    def test_a_deep_continuity_spool_is_its_own_finding(self):
+        import io, contextlib
+        ns = self.all_namespace()
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        drains = []
+        ns["_claude_continuity_spool_row"] = lambda drain: (
+            drains.append(drain) or ("WARN continuity spool depth — 12 unsent", 1))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 1)
+        self.assertIn("HEALTH_COMPLETE", out.getvalue())
+        self.assertIn("WARN continuity spool depth — 12 unsent", out.getvalue())
+        self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["claude_continuity_spool"])
+        self.assertEqual(drains, [False], "manual health reports; only the nightly section drains")
 
     def test_canonical_health_records_cap_failures_and_finishes(self):
         import io, contextlib
