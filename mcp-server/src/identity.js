@@ -415,6 +415,57 @@ export function continuityActorForTokenMaps(
 }
 
 /**
+ * UNATTENDED_TOKENS bearer -> Joe's sponsored joe-local machine actor, marked
+ * unattended, or null.
+ *
+ * WHY IT EXISTS (Joe's ruling 2026-10-12, decision cbe91287: remove his
+ * approval from everything the system can do itself). A partner-sponsored
+ * ATTENDED session already holds partner authority: joe-local through the
+ * LOCAL_TOKENS door, and native Claude/Codex through OAuth. The runners nobody
+ * sits beside (the launchd/nightly runner, Model Room desks) held no sponsor,
+ * so every authority verb, loop close, rule approval and incident close waited
+ * for a human to open a session. This door gives that runner the attended
+ * local actor's authority under its own credential.
+ *
+ * SAME SHAPE AS THE CONTINUITY MAPS: sponsor -> token, with the sponsor read
+ * from the map key the server holds and never from anything the caller sends.
+ * The function takes the request's own Authorization header and the server's
+ * map, and nothing else, so a caller-claimed sponsor has no parameter to ride.
+ *
+ * ONLY `joe` IS ACCEPTED. The ruling is Joe's, for his book. A `dell` key, an
+ * unknown key, a probe/review/agent slug, a token held by two keys and a
+ * malformed map all resolve to nothing. Dell's side would be a separate entry
+ * in UNATTENDED_ACTOR made on Dell's own ruling, never a shared credential.
+ *
+ * The actor IS joe-local, so partner authority, the authority DB login and the
+ * operational profile all fall out of the existing joe-local derivations. What
+ * differs is provenance: `via: "unattended-token"` and `unattended: true` let
+ * the ledger tell an unattended run from an attended one, and tools.js's
+ * humanCallerOnly verbs (confirm-merge) refuse it like every other machine.
+ */
+const UNATTENDED_ACTOR = Object.freeze({ joe: "joe-local" });
+
+export function unattendedActorForToken(authorizationHeader, unattendedTokensRaw) {
+  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+  let tokens;
+  try { tokens = JSON.parse(unattendedTokensRaw || "{}"); }
+  catch { return null; }
+  if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) return null;
+  const holders = Object.keys(tokens).filter(key =>
+    typeof tokens[key] === "string" && tokens[key].length > 0 && tokens[key] === token);
+  if (holders.length !== 1) return null;
+  const sponsor = holders[0];
+  if (!Object.prototype.hasOwnProperty.call(UNATTENDED_ACTOR, sponsor)) return null;
+  const slug = UNATTENDED_ACTOR[sponsor];
+  if (!isKnownActor(slug) || !isKnownPartner(sponsor) || LOCAL_SPONSOR[slug] !== sponsor) return null;
+  return authenticateConnection({ slug, display: DISPLAY[slug], human: false, agent: true,
+           via: "unattended-token", client_id: null,
+           sponsoring_human_slug: sponsor, human_slug: sponsor, sponsor_required: false,
+           native_agent_verified: true, unattended: true }, unattendedTokensRaw);
+}
+
+/**
  * HERMES_TOKENS bearer -> the R0 evaluation runtime's actor, or null.
  *
  * The pure half of index.js's hermesActorFor, split out for the same reason as
@@ -722,6 +773,7 @@ const SERVER_CREDENTIAL_NAMES = Object.freeze([
   "REVIEW_TOKENS", "AGENT_TOKENS", "LOCAL_TOKENS",
   "HERMES_TOKENS", "HERMES_TOKENS_EXTRA", "HERMES_COS_TOKENS",
   "CODEX_CONTINUITY_TOKENS", "CLAUDE_CONTINUITY_TOKENS",
+  "UNATTENDED_TOKENS",
   "GOOGLE_CLIENT_SECRET",
 ]);
 
@@ -781,7 +833,8 @@ const CALL_CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
  *
  * Called at every return in this file that turns a verified CREDENTIAL into an
  * actor — the OAuth grant's props, the agent bearer, the two continuity bearers,
- * the two Hermes bearers, and the review bearer below — and nowhere else. It is
+ * the unattended bearer, the two Hermes bearers, and the review bearer below —
+ * and nowhere else. It is
  * not exported, and nothing exported is a synonym for it.
  *
  * `credentialBytes` is THE BYTES THE DOOR VERIFIED AGAINST: the token map it

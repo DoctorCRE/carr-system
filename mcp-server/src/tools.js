@@ -5561,6 +5561,9 @@ export const TOOLS = {
   "confirm-merge": {
     write: true,
     humanOnly: true,
+    // A merge is irreversible and needs a human looking at both records, so
+    // no machine holds it, attended or unattended, however it is sponsored.
+    humanCallerOnly: true,
     description: "HUMAN-confirmed merge of two duplicate parties: sets merged_into on the loser so it becomes a pointer to the survivor. Only after a human has looked at both records — the Hovanian rule means nothing auto-merges, ever.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, survivor_party: { type: "string" }, merged_party: { type: "string" },
@@ -8819,16 +8822,20 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // WR-000021 overcorrection: the ledger still keeps acting_actor_slug as the
   // actual machine actor while mcp.js separately records the verified sponsor.
   // The registry-wide test covers every present and future humanOnly verb.
+  //
+  // humanCallerOnly is the one carve-out (Joe's 2026-10-12 ruling, decision
+  // cbe91287): a verb carrying it requires the human caller even when a machine
+  // holds sponsor-scoped partner authority, attended or unattended. Every other
+  // humanOnly verb admits the sponsored native/local agent and the unattended
+  // runner alike.
   if (tool.humanOnly === true) {
     const actorClass = authorizationClassForActor(actor);
-    // Identity merges require the human caller even when a machine holds
-    // sponsor-scoped partner authority. Other partner-authority verbs retain
-    // their existing native/local agent route.
+    const humanCallerOnly = tool.humanCallerOnly === true;
     if (actorClass !== "verified_partner" &&
-        (name === "confirm-merge" || !canExercisePartnerAuthority(actor)))
+        (humanCallerOnly || !canExercisePartnerAuthority(actor)))
       throw new ToolError({ error: "human_only_verb_requires_verified_partner",
         verb: name, actor_class: actorClass,
-        hint: name === "confirm-merge" ? "confirm-merge requires a verified human partner; machine identities cannot confirm identity merges." :
+        hint: humanCallerOnly ? `${name} requires a verified human partner; machine identities cannot call it, however they are sponsored.` :
               "this verb records a partner-authority act and requires either the verified partner " +
               "or a server-verified native/local agent bound to that partner's sponsor-scoped " +
               "authority connection." });
