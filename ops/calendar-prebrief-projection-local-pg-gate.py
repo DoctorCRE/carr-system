@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # ci: db-gate
+# ci: db-gate-before-isolated — creates and keeps the carr_authority_* login roles the isolated SIEP gates assert against
 """Disposable local-PG adversarial proof for calendar-prebrief projection 0229."""
 import os
 import uuid

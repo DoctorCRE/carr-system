@@ -90,7 +90,7 @@ if [ "${1:-}" = "--preflight" ]; then
     ops/vendor-level-drift-check.py bin/backup-dump.sh bin/archive-calendar.sh
     bin/sync-settings.sh bin/type-check.sh ops/store-markup-scan.py
     generators/build-open-items-dashboard.py ops/nightly-verb-probe.py
-    bin/smoke-and-record.sh tools/ops-record.py ops/staging-observed-prune.py
+    bin/smoke-and-record.sh tools/ops-record.py
     tools/health-check.py ops/jev_spend_health.py ops/grok_session.py
     lib/claude_continuity_spool.py
     # bin/routine-canonical-seam-refusal.sh came off this list on 2026-08-23: the
@@ -735,34 +735,6 @@ tombstone "environment rebuild proof" \
 tombstone "environment integration proof" \
   "admin capability — the same rehearsal lane the rebuild proof above cannot open" \
   "an admin credential is provisioned here and ops/p1-integration-gate.py is restored to this line"
-
-# ── THE ENFORCEMENT STACK'S OTHER COST: DISK (2026-08-27) ────────────────────
-# On 2026-08-27 out/staging-observed held 152 orphaned temp files over 1MB
-# apiece (~3.2GB) beside per-session observation files, one of them 110MB. The
-# disk filled and no new worktree could be created — a hard stop on every
-# session on this Mac, not a slow morning.
-#
-# hooks/staging-observation-tracker.py now sweeps abandoned temps before each
-# of its own writes and bounds its state files in bytes. That handles the
-# machine while sessions are running on it and cannot handle anything else: a
-# hook only runs while a session runs, so the state file of a session that has
-# ENDED is precisely the one nothing will ever touch again. Reaping by
-# absence-of-activity is a question only something outside the sessions can
-# ask, which is why it is a line here and not more code in the hook.
-#
-# IT RUNS HERE, AHEAD OF EVERYTHING THAT WRITES, and the position is the point.
-# The first cut of this put it beside the hook telemetry rollup near the bottom,
-# on the reasoning that both price the enforcement stack — one in latency, one
-# in bytes. That is a tidy grouping and it is the wrong order: the encrypted
-# backup is the LAST step and it writes a dump, so a full disk fails the backup
-# and then frees 3.2GB immediately afterwards. Reclamation belongs before the
-# steps that need the space, not beside the report it rhymes with.
-#
-# NO NEW SCHEDULED JOB, same argument the rollup makes: one more step on a chain
-# that is already awake. It exits 0 whether or not it removes anything — a
-# housekeeping step that reddens the chain is a check people learn to skip.
-step "staging-observed prune (temp orphans + idle sessions)" \
-    ./.venv/bin/python ops/staging-observed-prune.py
 
 step "daily AI seat health" ./.venv/bin/python ops/seat-health.py
 
@@ -1435,6 +1407,17 @@ step "incident assessment (latest run of every job)"  ./.venv/bin/python tools/o
 # path. --since-hours 36 overlaps this step's own ~24h cadence on purpose, so
 # a PR merged just before or after midnight is never missed by a boundary.
 step "pr recovery evidence (merged PRs -> incident evidence)"  ./.venv/bin/python tools/ops-record.py pr-evidence --since-hours 36
+
+# ── PR BOARD (2026-10-12, Joe's "build it", one of five needle movers) ─────
+# 40 open pull requests, 39 with mergeable UNKNOWN and no owner for any of
+# them. This writes out/pr-board.json: every open PR with ONE next action
+# (MERGE-READY / RESTACK / FIX-CI / STALE / WAIT) and its measured reason, for
+# the morning surfaces and any session to read. READ-ONLY HERE ON PURPOSE: no
+# --file-loops, so the nightly chain files nothing; the bound action (one
+# deduplicated loop per owner lane for STALE PRs) is printed in the log for
+# the orchestrator to run. Never closes, pushes or comments. Exit 78 when gh is
+# not authenticated (SKIP, not a red night).
+step "pr board (one action per open PR, reports only)"  ./run.sh pr-board
 
 # WHAT IS LEFT FOR A HUMAN. 0293 closes recovered lower-severity collector
 # incidents from their own three-run evidence. It deliberately does not touch:
