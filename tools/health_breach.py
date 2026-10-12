@@ -157,10 +157,11 @@ def parse_action(text: str) -> BoundAction | None:
             loose.append(clause)
     owner_match = _OWNER.search(action)
     owner = owner_match.group(1).strip() if owner_match else ""
-    if not verify and _VERIFY.search(action):
-        verify = _VERIFY.search(action).group(1).strip()
-    if not auto_clear and _CLEAR.search(action):
-        auto_clear = _CLEAR.search(action).group(1).strip()
+    verify_match, clear_match = _VERIFY.search(action), _CLEAR.search(action)
+    if not verify and verify_match:
+        verify = verify_match.group(1).strip()
+    if not auto_clear and clear_match:
+        auto_clear = clear_match.group(1).strip()
     remediation = "; ".join(explicit or loose)
     return BoundAction(owner=owner, remediation=remediation, verify=verify,
                        auto_clear=auto_clear, text=action)
@@ -231,24 +232,19 @@ def _read_number(door, number: str):
 def find_open_loops(breaches: list[Breach], door, workers: int = 8) -> dict:
     """row_id -> (open loops sorted by number, error or None). One search per
     distinct phrase, run in parallel; the record layer is the dedup authority."""
-    jobs = {}
-    for b in breaches:
-        if b.loop_number:
-            jobs[("#", b.loop_number)] = None
-        for phrase in b.phrases:
-            jobs[("search", phrase)] = None
+    def keys(b: Breach) -> list[tuple[str, str]]:
+        return ([("#", b.loop_number)] if b.loop_number else []) + [("search", p) for p in b.phrases]
+    wanted = list(dict.fromkeys(k for b in breaches for k in keys(b)))
     def run(job):
         kind, value = job
         return job, (_read_number(door, value) if kind == "#" else _search(door, value))
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        for job, answer in pool.map(run, list(jobs)):
-            jobs[job] = answer
+        answers = dict(pool.map(run, wanted))
     found = {}
     for b in breaches:
         loops, error = {}, None
-        keys = ([("#", b.loop_number)] if b.loop_number else []) + [("search", p) for p in b.phrases]
-        for job in keys:
-            rows, err = jobs[job]
+        for job in keys(b):
+            rows, err = answers[job]
             if err:
                 error = err
                 continue
@@ -350,6 +346,7 @@ def _loop_owner(text: str) -> str:
 
 def _body(b: Breach, observed: str) -> str:
     a = b.action
+    assert a is not None, "only a row with a bound action is filed"
     return "\n".join([
         f"{b.tag.rstrip()} {b.digest}] "
         f"{b.headline if b.headline.upper().startswith(b.level) else b.level + ' ' + b.headline}"[:600],
