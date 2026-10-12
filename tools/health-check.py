@@ -75,12 +75,15 @@ def _reader_args(argv):
     section = "all"
     fixture = None
     findings_json = None
+    act = False
     rest = []
     i = 0
     while i < len(argv):
         arg = argv[i]
         if arg == "--recovery":
             recovery = True
+        elif arg == "--act":
+            act = True
         elif arg in ("--reason", "--vault", "--section", "--fixture", "--findings-json"):
             if i + 1 >= len(argv):
                 raise SystemExit(f"health-check: {arg} requires a value")
@@ -110,15 +113,21 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "builds", "uptime", "storage"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|builds|uptime|storage")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "claude-continuity-spool", "costs", "builds", "uptime", "storage"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|claude-continuity-spool|costs|builds|uptime|storage")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
-    return recovery, reason, vault, section, fixture, findings_json, rest
+    # --act executes every red row's bound action (tools/health_breach.py). It
+    # needs the whole report: a partial run cannot prove a row green, and a
+    # fixture or a Drive projection is not the live state a loop should name.
+    if act and (recovery or fixture or section != "all"):
+        raise SystemExit("health-check: --act runs only on a full canonical report "
+                         "(no --recovery, --fixture or --section)")
+    return recovery, reason, vault, section, fixture, findings_json, act, rest
 
 
 RECOVERY_MODE, RECOVERY_REASON, VAULT, CANONICAL_SECTION, CANONICAL_FIXTURE, FINDINGS_JSON_PATH, \
-    _READER_REST = _reader_args(sys.argv[1:])
+    ACT_MODE, _READER_REST = _reader_args(sys.argv[1:])
 sys.argv[1:] = _READER_REST
 
 
@@ -187,6 +196,33 @@ def _grok_session_row():
                 "owner orchestrator · remediation restore the Grok reader/lock storage · "
                 "verify rerun health · auto-clear on successful read", 1)
 
+
+def _claude_continuity_spool_row(drain):
+    """Continuity spool depth, after an optional drain, with its bound action inline.
+
+    The nightly section drains (re-sends every receipt whose delivery is
+    unknown, under its original key, through the claude-continuity token) and
+    then reports; the `all` view only reports.  Red at the depth/age threshold,
+    green at 0; the row's loop is opened once per episode and auto-clears at 0.
+    """
+    sys.path.insert(0, REPO_ROOT)
+    from datetime import datetime as _dt, timezone as _tz
+    from lib import claude_continuity_spool as continuity_spool
+    try:
+        drained = continuity_spool.drain() if drain else None
+    except (OSError, ValueError) as exc:
+        return (f"UNAVAILABLE {continuity_spool.ROW_NAME} — drain {type(exc).__name__} · "
+                f"{continuity_spool.ACTION}"), 1
+    line = continuity_spool.health_row(run_verb=continuity_spool.run_verb,
+                                       state_path=continuity_spool.loop_state_path(),
+                                       now=_dt.now(_tz.utc), drained=drained)
+    return line, int(not line.startswith("OK"))
+
+
+if CANONICAL_SECTION == "claude-continuity-spool":
+    _spool_line, _spool_rc = _claude_continuity_spool_row(drain=True)
+    print(_spool_line)
+    sys.exit(_spool_rc)
 
 if CANONICAL_SECTION == "jev-spend":
     try:
@@ -1114,6 +1150,9 @@ _HEALTH_COMPLETION_MARKER = ("Projection freshness/tamper checks are recovery ev
                              "use --recovery --reason <why>.")
 
 _FINDINGS: list = []
+# Row family -> subjects its reader positively reported green this run (None:
+# not evaluated). health_breach.act() auto-clears a loop only on this evidence.
+_GREEN_EVIDENCE: dict = {}
 # The machine-readable form of every CANONICAL_FINDING line the run prints,
 # built alongside the text so both stay in lockstep. Schema decided against
 # Jev (architecture_or_design, 2026-09-24, full confidence on subject
@@ -1338,15 +1377,37 @@ def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=Fal
     return 1
 
 
+_HOST_LIVENESS: list = []
+
+
+def _host_liveness():
+    """(config, liveness) from one `Tailscale status` read per health run."""
+    if not _HOST_LIVENESS:
+        sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
+        import host_liveness
+        config = host_liveness.load_config()
+        _HOST_LIVENESS.append((host_liveness, config, host_liveness.observe(config=config)))
+    return _HOST_LIVENESS[0]
+
+
+def _host_liveness_rows():
+    """[(line, failed, host)]: RED only for a peer the tailnet reports offline."""
+    module, config, live = _host_liveness()
+    return module.rows(live, config)
+
+
 def _seat_health_rows():
+    """Seat rows from the record layer first (read-resource-dashboard, so the
+    other Mac's probes count) and this Mac's report second; a seat whose host
+    is offline reads SKIP, an unrun probe STALE, and only a run that failed FAIL."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
-    from seat_health import health_rows
+    import seat_health
     try:
-        with open(os.path.join(REPO_ROOT, "out", "orch", "budget", "seat-health.json")) as source:
-            report = json.load(source)
-    except (OSError, ValueError):
-        report = {}
-    return health_rows(report)
+        module, config, live = _host_liveness()
+        offline = module.offline_seats(live, config)
+    except (OSError, ValueError, KeyError, ImportError):
+        offline = {}
+    return seat_health.health_rows(seat_health.current_report(REPO_ROOT), offline=offline)
 
 
 def _tailscale_row():
@@ -1406,6 +1467,7 @@ def _storage_hygiene_row():
 def _canonical_health():
     """The normal health surface: record/control-plane/local truth only."""
     _FINDINGS.clear()
+    _GREEN_EVIDENCE.clear()
     rc = 0
     if CANONICAL_SECTION in ('all', 'builds'):
         try:
@@ -1764,6 +1826,16 @@ def _canonical_health():
             rc = _red("grok_session", _grok_line,
                       hard_error=_grok_line.startswith("UNAVAILABLE"), time_rolling=True)
 
+    if CANONICAL_SECTION == "all":
+        # Report only; the nightly claude-continuity-spool section drains.
+        try:
+            _spool_line, _spool_rc = _claude_continuity_spool_row(drain=False)
+        except Exception as exc:
+            _spool_line, _spool_rc = (f"UNAVAILABLE continuity spool depth — {type(exc).__name__}", 1)
+        print("  " + _spool_line)
+        if _spool_rc:
+            rc = _red("claude_continuity_spool", _spool_line, time_rolling=True)
+
     if CANONICAL_SECTION in ("all", "credentials"):
         # The source log is canonical across worktrees. The row carries its
         # response action on both OK and WARN, and the helper owns one loop.
@@ -1901,11 +1973,25 @@ def _canonical_health():
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
 
     if CANONICAL_SECTION == "all":
+        # A seat's loop auto-clears only on its own PASS line (tools/
+        # health_breach.py act): until the rows are read, no seat is green.
+        _GREEN_EVIDENCE["ai_seat_health"] = None
         try:
+            # FAIL (a probe ran and failed) and STALE-RED (no probe row for
+            # over 72 h while the seat's host is online or unknown) are red;
+            # STALE inside the bound and SKIP (host offline) are not.
+            _seats_green = set()
             for _seat_line in _seat_health_rows():
                 print("  " + _seat_line)
-                if _seat_line.startswith("FAIL"):
-                    rc = _red("ai_seat_health", _seat_line, time_rolling=True)
+                if _seat_line.startswith(("FAIL ", "STALE-RED ")):
+                    # One finding per seat: without a subject the six rows
+                    # merged into one (count 6) that kept only the last
+                    # seat's text, so five bound actions were unreachable.
+                    rc = _red("ai_seat_health", _seat_line, subject=_seat_line.split()[1],
+                              time_rolling=True)
+                elif _seat_line.startswith("PASS"):
+                    _seats_green.add(_seat_line.split()[1])
+            _GREEN_EVIDENCE["ai_seat_health"] = _seats_green
         except (ImportError, TypeError, AttributeError):
             _seat_detail = ("Seat health evidence unreadable; on breach: orchestrator repairs "
                             "ops/seat-health.py and reruns the daily exact-value probes; "
@@ -1934,11 +2020,11 @@ def _canonical_health():
                               else f"recent attempt failed ({_joh['reason']})")
                 _detail = f"{_last}; {_condition}; loop {_outcome}"
                 print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
-                rc = _red("jev_live_outage", _detail)
+                rc = _red("jev_live_outage", f"{_detail} · {_action}")
             elif _outcome == "error":
                 _detail = "outage loop could not be auto-cleared"
                 print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_action}")
-                rc = _red("jev_live_outage", _detail)
+                rc = _red("jev_live_outage", f"{_detail} · {_action}")
             else:
                 _summary = ("success verified; outage loop cleared" if _outcome == "cleared"
                             else "recent failure; last success is inside the grace window"
@@ -1950,7 +2036,7 @@ def _canonical_health():
         except Exception as e:
             _detail = f"outage evidence unreadable ({type(e).__name__})"
             print(f"  ⚠︎ {'Jev live judgment':<18} {_detail} · {_jev_outage.action('log_unreadable')}")
-            rc = _red("jev_live_outage", _detail)
+            rc = _red("jev_live_outage", f"{_detail} · {_jev_outage.action('log_unreadable')}")
 
     if CANONICAL_SECTION == "all":
         # Jev call receipt tamper audit (migrations/0587). The receipt store is
@@ -2033,6 +2119,23 @@ def _canonical_health():
                       "verify: rerun health · auto-clear: next successful node read")
             rc = _red("tailscale", detail, subject="local-node", hard_error=True)
 
+    if CANONICAL_SECTION in ("all", "tailscale"):
+        # Host liveness (2026-10-12): one row per Mac a seat runs on. The row
+        # above sees only THIS Mac's backend; the Studio sat offline for days
+        # while it stayed green and six seat rows blamed their wrappers.
+        try:
+            for _host_line, _host_failed, _host in _host_liveness_rows():
+                print(_host_line)
+                if _host_failed:
+                    rc = _red("host_liveness", _host_line.strip(), subject=_host)
+        except Exception as exc:
+            _host_detail = (f"host liveness check unavailable ({type(exc).__name__}) · on breach: "
+                            "owner orchestrator · fix: restore ops/host_liveness.py and "
+                            "ops/config/seat-hosts.v1.json · verify: python3 ops/host_liveness.py "
+                            "prints one row per host · auto-clear: next health run prints host rows")
+            print("  ✗✗ " + _host_detail)
+            rc = _red("host_liveness", _host_detail, subject="checker")
+
     # WHOLE-RUN backstop, alongside the static AST proof in tools/health-
     # check-findings-selftest.py (round 8 of an independent review of PR
     # #1237): every `rc = 1` path inside this function now goes through
@@ -2066,15 +2169,55 @@ def _canonical_health():
                            "rc=1 was set but no finding was recorded anywhere to explain it",
                            hard_error=True)
 
+    _breach_consumer()
     print(_HEALTH_COMPLETION_MARKER)
     return rc
+
+
+ACT_RECEIPTS = os.path.join(REPO_ROOT, "out", "health-act.jsonl")
+_ACT_ERRORS = 0
+
+
+def _breach_consumer():
+    """Execute (with --act) and audit every red row's bound action.
+
+    Runs before the completion marker, which must stay the last stdout line
+    (ops/release-pipeline.py reads it). Never touches `rc`: the audit is a
+    report about loops, not a new health fault, so a release's health diff
+    is unchanged by it. A fixture run stays hermetic and prints nothing."""
+    global _ACT_ERRORS
+    if CANONICAL_FIXTURE:
+        return
+    print("Breach response — one deduplicated loop per red row (rule 590b11e1)")
+    try:
+        import health_breach
+        findings = list(_FINDINGS)
+        if ACT_MODE:
+            report = health_breach.act(findings, health_breach.record_door,
+                                       receipts_path=ACT_RECEIPTS, complete=True, green=dict(_GREEN_EVIDENCE))
+            _ACT_ERRORS = report.errors
+            print(f"  {'ACT' if not report.errors else 'ACT ⚠︎'} {'breach act':<18} "
+                  f"{report.summary() or 'nothing to do'} · receipts {ACT_RECEIPTS}")
+            for row in report.receipts:
+                if row["decision"] in ("filed", "updated", "cleared", "clear_noted", "error"):
+                    print(f"     {row['decision']:<11} {row['row_id']} loop #{row.get('loop') or '-'}"
+                          + (f" — {row['detail']}" if row.get("detail") else ""))
+        print(health_breach.render_audit(health_breach.audit(findings, health_breach.record_door)))
+    except Exception as exc:
+        _ACT_ERRORS += 1
+        print(f"  UNKNOWN breach audit — {type(exc).__name__}: {exc} · on breach: owner "
+              "orchestrator · remediation repair tools/health_breach.py · verify the next "
+              "./run.sh health prints a breach audit line · auto-clear on that line")
 
 
 if not RECOVERY_MODE:
     _rc = _canonical_health()
     if FINDINGS_JSON_PATH:
         _write_findings_json(FINDINGS_JSON_PATH)
-    sys.exit(_rc)
+    # --act's exit status reports the ACT, not the health: a red report is the
+    # normal input to --act, and a nightly step that went red on it every night
+    # would teach everyone to stop reading the chain. A failed write is red.
+    sys.exit(int(_ACT_ERRORS > 0) if ACT_MODE else _rc)
 
 print(f"HEALTH RECOVERY MODE — NONCANONICAL Drive projections — reason: {RECOVERY_REASON}", file=sys.stderr)
 print(f"HEALTH RECOVERY MODE — vault: {VAULT}", file=sys.stderr)

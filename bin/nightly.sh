@@ -82,7 +82,7 @@ run_canary() {
 
 if [ "${1:-}" = "--preflight" ]; then
   required=(
-    ops/seat-health.py ops/seat_health.py
+    ops/seat-health.py ops/seat_health.py ops/host_liveness.py tools/room-bridge/dispatch.py
     ops/vault-drift-watch.py bin/schema-snapshot.sh ops/p1-environment-gate.py
     ops/p1-rebuild-gate.py ops/p1-integration-gate.py pipelines/cadence_engine.py
     pipelines/availability_matcher.py ops/fetch-allowlist.py
@@ -91,7 +91,8 @@ if [ "${1:-}" = "--preflight" ]; then
     bin/sync-settings.sh bin/type-check.sh ops/store-markup-scan.py
     generators/build-open-items-dashboard.py ops/nightly-verb-probe.py
     bin/smoke-and-record.sh tools/ops-record.py
-    tools/health-check.py ops/jev_spend_health.py ops/grok_session.py
+    tools/health-check.py ops/jev_spend_health.py ops/grok_session.py tools/health_breach.py
+    lib/claude_continuity_spool.py
     # bin/routine-canonical-seam-refusal.sh came off this list on 2026-08-23: the
     # chain stopped launching it when the refusals became tombstones, and a
     # preflight that requires a file no step runs is checking the wrong thing.
@@ -737,6 +738,20 @@ tombstone "environment integration proof" \
 
 step "daily AI seat health" ./.venv/bin/python ops/seat-health.py
 
+# DISPATCH CLAIM RECONCILE (2026-10-12). A dispatch killed mid-run leaves its
+# write-ownership claim `held`, and a held claim refuses every later job whose
+# --writes overlap it; until now only a session that remembered
+# `dispatch.py reconcile --claim <msg_id>` ever released one. This step examines
+# ONLY held claims whose writer is verifiably gone or that are older than 6
+# hours (--older-than-hours 6); a legitimately running overnight job with a
+# live writer is not touched, so it is never tagged stuck and never turns this
+# step red. A dead-writer claim is released; a claim over 6 h whose writer is
+# not provably gone is marked stuck. Exit 1 = such a claim is still held; on
+# breach: owner orchestrator reads the printed claims JSON, confirms the
+# writer is dead, then `dispatch.py reconcile --claim <msg_id>`; verify the
+# next run exits 0; auto-clear when no over-age claim is held.
+step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py reconcile --older-than-hours 6
+
 # ── ORDER 14: the two writing steps, BEFORE the exports ──────────────────────
 # The cadence engine WRITES (next_action + event), so the read-only exporter
 # credential above cannot run it. Both steps look for CARR_DB_JOBS_URL first
@@ -1084,9 +1099,28 @@ step "credential health (reports, never rotates; loops on a finding)" \
 step "Monthly system cost view and spike loops" \
      ./run.sh costs --publish --alerts
 
+# Re-sends Claude continuity receipts whose delivery was unknown, in order and
+# under their original keys, through the claude-continuity token (no human
+# credential); refused ones are archived with the store's reason. The row
+# ("continuity spool depth") opens or clears one deduplicated loop.
+step "Claude continuity spool drain" \
+     ./.venv/bin/python tools/health-check.py --section claude-continuity-spool
+
 # Authentication readback only; no model work and no interactive login.
 step "Grok authentication health" \
      ./.venv/bin/python tools/health-check.py --section grok-session
+
+# THE BOUND ACTIONS, EXECUTED (2026-10-12). Every red health row prints an
+# "on breach: open/update one deduplicated loop ..." clause, and until this
+# step nothing ran it: eleven rows sat red for days with the action as prose.
+# `run.sh health --act` files or updates ONE loop per red row through the
+# record layer (deduplicated by the key the row's own text names, found by
+# loop-board search, never by a local state file), leaves a loop the row's own
+# reader filed alone, and closes or notes-cleared its own loops whose row went
+# green. Placed after the seat probe, credential, cost and Grok steps above so
+# the rows it acts on are tonight's. Exit 1 means a loop write failed, never
+# that health is red. Receipts: out/health-act.jsonl.
+step "health breach response (one loop per red row)" ./run.sh health --act
 
 step "encrypted backup -> R2"                        env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh
 # CAPTURED HERE, ON THE NEXT LINE, AND THAT IS THE WHOLE POINT (fixed 2026-08-23).
