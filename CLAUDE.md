@@ -50,13 +50,17 @@ the classifier declined; that is working around a denial rather than filing it.
 Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
 224 Stop turns). Each item is the fix, not the story.
 
-1. **After a compaction, re-boot with the digest-only form.** The gate accepts it
-   on purpose and it costs ~200 characters a page instead of ~12,000:
+1. **A compaction no longer costs a re-boot.** When this session already read
+   every page and the store says the rules digest is unchanged, SessionStart
+   prints "RULE BOOT: carried across compact" and ordinary tools run at once;
+   rules reach the action point through the per-call route hook. The gate still
+   asks for a full boot when the digest changed, when the first boot was never
+   completed, or after `clear`. When it does ask, the digest-only form is the
+   cheap answer (~200 characters a page instead of ~12,000):
    `./run.sh call standing-context '{"detail":"boot","page":N}' | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'`
    (exactly those two fields; an extra field is not accepted). Reading all 15
-   pages in full after every compaction was 23% of that session's context and
-   the main reason it compacted every one to three hours. Rules still reach the
-   action point through the per-call route hook.
+   pages in full after every compaction was 23% of the 2026-10-10 session's
+   context and the main reason it compacted every one to three hours.
 2. **Dispatch (`tools/room-bridge/dispatch.py send`)**: launch with the Bash tool's
    `run_in_background`, never `nohup … &!`, `( … &)` or `perl -e 'alarm'` (exit
    142 and a claim left `held`). Declare `--writes` as the exact files, never a
