@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 import sys
 import uuid
-from seat_health import (assess, SEATS, atomic_json, combined_report, dispatchable, health_rows,
-                         probe, probe_jev, publish, read_dashboard, reconcile, verb_call)
+from seat_health import (assess, SEATS, atomic_json, current_report, dispatchable, health_rows,
+                         probe, probe_jev, publish, reconcile, verb_call)
 import host_liveness
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,11 +94,7 @@ def main():
     door = lambda name, payload: verb_call(args.runtime_repo, name, payload)  # noqa: E731
     config, live = hosts()
     if args.show:
-        try:
-            report = json.loads(report_path.read_text())
-        except (OSError, ValueError):
-            report = {}
-        rows = health_rows(combined_report(read_dashboard(door), report),
+        rows = health_rows(current_report(args.runtime_repo, report_path),
                            offline=host_liveness.offline_seats(live, config))
         print('\n'.join(rows))
         return int(any(line.startswith('FAIL') for line in rows))

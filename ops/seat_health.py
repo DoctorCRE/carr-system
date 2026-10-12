@@ -402,7 +402,7 @@ def probe(seat, runtime, run_dir, timeout, e2e_cli, here=False):
     return assess(seat, answer, diagnostics, code, latency, usage=usage)
 
 
-def _observed(row, now):
+def observed(row, now):
     """(datetime, fresh) for a row's observed_at; (None, False) when unusable."""
     try:
         at = datetime.fromisoformat(row['observed_at'].replace('Z', '+00:00'))
@@ -433,7 +433,7 @@ def health_rows(report, *, offline=None, now=None):
         if seat in offline:
             rows.append(f"SKIP {seat}: host {offline[seat]} offline · {action(seat, None)}")
             continue
-        at, fresh = _observed(row, now)
+        at, fresh = observed(row, now)
         if not fresh:
             last = at.date().isoformat() if at else 'never'
             rows.append(f"STALE {seat} last={last} · {action(seat, None)}")
@@ -502,7 +502,7 @@ def merge_seats(*sources):
         for seat, row in (source.items() if isinstance(source, dict) else ()):
             if seat not in SEATS or not isinstance(row, dict):
                 continue
-            at = _observed(row, datetime.now(timezone.utc))[0] or floor
+            at = observed(row, datetime.now(timezone.utc))[0] or floor
             if seat not in merged or at > stamps[seat]:
                 merged[seat], stamps[seat] = row, at
     return merged
@@ -512,6 +512,18 @@ def combined_report(dashboard, local_report):
     """A carr-seat-health/v1 report from the dashboard first and the local file second."""
     return {'schema': 'carr-seat-health/v1',
             'seats': merge_seats(dashboard_seats(dashboard), local_seats(local_report))}
+
+
+def current_report(repo, report_path=None):
+    """The one read every consumer uses (health-check, --show, dispatch): the
+    record layer through `repo`'s run.sh, then `report_path` (default: repo's
+    out/orch/budget/seat-health.json). Either source may be absent."""
+    repo = Path(repo)
+    try:
+        local = json.loads(Path(report_path or repo / 'out/orch/budget/seat-health.json').read_text())
+    except (OSError, ValueError):
+        local = {}
+    return combined_report(read_dashboard(lambda name, payload: verb_call(repo, name, payload)), local)
 
 
 def publish(seats, door, *, live=None, source_host=None, now=None):

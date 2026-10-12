@@ -1364,18 +1364,11 @@ def _seat_health_rows():
     sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
     import seat_health
     try:
-        with open(os.path.join(REPO_ROOT, "out", "orch", "budget", "seat-health.json")) as source:
-            report = json.load(source)
-    except (OSError, ValueError):
-        report = {}
-    dashboard = seat_health.read_dashboard(
-        lambda name, payload: seat_health.verb_call(REPO_ROOT, name, payload))
-    try:
         module, config, live = _host_liveness()
         offline = module.offline_seats(live, config)
     except (OSError, ValueError, KeyError, ImportError):
         offline = {}
-    return seat_health.health_rows(seat_health.combined_report(dashboard, report), offline=offline)
+    return seat_health.health_rows(seat_health.current_report(REPO_ROOT), offline=offline)
 
 
 def _tailscale_row():

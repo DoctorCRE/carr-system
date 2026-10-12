@@ -468,6 +468,20 @@ class SeatHealthTests(unittest.TestCase):
         self.assertEqual(health.combined_report(None, local)['seats'], local['seats'])
         self.assertEqual(health.combined_report({'ok': True, 'providers': 'x'}, {})['seats'], {})
 
+    def test_current_report_reads_the_dashboard_through_the_repo_door_then_the_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            fresh = datetime.now(timezone.utc).isoformat()
+            health.atomic_json(repo / 'out/orch/budget/seat-health.json',
+                               self.report_with(grok={'passed': True, 'observed_at': fresh, 'source': 'file'}))
+            dash = self.dashboard({'jev': {'passed': False, 'observed_at': fresh, 'source': 'dash'}})
+            with mock.patch.object(health, 'verb_call', return_value=dash) as door:
+                seats = health.current_report(repo)['seats']
+            self.assertEqual(door.call_args.args, (repo, 'read-resource-dashboard', {}))
+            self.assertEqual({seat: row['source'] for seat, row in seats.items()}, {'grok': 'file', 'jev': 'dash'})
+            with mock.patch.object(health, 'verb_call', return_value={'ok': False}):
+                self.assertEqual(set(health.current_report(repo, repo / 'missing.json')['seats']), set())
+
     def test_publish_writes_merged_seats_and_host_liveness_through_the_door(self):
         config = host_liveness.load_config()
         status = {'BackendState': 'Running', 'Self': {'DNSName': 'joes-macbook-pro.tailc8cc93.ts.net.'},

@@ -88,19 +88,13 @@ class SeatGateUnit(unittest.TestCase):
         self.assertIsNone(seat_gate.refusal({'kind': 'claude-remote', 'host': 'studio', 'model': 'x'},
                                             CONFIG, unknown, lambda: report()))
 
-    def test_report_reads_dashboard_first_then_local_file(self):
-        with tempfile.TemporaryDirectory() as d:
-            repo = Path(d)
-            (repo / 'out/orch/budget').mkdir(parents=True)
-            fresh = datetime.now(timezone.utc).isoformat()
-            (repo / 'out/orch/budget/seat-health.json').write_text(json.dumps(
-                report(grok={'passed': True, 'observed_at': fresh, 'source': 'file'})))
-            dash = {'ok': True, 'providers': [{'provider': 'model_route', 'model_route': {
-                'seats': {'jev': {'passed': False, 'observed_at': fresh}}}}]}
-            with patch.object(seat_health, 'verb_call', return_value=dash) as door:
-                seats = seat_gate.report(repo)['seats']
-            self.assertEqual(door.call_args.args[1:], ('read-resource-dashboard', {}))
-            self.assertEqual(set(seats), {'grok', 'jev'})
+    def test_check_reads_this_repos_seat_evidence(self):
+        with patch.object(host_liveness, 'observe', return_value=live(MACBOOK)), \
+             patch.object(seat_health, 'current_report',
+                          return_value=report(**{'sol-macbook': row(False, layer='network')})) as evidence:
+            got = seat_gate.check({'kind': 'codex-session', 'name': 'cx'})
+        self.assertEqual(got[0], 'seat_failed')
+        self.assertEqual(evidence.call_args.args, (seat_gate.REPO,))
 
 
 class SendThroughTheGate(unittest.TestCase):
@@ -124,7 +118,7 @@ class SendThroughTheGate(unittest.TestCase):
     def send(self, name, liveness, evidence):
         launched, err = [], io.StringIO()
         with patch.object(host_liveness, 'observe', return_value=liveness), \
-             patch.object(seat_gate, 'report', return_value=evidence), \
+             patch.object(seat_health, 'current_report', return_value=evidence), \
              patch.object(dispatch, '_to_codex', side_effect=lambda *a, **k: launched.append('codex')
                           or {'status': 'completed'}), \
              patch.object(dispatch.claude_remote_wire, 'run_task',

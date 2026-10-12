@@ -82,6 +82,11 @@ class HostLiveness(unittest.TestCase):
                 self.assertFalse(any(failed for _, failed, _ in hl.rows(live, self.config)))
                 self.assertNotEqual(live['hosts']['mac-studio']['state'], 'offline')
 
+    def test_non_boolean_online_is_unknown_not_online(self):
+        for value in ('false', 'true', 1, 0, None):
+            live = hl.liveness(status(peers=[dict(peer(STUDIO, False), Online=value)]), self.config)
+            self.assertEqual(live['hosts']['mac-studio']['state'], 'unknown', value)
+
     def test_self_row_is_not_overridden_by_a_peer_entry(self):
         live = hl.liveness(status(peers=[peer(MACBOOK, False)]), self.config)
         self.assertEqual(live['hosts']['joes-macbook-pro']['state'], 'online')

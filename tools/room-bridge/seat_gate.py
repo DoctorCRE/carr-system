@@ -22,7 +22,6 @@ is the grok host. Every other kind is a live local session and has no seat.
 """
 from __future__ import annotations
 
-import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,7 +70,7 @@ def refusal(entry: dict, config: dict, live: dict, report_fn, *, now=None):
     now = now or datetime.now(timezone.utc)
     row = seat_health.local_seats(report_fn()).get(seat)
     row = row if isinstance(row, dict) else {}
-    at, fresh = seat_health._observed(row, now)
+    at, fresh = seat_health.observed(row, now)
     if not fresh or seat_health.dispatchable(
             {"schema": "carr-seat-health/v1", "seats": {seat: row}}, seat, now=now):
         return None
@@ -83,18 +82,8 @@ def refusal(entry: dict, config: dict, live: dict, report_fn, *, now=None):
             f"Then rerun ops/seat-health.py --seat {seat} --force; a passing probe readmits it.")
 
 
-def report(repo: Path = REPO) -> dict:
-    """Seat evidence: the record layer first, this Mac's report second."""
-    try:
-        local = json.loads((repo / "out/orch/budget/seat-health.json").read_text())
-    except (OSError, ValueError):
-        local = {}
-    dashboard = seat_health.read_dashboard(
-        lambda name, payload: seat_health.verb_call(repo, name, payload))
-    return seat_health.combined_report(dashboard, local)
-
-
 def check(entry: dict):
     """The send-time gate: live tailnet read, lazy seat evidence."""
     config = host_liveness.load_config()
-    return refusal(entry, config, host_liveness.observe(config=config), report)
+    return refusal(entry, config, host_liveness.observe(config=config),
+                   lambda: seat_health.current_report(REPO))
