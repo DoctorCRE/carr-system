@@ -1539,7 +1539,35 @@ commit;
                 else:
                     raise AssertionError(f"rotation accepted {label} as its target")
             provision.require_rotation_target(candidate_scope, binding_fixture)
+            # Even a binding whose CANDIDATE slot names Production or the prior
+            # staging project is refused: those two are never rotation targets.
+            for label, project_id in (("Production", provision.PRODUCTION_PROJECT_ID),
+                                      ("prior staging", old.project_id)):
+                aliased = types.SimpleNamespace(
+                    old=old, candidate=types.SimpleNamespace(project_id=project_id))
+                try:
+                    provision.require_rotation_target(
+                        dataclasses.replace(candidate_scope, project_id=project_id), aliased)
+                except provision.ProvisioningRefusal:
+                    pass
+                else:
+                    raise AssertionError(f"rotation accepted {label} named as the candidate")
             check("rotation targets only the receipted staging candidate project", True)
+
+            # AND MAIN ASKS THAT QUESTION before anything is minted: an owner
+            # connection that is not the candidate's refuses the whole run.
+            stray_owner = dataclasses.replace(
+                candidate_owner, scope=dataclasses.replace(
+                    candidate_scope, project_id=old.project_id))
+            provision.resolve_replacement_binding = lambda *_args, **_kwargs: \
+                dataclasses.replace(binding_fixture, owner=stray_owner)
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"])
+            check("main refuses a rotation whose owner connection is not the candidate",
+                  rc == 2 and "not the receipted staging candidate" in err
+                  and not any(event[0] in {"apply", "bulk"} for event in rotation_events)
+                  and not writer_file.paths.pending.exists())
+            provision.resolve_replacement_binding = lambda *_args, **_kwargs: binding_fixture
         finally:
             for name in ("reject_unsafe_environment", "replacement_target",
                          "resolve_replacement_binding", "load_rollback_worker_values",
@@ -2084,8 +2112,8 @@ commit;
             provision.apply_login_profile(
                 Connection(passwordless=False), profile, tiny_plan, "r" * 64,
                 expected_creator="neondb_owner", rotate=True, adopt=True)
-        except provision.ProvisioningRefusal:
-            check("a profile is never adopted and rotated in one call", True)
+        except provision.ProvisioningRefusal as exc:
+            check("a profile is never adopted and rotated in one call", "never both" in str(exc))
         else:
             raise AssertionError("adopt and rotate were combined")
     finally:
