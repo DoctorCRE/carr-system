@@ -3,7 +3,7 @@
   "_repin_note_2026_09_05": "Rules 737a68d6 and a7784a18 were added as Layer 0 session rails. None of the eight pack-cutover target ids or contracts changed; migration 0483 moves their guarded map-digest preimage forward.",
   "_repin_note_2026_10_08": "Rule 8400cd3d entered the reviewed map as a governance-rules pack rule. None of the eight activation-target contracts changed; migration 0851 moves their guarded map-digest preimage forward.",
   "_repin_note_2026_10_12": "hooks/staging-observation-tracker.py was retired and removed from the loose_work control's implementation list. None of the eight activation-target contracts changed; migration 0859 moves their guarded map-digest preimage forward.",
-  "_repin_note_2026_10_12_unfiled_bug": "The unfiled_bug Stop-gate control was registered and rules 19ebbeb3 and 1b8e7f43 were bound to it. None of the eight activation-target contracts changed; migration 0869 moves their guarded map-digest preimage forward.",
+  "_repin_note_2026_10_12_unfiled_bug": "The unfiled_bug Stop-gate control was registered and rules 19ebbeb3 and 1b8e7f43 were bound to it. None of the eight activation-target contracts changed; migration 0871 moves their guarded map-digest preimage forward.",
   "base_map_sha256": "21241f16f01d82f32e8d46610288684de34c00eee7d51304da5f54c0b7df403a",
   "schema": "rule-delivery-activation-overlay/v1",
   "targets": [

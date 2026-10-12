@@ -1,5 +1,5 @@
 -- rollback: forward-only — deleting the row would un-register a control a rule approval may then cite; retire it with a guarded retirement migration like 0836
--- 0868_register_unfiled_bug_stop_gate_control.sql
+-- 0870_register_unfiled_bug_stop_gate_control.sql
 --
 -- REGISTER THE ENFORCEMENT CONTROL `unfiled_bug`.
 --
@@ -45,6 +45,6 @@ begin
                     and enforcement_class = 'stop_gate'
                     and implementation_ref = 'hooks/unfiled-bug-stop-gate.py'
                     and test_ref = 'ops/unfiled-bug-stop-gate-selftest.py') then
-    raise exception '0868 FAILED: unfiled_bug is not an installed, verified stop_gate after the insert';
+    raise exception '0870 FAILED: unfiled_bug is not an installed, verified stop_gate after the insert';
   end if;
 end $$;
