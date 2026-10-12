@@ -150,6 +150,22 @@ def newly_applied(before: str, after: str) -> list[str]:
     return sorted(set(rows_a) - set(rows_b))
 
 
+# ── snapshot IO ────────────────────────────────────────────────────────────
+# A snapshot is read and written byte for byte. Some CHECK constraints hold a
+# literal carriage return (the SCAC ingress_key checks reject '[\n\r\t]'), and
+# universal-newline text IO turns it into a line feed: the base then loads a
+# different constraint and --write commits it to db/schema.sql.
+
+def read_snapshot(path: pathlib.Path) -> str:
+    with open(path, encoding="utf-8", newline="") as fh:
+        return fh.read()
+
+
+def write_snapshot(path: pathlib.Path, text: str) -> None:
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
 # ── the run ────────────────────────────────────────────────────────────────
 
 class StepFailed(RuntimeError):
@@ -213,8 +229,8 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
     env["LC_ALL"] = "C"
     env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '')}"
     base_snapshot = subprocess.run(["git", "show", f"{base}:{SNAPSHOT}"], cwd=REPO,
-                                   capture_output=True, text=True, check=True).stdout
-    (work / "base.sql").write_text(base_snapshot)
+                                   capture_output=True, check=True).stdout.decode("utf-8")
+    write_snapshot(work / "base.sql", base_snapshot)
     fixture = local_pg.DisposablePostgres("carr-migration-shadow.", bindir / "pg_ctl", env)
     data, port = fixture.root / "data", free_port()
     dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
@@ -243,7 +259,7 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
             fixture.close()
         except RuntimeError as exc:
             raise ShutdownFailed(str(exc)) from exc
-    text = candidate.read_text()
+    text = read_snapshot(candidate)
     return base_snapshot, text, newly_applied(base_snapshot, text)
 
 
@@ -285,10 +301,10 @@ def main(argv: list[str] | None = None) -> int:
             dest.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(work / "candidate.sql", dest / "schema.sql")
         if args.write:
-            (REPO / SNAPSHOT).write_text(candidate)
+            write_snapshot(REPO / SNAPSHOT, candidate)
             print(f"migration-shadow: wrote {SNAPSHOT} from the shadow candidate")
             return 0
-        diffs = differences((REPO / SNAPSHOT).read_text(), candidate)
+        diffs = differences(read_snapshot(REPO / SNAPSHOT), candidate)
     finally:
         artifacts.close()
     if not diffs:
