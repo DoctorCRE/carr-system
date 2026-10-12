@@ -233,10 +233,10 @@ def _payload_facts(raw):
     tool_use_id IS THE CORRELATION KEY, and recording it is what makes the
     per-event cost exact instead of inferred. An earlier version of this file
     said the harness gives a hook no per-event id and grouped firings by
-    session + event + timestamp-second to compensate. That was wrong:
-    hooks/staging-observation-tracker.py has depended on `tool_use_id` since it
-    was written, and its docstring records the finding that the field is present
-    on both the Pre and Post call of one invocation and identical across them.
+    session + event + timestamp-second to compensate. That was wrong: the
+    field is present on both the Pre and Post call of one invocation and
+    identical across them (verified against the Claude Code binary by the
+    staging observation tracker, retired 2026-10-12 once nothing read it).
     Every gate that fires for one tool call now carries that id, so the rollup
     can add up exactly the hooks that one Bash call paid for — and can say which
     gate actually sentenced it — rather than guessing from a shared timestamp.
