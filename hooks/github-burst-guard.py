@@ -19,8 +19,18 @@ WHAT IT REFUSES (PreToolUse, Bash and the Codex exec shapes):
      named PRs this way is routine: replaying recorded Bash commands showed
      most loop refusals under a three-item cap were exactly that.
   2. A release-pipeline tick (ops/release-pipeline*.py tick, any path or copy)
-     or out/orch/shepherd.sh started within five minutes of the last one this
-     hook saw start. One shared window: shepherd ticks the pipeline itself.
+     or out/orch/shepherd.sh while a tick is RUNNING NOW: while another process
+     holds the pipeline's single-run flock on out/release-pipeline/lock.
+     Shepherd ticks the pipeline itself, so it is refused the same way. The
+     hook probes that lock with a non-blocking shared flock and releases it at
+     once; it never creates, deletes or holds the file, and a missing file
+     means nothing is running. `--help`, `-h` and `report` are never ticks.
+     A finished tick, a fast failure, or one a permission check denied leaves
+     nothing behind, so the retry runs at once. (Until 2026-10-12 this was a
+     five-minute window after the last tick START the hook saw; it refused a
+     retry after `tick --help`, after a denied tick and after a three-second
+     failure while GitHub core usage read 0/5000. The pipeline's own lock
+     already stops a second tick stacking on a running one.)
   3. During a fifteen-minute cooldown after a recorded GitHub rate-limit answer:
      every gh call and the release tick, except `gh api rate_limit`.
   4. Two or more gh calls where one is sent to the background with a single
@@ -48,7 +58,9 @@ commit message, a --body or grep pattern in quotes) is not scanned for gh.
 
 STATE: out/github-burst-guard-state.json (out/ is git-ignored), shared by every
 session on the machine because the limit is per account, not per session.
-CARR_GITHUB_BURST_STATE overrides the path for the selftest.
+CARR_GITHUB_BURST_STATE overrides the path for the selftest. `release_tick_at`
+(the last tick start allowed) is still written, for the record only; it never
+refuses anything. CARR_RELEASE_PIPELINE_LOCK overrides the lock path probed.
 
 KNOWN LIMIT. It sees the command a session issues, not what a script does
 inside itself, and a loop hidden behind a variable or a script file is not
@@ -59,6 +71,7 @@ allows the call and logs the reason to out/hook-guard.log.
 
 Fixtures: ops/github-burst-guard-selftest.py
 """
+import fcntl
 import json
 import os
 import re
@@ -78,11 +91,13 @@ except Exception:                       # a missing meter must not change a verd
     LOG = os.environ.get("CARR_HOOK_GUARD_LOG") or os.path.join(REPO, "out", "hook-guard.log")
 STATE = os.environ.get("CARR_GITHUB_BURST_STATE") or os.path.join(
     REPO, "out", "github-burst-guard-state.json")
+# The pipeline's single-run flock (ops/release-pipeline.py single_run_lock).
+TICK_LOCK = os.environ.get("CARR_RELEASE_PIPELINE_LOCK") or os.path.join(
+    REPO, "out", "release-pipeline", "lock")
 
 MIN_LOOP_SLEEP = 2
 POLL_SLEEP_HINT = 30                    # named in refusals; any sleep >= 2 passes
 MAX_LITERAL_CALLS = 10                  # items x gh calls per pass, literal lists only
-TICK_WINDOW = 5 * 60
 COOLDOWN = 15 * 60
 
 # A gh word: `gh` on its own followed by a subcommand. `gh-pages`, `ghost`
@@ -368,8 +383,46 @@ def loop_reason(cmd):
     return None
 
 
+# Arguments that make the pipeline print or report instead of ticking.
+NOT_A_TICK_ARGS = {"-h", "--help", "report"}
+
+
 def runs_release_tick(cmd):
-    return bool(TICK_RE.search(cmd) or SHEPHERD_RE.search(cmd))
+    """True when the command runs a real tick or shepherd: `--help`, `-h` and
+    `report` anywhere in that statement mean it only prints."""
+    for rx in (TICK_RE, SHEPHERD_RE):
+        for m in rx.finditer(cmd):
+            words = cmd[m.start():statement_end(cmd, m.end())].split()
+            if not NOT_A_TICK_ARGS.intersection(words):
+                return True
+    return False
+
+
+def tick_running():
+    """True while another process holds the pipeline's single-run flock.
+
+    Probe only: open the existing file read-only, try a non-blocking shared
+    flock and drop it at once. A missing file means no tick has the lock; it
+    is never created, deleted or held here. Any other error fails open."""
+    try:
+        fd = os.open(TICK_LOCK, os.O_RDONLY)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        log(f"ALLOW(lock-unreadable) {exc}")
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except OSError as exc:
+            log(f"ALLOW(lock-probe-failed) {exc}")
+            return False
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
 
 
 def gh_calls_only_rate_probe(cmd):
@@ -425,14 +478,13 @@ def pre_verdict(cmd, now):
                     f"is also allowed (rule 74ddb23c, never burst GitHub).")
 
     if tick:
-        last = stamp(state, "release_tick_at")
-        if last is not None and now - last < TICK_WINDOW:
-            wait = int(TICK_WINDOW - (now - last)) + 1
-            return (f"GITHUB BURST GUARD: a release-pipeline tick or shepherd run "
-                    f"started {int(now - last)}s ago. Each tick makes many GitHub calls, "
-                    f"and hand-run ticks stacked on the scheduled ones are what tripped "
-                    f"the rate limit on 2026-10-06. Wait {wait}s, or read the pipeline's "
-                    f"state instead of ticking it again; one `gh pr view <n> --json "
+        if tick_running():
+            return (f"GITHUB BURST GUARD: a release-pipeline tick is running right now "
+                    f"(it holds the single-run lock {TICK_LOCK}). Each tick makes many "
+                    f"GitHub calls, and ticks stacked on a running one are what tripped "
+                    f"the rate limit on 2026-10-06. Retry as soon as that tick finishes "
+                    f"and releases the lock; there is no fixed wait. Meanwhile read the "
+                    f"pipeline's state instead; one `gh pr view <n> --json "
                     f"state,mergedAt` answers most status questions (rule 74ddb23c, "
                     f"never burst GitHub).")
         write_state(release_tick_at=now)

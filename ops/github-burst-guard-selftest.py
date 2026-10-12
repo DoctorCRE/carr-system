@@ -14,8 +14,13 @@ WHAT THE HOOK MUST DO:
      with no `sleep N` (N >= 2) inside it. ALLOW the same loop with the sleep
      (which covers an `until gh ...; do sleep 30; done` poll), and a `for` over
      a short literal list (items x gh calls per pass <= 10).
-  2. DENY a release-pipeline tick or out/orch/shepherd.sh started within five
-     minutes of the last one the hook saw start. ALLOW it after five minutes.
+  2. DENY a release-pipeline tick or out/orch/shepherd.sh while a tick is
+     running: while another process holds the pipeline's flock on
+     out/release-pipeline/lock. ALLOW it the moment that lock is free, however
+     recently the last tick started (2026-10-12: a five-minute start window
+     blocked retries after `tick --help`, a denied tick and a 3-second
+     failure). `--help`, `-h` and `report` are never ticks and never stamped.
+     The probe never creates, deletes or holds the lock file.
   3. PostToolUse: record a GitHub rate-limit answer seen in a GitHub-touching
      command's output. PreToolUse then DENIES every gh call (and the release
      tick) for fifteen minutes, except `gh api rate_limit`.
@@ -23,11 +28,13 @@ WHAT THE HOOK MUST DO:
   the cooldown. Fail open on malformed input.
 
 Spawns the REAL hook with REAL payloads; exit 2 = denied, 0 = allowed.
-State and log go to a temp directory through CARR_GITHUB_BURST_STATE and
-CARR_HOOK_GUARD_LOG, so nothing here touches out/.
+State, log and the pipeline lock go to a temp directory through
+CARR_GITHUB_BURST_STATE, CARR_HOOK_GUARD_LOG and CARR_RELEASE_PIPELINE_LOCK,
+so nothing here touches out/.
 
     .venv/bin/python ops/github-burst-guard-selftest.py
 """
+import fcntl
 import json
 import os
 import subprocess
@@ -40,8 +47,10 @@ HOOK = os.path.join(REPO, "hooks", "github-burst-guard.py")
 
 TMP = tempfile.mkdtemp(prefix="github-burst-guard-")
 STATE = os.path.join(TMP, "state.json")
+LOCK = os.path.join(TMP, "release-pipeline", "lock")
 ENV = dict(os.environ,
            CARR_GITHUB_BURST_STATE=STATE,
+           CARR_RELEASE_PIPELINE_LOCK=LOCK,
            CARR_HOOK_GUARD_LOG=os.path.join(TMP, "hook-guard.log"))
 
 
@@ -172,20 +181,92 @@ LOOP_ALLOW = [
 TICK = "python3 ops/release-pipeline.py tick"
 
 
+class held_lock:
+    """Hold the pipeline lock exactly as ops/release-pipeline.py does while a
+    tick runs: an exclusive flock on an open file, in THIS process, so the
+    hook subprocess sees it held."""
+
+    def __enter__(self):
+        os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+        self.fh = open(LOCK, "a+")
+        fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return self
+
+    def __exit__(self, *exc):
+        fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+        self.fh.close()
+
+
+def remove_lock():
+    if os.path.exists(LOCK):
+        os.remove(LOCK)
+
+
 def tick_cases(failures):
     clear_state()
+    remove_lock()
     code, _ = pre(TICK)
     expect(failures, "tick-first-allowed", code, 0)
     expect(failures, "tick-first-recorded",
            0 if isinstance(read_state().get("release_tick_at"), (int, float)) else 1, 0)
-    code, err = pre("cd /Users/booko/carr-system && .venv/bin/python ops/release-pipeline.py tick --verbose")
-    expect(failures, "tick-again-denied", code, 2)
-    if code == 2 and "release" not in err.lower():
-        failures.append("tick-again-denied: reason does not name the release tick")
+    expect(failures, "probe-never-creates-lock", 0 if not os.path.exists(LOCK) else 1, 0)
+
+    # Right after a FINISHED tick (lock free), the next one runs at once:
+    # measured 2026-10-12 case (c), a 3-second failure blocked its own retry.
+    code, _ = pre("cd /Users/booko/carr-system && .venv/bin/python ops/release-pipeline.py tick --verbose")
+    expect(failures, "tick-right-after-finished-tick-allowed", code, 0)
+    set_state(release_tick_at=time.time() - 3)
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    with open(LOCK, "a"):                   # a released lock file left behind, as after any tick
+        pass
+    code, _ = pre(TICK)
+    expect(failures, "tick-3s-after-finished-tick-with-free-lock-allowed", code, 0)
     code, _ = pre("out/orch/shepherd.sh")
-    expect(failures, "shepherd-within-window-denied", code, 2)
-    code, _ = pre("python3 /tmp/copy/release-pipeline-v2.py tick")
-    expect(failures, "copied-tick-within-window-denied", code, 2)
+    expect(failures, "shepherd-with-free-lock-allowed", code, 0)
+
+    # While a tick holds the lock, every tick shape and shepherd is refused.
+    with held_lock():
+        code, err = pre(TICK)
+        expect(failures, "tick-while-lock-held-denied", code, 2)
+        if code == 2 and "running" not in err.lower():
+            failures.append("tick-while-lock-held-denied: reason does not say a tick is running")
+        if code == 2 and "lock" not in err.lower():
+            failures.append("tick-while-lock-held-denied: reason does not name the lock")
+        code, _ = pre("out/orch/shepherd.sh")
+        expect(failures, "shepherd-while-lock-held-denied", code, 2)
+        code, _ = pre("python3 /tmp/copy/release-pipeline-v2.py tick")
+        expect(failures, "copied-tick-while-lock-held-denied", code, 2)
+        code, _ = pre("cd ~/carr-system; timeout 1500 python3 ops/release-pipeline.py tick --lane worker")
+        expect(failures, "timeout-wrapped-tick-while-lock-held-denied", code, 2)
+        # A denied tick must not refresh the stamp.
+        set_state(release_tick_at=time.time() - 200)
+        before = read_state()["release_tick_at"]
+        pre(TICK)
+        expect(failures, "denied-tick-does-not-record",
+               0 if read_state().get("release_tick_at") == before else 1, 0)
+        # Help and report are not ticks, even while one is running.
+        for name, cmd in (("tick-help", "python3 ops/release-pipeline.py tick --help"),
+                          ("tick-h", "python3 ops/release-pipeline.py tick -h"),
+                          ("help-before-tick", "python3 ops/release-pipeline.py --help tick"),
+                          ("report", "python3 ops/release-pipeline.py report --date 2026-10-12"),
+                          ("shepherd-help", "out/orch/shepherd.sh --help")):
+            code, _ = pre(cmd)
+            expect(failures, f"{name}-while-lock-held-allowed", code, 0)
+    expect(failures, "probe-never-deletes-lock", 0 if os.path.exists(LOCK) else 1, 0)
+    code, _ = pre(TICK)
+    expect(failures, "tick-after-lock-released-allowed", code, 0)
+
+    # --help / -h / report are never stamped as a tick (2026-10-12 case (a)).
+    for name, cmd in (("tick-help", "python3 ops/release-pipeline.py tick --help"),
+                      ("tick-h", ".venv/bin/python ops/release-pipeline.py tick -h | head"),
+                      ("report", "python3 ops/release-pipeline.py report")):
+        clear_state()
+        pre(cmd)
+        expect(failures, f"{name}-never-stamped",
+               0 if "release_tick_at" not in read_state() else 1, 0)
+
+    clear_state()
+    remove_lock()
     code, _ = pre("python3 ops/release-pipeline.py status")
     expect(failures, "non-tick-subcommand-allowed", code, 0)
     code, _ = pre('grep -n "def tick" ops/release-pipeline.py')
@@ -202,26 +283,6 @@ def tick_cases(failures):
     code, _ = pre('gh pr comment 1622 --body "verified by running\n'
                   'python3 ops/release-pipeline.py tick --dry-run"')
     expect(failures, "comment-body-mentioning-tick-allowed", code, 0)
-    code, _ = pre("cd ~/carr-system; timeout 1500 python3 ops/release-pipeline.py tick --lane worker")
-    expect(failures, "timeout-wrapped-tick-denied", code, 2)
-
-    set_state(release_tick_at=time.time() - 290)
-    code, _ = pre(TICK)
-    expect(failures, "tick-just-inside-window-denied", code, 2)
-
-    set_state(release_tick_at=time.time() - 301)
-    code, _ = pre("bash out/orch/shepherd.sh")
-    expect(failures, "shepherd-after-window-allowed", code, 0)
-    stamp = read_state().get("release_tick_at", 0)
-    expect(failures, "shepherd-after-window-recorded",
-           0 if time.time() - stamp < 30 else 1, 0)
-
-    # A denied tick must not refresh the window, or a retry loop never clears.
-    set_state(release_tick_at=time.time() - 200)
-    before = read_state()["release_tick_at"]
-    pre(TICK)
-    expect(failures, "denied-tick-does-not-record",
-           0 if read_state().get("release_tick_at") == before else 1, 0)
 
 
 # ---- class 3: rate-limit cooldown -----------------------------------------
@@ -417,7 +478,7 @@ def main():
     code, _ = pre("gh pr view 1")
     expect(failures, "corrupt-state-fails-open", code, 0)
 
-    total = len(LOOP_DENY) + len(LOOP_ALLOW) + len(BG_DENY) + len(BG_ALLOW) + 50
+    total = len(LOOP_DENY) + len(LOOP_ALLOW) + len(BG_DENY) + len(BG_ALLOW) + 75
     if failures:
         print(f"FAIL github-burst-guard: {len(failures)} failure(s)")
         for f in failures:
