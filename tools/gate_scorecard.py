@@ -52,11 +52,36 @@ DEMOTE_SECONDS = 30.0
 DEMOTE_ANNOUNCES = 50
 
 
+def _worktree_roots(repo: str) -> list[str]:
+    """Every checkout Git knows about: the canonical tree and its worktrees."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", repo, "worktree", "list", "--porcelain"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return [repo]
+    roots = [line[9:].strip() for line in out.splitlines() if line.startswith("worktree ")]
+    return roots or [repo]
+
+
 def telemetry_paths(explicit: list[str] | None = None, out_dir: str | None = None) -> list[str]:
+    """The meter writes to the out/ of the checkout a hook ran in, so a session
+    in a worktree whose out/ is a real directory (not a link to canonical) keeps
+    its own telemetry. Measured 2026-10-12: seven worktrees on one Mac held
+    their own streams, one of them 12MB from the 37-hour orchestrator session,
+    and a card read from canonical out/ alone saw four Stop fires a week. Read
+    every registered checkout's out/, once each (links resolve to one place)."""
     if explicit:
         return [p for p in explicit if os.path.exists(p)]
-    base = out_dir or os.path.join(REPO, "out")
-    found = sorted(glob.glob(os.path.join(base, "hook-telemetry*.jsonl*")))
+    bases = [out_dir] if out_dir else [os.path.join(root, "out") for root in _worktree_roots(REPO)]
+    seen: set[str] = set()
+    found: list[str] = []
+    for base in bases:
+        for path in sorted(glob.glob(os.path.join(base, "hook-telemetry*.jsonl*"))):
+            real = os.path.realpath(path)
+            if real not in seen:
+                seen.add(real)
+                found.append(path)
     return found
 
 
@@ -90,7 +115,10 @@ def read_rows(paths: list[str], since: datetime | None = None):
                 yield row
 
 
-def tally(rows) -> dict[tuple[str, str], dict]:
+def tally(rows, calls: dict | None = None) -> dict[tuple[str, str], dict]:
+    """Per-wiring cards. When `calls` is given, it also fills the per-tool-call
+    tax: for every (tool, event) the hook processes spawned and the summed
+    milliseconds, keyed by tool_use_id so one call counts once."""
     cards: dict[tuple[str, str], dict] = defaultdict(lambda: {
         "fires": 0, "catches": 0, "announces": 0, "errors": 0,
         "total_ms": 0.0, "max_ms": 0.0, "sessions": set()})
@@ -98,6 +126,15 @@ def tally(rows) -> dict[tuple[str, str], dict]:
         key = (str(row.get("hook")), str(row.get("event") or "?"))
         card = cards[key]
         card["fires"] += 1
+        if calls is not None and row.get("tool_use_id") and row.get("tool"):
+            try:
+                row_ms = float(row.get("elapsed_ms") or 0.0)
+            except (TypeError, ValueError):
+                row_ms = 0.0
+            per_call = calls.setdefault((str(row["tool"]), key[1]), {})
+            slot = per_call.setdefault(str(row["tool_use_id"]), {"hooks": 0, "ms": 0.0})
+            slot["hooks"] += 1
+            slot["ms"] += row_ms
         register = str(row.get("register") or "")
         if register in ("block", "reopen") or row.get("reopen") is True:
             card["catches"] += 1
@@ -140,10 +177,31 @@ def verdict(card: dict) -> tuple[str, str]:
     return "KEEP", "cheap and quiet"
 
 
+def call_tax(calls: dict) -> list[dict]:
+    """One row per (tool, event): how many hook processes a single tool call
+    spawns and how many milliseconds of hook work it carries, averaged over the
+    calls seen. Measured 2026-10-12 before any fix: a Bash call spawned 10
+    PreToolUse and 7 PostToolUse processes, ~960 ms of Python in all, against a
+    45 ms bare-interpreter floor — the tax is interpreter start-ups, not gate
+    logic, so the bound action is fewer processes, not faster ones."""
+    rows = []
+    for (tool, event), per_call in calls.items():
+        n = len(per_call)
+        if not n:
+            continue
+        hooks = sum(slot["hooks"] for slot in per_call.values()) / n
+        ms = sum(slot["ms"] for slot in per_call.values()) / n
+        rows.append({"tool": tool, "event": event, "calls": n,
+                     "hooks_per_call": round(hooks, 1), "ms_per_call": round(ms, 0)})
+    rows.sort(key=lambda r: (-r["ms_per_call"], r["tool"], r["event"]))
+    return rows
+
+
 def build(paths: list[str], days: int | None = None, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     since = (now - timedelta(days=days)) if days else None
-    cards = tally(read_rows(paths, since))
+    calls: dict = {}
+    cards = tally(read_rows(paths, since), calls)
     rows = []
     for (hook, event), card in cards.items():
         v, why = verdict(card)
@@ -158,7 +216,7 @@ def build(paths: list[str], days: int | None = None, now: datetime | None = None
     order = {"FIX": 0, "DEMOTE": 1, "MEASURE": 3, "KEEP": 2}
     rows.sort(key=lambda r: (order[r["verdict"]], -r["seconds"], r["hook"]))
     return {"schema": "gate-scorecard/v1", "generated_at": now.isoformat(), "days": days,
-            "sources": paths, "rows": rows,
+            "sources": paths, "rows": rows, "call_tax": call_tax(calls),
             "not_measured": ["context characters per fire (the meter does not record output size yet)"]}
 
 
@@ -181,6 +239,15 @@ def render(card: dict) -> str:
     for r in rows:
         counts[r["verdict"]] += 1
     lines.append("  " + "  ".join(f"{k}={counts[k]}" for k in ("FIX", "DEMOTE", "KEEP", "MEASURE")))
+    tax = card.get("call_tax") or []
+    if tax:
+        lines.append(f"  sources: {len(card['sources'])} telemetry file(s) across every registered checkout")
+        lines.append("  per tool call (hook processes spawned · summed hook ms, averaged):")
+        for r in tax[:8]:
+            lines.append(f"    {r['tool'][:24]:24s} {r['event'][:12]:12s} {r['calls']:6d} calls  "
+                         f"{r['hooks_per_call']:5.1f} procs  {r['ms_per_call']:6.0f} ms")
+        lines.append("    on >8 procs or >500 ms a call: retire the DEMOTE wirings on that matcher first, "
+                     "then chain the rest into one process (each start-up costs ~45 ms before any gate runs)")
     lines.append("  on FIX: repair the gate or remove it from ops/config/hooks.json and reinstall; "
                  "on DEMOTE: switch the gate to log-only, then retire through the gate cascade; "
                  "not measured: " + "; ".join(card["not_measured"]))

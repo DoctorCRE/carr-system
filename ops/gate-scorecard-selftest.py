@@ -31,10 +31,12 @@ def check(name: str, ok: bool, detail: object = "") -> None:
 NOW = datetime(2026, 10, 12, 15, 0, tzinfo=timezone.utc)
 
 
-def row(hook, event="Stop", register="silent", ms=50.0, exit_code=0, age_hours=1, session="s1", reopen=False):
+def row(hook, event="Stop", register="silent", ms=50.0, exit_code=0, age_hours=1, session="s1", reopen=False,
+        tool=None, tool_use_id=None):
     return {"ts": (NOW - timedelta(hours=age_hours)).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "event": event, "hook": hook, "elapsed_ms": ms, "outcome": "deny" if register in ("block", "reopen") else "allow",
-            "exit": exit_code, "register": register, "reopen": reopen, "session": session}
+            "exit": exit_code, "register": register, "reopen": reopen, "session": session,
+            "tool": tool, "tool_use_id": tool_use_id}
 
 
 def write(rows) -> str:
@@ -65,6 +67,13 @@ rows += [row("rare-gate.py", ms=10.0) for _ in range(5)]
 rows += [row("reopen-gate.py", register="odd", reopen=True) for _ in range(25)]
 # old rows for the --days filter
 rows += [row("ancient-gate.py", age_hours=24 * 40) for _ in range(30)]
+# the per-call tax: three Bash calls, each hit by three PreToolUse hooks (10+20+30 ms)
+# and one PostToolUse hook; a row with no tool_use_id never counts as a call
+for call in ("c1", "c2", "c3"):
+    rows += [row(h, event="PreToolUse", ms=ms, tool="Bash", tool_use_id=call)
+             for h, ms in (("a-gate.py", 10.0), ("b-gate.py", 20.0), ("c-gate.py", 30.0))]
+    rows += [row("d-gate.py", event="PostToolUse", ms=5.0, tool="Bash", tool_use_id=call)]
+rows += [row("a-gate.py", event="PreToolUse", ms=999.0, tool="Bash")]
 path = write(rows)
 
 card = sc.build([path], days=None, now=NOW)
@@ -94,6 +103,35 @@ text = sc.render(card)
 check("the render carries every verdict and the bound action",
       all(v in text for v in ("FIX", "DEMOTE", "KEEP", "MEASURE")) and "on DEMOTE:" in text and "on FIX:" in text)
 check("the render says what is not measured", "context characters" in text)
+
+tax = {(r["tool"], r["event"]): r for r in card["call_tax"]}
+check("the per-call tax counts one call per tool_use_id", tax[("Bash", "PreToolUse")]["calls"] == 3)
+check("the per-call tax counts hook processes per call", tax[("Bash", "PreToolUse")]["hooks_per_call"] == 3.0)
+check("the per-call tax sums hook ms per call", tax[("Bash", "PreToolUse")]["ms_per_call"] == 60.0)
+check("the post side is tallied separately", tax[("Bash", "PostToolUse")] == {
+    "tool": "Bash", "event": "PostToolUse", "calls": 3, "hooks_per_call": 1.0, "ms_per_call": 5.0})
+check("a row without a tool_use_id is not a call", sum(r["calls"] for r in card["call_tax"]) == 6)
+check("the render carries the per-call tax and its bound action",
+      "per tool call" in text and "3.0 procs" in text and "chain the rest into one process" in text)
+
+# telemetry discovery: one stream per registered checkout, links to the same
+# file counted once, explicit paths untouched
+wt_a = tempfile.mkdtemp(prefix="wt-a-"); wt_b = tempfile.mkdtemp(prefix="wt-b-"); wt_c = tempfile.mkdtemp(prefix="wt-c-")
+os.makedirs(os.path.join(wt_a, "out")); os.makedirs(os.path.join(wt_b, "out"))
+open(os.path.join(wt_a, "out", "hook-telemetry.jsonl"), "w").close()
+open(os.path.join(wt_b, "out", "hook-telemetry.jsonl"), "w").close()
+open(os.path.join(wt_b, "out", "hook-telemetry.jsonl.1"), "w").close()
+os.symlink(os.path.join(wt_a, "out"), os.path.join(wt_c, "out"))
+_roots = sc._worktree_roots
+sc._worktree_roots = lambda repo: [wt_a, wt_b, wt_c]
+try:
+    found = sc.telemetry_paths()
+    check("every registered checkout's telemetry is read", len(found) == 3
+          and any(p.startswith(wt_a) for p in found) and sum(p.startswith(wt_b) for p in found) == 2)
+    check("a linked out/ is the same stream and is read once", not any(p.startswith(wt_c) for p in found))
+    check("explicit paths bypass discovery", sc.telemetry_paths([path]) == [path])
+finally:
+    sc._worktree_roots = _roots
 
 empty = sc.build([write([])], days=None, now=NOW)
 check("no rows renders the meter-missing remedy, not a blank card", "on breach:" in sc.render(empty))
