@@ -39,6 +39,9 @@ SIZING_REPIN = REPO / "migrations" / "0851_repin_rule_delivery_activation_after_
 TRACKER_RETIREMENT_REPIN = (
     REPO / "migrations" / "0859_repin_rule_delivery_activation_after_tracker_retirement.sql"
 )
+UNFILED_BUG_CONTROL_REPIN = (
+    REPO / "migrations" / "0868_repin_rule_delivery_activation_after_unfiled_bug_control.sql"
+)
 PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
 CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
 # The chain has a fourth link as of 2026-09-01. Reinstating canonical_edit into
@@ -70,6 +73,9 @@ POST_0837_ACTIVATION_DIGEST = "b4e0d6689df3d96be24fb0cb888587f545bef8ffeba79c3ee
 # Retiring hooks/staging-observation-tracker.py moved the map again; 0859
 # carries the guarded forward repin from the post-0851 digest.
 POST_0851_ACTIVATION_DIGEST = "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490bac4a76f4"
+# Registering the unfiled_bug Stop-gate control moved the map again; 0868
+# carries the guarded forward repin from the post-0859 digest.
+POST_0859_ACTIVATION_DIGEST = "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e"
 ACTIVATION_TO_TEST_REF = (
     "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; "
     "ops/rule-pack-preuse-reselection-selftest.py"
@@ -508,9 +514,19 @@ def main() -> int:
             """select count(*), count(*) filter (where map_digest=%s),
                       array_agg(short_id order by short_id)
                  from ops.rule_delivery_activation_target""",
+            (POST_0859_ACTIVATION_DIGEST,),
+        )
+        check("tracker retirement repins the exact targets to the post-0859 reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
+        # Replay the unfiled_bug control repin, again through its guarded preimage.
+        cur.execute(UNFILED_BUG_CONTROL_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
             (current_map_digest,),
         )
-        check("tracker retirement repins the exact targets to the current reviewed map",
+        check("unfiled_bug control repins the exact targets to the current reviewed map",
               one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
         cur.execute("""insert into actor (slug,kind,display_name) values ('joe','human','Joe')
                        on conflict (slug) do nothing returning id""")

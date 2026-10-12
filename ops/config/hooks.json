@@ -333,6 +333,11 @@
           "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/jev-supervisor.py",
           "timeout": 25
+        },
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/unfiled-bug-stop-gate.py",
+          "timeout": 15
         }
       ]
     }
