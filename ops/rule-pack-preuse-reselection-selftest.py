@@ -1825,6 +1825,28 @@ with tempfile.TemporaryDirectory() as route_tmp:
         check("recording under a new epoch forgets the old context's deliveries",
               routes_lib.fresh_ids(epoch_session, "Bash", union) == union[1:])
 
+        # A subagent is its own context (reviewer finding on PR 1708): what the
+        # main conversation holds is not in the child's window and vice versa,
+        # siblings are separate, and the child's OWN epoch (rotated by its own
+        # compaction) scopes it, untouched by the main arm's rotations.
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e3", "digest": "sha256:x"})
+        boot_gate._write_agent_epoch(epoch_session, "child-1")
+        routes_lib.record_delivered(epoch_session, "Bash", union[:1], agent_id="child-1")
+        check("a child's delivery does not mark the main context",
+              routes_lib.fresh_ids(epoch_session, "Bash", union) == union)
+        routes_lib.record_delivered(epoch_session, "Bash", union)
+        check("the main context's delivery does not mark the child; the child's own does",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union[1:])
+        boot_gate._write_agent_epoch(epoch_session, "child-2")
+        check("sibling children are separate contexts",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-2") == union)
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e4", "digest": "sha256:x"})
+        check("the main arm's rotation does not forget a child's deliveries",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union[1:])
+        boot_gate._write_agent_epoch(epoch_session, "child-1")
+        check("a child's own re-arm (its compaction) gives that child the rules again",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union)
+
         # Overflow: more text than the cap. Rules not in the always-on file
         # come first; every rule that does not fit is listed with a summary.
         big = gen_payload(tool="Agent", tool_input={"description": "big", "prompt": "p"},

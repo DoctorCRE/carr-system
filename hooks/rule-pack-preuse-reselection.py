@@ -668,6 +668,13 @@ def _route_statements(response: dict, packs: list[str], ids: list[str]):
     return identity, delivery, found, not_found
 
 
+def _agent_id(payload: dict) -> str | None:
+    """The subagent this call runs in, or None for the main conversation; the
+    same field the boot gate keys its per-child epoch on."""
+    value = payload.get("agent_id") or payload.get("agentId")
+    return str(value) if value else None
+
+
 def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
                     runner: Callable) -> dict | None:
     tool_name = payload["tool_name"]
@@ -675,7 +682,8 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
                                             else ([], [], []))
     candidates = sorted(set(routed) | set(table_ids)
                         | (set(scheduled_rule_ids()) if _matches(payload) else set()))
-    ids = rule_routes.fresh_ids(payload["session_id"], tool_name, candidates)
+    ids = rule_routes.fresh_ids(payload["session_id"], tool_name, candidates,
+                                agent_id=_agent_id(payload))
     if not ids:
         return None
     try:
@@ -725,7 +733,8 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         # receipt at all. Then nothing is claimed as delivered: the compact
         # notice names every id and records nothing for dedupe.
         return _context(rule_routes.notice_too_large(ids))
-    rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full])
+    rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full],
+                                 agent_id=_agent_id(payload))
     try:
         from lib.rule_recall import log_delivery
         log_delivery(Path(REPO) / "out/rule-route-delivery.jsonl", json.loads(text)["receipt_id"],
