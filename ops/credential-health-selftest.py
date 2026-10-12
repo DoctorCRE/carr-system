@@ -290,11 +290,13 @@ def test_neon_ambiguous_status_is_unknown_not_guessed_either_way():
         del os.environ["NEON_API_KEY"]
 
 
-def test_neon_default_url_is_api_keys_not_projects():
-    """The bare inventory default (no `url` override) must point at the
-    endpoint tools/rotate-credential.py's own neon() verification call
-    uses — /projects needed an org scope this key may not carry and
-    returned 400 for a good key."""
+def test_neon_default_url_is_the_org_scoped_projects_query():
+    """The bare inventory default (no `url` override) must ask the question
+    an ORGANIZATION key answers: NEON_API_KEY is minted by the credential
+    mint lane as an org key (2026-10-12), which /api_keys (personal keys)
+    does not serve. org_id is the part that matters — /projects without it
+    returned 400 for a good key — and it is the same query
+    tools/rotate-credential.py verifies a rotated key with."""
     captured = {}
 
     def spying_get(url, headers, timeout_s):
@@ -305,9 +307,14 @@ def test_neon_default_url_is_api_keys_not_projects():
     try:
         cred = _cred("neon-default-url", "neon_api", probe={"type": "neon_api", "timeout_s": 1})
         ch.evaluate_credential(cred)
-        check("neon_api's bare default URL is the /api_keys endpoint",
-              captured.get("url") == "https://console.neon.tech/api/v2/api_keys",
+        check("neon_api's bare default URL is the org-scoped /projects query",
+              captured.get("url") ==
+              "https://console.neon.tech/api/v2/projects?org_id=org-dry-dew-75906281&limit=1",
               captured.get("url"))
+        inventory = json.loads(ch.INVENTORY_PATH.read_text())
+        row = next(c for c in inventory["credentials"] if c["name"] == "neon-api-key")
+        check("the inventory's neon-api-key row asks the same org-scoped question",
+              row["probe"]["url"] == ch.NEON_PROBE_URL, row["probe"]["url"])
     finally:
         del os.environ["NEON_API_KEY"]
 
@@ -317,7 +324,7 @@ test_neon_file_present_but_key_missing_is_failed_not_env_fallback()
 test_neon_falls_back_to_env_when_file_absent()
 test_neon_401_is_failed()
 test_neon_ambiguous_status_is_unknown_not_guessed_either_way()
-test_neon_default_url_is_api_keys_not_projects()
+test_neon_default_url_is_the_org_scoped_projects_query()
 test_worker_bearer_reads_token_from_file_when_present()
 test_worker_bearer_file_present_but_key_missing_is_failed()
 test_worker_bearer_falls_back_to_env_when_file_absent()

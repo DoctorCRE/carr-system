@@ -1064,6 +1064,19 @@ step "rule-admission drift (reports, never admits)" ./.venv/bin/python ops/rule-
 # contract as its siblings: 0 whether or not it finds a miss, 78 = SKIP.
 step "rule-delivery shadow (reports, never scopes)" ./.venv/bin/python ops/rule-delivery-shadow-watch.py
 
+# CREDENTIAL MINT, added 2026-10-12 on Joe's ruling (decision cbe91287): minting
+# a credential must not require him. He places ONE root grant per provider once
+# (ops/config/credential-root-grants.v1.json); ops/credential-mint.py then mints,
+# verifies with the new child, stores, installs and revokes every child within
+# seven days of its expiry. A grant that is absent is never a live call: it files
+# one deduplicated loop per provider naming the one-time grant. It runs BEFORE the
+# health step on purpose, so tonight's health probes read tonight's credentials.
+# Same exit contract as the health step: 0 whenever the lane ran, 1 only when the
+# grant file and the inventory disagree. Its HOME-relative reads of
+# ~/.config/carr survive carr_routine_exec's stripped environment, like health's.
+step "credential mint (rotates children from placed root grants; loops on a missing grant)" \
+     ./.venv/bin/python ops/credential-mint.py
+
 # CREDENTIAL HEALTH, added 2026-09-24. Joe is replacing every interactive login
 # CARR depends on with a long-lived scoped token, so the daily question is no
 # longer "did somebody re-authenticate" but "is each credential still good, and
@@ -1104,7 +1117,7 @@ step "rule-delivery shadow (reports, never scopes)" ./.venv/bin/python ops/rule-
 # files its own deduplicated loop too, whenever the file it names IS present
 # but couldn't be verified, so a never-checked credential can't stay silent.
 # `run.sh health` run by hand carries the fuller ambient environment and
-# reads all eleven credentials the same way; this nightly step is the same
+# reads every inventoried credential the same way; this nightly step is the same
 # lane, not a second implementation of it.
 step "credential health (reports, never rotates; loops on a finding)" \
      ./.venv/bin/python ops/credential-health.py --nightly

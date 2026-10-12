@@ -71,6 +71,8 @@ DEDUP_PATH = REPO_ROOT / "out" / "credential-health-loop-dedup.json"
 MINT_STATE_PATH = REPO_ROOT / "out" / "credential-health-mint-state.json"
 
 BUCKETS = ("ok", "expiring_soon", "failed", "unknown")
+# The org tools/db-tap.py and tools/rotate-credential.py pin; see _probe_neon.
+NEON_PROBE_URL = "https://console.neon.tech/api/v2/projects?org_id=org-dry-dew-75906281&limit=1"
 DEFAULT_TIMEOUT_S = 10
 DEFAULT_EXPIRING_SOON_DAYS = 3
 JSONL_ALLOWED_KEYS = {"name", "status", "checked_at", "expires_at"}
@@ -422,13 +424,15 @@ def _read_token_file_first(spec, default_token_key):
 def _probe_neon(cred, timeout_s):
     """NEON_API_KEY against Neon's own control-plane API.
 
-    GET /api_keys — the exact path tools/rotate-credential.py's neon()
-    helper already calls to verify a freshly-rotated key before writing it
-    (see that file's `neon()`/`_rotate_api_key_locked` around line 730) —
-    rather than /projects, which this probe used to call and which needs an
-    organisation scope this key may not carry: it returned a bare 400 for a
-    perfectly good key (PR #1218 review, round 2), a probe bug, not a
-    finding about the credential.
+    GET /projects?org_id=<the CARR org> — the question an ORGANIZATION API
+    key answers, and the one tools/rotate-credential.py asks to verify a
+    freshly rotated key. Since 2026-10-12 NEON_API_KEY is minted by the
+    nightly credential-mint lane as an organization key of the CARR org
+    (lib/credential_mint.py), and /api_keys lists PERSONAL keys, which an
+    organization key is not entitled to. The org scope is the part that
+    matters: /projects without org_id answers a bare 400 for a perfectly
+    good key on this account (PR #1218 review, round 2), a probe bug, not
+    a finding about the credential.
 
     401/403 is treated as the only unambiguous "this key does not
     authenticate" shape Neon uses. Anything else non-2xx is reported as
@@ -440,7 +444,7 @@ def _probe_neon(cred, timeout_s):
         return ProbeResult("failed", hard_fail)
     if not key:
         return ProbeResult("unknown", "env_var_missing")
-    url = spec.get("url", "https://console.neon.tech/api/v2/api_keys")
+    url = spec.get("url", NEON_PROBE_URL)
     status, _body = HTTP_GET(
         url, {"Authorization": f"Bearer {key}", "Accept": "application/json"},
         timeout_s)
