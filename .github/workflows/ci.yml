@@ -90,10 +90,11 @@ name: CI
 # PR from breaking main; it does not catch main going red on its own (a moved
 # dependency, a date-sensitive test) while nobody is opening PRs. Weekends are not
 # workdays for either partner, so that is exactly the window with no other cover.
+#
+# Metadata events must not create a skipped suite on an already tested head.
+# After a base retarget, reopen the PR to test its new merge ref.
 on:
   pull_request:
-    # Metadata events must not create a skipped suite on an already tested head.
-    # After a base retarget, reopen the PR to test its new merge ref.
     types: [opened, synchronize, reopened]
   schedule:
     # 06:20 UTC daily. Sits after the nightly backup (02:35 UTC) and the 05:10
