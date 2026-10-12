@@ -13,6 +13,59 @@ DEFAULT = REPO / "ops/config/gate-declarations.json"
 _GATE = re.compile(r"hooks/([A-Za-z0-9_.-]+\.py)")
 _EVENT = re.compile(r"\bCARR_CONTEXT_HOOK_EVENT=(\w+)")
 
+# A CHAIN (WR-000259) runs several gates of one event and matcher in ONE
+# interpreter: lib/hook_execution.py run_chain. Executions that carry the same
+# "chain" name and sit at consecutive orders of one group render as a single
+# hooks.json command; every member keeps its own declaration, solo command and
+# timeout, so the replay, pairing and slot checks below are unchanged.
+SOLO_PREFIX = "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py "
+CHAIN_FLAG = "--chain"
+CHAIN_EVENTS = frozenset({"PreToolUse", "PostToolUse"})
+CHAIN_SLACK_SECONDS = 5      # outer budget above the members' summed timeouts
+DEFAULT_TIMEOUT = 60         # Claude Code's own default for a command hook
+_CHAIN_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
+# A member shares one interpreter with the others, so anything that acts on the
+# whole PROCESS (exiting it, its signals, threads, its working directory) or
+# swallows the chain's per-member timeout is refused at admission.
+_CHAIN_HAZARDS = re.compile(
+    r"os\._exit|\bsignal\.(?:alarm|setitimer|signal)\b|\bthreading\b|os\.fork\b"
+    r"|\batexit\b|os\.chdir\b|except\s*:|except\s+BaseException\b")
+
+
+def chain_hazards(source_text):
+    """Process-global constructs that make a gate unsafe to share an interpreter."""
+    return sorted(set(_CHAIN_HAZARDS.findall(source_text)))
+
+
+def chain_command(members):
+    """The one hooks.json hook a run of chained members renders to."""
+    tokens, total = [], 0
+    for member in members:
+        command = member.get("command", "")
+        path = command[len(SOLO_PREFIX):] if command.startswith(SOLO_PREFIX) else ""
+        if not path or " " in path or ":" in path:
+            raise ValueError(f"chain member is not a plain solo command: {command!r}")
+        timeout = member.get("timeout", DEFAULT_TIMEOUT)
+        tokens.append(f"{timeout}:{path}")
+        total += timeout
+    return {"type": "command",
+            "command": SOLO_PREFIX + CHAIN_FLAG + " " + " ".join(tokens),
+            "timeout": total + CHAIN_SLACK_SECONDS}
+
+
+def _fuse(hooks):
+    """Replace each run of same-chain members with its one rendered command."""
+    out = []
+    for hook in hooks:
+        name = hook.get("chain")
+        if name and out and isinstance(out[-1], list) and out[-1][0].get("chain") == name:
+            out[-1].append(hook)
+        elif name:
+            out.append([hook])
+        else:
+            out.append(hook)
+    return [chain_command(item) if isinstance(item, list) else item for item in out]
+
 
 def _unique_object(pairs):
     result = {}
@@ -45,7 +98,7 @@ def _render(data, source):
                 }
     return {
         event: [{**{k: v for k, v in group.items() if k != "hooks"},
-                 "hooks": [hook for _, hook in sorted(group["hooks"].items())]}
+                 "hooks": _fuse([hook for _, hook in sorted(group["hooks"].items())])}
                 for _, group in sorted(groups.items())]
         for event, groups in events.items()
     }
@@ -86,6 +139,28 @@ def _command_gate(command):
     return names[0] if names else None
 
 
+def _chain_member_errors(name, event, command, timeout, chain, repo):
+    """Admission for one chained execution; see the chain note at the top."""
+    errors = []
+    if not isinstance(chain, str) or not _CHAIN_NAME.fullmatch(chain):
+        return [f"{name}: invalid chain name"]
+    if event not in CHAIN_EVENTS:
+        errors.append(f"{name}: chain {chain} is on {event}; chains are admitted on "
+                      + " and ".join(sorted(CHAIN_EVENTS)) + " only")
+    if command != SOLO_PREFIX + "{{REPO}}/hooks/" + name:
+        errors.append(f"{name}: chain member must be wired as the plain solo command")
+    if timeout is not None and (not isinstance(timeout, int) or isinstance(timeout, bool)):
+        errors.append(f"{name}: chain member timeout must be whole seconds")
+    try:
+        hazards = chain_hazards((Path(repo) / "hooks" / name).read_text(encoding="utf-8"))
+    except OSError:
+        hazards = []
+    if hazards:
+        errors.append(f"{name}: cannot share an interpreter in chain {chain}: "
+                      + ", ".join(hazards))
+    return errors
+
+
 def validate(path=DEFAULT, *, repo=REPO):
     """Return declaration defects without executing gates or reading live state."""
     repo = Path(repo)
@@ -112,7 +187,7 @@ def validate(path=DEFAULT, *, repo=REPO):
     disk = {p.name for p in (repo / "hooks").glob("*.py")}
     for name in sorted(disk - entries.keys()):
         errors.append(f"hooks/{name}: missing declaration")
-    occupied, groups = set(), {}
+    occupied, groups, chains = set(), {}, {}
     for name, entry in entries.items():
         if name not in disk:
             errors.append(f"hooks/{name}: declared hook absent")
@@ -177,6 +252,17 @@ def validate(path=DEFAULT, *, repo=REPO):
                 timeout = execution.get("timeout")
                 if timeout is not None and (not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0):
                     errors.append(f"{name}: invalid execution timeout")
+                chain = execution.get("chain")
+                if chain is not None:
+                    errors.extend(_chain_member_errors(name, event, command, timeout, chain, repo))
+                    chains.setdefault((source, event, str(chain)), []).append((group, order))
+    for (source, event, chain), slots in sorted(chains.items()):
+        orders = sorted(order for _, order in slots)
+        if len(slots) < 2:
+            errors.append(f"chain {chain}: a chain needs at least two members")
+        if (len({group for group, _ in slots}) != 1
+                or orders != list(range(orders[0], orders[0] + len(orders)))):
+            errors.append(f"chain {chain}: members must sit at consecutive orders of one {event} group")
     for source, event, group in groups:
         orders = sorted(slot[3] for slot in occupied if slot[:3] == (source, event, group))
         if orders != list(range(len(orders))):
