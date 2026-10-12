@@ -212,6 +212,50 @@ check("EDITING an existing mechanism is not covered", rc == 0,
       f"exit {rc}: {out[:160]}")
 
 rc, out = run_in_fixture({"ops/new-thing-gate.py": UNDECLARED}, base_files={})
+
+# ── 5. the default base is the MERGE BASE, not the moving tip of main ───────
+# A branch forked before main deleted a mechanism still carries that file.
+# Measured against origin/main it reads as ADDED by the branch; measured
+# against the merge base it is nothing.  Six pull requests went red on
+# 2026-10-12 for exactly this (defect ca048a85).
+def run_in_forked_fixture(branch_files, base=None):
+    """main: base commit with a retired hook -> delete it.  feature: forked at the
+    base commit, adds branch_files.  origin/main points at main's tip.  The gate
+    runs on feature with the given --base (None = the gate's own default)."""
+    with tempfile.TemporaryDirectory() as td:
+        td = pathlib.Path(td)
+        env = dict(fixture_env(), GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                   GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        def git(*a):
+            return subprocess.run(["git", *a], cwd=td, env=env, capture_output=True, text=True)
+        git("init", "-q", "-b", "main")
+        (td / "hooks").mkdir(); (td / "ops").mkdir()
+        (td / "hooks" / "retired-gate.py").write_text(UNDECLARED + 'if __name__ == "__main__":\n    raise SystemExit(0)\n')
+        (td / "seed").write_text("seed")
+        git("add", "-A"); git("commit", "-qm", "base")
+        git("branch", "feature")
+        git("rm", "-q", "hooks/retired-gate.py"); git("commit", "-qm", "retire the hook")
+        git("update-ref", "refs/remotes/origin/main", "main")
+        git("checkout", "-q", "feature")
+        for rel, body in branch_files.items():
+            f = td / rel; f.parent.mkdir(parents=True, exist_ok=True); f.write_text(body)
+        git("add", "-A"); git("commit", "-qm", "feature work")
+        (td / "ops" / "mechanism-doctrine-gate.py").write_text(GATE.read_text())
+        argv = [sys.executable, str(td / "ops" / "mechanism-doctrine-gate.py")]
+        if base:
+            argv += ["--base", base]
+        p = subprocess.run(argv, cwd=td, capture_output=True, text=True, env=env)
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+rc, out = run_in_forked_fixture({"lib/helper.py": UNDECLARED})
+check("a branch forked before main retired a hook is NOT charged with adding it (default base)",
+      rc == 0, f"exit {rc}: {out[:200]}")
+rc, out = run_in_forked_fixture({"lib/helper.py": UNDECLARED}, base="origin/main")
+check("measured against origin/main the same branch is wrongly refused (the old default)",
+      rc == 1 and "hooks/retired-gate.py" in out, f"exit {rc}: {out[:200]}")
+rc, out = run_in_forked_fixture({"ops/new-thing-gate.py": UNDECLARED})
+check("a branch that really adds an undeclared mechanism is still refused under the merge base",
+      rc == 1 and "ops/new-thing-gate.py" in out and "retired-gate" not in out, f"exit {rc}: {out[:200]}")
 # A base that cannot be resolved must exit 2, never 0 — "could not look" is not
 # "nothing to see".
 p = subprocess.run([sys.executable, str(GATE), "--base", "refs/heads/no-such-ref-here"],
