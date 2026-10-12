@@ -716,6 +716,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _canonical_contradiction_alarm=lambda: 0,
                   _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,
                   _tailscale_row=lambda: ("OK fixture node", False),
+                  _host_liveness_rows=lambda: [("OK fixture host", False, "fixture")],
                   _build_duration_row=lambda: ("OK fixture build duration", 0),
                   _health_sub=Mock(classify_loose_status=Mock(return_value={
                       "actionable_tracked": [], "actionable_untracked": [],

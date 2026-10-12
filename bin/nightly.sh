@@ -82,7 +82,7 @@ run_canary() {
 
 if [ "${1:-}" = "--preflight" ]; then
   required=(
-    ops/seat-health.py ops/seat_health.py
+    ops/seat-health.py ops/seat_health.py ops/host_liveness.py tools/room-bridge/dispatch.py
     ops/vault-drift-watch.py bin/schema-snapshot.sh ops/p1-environment-gate.py
     ops/p1-rebuild-gate.py ops/p1-integration-gate.py pipelines/cadence_engine.py
     pipelines/availability_matcher.py ops/fetch-allowlist.py
@@ -764,6 +764,17 @@ step "staging-observed prune (temp orphans + idle sessions)" \
     ./.venv/bin/python ops/staging-observed-prune.py
 
 step "daily AI seat health" ./.venv/bin/python ops/seat-health.py
+
+# DISPATCH CLAIM RECONCILE (2026-10-12). A dispatch killed mid-run leaves its
+# write-ownership claim `held`, and a held claim refuses every later job whose
+# --writes overlap it; until now only a session that remembered
+# `dispatch.py reconcile --claim <msg_id>` ever released one. This step examines
+# held claims, releases the ones whose writer is verifiably gone, and leaves an
+# unknown writer stuck. Exit 1 = a claim is still held after reconcile; on breach:
+# owner orchestrator reads the printed claims JSON, confirms the writer is dead,
+# then `dispatch.py reconcile --claim <msg_id>`; verify the next run exits 0;
+# auto-clear when no claim is held.
+step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py reconcile
 
 # ── ORDER 14: the two writing steps, BEFORE the exports ──────────────────────
 # The cadence engine WRITES (next_action + event), so the read-only exporter

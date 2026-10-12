@@ -356,6 +356,7 @@ class OwnershipTests(unittest.TestCase):
     def test_cli_repeatable_writes_are_combined_with_brief(self):
         with patch('dispatch.write_ownership.open_prs', return_value=('owner/repo', [])), \
              patch.object(dispatch, '_to_codex', side_effect=self.completed), \
+             patch.object(dispatch.seat_gate, 'check', return_value=None), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
                 'send', 'sol', 'Writes: src/*.py', '--writes', 'tests/*', '--writes', 'docs/*']), 0)
