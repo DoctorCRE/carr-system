@@ -386,19 +386,6 @@ def _deduped_context(payload: dict, receipt: dict) -> dict | None:
     return _context(text)
 
 
-def _scheduled_oversize_notice(ids: list[str]) -> str:
-    # The original receipt contract credits the pack only when every rule is
-    # present in full. Claude hides oversized additionalContext behind a file
-    # preview, so a partial receipt would falsely certify delivery.
-    return (
-        "RULE PACK PREUSE DELIVERY TOO LARGE: scheduled-automation rules were "
-        "NOT delivered. The full receipt exceeds the visible hook context cap. "
-        "The tool call was not blocked or changed. Before acting, fetch these "
-        "rules with standing-context rule_ids in batches and read their full "
-        "text: " + ", ".join(ids) + "."
-    )
-
-
 # ---------------------------------------------------------------------------
 # GENERALIZED RAIL (WR-000019 slice S9) — same shape as the four functions
 # above, parameterized over the compiled trigger table's (trigger_ids, packs,
@@ -781,9 +768,12 @@ def process(payload: dict, *, runner: Callable = subprocess.run,
             response = _run_selector(ids, runner)
             row = _receipt(payload, response, ids)
             if not rule_routes.within_cap(canonical(row).decode("utf-8")):
-                notice = _scheduled_oversize_notice(ids)
-                return _context(notice if rule_routes.within_cap(notice)
-                                else rule_routes.notice_too_large(ids))
+                # 2026-10-12: an oversized pack used to yield only a notice
+                # telling the model to fetch every rule again (75 times in one
+                # 37-hour session: two context spends per call for the same
+                # rules). The route rail already knows how to FIT: full text
+                # for what the budget carries, one-line entries for the rest.
+                return _route_delivery(payload, rows, [], runner)
             return _deduped_context(payload, row)
         except Exception as exc:
             # Known selector failures retain their safe cause; arbitrary
