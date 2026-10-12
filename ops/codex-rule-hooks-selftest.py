@@ -188,11 +188,20 @@ def main():
             os.environ["CARR_RULE_BOOT_FETCH_STUB"] = str(page_one)
             try:
                 notice = boot.arm_session(session, "compact")
-                assert "2 page(s)" in notice and boot.read_arm(session)["source"] == "compact"
+                assert "carried across compact" in notice and "2 page(s)" in notice, notice
+                assert boot.read_arm(session)["source"] == "compact"
+                assert invoke("rule-boot-gate.py", base, state) == {}, \
+                    "a complete boot of an unchanged corpus carries across a compaction"
+                page_one.write_text(json.dumps({"rule_boot": {
+                    "schema": boot.BOOT_SCHEMA, "digest": "sha256:" + "b" * 64,
+                    "page": 1, "pages_total": 2, "total_chars": 12, "text": "page 1"}}))
+                notice = boot.arm_session(session, "compact")
+                assert "carried" not in notice and "2 page(s)" in notice, notice
             finally:
                 os.environ.pop("CARR_RULE_BOOT_FETCH_STUB", None)
             again = invoke("rule-boot-gate.py", base, state)["hookSpecificOutput"]
             assert again["permissionDecision"] == "deny"
+            assert "re-armed at SessionStart (compact)" in again["permissionDecisionReason"], again
         finally:
             if old is None:
                 os.environ.pop("CARR_RULE_BOOT_STATE_DIR", None)
