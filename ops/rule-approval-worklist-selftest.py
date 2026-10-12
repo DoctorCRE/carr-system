@@ -14,9 +14,10 @@ What it proves:
     rule's mapped control, and a reason citing decision cbe91287;
   * every result is appended to the log: the receipt id on success, the
     refusal VERBATIM on a refusal, plus one summary line with the counts;
-  * three source mutants must fail these expectations: one that approves a
-    GONE rule, one that approves a held-control rule, and one that drops the
-    idempotency key;
+  * source mutants must fail these expectations: one that approves a GONE
+    rule, one that approves a held-control rule, one that drops the
+    idempotency key, and one that approves a rule the map records as only
+    surfaced;
   * lib/rule_approval_worklist.py stays a library (no shebang, no __main__),
     wired through run.sh, and ops/ci.sh's ops/*-selftest.py glob collects
     this file.
@@ -52,11 +53,13 @@ SURFACING = "cccc0001"
 NOT_IN_CATALOG = "dddd0001"
 UNMAPPED = "eeee0001"
 GONE_INSTALLED = "ffff0001"   # GONE, and its control IS installed: only the GONE flag stops it
+SURFACED = "abab0001"         # installed deny control, but the map says the RULE is only surfaced
 
 DB = {
     "rules": [{"rule_id": rid(s), "policy_status": "active", "enforcement_class": "machine_enforceable",
                "enforcement_status": "blocked", "control_bound": False}
-              for s in (READY_A, READY_B, HELD, SURFACING, NOT_IN_CATALOG, UNMAPPED, GONE_INSTALLED)],
+              for s in (READY_A, READY_B, HELD, SURFACING, NOT_IN_CATALOG, UNMAPPED, GONE_INSTALLED,
+                        SURFACED)],
     "catalog": [
         {"control_key": "deny_ok", "installed": True, "verified": True, "enforcement_class": "deny_gate"},
         {"control_key": "stop_ok", "installed": True, "verified": True, "enforcement_class": "stop_gate"},
@@ -66,8 +69,9 @@ DB = {
     "status_counts": [],
 }
 RULE_CONTROLS = {
-    READY_A: {"control": "deny_ok"},
-    READY_B: {"control": "stop_ok"},
+    READY_A: {"control": "deny_ok", "enforcement_class": "deny_gate"},
+    READY_B: {"control": "stop_ok", "enforcement_class": "stop_gate"},
+    SURFACED: {"control": "deny_ok", "enforcement_class": "surfacing"},
     HELD: {"control": "session_boot"},
     SURFACING: {"control": "chat_lint"},
     NOT_IN_CATALOG: {"control": "never_registered"},
@@ -77,6 +81,7 @@ GONE = {GONE_INSTALLED}
 EXPECTED = {
     READY_A: "ready", READY_B: "ready", HELD: "held", SURFACING: "class_not_approvable",
     NOT_IN_CATALOG: "catalog_missing", UNMAPPED: "unmapped", GONE_INSTALLED: "gone",
+    SURFACED: "rule_only_surfaced",
 }
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 REFUSAL = ('TOOL ERROR {\n  "error": "db_error",\n  "message": "active rule '
@@ -147,7 +152,7 @@ class WorklistTest(unittest.TestCase):
             self.assertTrue(r["why"])
             self.assertEqual(r["approve_rule"] is not None, r["readiness"] == "ready")
         tot = w.totals(rows)
-        self.assertEqual(tot["blocked"], 7)
+        self.assertEqual(tot["blocked"], 8)
         self.assertEqual(tot["ready"], 2)
         self.assertEqual(tot["held_by_control"], {"session_boot": 1})
 
@@ -196,7 +201,8 @@ class WorklistTest(unittest.TestCase):
         self.assertEqual(tail["not_attempted"], 0)
         self.assertFalse(tail["halted_after_refusals"])
         self.assertEqual(tail["skipped"], {"catalog_missing": 1, "class_not_approvable": 1,
-                                           "gone": 1, "held": 1, "unmapped": 1})
+                                           "gone": 1, "held": 1, "rule_only_surfaced": 1,
+                                           "unmapped": 1})
         self.assertEqual(summary, tail)
 
     def test_refusal_ceiling_halts_and_counts_the_rest(self):
@@ -241,6 +247,9 @@ class WorklistTest(unittest.TestCase):
     def test_mutant_that_drops_the_idempotency_key_fails(self):
         self.assert_mutant_fails(mutant(
             '        "idempotency_key": idempotency_key,\n', ""))
+
+    def test_mutant_that_approves_a_surfacing_only_rule_fails(self):
+        self.assert_mutant_fails(mutant('    if map_class == "surfacing":\n', "    if False:\n"))
 
     def test_unmutated_source_passes_the_same_check(self):
         check_apply(self, mutant("SCHEMA = ", "SCHEMA  = "))

@@ -20,9 +20,12 @@ WHAT IT JOINS. Three sources, each read, never written:
 
 One row per blocked rule: its control, the catalog's readiness for that
 control, the GONE flag, a readiness verdict with its reason, and the exact
-approve-rule JSON. A rule is READY only when it is not GONE and its control is
+approve-rule JSON. A rule is READY only when it is not GONE, its control is
 installed, verified and of a class approve_rule accepts (deny_gate, stop_gate,
-schema, transactional_schema — the same set ops.bind_rule_controls checks).
+schema, transactional_schema — the same set ops.bind_rule_controls checks), and
+the map does not itself record the RULE as `surfacing`: a rule the map says is
+only reminded of, never blocked, would be overstated by a hard_enforced
+receipt (rule ab814a26: recitation is not enforcement).
 
 DRY RUN BY DEFAULT. `--apply` runs approve-rule for the READY rows,
 sequentially, through the allowlisted Bash door (`./run.sh call`), minting a
@@ -59,7 +62,8 @@ POLICY_KIND = "machine_enforceable"
 # ops.bind_rule_controls and ops.approve_rule_receipt_activation_v1 both accept
 # only these classes; a surfacing or judgment control is refused by name there.
 APPROVABLE_CLASSES = frozenset({"deny_gate", "stop_gate", "schema", "transactional_schema"})
-READINESS = ("ready", "held", "class_not_approvable", "catalog_missing", "unmapped", "gone")
+READINESS = ("ready", "held", "class_not_approvable", "rule_only_surfaced", "catalog_missing",
+             "unmapped", "gone")
 
 DB_SQL = """select json_build_object(
   'rules', coalesce((
@@ -175,7 +179,8 @@ def approve_payload(row: Mapping, idempotency_key: str) -> dict:
     }
 
 
-def classify(short_id: str, control: str | None, cat: Mapping | None, gone: bool) -> tuple[str, str]:
+def classify(short_id: str, control: str | None, cat: Mapping | None, gone: bool,
+             map_class: str | None = None) -> tuple[str, str]:
     """(readiness, why) for one blocked rule. Order matters: GONE wins over all."""
     if gone:
         return "gone", "triaged GONE: retire into its survivor, never approve"
@@ -190,6 +195,10 @@ def classify(short_id: str, control: str | None, cat: Mapping | None, gone: bool
         return "class_not_approvable", (
             f"{control} is {cat.get('enforcement_class')}; approve_rule accepts only "
             + ", ".join(sorted(APPROVABLE_CLASSES)))
+    if map_class == "surfacing":
+        return "rule_only_surfaced", (
+            f"the map records this rule as surfacing through {control} (a reminder, not a "
+            "block); a hard_enforced receipt would overstate it")
     return "ready", f"{control} is installed, verified and {cat['enforcement_class']}"
 
 
@@ -203,11 +212,13 @@ def build_worklist(db: Mapping, rule_controls: Mapping[str, Mapping], gone: set[
         entry = rule_controls.get(short) or {}
         control = entry.get("control")
         cat = catalog.get(control) if control else None
-        readiness, why = classify(short, control, cat, short in gone)
+        map_class = entry.get("enforcement_class")
+        readiness, why = classify(short, control, cat, short in gone, map_class)
         row = {
             "rule_id": rule_id,
             "short_id": short,
             "control": control,
+            "map_class": map_class,
             "catalog_installed": bool(cat and cat.get("installed")),
             "catalog_verified": bool(cat and cat.get("verified")),
             "catalog_class": cat.get("enforcement_class") if cat else None,
@@ -301,13 +312,15 @@ def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
 # ── render ─────────────────────────────────────────────────────────────────
 
 def render(rows: list[dict], tot: dict) -> str:
-    head = f"{'rule':<9} {'control':<34} {'class':<21} {'catalog':<10} {'gone':<5} readiness"
+    head = (f"{'rule':<9} {'control':<26} {'control class':<21} {'rule class':<13} "
+            f"{'catalog':<8} {'gone':<5} readiness")
     lines = [head, "-" * len(head)]
     for r in sorted(rows, key=lambda x: (READINESS.index(x["readiness"]), x["control"] or "", x["short_id"])):
         cat = ("ok" if r["catalog_installed"] and r["catalog_verified"]
                else "held" if r["catalog_class"] else "absent")
-        lines.append(f"{r['short_id']:<9} {(r['control'] or '-'):<34} {(r['catalog_class'] or '-'):<21} "
-                     f"{cat:<10} {'yes' if r['gone'] else 'no':<5} {r['readiness']}")
+        lines.append(f"{r['short_id']:<9} {(r['control'] or '-'):<26} {(r['catalog_class'] or '-'):<21} "
+                     f"{(r['map_class'] or '-'):<13} {cat:<8} {'yes' if r['gone'] else 'no':<5} "
+                     f"{r['readiness']}")
     lines.append("")
     lines.append(f"{tot['blocked']} blocked active machine_enforceable rules: "
                  + ", ".join(f"{tot[k]} {k}" for k in READINESS))
