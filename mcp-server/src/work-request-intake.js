@@ -388,7 +388,7 @@ function validateCriterionEvidence(args, ToolError) {
             "incident:<ref>. Nothing was written." });
 }
 
-// COMPLETION ON BOUND EVIDENCE (0858, decision cbe91287). The database decides,
+// COMPLETION ON BOUND EVIDENCE (0872, decision cbe91287). The database decides,
 // in ops.complete_sourced_work_request_on_bound_evidence: it writes the
 // acceptance receipt only when the latest proposal is criteria_met and every
 // acceptance criterion carries a receipt that resolves now. This only reports

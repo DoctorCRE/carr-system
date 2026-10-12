@@ -49,7 +49,7 @@ class OutcomeFake {
       observed_minutes: PROPOSE.observed_minutes, interaction_surface: PROPOSE.interaction_surface, heavy_session_used: PROPOSE.heavy_session_used,
       manual_context_transfers: PROPOSE.manual_context_transfers, accepted_by_actor_slug: "joe", accepted_at: acceptedA.accepted_at,
     }] };
-    // An inconclusive proposal never completes on bound evidence (0858); the
+    // An inconclusive proposal never completes on bound evidence (0872); the
     // database says so and names what is missing.
     if (sql.includes("complete_sourced_work_request_on_bound_evidence")) return { rows: [{
       work_request_id: "40000000-0000-0000-0000-000000000001", ref: "WR-000001", state: "ready", version: 3,

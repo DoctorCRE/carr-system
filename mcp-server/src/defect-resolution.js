@@ -4,7 +4,7 @@
 //
 // record-defect's own contract says a defect must ACCUMULATE: the class counts
 // are the point, so a close is never a delete and never a state written onto
-// public.defect. It is one append-only row in public.defect_resolution (0858)
+// public.defect. It is one append-only row in public.defect_resolution (0872)
 // naming the fix: a commit, a pull request, or a server receipt. v_defect shows
 // the receipt beside the defect; v_defect_class keeps counting it.
 //

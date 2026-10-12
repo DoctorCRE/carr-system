@@ -1,6 +1,6 @@
 -- rollback: forward-only — every row these objects hold is a closing receipt another record now stands on; stop writing by revoking execute on the two ops functions and insert on public.defect_resolution, and leave the rows in place.
 -- lock-review: two new tables and four new functions; v_defect is replaced with the same columns plus four appended ones; ops.sourced_work_request_outcome_feedback_acceptance_receipt gains two columns with a constant default (metadata-only) and one CHECK validated over its 22 rows under a brief ACCESS EXCLUSIVE lock.
--- 0858: self-closing records (Joe, 2026-10-12, decision cbe91287: "this system
+-- 0872: self-closing records (Joe, 2026-10-12, decision cbe91287: "this system
 -- needs to be able to function without me micromanaging it").
 --
 -- Three kinds of record piled up because only a person could close them:
@@ -55,7 +55,7 @@ create table public.defect_resolution (
 );
 
 comment on table public.defect_resolution is
-  'Append-only close receipt for one defect (0858, decision cbe91287): the fixing commit, pull request or server receipt, who bound it and when. The defect row itself never changes, so v_defect_class keeps counting it; v_defect shows the receipt beside it.';
+  'Append-only close receipt for one defect (0872, decision cbe91287): the fixing commit, pull request or server receipt, who bound it and when. The defect row itself never changes, so v_defect_class keeps counting it; v_defect shows the receipt beside it.';
 
 create function public.defect_resolution_is_append_only() returns trigger
 language plpgsql set search_path = pg_catalog, public, pg_temp as $fn$
@@ -138,7 +138,7 @@ begin
 end $fn$;
 
 comment on function ops.work_request_evidence_receipt_kind(text) is
-  'The one definition of a bound evidence receipt (0858): ops.run:<uuid> that succeeded, ops.deployment:<uuid> that completed, defect-resolution:<uuid>, or incident:<ref> that is resolved or reviewed. Null for anything else, including a malformed reference.';
+  'The one definition of a bound evidence receipt (0872): ops.run:<uuid> that succeeded, ops.deployment:<uuid> that completed, defect-resolution:<uuid>, or incident:<ref> that is resolved or reviewed. Null for anything else, including a malformed reference.';
 
 -- THE PREDICATE. Pure: criteria are the Work Request''s acceptance_criteria
 -- ([{id,text}]); bindings are [{criterion_id, receipt_ref, receipt_kind,
@@ -171,7 +171,7 @@ language sql immutable set search_path = pg_catalog, pg_temp as $fn$
 $fn$;
 
 comment on function ops.work_request_bound_evidence_verdict(jsonb, jsonb) is
-  'Pure completion predicate (0858): {complete, missing, receipts}. Complete only when every acceptance criterion id carries a binding whose receipt currently resolves.';
+  'Pure completion predicate (0872): {complete, missing, receipts}. Complete only when every acceptance criterion id carries a binding whose receipt currently resolves.';
 
 -- ── 3. Work Request criterion evidence ───────────────────────────────────────
 
@@ -190,7 +190,7 @@ create table ops.work_request_criterion_evidence (
 );
 
 comment on table ops.work_request_criterion_evidence is
-  'Append-only binding of one sourced Work Request acceptance criterion to one server-resolvable receipt (0858). Written only through ops.bind_work_request_criterion_evidence; when every criterion is bound and a criteria_met outcome proposal exists, the request completes on bound evidence.';
+  'Append-only binding of one sourced Work Request acceptance criterion to one server-resolvable receipt (0872). Written only through ops.bind_work_request_criterion_evidence; when every criterion is bound and a criteria_met outcome proposal exists, the request completes on bound evidence.';
 
 create function ops.work_request_criterion_evidence_is_append_only() returns trigger
 language plpgsql set search_path = pg_catalog, ops, pg_temp as $fn$
@@ -222,7 +222,7 @@ alter table ops.sourced_work_request_outcome_feedback_acceptance_receipt
         and jsonb_array_length(bound_receipt_refs) > 0));
 
 comment on column ops.sourced_work_request_outcome_feedback_acceptance_receipt.acceptance_basis is
-  'human_acceptance: a partner accepted the proposal (accept-outcome-feedback). completed_on_bound_evidence: every acceptance criterion carried a bound receipt the database resolved, and the request completed without a human call (0858); bound_receipt_refs lists them.';
+  'human_acceptance: a partner accepted the proposal (accept-outcome-feedback). completed_on_bound_evidence: every acceptance criterion carried a bound receipt the database resolved, and the request completed without a human call (0872); bound_receipt_refs lists them.';
 
 -- ── 5. completion on bound evidence ──────────────────────────────────────────
 
@@ -343,7 +343,7 @@ begin
 end $fn$;
 
 comment on function ops.complete_sourced_work_request_on_bound_evidence(text, uuid) is
-  'Completion on bound evidence (0858): writes an outcome-feedback acceptance receipt with acceptance_basis completed_on_bound_evidence when the latest proposal for the current ready plan is criteria_met and every acceptance criterion carries a receipt that resolves now. Otherwise writes nothing and returns what is missing.';
+  'Completion on bound evidence (0872): writes an outcome-feedback acceptance receipt with acceptance_basis completed_on_bound_evidence when the latest proposal for the current ready plan is criteria_met and every acceptance criterion carries a receipt that resolves now. Otherwise writes nothing and returns what is missing.';
 
 -- Bind one criterion of a ready sourced Work Request to one receipt, then try
 -- to complete. Idempotent on the key; the same receipt twice is the same act.
@@ -414,7 +414,7 @@ begin
 end $fn$;
 
 comment on function ops.bind_work_request_criterion_evidence(text, text, text, uuid) is
-  'Bind one acceptance criterion of a ready sourced Work Request to one receipt that resolves through ops.work_request_evidence_receipt_kind (0858). Append-only; a different receipt for a bound criterion is refused.';
+  'Bind one acceptance criterion of a ready sourced Work Request to one receipt that resolves through ops.work_request_evidence_receipt_kind (0872). Append-only; a different receipt for a bound criterion is refused.';
 
 revoke all on function ops.work_request_evidence_receipt_kind(text) from public;
 revoke all on function ops.work_request_bound_evidence_verdict(jsonb, jsonb) from public;

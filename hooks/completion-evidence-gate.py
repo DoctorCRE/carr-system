@@ -272,7 +272,7 @@ WRITE_ACTION_EXACT = {
                                   # to server-resolved evidence, once. "bind" is not a prefix.
     "rebind-slice-criterion-evidence",  # slice done-marker (0628): the partner override of a
                                   # binding; exact entry, same reasoning.
-    "bind-work-request-criterion-evidence",  # 0858: binds one Work Request acceptance criterion
+    "bind-work-request-criterion-evidence",  # 0872: binds one Work Request acceptance criterion
                                   # to a server-resolved receipt and may complete the request
                                   # on bound evidence. Exact entry: "bind" is not a prefix.
     "cancel-workflow-cutover-plan",  # DoctorCRE V5-R02: cancels an active cutover plan so it

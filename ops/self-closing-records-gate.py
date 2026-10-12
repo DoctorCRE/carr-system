@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ci: db-gate
 # doctrine: engineering-workflow-sop
-"""Rollback-only acceptance gate for 0870 self-closing records.
+"""Rollback-only acceptance gate for 0872 self-closing records.
 
 Proves, on the real schema and as the runtime role that fires each door:
 

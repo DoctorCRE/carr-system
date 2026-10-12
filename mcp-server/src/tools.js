@@ -10258,7 +10258,7 @@ registerTools(incidentTools({ withEnvelope, writeEvent, ToolError, authorization
 
 // The defect log's close door (decision cbe91287). A close is an append-only
 // resolution receipt beside the defect, never a change to it: defects still
-// accumulate by class. See src/defect-resolution.js and migrations/0858.
+// accumulate by class. See src/defect-resolution.js and migrations/0872.
 registerTools(defectResolutionTools({ withEnvelope, writeEvent, ToolError }), "defect-resolution");
 
 // Engineering Passport runtime: typed plan registration, server-derived
