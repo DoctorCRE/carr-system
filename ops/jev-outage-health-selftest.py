@@ -300,6 +300,20 @@ class OutageTests(unittest.TestCase):
             self.assertEqual(json.loads(state.read_text())["open_key"], "kept",
                              "an unconfirmed (not refused) reply must keep its key for replay")
 
+    def test_call_verb_marks_only_a_record_layer_refusal(self):
+        """repair_loop drops a persisted open payload only on `refused`; an
+        unconfirmed reply must keep it for replay."""
+        from unittest import mock
+        from lib.record_call import VerbResult
+        for kind, refused in (("refused", True), ("transient", False), ("failed", False)):
+            with self.subTest(kind=kind), mock.patch.object(
+                    health.record_call, "call_verb",
+                    return_value=VerbResult("add-loop", kind, reply={"error": "fixture"})):
+                self.assertEqual(health.call_verb("add-loop", {}), {"ok": False, "refused": refused})
+        with mock.patch.object(health.record_call, "call_verb",
+                               return_value=VerbResult("add-loop", "ok", reply={"ok": True, "loop_id": "l"})):
+            self.assertEqual(health.call_verb("add-loop", {}), {"ok": True, "loop_id": "l"})
+
     def test_one_loop_then_auto_close_after_success(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"

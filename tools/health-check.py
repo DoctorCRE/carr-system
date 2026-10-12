@@ -1123,6 +1123,9 @@ _HEALTH_COMPLETION_MARKER = ("Projection freshness/tamper checks are recovery ev
                              "use --recovery --reason <why>.")
 
 _FINDINGS: list = []
+# Row family -> subjects its reader positively reported green this run (None:
+# not evaluated). health_breach.act() auto-clears a loop only on this evidence.
+_GREEN_EVIDENCE: dict = {}
 # The machine-readable form of every CANONICAL_FINDING line the run prints,
 # built alongside the text so both stay in lockstep. Schema decided against
 # Jev (architecture_or_design, 2026-09-24, full confidence on subject
@@ -1415,6 +1418,7 @@ def _storage_hygiene_row():
 def _canonical_health():
     """The normal health surface: record/control-plane/local truth only."""
     _FINDINGS.clear()
+    _GREEN_EVIDENCE.clear()
     rc = 0
     if CANONICAL_SECTION in ('all', 'builds'):
         try:
@@ -1910,7 +1914,11 @@ def _canonical_health():
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
 
     if CANONICAL_SECTION == "all":
+        # A seat's loop auto-clears only on its own PASS line (tools/
+        # health_breach.py act): until the rows are read, no seat is green.
+        _GREEN_EVIDENCE["ai_seat_health"] = None
         try:
+            _seats_green = set()
             for _seat_line in _seat_health_rows():
                 print("  " + _seat_line)
                 if _seat_line.startswith("FAIL"):
@@ -1919,6 +1927,9 @@ def _canonical_health():
                     # seat's text, so five bound actions were unreachable.
                     rc = _red("ai_seat_health", _seat_line, subject=_seat_line.split()[1],
                               time_rolling=True)
+                elif _seat_line.startswith("PASS"):
+                    _seats_green.add(_seat_line.split()[1])
+            _GREEN_EVIDENCE["ai_seat_health"] = _seats_green
         except (ImportError, TypeError, AttributeError):
             _seat_detail = ("Seat health evidence unreadable; on breach: orchestrator repairs "
                             "ops/seat-health.py and reruns the daily exact-value probes; "
@@ -2104,7 +2115,7 @@ def _breach_consumer():
         findings = list(_FINDINGS)
         if ACT_MODE:
             report = health_breach.act(findings, health_breach.record_door,
-                                       receipts_path=ACT_RECEIPTS, complete=True)
+                                       receipts_path=ACT_RECEIPTS, complete=True, green=dict(_GREEN_EVIDENCE))
             _ACT_ERRORS = report.errors
             print(f"  {'ACT' if not report.errors else 'ACT ⚠︎'} {'breach act':<18} "
                   f"{report.summary() or 'nothing to do'} · receipts {ACT_RECEIPTS}")

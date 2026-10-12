@@ -50,7 +50,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import AbstractSet, Callable, Mapping, Optional
 
 TAG = "[health-breach "
 CLEARED = "cleared"
@@ -382,10 +382,18 @@ class ActReport:
 
 
 def act(findings: list[dict], door, *, receipts_path: Path | str, complete: bool,
+        green: Optional[Mapping[str, Optional[AbstractSet[str]]]] = None,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)) -> ActReport:
     """File/update one loop per red row; auto-clear this consumer's loops whose
     row went green. `complete` must be True only for a full, finished run —
-    a partial run cannot prove a row green, so it clears nothing."""
+    a partial run cannot prove a row green, so it clears nothing.
+
+    "Not red" is not "green". `green` maps a row family (the finding key) to
+    the subjects its reader positively reported green, or to None when the
+    family was not evaluated (its reader raised or its evidence was missing):
+    a loop in a listed family clears only for a subject in that set. And a
+    family with a red bare row (no subject — the shape an evaluation failure
+    takes) proves none of its subjects green, so none of them clears."""
     report = ActReport()
     stamp = now().strftime("%Y-%m-%dT%H:%M:%SZ")
     breaches = [breach_from_finding(f) for f in findings]
@@ -450,6 +458,15 @@ def act(findings: list[dict], door, *, receipts_path: Path | str, complete: bool
                 continue
             row_id = label[len(TAG):].split(" ", 1)[0].rstrip("]")
             if row_id in red or _loop_digest(loop) == CLEARED:
+                continue
+            family, _, subject = row_id.partition("/")
+            listed = green is not None and family in green
+            evidence = green.get(family) if listed and green is not None else None
+            unproven = (listed and evidence is None) or (
+                bool(subject) and (family in red or (listed and subject not in (evidence or ()))))
+            if unproven:
+                receipt(row_id, "withheld", loop=str(loop.get("number")),
+                        detail="this run did not report the row green; a loop clears only on green evidence")
                 continue
             number, version = str(loop.get("number")), loop.get("version")
             if _loop_owner(str(loop.get("owner"))) == "claude":

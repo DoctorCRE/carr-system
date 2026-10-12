@@ -146,6 +146,13 @@ class FakeDoor:
         return VerbResult(verb, "ok", reply={"ok": True})
 
 
+def _load_tool_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def finding(key, detail, subject=""):
     return {"key": key, "subject": subject, "detail": detail, "count": 1,
             "hard_error": False, "time_rolling": False}
@@ -275,6 +282,91 @@ class HealthActTests(unittest.TestCase):
         lib = load("mutant_noclear")
         lib.OWN_LOOPS_LIMIT = 0
         self.assertTrue(any("must close" in f for f in scenario(lib)))
+
+    # ── auto-clear needs green evidence (review of PR #1714, HIGH) ──────────
+    # A night when seat state could not be read emits ONE bare `ai_seat_health`
+    # row. Every `ai_seat_health/<seat>` loop is then "not red", but nothing
+    # proved any seat green, so none of them may close.
+
+    UNREADABLE = ("Seat health evidence unreadable; on breach: orchestrator repairs ops/seat-health.py "
+                  "and reruns the daily exact-value probes; auto-clear when all seats pass")
+
+    def own_loops(self, lib, *rows):
+        door = FakeDoor()
+        for number, (key, subject) in enumerate(rows, start=950):
+            b = lib.breach_from_finding(finding(key, SEAT if key == "ai_seat_health" else TAILSCALE, subject))
+            door.seed(number, f"{b.tag}{b.digest}] FAIL {b.row_id}\nrest")
+        return door
+
+    def test_an_unevaluated_seat_family_closes_no_seat_loop(self):
+        lib = load()
+        door = self.own_loops(lib, ("ai_seat_health", "grok"), ("ai_seat_health", "codex"),
+                              ("tailscale", "local-node"))
+        with tempfile.TemporaryDirectory() as tmp:
+            report = lib.act([finding("ai_seat_health", self.UNREADABLE)], door,
+                             receipts_path=Path(tmp) / "r.jsonl", complete=True,
+                             green={"ai_seat_health": None}, now=NOW)
+        self.assertEqual(door.loops["950"]["status"], "open", "grok's loop closed on an unread night")
+        self.assertEqual(door.loops["951"]["status"], "open", "codex's loop closed on an unread night")
+        self.assertEqual(door.loops["952"]["status"], "done", "a green row in another family still clears")
+        withheld = sorted(r["row_id"] for r in report.receipts if r["decision"] == "withheld")
+        self.assertEqual(withheld, ["ai_seat_health/codex", "ai_seat_health/grok"])
+
+    def test_a_seat_loop_clears_only_when_its_seat_reported_green(self):
+        lib = load()
+        door = self.own_loops(lib, ("ai_seat_health", "grok"), ("ai_seat_health", "retired-seat"),
+                              ("ai_seat_health", ""))
+        with tempfile.TemporaryDirectory() as tmp:
+            lib.act([], door, receipts_path=Path(tmp) / "r.jsonl", complete=True,
+                    green={"ai_seat_health": {"grok", "codex"}}, now=NOW)
+        self.assertEqual(door.loops["950"]["status"], "done", "a seat reported PASS clears")
+        self.assertEqual(door.loops["951"]["status"], "open", "a seat nobody evaluated never clears")
+        self.assertEqual(door.loops["952"]["status"], "done",
+                         "the bare unreadable-evidence row clears once the family was read")
+
+    def test_a_red_bare_row_withholds_every_loop_of_its_family(self):
+        """The same hole for any family whose evaluation failure emits a bare
+        row (credential_health "check failed ..."): its per-subject loops are
+        not proven green by that night's run."""
+        lib = load()
+        door = FakeDoor()
+        b = lib.breach_from_finding(finding("credential_health", TAILSCALE, "github-app"))
+        door.seed(960, f"{b.tag}{b.digest}] FAIL\nrest")
+        with tempfile.TemporaryDirectory() as tmp:
+            lib.act([finding("credential_health", "check failed (OSError: x)")], door,
+                    receipts_path=Path(tmp) / "r.jsonl", complete=True, now=NOW)
+        self.assertEqual(door.loops["960"]["status"], "open")
+
+    def test_health_check_reports_no_seat_green_when_seat_rows_raise(self):
+        """End to end through the shipped `_canonical_health` and act(): the
+        seat reader raises, and no per-seat loop closes."""
+        import contextlib, io
+        findings_suite = _load_tool_module("health_check_findings_selftest",
+                                           REPO / "tools" / "health-check-findings-selftest.py")
+        lib = load()
+        for rows, open_after in (
+                (TypeError("fixture seat report"), {"950", "951"}),
+                (["PASS grok latency=1s layer=none · ok", SEAT.replace("grok", "codex")], {"951"})):
+            with self.subTest(rows=rows):
+                ns = findings_suite.PaidCapCanonicalHealthTests().all_namespace()
+                ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+                def seat_rows(rows=rows):
+                    if isinstance(rows, Exception):
+                        raise rows
+                    return rows
+                ns["_seat_health_rows"] = seat_rows
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ns["_canonical_health"]()
+                door = self.own_loops(lib, ("ai_seat_health", "grok"), ("ai_seat_health", "codex"))
+                with tempfile.TemporaryDirectory() as tmp:
+                    lib.act(list(ns["_FINDINGS"]), door, receipts_path=Path(tmp) / "r.jsonl",
+                            complete=True, green=dict(ns["_GREEN_EVIDENCE"]), now=NOW)
+                self.assertEqual({n for n in ("950", "951") if door.loops[n]["status"] == "open"}, open_after)
+
+    def test_the_consumer_passes_the_green_evidence(self):
+        health = (REPO / "tools" / "health-check.py").read_text()
+        self.assertTrue("complete=True, green=dict(_GREEN_EVIDENCE)" in health,
+                        "_breach_consumer must hand act() the run's green evidence")
 
     def test_parser_reads_real_row_text(self):
         lib = load()
