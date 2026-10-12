@@ -31,7 +31,10 @@ TWO LANES, one tick:
           /dev/null for every child):
             1 release worktree at S (+ .venv link, npm ci in mcp-server)
             2 tools/staging-project-replacement.py prepare --apply --local-checks-green
-            3 tools/provision-staging-app-writer.py --apply
+            3 tools/provision-staging-app-writer.py --apply  (an operator-run
+              `tick --lane worker --rotate-lost-staging-credential LABEL`
+              forwards --rotate-lost-credential LABEL here: the deliberate
+              rotation of a staging login whose local file is lost)
             4 bin/migrate-prod.sh (dry) and, only when it lists pending, --apply
             5 bin/deploy-worker.sh --upload-version  (verifier bound HERE; a pending
               Durable Object migration is applied first: Production attachment
@@ -869,6 +872,13 @@ def blocker_loop(capability: str, detail: str, *, remedy: str = "", recovery: st
 
 # ── the pipeline ──────────────────────────────────────────────────────────────
 
+# The candidate login profiles tools/provision-staging-app-writer.py knows (its
+# PROFILES labels, which are tools/staging_database_credential.py's profile()
+# keys). The selftest holds the two lists equal.
+ROTATABLE_STAGING_CREDENTIALS = ("reader", "writer", "gate_zero_producer",
+                                 "foundation_assurance_oracle")
+
+
 class Pipeline:
     def __init__(self, cfg: dict, *, repo: Path = REPO, runner: Runner | None = None,
                  github: Callable[[str], Any] | None = None,
@@ -876,8 +886,14 @@ class Pipeline:
                  call_verb: Callable[[str, dict], tuple[bool, Any]] | None = None,
                  slice_marker: Callable[[str, str], dict] | None = None,
                  dry_run: bool = False, env: dict[str, str] | None = None,
-                 today: str | None = None, out: Callable[[str], None] = print):
+                 today: str | None = None, out: Callable[[str], None] = print,
+                 rotate_lost_staging_credentials: tuple[str, ...] = ()):
         self.cfg, self.repo, self.dry_run = cfg, repo, dry_run
+        # Joe's 2026-10-12 approval, carried for ONE operator-run tick: each
+        # label is forwarded to the staging-app-writer step as
+        # --rotate-lost-credential, and the provisioner alone decides whether
+        # that profile is really in the lost-file state. Never set by launchd.
+        self.rotate_lost_staging_credentials = tuple(rotate_lost_staging_credentials)
         self.runner = runner or Runner()
         self.env = env if env is not None else child_env()
         self._github = github or (lambda repo_name: GitHub(repo_name, self.env))
@@ -2408,8 +2424,15 @@ class Pipeline:
                                              "--local-checks-green", "--sha", sha, "--operation-id", op,
                                              "--candidate-operation-id", cand], wt)
         receipt = "<receipt_id from staging-prepare>" if self.dry_run else parse_json_field(prep.out, "receipt_id", "staging-prepare")
+        rotate: list[str] = []
+        for label in self.rotate_lost_staging_credentials:
+            rotate += ["--rotate-lost-credential", label]
+        if rotate:
+            self.out(f"  {'[dry-run] ' if self.dry_run else ''}staging-app-writer will DELIBERATELY ROTATE "
+                     f"the lost staging credential(s) {', '.join(self.rotate_lost_staging_credentials)} "
+                     "(refused by the provisioner unless the role holds a password and no local file exists)")
         self.step("staging-app-writer", [py, "tools/provision-staging-app-writer.py", "--candidate-operation-id",
-                                         cand, "--receipt-id", receipt, "--sha", sha, "--apply"], wt)
+                                         cand, "--receipt-id", receipt, "--sha", sha, "--apply", *rotate], wt)
 
         # 4. production migrations, only when something is pending
         plan = self.step("migrate-plan", ["bin/migrate-prod.sh"], wt)
@@ -3360,7 +3383,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="print the exact commands; execute no deploy")
     ap.add_argument("--lane", choices=("worker", "app"), action="append")
     ap.add_argument("--date", default=dt.date.today().isoformat())
+    ap.add_argument("--rotate-lost-staging-credential", action="append", default=[], metavar="LABEL",
+                    choices=ROTATABLE_STAGING_CREDENTIALS,
+                    help="tick --lane worker only: forward --rotate-lost-credential LABEL to the "
+                         "staging-app-writer step (repeatable), to deliberately rotate a staging "
+                         "candidate login whose local credential file is lost")
     args = ap.parse_args(argv)
+    if args.rotate_lost_staging_credential and (args.command != "tick" or args.lane != ["worker"]):
+        ap.error("--rotate-lost-staging-credential needs `tick --lane worker` and no other lane")
+    if len(set(args.rotate_lost_staging_credential)) != len(args.rotate_lost_staging_credential):
+        ap.error("--rotate-lost-staging-credential names each profile at most once")
     cfg = load_config()
     if args.command == "clear-failed":
         if not args.lane or len(args.lane) != 1 or not args.sha or not args.reason:
@@ -3379,7 +3411,8 @@ def main(argv: list[str] | None = None) -> int:
         pipe = Pipeline(cfg, dry_run=False)
         sha = args.sha or pipe.git("rev-parse", "origin/main", cwd=pipe.repo)
         return pipe.health_preflight(sha)
-    pipe = Pipeline(cfg, dry_run=args.dry_run)
+    pipe = Pipeline(cfg, dry_run=args.dry_run,
+                    rotate_lost_staging_credentials=tuple(args.rotate_lost_staging_credential))
     return pipe.tick(args.lane or ["worker", "app"])
 
 

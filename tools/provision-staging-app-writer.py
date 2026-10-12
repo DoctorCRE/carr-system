@@ -6,6 +6,17 @@ caller must supply the full candidate-operation UUID, immutable receipt UUID,
 and merged source SHA; provider scopes, roles, DSNs, grants, and Worker names
 remain server- and repository-derived authority rather than caller choices.
 
+DELIBERATE ROTATION OF A LOST CREDENTIAL (Joe, 2026-10-12). A candidate role
+that already holds a password but has no local credential file is refused --
+the file is lost, and silently replacing a live password is the failure the
+adopt guard exists to prevent. ``--rotate-lost-credential LABEL`` (repeatable,
+``--apply`` only) is the explicit, per-profile opt-in for exactly that state: a
+fresh password is minted in-process into the private pending file, set under
+the advisory lock in an uncommitted transaction, published to the staging
+Worker and read back, and only then committed and promoted. Any failure before
+the commit rolls the ALTER back and removes the pending file. Each committed
+rotation is reported in the run output with its profile, role, time and reason.
+
 STAGING ONLY, AND THAT IS THE DESIGN RATHER THAN A GAP. Every scope this tool
 resolves is refused if it lands on the Production project id. Migration 0502
 creates the Gate Zero producer seat WITHOUT a password, and this tool ADOPTS
@@ -23,6 +34,7 @@ and nothing in this branch provisions Production.
 from __future__ import annotations
 
 import argparse
+import datetime
 import importlib.util
 import json
 import os
@@ -278,6 +290,11 @@ class AdoptedSeat:
     profile: LoginProfile
     credential_file: Any
     stored: Any
+    # "adopted" for a migration-created seat's first password, "rotated" for a
+    # deliberate rotation of a lost credential. Both ride the same uncommitted
+    # transaction, the same publication and the same commit; only the word the
+    # run reports differs.
+    outcome: str = "adopted"
 
 
 @dataclass(frozen=True)
@@ -301,6 +318,12 @@ PROFILES = (
                  None, "DATABASE_URL_FOUNDATION_ASSURANCE_WRITER",
                  created_by_migration=True),
 )
+
+# THE ONE APPROVED REASON A CREDENTIALED STAGING ROLE MAY BE ROTATED BY THIS
+# TOOL. Joe approved it in chat on 2026-10-12: the Mac Studio holding the local
+# credential files has no power, so the roles still hold passwords nobody can
+# read. It is recorded verbatim on every rotation the run reports.
+DELIBERATE_ROTATION_REASON = "local credential file lost; Joe approved 2026-10-12"
 
 
 Run = Callable[..., subprocess.CompletedProcess]
@@ -1264,6 +1287,18 @@ def role_is_passwordless(cur: Any, role: str) -> bool:
     return rows[0][0] is True
 
 
+def _read_passwordless(cur: Any, role: str, *, purpose: str) -> bool:
+    try:
+        return role_is_passwordless(cur, role)
+    except ProvisioningRefusal:
+        raise
+    except psycopg.Error as exc:
+        raise ProvisioningRefusal(
+            f"could not read from pg_authid whether {role} is still passwordless; "
+            f"this connection cannot see it, so {purpose} refuses"
+        ) from exc
+
+
 def require_passwordless_seat(cur: Any, role: str) -> None:
     """The guard on adoption, and it reads the database rather than a local file.
 
@@ -1281,16 +1316,7 @@ def require_passwordless_seat(cur: Any, role: str) -> None:
     passwordless role, and the fix for a lost file is a deliberate rotation with
     its own approval -- never a side effect of a provisioning run.
     """
-    try:
-        passwordless = role_is_passwordless(cur, role)
-    except ProvisioningRefusal:
-        raise
-    except psycopg.Error as exc:
-        raise ProvisioningRefusal(
-            f"could not read from pg_authid whether {role} is still passwordless; "
-            "this connection cannot see it, so adoption refuses"
-        ) from exc
-    if not passwordless:
+    if not _read_passwordless(cur, role, purpose="adoption"):
         raise ProvisioningRefusal(
             f"{role} already holds a password; adopting it would rotate a credential that "
             "is still in use. The credential file is missing on this machine, not on the "
@@ -1298,9 +1324,25 @@ def require_passwordless_seat(cur: Any, role: str) -> None:
         )
 
 
+def require_credentialed_seat(cur: Any, role: str) -> None:
+    """The guard on deliberate rotation: the mirror of the adoption guard.
+
+    Rotation exists for exactly one state -- the role holds a password and this
+    machine has no file for it. A role with NO password is a seat waiting for
+    adoption, not a lost credential, so rotation refuses it and leaves it to the
+    adopt row rather than becoming a second way to credential a fresh seat.
+    """
+    if _read_passwordless(cur, role, purpose="deliberate rotation"):
+        raise ProvisioningRefusal(
+            f"{role} holds no password; that is a seat waiting to be adopted, not a lost "
+            "credential, so deliberate rotation refuses"
+        )
+
+
 def apply_login_profile(
     conn: Any, profile: LoginProfile, grants: Sequence[str], password: str,
     *, expected_creator: str, commit: bool = True, adopt: bool = False,
+    rotate: bool = False,
 ) -> bool:
     """Create/converge one login profile in one advisory-locked transaction.
 
@@ -1315,9 +1357,18 @@ def apply_login_profile(
     the Worker secret and reads it back while this transaction is still open, and
     a publication failure rolls the password change away rather than leaving a
     rotated role behind a Worker that never received the new DSN.
+
+    ``rotate`` is the deliberate rotation of a LOST credential (Joe, 2026-10-12)
+    and rides the adopt path's machinery: the role must already exist, must be
+    exactly its canonical closure BEFORE anything changes, and must -- read from
+    pg_authid under the advisory lock -- already hold a password. Only then is
+    the password replaced; no grant is re-issued, and the caller passes
+    ``commit=False`` so the same publish-then-commit settlement is the undo.
     """
     cur = conn.cursor()
     created = False
+    if adopt and rotate:
+        raise ProvisioningRefusal("a profile is adopted or rotated, never both")
     if adopt and not profile.created_by_migration:
         raise ProvisioningRefusal(
             f"{profile.login_role} is not a migration-created seat and may not be adopted")
@@ -1342,6 +1393,19 @@ def apply_login_profile(
             require_passwordless_seat(cur, profile.login_role)
             cur.execute(sql.SQL("alter role {} with password {}").format(
                 sql.Identifier(profile.login_role), sql.Literal(password)))
+        elif exists and rotate:
+            # The role must ALREADY be exactly canonical: a rotation changes a
+            # password and nothing else, so a drifted role refuses here rather
+            # than being quietly re-credentialed. Then, under the lock and
+            # immediately before the ALTER, the database must say the role
+            # holds a password -- the lost-file state and no other.
+            validate_profile_closure(
+                collect_profile_closure(cur, profile), profile, grants,
+                exact=True, expected_creator=expected_creator,
+            )
+            require_credentialed_seat(cur, profile.login_role)
+            cur.execute(sql.SQL("alter role {} with password {}").format(
+                sql.Identifier(profile.login_role), sql.Literal(password)))
         elif exists:
             validate_profile_closure(
                 collect_profile_closure(cur, profile), profile, grants,
@@ -1350,6 +1414,9 @@ def apply_login_profile(
         elif adopt:
             raise ProvisioningRefusal(
                 f"{profile.login_role} does not exist; its migration has not applied here")
+        elif rotate:
+            raise ProvisioningRefusal(
+                f"{profile.login_role} does not exist; there is no credential to rotate")
         else:
             if profile.bundle_role is not None:
                 bundle = collect_role_authority(cur, profile.bundle_role)
@@ -1375,7 +1442,7 @@ def apply_login_profile(
             # The exact edge (including its grantor) is proved below by the
             # same fail-closed closure validation used for reused roles.
             created = True
-        if not adopt:
+        if not (adopt or rotate):
             # THE ADOPT PATH VERIFIES THE MIGRATION'S GRANTS AND DOES NOT RE-ISSUE
             # THEM. For a role this tool creates, the canonical plan is what
             # brings the role into existence with its authority. For a
@@ -1544,7 +1611,7 @@ def publish_worker_cutover(
 def settle_adopted_seats(
     conn: Any, deferred: Sequence[AdoptedSeat], *,
     publish: Callable[[], None], prove: Callable[[AdoptedSeat], None],
-    compensate: Callable[[], None],
+    compensate: Callable[[], None], committed: Callable[[], None] = lambda: None,
 ) -> None:
     """Publish the Worker secrets FIRST, then commit the adopted seats' passwords.
 
@@ -1568,6 +1635,10 @@ def settle_adopted_seats(
     used, and only then is the failure reported. A compensation that cannot read
     its own restoration back is an uncertain state and says so by name rather
     than being retried.
+
+    ``committed`` runs the moment the commit has succeeded and before any proof:
+    it is how the caller learns that a rotated password is now live, which is
+    the line between discarding a pending credential and keeping it.
     """
     publish()
     try:
@@ -1583,6 +1654,7 @@ def settle_adopted_seats(
         raise ProvisioningRefusal(
             "adopted seat commit refused; prior Worker bindings restored; output suppressed"
         ) from exc
+    committed()
     for entry in deferred:
         prove(entry)
 
@@ -1613,9 +1685,27 @@ def require_direct_owner_identity(cur: Any) -> str:
     return "neondb_owner"
 
 
+def require_rotation_target(scope: ProviderScope, binding: ReplacementBinding) -> None:
+    """A deliberate rotation runs on the receipted staging CANDIDATE and nowhere else.
+
+    The owner DSN is already derived from that candidate; this re-states it at
+    the one place a password is about to change, so no later edit can point a
+    rotation at Production or at the untouched prior-staging rollback project.
+    """
+    if (
+        scope.project_id == PRODUCTION_PROJECT_ID
+        or scope.project_id == binding.old.project_id
+        or scope.project_id != binding.candidate.project_id
+    ):
+        raise ProvisioningRefusal(
+            "deliberate rotation refused: the owner connection is not the receipted "
+            "staging candidate project")
+
+
 def decide_profile_action(
     *, role_exists_now: bool, credential_state: str,
     role_created_by_migration: bool = False, role_passwordless: bool | None = None,
+    rotate_lost: bool = False,
 ) -> str:
     """Name the one safe action for an observed role/credential/password state.
 
@@ -1642,7 +1732,37 @@ def decide_profile_action(
       with it rather than re-applied.
     - NOT passwordless and credential absent -> no row at all, which refuses.
       That is the lost-local-file case, and refusing it is the point.
+
+    ``rotate_lost`` is the operator's explicit, per-profile answer to that last
+    row (--rotate-lost-credential, Joe 2026-10-12). It opens exactly ONE row --
+    role present, pg_authid shows a password, final AND pending both absent ->
+    rotate -- and turns every other state into a refusal rather than letting the
+    ordinary matrix run: a named rotation whose file exists is a mistaken
+    request, never a quiet reuse, and a working credential is never rotated.
     """
+    if rotate_lost:
+        if credential_state == "pending":
+            # The one realistic way here after a rotation started: the process
+            # died (power, SIGKILL) after minting the pending file and before
+            # the commit, so the `finally` that discards it never ran. Say how
+            # to tell the two cases apart rather than leaving a bare refusal.
+            raise ProvisioningRefusal(
+                "rotation refused: a pending credential exists and is never rotated. If a "
+                "rotation was interrupted, rerun WITHOUT the flag to resume it; if that fails "
+                "its login proof the file names nothing -- remove it and rerun with the flag")
+        if credential_state != "absent":
+            raise ProvisioningRefusal(
+                f"deliberate rotation refused: the local credential is {credential_state}; "
+                "a credential that still exists on this machine is never rotated")
+        if not role_exists_now:
+            raise ProvisioningRefusal(
+                "deliberate rotation refused: the role does not exist, so there is no "
+                "lost credential to rotate")
+        if role_passwordless is not False:
+            raise ProvisioningRefusal(
+                "deliberate rotation refused: pg_authid does not show the role holding a "
+                "password, so this is not a lost credential")
+        return "rotate"
     matrix = {
         (False, "absent"): "prepare_create",
         (False, "pending"): "create",
@@ -1701,7 +1821,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repair-prior-rollback-credentials", action="store_true",
                         help="adopt only missing passwordless migration seats on the prior "
                              "staging rollback project; never changes Worker secrets")
+    parser.add_argument("--rotate-lost-credential", action="append", default=[],
+                        metavar="LABEL", choices=[profile.label for profile in PROFILES],
+                        help="deliberately rotate this candidate login profile's password "
+                             "because its local credential file is lost (repeatable; "
+                             "--apply only). Refused unless the role exists, already holds "
+                             "a password, and neither its final nor pending file exists")
     args = parser.parse_args(argv)
+    if args.rotate_lost_credential and not args.apply:
+        parser.error("--rotate-lost-credential requires --apply")
+    if args.rotate_lost_credential and (
+            args.rollback_to_prior_staging or args.repair_prior_rollback_credentials):
+        parser.error("--rotate-lost-credential applies only to the candidate cutover")
+    if len(set(args.rotate_lost_credential)) != len(args.rotate_lost_credential):
+        parser.error("--rotate-lost-credential names each profile at most once")
     if args.rollback_to_prior_staging and args.repair_prior_rollback_credentials:
         parser.error("rollback and prior credential repair are mutually exclusive")
     if args.rollback_to_prior_staging and not args.apply:
@@ -1713,6 +1846,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    # Every deliberate rotation whose password change COMMITTED, so a refusal
+    # after the commit still says which credential is now new.
+    rotations: list[dict[str, str]] = []
     try:
         reject_unsafe_environment(os.environ)
         target = replacement_target(
@@ -1796,6 +1932,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                           if value is not None}
         config_root = replacement_credential_root(target.candidate_operation_id)
         lock_path = config_root / ".staging-role-operation.lock"
+        rotate_labels = frozenset(args.rotate_lost_credential)
+        if rotate_labels:
+            require_rotation_target(owner_dsn.scope, binding)
+        # Rotations minted in THIS run whose password change has not committed.
+        # Until the commit they are the undo: the `finally` below removes each
+        # pending file after the ALTER is rolled back, so no file is left naming
+        # a password the database never accepted.
+        minted_rotations: list[AdoptedSeat] = []
+        settled = {"committed": False}
         outcomes: dict[str, str] = {}
         candidate_values: dict[str, str] = {}
         # THE ADOPT PATH'S OPEN TRANSACTION. A migration-created seat's password
@@ -1820,11 +1965,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     cur.execute("select exists(select 1 from pg_roles where rolname=%s)",
                                 (login_profile.login_role,))
                     exists = cur.fetchone() == (True,)
+                    rotating = login_profile.label in rotate_labels
                     # The DATABASE decides whether a migration-created seat is
-                    # still uncredentialed; the local file cannot answer it.
+                    # still uncredentialed, and whether a role named for
+                    # rotation already holds a password; the local file cannot
+                    # answer either.
                     passwordless = (
                         role_is_passwordless(cur, login_profile.login_role)
-                        if exists and login_profile.created_by_migration else None
+                        if exists and (login_profile.created_by_migration or rotating)
+                        else None
                     )
                     try:
                         stored = credential.load_existing(
@@ -1840,7 +1989,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         action = decide_profile_action(
                             role_exists_now=exists, credential_state="absent",
                             role_created_by_migration=login_profile.created_by_migration,
-                            role_passwordless=passwordless,
+                            role_passwordless=passwordless, rotate_lost=rotating,
                         )
                         stored = credential.prepare_pending(
                             file_profile.paths, key=file_profile.key,
@@ -1850,11 +1999,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                             expected_port=owner_dsn.port,
                             expected_database=owner_dsn.database,
                         )
+                        if action == "rotate":
+                            minted_rotations.append(AdoptedSeat(
+                                login_profile, file_profile, stored, outcome="rotated"))
                     else:
                         action = decide_profile_action(
                             role_exists_now=exists, credential_state=stored.state,
                             role_created_by_migration=login_profile.created_by_migration,
-                            role_passwordless=passwordless,
+                            role_passwordless=passwordless, rotate_lost=rotating,
                         )
                     if action in {"resume", "reuse"}:
                         validate_profile_login(
@@ -1879,6 +2031,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                         deferred_seats.append(
                             AdoptedSeat(login_profile, file_profile, stored))
                         return stored.value, "adopting"
+                    elif action == "rotate":
+                        # DELIBERATE ROTATION of a lost credential rides the
+                        # adopt row's machinery end to end: the fresh password
+                        # was minted in-process into the pending file above,
+                        # the ALTER is prepared under the advisory lock and NOT
+                        # committed, and the same publish-then-commit
+                        # settlement below is the only way it becomes live.
+                        apply_login_profile(
+                            owner, login_profile, plans[login_profile.label], stored.password,
+                            expected_creator=expected_creator, rotate=True, commit=False,
+                        )
+                        deferred_seats.append(minted_rotations[-1])
+                        return stored.value, "rotating"
                     else:
                         apply_login_profile(
                             owner, login_profile, plans[login_profile.label], stored.password,
@@ -1930,7 +2095,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             seat.credential_file.paths, key=seat.credential_file.key,
                             expected_value=seat.stored.value,
                         )
-                    outcomes[seat.profile.label] = "adopted"
+                    outcomes[seat.profile.label] = seat.outcome
 
                 def restore_prior_cutover() -> None:
                     # The SAME door the publication used, under the SAME lock:
@@ -1948,10 +2113,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 # Publication happens while the adopt transaction is STILL OPEN;
                 # any refusal reaches the `finally` unwind, which rolls it back.
                 # A refusal of the COMMIT is past that point, so it compensates.
+                def record_commit() -> None:
+                    settled["committed"] = True
+                    rotated_at = datetime.datetime.now(datetime.timezone.utc).isoformat(
+                        timespec="seconds")
+                    rotations.extend({
+                        "profile": seat.profile.label, "role": seat.profile.login_role,
+                        "worker_secret": seat.profile.secret_name,
+                        "rotated_at": rotated_at, "reason": DELIBERATE_ROTATION_REASON,
+                    } for seat in minted_rotations)
+
                 settle_adopted_seats(
                     owner, deferred_seats,
                     publish=publish_cutover, prove=prove_adopted_seat,
-                    compensate=restore_prior_cutover)
+                    compensate=restore_prior_cutover, committed=record_commit)
             finally:
                 try:
                     owner.rollback()
@@ -1960,6 +2135,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 except (psycopg.Error, ValueError):
                     pass
                 owner.close()
+                if not settled["committed"]:
+                    # The ALTER above never committed (rolled back, or aborted
+                    # with the closed connection), so each minted password
+                    # names nothing; remove it before anything can resume it.
+                    for seat in minted_rotations:
+                        credential.discard_pending(
+                            seat.credential_file.paths, key=seat.credential_file.key,
+                            expected_value=seat.stored.value)
         after = final_state.get("after")
         if after is None:
             raise ProvisioningRefusal("final candidate state readback is absent")
@@ -1968,7 +2151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "branch": STAGING_BRANCH_NAME, "state": "provisioned",
             "candidate_operation_id": str(target.candidate_operation_id),
             "receipt_id": str(target.receipt_id), "git_sha": target.expected_sha,
-            "role_outcomes": outcomes,
+            "role_outcomes": outcomes, "deliberate_rotations": rotations,
             "canonical_grants": {label: len(plan) for label, plan in plans.items()},
             "identities": [READER_ROLE, APP_ROLE], "statement_timeout_seconds": 60,
             "idle_timeout_seconds": 120,
@@ -1987,6 +2170,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         replacement.ReplacementRefusal, subprocess.TimeoutExpired,
     ) as exc:
         print("staging-app-writer-provision: REFUSED — " + redact_error(exc), file=sys.stderr)
+        if rotations:
+            # The refusal came AFTER a rotation committed: the role's password
+            # and the Worker secret are new and the pending file is kept for
+            # the next run to resume, so say which ones without saying what.
+            print("staging-app-writer-provision: deliberate rotations committed before the "
+                  "refusal: " + json.dumps(rotations, sort_keys=True), file=sys.stderr)
         return 2
 
 

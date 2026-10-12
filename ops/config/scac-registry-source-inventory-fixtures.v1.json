@@ -113614,6 +113614,37 @@
       ],
       "expected_count": 1157,
       "expected_sha256": "359f00adaeaecb9e38cd278919f61204a330a5f2069fa72dd821c74dfb79680b"
+    },
+    "scac-mutation-registry.v116": {
+      "base_version": "v116",
+      "upsert": [
+        {
+          "ingress_key": "external-admin:tools/provision-staging-app-writer.py",
+          "ingress_kind": "external_admin",
+          "operation": "tools/provision-staging-app-writer.py",
+          "effect_class": "administrative_mutation",
+          "source_locator": "tools/provision-staging-app-writer.py",
+          "schema_digest": "9c5a9c5bee1d5b22363cd312fddadfaaa6922e0443ee64943e502da260d39bb8",
+          "handler_digest": "9c5a9c5bee1d5b22363cd312fddadfaaa6922e0443ee64943e502da260d39bb8",
+          "write": true,
+          "human_only": false,
+          "authority_only": true,
+          "principal_mode": "existing_script_specific_credential_boundary",
+          "mutation_kind": "scac.mutation.admin",
+          "target_surface": "scac.surface.runtime",
+          "delegates_to": [],
+          "request_shape": "fixed_script_cli_contract",
+          "idempotency_mode": "script_specific_registered_current_control",
+          "rollback_class": "forward_fix_only",
+          "admission_class": "registered_inventory_only",
+          "owner_package": "11",
+          "implementation_state": "inventoried_not_atomically_mediated",
+          "classification_authorizing": false
+        }
+      ],
+      "expected_count": 1192,
+      "expected_sha256": "571162e929fb124fb2bb1335a236700446b00f98cf1fc8161da22106fda38733",
+      "reason": "PR 1706 source-only review: bind the existing provision-staging-app-writer external-admin row after adding the opt-in --rotate-lost-credential path (Joe approved 2026-10-12) for a staging candidate login whose local credential file is lost. The script's fixed CLI contract, credential boundary, authority contract, and sealed runtime frontier remain unchanged."
     }
   }
 }

@@ -4612,6 +4612,103 @@ class DryRun(Base):
             self.assertIn(needle, text)
 
 
+class LostStagingCredentialRotation(Base):
+    """Joe's 2026-10-12 approval reaches the provisioner through ONE command:
+    `tick --lane worker --rotate-lost-staging-credential LABEL` forwards
+    --rotate-lost-credential LABEL to the staging-app-writer step and nowhere
+    else; without it the step's argv is exactly what it always was."""
+
+    def _app_writer_argv(self, runner):
+        return next(argv for name, argv in runner.calls if name == "staging-app-writer")
+
+    def test_the_flag_is_forwarded_to_the_staging_app_writer_step_only(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.rotate_lost_staging_credentials = ("writer", "gate_zero_producer")
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        argv = self._app_writer_argv(runner)
+        self.assertEqual(argv[argv.index("--apply"):], [
+            "--apply", "--rotate-lost-credential", "writer",
+            "--rotate-lost-credential", "gate_zero_producer"])
+        for name, other in runner.calls:
+            if name != "staging-app-writer":
+                self.assertNotIn("--rotate-lost-credential", other, name)
+
+    def test_without_the_flag_the_step_is_unchanged(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        argv = self._app_writer_argv(runner)
+        self.assertEqual(argv[-1], "--apply")
+        self.assertNotIn("--rotate-lost-credential", argv)
+
+    def test_dry_run_says_a_rotation_would_occur_and_runs_nothing(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        lines: list[str] = []
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, dry_run=True)
+        pipe.out = lines.append
+        pipe.rotate_lost_staging_credentials = ("writer",)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        text = "\n".join(lines)
+        self.assertIn("[dry-run] staging-app-writer will DELIBERATELY ROTATE "
+                      "the lost staging credential(s) writer", text)
+        self.assertIn("provision-staging-app-writer.py", text)
+        self.assertIn("--apply --rotate-lost-credential writer", text)
+
+    def test_main_forwards_the_labels_for_a_worker_tick_only(self):
+        built: list[dict] = []
+
+        class Recorder:
+            def __init__(self, cfg, **kwargs):
+                built.append(kwargs)
+
+            def tick(self, lanes):
+                built[-1]["lanes"] = lanes
+                return 0
+
+        with mock.patch.object(rp, "Pipeline", Recorder), \
+                mock.patch.object(rp, "load_config", return_value={}):
+            self.assertEqual(rp.main(["tick", "--lane", "worker", "--dry-run",
+                                      "--rotate-lost-staging-credential", "writer",
+                                      "--rotate-lost-staging-credential", "reader"]), 0)
+            self.assertEqual(built[-1]["rotate_lost_staging_credentials"], ("writer", "reader"))
+            self.assertEqual(built[-1]["lanes"], ["worker"])
+            self.assertTrue(built[-1]["dry_run"])
+            self.assertEqual(rp.main(["tick", "--lane", "worker"]), 0)
+            self.assertEqual(built[-1]["rotate_lost_staging_credentials"], ())
+            for bad in (["tick", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "app", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "worker", "--lane", "app",
+                         "--rotate-lost-staging-credential", "writer"],
+                        ["report", "--lane", "worker", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "worker", "--rotate-lost-staging-credential", "production"],
+                        ["tick", "--lane", "worker", "--rotate-lost-staging-credential", "writer",
+                         "--rotate-lost-staging-credential", "writer"]):
+                with self.subTest(bad=bad), mock.patch("sys.stderr"), \
+                        self.assertRaises(SystemExit) as raised:
+                    rp.main(bad)
+                self.assertEqual(raised.exception.code, 2)
+
+    def test_the_labels_are_exactly_the_provisioners_credential_profiles(self):
+        spec = importlib.util.spec_from_file_location(
+            "staging_database_credential_for_release_selftest",
+            HERE.parent / "tools/staging_database_credential.py")
+        assert spec is not None and spec.loader is not None
+        credential = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = credential
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(credential)
+        with self.assertRaises(credential.CredentialRefusal) as unknown:
+            credential.profile("__no_such_profile__", config_root=Path(self._tmp.name))
+        listed = str(unknown.exception).split(": ", 1)[1].split(", ")
+        self.assertEqual(sorted(rp.ROTATABLE_STAGING_CREDENTIALS), sorted(listed))
+
+
 class SchemaSnapshotGhRunner(FakeRunner):
     """FakeRunner with a stubbed `gh pr list` / `gh pr close`: an in-memory
     set of open PRs, and chosen PR numbers whose close exits nonzero or
