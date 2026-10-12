@@ -23,6 +23,7 @@ import {
 import { partnerAuthoritySlugForActor } from "../src/partner-authority.js";
 import { authorityDsnForActor, profileForActor } from "../src/mcp.js";
 import { LOCAL_CLIENT_PROFILE_NAMES, selectLocalClientCredential } from "../local-client-auth.mjs";
+import { mcpInventory } from "../../ops/scac-mutation-inventory.mjs";
 
 const SECRET = "unattended-secret-fixture";
 const MAP = JSON.stringify({ joe: SECRET });
@@ -146,6 +147,12 @@ test("confirm-merge is the one verb carrying humanCallerOnly", () => {
   assert.equal(TOOLS["confirm-merge"].humanOnly, true);
   const flagged = Object.keys(TOOLS).filter(name => TOOLS[name].humanCallerOnly === true);
   assert.deepEqual(flagged, ["confirm-merge"]);
+});
+
+test("the live SCAC inventory reads the human-caller principal mode off the flag", () => {
+  const rows = new Map(mcpInventory(TOOLS).map(row => [row.operation, row]));
+  assert.equal(rows.get("confirm-merge").principal_mode, "server_verified_human");
+  assert.equal(rows.get("close-incident").principal_mode, "server_verified_human_or_native_agent");
 });
 
 test("confirm-merge refuses the unattended actor before database access", async () => {
