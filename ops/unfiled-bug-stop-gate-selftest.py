@@ -229,6 +229,11 @@ def main():
     allows("relay of a seat's fix", [
         prompt("go"), say("PR 1715 also fixes a bug in the schema-snapshot tool that was mangling a "
                           "carriage return. Relayed to the orchestrator in model-room.")])
+    # The same defect sentence the refusal hold uses, attributed to a reviewer:
+    # only the relay screen stands between this and a hold.
+    allows("relay of a reviewer's finding", [
+        prompt("go"), say("The reviewer found that the rerun script keeps refusing with an error "
+                          "that names no field.")])
     allows("hypothetical", [
         prompt("go"), say("If the preflight list is reordered, the selftest would fail on every run.")])
     allows("negated", [
