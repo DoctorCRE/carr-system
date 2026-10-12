@@ -1453,7 +1453,7 @@ commit;
                   ])
             check("the rotated password is fresh, in-process, published and promoted",
                   len(minted.encode()) >= 32 and minted not in candidate_by_role.values()
-                  and published_writer and minted in published_writer[0]
+                  and bool(published_writer) and minted in published_writer[0]
                   and writer_file.paths.final.exists()
                   and not writer_file.paths.pending.exists()
                   and (writer_file.paths.final.stat().st_mode & 0o777) == 0o600)
@@ -1469,7 +1469,7 @@ commit;
                   == "local credential file lost; Joe approved 2026-10-12"
                   and rotation_record[0]["rotated_at"].endswith("+00:00"))
             check("the rotated password never appears in the run output",
-                  minted and minted not in out + err and published_writer[0] not in out + err)
+                  bool(minted) and minted not in out + err and published_writer[0] not in out + err)
 
             # A WORKING CREDENTIAL IS NEVER ROTATED: the final file now exists.
             before_bytes = writer_file.paths.final.read_bytes()
@@ -1501,7 +1501,7 @@ commit;
                   and not writer_file.paths.pending.exists()
                   and not writer_file.paths.final.exists()
                   and "deliberate rotations committed" not in err
-                  and minted and minted not in out + err)
+                  and bool(minted) and minted not in out + err)
 
             # THE COMMIT FAILS AFTER PUBLICATION: compensate, then discard.
             rc, out, err = run_rotation(
@@ -1524,7 +1524,7 @@ commit;
                   rc == 2 and writer_file.paths.pending.exists()
                   and not writer_file.paths.final.exists()
                   and "deliberate rotations committed" in err and "app_writer" in err
-                  and minted and minted not in out + err)
+                  and bool(minted) and minted not in out + err)
             writer_file.paths.pending.unlink()
 
             # A ROTATION AIMED ANYWHERE BUT THE RECEIPTED CANDIDATE REFUSES.
