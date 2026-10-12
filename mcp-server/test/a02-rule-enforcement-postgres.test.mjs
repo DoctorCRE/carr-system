@@ -49,6 +49,10 @@ const R = Object.freeze({
   oneOfTwoUnverified: "a020000f-0000-4000-8000-000000000000", // N7
   oneOfTwoChanged:    "a0200010-0000-4000-8000-000000000000", // N8
   catalogMovedEarlier: "a0200011-0000-4000-8000-000000000000", // "changed" means either direction
+  // 0866: a current exact machine_enforceable/hard_enforced approval whose
+  // controls all hold is covered WITHOUT a fallback receipt; the fallback
+  // rung binds human_only rules (the four fallback cases above are human_only).
+  hardEnforcedNoFallback: "a0200012-0000-4000-8000-000000000000",
 });
 
 const EXPECTED_GAPS = Object.freeze({
@@ -143,11 +147,13 @@ async function seedRule(db, ctx, id, spec) {
        (idempotency_key, rule_id, rule_version, statement_hash, actor_id, policy_kind,
         enforcement_status, requested_control_keys, installed_control_keys, reason,
         normalized_contract, contract_hash, evidence_refs, created_at)
-     values ($1, $2, $3, $4, $5, 'machine_enforceable', 'hard_enforced', $6::text[], $6::text[],
+     values ($1, $2, $3, $4, $5, $7, $8, $6::text[], $6::text[],
              'synthetic approval', '{}'::jsonb,
              encode(public.digest('{}'::jsonb::text, 'sha256'), 'hex'), array['synthetic'],
              now() - interval '2 hours')`,
-    [`a02-pg-approval-${id}`, id, approvedVersion, sha(approvedStatement), ctx.joeId, controls]);
+    [`a02-pg-approval-${id}`, id, approvedVersion, sha(approvedStatement), ctx.joeId, controls,
+     spec.policyKind ?? "machine_enforceable",
+     (spec.policyKind ?? "machine_enforceable") === "human_only" ? "authority_enforced" : "hard_enforced"]);
   if (spec.fallback === false) return;
   const fallbackStatement = spec.fallbackStatement ?? statement;
   await db.query(
@@ -285,12 +291,14 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
     // the case that pins "distinct from", in either direction.
     await seedRule(db, ctx, R.catalogMovedEarlier, {
       verifiedAt: "now() - interval '1 hour'", catalogVerifiedAt: "now() - interval '5 days'" });
-    await seedRule(db, ctx, R.fallbackAbsent, { fallback: false });
-    await seedRule(db, ctx, R.fallbackOldVersion, { version: 2, fallbackVersion: 1 });
-    await seedRule(db, ctx, R.fallbackOldHash, {
+    const HUMAN = { policyKind: "human_only" };
+    await seedRule(db, ctx, R.fallbackAbsent, { ...HUMAN, fallback: false });
+    await seedRule(db, ctx, R.fallbackOldVersion, { ...HUMAN, version: 2, fallbackVersion: 1 });
+    await seedRule(db, ctx, R.fallbackOldHash, { ...HUMAN,
       statement: "a02 current statement B", fallbackStatement: "a02 earlier statement A" });
     await seedRule(db, ctx, R.proposed, { status: "proposed" });
-    await seedRule(db, ctx, R.writerTarget, { fallback: false });
+    await seedRule(db, ctx, R.writerTarget, { ...HUMAN, fallback: false });
+    await seedRule(db, ctx, R.hardEnforcedNoFallback, { fallback: false });
     await db.query("commit");
 
     await t.test("every leg of the guard reports its exact named gap (S2 S3 S4 S5 S6 S9 S10 S20 N7 N8, rulings 5a, corrections 1-2)", async () => {
@@ -298,9 +306,11 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       assert.equal(record.schema_version, "doctorcre-v5-a02-rule-enforcement-coverage.v2");
       assert.deepEqual(gapsByRule(record), EXPECTED_GAPS);
       // S6: the proposed rule is never counted, covered or not.
-      assert.equal(record.active_rule_count, 16);
-      assert.equal(record.covered_rule_count, 1);
+      assert.equal(record.active_rule_count, 17);
+      assert.equal(record.covered_rule_count, 2);
       assert.equal(record.gap_count, 15);
+      // 0866: hard_enforced with every control holding needs no fallback.
+      assert.equal(gapsByRule(record)[R.hardEnforcedNoFallback], undefined);
       assert.equal(record.coverage_state, "gaps");
       assert.equal(record.coverage_complete, false);
       for (const gap of record.gaps) assert.ok(gap.detail.trim().length > 0);
@@ -382,7 +392,7 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       const expected = { ...EXPECTED_GAPS };
       delete expected[R.writerTarget];
       assert.deepEqual(gapsByRule(record), expected);
-      assert.equal(record.covered_rule_count, 2);
+      assert.equal(record.covered_rule_count, 3);
     });
 
     await t.test("S7 and item 2: UPDATE, DELETE and the owner's TRUNCATE are refused", async () => {
