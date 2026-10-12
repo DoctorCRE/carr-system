@@ -77,13 +77,46 @@ def refusal(entry: dict, config: dict, live: dict, report_fn, *, now=None):
     layer = row.get("failing_layer") if row.get("failing_layer") in seat_health.FAILURE_LAYERS else "unknown"
     return ("seat_failed",
             f"dispatch refused: {name} is seat {seat}, whose probe at "
-            f"{at.strftime('%Y-%m-%dT%H:%MZ')} failed (layer {layer}). "
+            f"{at.isoformat(timespec='minutes')} failed (layer {layer}). "
             f"{seat_health.action(seat, layer if layer != 'unknown' else 'runner_wrapper')} "
             f"Then rerun ops/seat-health.py --seat {seat} --force; a passing probe readmits it.")
 
 
+class SendReads:
+    """The two slow reads, each made at most once per send.
+
+    The tailnet read (`Tailscale status --json`, host_liveness.read_status) is
+    bounded at 15 s; the seat evidence (`read-resource-dashboard` through
+    ./run.sh call, seat_health.verb_call) at 35 s. The dashboard read happens
+    only when the desk maps to a seat whose host is not offline, so a send
+    costs at most 15 s + 35 s = 50 s of gate time, and a live local session
+    or an offline host costs the tailnet read alone."""
+
+    def __init__(self, config: dict):
+        self.config = config
+        self._live: dict | None = None
+        self._report: dict | None = None
+
+    def live(self) -> dict:
+        if self._live is None:
+            self._live = host_liveness.observe(config=self.config)
+        return self._live
+
+    def report(self) -> dict:
+        if self._report is None:
+            self._report = seat_health.current_report(REPO)
+        return self._report
+
+
 def check(entry: dict):
-    """The send-time gate: live tailnet read, lazy seat evidence."""
-    config = host_liveness.load_config()
-    return refusal(entry, config, host_liveness.observe(config=config),
-                   lambda: seat_health.current_report(REPO))
+    """The send-time gate. Any failure to read its inputs (a missing or
+    malformed ops/config/seat-hosts.v1.json above all) is a refusal naming
+    the file and the error class, never a traceback out of dispatch.main."""
+    try:
+        reads = SendReads(host_liveness.load_config())
+        return refusal(entry, reads.config, reads.live(), reads.report)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        return ("seat_gate_unreadable",
+                f"dispatch refused: the seat gate could not read {host_liveness.CONFIG} or the seat "
+                f"evidence ({type(exc).__name__}). Nothing was launched. Restore that file "
+                f"(schema carr-seat-hosts/v1) and rerun; python3 ops/host_liveness.py shows the error.")

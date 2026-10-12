@@ -1961,9 +1961,12 @@ def _canonical_health():
 
     if CANONICAL_SECTION == "all":
         try:
+            # FAIL (a probe ran and failed) and STALE-RED (no probe row for
+            # over 72 h while the seat's host is online or unknown) are red;
+            # STALE inside the bound and SKIP (host offline) are not.
             for _seat_line in _seat_health_rows():
                 print("  " + _seat_line)
-                if _seat_line.startswith("FAIL"):
+                if _seat_line.startswith(("FAIL ", "STALE-RED ")):
                     rc = _red("ai_seat_health", _seat_line, time_rolling=True)
         except (ImportError, TypeError, AttributeError):
             _seat_detail = ("Seat health evidence unreadable; on breach: orchestrator repairs "

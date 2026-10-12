@@ -920,6 +920,9 @@ def main(argv: list[str]) -> int:
     rc = sub.add_parser('reconcile', help='verify and recover held ownership claims; unknown writers stay stuck')
     rc.add_argument('--claim', help='one job msg_id; otherwise examine held claims')
     rc.add_argument('--limit', type=int, default=20, help='maximum claims per call (1..100)')
+    rc.add_argument('--older-than-hours', type=float, metavar='H',
+                    help='sweep only claims whose writer is verifiably gone or that are older '
+                         'than H hours; a young claim with a live writer is left alone')
 
     s = sub.add_parser("send", help="dispatch one task to one desk")
     s.add_argument("name")
@@ -946,7 +949,8 @@ def main(argv: list[str]) -> int:
 
     try:
         if a.cmd == 'reconcile':
-            claims = write_ownership.reconcile(a.claim, limit=a.limit)
+            claims = write_ownership.reconcile(a.claim, limit=a.limit,
+                                               older_than_hours=a.older_than_hours)
             print(json.dumps({'ledger': str(write_ownership.LEDGER), 'claims': claims}, indent=2))
             return 1 if any(row['ownership_state'] == 'held' for row in claims) else 0
         if a.cmd == "where":

@@ -3,7 +3,7 @@ import json
 import os
 import io
 import importlib.util
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest import mock
 from pathlib import Path
 import subprocess
@@ -328,7 +328,8 @@ class SeatHealthTests(unittest.TestCase):
         required = nightly.split('required=(', 1)[1].split(')', 1)[0]
         for path in ('ops/seat-health.py', 'ops/host_liveness.py', 'tools/room-bridge/dispatch.py'):
             self.assertIn(path, required)
-        self.assertIn('step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py reconcile\n',
+        self.assertIn('step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py '
+                      'reconcile --older-than-hours 6\n',
                       nightly)
         self.assertLess(nightly.index('step "daily AI seat health"'), nightly.index('step "dispatch claim reconcile"'))
 
@@ -337,7 +338,8 @@ class SeatHealthTests(unittest.TestCase):
         self.assertEqual(len(rows), 6)
         self.assertTrue(all('on breach:' in line and 'owner orchestrator' in line
                             and 'Verify:' in line and 'auto-clear' in line for line in rows))
-        self.assertEqual(rows, [line for line in rows if line.startswith('STALE ') and ' last=never ' in line])
+        # No observation at all cannot prove the gap is young: past the bound, red.
+        self.assertEqual(rows, [line for line in rows if line.startswith('STALE-RED ') and ' last=never ' in line])
 
     def report_with(self, **seats):
         return {'schema': 'carr-seat-health/v1', 'seats': seats}
@@ -352,10 +354,10 @@ class SeatHealthTests(unittest.TestCase):
         rows = dict(zip(health.SEATS, health.health_rows(self.report_with(
             grok=failed, jev=passed, **{'sol-studio': expired, 'e2e-auth': future,
                                          'sol-macbook': {'observed_at': 'garbage'}}), now=now)))
-        self.assertTrue(rows['opus-studio'].startswith('STALE opus-studio last=never '), rows['opus-studio'])
-        self.assertTrue(rows['sol-studio'].startswith('STALE sol-studio last=2026-10-05 '), rows['sol-studio'])
+        self.assertTrue(rows['opus-studio'].startswith('STALE-RED opus-studio last=never '), rows['opus-studio'])
+        self.assertTrue(rows['sol-studio'].startswith('STALE-RED sol-studio last=2026-10-05 '), rows['sol-studio'])
         self.assertTrue(rows['e2e-auth'].startswith('STALE e2e-auth last=2026-10-13 '), rows['e2e-auth'])
-        self.assertTrue(rows['sol-macbook'].startswith('STALE sol-macbook last=never '), rows['sol-macbook'])
+        self.assertTrue(rows['sol-macbook'].startswith('STALE-RED sol-macbook last=never '), rows['sol-macbook'])
         self.assertTrue(rows['grok'].startswith('FAIL grok latency=0.2s layer=auth '), rows['grok'])
         self.assertTrue(rows['jev'].startswith('PASS jev latency=0.2s layer=none '), rows['jev'])
         # FAIL is reserved for a probe that ran and failed: no other row may say it.
@@ -363,6 +365,44 @@ class SeatHealthTests(unittest.TestCase):
         # A fresh row whose pass bit is not a real boolean is a failed run, never a pass.
         bent = dict(passed, passed='yes')
         self.assertTrue(health.health_rows(self.report_with(jev=bent), now=now)[4].startswith('FAIL jev'))
+
+    def test_stale_escalates_to_red_after_72h_when_host_online_or_unknown(self):
+        now = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
+        def row_at(hours):
+            return dict(health.assess('grok', '323', '', 0, .2),
+                        observed_at=(now - timedelta(hours=hours)).isoformat())
+        # Inside the bound: a warning, never red.
+        [young] = [l for l in health.health_rows(self.report_with(grok=row_at(48)), now=now) if ' grok ' in l]
+        self.assertTrue(young.startswith('STALE grok last='), young)
+        self.assertFalse(health.is_red(young))
+        [edge] = [l for l in health.health_rows(self.report_with(grok=row_at(72)), now=now) if ' grok ' in l]
+        self.assertTrue(edge.startswith('STALE grok '), edge)
+        # Past the bound, host online (absent from offline) or unknown: red, with a bound action.
+        for offline in (None, {}, {'opus-studio': 'mac-studio'}):
+            [old] = [l for l in health.health_rows(self.report_with(grok=row_at(73)), now=now, offline=offline)
+                     if ' grok ' in l]
+            self.assertTrue(old.startswith('STALE-RED grok last=2026-10-09 '), old)
+            self.assertTrue(health.is_red(old))
+            for part in ('deduplicated loop seat-health:grok', 'owner orchestrator',
+                         'stopped producing rows', 'Verify:', 'auto-clear'):
+                self.assertIn(part, old)
+        # Past the bound while the host is offline: SKIP, a warning only.
+        rows = health.health_rows(self.report_with(grok=row_at(500)), now=now, offline={'grok': 'mac-studio'})
+        [skip] = [l for l in rows if 'grok' in l.split(' · ')[0]]
+        self.assertTrue(skip.startswith('SKIP grok: host mac-studio offline'), skip)
+        self.assertFalse(health.is_red(skip))
+
+    def test_show_exits_nonzero_on_stale_red(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            old = (datetime.now(timezone.utc) - timedelta(hours=100)).isoformat()
+            seats = {seat: dict(health.assess(seat, '323', '', 0, .1),
+                                observed_at=datetime.now(timezone.utc).isoformat()) for seat in health.SEATS}
+            seats['grok'] = dict(seats['grok'], observed_at=old)
+            health.atomic_json(root / 'results/seat-health.json', self.report_with(**seats))
+            out = io.StringIO()
+            self.assertEqual(self.invoke(root, '--show', out=out), 1)
+            self.assertIn('STALE-RED grok', out.getvalue())
 
     def test_offline_host_reads_skip_not_fail(self):
         now = datetime(2026, 10, 12, 12, tzinfo=timezone.utc)
@@ -376,10 +416,20 @@ class SeatHealthTests(unittest.TestCase):
     def test_show_exits_zero_on_stale_and_skip_and_nonzero_on_fail(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            out = io.StringIO()
-            self.assertEqual(self.invoke(root, '--show', out=out), 0)
-            self.assertIn('STALE grok last=never', out.getvalue())
             report = root / 'results/seat-health.json'
+            now = datetime.now(timezone.utc)
+            seats = {seat: dict(health.assess(seat, '323', '', 0, .1), observed_at=now.isoformat())
+                     for seat in health.SEATS}
+            seats['grok'] = dict(seats['grok'], observed_at=(now - timedelta(hours=30)).isoformat())
+            health.atomic_json(report, self.report_with(**seats))
+            out = io.StringIO()
+            live = host_liveness.liveness(None, host_liveness.load_config())
+            for name in live['hosts']:
+                live['hosts'][name]['state'] = 'online'
+            live['hosts']['joes-macbook-pro']['state'] = 'offline'
+            self.assertEqual(self.invoke(root, '--show', out=out, live=live), 0)
+            self.assertIn('STALE grok last=', out.getvalue())
+            self.assertIn('SKIP sol-macbook: host joes-macbook-pro offline', out.getvalue())
             health.atomic_json(report, self.report_with(grok=dict(health.assess('grok', '', '', 1, .1),
                 observed_at=datetime.now(timezone.utc).isoformat())))
             self.assertEqual(self.invoke(root, '--show'), 1)
@@ -449,7 +499,8 @@ class SeatHealthTests(unittest.TestCase):
         if seats is not None:
             route['seats'] = seats
         return {'ok': True, 'providers': [
-            {'provider': 'model_route', 'model_route': route or None, 'state': 'stale'},
+            {'provider': 'model_route', 'model_route': route or None, 'state': 'stale',
+             'observed_at': '2026-10-01T00:00:00+00:00'},
             dict({'provider': 'local_compute', 'state': 'collector_absent'}, **(compute or {}))]}
 
     def test_record_layer_first_local_file_second(self):
@@ -491,6 +542,7 @@ class SeatHealthTests(unittest.TestCase):
         studio_row = {'passed': False, 'observed_at': '2026-10-05T06:00:00+00:00', 'failing_layer': 'auth'}
         dash = self.dashboard({'grok': studio_row}, route_extra={'endpoint': 'http://127.0.0.1:8000'},
                               compute={'measured_capacity': {'cpu_cores': 24},
+                                       'observed_at': '2026-10-02T00:00:00+00:00',
                                        'configured_capacity': {'host': 'mac-studio'}})
         calls = []
         def door(name, payload):
@@ -505,11 +557,16 @@ class SeatHealthTests(unittest.TestCase):
         self.assertEqual(set(route['model_route']['seats']), {'jev', 'grok'})
         self.assertEqual(route['model_route']['seats']['jev'],
                          {key: jev[key] for key in health.SEAT_ROW_FIELDS})
-        self.assertEqual(route['model_route']['endpoint'], 'http://127.0.0.1:8000')
+        self.assertNotIn('endpoint', route['model_route'])
+        self.assertEqual(route['model_route']['carried_forward'],
+                         {'endpoint': {'value': 'http://127.0.0.1:8000',
+                                       'observed_at': '2026-10-01T00:00:00+00:00'}})
         self.assertEqual(route['model_route']['seat_source_host'], 'joes-macbook-pro')
         self.assertEqual((route['state'], route['reason']), ('partial', 'seats not passing: grok'))
         compute = writes['local_compute']
-        self.assertEqual(compute['measured_capacity']['cpu_cores'], 24)
+        self.assertNotIn('cpu_cores', compute['measured_capacity'])
+        self.assertEqual(compute['measured_capacity']['carried_forward'],
+                         {'cpu_cores': {'value': 24, 'observed_at': '2026-10-02T00:00:00+00:00'}})
         self.assertEqual(compute['measured_capacity']['hosts']['mac-studio'],
                          {'state': 'offline', 'last_seen': '2026-10-09T23:46Z'})
         self.assertEqual(compute['configured_capacity'], {'host': 'mac-studio'})
@@ -527,6 +584,56 @@ class SeatHealthTests(unittest.TestCase):
             raise OSError('door down')
         self.assertEqual(health.publish({'jev': jev}, broken, live=live),
                          {'model_route': 'error', 'local_compute': 'error'})
+
+    def test_publish_never_restamps_a_foreign_measurement(self):
+        # A carried key keeps the stamp it was first measured at across publishes.
+        writes = {}
+        dash = self.dashboard({}, route_extra={'endpoint': 'x'},
+                              compute={'measured_capacity': {'cpu_cores': 24},
+                                       'observed_at': '2026-10-02T00:00:00+00:00'})
+        jev = dict(health.assess('jev', '323', '', 0, .3), observed_at='2026-10-12T06:00:00+00:00')
+        live = host_liveness.liveness(None, host_liveness.load_config())
+        for _ in range(2):
+            def door(name, payload):
+                if name == 'read-resource-dashboard':
+                    return dash
+                writes[payload['provider']] = payload
+                return {'ok': True}
+            health.publish({'jev': jev}, door, live=live, now=datetime(2026, 10, 12, 12, tzinfo=timezone.utc))
+            dash = {'ok': True, 'providers': [dict(payload, observed_at=payload['observed_at'])
+                                              for payload in writes.values()]}
+        self.assertEqual(writes['model_route']['observed_at'], '2026-10-12T12:00:00+00:00')
+        self.assertEqual(writes['model_route']['model_route']['carried_forward'],
+                         {'endpoint': {'value': 'x', 'observed_at': '2026-10-01T00:00:00+00:00'}})
+        self.assertEqual(writes['local_compute']['measured_capacity']['carried_forward'],
+                         {'cpu_cores': {'value': 24, 'observed_at': '2026-10-02T00:00:00+00:00'}})
+        for payload in writes.values():
+            self.assertNotIn('endpoint', payload.get('model_route') or {})
+            self.assertNotIn('cpu_cores', payload.get('measured_capacity') or {})
+
+    def test_unreadable_tailnet_publishes_unknown_never_ok(self):
+        config = host_liveness.load_config()
+        def payloads(status):
+            writes = {}
+            def door(name, payload):
+                if name != 'read-resource-dashboard':
+                    writes[payload['provider']] = payload
+                return {'ok': True}
+            health.publish({}, door, live=host_liveness.liveness(status, config))
+            return writes['local_compute']
+        for status in (None, {'BackendState': 'Stopped'}):
+            compute = payloads(status)
+            self.assertNotEqual(compute['state'], 'ok')
+            self.assertEqual(compute['state'], 'partial')
+            self.assertTrue(compute['reason'].startswith('host liveness unknown: tailnet not readable'),
+                            compute['reason'])
+            self.assertTrue(all(row['state'] == 'unknown'
+                                for row in compute['measured_capacity']['hosts'].values()))
+        peers = {f'p{i}': {'DNSName': spec['dns_name'] + '.', 'Online': True}
+                 for i, spec in enumerate(config['hosts'].values())}
+        first = next(iter(config['hosts'].values()))['dns_name'] + '.'
+        compute = payloads({'BackendState': 'Running', 'Self': {'DNSName': first}, 'Peer': peers})
+        self.assertEqual((compute['state'], compute['reason']), ('ok', None))
 
     def test_recorded_run_publishes_and_a_refused_publish_fails_the_run(self):
         with tempfile.TemporaryDirectory() as d:

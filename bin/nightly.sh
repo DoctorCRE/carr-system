@@ -742,12 +742,15 @@ step "daily AI seat health" ./.venv/bin/python ops/seat-health.py
 # write-ownership claim `held`, and a held claim refuses every later job whose
 # --writes overlap it; until now only a session that remembered
 # `dispatch.py reconcile --claim <msg_id>` ever released one. This step examines
-# held claims, releases the ones whose writer is verifiably gone, and leaves an
-# unknown writer stuck. Exit 1 = a claim is still held after reconcile; on breach:
-# owner orchestrator reads the printed claims JSON, confirms the writer is dead,
-# then `dispatch.py reconcile --claim <msg_id>`; verify the next run exits 0;
-# auto-clear when no claim is held.
-step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py reconcile
+# ONLY held claims whose writer is verifiably gone or that are older than 6
+# hours (--older-than-hours 6); a legitimately running overnight job with a
+# live writer is not touched, so it is never tagged stuck and never turns this
+# step red. A dead-writer claim is released; a claim over 6 h whose writer is
+# not provably gone is marked stuck. Exit 1 = such a claim is still held; on
+# breach: owner orchestrator reads the printed claims JSON, confirms the
+# writer is dead, then `dispatch.py reconcile --claim <msg_id>`; verify the
+# next run exits 0; auto-clear when no over-age claim is held.
+step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py reconcile --older-than-hours 6
 
 # ── ORDER 14: the two writing steps, BEFORE the exports ──────────────────────
 # The cadence engine WRITES (next_action + event), so the read-only exporter

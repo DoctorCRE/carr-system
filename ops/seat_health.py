@@ -30,6 +30,9 @@ def action(seat, layer):
               f'Repair {wrappers[seat]} and its completion contract.' if layer == 'runner_wrapper' else
               f'Restore network reachability from {wrappers[seat]}.' if layer == 'network' else
               f'Repair model selection or the response contract in {wrappers[seat]}.' if layer == 'model' else
+              f'Find why the daily probe for {seat} stopped producing rows on its live host '
+              f'(bin/nightly.sh step "daily AI seat health", out/seat-health-runs) and rerun '
+              f'ops/seat-health.py --seat {seat} --force.' if layer == 'stale' else
               f'Rerun {wrappers[seat]} through the daily probe if its evidence expires.')
     verification = ('e2e models openai must list gpt-6-luna' if seat == 'e2e-auth'
                     else 'this seat must return exactly 323 for 17 * 19')
@@ -414,8 +417,24 @@ def observed(row, now):
         return None, False
 
 
+# A seat with no fresh row is STALE, a warning. STALE is only a warning while
+# it is young: past this bound with the seat's host online or unknown, the
+# daily probe has silently stopped producing rows on a live Mac, and the row
+# escalates to STALE-RED, which feeds the ai_seat_health red. A seat whose host
+# the tailnet reports offline reads SKIP instead and never escalates here (the
+# host row carries that alarm). A seat with no parseable observation at all is
+# treated as past the bound: no timestamp cannot prove the gap is young.
+STALE_RED_AFTER_SECONDS = 72 * 3600
+RED_PREFIXES = ('FAIL ', 'STALE-RED ')
+
+
+def is_red(line):
+    """True for a health row that must turn the ai_seat_health check red."""
+    return isinstance(line, str) and line.startswith(RED_PREFIXES)
+
+
 def health_rows(report, *, offline=None, now=None):
-    """One row per seat: PASS, FAIL, STALE or SKIP.
+    """One row per seat: PASS, FAIL, STALE, STALE-RED or SKIP.
 
     FAIL means the last probe RAN inside its 24-hour window and failed. A
     missing, expired, future-dated or unreadable observation is STALE (a WARN:
@@ -436,7 +455,12 @@ def health_rows(report, *, offline=None, now=None):
         at, fresh = observed(row, now)
         if not fresh:
             last = at.date().isoformat() if at else 'never'
-            rows.append(f"STALE {seat} last={last} · {action(seat, None)}")
+            if at is None or (now - at).total_seconds() > STALE_RED_AFTER_SECONDS:
+                rows.append(f"STALE-RED {seat} last={last} no probe row for over "
+                            f"{STALE_RED_AFTER_SECONDS // 3600}h while its host is online or unknown"
+                            f" · {action(seat, 'stale')}")
+            else:
+                rows.append(f"STALE {seat} last={last} · {action(seat, None)}")
             continue
         passed = dispatchable({'schema': 'carr-seat-health/v1', 'seats': {seat: row}}, seat, now=now)
         latency = row.get('latency_seconds')
@@ -526,6 +550,34 @@ def current_report(repo, report_path=None):
     return combined_report(read_dashboard(lambda name, payload: verb_call(repo, name, payload)), local)
 
 
+def carried_forward(previous_row, field, own_keys):
+    """Another collector's keys inside `previous_row[field]`, kept with the
+    observed_at they were MEASURED at rather than this publish's stamp.
+
+    The dashboard holds one row per provider, so a publish that dropped them
+    would erase another collector's values, and one that copied them beside
+    its own keys would restamp old measurements as fresh under the
+    dashboard's 15-minute staleness rule. They travel instead under
+    `carried_forward` as {key: {'value': ..., 'observed_at': <original>}}; an
+    entry already carried keeps its first stamp."""
+    previous = previous_row.get(field) if isinstance(previous_row, dict) else None
+    if not isinstance(previous, dict):
+        return {}
+    stamp = previous_row.get('observed_at')
+    stamp = stamp if isinstance(stamp, str) else None
+    carried = previous.get('carried_forward')
+    carried = {key: entry for key, entry in carried.items()
+               if isinstance(entry, dict) and 'value' in entry} if isinstance(carried, dict) else {}
+    for key, value in previous.items():
+        if key not in own_keys and key != 'carried_forward':
+            carried[key] = {'value': value, 'observed_at': stamp}
+    return carried
+
+
+ROUTE_OWN_KEYS = ('seats', 'seat_source_host')
+COMPUTE_OWN_KEYS = ('hosts', 'tailnet_backend')
+
+
 def publish(seats, door, *, live=None, source_host=None, now=None):
     """Write the merged seat map (model_route) and host liveness (local_compute).
 
@@ -537,27 +589,40 @@ def publish(seats, door, *, live=None, source_host=None, now=None):
     compact = {seat: {key: row[key] for key in SEAT_ROW_FIELDS if key in row}
                for seat, row in merge_seats(seats, dashboard_seats(dashboard)).items()}
     failing = sorted(seat for seat, row in compact.items() if row.get('passed') is not True)
-    previous = dashboard_provider(dashboard, 'model_route').get('model_route')
-    route = ({key: value for key, value in previous.items() if key != 'seats'}
-             if isinstance(previous, dict) else {})
-    route.update(seats=compact, seat_source_host=source_host)
+    route = {'seats': compact, 'seat_source_host': source_host}
+    carried = carried_forward(dashboard_provider(dashboard, 'model_route'), 'model_route', ROUTE_OWN_KEYS)
+    if carried:
+        route['carried_forward'] = carried
     payloads = [{'provider': 'model_route', 'model_route': route,
                  'state': 'partial' if failing else 'ok',
                  'reason': 'seats not passing: ' + ', '.join(failing) if failing else None}]
     if isinstance(live, dict) and isinstance(live.get('hosts'), dict):
         compute = dashboard_provider(dashboard, 'local_compute')
-        measured = compute.get('measured_capacity')
-        measured = dict(measured) if isinstance(measured, dict) else {}
-        measured['hosts'] = {name: {'state': row.get('state'), 'last_seen': row.get('last_seen')}
-                             for name, row in live['hosts'].items() if isinstance(row, dict)}
+        backend = live.get('backend') if isinstance(live.get('backend'), str) else 'unreadable'
+        measured = {'hosts': {name: {'state': row.get('state'), 'last_seen': row.get('last_seen')}
+                              for name, row in live['hosts'].items() if isinstance(row, dict)},
+                    'tailnet_backend': backend}
+        carried = carried_forward(compute, 'measured_capacity', COMPUTE_OWN_KEYS)
+        if carried:
+            measured['carried_forward'] = carried
         down = sorted(name for name, row in measured['hosts'].items() if row['state'] == 'offline')
+        unknown = sorted(name for name, row in measured['hosts'].items() if row['state'] not in ('online', 'offline'))
         configured = compute.get('configured_capacity')
+        # The verb's state enum has no 'unknown'. An unread tailnet (or a host
+        # it does not report) is 'partial' with a reason that says unknown,
+        # never 'ok': no host was seen up.
+        if down:
+            state, reason = 'host_offline', 'host offline: ' + ', '.join(
+                f"{name} since {measured['hosts'][name]['last_seen'] or 'never'}" for name in down)
+        elif backend != 'Running':
+            state, reason = 'partial', f'host liveness unknown: tailnet not readable (backend {backend})'
+        elif unknown:
+            state, reason = 'partial', 'host liveness unknown: ' + ', '.join(unknown)
+        else:
+            state, reason = 'ok', None
         payloads.append({'provider': 'local_compute', 'measured_capacity': measured,
                          'configured_capacity': configured if isinstance(configured, dict) else None,
-                         'state': 'host_offline' if down else 'ok',
-                         'reason': 'host offline: ' + ', '.join(
-                             f"{name} since {measured['hosts'][name]['last_seen'] or 'never'}"
-                             for name in down) if down else None})
+                         'state': state, 'reason': reason})
     results = {}
     for payload in payloads:
         payload.update(idempotency_key=str(uuid.uuid4()), source='ops/seat-health.py',

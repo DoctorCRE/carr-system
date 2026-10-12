@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sys
 import uuid
-from seat_health import (assess, SEATS, atomic_json, current_report, dispatchable, health_rows,
+from seat_health import (assess, SEATS, atomic_json, current_report, dispatchable, health_rows, is_red,
                          probe, probe_jev, publish, reconcile, verb_call)
 import host_liveness
 
@@ -97,7 +97,7 @@ def main():
         rows = health_rows(current_report(args.runtime_repo, report_path),
                            offline=host_liveness.offline_seats(live, config))
         print('\n'.join(rows))
-        return int(any(line.startswith('FAIL') for line in rows))
+        return int(any(is_red(line) for line in rows))
     output.mkdir(parents=True, exist_ok=True)
     with (output / 'seat-health.lock').open('a') as lock:
         try:

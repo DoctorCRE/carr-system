@@ -96,6 +96,41 @@ class SeatGateUnit(unittest.TestCase):
         self.assertEqual(got[0], 'seat_failed')
         self.assertEqual(evidence.call_args.args, (seat_gate.REPO,))
 
+    def test_unreadable_config_is_a_refusal_naming_file_and_error_class(self):
+        with tempfile.TemporaryDirectory() as d:
+            missing = Path(d) / 'seat-hosts.v1.json'
+            bad = Path(d) / 'bad.json'
+            bad.write_text('{not json')
+            wrong = Path(d) / 'wrong.json'
+            wrong.write_text(json.dumps({'schema': 'carr-seat-hosts/v1', 'hosts': {}, 'seats': []}))
+            for path, error in ((missing, 'FileNotFoundError'), (bad, 'JSONDecodeError'),
+                                (wrong, 'ValueError')):
+                with self.subTest(error=error), patch.object(host_liveness, 'CONFIG', path), \
+                     patch.object(host_liveness, 'observe') as observe:
+                    got = seat_gate.check({'kind': 'codex-session', 'name': 'cx'})
+                    self.assertEqual(got[0], 'seat_gate_unreadable')
+                    self.assertIn(str(path), got[1])
+                    self.assertIn(f'({error})', got[1])
+                    observe.assert_not_called()
+        # A malformed config that loads but lacks a key the gate needs.
+        broken = dict(CONFIG, seats=CONFIG['seats'])
+        broken.pop('hosts')
+        with patch.object(host_liveness, 'load_config', return_value=broken), \
+             patch.object(host_liveness, 'observe', side_effect=KeyError('hosts')):
+            got = seat_gate.check({'kind': 'codex-session', 'name': 'cx'})
+        self.assertEqual(got[0], 'seat_gate_unreadable')
+        self.assertIn('(KeyError)', got[1])
+
+    def test_failed_probe_time_is_timezone_aware_isoformat(self):
+        at = datetime(2026, 10, 12, 6, 30, tzinfo=timezone(timedelta(hours=-5)))
+        failed = {'passed': False, 'dispatchable': False, 'failing_layer': 'auth',
+                  'observed_at': at.isoformat()}
+        with patch.object(seat_health, 'observed', return_value=(at, True)):
+            got = seat_gate.refusal({'kind': 'codex-session', 'name': 'cx'}, CONFIG, live(MACBOOK),
+                                    lambda: report(**{'sol-macbook': failed}))
+        self.assertIn('probe at 2026-10-12T06:30-05:00 failed', got[1])
+        self.assertNotIn('06:30Z', got[1])
+
 
 class SendThroughTheGate(unittest.TestCase):
     """The CLI door: a refused send launches nothing; a live seat still dispatches."""
@@ -117,8 +152,8 @@ class SendThroughTheGate(unittest.TestCase):
 
     def send(self, name, liveness, evidence):
         launched, err = [], io.StringIO()
-        with patch.object(host_liveness, 'observe', return_value=liveness), \
-             patch.object(seat_health, 'current_report', return_value=evidence), \
+        with patch.object(host_liveness, 'observe', return_value=liveness) as self.observe, \
+             patch.object(seat_health, 'current_report', return_value=evidence) as self.evidence, \
              patch.object(dispatch, '_to_codex', side_effect=lambda *a, **k: launched.append('codex')
                           or {'status': 'completed'}), \
              patch.object(dispatch.claude_remote_wire, 'run_task',
@@ -149,6 +184,22 @@ class SendThroughTheGate(unittest.TestCase):
         # No evidence at all (STALE) is not a refusal.
         code, launched, _ = self.send('cx', live(MACBOOK), report())
         self.assertEqual((code, launched), (0, ['codex']))
+
+    def test_each_send_reads_the_tailnet_once_and_the_dashboard_at_most_once(self):
+        self.send('cx', live(MACBOOK), report(**{'sol-macbook': row(True)}))
+        self.assertEqual((self.observe.call_count, self.evidence.call_count), (1, 1))
+        self.send('studio-desk', live(MACBOOK, studio_online=False), report())
+        self.assertEqual((self.observe.call_count, self.evidence.call_count), (1, 0))
+
+    def test_missing_config_refuses_without_a_traceback(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(host_liveness, 'CONFIG', Path(d) / 'absent.json'):
+                code, launched, err = self.send('cx', live(MACBOOK), report())
+        self.assertEqual((code, launched), (2, []))
+        self.assertIn('refused (seat_gate_unreadable)', err)
+        self.assertIn('absent.json', err)
+        self.assertIn('FileNotFoundError', err)
+        self.assertNotIn('Traceback', err)
 
 
 if __name__ == '__main__':
