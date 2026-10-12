@@ -121,6 +121,13 @@
     "required_checks": [
       "test"
     ],
+    "fix_forward_derived_fields": [
+      {
+        "path": "contracts/e2e-staging-control-proofs.v1.json",
+        "json_pointer": "/application_source_sha256"
+      }
+    ],
+    "_fix_forward_derived_fields": "application_source_sha256 digests the whole app tree, so almost every app PR rewrites it. A fix-forward's change still counts as present at the release target when a listed file differs ONLY at that JSON pointer (same mode, both sides valid JSON, pointer present on both); the run record names each such path. Any other difference still needs a fresh Fixes-Forward approval. The worker lane lists none.",
     "post_release_smoke": true
   }
 }

@@ -2789,6 +2789,123 @@ class FixForward(Base):
                 self.assertEqual(ff({"body": f"APPROVE\n{reviewed}\n{prefix}Fixes-Forward: #1342\n"}), set())
 
 
+class FixForwardDerivedDigest(Base):
+    """The app lane's contracts/e2e-staging-control-proofs.v1.json carries
+    application_source_sha256, a digest of the whole app tree that almost
+    every app PR recomputes. A later PR that changes ONLY that listed JSON
+    pointer must not undo an earlier fix-forward; any other difference still
+    does, and only the lane that lists the path gets the exception."""
+
+    PROOFS = "contracts/e2e-staging-control-proofs.v1.json"
+    # FixForward's scenario helpers, without re-running its tests
+    land, block, fix_approve = FixForward.land, FixForward.block, FixForward.fix_approve
+    tick, assert_held = FixForward.tick, FixForward.assert_held
+
+    def setUp(self):
+        super().setUp()
+        self.nums: dict[str, int] = {}
+
+    def proofs(self, digest, controls=("a",), raw=None):
+        return raw if raw is not None else json.dumps({
+            "schema": "doctorcre-staging-control-proofs.v1", "reviewed_source_commit": "c" * 40,
+            "application_source_sha256": digest, "carr_source_commit": "d" * 40,
+            "controls": list(controls)}, indent=2) + "\n"
+
+    def derived(self, lane):
+        return self.fx.config()[lane].get("fix_forward_derived_fields") or []
+
+    def present(self, fix, target, lane="app"):
+        ignored = []
+        ok = self.fx.pipeline(FakeRunner()).change_present(self.fx.repo, fix, target, self.derived(lane), ignored)
+        return ok, ignored
+
+    def carrier(self):
+        self.land({"src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
+        f, _ = self.land({"src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
+        return f
+
+    def test_config_lists_the_app_digest_and_nothing_for_the_worker(self):
+        self.assertEqual(self.derived("app"), [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}])
+        self.assertEqual(self.derived("worker"), [])
+
+    def test_a_later_recompute_of_only_the_listed_digest_keeps_the_carrier(self):   # (a)
+        f = self.carrier()
+        u, _ = self.land({"src/b.js": "later app PR", self.PROOFS: self.proofs("3" * 64)})
+        self.assertEqual(self.present(f, u),
+                         (True, [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}]))
+
+    def test_an_unchanged_carrier_records_no_ignored_field(self):
+        f = self.carrier()
+        u, _ = self.land({"src/b.js": "later app PR"})
+        self.assertEqual(self.present(f, u), (True, []))
+
+    def test_another_field_of_the_same_file_differing_is_not_present(self):   # (b)
+        f = self.carrier()
+        u, _ = self.land({self.PROOFS: self.proofs("3" * 64, controls=("a", "b"))})
+        self.assertEqual(self.present(f, u), (False, []))
+        # a type change the == operator would hide (true == 1) still differs
+        f2, _ = self.land({self.PROOFS: self.proofs("4" * 64, controls=(1,))})
+        u2, _ = self.land({self.PROOFS: self.proofs("5" * 64, controls=(True,))})
+        self.assertEqual(self.present(f2, u2), (False, []))
+
+    def test_an_unlisted_path_differing_is_not_present(self):   # (c)
+        self.land({"src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
+        f, _ = self.land({"src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
+        u, _ = self.land({"src/a.js": "rewritten", self.PROOFS: self.proofs("3" * 64)})
+        self.assertEqual(self.present(f, u), (False, []))
+        # the same pointer in an unlisted JSON file is not exempt either
+        self.land({"contracts/other.v1.json": self.proofs("1" * 64)})
+        f2, _ = self.land({"contracts/other.v1.json": self.proofs("2" * 64)})
+        u2, _ = self.land({"contracts/other.v1.json": self.proofs("3" * 64)})
+        self.assertEqual(self.present(f2, u2), (False, []))
+
+    def test_the_worker_lane_with_the_same_file_name_is_not_present(self):   # (d)
+        f = self.carrier()
+        u, _ = self.land({self.PROOFS: self.proofs("3" * 64)})
+        self.assertEqual(self.present(f, u, lane="worker"), (False, []))
+
+    def test_malformed_or_ambiguous_json_at_the_target_is_not_present(self):   # (e)
+        f = self.carrier()
+        good = self.proofs("3" * 64)
+        for raw in (good[:-5], "", "[]", good.replace('"schema"', '"schema": 1, "schema"', 1),
+                    good.replace('"application_source_sha256"', '"application_source_sha"', 1)):
+            with self.subTest(raw=raw[:40]):
+                u, _ = self.land({self.PROOFS: self.proofs("", raw=raw)})
+                self.assertEqual(self.present(f, u), (False, []))
+
+    def test_a_pointer_missing_at_the_fix_or_a_mode_change_is_not_present(self):
+        self.land({self.PROOFS: json.dumps({"controls": ["a"]})})
+        f, _ = self.land({self.PROOFS: json.dumps({"controls": ["b"]})})
+        u, _ = self.land({self.PROOFS: json.dumps({"controls": ["b"], "application_source_sha256": "x"})})
+        self.assertEqual(self.present(f, u), (False, []))
+        f2 = self.carrier()
+        self.land({self.PROOFS: self.proofs("3" * 64)})
+        (self.fx.repo / self.PROOFS).chmod(0o755)
+        git(self.fx.repo, "add", self.PROOFS)
+        git(self.fx.repo, "commit", "-q", "-m", "mode")
+        git(self.fx.repo, "push", "-q", "origin", "HEAD:main")
+        u2 = git(self.fx.repo, "rev-parse", "HEAD")
+        self.assertEqual(self.present(f2, u2), (False, []))
+
+    def test_the_run_record_names_the_ignored_derived_field(self):
+        b, nb = self.land({"mcp-server/src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
+        f, nf = self.land({"mcp-server/src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
+        u, nu = self.land({"mcp-server/src/b.js": "later", self.PROOFS: self.proofs("3" * 64)})
+        comments = {nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]}
+        runner, rec = self.tick(comments)   # the worker lane lists nothing: held
+        self.assert_held(runner, rec, nb)
+        cfg = self.fx.config()
+        cfg["worker"]["fix_forward_derived_fields"] = self.derived("app")
+        self.fx.config = lambda **_: cfg
+        runner, rec = self.tick(comments)
+        self.assertEqual(rec["status"], "shipped", rec)
+        self.assertEqual(rec["sha"], u)
+        [ff] = rec["fix_forwards"]
+        self.assertEqual(ff["fixing_pr"], nf)
+        self.assertEqual(ff["derived_fields_ignored"],
+                         [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}])
+
+
 class SquashGitHub(FakeGitHub):
     """FakeGitHub, except the squash commit `merged` maps to PR `number`
     whose real head is `head`, approved at `reviewed`."""
