@@ -50,13 +50,21 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from lib import gate_declarations  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from git_env import fixture_env  # noqa: E402
+
+# Every git call here — the island's `git init` and the gates that run git
+# inside it — gets an environment with GIT_DIR and friends scrubbed, so a
+# hook-exported GIT_DIR can never redirect them at a real repository.
+ENV = fixture_env()
+
 FIXTURES = os.path.join(REPO, "ops", "fixtures", "real-replay")
 JOIN = "\n\n"
 SEVERITY = {"allow": 1, "ask": 2, "deny": 3}
 ROW_FIELDS = ("hook", "event", "tool", "tool_use_id", "outcome", "exit", "register",
               "reopen", "deny_class", "deny_headline", "error_tail")
 
-failures = []
+failures: list[str] = []
 QUIET = [False]          # the mutant pass counts failures without printing them
 
 
@@ -142,14 +150,14 @@ def build_island(tmp, mutate=None):
             raise AssertionError(f"mutant target missing from hook_execution.py: {old!r}")
         open(path, "w", encoding="utf-8").write(text.replace(old, new, 1))
     os.makedirs(os.path.join(island, "out"), exist_ok=True)
-    subprocess.run(["git", "init", "-q"], cwd=island, check=True,
-                   env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+    subprocess.run(["git", "init", "-q"], cwd=island, check=True, env=ENV,
+                   capture_output=True)
     write_gates(os.path.join(island, "fixture-gates"))
     return island
 
 
 def env_for(tmp, telemetry):
-    env = {k: v for k, v in os.environ.items()
+    env = {k: v for k, v in ENV.items()
            if not k.startswith(("CARR_", "CLAUDE_")) and k != "PYTHONPATH"}
     env.update({
         "HOME": os.path.join(tmp, "home"),
