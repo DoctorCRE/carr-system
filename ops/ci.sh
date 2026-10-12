@@ -1397,9 +1397,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   for definer_pg_proof in \
     mcp-server/test/security-definer-search-path-postgres.sql \
     mcp-server/test/definer-temp-substitution-postgres.sql \
-    mcp-server/test/definer-hardening-catalog-postgres.sql \
-    mcp-server/test/completion-tenant-barriers-postgres.sql \
-    mcp-server/test/dot-security-definers-postgres.sql; do
+    mcp-server/test/completion-tenant-barriers-postgres.sql; do
     definer_pg_log="$LOGDIR/$(basename "$definer_pg_proof" .sql).log"
     if ! run_quiet "$definer_pg_log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" -f "$definer_pg_proof"; then
@@ -1408,6 +1406,23 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       return
     fi
   done
+  # WR-000258: these two were nearly all of the 330 s that PR 1708's hosted run
+  # booked to the 'tour' step (measured on a loaded Mac: ~320 s and ~60 s of the
+  # ~385 s for the proofs between 'migrate' and 'tour'). The Dot proof hashes every public/ops row (the sealed SCAC
+  # registry alone is ~240k rows) before and after each of its reviewed calls, and the
+  # catalog proof re-validates all 116 registry seals; both roll back everything
+  # they write. ops/ci-migration-gates.py runs the Dot proof as $dot_proof_shards
+  # sessions (each owning the calls at its position modulo the count) and the
+  # catalog proof beside them, each on its own copy of this database, requires the
+  # shards to have executed every reviewed call exactly once, and prints
+  # sql-proof-timing with the one-after-another total so the saving is visible.
+  local dot_proof_shards="${CARR_DOT_PROOF_SHARDS:-3}"
+  if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --psql "$psql_bin" \
+       --sql-proof mcp-server/test/definer-hardening-catalog-postgres.sql \
+       --sql-proof "mcp-server/test/dot-security-definers-postgres.sql:$dot_proof_shards"; then
+    bad migration "SECURITY DEFINER PostgreSQL acceptance failed: definer-hardening-catalog or dot-security-definers (named above)"
+    return
+  fi
   if ! CARR_INVOICE_TEST_DATABASE_URL="$dsn" CARR_INVOICE_TEST_REQUIRED=1 \
        run_quiet "$LOGDIR/invoice-tracker-transaction.log" \
        node --test mcp-server/test/invoice-tracker-transaction.test.mjs; then
