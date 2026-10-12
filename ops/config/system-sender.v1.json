@@ -1,0 +1,35 @@
+{
+  "_comment": "system-sender.v1.json — policy data for lib/system_sender.py, the system's own outbound sender (mail through New Outlook, social through Blotato). Authority: Joe's autonomy ruling of 2026-10-12, decision cbe91287-10a2-48d0-bda7-3b1784b4bb93 (\"I don't even want credential minting, external sends, mailbox and CRM consent ... to require me\"), and rule c66dc739 as amended the same day: sending is no longer a human gate. The gate is this policy chain instead: kill switch, writing lint, recipient allowlist, dedupe, daily caps, shadow mode, receipts. SHADOW MODE: while live_from is null or in the future, every call runs the whole chain and records would_send, and nothing leaves the machine. Going live is an edit of live_from to an ISO-8601 timestamp with an offset, through an ordinary PR. Never put a credential value in this file; the Blotato key is named in ops/config/credential-inventory.v1.json (blotato-api-key) and lives where that row says.",
+  "schema": "carr-system-sender/v1",
+  "live_from": null,
+  "timezone": "America/Chicago",
+  "daily_caps": {
+    "mail": 20,
+    "social": 5
+  },
+  "mail": {
+    "self_addresses": [
+      "joe.bookout@carr.us",
+      "dell.mccraney@carr.us"
+    ],
+    "_self_addresses_note": "Joe's and Dell's own CARR addresses, the same pair bin/gmail-handover.py allows. Any other recipient must be an exact participant email on the deal named in the call, read live through get-call-context."
+  },
+  "social": {
+    "platforms": [
+      "linkedin",
+      "facebook",
+      "instagram",
+      "twitter"
+    ],
+    "accounts_file": "claude-tree/skills/social-media-manager/config/blotato-accounts.json",
+    "api_base": "https://backend.blotato.com/v2",
+    "_platforms_note": "A platform must be listed here AND carry an accountId in accounts_file; the account and page ids come from that file, never from the caller."
+  },
+  "kill_switch": {
+    "stop_file": "out/system-send.stop",
+    "signal_kind": "system_send_stop",
+    "_note": "Either one stops every send: the stop file existing, or an open or claimed record-layer signal of this kind (read through next-signals). A kill-switch read that fails refuses the send."
+  },
+  "receipts_file": "out/sends.jsonl",
+  "ledger_file": "out/system-sender-ledger.json"
+}

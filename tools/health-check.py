@@ -110,8 +110,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "builds", "uptime", "storage"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|builds|uptime|storage")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "builds", "uptime", "storage", "sends"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|builds|uptime|storage|sends")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     return recovery, reason, vault, section, fixture, findings_json, rest
@@ -1403,6 +1403,19 @@ def _storage_hygiene_row():
             used > storage_hygiene.DATA_THRESHOLD_BYTES)
 
 
+def _system_sends_row():
+    """lib/system_sender.py's own row: today's sends against the cap, shadow vs
+    live, kill-switch state, held dedupe claims. Same reader the sender's cap
+    uses (rule a8c55a47), so the row cannot disagree with the refusal."""
+    try:
+        from lib.system_sender import health_row
+        return health_row()
+    except Exception as exc:
+        return (f"UNKNOWN system sends — sender unavailable ({type(exc).__name__}) · on breach: "
+                "owner orchestrator · restore lib/system_sender.py or ops/config/system-sender.v1.json "
+                "· verify: run.sh health --section sends · auto-clear after a successful read", True, True)
+
+
 def _canonical_health():
     """The normal health surface: record/control-plane/local truth only."""
     _FINDINGS.clear()
@@ -1437,7 +1450,7 @@ def _canonical_health():
         if " over budget: " in _site_line or _site_line.startswith("UNKNOWN"):
             rc = _red("jev_site_budget", _site_line, hard_error=_site_line.startswith("UNKNOWN"))
     try:
-        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "storage", "uptime") else _canonical_snapshot()
+        snap = {} if CANONICAL_SECTION in ("jev-cap", "grok-session", "storage", "uptime", "sends") else _canonical_snapshot()
     except Exception as exc:
         print(f"canonical health: REFUSED ({type(exc).__name__}: {exc})")
         _red("canonical_health_refused", f"{type(exc).__name__}: {exc}", hard_error=True)
@@ -2020,6 +2033,12 @@ def _canonical_health():
             _unprovisioned = ("production_uptime" in PROVISIONING_PENDING
                               and "monitor unreachable" in line)
             rc = _red("production_uptime", line, subject="carr-uptime", hard_error=not _unprovisioned)
+
+    if CANONICAL_SECTION in ("all", "sends") and not CANONICAL_FIXTURE:
+        line, breach, hard = _system_sends_row()
+        print("  " + line)
+        if breach:
+            rc = _red("system_sends", line, subject="system-sender", hard_error=hard)
 
     if CANONICAL_SECTION in ("all", "tailscale"):
         try:
