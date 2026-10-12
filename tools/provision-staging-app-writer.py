@@ -1741,6 +1741,15 @@ def decide_profile_action(
     request, never a quiet reuse, and a working credential is never rotated.
     """
     if rotate_lost:
+        if credential_state == "pending":
+            # The one realistic way here after a rotation started: the process
+            # died (power, SIGKILL) after minting the pending file and before
+            # the commit, so the `finally` that discards it never ran. Say how
+            # to tell the two cases apart rather than leaving a bare refusal.
+            raise ProvisioningRefusal(
+                "rotation refused: a pending credential exists and is never rotated. If a "
+                "rotation was interrupted, rerun WITHOUT the flag to resume it; if that fails "
+                "its login proof the file names nothing -- remove it and rerun with the flag")
         if credential_state != "absent":
             raise ProvisioningRefusal(
                 f"deliberate rotation refused: the local credential is {credential_state}; "

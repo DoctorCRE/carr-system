@@ -1482,8 +1482,10 @@ commit;
             writer_file.paths.final.rename(writer_file.paths.pending)
             rc, out, err = run_rotation(
                 rotation_argv + ["--rotate-lost-credential", "writer"])
-            check("rotation refuses when only the pending credential file exists",
+            check("rotation refuses when only the pending credential file exists, "
+                  "and says how to recover an interrupted rotation",
                   rc == 2 and "never rotated" in err
+                  and "rerun WITHOUT the flag" in err and "remove it" in err
                   and not any(event[0] in {"apply", "bulk"} for event in rotation_events)
                   and writer_file.paths.pending.read_bytes() == before_bytes)
             writer_file.paths.pending.unlink()

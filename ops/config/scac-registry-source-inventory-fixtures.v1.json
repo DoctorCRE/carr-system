@@ -113624,8 +113624,8 @@
           "operation": "tools/provision-staging-app-writer.py",
           "effect_class": "administrative_mutation",
           "source_locator": "tools/provision-staging-app-writer.py",
-          "schema_digest": "caf786f0b5579351efa9ca5d2ca527aa82b3906da6e87f47149c99867d9a8d71",
-          "handler_digest": "caf786f0b5579351efa9ca5d2ca527aa82b3906da6e87f47149c99867d9a8d71",
+          "schema_digest": "9c5a9c5bee1d5b22363cd312fddadfaaa6922e0443ee64943e502da260d39bb8",
+          "handler_digest": "9c5a9c5bee1d5b22363cd312fddadfaaa6922e0443ee64943e502da260d39bb8",
           "write": true,
           "human_only": false,
           "authority_only": true,
@@ -113643,7 +113643,7 @@
         }
       ],
       "expected_count": 1192,
-      "expected_sha256": "76739b88b265bf74f98d3254595f86026ecfa1d741b2af05cedcf186c1d82aef",
+      "expected_sha256": "571162e929fb124fb2bb1335a236700446b00f98cf1fc8161da22106fda38733",
       "reason": "PR 1706 source-only review: bind the existing provision-staging-app-writer external-admin row after adding the opt-in --rotate-lost-credential path (Joe approved 2026-10-12) for a staging candidate login whose local credential file is lost. The script's fixed CLI contract, credential boundary, authority contract, and sealed runtime frontier remain unchanged."
     }
   }
