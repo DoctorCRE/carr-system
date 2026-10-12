@@ -85,8 +85,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py --chain 20:{{REPO}}/hooks/staging-observation-tracker.py 60:{{REPO}}/hooks/settings-change-gate.py 15:{{REPO}}/hooks/bash-write-gate.py 10:{{REPO}}/hooks/write-effect-check.py 10:{{REPO}}/hooks/draft-export-gate.py 5:{{REPO}}/hooks/github-burst-guard.py",
-          "timeout": 125
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py --chain 60:{{REPO}}/hooks/settings-change-gate.py 15:{{REPO}}/hooks/bash-write-gate.py 10:{{REPO}}/hooks/write-effect-check.py 10:{{REPO}}/hooks/draft-export-gate.py 5:{{REPO}}/hooks/github-burst-guard.py",
+          "timeout": 105
         }
       ]
     },
@@ -183,11 +183,6 @@
     {
       "matcher": "Bash",
       "hooks": [
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-          "timeout": 20
-        },
         {
           "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
