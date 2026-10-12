@@ -289,7 +289,7 @@ def reconcile(result, state_path, verb):
             payload = {"kind": "open_loop", "owner": "Joe", "domain": "system",
                        "blocker": "human_only" if reason == "billing_exhausted" else "capability",
                        "blocker_detail": ("Joe must add TypeSafe account credits" if reason == "billing_exhausted"
-                                          else f"TypeSafe provider failure: {reason}"), "body": _body(reason)}
+                                          else f"Joe restores the TypeSafe provider path ({reason})"), "body": _body(reason)}
             outcome = repair_loop.reconcile(state, payload, verb, save)
             if state.get("loop_id"):
                 state["state"] = "outage_open"
@@ -307,6 +307,9 @@ def reconcile(result, state_path, verb):
 
 
 def call_verb(name, payload):
-    """A loop verb's reply, or {"ok": False} for anything but an ok outcome."""
+    """A loop verb's reply, or {"ok": False} for anything but an ok outcome;
+    `refused` marks a definite no from the record layer (nothing written)."""
     result = record_call.call_verb(name, payload, timeout=35)
-    return result.reply if result.ok and isinstance(result.reply, dict) else {"ok": False}
+    if result.ok and isinstance(result.reply, dict):
+        return result.reply
+    return {"ok": False, "refused": result.kind == record_call.REFUSED}
