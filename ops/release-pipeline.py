@@ -148,12 +148,24 @@ released batch ONLY if ALL of these hold:
      and every path F changed still has F's exact blob and mode at the target.
      A later revert or rewrite of any F path fails this; a later PR that
      carries the fix forward again needs its own marker and passes this check.
+     The ONE exception is a derived digest the lane lists in
+     `fix_forward_derived_fields` ({path, json_pointer}; the app lane lists
+     contracts/e2e-staging-control-proofs.v1.json /application_source_sha256,
+     a digest of the whole app tree that almost every app PR recomputes; the
+     worker lane lists none). Only after the strict check fails, and only for
+     a listed path whose mode is unchanged, both blobs are parsed as JSON
+     (duplicate keys refused), exactly that pointer is deleted from each, and
+     the path counts as present when the remaining documents serialize
+     identically. An unlisted path, a parse error, a pointer missing on either
+     side or any other difference still fails. Each path that passed this way
+     is named in that fix-forward's `derived_fields_ignored`.
 A target between B and F therefore stays a review_blocked hold: the defective
 commit can never ship alone, only in the same atomic release as its fix. B's
 BLOCK verdict is left as it is, B is never listed as approved, and its release
 paths still need green CI. The run record (and the dry-run output) carries
 `fix_forwards`: the blocked PR and its commit on main, the BLOCK comment URL,
-the fixing PR and its merge commit, the fixing approval's Reviewed-SHA and URL.
+the fixing PR and its merge commit, the fixing approval's Reviewed-SHA and URL,
+and `derived_fields_ignored` (the exception in 3, usually empty).
 Both lanes read review evidence through the same code, so the rule is the same
 for the app lane. The reviewer of F is the one who attests
 that F fixes B, so the marker goes on F's independent approval, nowhere else.
@@ -1312,7 +1324,8 @@ class Pipeline:
             if commit == sha and approval is not None:
                 head = {"pr": number, "head_sha": head_sha, "url": str(approval.get("html_url") or ""),
                         "event": events.get(commit) or {}, "rule": rule, "reviewed_sha": reviewed_sha}
-        fix_forwards = self.resolve_fix_forwards(repo_dir, sha, blocked, fixers)
+        fix_forwards = self.resolve_fix_forwards(repo_dir, sha, blocked, fixers,
+                                                 lane_cfg.get("fix_forward_derived_fields") or [])
         if head is None:
             raise Blocked("no_independent_review", f"the head commit {sha[:12]} has no approval")
         return {"head": head, "prs": reviewed, "pre_pipeline_prs": pre_pipeline, "release_prs": release_prs,
@@ -1321,7 +1334,7 @@ class Pipeline:
                 "verifier_evidence": evidence_ref_from_url(head["url"])}
 
     def resolve_fix_forwards(self, repo_dir: Path, sha: str, blocked: list[dict],
-                             fixers: list[dict]) -> list[dict]:
+                             fixers: list[dict], derived: Iterable[dict] = ()) -> list[dict]:
         """Each BLOCKED commit B of the batch base..sha ships only with its fix,
         else the whole batch is a review_blocked hold. ALL of these must hold:
           1. a LATER first-parent commit of the SAME batch (so at or before the
@@ -1336,7 +1349,8 @@ class Pipeline:
           3. the target is at or after F's merge commit (re-checked in git),
              and F's change is still PRESENT at the target (change_present):
              a later revert of F, or a later rewrite of F's lines, drops F as
-             the fixer unless that later PR carries its own marker.
+             the fixer unless that later PR carries its own marker. Only a
+             recomputed lane-listed derived digest is exempt (`derived`).
         B is bound by its commit on main and the PR GitHub maps it to; F by
         its merge_commit_sha, its PR number and its approval's Reviewed-SHA.
         The first unfixed B raises; nothing is shipped partially.
@@ -1349,13 +1363,15 @@ class Pipeline:
                           if f["position"] < b["position"] and b["pr"] in f["fixes"]
                           and f["merge_commit_sha"] == f["commit"]]
             fix = None
+            ignored: list[dict] = []
             for cand in candidates:
                 try:
                     self.git("merge-base", "--is-ancestor", cand["commit"], sha, cwd=repo_dir)
                     self.git("merge-base", "--is-ancestor", b["commit"], cand["commit"], cwd=repo_dir)
                 except StepFailed:
                     continue
-                if self.change_present(repo_dir, cand["commit"], sha):
+                ignored = []
+                if self.change_present(repo_dir, cand["commit"], sha, derived, ignored):
                     fix = cand
                     break
             if fix is None:
@@ -1368,15 +1384,23 @@ class Pipeline:
                 raise Blocked("review_blocked", f"PR #{b['pr']} ({b['commit'][:12]}): {b['detail']}; {why}")
             out.append({"blocked_pr": b["pr"], "blocked_commit": b["commit"], "block_url": b["url"],
                         "fixing_pr": fix["pr"], "fixing_commit": fix["commit"],
-                        "fixing_reviewed_sha": fix["reviewed_sha"], "fixing_approval_url": fix["url"]})
+                        "fixing_reviewed_sha": fix["reviewed_sha"], "fixing_approval_url": fix["url"],
+                        "derived_fields_ignored": ignored})
             self.out(f"  fix-forward: PR #{b['pr']} ({b['commit'][:12]}) is BLOCKED and ships only with "
                      f"its fix PR #{fix['pr']} ({fix['commit'][:12]}), approval {fix['url']}")
+            for item in ignored:
+                self.out(f"  fix-forward: PR #{fix['pr']}'s {item['path']} differs at the target only in "
+                         f"the derived field {item['json_pointer']}, which was ignored")
         return out
 
-    def change_present(self, repo_dir: Path, fix: str, target: str) -> bool:
+    def change_present(self, repo_dir: Path, fix: str, target: str, derived: Iterable[dict] = (),
+                       ignored: list[dict] | None = None) -> bool:
         """Require every path touched by the attested fix to match its blob
         and mode at the target. A partial revert or later edit needs a fresh
-        reviewed Fixes-Forward marker, even if another fix path remains."""
+        reviewed Fixes-Forward marker, even if another fix path remains.
+        Only when that strict check fails may a path listed in `derived`
+        ({path, json_pointer}) pass by derived_field_only(); each such path
+        is appended to `ignored`. Anything else stays not present."""
         try:
             # Keep -z output intact: trimming would corrupt a leading-space
             # filename. The later diff must treat every name literally, since
@@ -1384,10 +1408,72 @@ class Pipeline:
             paths = self.changed_paths(f"{fix}^1", fix, cwd=repo_dir)
             if not paths:
                 return False
-            self.git("--literal-pathspecs", "diff", "--quiet", fix, target, "--", *paths,
-                     cwd=repo_dir)
+            try:
+                self.git("--literal-pathspecs", "diff", "--quiet", fix, target, "--", *paths,
+                         cwd=repo_dir)
+                return True
+            except StepFailed:
+                pass
+            listed = {d["path"]: d["json_pointer"] for d in derived
+                      if isinstance(d, dict) and isinstance(d.get("path"), str)
+                      and isinstance(d.get("json_pointer"), str) and d["json_pointer"].startswith("/")}
+            output = self.git("--literal-pathspecs", "diff", "--no-renames", "--name-only", "-z",
+                              fix, target, "--", *paths, cwd=repo_dir, trim_output=False)
+            differing = [p for p in output.split("\0") if p]
+            if not differing or any(p not in listed for p in differing):
+                return False
+            for p in differing:
+                if not self.derived_field_only(repo_dir, fix, target, p, listed[p]):
+                    return False
+            if ignored is not None:
+                ignored.extend({"path": p, "json_pointer": listed[p]} for p in differing)
             return True
         except StepFailed:
+            return False
+
+    def derived_field_only(self, repo_dir: Path, fix: str, target: str, path: str, pointer: str) -> bool:
+        """True only when `path` is a file of the same mode on both sides, both
+        blobs parse as JSON without duplicate keys, `pointer` exists in both,
+        and with exactly that pointer deleted the two documents serialize
+        identically. Any failure is False: the fix is not present."""
+        def entry(commit: str) -> tuple[str, str] | None:
+            out = self.git("--literal-pathspecs", "ls-tree", "-z", commit, "--", path,
+                           cwd=repo_dir, trim_output=False)
+            rows = [r for r in out.split("\0") if r]
+            if len(rows) != 1:
+                return None
+            meta, _, name = rows[0].partition("\t")
+            mode, kind, oid = meta.split(" ")
+            return (mode, oid) if kind == "blob" and name == path else None
+
+        def no_duplicates(pairs: list[tuple[str, Any]]) -> dict:
+            keys = [k for k, _ in pairs]
+            if len(keys) != len(set(keys)):
+                raise ValueError("duplicate key")
+            return dict(pairs)
+
+        def without(doc: Any) -> str | None:
+            tokens = [t.replace("~1", "/").replace("~0", "~") for t in pointer.split("/")[1:]]
+            node = doc
+            for t in tokens[:-1]:
+                if not isinstance(node, dict) or t not in node:
+                    return None
+                node = node[t]
+            if not isinstance(node, dict) or tokens[-1] not in node:
+                return None
+            del node[tokens[-1]]
+            # Canonical text, not ==: Python treats true == 1 == 1.0.
+            return json.dumps(doc, sort_keys=True, ensure_ascii=True, allow_nan=True)
+
+        try:
+            a, b = entry(fix), entry(target)
+            if a is None or b is None or a[0] != b[0]:
+                return False
+            docs = [json.loads(self.git("cat-file", "blob", oid, cwd=repo_dir, trim_output=False),
+                               object_pairs_hook=no_duplicates) for _, oid in (a, b)]
+            left, right = without(docs[0]), without(docs[1])
+            return left is not None and left == right
+        except (StepFailed, ValueError, RecursionError):
             return False
 
     def main_merge_only(self, repo_dir: Path, number: int, reviewed: str, head: str,
