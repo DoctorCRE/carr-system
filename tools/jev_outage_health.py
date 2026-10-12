@@ -282,7 +282,7 @@ def outage_blocker(reason):
                 "residue_kind": "money_movement", "residue_host": "TypeSafe"}
     if reason == "auth_failed":
         return {"owner": "Joe", "blocker": "capability",
-                "blocker_detail": "TypeSafe provider failure: auth_failed",
+                "blocker_detail": "Joe signs back in to the TypeSafe provider (auth_failed)",
                 "residue_kind": "provider_login", "residue_host": "TypeSafe"}
     return {"owner": "claude", "blocker": "other_lane",
             "blocker_detail": f"The orchestrator must restore TypeSafe judgments after a provider failure: {reason}"}
@@ -322,6 +322,9 @@ def reconcile(result, state_path, verb):
 
 
 def call_verb(name, payload):
-    """A loop verb's reply, or {"ok": False} for anything but an ok outcome."""
+    """A loop verb's reply, or {"ok": False} for anything but an ok outcome;
+    `refused` marks a definite no from the record layer (nothing written)."""
     result = record_call.call_verb(name, payload, timeout=35)
-    return result.reply if result.ok and isinstance(result.reply, dict) else {"ok": False}
+    if result.ok and isinstance(result.reply, dict):
+        return result.reply
+    return {"ok": False, "refused": result.kind == record_call.REFUSED}
