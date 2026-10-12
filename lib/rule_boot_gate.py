@@ -17,6 +17,9 @@ STATE LAYOUT (under out/rule-boot-gate/, gitignored, per machine):
     <session>/arm.json                    status (armed | unavailable |
                                           not_deployed), digest, pages_total,
                                           epoch
+                                          [carry_epoch: see WHO COMPACTED]
+                                          [by_agent: a flagged child's SessionStart
+                                          re-armed it on a new digest]
     <session>/agents/<agent>.epoch        one epoch per child context; a child
                                           SessionStart rotates only this file
     <session>/fetched/<agent>/<key>/      one directory per context and digest
@@ -28,6 +31,10 @@ STATE LAYOUT (under out/rule-boot-gate/, gitignored, per machine):
         failed      a fetch came back as an error: the store is unreachable
         unsupported the Worker rejected detail=boot: not deployed yet
         d<H>-<rnd>  one deny, made when H pages were confirmed
+        a-child     main: the compaction behind this epoch was a subagent's
+        a-own       main: it was this context's own (see WHO COMPACTED)
+        k<T>        a child: its transcript showed no compaction since its boot
+                    when checked against the compaction re-armed at T
 Marker files, not a read-modify-write JSON, because a model often fetches the
 pages in parallel and parallel hooks would otherwise lose each other's pages.
 <key> is digest+the child's own epoch when its epoch file exists, digest alone
@@ -35,6 +42,26 @@ for a child that has not emitted SessionStart, and digest+the session epoch for
 the main context. A child SessionStart therefore re-gates only that child. A
 main SessionStart re-gates the main context, and a digest change re-gates every
 context.
+
+WHO COMPACTED (WR-000265, measured 2026-10-12). A subagent's compaction runs
+the SessionStart hooks too, and Claude Code (2.1.287, 2.1.293, 2.1.295) builds
+that payload without the agent's context: the parent's session_id, the
+parent's transcript_path, no agent_id, and agent_type is the MAIN thread's. No
+payload field tells a child's compaction from the parent's own. A SessionStart
+that does carry agent_id (the flagged form) rotates only that child's epoch.
+An unflagged compact with the same corpus still rotates the session epoch
+(fail closed), and records as carry_epoch the epoch under which the main
+context last held a complete boot. The transcripts then settle it at the main
+context's next held call: the main file is <dir>/<session>.jsonl and a
+subagent's is <dir>/<session>/subagents/agent-<id>.jsonl. When the main file
+has no compact_boundary of its own after the main boot completed, has a line
+written after the re-arm, and some subagent file has a compact_boundary within
+COMPACT_SLACK_S before the re-arm, the compaction was a child's and the carried
+boot counts (a-child). A main boundary after the boot is the main context's own
+compaction (a-own): held, as before. Anything less settles nothing: held. This
+never carries a boot across the main context's own compaction. A child is
+re-gated (new agent epoch) when its own file shows a compact_boundary after its
+boot completed. Without a transcript (another host, a replay) nothing changes.
 
 WHEN THE DIGEST MOVES MID-SESSION. Every boot page carries the corpus digest
 and page count. When a fetch in any context returns a digest or page count
@@ -60,6 +87,7 @@ import re
 import secrets
 import subprocess
 import time
+from datetime import datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA = "carr-rule-boot-gate/v1"
@@ -67,6 +95,15 @@ BOOT_SCHEMA = "carr-rule-boot/v1"
 
 MAX_DIAGNOSTIC_MARKERS = 3
 PENDING_GRACE_S = 45
+# A child's compact_boundary is stamped before its SessionStart hooks run
+# (after PostCompact hooks and the summary), so it precedes the re-arm.
+COMPACT_SLACK_S = 600
+# The PreToolUse hook has a 5s timeout and a cancelled hook lets the call
+# through, so the transcript reads are bounded: a file larger than this, or a
+# scan past the budget, settles nothing and the context stays held.
+MAX_TRANSCRIPT_BYTES = 128 * 1024 * 1024
+SCAN_BUDGET_S = 1.5
+_AGENT_FILE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 # The CARR connector's MCP prefixes: the local server, the records alias and
 # the claude.ai account connector (by name and by this account's connector
@@ -810,6 +847,12 @@ def arm_session(session_id, source, now=None, *, agent_id=None):
         arm.update(status="armed", digest=boot["digest"], pages_total=int(boot["pages_total"]))
         if int(boot.get("total_chars") or 0) >= 1:
             arm["total_chars"] = int(boot["total_chars"])
+        if agent_id:
+            arm["by_agent"] = safe_key(agent_id, "agent")
+        elif str(source or "") == "compact" and same_corpus:
+            carry = _carry_epoch(session_id, stored)
+            if carry:
+                arm["carry_epoch"] = carry
         write_arm(session_id, arm)
         if agent_id:
             _write_agent_epoch(session_id, agent_id)
@@ -821,6 +864,186 @@ def arm_session(session_id, source, now=None, *, agent_id=None):
     arm.update(status="unavailable", reason=reason or "unreachable")
     write_arm(session_id, arm)
     return f"{UNAVAILABLE_NOTICE} ({arm['reason']})"
+
+
+def _carry_epoch(session_id, stored):
+    """The epoch under which the main context last held a complete boot of the
+    stored corpus: the stored epoch when it is complete there, else the one the
+    stored arm already carried (a chain of unattributed compactions)."""
+    if _boot_time(_fetch_dir(session_id, None, stored), stored) is not None:
+        return safe_key(stored.get("epoch"), "e0")
+    return stored.get("carry_epoch")
+
+
+# ---------------------------------------------------------------- who compacted
+
+def _iso_ts(value):
+    try:
+        text = str(value)
+        return datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _boot_time(folder, arm):
+    """When this context's boot of `arm` completed (the newest page
+    confirmation), or None when it is not complete."""
+    total = int(arm.get("pages_total") or 0)
+    if total < 1 or not set(range(1, total + 1)) <= _pages(_markers(folder), "c") or _short_text(folder, arm):
+        return None
+    try:
+        return max(os.path.getmtime(os.path.join(folder, f"c{p}")) for p in range(1, total + 1))
+    except OSError:
+        return None
+
+
+def _transcript_events(path):
+    """(own boundaries, newest timestamp) of one Claude Code transcript, or
+    None when it cannot be read. Own boundaries are the timestamps of the
+    compact_boundary entries that belong to the file's own context: a
+    sidechain (subagent) entry mirrored into a main file is not one."""
+    try:
+        if os.path.getsize(path) > MAX_TRANSCRIPT_BYTES:
+            return None
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    sub = os.path.basename(os.path.dirname(path)) == "subagents"
+    own, start = [], 0
+    while True:
+        at = data.find(b'"compact_boundary"', start)
+        if at < 0:
+            break
+        head = data.rfind(b"\n", 0, at) + 1
+        end = data.find(b"\n", at)
+        end = len(data) if end < 0 else end
+        start = end
+        try:
+            entry = json.loads(data[head:end])
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("subtype") != "compact_boundary":
+            continue
+        if not sub and (entry.get("isSidechain") or entry.get("agentId")):
+            continue
+        ts = _iso_ts(entry.get("timestamp"))
+        if ts is not None:
+            own.append(ts)
+    # Bookkeeping lines (custom-title, last-prompt, ...) carry no timestamp and
+    # come in bursts, and entries are only roughly in time order: take the
+    # newest of the last few stamped lines.
+    newest, stamped = None, 0
+    for line in reversed(data.rstrip(b"\n").rsplit(b"\n", 512)[-512:]):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        ts = _iso_ts(entry.get("timestamp")) if isinstance(entry, dict) else None
+        if ts is None:
+            continue
+        newest = ts if newest is None else max(newest, ts)
+        stamped += 1
+        if stamped >= 16:
+            break
+    return own, newest
+
+
+def _main_transcript(session_id, transcript_path):
+    """The main context's transcript the payload names, when it is one."""
+    if not isinstance(transcript_path, str) or not transcript_path:
+        return None
+    path = os.path.realpath(os.path.expanduser(transcript_path))
+    return path if os.path.basename(path) == f"{session_id}.jsonl" else None
+
+
+def _stamp(ts):
+    return time.strftime("%H:%M:%SZ", time.gmtime(ts))
+
+
+def _main_compaction(session_id, payload, arm, carry_folder):
+    """Whose compaction re-armed this main context: ("child", ts) when the
+    transcripts show a subagent's and not this context's, ("own", ts) when
+    the main transcript shows its own after its boot, (None, None) when they
+    do not settle it."""
+    deadline = time.monotonic() + SCAN_BUDGET_S
+    boot = _boot_time(carry_folder, arm)
+    main = _main_transcript(session_id, payload.get("transcript_path") or payload.get("transcriptPath"))
+    if boot is None or main is None:
+        return None, None
+    events = _transcript_events(main)
+    if events is None:
+        return None, None
+    own = [ts for ts in events[0] if ts > boot]
+    if own:
+        return "own", max(own)
+    armed_at = int(arm.get("armed_at") or 0)
+    if events[1] is None or events[1] <= armed_at:
+        return None, None
+    folder = os.path.join(main[:-len(".jsonl")], "subagents")
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return None, None
+    for name in names:
+        path = os.path.join(folder, name)
+        if not (name.startswith("agent-") and name.endswith(".jsonl")):
+            continue
+        if time.monotonic() > deadline:
+            return None, None
+        try:
+            if os.path.getmtime(path) < armed_at - COMPACT_SLACK_S:
+                continue
+        except OSError:
+            continue
+        child = _transcript_events(path)
+        hits = [ts for ts in (child[0] if child else []) if armed_at - COMPACT_SLACK_S <= ts <= armed_at + 5]
+        if hits:
+            return "child", max(hits)
+    return None, None
+
+
+def _child_compacted(session_id, agent_id, payload, arm, folder):
+    """The time a child's own transcript shows it compacted after its boot,
+    when a compaction re-armed the session after that boot; else None."""
+    if str(arm.get("source") or "") != "compact" or not _AGENT_FILE_ID.fullmatch(str(agent_id)):
+        return None
+    armed_at = int(arm.get("armed_at") or 0)
+    boot = _boot_time(folder, arm)
+    # armed_at is whole seconds: a boot inside that second is still checked.
+    if boot is None or armed_at + 1 <= boot or f"k{armed_at}" in _markers(folder):
+        return None
+    main = _main_transcript(session_id, payload.get("transcript_path") or payload.get("transcriptPath"))
+    if main is None:
+        return None
+    events = _transcript_events(os.path.join(main[:-len(".jsonl")], "subagents", f"agent-{agent_id}.jsonl"))
+    if events is None:
+        return None
+    own = [ts for ts in events[0] if ts > boot]
+    if own:
+        return max(own)
+    _touch(folder, f"k{armed_at}")
+    return None
+
+
+def _rearm_reason(arm, owner, when):
+    """Why a main context that had read the rules is held again, naming the
+    real source of the re-arm."""
+    source = str(arm.get("source") or "")
+    if arm.get("by_agent"):
+        return (f"A subagent's SessionStart ({source}) found a new rule digest, so every context of "
+                "this session reads the new boot. Read every page.\n")
+    if source != "compact":
+        return (f"This session was re-armed at SessionStart ({source}): pages read before it do "
+                "not count, because this context no longer holds them. Read every page again.\n")
+    if owner == "own":
+        return (f"This context compacted at {_stamp(when)} (its transcript shows the compaction): "
+                "pages read before it do not count, because this context no longer holds them. "
+                "Read every page again.\n")
+    return (f"This session was re-armed at SessionStart (compact) at {_stamp(int(arm.get('armed_at') or 0))}. "
+            "Claude Code's SessionStart payload does not say whether this context or one of its "
+            "subagents compacted, and the transcripts did not show it was a subagent, so pages read "
+            "before it do not count. Read every page again.\n")
 
 
 # ---------------------------------------------------------------- verdicts
@@ -878,6 +1101,32 @@ def verdict(payload, now=None):
     confirmed = _pages(names, "c")
     total = int(arm.get("pages_total") or 0)
     missing = [p for p in range(1, total + 1) if p not in confirmed]
+    owner, when = None, None
+    if missing and not agent_id and arm.get("carry_epoch") and "a-own" not in names:
+        # An unflagged SessionStart(compact) re-armed this context: carry its
+        # earlier boot only when the transcripts show a child compacted.
+        carried = _fetch_dir(session_id, None, {**arm, "epoch": arm["carry_epoch"]})
+        if "a-child" in names:
+            owner = "child"
+        else:
+            owner, when = _main_compaction(session_id, payload, arm, carried)
+            if owner:
+                _touch(folder, f"a-{owner}")
+        if owner == "child" and _boot_time(carried, arm) is not None:
+            return "allow", None
+    elif "a-own" in names:
+        owner = "own"
+    if not missing and agent_id:
+        compacted = _child_compacted(session_id, agent_id, payload, arm, folder)
+        if compacted is not None:
+            try:
+                _write_agent_epoch(session_id, agent_id)
+            except OSError as exc:
+                return "deny", STATE_UNWRITABLE_NOTICE.format(why=str(exc))
+            return _hold(_fetch_dir(session_id, agent_id, key), 0, (
+                f"RULE BOOT: this subagent compacted at {_stamp(compacted)} after it read the rules "
+                "(its transcript shows the compaction), so its earlier reads do not count. "
+                "Read every page again.\n") + fetch_instructions(list(range(1, total + 1)), arm.get("digest"), total))
     if not missing:
         if not _short_text(folder, arm):
             return "allow", None
@@ -905,10 +1154,12 @@ def verdict(payload, now=None):
     source = str(arm.get("source") or "")
     if not agent_id and not confirmed and source in ("compact", "resume", "clear"):
         # The main context's pages are keyed by the arm's epoch, so reads made
-        # before this SessionStart do not count: say so, or a context that
-        # remembers reading them (in its summary) thinks the gate is broken.
-        lead += (f"This session was re-armed at SessionStart ({source}): pages read before it do "
-                 "not count, because this context no longer holds them. Read every page again.\n")
+        # before this SessionStart do not count: say so, naming whose
+        # compaction it was, or a context that remembers reading them (in its
+        # summary) thinks the gate is broken.
+        if owner == "own" and when is None:
+            when = int(arm.get("armed_at") or 0)
+        lead += _rearm_reason(arm, owner, when)
     return _hold(folder, len(confirmed), lead + fetch_instructions(missing, arm.get("digest"), total))
 
 
@@ -1116,6 +1367,8 @@ def observe(payload):
             arm.setdefault("epoch", "fetch-" + safe_key(digest.replace("sha256:", ""), "none")[:12])
             arm.pop("reason", None)
             arm.pop("total_chars", None)
+            arm.pop("carry_epoch", None)
+            arm.pop("by_agent", None)
             if int((boot or {}).get("total_chars") or 0) >= 1:
                 arm["total_chars"] = int(boot["total_chars"])
             try:
