@@ -1428,6 +1428,17 @@ step "incident assessment (latest run of every job)"  ./.venv/bin/python tools/o
 # a PR merged just before or after midnight is never missed by a boundary.
 step "pr recovery evidence (merged PRs -> incident evidence)"  ./.venv/bin/python tools/ops-record.py pr-evidence --since-hours 36
 
+# ── PR BOARD (2026-10-12, Joe's "build it", one of five needle movers) ─────
+# 40 open pull requests, 39 with mergeable UNKNOWN and no owner for any of
+# them. This writes out/pr-board.json: every open PR with ONE next action
+# (MERGE-READY / RESTACK / FIX-CI / STALE / WAIT) and its measured reason, for
+# the morning surfaces and any session to read. READ-ONLY HERE ON PURPOSE: no
+# --file-loops, so the nightly chain files nothing; the bound action (one
+# deduplicated loop per owner lane for STALE PRs) is printed in the log for
+# the orchestrator to run. Never closes, pushes or comments. Exit 78 when gh is
+# not authenticated (SKIP, not a red night).
+step "pr board (one action per open PR, reports only)"  ./run.sh pr-board
+
 # WHAT IS LEFT FOR A HUMAN. 0293 closes recovered lower-severity collector
 # incidents from their own three-run evidence. It deliberately does not touch:
 #
