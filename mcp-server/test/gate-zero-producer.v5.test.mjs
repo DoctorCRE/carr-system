@@ -1608,7 +1608,9 @@ test("SHAPE: every callable this PR added to identity.js and the walker wears am
   // AND THE ONE ENTRY ONTO THE AUTHENTICATED CALL WEARS THE SHAPE TOO. It is a
   // top-level export rather than a member of the namespace above, because that
   // namespace is a set of READERS and this is not one.
-  for (const name of ["serveAuthenticatedCall", "serveReviewRequest"])
+  // The unattended door (decision cbe91287) postdates the amendment, so it
+  // arrives wearing the closed shape rather than as an older plain door.
+  for (const name of ["serveAuthenticatedCall", "serveReviewRequest", "unattendedActorForToken"])
     assertClosedShape(identity[name], `identity.js#${name}`);
 
   // AND THE NAME SPACE THE CONTEXT ENTRY WILL RESOLVE IS DECLARED AND FROZEN —
@@ -1632,7 +1634,7 @@ test("SHAPE: every callable this PR added to identity.js and the walker wears am
      "hermesCosActorForToken", "isKnownActor", "isKnownPartner",
      "organizationTenantForActor", "permittedActionOwnerSlugs", "personalScopeForActor",
      "propsForSlug", "serveAuthenticatedCall", "serveReviewRequest", "slugForEmail",
-     "verifiedAgentSlugForClient"],
+     "unattendedActorForToken", "verifiedAgentSlugForClient"],
     "identity.js grew or lost a top-level callable export");
 
   const walker = await import("./gate-zero-reachability-walk.testhelper.mjs");

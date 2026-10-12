@@ -445,7 +445,7 @@ export function continuityActorForTokenMaps(
  */
 const UNATTENDED_ACTOR = Object.freeze({ joe: "joe-local" });
 
-export function unattendedActorForToken(authorizationHeader, unattendedTokensRaw) {
+export const unattendedActorForToken = closedCallable((authorizationHeader, unattendedTokensRaw) => {
   const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
   if (!token) return null;
   let tokens;
@@ -463,7 +463,7 @@ export function unattendedActorForToken(authorizationHeader, unattendedTokensRaw
            via: "unattended-token", client_id: null,
            sponsoring_human_slug: sponsor, human_slug: sponsor, sponsor_required: false,
            native_agent_verified: true, unattended: true }, unattendedTokensRaw);
-}
+});
 
 /**
  * HERMES_TOKENS bearer -> the R0 evaluation runtime's actor, or null.
