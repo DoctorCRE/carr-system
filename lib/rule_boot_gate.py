@@ -790,33 +790,6 @@ def _live_page_one(timeout=10):
     return None, f"unreachable (exit {proc.returncode})"
 
 
-CARRY_SOURCES = ("compact", "resume")
-CARRIED_NOTICE = (
-    "RULE BOOT: carried across {source}: this session already read every page of the rules "
-    "(digest {digest}, {total} page(s)) and the store says the corpus is unchanged, so no re-fetch "
-    "is required. The compacted context no longer holds the text; the per-call route hook "
-    "re-delivers each rule in full the first time a tool call needs it. To re-read a page: "
-    "cd {repo} && ./run.sh call standing-context '{{\"detail\":\"boot\",\"page\":1}}'")
-
-
-def _short_digest(digest):
-    return str(digest or "").replace("sha256:", "")[:12]
-
-
-def _fully_confirmed(session_id, arm):
-    """True when this session's main context confirmed every page of `arm`
-    (by text or by the digest filter) under the epoch the arm was armed with."""
-    if not arm or arm.get("status") != "armed":
-        return False
-    total = int(arm.get("pages_total") or 0)
-    if total < 1:
-        return False
-    folder = _fetch_dir(session_id, None, arm)
-    if _pages(_markers(folder), "c") != set(range(1, total + 1)):
-        return False
-    return not _short_text(folder, arm)
-
-
 def arm_session(session_id, source, now=None, *, agent_id=None):
     """Arm the gate for a session at SessionStart and return the context text
     (always under 10k characters: SessionStart context is capped there)."""
@@ -836,29 +809,6 @@ def arm_session(session_id, source, now=None, *, agent_id=None):
 
     arm = {"schema": SCHEMA, "source": str(source or ""), "armed_at": int(now or time.time()),
            "epoch": secrets.token_hex(6)}
-    if (not agent_id and str(source) in CARRY_SOURCES and same_corpus
-            and _fully_confirmed(session_id, stored)):
-        # THE BOOT CARRIES ACROSS A COMPACTION WHEN NOTHING CHANGED. This
-        # session already confirmed every page of this digest, and the live
-        # read just now says the corpus is the same. Asking for the pages again
-        # bought nothing the gate could see: since the digest-only filter was
-        # admitted, a re-boot after compaction was fifteen identical two-field
-        # answers (measured 2026-10-12, 11 compactions in one build session,
-        # ~20s and 15 held tool calls each). The epoch still rotates so the
-        # per-call route hook re-delivers each rule's text in this context.
-        arm.update(status="armed", digest=boot["digest"], pages_total=int(boot["pages_total"]),
-                   carried_from=stored.get("epoch"))
-        if int(boot.get("total_chars") or 0) >= 1:
-            arm["total_chars"] = int(boot["total_chars"])
-        write_arm(session_id, arm)
-        folder = _fetch_dir(session_id, None, arm)
-        for page in range(1, arm["pages_total"] + 1):
-            why = _touch(folder, f"p{page}") or _put(folder, f"c{page}", DIGEST_ONLY)
-            if why:
-                return fetch_instructions(list(range(1, arm["pages_total"] + 1)),
-                                          arm["digest"], arm["pages_total"])
-        return CARRIED_NOTICE.format(source=source, digest=_short_digest(arm["digest"]),
-                                     total=arm["pages_total"], repo=REPO)
     if live_armed:
         arm.update(status="armed", digest=boot["digest"], pages_total=int(boot["pages_total"]))
         if int(boot.get("total_chars") or 0) >= 1:

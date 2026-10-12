@@ -305,11 +305,6 @@ def notice(r):
     return (r or {}).get("additionalContext", "")
 
 
-def arm_json(c):
-    with open(os.path.join(c.state, SESSION, "arm.json"), encoding="utf-8") as fh:
-        return json.load(fh)
-
-
 def never_denied(c, n=6, **kw):
     r = None
     for i in range(n):
@@ -552,29 +547,13 @@ def case_digest_change_rearms(c):
 
 
 def case_rearm_on_compact(c):
-    """A compaction or resume after a COMPLETE boot of an unchanged corpus
-    carries the boot: no re-fetch, a rotated epoch (so the per-call route hook
-    re-delivers rule text in the new context). An incomplete boot does not
-    carry, and `clear` never does."""
     c.stub("a", pages=2)
     c.arm()
     c.fetch(1)
-    assert denied(c.call(*READ))
-    text = c.arm("compact")
-    assert "carried" not in text and denied(c.call(*READ)), "an incomplete boot does not carry across a compaction"
-    c.fetch(1)
     c.fetch(2)
     assert c.call(*READ) is None
-    before = arm_json(c)["epoch"]
-    for source in ("compact", "resume"):
-        text = c.arm(source)
-        assert f"carried across {source}" in text and "2 page(s)" in text, text
-        assert c.call(*READ) is None, f"{source}: a complete boot of an unchanged corpus carries"
-        after = arm_json(c)
-        assert after["epoch"] != before and after["carried_from"] == before, (before, after)
-        before = after["epoch"]
-    text = c.arm("clear")
-    assert "carried" not in text and denied(c.call(*READ)), "clear empties the context on purpose: full boot"
+    c.arm("compact")
+    assert denied(c.call(*READ)), "a compacted context has lost the rules: re-fetch required"
     c.fetch(1)
     c.fetch(2)
     assert c.call(*READ) is None
@@ -771,21 +750,18 @@ def case_hint_output_with_identity(c):
 
 def case_digest_only_never_delivers_text(c):
     c.stub_sized("ab", 2)
-    c.arm("startup")
-    assert denied(c.call(*READ)), "startup: prior-context pages do not unlock tools"
-    for page in (1, 2):
-        command = f"{abs_cmd(page)} | jq -r '.rule_boot.digest'"
-        pre, post = c.fetch_cmd(command, page, stdout=lambda body: json.loads(body)["rule_boot"]["digest"])
-        assert not denied(pre), "recovery fetch remains available"
-        assert post and "does not count as read" in post["additionalContext"]
-    assert denied(c.call(*READ)), "digest-only output cannot authorize a tool"
-    for page in (1, 2):
-        c.fetch(page)
-    assert c.call(*READ) is None, "retained complete text authorizes the tool"
-    # The complete read is what carries across a compaction; the bare-digest
-    # answers above never counted and never would have.
-    assert "carried across compact" in c.arm("compact") and c.call(*READ) is None
-
+    for source in ("startup", "compact"):
+        c.arm(source)
+        assert denied(c.call(*READ)), f"{source}: prior-context pages do not unlock tools"
+        for page in (1, 2):
+            command = f"{abs_cmd(page)} | jq -r '.rule_boot.digest'"
+            pre, post = c.fetch_cmd(command, page, stdout=lambda body: json.loads(body)["rule_boot"]["digest"])
+            assert not denied(pre), "recovery fetch remains available"
+            assert post and "does not count as read" in post["additionalContext"]
+        assert denied(c.call(*READ)), f"{source}: digest-only output cannot authorize a tool"
+        for page in (1, 2):
+            c.fetch(page)
+        assert c.call(*READ) is None, f"{source}: retained complete text authorizes the tool"
 
 def case_parallel_batch(c):
     """Seven page fetches sent at once, as a model batches them: every PreToolUse
@@ -857,19 +833,13 @@ def case_connector_after_compaction(c):
     for p in range(1, 8):
         connector(p)
     assert c.call(*READ) is None, "seven connector pages read: allowed"
-    assert "carried across compact" in c.arm("compact"), "complete boot, corpus unchanged: carried"
-    assert c.call(*READ) is None, "a carried compaction needs no re-read"
-    # The store moves to a new 7-page corpus: the compaction holds, saying why,
-    # until the connector re-reads it.
-    c.stub_sized("b", pages=7)
     c.arm("compact")
     r = c.call(*READ)
     assert denied(r) and "compact" in r["permissionDecisionReason"], f"held, saying why: {r}"
     for p in range(1, 8):
         connector(p)
     assert c.call(*READ) is None, "connector pages read after the compaction: allowed"
-    # Piped Bash fetches after another corpus change, including head that keeps the whole page.
-    c.stub_sized("c", pages=7)
+    # Piped Bash fetches after another compaction, including head that keeps the whole page.
     c.arm("compact")
     for p in range(1, 8):
         tail = "| head -n 100000" if p % 2 else "| jq ."
@@ -991,21 +961,16 @@ def case_parallel_first_fetch_without_arm(c):
 
 
 def case_compact_rearms_the_served_set(c):
-    """A compaction after a complete boot of an unchanged corpus carries. When
-    the corpus changed, it re-arms the served pages and nothing else, and
-    nothing short of reading them stands in: not a digest-only call, not an
-    unpaged standing-context, not a summary's memory."""
+    """A compaction re-arms the served pages and nothing
+    else, and nothing short of reading them stands in: not a digest-only
+    call, not an unpaged standing-context, not a summary's memory."""
     c.stub_sized("a", pages=4)
     c.arm()
     for p in (1, 2, 3, 4):
         c.fetch_cmd(abs_cmd(p), p)
     assert c.call(*READ) is None
     text = c.arm("compact")
-    assert "carried across compact" in text and "4 page(s)" in text, text
-    assert c.call(*READ) is None, "complete boot of an unchanged corpus: carried"
-    c.stub_sized("b", pages=4)
-    text = c.arm("compact")
-    assert "4 page(s)" in text and "carried" not in text, text
+    assert "4 page(s)" in text, text
     r = c.call(*READ)
     assert denied(r) and "compact" in r["permissionDecisionReason"], r
     assert "(1, 2, 3, 4)" in r["permissionDecisionReason"], r
@@ -1223,10 +1188,8 @@ def case_child_compaction_rearms_only_that_child(c):
     c.arm("compact", agent="sub-a")
     assert denied(c.call(*READ, agent="sub-a")), "every compaction of the child re-arms it"
     assert c.call(*READ) is None, "and the parent stays booted throughout"
-    before = arm_json(c)["epoch"]
-    assert "carried across compact" in c.arm("compact"), "the parent's complete boot of an unchanged corpus carries"
-    assert c.call(*READ) is None and arm_json(c)["epoch"] != before, "carried: no re-read, new epoch"
-    assert denied(c.call(*READ, agent="sub-a")), "the child, compacted above and never re-read, stays held whatever the parent's carry did"
+    c.arm("compact")
+    assert denied(c.call(*READ)), "the parent's own compaction still re-arms the parent"
 
 
 def case_child_rearm_digest_change_regates_all(c):
