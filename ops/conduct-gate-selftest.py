@@ -27,12 +27,16 @@ CASES = [('fenced-bash', 'update the repo', "I've made the changes. Now run:\n\n
 # 2026-10-12: the partner asking for the steps in his own words. All three were
 # BLOCKED as command handoffs in the Orchestrator.macbook session because none
 # said the literal word "command" (HUMAN_WANTS_COMMAND, hooks/conduct_patterns.py).
-('human-asked-instructions', 'give me the instructions for whatever password you need for the worker release', 'Three steps, all required:\n\n```bash\nage -d ~/.config/carr/db.env.age\n```', False),
+('human-asked-instructions', 'give me the instructions for whatever you need for the worker release', 'Three steps, all required:\n\n```bash\nbin/deploy-worker.sh --env production\n```', False),
 ('human-asked-paste-it', 'Paste it in this chat?', 'Here it is:\n\n```bash\n./run.sh release --worker\n```', False),
 ('human-asked-what-do-i-do', 'what do I need to do on my end?', 'Run this once:\n\n```bash\nbin/deploy-worker.sh --env production\n```', False),
 # The widening must not swallow the plain handoff: a status question is not a
 # request for a command.
-('status-question-still-blocks', 'where are we on the release?', 'Nearly there. Run:\n\n```bash\nbin/deploy-worker.sh --env production\n```', True)]
+('status-question-still-blocks', 'where are we on the release?', 'Nearly there. Run:\n\n```bash\nbin/deploy-worker.sh --env production\n```', True),
+# "fix" in the partner's turn is an order to fix, not a request for the steps;
+# only "how do I fix" (the partner asking to be told) buys the exemption.
+('fix-order-still-blocks', 'can you fix the exporter?', 'Found it. Run:\n\n```bash\n./run.sh export --only compiled-rules\n```', True),
+('how-do-i-fix-allows', 'how do I fix the exporter myself?', 'Run:\n\n```bash\n./run.sh export --only compiled-rules\n```', False)]
 
 
 def run_case(human, assistant):
