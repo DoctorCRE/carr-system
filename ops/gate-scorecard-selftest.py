@@ -122,8 +122,8 @@ open(os.path.join(wt_a, "out", "hook-telemetry.jsonl"), "w").close()
 open(os.path.join(wt_b, "out", "hook-telemetry.jsonl"), "w").close()
 open(os.path.join(wt_b, "out", "hook-telemetry.jsonl.1"), "w").close()
 os.symlink(os.path.join(wt_a, "out"), os.path.join(wt_c, "out"))
-_roots = sc._worktree_roots
-sc._worktree_roots = lambda repo: [wt_a, wt_b, wt_c]
+_roots = getattr(sc, "_worktree_roots")
+setattr(sc, "_worktree_roots", lambda repo: [wt_a, wt_b, wt_c])  # a module loaded by spec has no typed attributes
 try:
     found = sc.telemetry_paths()
     check("every registered checkout's telemetry is read", len(found) == 3
@@ -131,7 +131,7 @@ try:
     check("a linked out/ is the same stream and is read once", not any(p.startswith(wt_c) for p in found))
     check("explicit paths bypass discovery", sc.telemetry_paths([path]) == [path])
 finally:
-    sc._worktree_roots = _roots
+    setattr(sc, "_worktree_roots", _roots)
 
 empty = sc.build([write([])], days=None, now=NOW)
 check("no rows renders the meter-missing remedy, not a blank card", "on breach:" in sc.render(empty))
