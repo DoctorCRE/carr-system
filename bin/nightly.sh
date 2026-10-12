@@ -1116,6 +1116,18 @@ step "Monthly system cost view and spike loops" \
 step "Grok authentication health" \
      ./.venv/bin/python tools/health-check.py --section grok-session
 
+# ── DEFECT BRIDGE (WR-000269, Joe's ruling 2026-10-12) ─────────────────────
+# "you cant detect a bug and then step over it." Every recorded defect that no
+# Work Request names gets one: ONE request per defect class per open set,
+# through report-problem, naming every defect id, at most 10 a night (largest
+# class first, so 480-odd classes do not land in Joe's triage queue at once).
+# Dedupe is the record layer itself (an existing request naming the id, then a
+# derived idempotency key), never a local file; any unproven read files nothing
+# and exits 1. lib/defect_bridge.py holds the logic; tools/health-check.py's
+# `unaddressed defects` row prints the count and this step as its bound action.
+step "defect bridge (one Work Request per unaddressed defect class)" \
+     ./.venv/bin/python ops/defect-bridge.py
+
 step "encrypted backup -> R2"                        env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh
 # CAPTURED HERE, ON THE NEXT LINE, AND THAT IS THE WHOLE POINT (fixed 2026-08-23).
 # This assignment used to sit at the bottom of the portability mirror below, so

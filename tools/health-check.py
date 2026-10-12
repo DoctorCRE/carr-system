@@ -3831,6 +3831,23 @@ except Exception as e:
 # went looking by hand. The nightly chain runs this file, so a stranded pull
 # request now surfaces within a day with no inbox involved. Thresholds and the
 # reasoning behind their width live in ops/pr-hygiene-check.py.
+print("\ndefect log")
+# WR-000269: every recorded defect has a Work Request naming it, or it is
+# counted here. ops/defect-bridge.py --health-row prints the row with its bound
+# action inline (rule 590b11e1); a failed read prints UNKNOWN, never all-clear.
+try:
+    _dbp = subprocess.run([os.path.join(REPO_ROOT, ".venv/bin/python"),
+                           os.path.join(REPO_ROOT, "ops", "defect-bridge.py"), "--health-row"],
+                          cwd=REPO_ROOT, capture_output=True, text=True, timeout=300)
+    print((_dbp.stdout or "").rstrip() or
+          "  ⚠︎ unaddressed defects  check produced no output · on breach: run "
+          "ops/defect-bridge.py --dry-run by hand")
+    if _dbp.returncode != 0:
+        rc = 1
+except Exception as e:
+    print(f"  ⚠︎ unaddressed defects check failed ({type(e).__name__}: {e})")
+    rc = 1
+
 print("\nrepo hygiene")
 try:
     _prh = os.path.join(REPO_ROOT, "ops", "pr-hygiene-check.py")
