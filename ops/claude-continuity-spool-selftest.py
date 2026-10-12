@@ -382,7 +382,9 @@ class HealthRowTest(SpoolTest):
         self.assertIn("on breach:", first)
         self.assertEqual([name for name, _ in self.verbs], ["add-loop"], second)
         payload = self.verbs[0][1]
-        self.assertEqual((payload["kind"], payload["blocker"]), ("open_loop", "capability"))
+        # Internal repair, owner claude: other_lane. A capability loop must name
+        # Joe or Dell (needsDecider) and a residue (add-loop RESIDUE_CLASSES).
+        self.assertEqual((payload["kind"], payload["blocker"]), ("open_loop", "other_lane"))
         for path in self.spooled():
             os.replace(path, self.root / path.name)
         self.row(later)
