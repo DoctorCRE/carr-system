@@ -9,23 +9,21 @@ Stop is always advisory and this process always exits zero.
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 import pathlib
 import re
 import secrets
-import shlex
 import stat
 import subprocess
 import sys
 import tempfile
-import time
 import unicodedata
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from lib import claude_continuity_config as continuity_config  # noqa: E402
+from lib import claude_continuity_spool as spool  # noqa: E402
 from lib.claude_rule_delivery_dedupe import reset as reset_rule_delivery  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -41,10 +39,7 @@ MAX_INPUT_BYTES = 1_000_000
 MAX_TAIL_BYTES = 262_144
 MAX_CAPSULE_BYTES = 4_800
 MAX_NUDGE_BYTES = 2_400
-MAX_SPOOL_BYTES = 1_000_000
-MAX_SPOOL_FILES = 100
 MAX_SESSION_FILES = 500
-CALL_TIMEOUT_SECONDS = 7.0
 # Observed on this machine 2026-09-11: the earliest native compaction in 1821
 # transcripts happened at 5.46 MB, the deepest at 21 MB.  Asking at 2 MB and
 # again every 2 MB puts at least two checkpoint prompts before the earliest
@@ -65,11 +60,6 @@ def _path(env_name: str, default: pathlib.Path) -> pathlib.Path:
 def mode_path() -> pathlib.Path:
     return _path("CARR_CLAUDE_CONTINUITY_MODE_FILE",
                  pathlib.Path.home() / ".config/carr/claude-continuity-mode.json")
-
-
-def spool_dir() -> pathlib.Path:
-    return _path("CARR_CLAUDE_CONTINUITY_SPOOL_DIR",
-                 pathlib.Path.home() / ".config/carr/claude-continuity-spool")
 
 
 def session_dir() -> pathlib.Path:
@@ -178,10 +168,7 @@ def mark_nudged(transcript_path_digest: str, byte_offset: int) -> None:
 
 
 def unsent_receipts() -> int:
-    try:
-        return len(list(spool_dir().glob("*.json")))
-    except OSError:
-        return 0
+    return len(spool.spooled())
 
 
 def _read_mode() -> str:
@@ -359,68 +346,7 @@ def _identity(payload: dict) -> tuple[dict, pathlib.Path]:
 
 
 def _call(name: str, args: dict) -> dict | None:
-    raw = os.environ.get("CARR_CLAUDE_CONTINUITY_CALL")
-    try:
-        argv = shlex.split(raw) if raw else [str(REPO / "run.sh"), "call"]
-    except ValueError:
-        return None
-    argv.extend((name, json.dumps(args, separators=(",", ":"), ensure_ascii=False)))
-    env = {**os.environ, "CARR_MCP_CLIENT_PROFILE": "claude-continuity"}
-    try:
-        proc = subprocess.run(argv, cwd=REPO, env=env, capture_output=True,
-                              text=True, timeout=CALL_TIMEOUT_SECONDS, check=False)
-        if proc.returncode:
-            return None
-        response = json.loads(proc.stdout)
-        return response if isinstance(response, dict) and response.get("ok") is True else None
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        return None
-
-
-def _spool_key() -> bytes:
-    path = spool_dir().with_suffix(".key")
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    try:
-        data = path.read_bytes()
-        if len(data) != 32 or stat.S_IMODE(path.stat().st_mode) != 0o600:
-            raise ValueError("invalid spool key")
-        return data
-    except FileNotFoundError:
-        data = secrets.token_bytes(32)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-        return data
-
-
-def _spool_receipt(verb: str, args: dict) -> None:
-    """Keep signed receipts for diagnosis only; no code replays this spool."""
-    directory = spool_dir()
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    files = sorted(directory.glob("*.json"), key=lambda path: path.stat().st_mtime_ns)
-    total = sum(path.stat().st_size for path in files)
-    body = {"schema_version": 1, "verb": verb, "args": args,
-            "spooled_at": datetime.now(timezone.utc).isoformat()}
-    body["hmac_sha256"] = hmac.new(_spool_key(), _canonical(body), hashlib.sha256).hexdigest()
-    encoded = _canonical(body) + b"\n"
-    while files and (len(files) >= MAX_SPOOL_FILES or total + len(encoded) > MAX_SPOOL_BYTES):
-        victim = files.pop(0)
-        total -= victim.stat().st_size
-        victim.unlink()
-    fd, temp_name = tempfile.mkstemp(prefix=".receipt-", dir=directory)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_name, directory / f"{time.time_ns()}-{secrets.token_hex(4)}.json")
-    finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
-        pathlib.Path(temp_name).unlink(missing_ok=True)
+    return spool.invoke(name, args)[0]
 
 
 def _shadow_audit(event: str, identity: dict, cursor: dict) -> None:
@@ -442,25 +368,34 @@ def _shadow_audit(event: str, identity: dict, cursor: dict) -> None:
         os.close(fd)
 
 
-def _event_key(event: str, identity: dict, cursor: dict, payload: dict) -> str:
-    occurrence = payload.get("tool_use_id") if event == "post_tool_use" else None
-    material = {"event": event, "session": identity["session_id"],
-                "leaf": identity["transcript_path_digest"],
-                "occurrence": occurrence or cursor["byte_offset"]}
-    return hashlib.sha256(_canonical(material)).hexdigest()
+def receipt_key(args: dict) -> str:
+    """One key per request body, which is the store envelope's own contract.
+
+    Keying on the transcript offset alone collided: a prompt that has not yet
+    reached the transcript (queued or blocked) fires UserPromptSubmit again at
+    the same offset, and every repeat carried a new observed_at under the first
+    one's key, so the store refused it as key_reuse and the hook spooled a
+    receipt that could never send.  A byte-identical resend (the drain) still
+    replays under the same key.
+    """
+    return hashlib.sha256(_canonical(args)).hexdigest()
 
 
 def _record(event: str, identity: dict, cursor: dict, source_digest: str,
-            payload: dict, telemetry: dict | None = None) -> bool:
-    args = {**identity, "idempotency_key": _event_key(event, identity, cursor, payload),
-            "event_type": event, "cursor": cursor, "transcript_digest": source_digest,
+            telemetry: dict | None = None) -> bool:
+    args = {**identity, "event_type": event, "cursor": cursor, "transcript_digest": source_digest,
             "observed_at": datetime.now(timezone.utc).isoformat()}
     if telemetry:
         args["telemetry"] = telemetry
-    if _call("claude-record-event", args) is not None:
+    args["idempotency_key"] = receipt_key(args)
+    response, failure = spool.invoke("claude-record-event", args)
+    if response is not None:
         return True
     try:
-        _spool_receipt("claude-record-event", args)
+        if failure and failure["kind"] == "refused":
+            spool.archive({"verb": "claude-record-event", "args": args}, "refused", failure["error"])
+        else:
+            spool.spool_receipt("claude-record-event", args, failure or {"kind": "transport"})
     except (OSError, ValueError) as exc:
         _warn(f"receipt unavailable ({exc.__class__.__name__})")
     return False
@@ -503,7 +438,7 @@ def _activation_envelope(identity: dict, cursor: dict, response: dict | None) ->
     ]
     unsent = unsent_receipts()
     if unsent:
-        lines.append(f"Spool: {unsent} unsent receipts; growth refuses writes.")
+        lines.append(f"Spool: {unsent} receipts await nightly drain.")
     return "\n".join(lines)
 
 
@@ -623,7 +558,7 @@ def main() -> int:
     if event == "post_tool_use":
         telemetry = {"tool_name": str(payload.get("tool_name", ""))[:200],
                      "sample_rate_basis_points": 1000}
-    _record(event, identity, cursor, source_digest, payload, telemetry)
+    _record(event, identity, cursor, source_digest, telemetry)
     return 0
 
 

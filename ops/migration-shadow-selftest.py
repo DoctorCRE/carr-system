@@ -117,6 +117,18 @@ with tempfile.TemporaryDirectory() as tmp:
         git('merge', '--no-commit', 'main')
         check('a pending main merge shadows from the main it incorporated', shadow.default_base() == main)
 
+# A CHECK constraint can hold a literal carriage return (the SCAC ingress_key
+# checks do). Universal-newline text IO rewrites it to a line feed, which then
+# loads into the shadow cluster and lands in db/schema.sql as a different
+# constraint. Every snapshot read and write must keep the bytes.
+CR = "CREATE TABLE ops.k (k text CHECK (k !~ '[\n\r\t]'));\n"
+print("byte fidelity")
+with tempfile.TemporaryDirectory() as tmp:
+    path = pathlib.Path(tmp) / 'schema.sql'
+    shadow.write_snapshot(path, snapshot(CR, R1))
+    check("a written snapshot keeps a carriage return", b"\r" in path.read_bytes())
+    check("a read snapshot keeps a carriage return", "\r" in shadow.read_snapshot(path))
+
 with tempfile.TemporaryDirectory() as tmp:
     work = pathlib.Path(tmp)
     def fake_run(command, env, label, log):
@@ -125,7 +137,12 @@ with tempfile.TemporaryDirectory() as tmp:
         return ''
     def fake_process(command, **kwargs):
         if command[0] == 'git':
-            return subprocess.CompletedProcess(command, 0, snapshot(T, R1), '')
+            out = snapshot(CR, R1)
+            if kwargs.get('text') or kwargs.get('universal_newlines'):
+                # What a text-mode pipe really returns: universal newlines.
+                return subprocess.CompletedProcess(
+                    command, 0, out.replace('\r\n', '\n').replace('\r', '\n'), '')
+            return subprocess.CompletedProcess(command, 0, out.encode(), '')
         if pathlib.Path(command[0]).name == 'initdb':
             data = pathlib.Path(command[command.index('-D') + 1])
             data.mkdir(parents=True, exist_ok=True)
@@ -139,6 +156,8 @@ with tempfile.TemporaryDirectory() as tmp:
             check("failed shutdown fails the shadow result", True)
         else:
             check("failed shutdown fails the shadow result", False)
+    check("the base snapshot loads with its carriage return intact",
+          b"\r" in (work / 'base.sql').read_bytes())
 
 with tempfile.TemporaryDirectory() as tmp:
     bins = pathlib.Path(tmp)

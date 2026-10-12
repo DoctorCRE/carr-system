@@ -49,11 +49,11 @@ def check(name, cond, detail=""):
 
 
 def payload(event="PreToolUse", tool="Bash", tool_input=None, **extra):
-    # tool_use_id and prompt_id are the harness's own correlation keys — see
-    # hooks/staging-observation-tracker.py, which has depended on tool_use_id
-    # being identical across the Pre and Post call of one invocation since it
-    # was written. They are in the default fixture rather than bolted onto one
-    # case, so every check below runs against a realistic payload.
+    # tool_use_id and prompt_id are the harness's own correlation keys:
+    # tool_use_id is identical across the Pre and Post call of one invocation
+    # (lib/hook_execution.py records why). They are in the default fixture
+    # rather than bolted onto one case, so every check below runs against a
+    # realistic payload.
     body = {
         "session_id": "hook-meter-selftest",
         "transcript_path": "/tmp/hook-meter-selftest.jsonl",

@@ -414,7 +414,7 @@ class ClaudeContinuityDeliversTest(ClaudeContinuityHookTest):
         self.run_hook("UserPromptSubmit")
         self.base_env["CARR_CLAUDE_CONTINUITY_CALL"] = str(self.caller)
         context = json.loads(self.run_hook("SessionStart", source="startup").stdout)
-        self.assertIn("1 unsent receipts", context["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("Spool: 1 receipts await nightly drain", context["hookSpecificOutput"]["additionalContext"])
 
     def test_an_unsampled_tool_event_never_reads_the_transcript(self):
         self.set_mode("checkpoint")
