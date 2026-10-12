@@ -5,6 +5,8 @@ Usage: ops/ci-rerun.sh RUN_ID --job JOB_ID [--repo OWNER/REPO].
 The default repository is jbookout/carr-system. Successful jobs are retained;
 GitHub also reruns dependents. Local checks precede policy admission and the
 remote attempt/head is rechecked immediately before the single dispatch.
+Other repositories use their associated PR head; carr-system also requires
+that head to match this checkout.
 """
 from __future__ import annotations
 import argparse
@@ -39,7 +41,7 @@ def admit(run, job, pr, head):
             or run.get('conclusion') not in ('failure', 'cancelled')
             or run.get('head_sha') != head or pr.get('state') != 'open'
             or pr.get('head', {}).get('sha') != head):
-        raise Refusal('requires completed failed/cancelled CI at the open PR and local head')
+        raise Refusal('requires completed failed/cancelled CI at the open PR and candidate head')
     attempt = run.get('run_attempt')
     if type(attempt) is not int or not 1 <= attempt < MAX_ATTEMPTS:
         raise Refusal('CI retry budget exhausted (initial run plus two retries)')
@@ -53,7 +55,12 @@ def admit(run, job, pr, head):
 
 
 def rerun(remote, run_id, job_id, head, policy, checks, dispatch):
+    """Pin the candidate to the supplied local head, or the fetched PR head."""
     snapshot = remote.snapshot(run_id, job_id)
+    if head is None:
+        head = snapshot[2].get('head', {}).get('sha')
+        if not head:
+            raise Refusal('PR head unavailable; no dispatch')
     group = admit(*snapshot, head)
     checks(group)
     authorize_metered_execution(policy, 'github-actions-remote-ci',
@@ -62,7 +69,7 @@ def rerun(remote, run_id, job_id, head, policy, checks, dispatch):
     admit(*current, head)
     if current != snapshot:
         raise Refusal('run, job or PR changed during local checks; no dispatch')
-    dispatch(run_id, job_id, current[0]['run_attempt'])
+    dispatch(run_id, job_id, current[0]['run_attempt'], head)
 
 
 class GitHub:
@@ -109,7 +116,7 @@ def main():
     try:
         if subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=ROOT,text=True).strip():
             raise Refusal('commit tracked changes before rerunning CI')
-        head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+        local_head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
         policy = json.loads((ROOT / 'ops/config/platform-metering.v1.json').read_text())
         lock_dir = Path(tempfile.gettempdir()) / 'carr-ci-rerun'
         # Keep existing default-repository reservations effective after upgrade.
@@ -119,11 +126,11 @@ def main():
         with (lock_dir / f'{args.run_id}.lock').open('a+') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             remote = GitHub(args.repo)
-            def dispatch(run_id, job_id, attempt):
+            def dispatch(run_id, job_id, attempt, head):
                 reservation = lock_dir / f'{run_id}-{attempt}.json'
                 if reservation.exists():
                     raise Refusal('attempt already dispatched or uncertain; inspect hosted run')
-                if subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip() != head:
+                if subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip() != local_head:
                     raise Refusal('local head changed during checks')
                 if subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=ROOT,text=True).strip():
                     raise Refusal('local tracked changes appeared during checks')
@@ -136,6 +143,7 @@ def main():
                 if result.returncode:
                     raise Refusal('dispatch refused or uncertain; reservation retained')
                 print(f'CI job retry submitted: run {run_id}, job {job_id}, next attempt {attempt + 1}/{MAX_ATTEMPTS}')
+            head = local_head if args.repo == REPO else None
             rerun(remote,args.run_id,args.job,head,policy,local_checks,dispatch)
         return 0
     except (Refusal, MeteringRefusal) as exc:

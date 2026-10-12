@@ -218,8 +218,10 @@ class FakeGitHub:
     green on every main commit, app check `test` green — unless overridden."""
 
     def __init__(self, approve_all: bool = True, comments: dict | None = None, canary: dict | None = None,
-                 red_ci_prs: set | None = None, checks: list | None = None, raise_on: str | None = None):
+                 red_ci_prs: set | None = None, checks: list | None = None, raise_on: str | None = None,
+                 ci_runs: dict | None = None):
         self.approve_all, self.comment_map = approve_all, comments or {}
+        self.ci_runs = ci_runs or {}     # pr -> [(id, conclusion)], replacing the default single run
         self.canary, self.red_ci_prs = canary, red_ci_prs or set()
         self.checks = checks if checks is not None else [
             {"name": "test", "status": "completed", "conclusion": "success"}]
@@ -244,6 +246,9 @@ class FakeGitHub:
     def runs_for(self, sha):
         if sha in self.heads:               # a PR head (see pr_for_commit)
             pr = self.heads[sha]
+            if pr in self.ci_runs:
+                return [{"id": i, "name": "CI", "event": "pull_request", "status": "completed",
+                         "conclusion": c} for i, c in self.ci_runs[pr]]
             ok = pr not in self.red_ci_prs
             return [{"id": 40000 + pr, "name": "CI", "event": "pull_request", "status": "completed",
                      "conclusion": "success" if ok else "failure"}]
@@ -2977,6 +2982,36 @@ class CanaryAndCI(Base):
         rec = self.fx.records()[-1]
         self.assertEqual(rec["reason"], "ci_not_green")
         self.assertIn(f"PR #{FakeGitHub().pr_number(first)}", rec["detail"])
+
+    def test_a_newer_cancelled_ci_run_does_not_hide_an_older_green_one(self):
+        first = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        gh = FakeGitHub(ci_runs={FakeGitHub().pr_number(first): [(38153038213, "success"),
+                                                                 (38154018553, "cancelled")]})
+        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), github=gh, live=live).tick(["worker"]), 0,
+                         self.fx.records())
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_a_newer_failed_ci_run_still_holds_over_an_older_green_one(self):
+        first = self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner()
+        gh = FakeGitHub(ci_runs={FakeGitHub().pr_number(first): [(38153038213, "success"),
+                                                                 (38154018553, "failure")]})
+        self.assertEqual(self.fx.pipeline(runner, github=gh).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["reason"], "ci_not_green")
+        self.assertIn("38154018553", rec["detail"])
+
+    def test_only_a_cancelled_ci_run_holds(self):
+        first = self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner()
+        gh = FakeGitHub(ci_runs={FakeGitHub().pr_number(first): [(38154018553, "cancelled")]})
+        self.assertEqual(self.fx.pipeline(runner, github=gh).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["reason"], "ci_not_green")
+        self.assertIn("has no successful", rec["detail"])
 
     def test_unicode_named_release_path_cannot_hide_failed_ci(self):
         first = self.fx.commit({"mcp-server/src/unicodé.js": "1"})
