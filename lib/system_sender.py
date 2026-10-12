@@ -29,7 +29,10 @@ Every call runs the SAME chain, in this order, before anything leaves:
   e. daily caps    from config (20 mail, 5 social), counted per local day in
                    the config's timezone from out/sends.jsonl.
   f. shadow mode   while live_from is null or in the future, the call does all
-                   of the above, records would_send, and sends nothing.
+                   of the above, records would_send, and sends nothing. The
+                   shipped config is live (Joe, 2026-10-12: no shadow period
+                   for an obvious improvement); shadow stays available by
+                   moving live_from forward.
   g. receipts      every attempt, refusals included, appends one line to
                    out/sends.jsonl, then reaches the record layer: a live mail
                    to a deal participant through log-outreach, everything else
@@ -350,9 +353,13 @@ class Sender:
         live_from = self.config.get("live_from")
         if not live_from:
             return False
-        start = dt.datetime.fromisoformat(live_from)
-        if start.tzinfo is None:
-            return False      # an offset-less timestamp is ambiguous: stay in shadow
+        if _DATE.fullmatch(live_from):
+            # A bare date means midnight of that day in the config's timezone.
+            start = dt.datetime.fromisoformat(live_from).replace(tzinfo=self.tz)
+        else:
+            start = dt.datetime.fromisoformat(live_from)
+            if start.tzinfo is None:
+                return False  # an offset-less time of day is ambiguous: stay in shadow
         return (at or self._now()) >= start
 
     def kill_switch(self) -> KillSwitch:

@@ -13,7 +13,8 @@ stop file, open signal, claimed signal and unreadable read; lint; recipient and
 platform allowlists; follow-up; cap; ledger), shadow mode, dedupe including a
 crash mid-send, the definite-vs-ambiguous transport split, receipts on every
 attempt, the record-layer routing (log-outreach vs record-signal), the health
-row, and that the SHIPPED config is in shadow mode.
+row, and that the SHIPPED config is live (Joe, 2026-10-12) while a future
+live_from still shadows.
 """
 from __future__ import annotations
 
@@ -164,7 +165,7 @@ def scenario(fn):  # a crash inside one scenario is a failed check, never a stop
 @scenario
 def test_shadow_mode_does_everything_but_send() -> None:
     for label, live_from in (("null", None), ("future", "2026-12-01T00:00:00-06:00"),
-                             ("no offset", "2026-10-01T00:00:00")):
+                             ("future date", "2026-10-14"), ("no offset", "2026-10-01T00:00:00")):
         env = Env(live_from=live_from)
         try:
             r = env.mail(to=[PARTICIPANT], deal_id=DEAL,
@@ -188,11 +189,22 @@ def test_shadow_mode_does_everything_but_send() -> None:
 
 
 @scenario
-def test_shipped_config_is_shadow() -> None:
+def test_shipped_config_is_live() -> None:
     config = ss.load_config()
     sender = ss.Sender(config=config, verb=Fakes().verb)   # reads nothing, writes nothing
-    check("shipped config: live_from is null", config["live_from"] is None, config["live_from"])
-    check("shipped config: the sender is in shadow mode", not sender.is_live(T0))
+    check("shipped config: live_from is 2026-10-12", config["live_from"] == "2026-10-12", config["live_from"])
+    check("shipped config: the sender is live", sender.is_live(T0))
+    check("shipped config: a bare date starts at midnight Central, not UTC",
+          sender.is_live(dt.datetime(2026, 10, 12, 5, 0, tzinfo=dt.timezone.utc))
+          and not sender.is_live(dt.datetime(2026, 10, 12, 4, 59, tzinfo=dt.timezone.utc)))
+    env = Env(live_from=config["live_from"])
+    try:
+        r = env.mail()
+        check("shipped live_from: a clean partner mail is actually sent (fake Outlook driven once)",
+              r.outcome == ss.SENT and len(env.fakes.outlook_calls) == 1
+              and env.receipts()[0]["mode"] == "live", r)
+    finally:
+        env.close()
     check("shipped config: caps are 20 mail and 5 social",
           config["daily_caps"] == {"mail": 20, "social": 5}, config["daily_caps"])
     check("shipped config cites decision cbe91287",
@@ -566,7 +578,7 @@ def test_health_row() -> None:
 
 def main() -> int:
     for test in (test_shadow_mode_does_everything_but_send,
-                 test_shipped_config_is_shadow,
+                 test_shipped_config_is_live,
                  test_kill_switch_refuses_before_anything_else,
                  test_lint_finding_refuses,
                  test_real_lint_door_refuses_every_severity,
