@@ -2,6 +2,7 @@
 """Conflicting jobs stop before launch, including paths not created yet."""
 import ast
 import contextlib
+from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
@@ -356,6 +357,7 @@ class OwnershipTests(unittest.TestCase):
     def test_cli_repeatable_writes_are_combined_with_brief(self):
         with patch('dispatch.write_ownership.open_prs', return_value=('owner/repo', [])), \
              patch.object(dispatch, '_to_codex', side_effect=self.completed), \
+             patch.object(dispatch.seat_gate, 'check', return_value=None), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
                 'send', 'sol', 'Writes: src/*.py', '--writes', 'tests/*', '--writes', 'docs/*']), 0)
@@ -743,6 +745,61 @@ os._exit(17)
         self.assertTrue(write_ownership.process_terminated(row['owner_process']))
         self.assertFalse(write_ownership.process_terminated(row['executor'], group=True))
         self.assertEqual(row['ownership_state'], 'held')
+
+    def nightly_reconcile(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = dispatch.main(['reconcile', '--older-than-hours', '6'])
+        return code, json.loads(out.getvalue())['claims']
+
+    def test_nightly_sweep_leaves_a_young_live_claim_alone(self):
+        with patch.object(write_ownership, 'open_prs', return_value=('owner/repo', [])):
+            write_ownership.reserve({'msg_id': 'live', 'desk': 'sol', 'task': 'build'}, '.', ['src/*'])
+        write_ownership.launch('live')
+        before = self.ledger.read_bytes()
+        self.assertEqual(self.nightly_reconcile(), (0, []))
+        self.assertEqual(self.ledger.read_bytes(), before)
+        self.assertEqual(write_ownership._claim('live')['status'], 'running')
+        # The unfiltered sweep is the behaviour the filter exists to avoid.
+        self.assertEqual(write_ownership.reconcile()[0]['status'], 'stuck')
+
+    def test_nightly_sweep_releases_a_dead_writer_claim(self):
+        code = """
+import os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import write_ownership as w
+w.LEDGER = Path(sys.argv[2])
+w.open_prs = lambda cwd: ('owner/repo', [])
+row = w.reserve({'msg_id': 'crashed', 'desk': 'sol', 'task': 'build'}, '.', ['src/*'])
+w._persist({**row, 'executor': {'kind': 'unconfirmed'}})
+os._exit(17)
+"""
+        crashed = subprocess.run([sys.executable, '-c', code,
+            str(Path(dispatch.__file__).parent), str(self.ledger)], capture_output=True, text=True)
+        self.assertEqual(crashed.returncode, 17, crashed.stderr)
+        code, claims = self.nightly_reconcile()
+        self.assertEqual(code, 0)
+        self.assertEqual([(c['msg_id'], c['ownership_state']) for c in claims], [('crashed', 'released')])
+
+    def test_nightly_sweep_examines_an_over_age_claim_with_a_live_writer(self):
+        with patch.object(write_ownership, 'open_prs', return_value=('owner/repo', [])):
+            row = write_ownership.reserve({'msg_id': 'old', 'desk': 'sol', 'task': 'build'}, '.', ['src/*'])
+        write_ownership.launch('old')
+        aged = write_ownership._claim('old')
+        old = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+        write_ownership._persist({**aged, 'claimed_at': old, 'launch_marker': old})
+        self.assertEqual(row['ownership_state'], 'held')
+        code, claims = self.nightly_reconcile()
+        self.assertEqual(code, 1)
+        self.assertEqual([(c['msg_id'], c['status']) for c in claims], [('old', 'stuck')])
+
+    def test_older_than_hours_is_a_sweep_only_positive_bound(self):
+        for kwargs in ({'older_than_hours': 0}, {'older_than_hours': -1}):
+            with self.assertRaises(desks.DeskError):
+                write_ownership.reconcile(**kwargs)
+        with self.assertRaises(desks.DeskError):
+            write_ownership.reconcile('x', older_than_hours=6)
 
     def test_launch_marker_with_live_dispatcher_keeps_claim(self):
         with patch.object(write_ownership, 'open_prs', return_value=('owner/repo', [])):

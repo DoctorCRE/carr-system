@@ -403,7 +403,7 @@ def health_row(*, run_verb, state_path: pathlib.Path, now: datetime, drained: di
                          "spooled receipt's failure kind and the refusal reasons in "
                          "claude-continuity-spool-archive.jsonl and fix the unreachable write. "
                          "This loop auto-clears when the depth reaches 0."),
-                "blocker": "capability",
+                "blocker": "other_lane",
                 "blocker_detail": "the Worker not answering claude-record-event from the "
                                   "claude-continuity token before the hook's call timeout",
             })
