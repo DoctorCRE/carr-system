@@ -1,5 +1,5 @@
 -- rollback: forward-only — reverting would mark three controls held again while a rule approval may already cite them; hold one with a guarded migration that first proves no rule_control_binding names it
--- 0864_register_session_boot_ledger_capture_loop_guard_controls.sql
+-- 0874_register_session_boot_ledger_capture_loop_guard_controls.sql
 --
 -- INSTALL THREE HELD ENFORCEMENT CONTROLS: session_boot, ledger_capture, loop_guard.
 --
@@ -73,6 +73,6 @@ begin
        or (control_key = 'loop_guard' and enforcement_class = 'transactional_schema'
            and test_ref = 'ops/loop-guard-selftest.py'));
   if v_count <> 3 then
-    raise exception '0864 FAILED: % of 3 controls are installed, verified and test-bound', v_count;
+    raise exception '0874 FAILED: % of 3 controls are installed, verified and test-bound', v_count;
   end if;
 end $$;

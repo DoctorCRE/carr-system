@@ -458,6 +458,7 @@ def reserve(row: dict, cwd: str, writes: list[str]) -> dict:
                     f"stuck or running: claim held; run dispatch.py reconcile --claim {previous['msg_id']}; {advice}")
         current = process_owner()
         return _persist({**row, 'repo': repo, 'writes': writes, 'own_pr': mine,
+                         'claimed_at': datetime.now(timezone.utc).isoformat(),
                          'owner_process': current,
                          'executor': _executor_identity({'kind': 'reservation'}, current),
                          'ownership_state': 'held', 'status': 'running'})
@@ -590,14 +591,47 @@ def release(msg_id: str, *, reason: str) -> dict:
                          'reconcile_reason': reason})
 
 
-def reconcile(msg_id: str | None = None, *, limit: int = 20) -> list[dict]:
-    """Bounded, idempotent, append-only recovery; never accepts caller-supplied proof."""
+def held_since(row: dict) -> datetime | None:
+    """When the claim was taken: claimed_at (reserve, 2026-10-12 on), else the
+    launch marker; None when neither parses as a timezone-aware time."""
+    for key in ('claimed_at', 'launch_marker'):
+        try:
+            at = datetime.fromisoformat(str(row.get(key)))
+        except ValueError:
+            continue
+        if at.tzinfo is not None:
+            return at
+    return None
+
+
+def _due(row: dict, older_than_hours: float, now: datetime) -> bool:
+    """A held claim an unattended sweep may examine: its writer is verifiably
+    gone, or the claim is older than the bound. A young claim whose writer is
+    alive or unproven is a running job and is left alone (release() would mark
+    it stuck)."""
+    if termination_evidence(row):
+        return True
+    at = held_since(row)
+    return at is not None and (now - at).total_seconds() > older_than_hours * 3600
+
+
+def reconcile(msg_id: str | None = None, *, limit: int = 20,
+              older_than_hours: float | None = None) -> list[dict]:
+    """Bounded, idempotent, append-only recovery; never accepts caller-supplied proof.
+
+    `older_than_hours` (sweeps without msg_id only) restricts the sweep to
+    claims _due() says may be examined; without it every held claim is."""
     if not 1 <= limit <= 100:
         raise DeskError('bad_reconcile_limit', 'reconcile limit must be 1..100')
+    if older_than_hours is not None and (msg_id or not older_than_hours > 0):
+        raise DeskError('bad_reconcile_filter', 'older_than_hours needs a sweep and a positive bound')
+    now = datetime.now(timezone.utc)
     with _locked(LEDGER):
         claims = _claims()
         if msg_id and msg_id not in claims:
             raise DeskError('claim_missing', 'claim not found in ownership authority')
         ids = [msg_id] if msg_id else [key for key, row in claims.items()
-                                      if row['ownership_state'] == 'held'][:limit]
+                                      if row['ownership_state'] == 'held'
+                                      and (older_than_hours is None
+                                           or _due(row, older_than_hours, now))][:limit]
     return [release(key, reason='explicit reconcile') for key in ids]

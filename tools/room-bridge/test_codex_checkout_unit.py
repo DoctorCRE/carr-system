@@ -190,6 +190,7 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertIn('--checkout', out.getvalue())
         self.assertIn('new:', out.getvalue())
         with patch.object(dispatch, 'dispatch', return_value={'status': 'completed'}) as send, \
+             patch.object(dispatch.seat_gate, 'check', return_value=None), \
              contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(dispatch.main(['--registry', str(self.reg.path), 'send', 'cx',
                                            'repair', '--checkout', 'repair']), 0)

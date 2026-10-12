@@ -685,8 +685,7 @@
     "loose_work": {
       "failure_mode": "Stop block",
       "implementation": [
-        "hooks/loose-work-gate.py",
-        "hooks/staging-observation-tracker.py"
+        "hooks/loose-work-gate.py"
       ],
       "test": [
         "ops/loose-work-gate-selftest.py"

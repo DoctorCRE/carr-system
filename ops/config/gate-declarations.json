@@ -21,7 +21,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 2,
+              "order": 1,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/bash-write-gate.py",
@@ -390,7 +390,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 4,
+              "order": 3,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/draft-export-gate.py",
@@ -1239,7 +1239,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 1,
+              "order": 0,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
@@ -1258,7 +1258,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 2,
-              "order": 1,
+              "order": 0,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
@@ -1267,52 +1267,6 @@
         }
       ],
       "paired_selftest": "ops/settings-change-gate-selftest.py"
-    },
-    "staging-observation-tracker.py": {
-      "role": "gate",
-      "wirings": [
-        {
-          "event": "PreToolUse",
-          "matcher": "Bash",
-          "fixtures": [
-            "bash",
-            "scenarios"
-          ],
-          "allow_only": "A pure recorder: main() always exits 0 ('this tracker never blocks; it only ever observes') and handle() prints nothing.",
-          "executions": [
-            {
-              "source": "ops/config/hooks.json",
-              "group": 6,
-              "order": 0,
-              "matcher_present": true,
-              "type": "command",
-              "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-              "timeout": 20
-            }
-          ]
-        },
-        {
-          "event": "PostToolUse",
-          "matcher": "Bash",
-          "fixtures": [
-            "bash",
-            "scenarios"
-          ],
-          "allow_only": "A pure recorder: main() always exits 0 ('this tracker never blocks; it only ever observes') and handle() prints nothing.",
-          "executions": [
-            {
-              "source": "ops/config/hooks.json",
-              "group": 2,
-              "order": 0,
-              "matcher_present": true,
-              "type": "command",
-              "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-              "timeout": 20
-            }
-          ]
-        }
-      ],
-      "paired_selftest": "ops/staging-observation-tracker-selftest.py"
     },
     "stop_latch.py": {
       "role": "helper",
@@ -1419,7 +1373,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 3,
+              "order": 2,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
@@ -1439,7 +1393,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 2,
-              "order": 2,
+              "order": 1,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
@@ -1464,7 +1418,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 5,
+              "order": 4,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/github-burst-guard.py",
@@ -1478,12 +1432,12 @@
           "fixtures": [
             "bash"
           ],
-          "allow_only": "PostToolUse only RECORDS: when a GitHub-touching command's output carries a rate-limit answer it writes the time to out/github-burst-guard-state.json and exits 0. It never denies and prints nothing; the cooldown it starts is refused on PreToolUse, covered by a scenario here and end to end by ops/github-burst-guard-selftest.py.",
+          "allow_only": "PostToolUse only RECORDS, to out/github-burst-guard-state.json, and exits 0: the time of a rate-limit answer in a GitHub-touching command's output, and the start of a release tick or shepherd run that finished with exit 0 after 60s or more or was launched in the background. It never denies and prints nothing; the cooldown and the five-minute tick window it starts are refused on PreToolUse, covered by scenarios here and end to end by ops/github-burst-guard-selftest.py.",
           "executions": [
             {
               "source": "ops/config/hooks.json",
               "group": 2,
-              "order": 3,
+              "order": 2,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/github-burst-guard.py",
@@ -1497,7 +1451,7 @@
           "fixtures": [
             "bash"
           ],
-          "allow_only": "PostToolUseFailure only RECORDS a rate-limit answer from a failed GitHub-touching command, the same as PostToolUse. It never denies and prints nothing; ops/github-burst-guard-selftest.py covers the failure-event path.",
+          "allow_only": "PostToolUseFailure only RECORDS a rate-limit answer from a failed GitHub-touching command, the same as PostToolUse, and drops a failed tick's pending start so it never stamps the tick window. It never denies and prints nothing; ops/github-burst-guard-selftest.py covers the failure-event path.",
           "executions": [
             {
               "source": "ops/config/hooks.json",

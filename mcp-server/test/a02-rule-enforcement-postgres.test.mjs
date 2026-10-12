@@ -49,7 +49,7 @@ const R = Object.freeze({
   oneOfTwoUnverified: "a020000f-0000-4000-8000-000000000000", // N7
   oneOfTwoChanged:    "a0200010-0000-4000-8000-000000000000", // N8
   catalogMovedEarlier: "a0200011-0000-4000-8000-000000000000", // "changed" means either direction
-  // 0866: a current exact machine_enforceable/hard_enforced approval whose
+  // 0876: a current exact machine_enforceable/hard_enforced approval whose
   // controls all hold is covered WITHOUT a fallback receipt; the fallback
   // rung binds human_only rules (the four fallback cases above are human_only).
   hardEnforcedNoFallback: "a0200012-0000-4000-8000-000000000000",
@@ -309,7 +309,7 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       assert.equal(record.active_rule_count, 17);
       assert.equal(record.covered_rule_count, 2);
       assert.equal(record.gap_count, 15);
-      // 0866: hard_enforced with every control holding needs no fallback.
+      // 0876: hard_enforced with every control holding needs no fallback.
       assert.equal(gapsByRule(record)[R.hardEnforcedNoFallback], undefined);
       assert.equal(record.coverage_state, "gaps");
       assert.equal(record.coverage_complete, false);

@@ -1,4 +1,4 @@
--- 0866_a02_fallback_rung_human_only.sql
+-- 0876_a02_fallback_rung_human_only.sql
 -- rollback: re-run the create or replace from migrations/0721_a02_rule_enforcement_coverage.sql (the fallback rung then binds every rule again); no data is written here
 --
 -- V5-A02: THE FALLBACK RUNG BINDS HUMAN-ONLY RULES, NOT HARD-ENFORCED ONES.
@@ -110,7 +110,7 @@ begin
                 and fr.rule_version = a.version
                 and fr.statement_hash = a.statement_hash
            ) as fallback_recorded,
-           -- 0866: the fallback rung binds human_only rules (and any rule
+           -- 0876: the fallback rung binds human_only rules (and any rule
            -- without a current exact hard_enforced approval). A rule whose
            -- current exact approval is machine_enforceable/hard_enforced is
            -- enforced by its installed control; the control IS the procedure.
@@ -219,20 +219,20 @@ comment on function ops.v5_a02_rule_enforcement_coverage() is
   'that is not future-dated and whose catalog verified_at still equals the value '
   'the approval captured on the enforcement point. A rule whose current exact '
   'approval is not machine_enforceable/hard_enforced (human_only, or none) also '
-  'needs an exact Joe-authority-connection fallback receipt (0866). Missing '
+  'needs an exact Joe-authority-connection fallback receipt (0876). Missing '
   'evidence is a named gap, and zero active rules is coverage_state empty, never complete.';
 
-do $v5_a02_0866$
+do $v5_a02_0876$
 begin
   if position('fallback_required and not fallback_recorded' in
        pg_get_functiondef('ops.v5_a02_rule_enforcement_coverage()'::regprocedure)) = 0 then
-    raise exception '0866 FAILED: the fallback rung is not conditioned on fallback_required';
+    raise exception '0876 FAILED: the fallback rung is not conditioned on fallback_required';
   end if;
   if not has_function_privilege('carr_reader',
        'ops.v5_a02_rule_enforcement_coverage()'::regprocedure, 'execute')
      or has_function_privilege('carr_writer',
        'ops.v5_a02_rule_enforcement_coverage()'::regprocedure, 'execute') then
-    raise exception '0866 FAILED: V5-A02 coverage grants changed';
+    raise exception '0876 FAILED: V5-A02 coverage grants changed';
   end if;
 end
-$v5_a02_0866$;
+$v5_a02_0876$;

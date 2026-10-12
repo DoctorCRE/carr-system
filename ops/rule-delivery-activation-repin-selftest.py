@@ -3,7 +3,7 @@
 
 The latest forward repin (highest-numbered migrations/NNNN_repin_rule_delivery_activation_after_*.sql)
 must start from its predecessor's v_new, end at the overlay's base_map_sha256, and change only the
-digest. Chain-generic since 0865 (held-control tests), so the next repin needs no edit here.
+digest. Chain-generic since 0875 (held-control tests), so the next repin needs no edit here.
 """
 import importlib.util
 import os

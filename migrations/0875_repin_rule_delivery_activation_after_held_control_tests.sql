@@ -1,13 +1,13 @@
--- Installing session_boot, ledger_capture and loop_guard (0864) gave each a
+-- Installing session_boot, ledger_capture and loop_guard (0874) gave each a
 -- CI-run test in ops/config/rule-enforcement-map.json, which moves the map
 -- digest. The eight pack-cutover contracts stay unchanged (their frozen
 -- from_test_ref is the activation target's own record, not the catalog row),
--- so advance only their guarded identity from the post-0851 map to this one.
+-- so advance only their guarded identity from the post-0859 map to this one.
 -- rollback: repin the same eight targets to v_old after verifying the exact v_new preimage
-do $rule_delivery_0865$
+do $rule_delivery_0875$
 declare
-  v_old constant text := '2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490bac4a76f4';
-  v_new constant text := '4c5be9e0af6b9b2aa2668f4a5681676dc80cb9f33502724bfd241ae4e4babd70';
+  v_old constant text := 'f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e';
+  v_new constant text := 'b7666273937390aa3f1161ab5ce223cb652e18be2d21167b554d86fd2d76b1ff';
   v_ids constant text[] := array[
     '113b3833','25fcddee','3fa17fa0','49533583',
     '557838a5','57d13061','72e06bdf','c66dc739'
@@ -56,12 +56,12 @@ begin
   )
   select count(*) into v_count from differences;
   if v_count<>0 then
-    raise exception '0865 REFUSED: exact activation-target contract preimage is absent';
+    raise exception '0875 REFUSED: exact activation-target contract preimage is absent';
   end if;
   update ops.rule_delivery_activation_target set map_digest=v_new
     where short_id=any(v_ids) and map_digest=v_old;
   get diagnostics v_count=row_count;
   if v_count<>cardinality(v_ids) then
-    raise exception '0865 REFUSED: changed % targets, expected %',v_count,cardinality(v_ids);
+    raise exception '0875 REFUSED: changed % targets, expected %',v_count,cardinality(v_ids);
   end if;
-end $rule_delivery_0865$;
+end $rule_delivery_0875$;
