@@ -1061,9 +1061,16 @@ check("x.com fires the joe-comms pack despite the word boundary",
 # transcript that was 209,805 shlex.split calls and 58 s against a 20 s Stop
 # timeout, so the gate failed open on every turn. Same string, one split.
 import shlex as _shlex
-_split_calls = []
+_split_calls: list[str] = []
 _real_split = _shlex.split
-_shlex.split = lambda s, *a, **k: (_split_calls.append(s), _real_split(s, *a, **k))[1]
+
+
+def _counting_split(s, *a, **k):
+    _split_calls.append(s)
+    return _real_split(s, *a, **k)
+
+
+_shlex.split = _counting_split
 try:
     gate._SHELL_STANDING_CACHE.clear()
     repeated = "cd /tmp && ./run.sh call standing-context '{\"detail\":\"boot\",\"page\":1}'"
