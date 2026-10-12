@@ -60,6 +60,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -148,13 +149,15 @@ def _default_verb(verb: str, args: Mapping[str, Any]) -> VerbResult:
 
 
 def run_lint(text: str, surface: str) -> tuple[bool, str]:
-    """The existing writing-lint door, `run.sh lint <file> --surface <s>`.
+    """The existing writing-lint tool, the one `run.sh lint` runs, called directly
+    (run.sh has a zsh shebang, absent on CI and fresh Linux checkouts).
     Clean means exit 0 AND zero findings of every severity."""
     fd, path = tempfile.mkstemp(prefix="system-sender-", suffix=".txt")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
-        proc = subprocess.run([str(REPO / "run.sh"), "lint", path, "--surface", surface],
+        proc = subprocess.run([sys.executable, str(REPO / "tools" / "writing-lint.py"), path,
+                               "--surface", surface],
                               cwd=str(REPO), capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, f"lint could not run ({type(exc).__name__})"
