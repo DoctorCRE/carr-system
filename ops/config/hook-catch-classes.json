@@ -52,7 +52,6 @@
       "note": "Decides nothing itself: it extracts write targets and delegates to the two policy gates."
     },
     "close-before-open-gate.py": {"catch_class": "new work opened while prior work is unclosed", "also_caught_by": "unverified"},
-    "staging-observation-tracker.py": {"catch_class": "observation tracking for staged work", "also_caught_by": "unverified"},
     "settings-change-gate.py": {
       "catch_class": "change to installed machine configuration",
       "also_caught_by": "unverified",
