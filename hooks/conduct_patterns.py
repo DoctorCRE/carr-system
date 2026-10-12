@@ -125,10 +125,20 @@ HANDOFF_PROSE = [
 # EXEMPTIONS — read off the HUMAN's own turn, never self-granted.
 # ─────────────────────────────────────────────────────────────────────────────
 HUMAN_WANTS_COMMAND = re.compile(
-    r"\b(show|give|paste|what'?s|what is|write)\b[^.?!]{0,40}\b(command|script|snippet|one[- ]liner|syntax)\b"
-    r"|\bhow do I (run|install|start|build)\b"
+    r"\b(show|give|paste|what'?s|what is|write|send)\b[^.?!]{0,40}"
+    r"\b(command|script|snippet|one[- ]liner|syntax|instructions?|steps)\b"
+    r"|\bhow do I (run|install|start|build|do|fix|reset|change|set)\b"
     r"|\bi'?ll run (it|this|them)\b"
+    r"|\bpaste (it|this|that|them)\b"          # "Paste it in this chat?" (Joe, 2026-10-11)
+    r"|\bwhat do I (need to |have to )?(do|run|type|enter)\b"
+    r"|\btell me (what|how) to\b"
     r"|\b(don'?t|do not) run\b", re.I)
+# Widened 2026-10-12 after the Orchestrator.macbook session: Joe wrote "give me
+# the instructions for whatever password you need for the worker release" and
+# "Paste it in this chat?", and the gate held the answer open as a COMMAND
+# HANDOFF because neither said the literal word "command". A partner asking for
+# the steps IS the exemption this regex exists to read; the words he uses for
+# "the thing I should type" are instructions, steps, paste it, what do I do.
 
 HUMAN_WANTS_CHOICE = re.compile(
     r"\b(what are (my|the) options|lay out the options|give me options|which (would|do) you recommend"

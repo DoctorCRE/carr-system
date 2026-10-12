@@ -59,6 +59,14 @@ def assistant(text):
     return {"type": "assistant", "message": {"role": "assistant", "content": text}}
 
 
+def compact_summary(text):
+    """The record the harness injects after compaction: user role, the model's
+    own recap as content, flagged isCompactSummary, no origin at all. Shape
+    counted from the Orchestrator.macbook transcript, 2026-10-12 (11 of them)."""
+    return {"type": "user", "isCompactSummary": True, "turnOrigin": "peer",
+            "message": {"role": "user", "content": text}}
+
+
 CALL_IDS = itertools.count()
 
 
@@ -124,6 +132,23 @@ def completed_fixture(records):
 
 CASES = [
     ("ordinary answer", [user("status"), assistant("The board is current.")], False),
+    # 2026-10-12: a compaction summary is the model's recap, not an order. The
+    # Orchestrator.macbook session was held open three times for "unaccounted
+    # clause [production]: - **Release pipeline (ops/release-pipeline" — a
+    # bullet from its OWN summary of standing rulings. The control right below
+    # keeps the same words an order when the partner typed them.
+    # The Read satisfies the generic fresh-verification floor, so the ONLY thing
+    # left to block on is a production clause — which must not come from a recap.
+    ("compaction summary is not an order",
+     [compact_summary("Standing rulings:\n- Release it with bin/deploy-worker.sh to production once CI is green."),
+      tool("Bash", {"command": "npx wrangler deploy"}), tool("Read"),
+      assistant("Deployed.")],
+     False),
+    ("the same words typed by the partner ARE an order",
+     [user("Release it with bin/deploy-worker.sh to production once CI is green."),
+      tool("Bash", {"command": "npx wrangler deploy"}), tool("Read"),
+      assistant("Deployed.")],
+     True),
     ("one file patch is friction-free", [user("fix it"), tool("apply_patch", {"command": "*** Update File: a.py\n+x"}), assistant("Done.")], False),
     ("unsupported completion after multi-file patch", [user("fix it"), tool("apply_patch", {"command": "*** Update File: a.py\n+x\n*** Update File: b.py\n+y"}), assistant("Done.")], True),
     ("fresh read permits completion", [user("fix it"), tool("apply_patch", {"command": "*** Update File: a.py\n+x\n*** Update File: b.py\n+y"}), tool("Read"), assistant("Done and verified.")], False),

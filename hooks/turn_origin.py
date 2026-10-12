@@ -44,6 +44,18 @@ NON_HUMAN_TEXT_PREFIXES = (
     "<task-notification", "<system-reminder", "[SYSTEM",
     "# Autonomous loop check", "<<autonomous-loop",
     "Another Claude session sent a message",
+    # Fifth shape, counted 2026-10-12 from the Orchestrator.macbook transcript
+    # (11 of them in one session): the COMPACTION SUMMARY the harness writes
+    # when a context fills up. It is a `user` record carrying the model's own
+    # recap of the session — standing rulings, bullet lists of what to do next —
+    # stamped isCompactSummary and with turnOrigin human/peer/task_notification
+    # at random, and with NO origin dict at all. The completion-evidence gate
+    # read its bullets ("- **Release pipeline (ops/release-pipeline", "Merge only
+    # after an independent review at head") as Joe's ORDERED CLAUSES and held
+    # the turn open demanding production receipts for them, three times in one
+    # day. The flag check in is_harness_injected is the discriminator; this
+    # prefix is depth for a record that lost its flags on export.
+    "This session is being continued from a previous conversation",
 )
 
 # Fourth shape, found live 2026-08-14: a message relayed from ANOTHER CLAUDE
@@ -114,6 +126,12 @@ def is_harness_injected(rec, text):
     #    the conversation rather than in it — peer relays, stop-hook feedback.
     #    Never set on a typed turn.
     if rec.get("isMeta"):
+        return True
+    # 1b. COMPACTION SUMMARIES. The harness marks the recap it injects after a
+    #    context fills with isCompactSummary; it never sets origin on it, so
+    #    the inversion in step 3 cannot see it, and it is the one injected
+    #    record that is WRITTEN IN THE MODEL'S VOICE about the partner's orders.
+    if rec.get("isCompactSummary"):
         return True
     # 2. CONTENT SHAPES, kept ahead of the origin check because the loop tick
     #    genuinely does arrive origin-stamped "human" and only its text betrays

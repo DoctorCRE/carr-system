@@ -183,6 +183,31 @@ def main():
             check(f"allowed: {label}", rc4 == 0 and err4.strip() == "",
                   f"exit {rc4}: {err4[:120]}")
 
+        # 4b. THE SUBJECT IS READ OFF THE DRIFT SENTENCE, NOT THE WHOLE REPLY.
+        #     A long status update mentions the ruled-on subsystem in passing
+        #     (paragraph one) and calls a DIFFERENT thing stale (paragraph three).
+        #     Before drift_window (2026-10-12) the rare stem from paragraph one
+        #     matched the ruling and the reply was blocked — six times in one
+        #     orchestrator session, every tag an unrelated word. The ruling here
+        #     is about the quokka-indexer; the drift claim is about the exporter.
+        wide = ("Overnight summary. The quokka-indexer lane is off, as decided, and "
+                "nothing there needs attention.\n\n"
+                "Two PRs merged and the board is current.\n\n"
+                "One problem: the exporter schedule is stale and should have been "
+                "re-pointed at the new bucket when the rename landed; I am fixing it.")
+        p4b = transcript(tmp, wide, "t-wide.jsonl")
+        rc4b, err4b = run(tmp, p4b, decisions, os.path.join(tmp, "s4b"))
+        check("a ruling mentioned in ANOTHER paragraph does not block the drift claim",
+              rc4b == 0 and err4b.strip() == "", f"exit {rc4b}: {err4b[:160]}")
+        #     ...while the same subject IN the drift sentence still blocks.
+        narrow = ("Overnight summary. Two PRs merged and the board is current.\n\n"
+                  "One problem: the quokka-indexer schedule is stale and should have "
+                  "been re-pointed when the rename landed; I am fixing it.")
+        p4c = transcript(tmp, narrow, "t-narrow.jsonl")
+        rc4c, err4c = run(tmp, p4c, decisions, os.path.join(tmp, "s4c"))
+        check("the ruled-on subject IN the drift sentence still blocks",
+              rc4c == 2 and "quokka-indexer" in err4c, f"exit {rc4c}: {err4c[:160]}")
+
         # 5. Never wedge. Every one of these fails OPEN.
         rc5, _ = run(tmp, path, decisions, os.path.join(tmp, "s5"), stop_active=True)
         check("stop_hook_active is respected", rc5 == 0, f"exit {rc5}")

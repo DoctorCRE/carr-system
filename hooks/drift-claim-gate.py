@@ -133,6 +133,35 @@ def claim_text(ti):
     return "\n".join(parts)
 
 
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n{2,}|\n(?=\s*(?:[-*•]|\d+[.)])\s)")
+
+
+def drift_window(text):
+    """The sentences that carry the drift language, each with the sentence
+    before it — the subject the claim is ABOUT lives there, not three
+    paragraphs away.
+
+    Added 2026-10-12 after the chat door blocked six times in one orchestrator
+    session on rulings tagged "chasin", "pauses", "undone", "panels",
+    "forged": every one of them a rare stem lifted from an UNRELATED paragraph
+    of a long status update that happened to contain one drift phrase. Rarity
+    weighting was right about which stems to trust; it was wrong about where
+    to look for them. A long reply is many subjects, and only the sentence
+    around the drift phrase names the one being called wrong. Text with no
+    drift phrase comes back whole, so the write door's short claims are
+    unchanged."""
+    parts = [p for p in _SENTENCE_SPLIT.split(text or "") if p and p.strip()]
+    if len(parts) < 3:
+        return text or ""
+    keep = set()
+    for i, part in enumerate(parts):
+        if DRIFT.search(part):
+            keep.update((i - 1, i))
+    if not keep:
+        return text or ""
+    return " ".join(parts[i] for i in sorted(keep) if 0 <= i < len(parts))
+
+
 def salient_tokens(text):
     """Distinctive tokens, most specific first: hyphenated and dotted names
     before plain long words, because 'harden-gates.sh' identifies a subject and
@@ -294,7 +323,7 @@ def decide(payload):
     if len(text) < 60 or not DRIFT.search(text):
         sys.exit(0)
 
-    hits = search_decisions(salient_tokens(text))
+    hits = search_decisions(salient_tokens(drift_window(text)))
     if not hits:
         # A drift claim with no matching ruling is probably a real finding.
         # Silence is the correct output here.

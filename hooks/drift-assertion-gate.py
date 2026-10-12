@@ -214,7 +214,10 @@ def decide(payload):
     prose = chat().strip_fences(text)
     if not module.DRIFT.search(prose):
         sys.exit(0)
-    hits = module.search_decisions(module.salient_tokens(prose))
+    # Tokens come from the sentences around the drift phrase, not the whole
+    # reply: a long status update names many subjects and only one of them
+    # is being called wrong (drift_window's docstring has the six false blocks).
+    hits = module.search_decisions(module.salient_tokens(module.drift_window(prose)))
     if not hits:
         sys.exit(0)                     # no ruling: probably a real finding
     if already_raised(payload.get("session_id"), hits):

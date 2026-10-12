@@ -659,6 +659,24 @@ def _native_standing_invocation(payload):
 
 
 def _shell_standing_invocation(command):
+    # Memoised on the command text. standing_result_delivery() re-walks every
+    # prior record for every standing-context result, so a long session asked
+    # this question once per (result x command) pair: 441 results x 476 Bash
+    # calls = 209,805 shlex.split calls, 58 s, and a 20 s Stop timeout that
+    # failed open on every turn of the 2026-10-10 orchestrator session. The
+    # answer depends only on the string, so each distinct command is split once.
+    if not isinstance(command, str):
+        return False
+    cached = _SHELL_STANDING_CACHE.get(command)
+    if cached is None:
+        cached = _SHELL_STANDING_CACHE[command] = _shell_standing_invocation_uncached(command)
+    return cached
+
+
+_SHELL_STANDING_CACHE: dict = {}
+
+
+def _shell_standing_invocation_uncached(command):
     import shlex
     try:
         words = shlex.split(command)
