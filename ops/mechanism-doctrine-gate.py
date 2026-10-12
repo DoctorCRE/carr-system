@@ -151,6 +151,24 @@ def classify(path):
     return None
 
 
+def default_base():
+    """The merge base of HEAD and origin/main, or origin/main when none resolves.
+
+    Measuring against origin/main directly is wrong for any branch older than
+    main's latest commit: a mechanism main DELETED after the branch forked is
+    still in the branch's tree, and a plain diff reads it as a file the branch
+    ADDED.  On 2026-10-12 one hook retired on main turned six unrelated pull
+    requests red this way, each labelled inherited-from-main.  The merge base
+    is what the change actually started from.
+    """
+    try:
+        out = subprocess.run(["git", "merge-base", "HEAD", "origin/main"],
+                             cwd=REPO, capture_output=True, text=True, check=True).stdout.strip()
+    except subprocess.CalledProcessError:
+        return "origin/main"
+    return out or "origin/main"
+
+
 def added_files(base):
     """Repo-relative paths ADDED (not modified) between base and the worktree."""
     try:
@@ -205,8 +223,10 @@ def known_slugs():
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--base", default="origin/main",
-                    help="what the change is measured against (default origin/main)")
+    ap.add_argument("--base", default=None,
+                    help="what the change is measured against (default: the merge base of "
+                         "HEAD and origin/main, so a file main has since deleted is not read "
+                         "as one this change added; origin/main itself when no merge base resolves)")
     ap.add_argument("--explain", action="store_true",
                     help="print what this gate covers and exit")
     args = ap.parse_args()
@@ -223,9 +243,10 @@ def main() -> int:
         return 0
 
     try:
-        added = added_files(args.base)
+        base = args.base or default_base()
+        added = added_files(base)
     except RuntimeError as exc:
-        say(f"FAIL  mechanism-doctrine — cannot read the change against {args.base}: {exc}")
+        say(f"FAIL  mechanism-doctrine — cannot read the change against {args.base or default_base()}: {exc}")
         say("      A gate that cannot see the diff has not passed; it has not run.")
         return 2
 
