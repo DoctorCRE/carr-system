@@ -254,15 +254,26 @@ def record_verb(runtime_root: Path) -> Callable[[str, dict], dict]:
 def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
           mint: Callable[[], str] = lambda: str(uuid.uuid4()),
           now: Callable[[], str] = lambda: _dt.datetime.now(_dt.timezone.utc).isoformat(),
-          limit: int | None = None) -> dict:
-    """approve-rule for each READY row, one at a time; every result is appended to `log`."""
+          limit: int | None = None, max_refusals: int = 3) -> dict:
+    """approve-rule for each READY row, one at a time; every result is appended to `log`.
+
+    Stops after `max_refusals` refusals. Every refusal the server cannot map to
+    a named error is also written to its incident store, so a refusal that is
+    structural (the same database precondition for every remaining row) would
+    otherwise spray one identical incident per rule and teach nothing new. The
+    rows not attempted are counted in the summary, never silently dropped.
+    """
     log.parent.mkdir(parents=True, exist_ok=True)
     counts = Counter()
     ready = [r for r in rows if r["readiness"] == "ready"]
     if limit is not None:
         ready = ready[:limit]
+    attempted = 0
     with log.open("a", encoding="utf-8") as fh:
         for row in ready:
+            if counts["refused"] >= max_refusals:
+                break
+            attempted += 1
             payload = approve_payload(row, mint())
             res = call("approve-rule", payload)
             result = res.get("result") if res.get("ok") else None
@@ -279,8 +290,10 @@ def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
             fh.flush()
         skipped = Counter(r["readiness"] for r in rows if r["readiness"] != "ready")
         summary = {"schema": SCHEMA, "at": now(), "kind": "summary", "decision": DECISION_ID,
-                   "attempted": len(ready), "approved": counts["approved"],
-                   "refused": counts["refused"], "skipped": dict(sorted(skipped.items()))}
+                   "attempted": attempted, "approved": counts["approved"],
+                   "refused": counts["refused"], "not_attempted": len(ready) - attempted,
+                   "halted_after_refusals": attempted < len(ready),
+                   "skipped": dict(sorted(skipped.items()))}
         fh.write(json.dumps(summary, sort_keys=True) + "\n")
     return summary
 
@@ -319,6 +332,8 @@ def main(argv: list[str] | None = None, *, db: Mapping | None = None,
     ap.add_argument("--apply", action="store_true",
                     help="run approve-rule for each READY row (the only write)")
     ap.add_argument("--limit", type=int, default=None, help="apply to at most N ready rows")
+    ap.add_argument("--max-refusals", type=int, default=3,
+                    help="stop after N refusals (default 3); the rest are counted as not attempted")
     ap.add_argument("--runtime-root", default=os.environ.get("CARR_RUNTIME_ROOT", str(SOURCE)),
                     help="checkout whose tools/db-tap.py and run.sh carry the runtime "
                          "(default: this checkout)")
@@ -339,7 +354,8 @@ def main(argv: list[str] | None = None, *, db: Mapping | None = None,
               "status_counts": state.get("status_counts"), "rows": rows}
     if args.apply:
         log = Path(args.log) if args.log else root / "out" / "rule-approvals.jsonl"
-        report["applied"] = apply(rows, call or record_verb(root), log, mint=mint, limit=args.limit)
+        report["applied"] = apply(rows, call or record_verb(root), log, mint=mint, limit=args.limit,
+                                  max_refusals=args.max_refusals)
         report["log"] = str(log)
     if args.json:
         print(json.dumps(report, indent=2))
@@ -348,5 +364,7 @@ def main(argv: list[str] | None = None, *, db: Mapping | None = None,
         if args.apply:
             a = report["applied"]
             print(f"\napplied: {a['attempted']} attempted, {a['approved']} approved, "
-                  f"{a['refused']} refused; skipped {a['skipped']}; log {report['log']}")
+                  f"{a['refused']} refused, {a['not_attempted']} not attempted"
+                  f"{' (halted at the refusal ceiling)' if a['halted_after_refusals'] else ''}; "
+                  f"skipped {a['skipped']}; log {report['log']}")
     return 0

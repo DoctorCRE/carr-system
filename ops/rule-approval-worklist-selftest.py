@@ -193,9 +193,22 @@ class WorklistTest(unittest.TestCase):
         self.assertEqual(no["refusal"], REFUSAL, "the refusal is recorded verbatim")
         self.assertEqual(no["idempotency_key"], door.calls[1][1]["idempotency_key"])
         self.assertEqual(tail["kind"], "summary")
+        self.assertEqual(tail["not_attempted"], 0)
+        self.assertFalse(tail["halted_after_refusals"])
         self.assertEqual(tail["skipped"], {"catalog_missing": 1, "class_not_approvable": 1,
                                            "gone": 1, "held": 1, "unmapped": 1})
         self.assertEqual(summary, tail)
+
+    def test_refusal_ceiling_halts_and_counts_the_rest(self):
+        with tempfile.TemporaryDirectory() as td:
+            rows = w.build_worklist(DB, RULE_CONTROLS, GONE)
+            door = FakeDoor()
+            # READY_A is approved, READY_B refused; a ceiling of 1 stops after B.
+            summary = w.apply(list(reversed(rows)), door, Path(td) / "log.jsonl", max_refusals=1)
+        self.assertEqual([p["rule_id"] for _, p in door.calls], [rid(READY_B)])
+        self.assertEqual(summary["attempted"], 1)
+        self.assertEqual(summary["not_attempted"], 1)
+        self.assertTrue(summary["halted_after_refusals"])
 
     def test_limit_bounds_the_attempts(self):
         with tempfile.TemporaryDirectory() as td:
