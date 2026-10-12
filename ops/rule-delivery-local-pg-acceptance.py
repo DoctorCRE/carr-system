@@ -36,6 +36,7 @@ PY = REPO / ".venv" / "bin" / "python"
 MIGRATION_0363 = REPO / "migrations" / "0363_rule_delivery_activation_digest_repin.sql"
 RETIREMENT_REPIN = REPO / "migrations" / "0837_repin_rule_delivery_activation_after_control_retirement.sql"
 SIZING_REPIN = REPO / "migrations" / "0851_repin_rule_delivery_activation_after_sizing_rule.sql"
+HELD_CONTROL_REPIN = REPO / "migrations" / "0865_repin_rule_delivery_activation_after_held_control_tests.sql"
 PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
 CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
 # The chain has a fourth link as of 2026-09-01. Reinstating canonical_edit into
@@ -64,6 +65,7 @@ POST_0554_ACTIVATION_DIGEST = "c6e89d64de575b9c6e39c8c88cd6a32e97e494b381a7ac443
 # reviewed map moved its digest; migration 0772 carries the guarded forward repin.
 POST_0772_ACTIVATION_DIGEST = "43ac7f513c173114b1723a886baf56a83ec40e7fef8b187ed3dead7d16d90ada"
 POST_0837_ACTIVATION_DIGEST = "b4e0d6689df3d96be24fb0cb888587f545bef8ffeba79c3ee6757b447f3fb308"
+POST_0851_ACTIVATION_DIGEST = "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490bac4a76f4"
 ACTIVATION_TO_TEST_REF = (
     "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; "
     "ops/rule-pack-preuse-reselection-selftest.py"
@@ -492,9 +494,19 @@ def main() -> int:
             """select count(*), count(*) filter (where map_digest=%s),
                       array_agg(short_id order by short_id)
                  from ops.rule_delivery_activation_target""",
+            (POST_0851_ACTIVATION_DIGEST,),
+        )
+        check("sizing rule repins the exact targets to the post-0851 reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
+        # Replay the held-control-tests repin (0865) from that exact preimage.
+        cur.execute(HELD_CONTROL_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
             (current_map_digest,),
         )
-        check("sizing rule repins the exact targets to the current reviewed map",
+        check("held-control tests repin the exact targets to the current reviewed map",
               one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
         cur.execute("""insert into actor (slug,kind,display_name) values ('joe','human','Joe')
                        on conflict (slug) do nothing returning id""")

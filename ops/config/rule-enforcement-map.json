@@ -659,7 +659,8 @@
         "hooks/ledger-sweep.py"
       ],
       "test": [
-        "external:ledger scope regressions"
+        "tools/test-ledger-sweep.py",
+        "tools/test-ledger-scope.py"
       ]
     },
     "loop_guard": {
@@ -669,7 +670,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "external:migration probes"
+        "ops/loop-guard-selftest.py"
       ]
     },
     "loop_successor": {
@@ -847,7 +848,8 @@
         "mcp-server/src/mcp.js"
       ],
       "test": [
-        "command:python3 hooks/gate-integrity.py --selftest"
+        "ops/session-brief-selftest.py",
+        "ops/machine-converge-selftest.py"
       ]
     },
     "settings_change": {

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Exercise the sizing-rule repin against PostgreSQL and the current overlay."""
+"""Exercise the LATEST rule-delivery activation repin against PostgreSQL and the current overlay.
+
+The latest forward repin (highest-numbered migrations/NNNN_repin_rule_delivery_activation_after_*.sql)
+must start from its predecessor's v_new, end at the overlay's base_map_sha256, and change only the
+digest. Chain-generic since 0865 (held-control tests), so the next repin needs no edit here.
+"""
 import importlib.util
 import os
 from pathlib import Path
@@ -22,9 +27,10 @@ TO_TEST_REF = "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-s
 
 
 def main():
-    migrations = list(ROOT.glob("migrations/[0-9][0-9][0-9][0-9]_repin_rule_delivery_activation_after_sizing_rule.sql"))
-    assert len(migrations) == 1, "the sizing rule needs one forward activation repin"
-    repin = migrations[0].read_text()
+    chain = sorted(ROOT.glob("migrations/[0-9][0-9][0-9][0-9]_repin_rule_delivery_activation_after_*.sql"))
+    assert len(chain) >= 2, "the activation repin chain needs a predecessor"
+    repin = chain[-1].read_text()
+    prior = chain[-2].read_text()
     contract_fields = (
         "short_id", "expected_scope", "expected_pack", "from_control",
         "from_enforcement_class", "from_implementation_ref", "from_test_ref",
@@ -33,10 +39,13 @@ def main():
     )
     for field in contract_fields:
         assert re.search(rf"\b{field}\b", repin), f"repin does not guard {field}"
-    prior = (ROOT / "migrations/0837_repin_rule_delivery_activation_after_control_retirement.sql").read_text()
     old_digest = re.search(r"v_new constant text := '([0-9a-f]{64})'", prior)[1]
+    assert re.search(r"v_old constant text := '([0-9a-f]{64})'", repin)[1] == old_digest, \
+        f"{chain[-1].name} does not start where {chain[-2].name} ended"
     _, overlay = load_validated()
     new_digest = overlay["base_map_sha256"]
+    assert re.search(r"v_new constant text := '([0-9a-f]{64})'", repin)[1] == new_digest, \
+        f"{chain[-1].name} does not end at the overlay's base_map_sha256"
     spec = importlib.util.spec_from_file_location("local_pg_ci", ROOT / "ops/local-pg-ci.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
