@@ -1432,7 +1432,7 @@
           "fixtures": [
             "bash"
           ],
-          "allow_only": "PostToolUse only RECORDS: when a GitHub-touching command's output carries a rate-limit answer it writes the time to out/github-burst-guard-state.json and exits 0. It never denies and prints nothing; the cooldown it starts is refused on PreToolUse, covered by a scenario here and end to end by ops/github-burst-guard-selftest.py.",
+          "allow_only": "PostToolUse only RECORDS, to out/github-burst-guard-state.json, and exits 0: the time of a rate-limit answer in a GitHub-touching command's output, and the start of a release tick or shepherd run that finished with exit 0 after 60s or more or was launched in the background. It never denies and prints nothing; the cooldown and the five-minute tick window it starts are refused on PreToolUse, covered by scenarios here and end to end by ops/github-burst-guard-selftest.py.",
           "executions": [
             {
               "source": "ops/config/hooks.json",
@@ -1451,7 +1451,7 @@
           "fixtures": [
             "bash"
           ],
-          "allow_only": "PostToolUseFailure only RECORDS a rate-limit answer from a failed GitHub-touching command, the same as PostToolUse. It never denies and prints nothing; ops/github-burst-guard-selftest.py covers the failure-event path.",
+          "allow_only": "PostToolUseFailure only RECORDS a rate-limit answer from a failed GitHub-touching command, the same as PostToolUse, and drops a failed tick's pending start so it never stamps the tick window. It never denies and prints nothing; ops/github-burst-guard-selftest.py covers the failure-event path.",
           "executions": [
             {
               "source": "ops/config/hooks.json",

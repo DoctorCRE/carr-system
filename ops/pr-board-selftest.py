@@ -225,7 +225,7 @@ class Loops(unittest.TestCase):
             return {"ok": True, "loop": self.loops[payload["number"]]}
         if verb == "add-loop":
             self.assertEqual((payload["kind"], payload["domain"], payload["blocker"]),
-                             ("open_loop", "system", "ruling"))
+                             ("open_loop", "system", "other_lane"))
             self.assertTrue(payload["blocker_detail"] and payload["idempotency_key"].startswith("pr-board-"))
             number = str(len(self.loops) + 1)
             self.loops[number] = {"loop_id": f"id-{number}", "version": 1, "status": "open",

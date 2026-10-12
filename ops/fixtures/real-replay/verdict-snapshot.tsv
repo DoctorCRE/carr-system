@@ -705,11 +705,12 @@ gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:d9316125677c	announce	G
 gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:fa39d0ae0973	announce	GATE CHANGE ANNOUNCED — executor-tier-gate.py is enforcement, and edit just changed it.
 github-burst-guard.py	PostToolUseFailure[Bash]	(all)	counts	allow=320
 github-burst-guard.py	PostToolUse[Bash]	(all)	counts	allow=320
-github-burst-guard.py	PreToolUse[Bash]	(all)	counts	allow=320 deny=4
+github-burst-guard.py	PreToolUse[Bash]	(all)	counts	allow=320 deny=5
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b01	deny	GITHUB BURST GUARD: this command is `xargs` fanning gh out over a list with no `sleep #`+ between calls. A burst like that trips GitHub's sh
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b02	deny	GITHUB BURST GUARD: this command is a `for` loop that runs gh on every pass with no `sleep #`+ inside it. A burst like that trips GitHub's s
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b03	deny	GITHUB BURST GUARD: GitHub answered with a rate-limit error # minute(s) ago, and every session, CI watcher and the release pipeline share th
-github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b04	deny	GITHUB BURST GUARD: a release-pipeline tick or shepherd run started #s ago. Each tick makes many GitHub calls, and hand-run ticks stacked on
+github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b04	deny	GITHUB BURST GUARD: a release-pipeline tick or shepherd run that did real work started #s ago. Each tick makes many GitHub calls, and hand-r
+github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b05	deny	GITHUB BURST GUARD: GitHub answered with a rate-limit error # minute(s) ago, and every session, CI watcher and the release pipeline share th
 guard-unattended.py	PreToolUse[Bash|WebFetch]	(all)	counts	allow=309 deny=13
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:230bd999bc9a	deny	network send to an unrecognised host (#.#.#.#) — blocked by the CARR unattended guard: the command carries a $-expansion, backtick or proces
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:2f83845bddfc	deny	recursive/forced delete — blocked by the CARR unattended guard
