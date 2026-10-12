@@ -2,6 +2,7 @@
 """Bounded review processes cannot leave detached workspace children behind."""
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -135,7 +136,7 @@ class BoundedProcessTests(unittest.TestCase):
                 if pidfile.exists():
                     try:
                         os.kill(int(pidfile.read_text()), signal.SIGKILL)
-                    except ProcessLookupError:
+                    except (ProcessLookupError, ValueError):  # killed mid-write
                         pass
 
     def own_inventory(self):
@@ -220,4 +221,10 @@ class BoundedProcessTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    # run_bounded adopts and kills every new same-user orphan on the host
+    # (lib/dot_processes.py _Tracker.observe), so test_dot_processes.py and
+    # test_dot_verdicts.py kill each other's escaped fixture children when the
+    # parallel gates pool runs them side by side. Hold one host lock instead.
+    with open(Path(tempfile.gettempdir()) / 'carr-dot-run-bounded.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        unittest.main()

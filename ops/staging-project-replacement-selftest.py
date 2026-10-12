@@ -73,7 +73,7 @@ operation_id = uuid.UUID("11111111-2222-4333-8444-555555555555")
 assert ctl.candidate_name(operation_id).endswith(operation_id.hex)
 assert len(ctl.candidate_name(operation_id)) == len("carr-staging-replacement-") + 32
 assert ctl.load_candidate_spec() == ctl.CandidateSpec(18, "aws-us-east-1",
-                                                      ctl.Decimal("0.25"), ctl.Decimal("8"))
+                                                      ctl.Decimal("0.25"), ctl.Decimal("2"))
 
 
 class ScopeRun:
@@ -91,7 +91,7 @@ class ScopeRun:
             payload = {"endpoints": [{"id": "ep-candidate", "host": "ep-candidate.neon.tech",
                          "branch_id": "br-candidate" if self.endpoint_bound else "wrong",
                          "type": "read_write", "autoscaling_limit_min_cu": 0.25,
-                         "autoscaling_limit_max_cu": 8}]}
+                         "autoscaling_limit_max_cu": 2}]}
         return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
 
 
@@ -449,7 +449,7 @@ top_secret = "credential-uri-secret-must-not-escape"
 try:
     ctl.validate_source = lambda _sha: ctl.SourceContract("a"*40, {})
     ctl.load_candidate_spec = lambda: ctl.CandidateSpec(18, "aws-us-east-1",
-        ctl.Decimal("0.25"), ctl.Decimal("8"))
+        ctl.Decimal("0.25"), ctl.Decimal("2"))
     prod = ctl.ProviderScope(ctl.PRODUCTION_PROJECT_ID, "production", "br-p", "ep-p",
                              "ep-p.neon.tech")
     old = ctl.ProviderScope("old", "carr-staging", "br-o", "ep-o", "ep-o.neon.tech")
@@ -510,7 +510,7 @@ create_calls: list[uuid.UUID] = []
 try:
     ctl.validate_source = lambda _sha: ctl.SourceContract("a"*40, {})
     ctl.load_candidate_spec = lambda: ctl.CandidateSpec(
-        18, "aws-us-east-1", ctl.Decimal("0.25"), ctl.Decimal("8"))
+        18, "aws-us-east-1", ctl.Decimal("0.25"), ctl.Decimal("2"))
     prod = ctl.ProviderScope(ctl.PRODUCTION_PROJECT_ID, "production", "br-p", "ep-p",
                              "ep-p.neon.tech")
     old = ctl.ProviderScope("old", "carr-staging", "br-o", "ep-o", "ep-o.neon.tech")

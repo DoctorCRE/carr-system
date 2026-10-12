@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import fcntl
 import importlib.util
 import json
 from pathlib import Path
@@ -926,4 +927,10 @@ class LoopRegressionTests(unittest.TestCase):
         self.assertEqual(m['inspect'](queue, 'jbookout/carr-system', 1)['state'], 'closed')
 
 if __name__ == '__main__':
-    unittest.main()
+    # run_bounded adopts and kills every new same-user orphan on the host
+    # (lib/dot_processes.py _Tracker.observe), so test_dot_processes.py and
+    # test_dot_verdicts.py kill each other's escaped fixture children when the
+    # parallel gates pool runs them side by side. Hold one host lock instead.
+    with open(Path(tempfile.gettempdir()) / 'carr-dot-run-bounded.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        unittest.main()
