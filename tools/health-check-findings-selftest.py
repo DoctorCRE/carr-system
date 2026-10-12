@@ -597,6 +597,10 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
                   _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
                   _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
+                  # The breach consumer reaches the record layer; its own
+                  # hermetic suite is ops/health-act-selftest.py.
+                  _breach_consumer=lambda: None,
+                  _GREEN_EVIDENCE={},
                   _jev_site_spend_row=lambda: "OK jev spend by site — fixture",
                   _grok_session_row=lambda: ("OK fixture Grok session", 0),
                   flashlib=Mock(health_row=Mock(return_value="OK Flash stopped")),
@@ -880,6 +884,68 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
             [finding] = [row for row in rows if row["key"] == "jev_paid_cap"]
             self.assertEqual(finding["key"], "jev_paid_cap")
             self.assertTrue(finding["hard_error"])
+
+
+class ActModeContract(unittest.TestCase):
+    """`./run.sh health --act` (tools/health_breach.py): the shipped argument
+    guard, exit status and Jev row text, each executed from the real source."""
+
+    def reader_args(self):
+        ns = {"os": __import__("os"), "DEFAULT_RECOVERY_VAULT": "/fixture/vault"}
+        exec(compile(ast.Module(body=[_find_function("_reader_args")], type_ignores=[]),
+                     str(HEALTH_CHECK_PATH), "exec"), ns)
+        return ns["_reader_args"]
+
+    def test_act_refuses_a_partial_report(self):
+        """A partial run cannot prove a row green, so --act must never run on
+        one: its auto-clear would close every loop the run did not look at."""
+        reader_args = self.reader_args()
+        for argv in (["--act", "--section", "jobs"], ["--act", "--fixture", "f.json"],
+                     ["--act", "--recovery", "--reason", "drill"]):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit) as refused:
+                reader_args(argv)
+            self.assertIn("--act runs only on a full canonical report", str(refused.exception))
+        recovery, _, _, section, fixture, _, act, _ = reader_args(["--act"])
+        self.assertEqual((recovery, section, fixture, act), (False, "all", None, True))
+
+    def run_exit(self, rc, act_mode, act_errors):
+        [node] = [n for n in TREE.body if isinstance(n, ast.If) and isinstance(n.test, ast.UnaryOp)
+                  and isinstance(n.test.operand, ast.Name) and n.test.operand.id == "RECOVERY_MODE"]
+        ns = {"sys": sys, "RECOVERY_MODE": False, "FINDINGS_JSON_PATH": None,
+              "ACT_MODE": act_mode, "_ACT_ERRORS": act_errors, "_canonical_health": lambda: rc}
+        with self.assertRaises(SystemExit) as exited:
+            exec(compile(ast.Module(body=[node], type_ignores=[]), str(HEALTH_CHECK_PATH), "exec"), ns)
+        return exited.exception.code
+
+    def test_act_exit_status_reports_the_act_not_the_health(self):
+        self.assertEqual(self.run_exit(1, True, 0), 0, "a red report is --act's normal input")
+        self.assertEqual(self.run_exit(0, True, 2), 1, "a failed act turns the nightly step red")
+        self.assertEqual(self.run_exit(1, False, 0), 1, "plain health still exits with its rc")
+        self.assertEqual(self.run_exit(0, False, 3), 0)
+
+    def test_jev_outage_rows_carry_their_bound_action(self):
+        """Without the action in the finding the breach consumer reads the row
+        as unbound and never files its loop."""
+        import contextlib, io
+        from unittest.mock import Mock
+        action = lambda reason: f"on breach: owner Joe; fix {reason}; auto-clear on judgment"  # noqa: E731
+        cases = (
+            ({"status": "warn", "reason": "http_500", "age_hours": 3, "pending": False}, "opened", None,
+             "on breach: owner Joe; fix http_500"),
+            ({"status": "ok", "reason": None, "age_hours": 1, "pending": False}, "error", None,
+             "on breach: owner Joe; fix None"),
+            (None, None, OSError("fixture"), "on breach: owner Joe; fix log_unreadable"),
+        )
+        for evaluated, outcome, raised, expected in cases:
+            with self.subTest(outcome=outcome, raised=raised):
+                ns = PaidCapCanonicalHealthTests().all_namespace()
+                ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+                ns["_jev_outage"] = Mock(evaluate=Mock(return_value=evaluated, side_effect=raised),
+                                         reconcile=Mock(return_value=outcome), action=Mock(side_effect=action))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ns["_canonical_health"]()
+                [row] = [f for f in ns["_FINDINGS"] if f["key"] == "jev_live_outage"]
+                self.assertIn(expected, row["detail"])
 
 
 class RcAssignedOnlyViaRed(unittest.TestCase):
