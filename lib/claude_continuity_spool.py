@@ -1,8 +1,10 @@
 """Local spool for Claude continuity receipts the store did not confirm.
 
 The spool holds only receipts whose delivery is unknown (the store was
-unreachable or did not answer in time).  A receipt the store refused can never
-apply, so it goes straight to the archive with the store's reason.  The drain
+unreachable, did not answer in time, or answered with a fault it did not choose
+deterministically).  A receipt the store refused can never apply, so it goes
+straight to the archive with the store's reason; "refused" is a closed set of
+codes (see REFUSAL_CODES and REFUSAL_PREFIXES), never "any TOOL ERROR".  The drain
 re-sends spooled lifecycle receipts in order under their original idempotency
 keys; it never sends a checkpoint or anything carrying a pending external
 effect.  Nothing here deletes a receipt: every one that leaves the spool is
@@ -35,6 +37,19 @@ MAX_DRAIN_ATTEMPTS = 5
 WARN_COUNT = 10
 WARN_AGE_HOURS = 36
 DRAINABLE_VERB = "claude-record-event"
+# A store answer counts as a refusal only when the Worker chose it
+# deterministically: the dispatcher's argument and profile checks, and the
+# continuity verb's own validation, binding and key codes (every one of which
+# is named claude_*).  Anything else is delivery-unknown and stays spooled:
+# unhandled_verb_failure is what any untyped throw becomes, which is what a
+# Neon connection drop, a lock or statement timeout or a serialization failure
+# looks like from here; the write rolled back and is retryable.  A code this
+# module has never seen is treated the same way, so a new fault class cannot
+# empty the spool.
+REFUSAL_CODES = frozenset({
+    "key_reuse", "missing_required", "unregistered_operation_fields", "unknown_tool", "not_in_profile",
+})
+REFUSAL_PREFIXES = ("claude_",)
 RECORD_EVENT_FIELDS = frozenset({
     "runtime", "session_id", "transcript_path_digest", "project_affinity", "cwd",
     "parent_session_id", "native_agent_id", "model_id", "idempotency_key", "event_type",
@@ -88,11 +103,20 @@ def _signature(body: dict) -> str:
     return hmac.new(spool_key(), canonical(unsigned), hashlib.sha256).hexdigest()
 
 
+
+def is_refusal(error: str) -> bool:
+    """True only for a code the store chose deterministically; such a write can
+    never apply as sent.  Everything else (unhandled_verb_failure,
+    unparseable_tool_error, a code never seen here) is delivery-unknown."""
+    return error in REFUSAL_CODES or error.startswith(REFUSAL_PREFIXES)
+
 def invoke(verb: str, args: dict) -> tuple[dict | None, dict | None]:
     """Call one verb; return (response, None) or (None, failure).
 
-    failure.kind is "refused" (the store answered with an error code — the
-    write can never apply as sent), "timeout" or "transport" (delivery unknown).
+    failure.kind is "refused" (the store answered with a deterministic code from
+    REFUSAL_CODES / REFUSAL_PREFIXES — the write can never apply as sent),
+    "unknown" (any other error code, including unhandled_verb_failure: the write
+    may have rolled back), "timeout" or "transport" (delivery unknown).
     """
     raw = os.environ.get("CARR_CLAUDE_CONTINUITY_CALL")
     try:
@@ -115,7 +139,8 @@ def invoke(verb: str, args: dict) -> tuple[dict | None, dict | None]:
                 payload, _ = json.JSONDecoder().raw_decode(proc.stderr[marker + len("TOOL ERROR "):])
                 error = payload.get("error") if isinstance(payload, dict) else None
                 if isinstance(error, str) and error:
-                    return None, {"kind": "refused", "error": error[:200]}
+                    kind = "refused" if is_refusal(error) else "unknown"
+                    return None, {"kind": kind, "error": error[:200]}
             except ValueError:
                 pass
         return None, {"kind": "transport", "exit": proc.returncode}

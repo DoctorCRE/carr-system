@@ -176,6 +176,23 @@ class RefusalTest(SpoolTest):
         self.assertEqual(row["reason"], "claude_continuity_binding_conflict")
         self.assertEqual(row["receipt"]["args"]["event_type"], "stop")
 
+    def test_a_transient_server_fault_is_spooled_not_archived(self):
+        # unhandled_verb_failure is what the Worker returns for any untyped
+        # throw: a Neon connection drop, a statement timeout, a serialization
+        # failure.  The write rolled back and is retryable, so it waits.
+        for code in ("unhandled_verb_failure", "unparseable_tool_error", "a_code_nobody_has_seen"):
+            with self.subTest(code=code):
+                os.environ.update(SERVER_MODE="refuse", SERVER_REFUSAL=code)
+                try:
+                    self.run_hook("Stop")
+                finally:
+                    os.environ.pop("SERVER_MODE")
+                self.assertEqual(self.archived(), [], f"{code} is delivery-unknown, never a refusal")
+                [path] = self.spooled()
+                body = json.loads(path.read_text())
+                self.assertEqual(body["failure"], {"kind": "unknown", "error": code})
+                path.unlink()
+
     def test_an_unreachable_store_spools_with_the_failure_kind(self):
         self.outage("Stop")
         [path] = self.spooled()
@@ -237,6 +254,20 @@ class DrainTest(SpoolTest):
         self.calls.unlink()
         spool.drain()
         self.assertEqual(self.calls_made(), [], "an archived receipt is never retried")
+
+    def test_a_transient_server_fault_stops_the_drain_and_keeps_the_receipt(self):
+        self.outage("UserPromptSubmit", "Stop")
+        os.environ.update(SERVER_MODE="refuse", SERVER_REFUSAL="unhandled_verb_failure")
+        try:
+            result = spool.drain()
+        finally:
+            os.environ.pop("SERVER_MODE")
+        self.assertEqual((result["transient"], result["archived"], result["delivered"]), (1, 0, 0))
+        self.assertEqual(len(self.spooled()), 2, "a store fault during the drain empties nothing")
+        self.assertEqual(self.archived(), [], "nothing is written off as refused")
+        # Once the store answers again the same receipts deliver under their keys.
+        result = spool.drain()
+        self.assertEqual((result["delivered"], len(self.spooled())), (2, 0))
 
     def test_an_unreachable_store_stops_the_drain_and_retries_are_bounded(self):
         self.outage("UserPromptSubmit", "Stop")

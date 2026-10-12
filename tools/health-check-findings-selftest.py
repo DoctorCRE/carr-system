@@ -756,6 +756,28 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                 self.assertEqual([row["key"] for row in ns["_FINDINGS"]],
                                  [] if line.startswith("OK") else ["jev_paid_cap"])
 
+    def test_the_real_spool_row_drains_only_when_the_nightly_asks(self):
+        # Exercises the real _claude_continuity_spool_row rather than the stub:
+        # an always-drain mutant would make `health-check --section all`
+        # mutate the spool, and this is the test that dies for it.
+        import pathlib as _pathlib
+        from unittest.mock import patch
+        import sys as _sys
+        ns = self.namespace()
+        exec(compile(ast.Module(body=[_find_function("_claude_continuity_spool_row")], type_ignores=[]),
+                     str(HEALTH_CHECK_PATH), "exec"), ns)  # noqa: S102 — trusted repo source
+        _sys.path.insert(0, ns["REPO_ROOT"])
+        from lib import claude_continuity_spool as cs
+        drains = []
+        with patch.object(cs, "drain", lambda: drains.append("drain") or {"delivered": 0}), \
+             patch.object(cs, "health_row", lambda **kw: f"OK continuity spool depth — drained={kw['drained']!r}"), \
+             patch.object(cs, "loop_state_path", lambda: _pathlib.Path("/dev/null")):
+            manual, manual_code = ns["_claude_continuity_spool_row"](False)
+            nightly, nightly_code = ns["_claude_continuity_spool_row"](True)
+        self.assertEqual(drains, ["drain"], "exactly one drain, and only for the nightly section")
+        self.assertEqual((manual, manual_code), ("OK continuity spool depth — drained=None", 0))
+        self.assertEqual((nightly, nightly_code), ("OK continuity spool depth — drained={'delivered': 0}", 0))
+
     def test_a_deep_continuity_spool_is_its_own_finding(self):
         import io, contextlib
         ns = self.all_namespace()
