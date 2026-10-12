@@ -1,4 +1,4 @@
-// self-closing-records-sql.test.mjs — the SQL half of migration 0858, run on a
+// self-closing-records-sql.test.mjs — the SQL half of migration 0862, run on a
 // real disposable PostgreSQL rather than a fake that answers marker comments.
 //
 // Three things are proven here because they are the predicates, and a predicate
@@ -35,11 +35,11 @@ for (const pgConfig of ["pg_config", "/opt/homebrew/opt/postgresql@17/bin/pg_con
   } catch { /* try the next candidate */ }
 }
 
-const migration = readFileSync(path.join(root, "migrations/0858_self_closing_records.sql"), "utf8");
+const migration = readFileSync(path.join(root, "migrations/0862_self_closing_records.sql"), "utf8");
 const schema = readFileSync(path.join(root, "db/schema.sql"), "utf8");
 const lift = (pattern, label) => {
   const found = migration.match(pattern)?.[0];
-  assert.ok(found, `migration 0858 must define ${label}`);
+  assert.ok(found, `migration 0862 must define ${label}`);
   return found;
 };
 const table = (name) => {
@@ -51,7 +51,7 @@ const table = (name) => {
 const uuid = (n) => `aa000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const JOE = uuid(1);
 
-test("0858's predicates decide on a real PostgreSQL", { skip: !bin && "local PostgreSQL binaries unavailable" }, async () => {
+test("0862's predicates decide on a real PostgreSQL", { skip: !bin && "local PostgreSQL binaries unavailable" }, async () => {
   let fixture;
   let c;
   const releaseBudget = await acquirePostgresFixtureGroup();
