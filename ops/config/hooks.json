@@ -85,11 +85,6 @@
       "hooks": [
         {
           "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-          "timeout": 20
-        },
-        {
-          "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
         },
         {
@@ -200,11 +195,6 @@
       "hooks": [
         {
           "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-          "timeout": 20
-        },
-        {
-          "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
         },
         {
@@ -220,7 +210,6 @@
       ]
     },
     {
-      "matcher": "Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep",
       "hooks": [
         {
           "type": "command",

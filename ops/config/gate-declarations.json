@@ -21,7 +21,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 2,
+              "order": 1,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/bash-write-gate.py",
@@ -366,7 +366,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 4,
+              "order": 3,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/draft-export-gate.py",
@@ -612,7 +612,7 @@
       "wirings": [
         {
           "event": "PostToolUse",
-          "matcher": "Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep",
+          "matcher": "",
           "fixtures": [
             "bash",
             "edits",
@@ -625,7 +625,7 @@
               "source": "ops/config/hooks.json",
               "group": 2,
               "order": 0,
-              "matcher_present": true,
+              "matcher_present": false,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/jev-supervisor.py",
               "timeout": 25
@@ -1215,7 +1215,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 1,
+              "order": 0,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
@@ -1234,7 +1234,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 1,
-              "order": 1,
+              "order": 0,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
@@ -1243,52 +1243,6 @@
         }
       ],
       "paired_selftest": "ops/settings-change-gate-selftest.py"
-    },
-    "staging-observation-tracker.py": {
-      "role": "gate",
-      "wirings": [
-        {
-          "event": "PreToolUse",
-          "matcher": "Bash",
-          "fixtures": [
-            "bash",
-            "scenarios"
-          ],
-          "allow_only": "A pure recorder: main() always exits 0 ('this tracker never blocks; it only ever observes') and handle() prints nothing.",
-          "executions": [
-            {
-              "source": "ops/config/hooks.json",
-              "group": 6,
-              "order": 0,
-              "matcher_present": true,
-              "type": "command",
-              "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-              "timeout": 20
-            }
-          ]
-        },
-        {
-          "event": "PostToolUse",
-          "matcher": "Bash",
-          "fixtures": [
-            "bash",
-            "scenarios"
-          ],
-          "allow_only": "A pure recorder: main() always exits 0 ('this tracker never blocks; it only ever observes') and handle() prints nothing.",
-          "executions": [
-            {
-              "source": "ops/config/hooks.json",
-              "group": 1,
-              "order": 0,
-              "matcher_present": true,
-              "type": "command",
-              "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-              "timeout": 20
-            }
-          ]
-        }
-      ],
-      "paired_selftest": "ops/staging-observation-tracker-selftest.py"
     },
     "stop_latch.py": {
       "role": "helper",
@@ -1395,7 +1349,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 3,
+              "order": 2,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
@@ -1415,7 +1369,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 1,
-              "order": 2,
+              "order": 1,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
@@ -1440,7 +1394,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 6,
-              "order": 5,
+              "order": 4,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/github-burst-guard.py",
@@ -1459,7 +1413,7 @@
             {
               "source": "ops/config/hooks.json",
               "group": 1,
-              "order": 3,
+              "order": 2,
               "matcher_present": true,
               "type": "command",
               "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/github-burst-guard.py",

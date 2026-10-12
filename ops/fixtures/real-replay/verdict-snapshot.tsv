@@ -284,8 +284,8 @@ guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e15de7ccac12	deny	network sen
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e3c7b98b9e56	deny	private key material — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	scenarios:5c0000000005	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	tool_calls:f53afacc66e2	deny	WebFetch to a non-standard port (#) on a host outside KNOWN_HOSTS — blocked by the CARR guard.
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	(all)	counts	allow=441 announce=1
-jev-supervisor.py	PostToolUse[Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep]	scenarios:9e7000000001	announce	[jev failure_triage] code_bug: Read the traceback and fix the code at the location it points to.
+jev-supervisor.py	PostToolUse	(all)	counts	allow=457 announce=1
+jev-supervisor.py	PostToolUse	scenarios:9e7000000001	announce	[jev failure_triage] code_bug: Read the traceback and fix the code at the location it points to.
 jev-supervisor.py	Stop	(all)	counts	allow=87 announce=1
 jev-supervisor.py	Stop	scenarios:e1a5c0de0001	announce	[jev done_claim] unsupported: Completion criteria are not met.
 job-watchdog-digest.py	UserPromptSubmit	(all)	counts	allow=6
@@ -719,8 +719,6 @@ session-presence-hook.py	SessionEnd	(all)	counts	allow=1
 session-presence-hook.py	UserPromptSubmit	(all)	counts	allow=6
 settings-change-gate.py	PostToolUse[Bash]	(all)	counts	allow=320
 settings-change-gate.py	PreToolUse[Bash]	(all)	counts	allow=320
-staging-observation-tracker.py	PostToolUse[Bash]	(all)	counts	allow=320
-staging-observation-tracker.py	PreToolUse[Bash]	(all)	counts	allow=320
 unread-artifact-gate.py	Stop	(all)	counts	allow=87 announce=1
 unread-artifact-gate.py	Stop	scenarios:d4a000000004	announce	UNREAD ARTIFACT — you are describing what a file DOES, and this session never opened it:
 weekend-quiet-gate.py	PreToolUse[PushNotification|mcp__.*__(send_message|create_draft|update_draft)]	(all)	counts	allow=7 deny=1

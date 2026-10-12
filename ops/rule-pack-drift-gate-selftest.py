@@ -1322,6 +1322,52 @@ with tempfile.TemporaryDirectory() as directory:
     check("a chain parent arriving after its child falls back to the whole file",
           scan.reason == "whole_file" and same_verdict(scan, early + chain[:2])[0], scan.reason)
 
+# Review round 1 of PR 1716, finding 4: whole_file is sticky, so a transcript
+# over the cap that trips it must still be judged, by reading the whole file in
+# cap-sized steps, not capped on every Stop forever.
+with tempfile.TemporaryDirectory() as directory:
+    transcript = Path(directory) / "dup-big.jsonl"
+    padding = [assistant_tool("Bash", {"command": f"echo {n} " + "z" * 300}) for n in range(20)]
+    records = with_uuids(turns[0] + padding + turns[1], "dupbig")
+    records = records + [dict(records[1])]  # one duplicated uuid
+    write_jsonl(transcript, records)
+    size = transcript.stat().st_size
+    cap = size // 2 + 1
+    check("the duplicate-uuid fixture is over the cap and within the whole-file steps",
+          cap < size <= cap * gate.WHOLE_FILE_STEPS, f"{size} vs cap {cap}")
+    scans = [gate.scan_transcript(str(transcript), "dup-big", cap=cap) for _ in range(6)]
+    judged = [s for s in scans if not s.capped]
+    check("an over-cap whole_file transcript is judged, not capped on every Stop",
+          len(judged) >= 4 and all(s.reason == "whole_file" for s in judged)
+          and all(same_verdict(s, records)[0] for s in judged),
+          str([(s.reason, s.capped) for s in scans]))
+    # Past the step budget it is capped, visibly, with the whole-file reason.
+    huge = Path(directory) / "dup-huge.jsonl"
+    filler = [assistant_tool("Bash", {"command": f"echo {n} " + "w" * 300}) for n in range(60)]
+    many = with_uuids(turns[0] + filler + turns[1], "duphuge")
+    write_jsonl(huge, [many[0], dict(many[0])] + many[1:])
+    check("the second fixture is past the whole-file steps",
+          huge.stat().st_size > cap * gate.WHOLE_FILE_STEPS, str(huge.stat().st_size))
+    last = [gate.scan_transcript(str(huge), "dup-huge", cap=cap) for _ in range(3)][-1]
+    check("past the whole-file steps the Stop is capped and says why",
+          bool(last.capped) and "whole-file read" in last.capped, str(last.capped))
+
+# Finding 5: every scheduled-task source scheduled_workflow_packs() could read
+# is a cursor input, including one added after the cursor was saved.
+on_disk = sorted(f"ops/scheduled-tasks/{p.name}" for p in (REPO / "ops/scheduled-tasks").iterdir()
+                 if p.name.endswith(".SKILL.md"))
+check("every ops/scheduled-tasks/*.SKILL.md is a cursor input",
+      bool(on_disk) and set(on_disk) <= set(gate.CURSOR_INPUTS),
+      str(sorted(set(on_disk) - set(gate.CURSOR_INPUTS))))
+with tempfile.TemporaryDirectory() as directory:
+    fake_repo = Path(directory)
+    (fake_repo / "ops/scheduled-tasks").mkdir(parents=True)
+    (fake_repo / "ops/scheduled-tasks/one.SKILL.md").write_text("a", encoding="utf-8")
+    before = gate.cursor_inputs_fingerprint(fake_repo)
+    (fake_repo / "ops/scheduled-tasks/third-workflow.SKILL.md").write_text("b", encoding="utf-8")
+    check("a scheduled task added later discards the cursor",
+          gate.cursor_inputs_fingerprint(fake_repo) != before)
+
 # The stub priors DeliveryState hands preuse_delivery() must answer the two
 # prior-dependent matchers exactly as the real prior records do.
 from lib.rule_delivery_preuse import matched_prompt, matched_tool_call, digest as receipt_digest  # noqa:E402

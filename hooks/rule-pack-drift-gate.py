@@ -1144,29 +1144,51 @@ TAIL_CHECK_BYTES = 4096
 # About half a second of parsing on this hardware; a 39 MB transcript seen for
 # the first time catches up over three turn ends instead of one 16 s stall.
 SCAN_CAP_BYTES = 16 * 1024 * 1024
+# A transcript marked whole_file is re-read from byte 0 on every Stop, in
+# cap-sized steps, up to this many steps (48 MiB, about 3.5 s here, under the
+# hook's 20 s timeout even at the heaviest throttle measured). Past that it is
+# capped with a visible notice and not judged.
+WHOLE_FILE_STEPS = 3
+def scheduled_task_sources(repo=REPO):
+    """Every ops/scheduled-tasks/<name>.SKILL.md scheduled_workflow_packs() can
+    read, so adding, removing or editing any of them discards the cursor."""
+    folder = Path(repo) / "ops" / "scheduled-tasks"
+    try:
+        names = sorted(p.name for p in folder.iterdir() if p.name.endswith(".SKILL.md"))
+    except OSError:
+        return []
+    return [f"ops/scheduled-tasks/{name}" for name in names]
+
+
 # Every file the verdict reads besides the transcript. A change to any of them
 # can change what an old receipt is worth, so it discards the cursor. The
 # selftest records the files a full evaluation actually opens and fails if one
-# is missing here.
-CURSOR_INPUTS = tuple(sorted(set(WINDOW_SOURCE_PATHS) | set(SELECTOR_SOURCE_PATHS) | {
+# is missing here. The scheduled-task sources are globbed at each fingerprint,
+# so a task added after a cursor was saved discards it too.
+FIXED_CURSOR_INPUTS = frozenset(set(WINDOW_SOURCE_PATHS) | set(SELECTOR_SOURCE_PATHS) | {
     "ops/config/rule-enforcement-map.json", TRIGGER_TABLE_RELATIVE, CORPUS_RELATIVE,
     "ops/config/rule-routes.v1.json", "ops/config/rule-classification.v1.csv",
     "ops/config/rule-classes.v1.json", "ops/config/hooks.json",
     "ops/config/codex-hooks.json", "ops/config/rule-delivery-activation-overlay.v1.json",
     "ops/config/control-enforcement-classes.v1.json", "ops/config/gate-baseline.json",
-    "ops/scheduled-tasks/engineering-slice.SKILL.md",
-    "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
     "control-room/contracts/engineering-slice-receipt.v1.schema.json",
     "lib/rule_routes.py", "lib/rule_delivery_preuse.py", "lib/rule_delivery_shadow.py",
     "lib/transcript_read.py", "hooks/rule-pack-drift-gate.py", "hooks/lint-gate.py",
     "mcp-server/src/mutation-registry.js",
-}))
+})
+
+
+def cursor_inputs(repo=REPO):
+    return tuple(sorted(FIXED_CURSOR_INPUTS | set(scheduled_task_sources(repo))))
+
+
+CURSOR_INPUTS = cursor_inputs()
 
 
 def cursor_inputs_fingerprint(repo=REPO):
     """Size and mtime of every verdict input; any change discards the cursor."""
     rows = []
-    for relative in CURSOR_INPUTS:
+    for relative in cursor_inputs(repo):
         try:
             st = os.stat(os.path.join(repo, relative))
             rows.append((relative, st.st_size, st.st_mtime_ns))
@@ -1448,13 +1470,22 @@ def scan_transcript(path, session, *, cap=None, log_path=None):
             return Scan(turn=turn, delivery=delivery.result(), read=(start, offset),
                         reason=reason, reread=turn_start if turn_start < start else None)
     # A duplicated uuid or a late parent: the original whole-file evaluation.
-    if size > cap:
+    # The mark is sticky, so a cap of `cap` here would leave a transcript over
+    # it unjudged on every later Stop (review round 1 of PR 1716). It reads up
+    # to WHOLE_FILE_STEPS cap-sized steps instead, the old gate's cost.
+    if size > cap * WHOLE_FILE_STEPS:
         persist(offset, lines)
         return Scan(capped=f"this transcript needs a whole-file read of {size / 1048576:.1f} MB",
                     read=(0, 0), reason="whole_file")
-    records, offset, line_count = read_records(path, 0, size, size=size, line_number=0,
-                                               session=session, log_path=None)
-    plain = [record for _, record, _ in records]
+    plain, offset, line_count = [], 0, 0
+    while offset < size:
+        step, reached, line_count = read_records(
+            path, offset, min(size, offset + cap), size=size, line_number=line_count,
+            session=session, log_path=None)
+        plain.extend(record for _, record, _ in step)
+        if reached <= offset:
+            break
+        offset = reached
     persist(offset, line_count)
     return Scan(turn=current_turn(plain), delivery=delivery_state(plain), read=(0, offset),
                 reason="whole_file")

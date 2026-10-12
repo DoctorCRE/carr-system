@@ -971,8 +971,9 @@ class PerCallTaxTests(unittest.TestCase):
     def test_predicates_mirror_the_library(self):
         import inspect as pyinspect
         self.assertEqual(self.m.WATCH_FAILURE_MARKERS.pattern, self.watch.FAILURE_MARKERS.pattern)
-        self.assertEqual((self.m.LOOP_WINDOW, self.m.LOOP_REPEAT_MIN),
-                         (self.watch.LOOP_WINDOW, self.watch.LOOP_REPEAT_MIN))
+        self.assertEqual((self.m.LOOP_WINDOW, self.m.LOOP_REPEAT_MIN, self.m.STALE_EDIT_CALLS),
+                         (self.watch.LOOP_WINDOW, self.watch.LOOP_REPEAT_MIN,
+                          self.watch.STALE_EDIT_CALLS))
         self.assertEqual(self.m.WATCH_EDIT_TOOLS, self.watch.EDIT_TOOL_NAMES)
         source = pyinspect.getsource(self.watch.inspect_tool_event)
         self.assertIn(f'r"{self.m.INSPECT_MISSING.pattern}"', source)
@@ -1061,6 +1062,100 @@ class PerCallTaxTests(unittest.TestCase):
         self.assertEqual(outputs[:2], ["", ""])
         self.assertIn("stuck", outputs[2])
         self.assertEqual(fake.calls.count("watch_progress"), 1)
+
+    def test_progress_due_after_stale_edit_calls_and_an_edit_resets_the_count(self):
+        ring = os.path.join(self.dir, "ring.json")
+        calls = [self.event("Bash", {"command": f"echo {i}"}, {"stdout": str(i)})
+                 for i in range(2 * self.m.STALE_EDIT_CALLS)]
+        due = [self.m.progress_due(p, ring) for p in calls[:self.m.STALE_EDIT_CALLS]]
+        self.assertEqual(due, [False] * (self.m.STALE_EDIT_CALLS - 1) + [True],
+                         "the STALE_EDIT_CALLS-th call with no edit is due")
+        self.assertTrue(self.m.progress_due(calls[self.m.STALE_EDIT_CALLS], ring), "and the next")
+        edit = self.event("Edit", {"file_path": "a.py", "new_string": "x"}, {"success": True})
+        self.assertFalse(self.m.progress_due(edit, ring))
+        self.assertFalse(self.m.progress_due(calls[self.m.STALE_EDIT_CALLS + 1], ring),
+                         "an edit resets the stale count")
+
+    def test_ring_file_from_before_the_stale_count_still_reads(self):
+        ring = os.path.join(self.dir, "ring.json")
+        same = self.event("Bash", {"command": "gh run view 1"}, {"stdout": "queued", "stderr": ""})
+        self.assertFalse(self.m.progress_due(same, ring))
+        with open(ring) as fh:
+            state = json.load(fh)
+        with open(ring, "w") as fh:
+            json.dump(state["ring"], fh)  # the round-0 format: a bare list
+        self.assertFalse(self.m.progress_due(same, ring))
+        self.assertTrue(self.m.progress_due(same, ring), "the old ring's entry still counts")
+
+    def drive_real_watch(self, calls):
+        """Run each call through main() against the REAL jev_session_watch, with
+        the transcript growing call by call as the harness writes it. Returns
+        every watch_progress result."""
+        transcript = os.path.join(self.dir, "session.jsonl")
+        state = os.path.join(self.dir, "watch-state")
+        seen = []
+        real = self.watch.watch_progress
+
+        def watch_progress(*args, **kwargs):
+            out = real(*args, state_dir=state, **kwargs)
+            seen.append(out)
+            return out
+        watch_progress.__name__ = "watch_progress"
+        self.watch.watch_progress = watch_progress
+
+        def lib(name):
+            if name == "jev_session_watch":
+                return self.watch
+            if name == "jev_code_review":
+                return SimpleNamespace(latest_task=lambda path: "keep going")
+            raise AssertionError(f"unexpected library {name}")
+        self.m._lib = lib
+        for i, (tool, tool_input, text) in enumerate(calls):
+            with open(transcript, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": f"t{i}", "name": tool, "input": tool_input}]}}) + "\n")
+                fh.write(json.dumps({"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": f"t{i}", "content": text}]}}) + "\n")
+            payload = {**self.event(tool, tool_input, {"stdout": text, "stderr": ""}),
+                       "transcript_path": transcript}
+            self.assertEqual(run_main(self.m, payload)[0], 0)
+        return seen
+
+    def test_reviewer_case_stale_edit_fires_the_real_watch(self):
+        # Review round 1, finding 1: 26 distinct Bash calls with no edit fire
+        # needs_review / no_artifact_delta_observed on main; the pre-check
+        # must let that through.
+        calls = [("Bash", {"command": f"echo {i}"}, f"out {i}") for i in range(26)]
+        fired = [r for r in self.drive_real_watch(calls)
+                 if r.get("detail", {}).get("trigger") == "no_artifact_delta_observed"]
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(fired[0]["verdict"], "needs_review")
+
+    def test_reviewer_case_unmatched_tool_loop_fires_repeated_tool_call(self):
+        # Review round 1, finding 2: three identical MCP calls then one Bash
+        # call. Main's transcript watch says stuck / repeated_tool_call.
+        calls = [("mcp__x__read-loop", {"id": 1}, "same")] * 3 + [("Bash", {"command": "ls"}, "a")]
+        fired = [r for r in self.drive_real_watch(calls)
+                 if r.get("detail", {}).get("trigger") == "repeated_tool_call"]
+        self.assertEqual(len(fired), 1)
+        self.assertEqual(fired[0]["verdict"], "stuck")
+
+    def test_every_tool_reaches_the_hook(self):
+        # The ring only sees what the PostToolUse wiring delivers, while the
+        # watch it stands in for reads every tool in the transcript.
+        sys.path.insert(0, REPO)
+        from lib.gate_declarations import render_hooks
+        groups = [g for g in render_hooks()["PostToolUse"]
+                  if any("jev-supervisor.py" in h["command"] for h in g["hooks"])]
+        self.assertEqual(len(groups), 1)
+        matcher = groups[0].get("matcher", "")
+        with open(os.path.join(REPO, "ops", "config", "hooks.json"), encoding="utf-8") as fh:
+            live = [g for g in json.load(fh)["PostToolUse"]
+                    if any("jev-supervisor.py" in h["command"] for h in g["hooks"])]
+        self.assertEqual([g.get("matcher", "") for g in live], [matcher])
+        import re
+        for tool in ("Bash", "Read", "Glob", "Agent", "TodoWrite", "mcp__x__read-loop"):
+            self.assertTrue(not matcher or re.fullmatch(matcher, tool), tool)
 
 
 if __name__ == "__main__":

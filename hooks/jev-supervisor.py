@@ -43,12 +43,18 @@ predicates run first, with nothing under ops/ loaded:
                     an edit that adds text). Anything else returns [] there
                     and records nothing, so skipping it changes no verdict.
   progress_due()    a per-session ring of the last LOOP_WINDOW call
-                    fingerprints, cut by a successful edit. The full watch
-                    runs only when this call repeats one in the ring at least
-                    LOOP_REPEAT_MIN - 1 times, when its output carries a
+                    fingerprints and a count of calls since the last edit,
+                    both cut by a successful edit. The full watch runs only
+                    when this call repeats one in the ring at least
+                    LOOP_REPEAT_MIN - 1 times, when STALE_EDIT_CALLS calls
+                    have passed with no edit, when its output carries a
                     failure marker, or when the caller supplies a budget or
                     artifact pair. A repetition can only appear with the call
                     that repeats, so the stuck verdict still fires on time.
+                    The watch reads every tool in the transcript, so the
+                    PostToolUse wiring has no matcher: a loop of MCP, Glob or
+                    Agent calls must reach the ring too (review round 1 of
+                    PR 1716). An unmatched tool costs interpreter start-up.
 ops/jev-supervisor-selftest.py holds both predicates to the library: the
 regexes and thresholds must equal jev_session_watch's, and every event they
 skip must yield nothing from the real inspect_tool_event().
@@ -119,6 +125,7 @@ WATCH_FAILURE_MARKERS = re.compile(
 INSPECT_MISSING = re.compile(r"No such file or directory|does not exist|File not found|ENOENT", re.I)
 LOOP_WINDOW = 12
 LOOP_REPEAT_MIN = 3
+STALE_EDIT_CALLS = 25
 WATCH_EDIT_TOOLS = {"edit", "write", "notebookedit"}
 INSPECT_EDIT_TOOLS = {"edit", "write", "multiedit"}
 INSPECT_PATH_TOOLS = {"read", "edit", "write", "multiedit", "bash"}
@@ -186,18 +193,20 @@ def _ring_path(payload):
 def progress_due(payload, ring_path=None):
     """Whether the stuck-and-drift watch could fire on this call.
 
-    Keeps a ring of the last LOOP_WINDOW call fingerprints for the session
-    (tool, input, output), cut at each successful edit the way the watch cuts
-    its window. Any state error answers True: the full watch decides then.
+    Keeps, per session, a ring of the last LOOP_WINDOW call fingerprints
+    (tool, input, output) and a count of calls since the last successful edit,
+    both cut at each successful edit the way the watch cuts its window. Due on
+    a repeat inside the ring, on STALE_EDIT_CALLS calls with no edit (the
+    watch's no_artifact_delta_observed), on a failure marker, or on a budget or
+    artifact field. Every call updates the state, including one that is due
+    for another reason. Any state error answers True: the full watch decides.
     """
-    if any(payload.get(k) is not None for k in
-           ("elapsed_seconds", "budget_seconds", "artifact_before", "artifact_after")):
-        return True
+    budget = any(payload.get(k) is not None for k in
+                 ("elapsed_seconds", "budget_seconds", "artifact_before", "artifact_after"))
     name = (payload.get("tool_name") or "").lower()
     response = payload.get("tool_response")
     output = _text(response)[-MAX_OUTPUT_CHARS:]
-    if WATCH_FAILURE_MARKERS.search(output):
-        return True
+    failure = bool(WATCH_FAILURE_MARKERS.search(output))
     try:
         tool_input = json.dumps(payload.get("tool_input"), sort_keys=True, default=str)
     except (TypeError, ValueError):
@@ -212,18 +221,28 @@ def progress_due(payload, ring_path=None):
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
             fh.seek(0)
             raw = fh.read()
-            ring = json.loads(raw) if raw.strip() else []
-            if not isinstance(ring, list):
-                ring = []
+            state = json.loads(raw) if raw.strip() else {}
+            if isinstance(state, list):  # a ring written before the stale count existed
+                state = {"ring": state}
+            if not isinstance(state, dict):
+                state = {}
+            ring = [f for f in state.get("ring") or [] if isinstance(f, str)]
+            since_edit = state.get("since_edit")
+            if not isinstance(since_edit, int) or since_edit < 0:
+                since_edit = len(ring)
             seen = ring.count(fingerprint)
-            edited = (name in WATCH_EDIT_TOOLS and _exit_code(response) in (None, 0))
-            ring = [] if edited else (ring + [fingerprint])[-LOOP_WINDOW:]
+            # The watch's _successful_edit: an edit tool, no error, no failure marker.
+            if name in WATCH_EDIT_TOOLS and _exit_code(response) in (None, 0) and not failure:
+                ring, since_edit = [], 0
+            else:
+                ring, since_edit = (ring + [fingerprint])[-LOOP_WINDOW:], since_edit + 1
             fh.seek(0)
             fh.truncate()
-            fh.write(json.dumps(ring))
+            fh.write(json.dumps({"ring": ring, "since_edit": since_edit}))
     except (OSError, ValueError):
         return True
-    return seen >= LOOP_REPEAT_MIN - 1
+    return (budget or failure or seen >= LOOP_REPEAT_MIN - 1
+            or since_edit >= STALE_EDIT_CALLS)
 
 
 def _git_root(cwd):
