@@ -275,7 +275,7 @@ def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
     rows not attempted are counted in the summary, never silently dropped.
     """
     log.parent.mkdir(parents=True, exist_ok=True)
-    counts = Counter()
+    counts: Counter[str] = Counter()
     ready = [r for r in rows if r["readiness"] == "ready"]
     if limit is not None:
         ready = ready[:limit]
@@ -365,19 +365,20 @@ def main(argv: list[str] | None = None, *, db: Mapping | None = None,
         print(json.dumps({"schema": SCHEMA, "ok": False, "error": msg}) if args.json else msg)
         return 1
     tot = totals(rows)
-    report = {"schema": SCHEMA, "ok": True, "decision": DECISION_ID, "totals": tot,
+    report: dict = {"schema": SCHEMA, "ok": True, "decision": DECISION_ID, "totals": tot,
               "status_counts": state.get("status_counts"), "rows": rows}
+    applied: dict | None = None
     if args.apply:
         log = Path(args.log) if args.log else root / "out" / "rule-approvals.jsonl"
-        report["applied"] = apply(rows, call or record_verb(root), log, mint=mint, limit=args.limit,
+        report["applied"] = applied = apply(rows, call or record_verb(root), log, mint=mint, limit=args.limit,
                                   max_refusals=args.max_refusals)
         report["log"] = str(log)
     if args.json:
         print(json.dumps(report, indent=2))
     else:
         print(render(rows, tot))
-        if args.apply:
-            a = report["applied"]
+        if applied is not None:
+            a = applied
             print(f"\napplied: {a['attempted']} attempted, {a['approved']} approved, "
                   f"{a['refused']} refused, {a['not_attempted']} not attempted"
                   f"{' (halted at the refusal ceiling)' if a['halted_after_refusals'] else ''}; "

@@ -120,6 +120,7 @@ def violated(c: Cluster, db: str, stmt: str) -> str | None:
 def main() -> int:
     check_parity()
     spec = importlib.util.spec_from_file_location("local_pg_ci", ROOT / "ops/local-pg-ci.py")
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)

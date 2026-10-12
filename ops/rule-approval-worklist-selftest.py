@@ -168,7 +168,8 @@ class WorklistTest(unittest.TestCase):
     def test_dry_run_is_the_default_and_calls_nothing(self):
         door = FakeDoor()
         orig = (w.load_map, w.load_gone)
-        w.load_map, w.load_gone = (lambda: RULE_CONTROLS), (lambda: GONE)
+        w.load_map = lambda path=w.MAP: RULE_CONTROLS  # type: ignore[assignment]
+        w.load_gone = lambda path=w.TRIAGE: GONE  # type: ignore[assignment]
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
