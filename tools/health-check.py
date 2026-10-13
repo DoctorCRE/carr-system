@@ -769,7 +769,7 @@ def _canonical_snapshot():
         return value
 
     snapshot = {"exports": None, "job_definitions": None, "jobs": None,
-                "controls": None, "errors": []}
+                "controls": None, "verb_usage": None, "errors": []}
     if CANONICAL_SECTION in ("all", "exports"):
         # THE CUTOFF (fired 2026-08-19) IS CARRIED HERE TOO. A retired .md target
         # stops producing export_run rows at all, so 26 hours later every one of
@@ -960,7 +960,54 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                         "active_rules_accepted_unenforceable": int(cols[4]),
                     }
                     break
+        # value::text, because db-tap prints str() of each column and a jsonb
+        # column arrives as a Python dict whose str() is not JSON.
+        p = subprocess.run(
+            [_query_python, os.path.join(REPO_ROOT, "tools/db-tap.py"),
+             "sql", "/dev/stdin"],
+            input="select value::text from public.v_integrity_digest "
+                  "where line = 'verb_usage_30d';",
+            cwd=REPO_ROOT, text=True, capture_output=True, timeout=120,
+            env={k: v for k, v in os.environ.items() if k != "CARR_VAULT"},
+        )
+        if p.returncode:
+            snapshot["errors"].append("verb_usage: " +
+                                      ((p.stderr or "").strip() or "query failed"))
+        else:
+            for line in p.stdout.splitlines():
+                if line.startswith("{"):
+                    try:
+                        snapshot["verb_usage"] = json.loads(line)
+                    except ValueError as exc:
+                        snapshot["errors"].append(f"verb_usage: unparseable result ({exc})")
+                    break
     return snapshot
+
+
+VERB_USAGE_LIST_ALL_BELOW = 60
+VERB_USAGE_LIST_HEAD = 20
+
+
+def _verb_usage_lines(value):
+    """v_integrity_digest's verb_usage_30d row as one sentence, then the names.
+
+    Every name is listed while fewer than VERB_USAGE_LIST_ALL_BELOW are uncalled,
+    else the first VERB_USAGE_LIST_HEAD (write verbs come first, as the view
+    sorts them) and a count of the rest. The action text is the view's own, so
+    the migration and this line cannot disagree about what to do."""
+    uncalled = value["uncalled"]
+    writes = sum(1 for verb in uncalled if verb["write"])
+    gated = sum(1 for verb in uncalled if verb["human_only"] or verb["authority_only"])
+    lines = [f"verb usage: {len(uncalled)} of {value['registered']} registered verbs "
+             f"uncalled in {value['window_days']} days ({writes} write, "
+             f"{len(uncalled) - writes} read; {gated} human/authority-only) — "
+             f"{value['action']}"]
+    names = [verb["verb"] for verb in uncalled]
+    shown = names if len(names) < VERB_USAGE_LIST_ALL_BELOW else names[:VERB_USAGE_LIST_HEAD]
+    lines += ["  " + ", ".join(shown[i:i + 6]) for i in range(0, len(shown), 6)]
+    if len(shown) < len(names):
+        lines.append(f"  … and {len(names) - len(shown)} more (integrity-digest lists every one)")
+    return lines
 
 
 def _iso(value):
@@ -1816,6 +1863,24 @@ def _canonical_health():
                 ):
                     if _count:
                         rc = _red(_key, _detail, count=_count, time_rolling=_time_rolling)
+
+        # WR-000284 C5: a registered verb nobody calls is named every day. The
+        # count is informational, never red: some uncalled verbs are human-
+        # or authority-only by design, and a permanently red row is a row
+        # nobody reads (rule bd4a6d22). Only an unreadable row is red.
+        print("Verb usage — registered verbs with no call in 30 days")
+        verb_usage = snap.get("verb_usage")
+        try:
+            _verb_lines = _verb_usage_lines(verb_usage)
+        except (TypeError, KeyError):
+            print("  ⚠︎ verb usage UNREADABLE — v_integrity_digest verb_usage_30d "
+                  "did not come back · on breach: run integrity-digest by hand")
+            rc = _red("verb_usage", "verb_usage_30d unreadable", hard_error=True)
+        else:
+            _uncalled = len(verb_usage["uncalled"])
+            print(f"  {'OK' if not _uncalled else '→︎'} {_verb_lines[0]}")
+            for _line in _verb_lines[1:]:
+                print("  " + _line)
 
         p = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_ROOT,
                            text=True, capture_output=True, timeout=30)
