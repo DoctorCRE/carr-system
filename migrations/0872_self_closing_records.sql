@@ -1,5 +1,5 @@
--- rollback: forward-only — every row these objects hold is a closing receipt another record now stands on; stop writing by revoking execute on the two ops functions and insert on public.defect_resolution, and leave the rows in place.
--- lock-review: two new tables and four new functions; v_defect is replaced with the same columns plus four appended ones; ops.sourced_work_request_outcome_feedback_acceptance_receipt gains two columns with a constant default (metadata-only) and one CHECK validated over its 22 rows under a brief ACCESS EXCLUSIVE lock.
+-- rollback: forward-only — every row these objects hold is a closing receipt another record now stands on; stop writing by revoking execute on the two ops completion functions and insert on public.defect_resolution, and leave the rows in place.
+-- lock-review: two new tables (one with a unique index on its receipt reference), eight new functions and three trigger functions; v_defect is replaced with the same columns plus four appended ones; ops.sourced_work_request_outcome_feedback_acceptance_receipt gains two columns with a constant default (metadata-only) and one CHECK validated over its 22 rows under a brief ACCESS EXCLUSIVE lock.
 -- 0872: self-closing records (Joe, 2026-10-12, decision cbe91287: "this system
 -- needs to be able to function without me micromanaging it").
 --
@@ -31,6 +31,22 @@
 -- a complete ops.deployment, a defect resolution, or a resolved incident. A
 -- caller's own words never count, which is the difference between this and the
 -- outcome proposal's free-text evidence_refs.
+--
+-- THE CHECKS ARE TECHNICAL, AND THEY ARE THE AUTHORITY (decision cbe91287 took
+-- the human out of these closes, so what replaces the human has to hold):
+--
+--   * a receipt must be EVIDENCE FOR THIS REQUEST, not merely exist
+--     (ops.work_request_evidence_receipt_mismatch): a run of a release recorded
+--     for the request or naming it, a deployment shipping a release slice member
+--     that names it, the close of a defect the request names, an incident linked
+--     to it. One receipt binds to one criterion, ever.
+--   * only a human actor or a sponsored agent binds evidence or completes a
+--     request (ops.work_request_completion_actor), whatever role calls.
+--   * a defect closes only on evidence the server already holds
+--     (ops.defect_resolution_evidence_receipt): a merged commit or pull request
+--     recorded as a release slice member, a succeeded run, a complete deployment
+--     or a resolved incident. A bare sha or a PR number nobody recorded is
+--     refused by the table itself.
 
 -- ── 1. defect resolution ─────────────────────────────────────────────────────
 
@@ -63,6 +79,69 @@ begin
   raise exception 'defect_resolution is append-only: a closed defect keeps the evidence it was closed on';
 end $fn$;
 
+-- One spelling per receipt. A server receipt's uuid is matched lowercase
+-- everywhere it is stored, so an uppercase uuid is the same receipt rather than
+-- an unresolvable one; an incident ref keeps its own (uppercase) form.
+create function ops.work_request_evidence_receipt_normalized(p_ref text) returns text
+language sql immutable set search_path = pg_catalog, pg_temp as $fn$
+  select case
+    when p_ref is null then null
+    when btrim(p_ref) ~* '^(ops\.run|ops\.deployment|defect-resolution):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      then lower(btrim(p_ref))
+    else btrim(p_ref)
+  end
+$fn$;
+
+comment on function ops.work_request_evidence_receipt_normalized(text) is
+  'The stored spelling of a receipt reference (0872): a server receipt''s prefix and uuid lowercased, anything else trimmed.';
+
+-- The server row a defect's fix evidence resolves to, or null. A commit or pull
+-- request counts only when the server already holds it as merged and shipped
+-- (ops.release_slice_member); a receipt only when it resolves to a succeeded
+-- run, a complete deployment or a resolved incident. SECURITY DEFINER because
+-- close-defect inserts as carr_writer, which holds no grant on the slice ledger.
+create function ops.defect_resolution_evidence_receipt(p_kind text, p_ref text) returns text
+language plpgsql stable security definer set search_path = pg_catalog, ops, public, pg_temp as $fn$
+declare
+  v_ref text := ops.work_request_evidence_receipt_normalized(p_ref);
+  v_member uuid;
+  v_shas integer;
+begin
+  if p_kind = 'commit' and v_ref ~ '^[0-9a-f]{7,40}$' then
+    select count(distinct m.commit_sha) into v_shas
+      from ops.release_slice_member m where m.commit_sha like v_ref || '%';
+    if v_shas = 1 then
+      select m.id into v_member from ops.release_slice_member m
+       where m.commit_sha like v_ref || '%' order by m.created_at, m.id limit 1;
+      return 'release-slice-member:' || v_member::text;
+    end if;
+  elsif p_kind = 'pull_request' and v_ref ~ '^[1-9][0-9]{0,6}$' then
+    select m.id into v_member from ops.release_slice_member m
+     where m.pr_number = v_ref::integer order by m.created_at, m.id limit 1;
+    if v_member is not null then
+      return 'release-slice-member:' || v_member::text;
+    end if;
+  elsif p_kind = 'receipt' and ops.work_request_evidence_receipt_kind(v_ref) in ('run', 'deployment', 'incident') then
+    return v_ref;
+  end if;
+  return null;
+end $fn$;
+
+comment on function ops.defect_resolution_evidence_receipt(text, text) is
+  'What a defect close stands on (0872): release-slice-member:<uuid> for a commit or pull request the server recorded as merged and shipped, or the receipt itself when it is a succeeded run, a complete deployment or a resolved incident. Null otherwise; public.defect_resolution refuses the insert on null.';
+
+create function public.defect_resolution_evidence_must_resolve() returns trigger
+language plpgsql set search_path = pg_catalog, public, pg_temp as $fn$
+begin
+  if ops.defect_resolution_evidence_receipt(new.evidence_kind, new.evidence_ref) is null then
+    raise exception 'defect_resolution_evidence_unresolved: % % resolves to no merged commit or pull request the server recorded, succeeded run, complete deployment or resolved incident',
+      new.evidence_kind, new.evidence_ref using errcode = '23514';
+  end if;
+  return new;
+end $fn$;
+
+create trigger defect_resolution_evidence_resolves before insert
+on public.defect_resolution for each row execute function public.defect_resolution_evidence_must_resolve();
 create trigger defect_resolution_append_only before update or delete
 on public.defect_resolution for each row execute function public.defect_resolution_is_append_only();
 create trigger defect_resolution_no_truncate before truncate
@@ -109,10 +188,11 @@ select d.id,
 -- The kind of server record a receipt reference resolves to RIGHT NOW, or null.
 -- Each branch matches the reference's exact shape before it casts, so a
 -- malformed reference answers null instead of raising.
-create function ops.work_request_evidence_receipt_kind(p_ref text) returns text
+create function ops.work_request_evidence_receipt_kind(p_receipt text) returns text
 language plpgsql stable set search_path = pg_catalog, ops, public, pg_temp as $fn$
 declare
   uuid_shape constant text := '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  p_ref constant text := ops.work_request_evidence_receipt_normalized(p_receipt);
 begin
   if p_ref is null then
     return null;
@@ -139,6 +219,102 @@ end $fn$;
 
 comment on function ops.work_request_evidence_receipt_kind(text) is
   'The one definition of a bound evidence receipt (0872): ops.run:<uuid> that succeeded, ops.deployment:<uuid> that completed, defect-resolution:<uuid>, or incident:<ref> that is resolved or reviewed. Null for anything else, including a malformed reference.';
+
+-- WHY A RESOLVING RECEIPT IS NOT YET EVIDENCE FOR THIS REQUEST, or null when
+-- it is. Each kind must be tied to the request by a row the request's own work
+-- produced, never by the binder's say-so:
+--   run          belongs to a release recorded for the request
+--                (ops.release.work_request_ref), or names the request in its
+--                run_key, source_ref or evidence_ref
+--   deployment   ships a release slice member whose slice id is the request or
+--                whose merged commit subject names it
+--   defect       the closed defect is one the request names (title, desired
+--                outcome or acceptance criteria), as the defect bridge files it
+--   incident     linked to the request (link-incident-work-request)
+create function ops.work_request_evidence_receipt_mismatch(p_receipt text, p_work_request_id uuid) returns text
+language plpgsql stable set search_path = pg_catalog, ops, public, pg_temp as $fn$
+declare
+  v_ref constant text := ops.work_request_evidence_receipt_normalized(p_receipt);
+  v_kind constant text := ops.work_request_evidence_receipt_kind(p_receipt);
+  v_names text;
+  w ops.work_request%rowtype;
+begin
+  select x.* into w from ops.work_request x where x.id = p_work_request_id;
+  if not found then
+    return 'work_request_not_found';
+  end if;
+  if v_kind is null then
+    return format('receipt_unresolved: %s', coalesce(v_ref, 'null'));
+  end if;
+  v_names := '(^|[^A-Za-z0-9])' || w.ref || '([^0-9]|$)';
+  if v_kind = 'run' then
+    if exists (select 1 from ops.run r left join ops.release rel on rel.id = r.release_id
+                where r.id = substring(v_ref from 9)::uuid
+                  and (rel.work_request_ref = w.ref or coalesce(r.run_key, '') ~ v_names
+                       or coalesce(r.source_ref, '') ~ v_names or coalesce(r.evidence_ref, '') ~ v_names)) then
+      return null;
+    end if;
+    return format('run_not_linked_to_work_request: %s belongs to no release recorded for %s and names %s in none of run_key, source_ref, evidence_ref',
+                  v_ref, w.ref, w.ref);
+  elsif v_kind = 'deployment' then
+    if exists (select 1 from ops.deployment d
+                 join ops.release_slice_member m on m.release_id = d.release_id
+                where d.id = substring(v_ref from 16)::uuid
+                  and (m.slice_id = w.ref or m.subject ~ v_names)) then
+      return null;
+    end if;
+    return format('deployment_not_linked_to_work_request: %s ships no release slice member whose slice or merged commit subject names %s',
+                  v_ref, w.ref);
+  elsif v_kind = 'defect_resolution' then
+    if exists (select 1 from public.defect_resolution x
+                where x.id = substring(v_ref from 19)::uuid
+                  and position(x.defect_id::text in lower(coalesce(w.title, '') || ' ' || coalesce(w.desired_outcome, '')
+                                                          || ' ' || w.acceptance_criteria::text)) > 0) then
+      return null;
+    end if;
+    return format('defect_not_linked_to_work_request: %s closes a defect %s does not name in its title, desired outcome or acceptance criteria',
+                  v_ref, w.ref);
+  elsif v_kind = 'incident' then
+    if exists (select 1 from ops.incident i
+                 join ops.incident_link l on l.incident_id = i.id and l.kind = 'work_request'
+                where i.ref = substring(v_ref from 10) and l.ref = w.ref) then
+      return null;
+    end if;
+    return format('incident_not_linked_to_work_request: %s is not linked to %s (link-incident-work-request)', v_ref, w.ref);
+  end if;
+  return format('receipt_unresolved: %s', v_ref);
+end $fn$;
+
+comment on function ops.work_request_evidence_receipt_mismatch(text, uuid) is
+  'Why a receipt is not evidence for this Work Request (0872), or null when it is: a run of the request''s release or naming it, a deployment shipping a slice member naming it, the close of a defect it names, or an incident linked to it.';
+
+-- WHO MAY BIND OR COMPLETE. The acting actor is the server-set
+-- carr.acting_actor_slug, resolved to an active actor row; it must be a human
+-- actor, or an automation actor whose transaction carries a verified sponsoring
+-- partner (carr.sponsoring_human_slug, the same server-set sponsor
+-- ops.j102_sponsoring_partner stands on). An unsponsored runtime is refused here
+-- whichever role or verb reached the function.
+create function ops.work_request_completion_actor() returns public.actor
+language plpgsql stable set search_path = pg_catalog, ops, public, pg_temp as $fn$
+declare
+  v_slug constant text := nullif(btrim(current_setting('carr.acting_actor_slug', true)), '');
+  v_sponsor constant text := nullif(btrim(current_setting('carr.sponsoring_human_slug', true)), '');
+  a public.actor%rowtype;
+begin
+  select x.* into a from public.actor x where x.slug = v_slug and x.active;
+  if not found then
+    raise exception 'work_request_completion_actor_unresolved: the server-set acting actor (%) is not an active actor',
+      coalesce(v_slug, 'none') using errcode = '42501';
+  end if;
+  if a.kind = 'human' or (a.kind = 'automation' and v_sponsor in ('joe', 'dell')) then
+    return a;
+  end if;
+  raise exception 'work_request_completion_requires_sponsored_actor: % is a % actor without a verified sponsoring partner; only a human actor or a sponsored agent binds evidence to or completes a Work Request',
+    a.slug, a.kind using errcode = '42501';
+end $fn$;
+
+comment on function ops.work_request_completion_actor() is
+  'The actor a Work Request evidence binding or completion is recorded under (0872): the server-set acting actor, refused with 42501 unless it is a human actor or a sponsored agent.';
 
 -- THE PREDICATE. Pure: criteria are the Work Request''s acceptance_criteria
 -- ([{id,text}]); bindings are [{criterion_id, receipt_ref, receipt_kind,
@@ -189,6 +365,11 @@ create table ops.work_request_criterion_evidence (
   constraint work_request_criterion_evidence_once unique (work_request_id, criterion_id)
 );
 
+-- One receipt is evidence for one criterion, ever. Without this, one green run
+-- could satisfy every criterion of a request.
+create unique index work_request_criterion_evidence_receipt_once
+  on ops.work_request_criterion_evidence (receipt_ref);
+
 comment on table ops.work_request_criterion_evidence is
   'Append-only binding of one sourced Work Request acceptance criterion to one server-resolvable receipt (0872). Written only through ops.bind_work_request_criterion_evidence; when every criterion is bound and a criteria_met outcome proposal exists, the request completes on bound evidence.';
 
@@ -236,7 +417,7 @@ returns table(work_request_id uuid, ref text, state text, version integer, compl
               bound_receipt_refs jsonb, accepted_by_actor_slug text, accepted_at timestamptz, replayed boolean)
 language plpgsql security definer set search_path = pg_catalog, ops, public, pg_temp as $fn$
 declare
-  actor_slug text; a public.actor%rowtype; w ops.work_request%rowtype;
+  a public.actor%rowtype; w ops.work_request%rowtype;
   p ops.sourced_work_request_plan%rowtype;
   ar ops.sourced_work_request_plan_acceptance_receipt%rowtype;
   f ops.sourced_work_request_outcome_feedback%rowtype;
@@ -246,11 +427,7 @@ begin
   if coalesce(btrim(p_work_request), '') !~ '^WR-[0-9]{1,12}$' or p_idempotency_key is null then
     raise exception 'completion on bound evidence requires an exact Work Request ref and a UUID idempotency key';
   end if;
-  actor_slug := nullif(btrim(current_setting('carr.acting_actor_slug', true)), '');
-  select x.* into a from public.actor x where x.slug = actor_slug and x.active;
-  if not found then
-    raise exception 'completion on bound evidence requires a server-derived acting actor';
-  end if;
+  a := ops.work_request_completion_actor();
 
   perform pg_advisory_xact_lock(hashtextextended('program6-outcome-feedback-acceptance:' || p_idempotency_key, 0));
   select x.* into fr from ops.sourced_work_request_outcome_feedback_acceptance_receipt x
@@ -321,7 +498,8 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object(
            'criterion_id', e.criterion_id, 'receipt_ref', e.receipt_ref,
-           'receipt_kind', ops.work_request_evidence_receipt_kind(e.receipt_ref),
+           'receipt_kind', case when ops.work_request_evidence_receipt_mismatch(e.receipt_ref, w.id) is null
+                                then ops.work_request_evidence_receipt_kind(e.receipt_ref) end,
            'binding_id', e.id::text) order by e.criterion_id), '[]'::jsonb)
     into bindings
     from ops.work_request_criterion_evidence e where e.work_request_id = w.id;
@@ -343,7 +521,7 @@ begin
 end $fn$;
 
 comment on function ops.complete_sourced_work_request_on_bound_evidence(text, uuid) is
-  'Completion on bound evidence (0872): writes an outcome-feedback acceptance receipt with acceptance_basis completed_on_bound_evidence when the latest proposal for the current ready plan is criteria_met and every acceptance criterion carries a receipt that resolves now. Otherwise writes nothing and returns what is missing.';
+  'Completion on bound evidence (0872): writes an outcome-feedback acceptance receipt with acceptance_basis completed_on_bound_evidence when the acting actor is a human or sponsored agent, the latest proposal for the current ready plan is criteria_met, and every acceptance criterion carries a receipt that resolves now and is evidence for this request. Otherwise writes nothing and returns what is missing.';
 
 -- Bind one criterion of a ready sourced Work Request to one receipt, then try
 -- to complete. Idempotent on the key; the same receipt twice is the same act.
@@ -353,8 +531,9 @@ returns table(binding_id uuid, work_request_id uuid, ref text, criterion_id text
               receipt_kind text, bound_by_actor_slug text, created_at timestamptz, replayed boolean)
 language plpgsql security definer set search_path = pg_catalog, ops, public, pg_temp as $fn$
 declare
-  actor_slug text; a public.actor%rowtype; w ops.work_request%rowtype;
-  e ops.work_request_criterion_evidence%rowtype; kind text;
+  a public.actor%rowtype; w ops.work_request%rowtype;
+  e ops.work_request_criterion_evidence%rowtype; v_kind text; v_mismatch text;
+  v_receipt constant text := ops.work_request_evidence_receipt_normalized(p_receipt_ref);
 begin
   if coalesce(btrim(p_work_request), '') !~ '^WR-[0-9]{1,12}$'
      or coalesce(p_criterion_id, '') !~ '^[A-Z][A-Z0-9-]{1,63}$'
@@ -362,18 +541,14 @@ begin
      or p_idempotency_key is null then
     raise exception 'criterion evidence binding requires an exact Work Request ref, criterion id, receipt reference and UUID idempotency key';
   end if;
-  actor_slug := nullif(btrim(current_setting('carr.acting_actor_slug', true)), '');
-  select x.* into a from public.actor x where x.slug = actor_slug and x.active;
-  if not found then
-    raise exception 'criterion evidence binding requires a server-derived acting actor';
-  end if;
+  a := ops.work_request_completion_actor();
 
   perform pg_advisory_xact_lock(hashtextextended('work-request-criterion-evidence:' || p_idempotency_key, 0));
   select x.* into e from ops.work_request_criterion_evidence x where x.idempotency_key = p_idempotency_key;
   if found then
     select x.* into w from ops.work_request x where x.id = e.work_request_id;
     if w.ref is distinct from p_work_request or e.criterion_id is distinct from p_criterion_id
-       or e.receipt_ref is distinct from p_receipt_ref then
+       or e.receipt_ref is distinct from v_receipt then
       raise exception 'idempotency key already names a different criterion evidence binding';
     end if;
     return query select e.id, w.id, w.ref, e.criterion_id, e.receipt_ref, e.receipt_kind,
@@ -390,36 +565,52 @@ begin
   if not exists (select 1 from jsonb_array_elements(w.acceptance_criteria) c where c.value ->> 'id' = p_criterion_id) then
     raise exception 'criterion % is not one of this Work Request''s acceptance criteria', p_criterion_id;
   end if;
-  kind := ops.work_request_evidence_receipt_kind(p_receipt_ref);
-  if kind is null then
-    raise exception 'receipt % does not resolve to a succeeded run, a complete deployment, a defect resolution or a resolved incident', p_receipt_ref;
+  v_kind := ops.work_request_evidence_receipt_kind(v_receipt);
+  if v_kind is null then
+    raise exception 'receipt_unresolved: receipt % does not resolve to a succeeded run, a complete deployment, a defect resolution or a resolved incident', v_receipt;
+  end if;
+  v_mismatch := ops.work_request_evidence_receipt_mismatch(v_receipt, w.id);
+  if v_mismatch is not null then
+    raise exception 'receipt_not_evidence_for_work_request: %', v_mismatch;
   end if;
 
   select x.* into e from ops.work_request_criterion_evidence x
    where x.work_request_id = w.id and x.criterion_id = p_criterion_id;
   if found then
-    if e.receipt_ref is distinct from p_receipt_ref then
-      raise exception 'criterion % is already bound to %', p_criterion_id, e.receipt_ref;
+    if e.receipt_ref is distinct from v_receipt then
+      raise exception 'criterion_already_bound: criterion % is already bound to %', p_criterion_id, e.receipt_ref;
     end if;
     return query select e.id, w.id, w.ref, e.criterion_id, e.receipt_ref, e.receipt_kind,
       (select y.slug from public.actor y where y.id = e.bound_by_actor_id), e.created_at, true;
     return;
   end if;
+  select x.* into e from ops.work_request_criterion_evidence x where x.receipt_ref = v_receipt;
+  if found then
+    raise exception 'receipt_already_bound: % is already evidence for % criterion %', v_receipt,
+      (select y.ref from ops.work_request y where y.id = e.work_request_id), e.criterion_id;
+  end if;
 
   insert into ops.work_request_criterion_evidence
     (work_request_id, criterion_id, receipt_ref, receipt_kind, bound_by_actor_id, idempotency_key)
-  values (w.id, p_criterion_id, p_receipt_ref, kind, a.id, p_idempotency_key)
+  values (w.id, p_criterion_id, v_receipt, v_kind, a.id, p_idempotency_key)
   returning * into e;
   return query select e.id, w.id, w.ref, e.criterion_id, e.receipt_ref, e.receipt_kind, a.slug, e.created_at, false;
 end $fn$;
 
 comment on function ops.bind_work_request_criterion_evidence(text, text, text, uuid) is
-  'Bind one acceptance criterion of a ready sourced Work Request to one receipt that resolves through ops.work_request_evidence_receipt_kind (0872). Append-only; a different receipt for a bound criterion is refused.';
+  'Bind one acceptance criterion of a ready sourced Work Request to one receipt that resolves through ops.work_request_evidence_receipt_kind and is evidence for this request (ops.work_request_evidence_receipt_mismatch), as a human actor or sponsored agent (0872). Append-only; a different receipt for a bound criterion, and a receipt already bound anywhere, are refused.';
 
+revoke all on function ops.work_request_evidence_receipt_normalized(text) from public;
+revoke all on function ops.defect_resolution_evidence_receipt(text, text) from public;
+revoke all on function public.defect_resolution_evidence_must_resolve() from public;
+revoke all on function ops.work_request_evidence_receipt_mismatch(text, uuid) from public;
+revoke all on function ops.work_request_completion_actor() from public;
 revoke all on function ops.work_request_evidence_receipt_kind(text) from public;
 revoke all on function ops.work_request_bound_evidence_verdict(jsonb, jsonb) from public;
 revoke all on function ops.complete_sourced_work_request_on_bound_evidence(text, uuid) from public;
 revoke all on function ops.bind_work_request_criterion_evidence(text, text, text, uuid) from public;
+grant execute on function ops.work_request_evidence_receipt_normalized(text) to carr_writer, carr_reader;
+grant execute on function ops.defect_resolution_evidence_receipt(text, text) to carr_writer;
 grant execute on function ops.work_request_evidence_receipt_kind(text) to carr_writer, carr_reader;
 grant execute on function ops.work_request_bound_evidence_verdict(jsonb, jsonb) to carr_writer, carr_reader;
 grant execute on function ops.complete_sourced_work_request_on_bound_evidence(text, uuid) to carr_writer;

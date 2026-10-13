@@ -7,9 +7,16 @@ Proves, on the real schema and as the runtime role that fires each door:
 
 * a sourced Work Request reaches its done state (an accepted outcome-feedback
   receipt) without a human call only when every acceptance criterion carries a
-  bound receipt the database resolves, and the receipt says so;
+  bound receipt the database resolves AND ties to the request, and the
+  receipt says so;
+* only a human actor or a sponsored agent binds or completes: an unsponsored
+  runtime is refused by the database whatever role calls;
 * binding refuses a criterion that is not the request's, a receipt that does
-  not resolve, and a second different receipt for a bound criterion;
+  not resolve, a receipt that resolves but is evidence for something else, a
+  receipt already bound to another criterion, and a second different receipt
+  for a bound criterion;
+* a defect closes only on evidence the server holds: a bare sha is refused by
+  the table itself;
 * both doors replay exactly on their idempotency key;
 * the human acceptance path is untouched and still stamps human_acceptance;
 * defect_resolution and work_request_criterion_evidence are append-only.
@@ -26,6 +33,7 @@ import sys
 import uuid
 from pathlib import Path
 
+import psycopg
 from psycopg.types.json import Jsonb
 from gate_runtime_role import rollback_only_connection, set_local_role
 
@@ -81,8 +89,24 @@ def propose_all(cur, ref, version, plan_hash, criterion_ids, outcome="met"):
        "Observed the bounded results", 12, "mcp", False, 0, uuid.uuid4())).fetchone()
 
 
-def act_as(cur, slug: str | None) -> None:
-    cur.execute("select set_config('carr.acting_actor_slug', %s, true)", (slug or "",))
+def act_as(cur, slug: str | None, sponsor: str = "joe") -> None:
+    """The writer context setWriterActorContext gives a sponsored agent's session."""
+    cur.execute("select set_config('carr.acting_actor_slug', %s, true), "
+                "set_config('carr.sponsoring_human_slug', %s, true)", (slug or "", sponsor))
+
+
+def refused_with(cur, sql: str, params: tuple, label: str, needle: str) -> None:
+    """A refusal that must also NAME why, so a refusal for the wrong reason fails."""
+    cur.execute("savepoint self_closing_refusal")
+    try:
+        cur.execute(sql, params)
+    except psycopg.Error as exc:
+        cur.execute("rollback to savepoint self_closing_refusal")
+        if needle not in str(exc):
+            raise RuntimeError(f"{label} was refused for the wrong reason: {exc}") from exc
+        return
+    cur.execute("rollback to savepoint self_closing_refusal")
+    raise RuntimeError(f"{label} was accepted")
 
 
 def bind(cur, ref, criterion, receipt, key=None):
@@ -95,20 +119,35 @@ def complete(cur, ref, key=None):
                        (ref, key or uuid.uuid4())).fetchone()
 
 
-def resolve_defect(cur, joe_id, defect_class: str) -> str:
-    """One defect and its resolution receipt, written as carr_writer (close-defect's role)."""
-    defect_id = cur.execute("""insert into public.defect (defect_class, claimed, actual, detected_by, created_by)
+def evidence_run(cur, run_key: str = "self-closing-gate") -> str:
+    """A succeeded run the server holds, written as the owner (a collector's row)."""
+    service = cur.execute("""insert into ops.service (key, name, owner_actor)
+      values (%s, 'self-closing gate fixture', 'claude') returning id""",
+      (f"self-closing-gate-{uuid.uuid4().hex[:12]}",)).fetchone()[0]
+    run = cur.execute("""insert into ops.run (kind, service_id, environment, run_key, state, started_at, ended_at,
+        source_kind, source_ref)
+      values ('check', %s, 'production', %s, 'succeeded', now(), now(), 'collector', 'self-closing-gate')
+      returning id""", (service, run_key)).fetchone()[0]
+    return f"ops.run:{run}"
+
+
+def new_defect(cur, joe_id, defect_class: str) -> str:
+    return str(cur.execute("""insert into public.defect (defect_class, claimed, actual, detected_by, created_by)
       values (%s,'a fixture claim','a fixture result','self',%s) returning id""",
-      (defect_class, joe_id)).fetchone()[0]
+      (defect_class, joe_id)).fetchone()[0])
+
+
+def resolve_defect(cur, joe_id, defect_id: str, fix_receipt: str) -> str:
+    """The defect's resolution receipt, written as carr_writer (close-defect's role)."""
     set_local_role(cur, "carr_writer")
     resolution_id = cur.execute("""insert into public.defect_resolution
       (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
-      values (%s,'commit','abc1234',%s,%s) returning id""",
-      (defect_id, str(uuid.uuid4()), joe_id)).fetchone()[0]
+      values (%s,'receipt',%s,%s,%s) returning id""",
+      (defect_id, fix_receipt, str(uuid.uuid4()), joe_id)).fetchone()[0]
     readback = cur.execute("select resolution_kind, resolution_ref from public.v_defect where id=%s",
                            (defect_id,)).fetchone()
     cur.execute("reset role")
-    if readback != ("commit", "abc1234"):
+    if readback != ("receipt", fix_receipt):
         raise RuntimeError(f"v_defect does not show the resolution receipt: {readback}")
     return f"defect-resolution:{resolution_id}"
 
@@ -122,17 +161,45 @@ def main() -> int:
         with rollback_only_connection(dsn) as conn, conn.cursor() as cur:
             p6.authority_roles(cur)
             joe_id = p6.one(cur, "select id from actor where slug='joe' and active and kind='human'")[0]
-            criteria = [{"id": "ALPHA", "text": "The first outcome has a receipt"},
-                        {"id": "BETA", "text": "The second outcome has a receipt"}]
+            defect_a = new_defect(cur, joe_id, "self-closing-gate-a")
+            defect_b = new_defect(cur, joe_id, "self-closing-gate-b")
+            defect_stranger = new_defect(cur, joe_id, "self-closing-gate-stranger")
+            # The request names its defects the way the defect bridge files them.
+            criteria = [{"id": "ALPHA", "text": f"defect:{defect_a} is fixed"},
+                        {"id": "BETA", "text": f"defect:{defect_b} is fixed"}]
             request_id, ref, version, plan_hash = ready_request(p6, cur, joe_id, "Self-closing", criteria)
-            receipt_a = resolve_defect(cur, joe_id, "self-closing-gate-a")
-            receipt_b = resolve_defect(cur, joe_id, "self-closing-gate-b")
+            fix = evidence_run(cur)
+
+            # A defect closes only on evidence the server holds.
+            set_local_role(cur, "carr_writer")
+            refused_with(cur, """insert into public.defect_resolution
+                (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+                values (%s,'commit','abcdef0',%s,%s)""", (defect_a, str(uuid.uuid4()), joe_id),
+                "closing a defect on a bare sha", "defect_resolution_evidence_unresolved")
+            cur.execute("reset role")
+            receipt_a = resolve_defect(cur, joe_id, defect_a, fix)
+            receipt_b = resolve_defect(cur, joe_id, defect_b, fix)
+            receipt_stranger = resolve_defect(cur, joe_id, defect_stranger, fix)
+            unrelated_run = evidence_run(cur, "nightly")
 
             set_local_role(cur, "carr_writer")
             act_as(cur, None)
             p6.refusal(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'ALPHA',%s,%s)",
                        (ref, receipt_a, uuid.uuid4()), "binding without a server-derived actor")
+            act_as(cur, "claude", sponsor="")
+            refused_with(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'ALPHA',%s,%s)",
+                         (ref, receipt_a, uuid.uuid4()), "binding by an unsponsored agent",
+                         "work_request_completion_requires_sponsored_actor")
+            refused_with(cur, "select * from ops.complete_sourced_work_request_on_bound_evidence(%s,%s)",
+                         (ref, uuid.uuid4()), "completion by an unsponsored agent",
+                         "work_request_completion_requires_sponsored_actor")
             act_as(cur, "claude")
+            refused_with(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'ALPHA',%s,%s)",
+                         (ref, receipt_stranger, uuid.uuid4()), "binding the close of a defect the request does not name",
+                         "defect_not_linked_to_work_request")
+            refused_with(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'ALPHA',%s,%s)",
+                         (ref, unrelated_run, uuid.uuid4()), "binding a green run unrelated to the request",
+                         "run_not_linked_to_work_request")
             p6.refusal(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'GAMMA',%s,%s)",
                        (ref, receipt_a, uuid.uuid4()), "binding a criterion the request does not have")
             p6.refusal(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'ALPHA',%s,%s)",
@@ -152,6 +219,9 @@ def main() -> int:
                 raise RuntimeError(f"binding readback is wrong: {alpha}")
             if alpha_replay[:-1] != alpha[:-1] or alpha_replay[-1] is not True:
                 raise RuntimeError("binding did not replay exactly on its idempotency key")
+            refused_with(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'BETA',%s,%s)",
+                         (ref, receipt_a, uuid.uuid4()), "one receipt bound to a second criterion",
+                         "receipt_already_bound")
             p6.refusal(cur, "select * from ops.bind_work_request_criterion_evidence(%s,'ALPHA',%s,%s)",
                        (ref, receipt_b, uuid.uuid4()), "a second, different receipt for a bound criterion")
             p6.refusal(cur, "update ops.work_request_criterion_evidence set receipt_ref='x' where id=%s",

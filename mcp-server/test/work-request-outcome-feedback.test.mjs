@@ -49,14 +49,6 @@ class OutcomeFake {
       observed_minutes: PROPOSE.observed_minutes, interaction_surface: PROPOSE.interaction_surface, heavy_session_used: PROPOSE.heavy_session_used,
       manual_context_transfers: PROPOSE.manual_context_transfers, accepted_by_actor_slug: "joe", accepted_at: acceptedA.accepted_at,
     }] };
-    // An inconclusive proposal never completes on bound evidence (0872); the
-    // database says so and names what is missing.
-    if (sql.includes("complete_sourced_work_request_on_bound_evidence")) return { rows: [{
-      work_request_id: "40000000-0000-0000-0000-000000000001", ref: "WR-000001", state: "ready", version: 3,
-      completed: false, missing: ["criteria_met_outcome_proposal"], receipt_id: null,
-      feedback_ref: acceptedA.feedback_ref, feedback_hash: FEEDBACK_HASH, acceptance_basis: null,
-      bound_receipt_refs: null, accepted_by_actor_slug: null, accepted_at: null, replayed: false,
-    }] };
     if (sql.startsWith("insert into event")) return { rows: [] };
     if (sql.startsWith("insert into tool_call")) { this.toolCalls.set(params[0], { request_hash: params[3], response: JSON.parse(params[4]),
         actor_id: params[2], organization_tenant_id: params[7] ?? null,
@@ -96,12 +88,7 @@ test("outcome feedback schemas are closed; routine writers may propose but only 
 test("proposal is explicit pending feedback, not a self-attested outcome", async () => {
   const db = new OutcomeFake(); const out = await executeRegisteredTool(db, JOE, "propose-outcome-feedback", structuredClone(PROPOSE));
   assert.deepEqual(out, { ok: true, human_ref: "WR-000001", state: "ready", version: 3, plan_ref: "PLAN-000001", plan_hash: PERSISTED_PLAN_HASH,
-    feedback_ref: acceptedA.feedback_ref, feedback_hash: FEEDBACK_HASH, status: "pending_human_acceptance",
-    completion: { completed: false, missing: ["criteria_met_outcome_proposal"], receipt_id: null,
-      feedback_ref: acceptedA.feedback_ref, feedback_hash: FEEDBACK_HASH, acceptance_basis: null,
-      bound_receipt_refs: null, accepted_by_actor_slug: null, accepted_at: null,
-      summary: "not complete: every acceptance criterion needs a bound receipt and the latest proposal must be criteria_met" },
-    proposed_outcome: "inconclusive",
+    feedback_ref: acceptedA.feedback_ref, feedback_hash: FEEDBACK_HASH, status: "pending_human_acceptance", proposed_outcome: "inconclusive",
     criterion_results: PROPOSE.criterion_results, evidence_refs: PROPOSE.evidence_refs, blocker_code: "evidence_missing", result_summary: PROPOSE.result_summary,
     observed_minutes: 12, interaction_surface: "codex", heavy_session_used: true, manual_context_transfers: 1 });
   assert.equal(Object.hasOwn(out, "raw_payload"), false); assert.equal(Object.hasOwn(out, "prompt"), false);
