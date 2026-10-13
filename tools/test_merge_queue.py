@@ -865,12 +865,19 @@ class QueueTests(unittest.TestCase):
         self.pr(state='behind')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
         original_sleep = module.time.sleep
+        waiting_on_update = []
         def cancel(seconds):
-            self.q.stopped = True
+            # Cancel only once the update-branch call is the one waiting for its slot.
+            # An earlier read can also wait on a reserved call slot; cancelling there
+            # ends the tick before the entry is planned and the actions row never exists.
+            if waiting_on_update:
+                self.q.stopped = True
             original_sleep(0)
         real_gh = self.q.gh
         def delay_update(*args, **kwargs):
-            if 'update-branch' in str(args): self.q.last_gh = time.monotonic() + 1
+            if 'update-branch' in str(args):
+                waiting_on_update.append(True)
+                self.q.last_gh = time.monotonic() + 1
             return real_gh(*args, **kwargs)
         with patch.object(self.q, 'gh', side_effect=delay_update), patch.object(module.time, 'sleep', side_effect=cancel):
             self.q.tick()
