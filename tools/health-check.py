@@ -981,6 +981,11 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                     except ValueError as exc:
                         snapshot["errors"].append(f"verb_usage: unparseable result ({exc})")
                     break
+            else:
+                # The query ran and the view has no verb_usage_30d line: the
+                # migration that adds it is not applied yet, which is what the
+                # release baseline reads before it applies that migration.
+                snapshot["verb_usage_absent"] = True
     return snapshot
 
 
@@ -1870,17 +1875,25 @@ def _canonical_health():
         # nobody reads (rule bd4a6d22). Only an unreadable row is red.
         print("Verb usage — registered verbs with no call in 30 days")
         verb_usage = snap.get("verb_usage")
-        try:
-            _verb_lines = _verb_usage_lines(verb_usage)
-        except (TypeError, KeyError):
-            print("  ⚠︎ verb usage UNREADABLE — v_integrity_digest verb_usage_30d "
-                  "did not come back · on breach: run integrity-digest by hand")
-            rc = _red("verb_usage", "verb_usage_30d unreadable", hard_error=True)
+        if snap.get("verb_usage_absent"):
+            # Soft, not hard: an absent line is a pending migration, and a hard
+            # error here would block the very release that applies it.
+            print("  ⚠︎ verb usage NOT DEPLOYED — v_integrity_digest has no "
+                  "verb_usage_30d line yet · on breach: apply the pending "
+                  "migration through the release")
+            rc = _red("verb_usage", "verb_usage_30d not deployed")
         else:
-            _uncalled = len(verb_usage["uncalled"])
-            print(f"  {'OK' if not _uncalled else '→︎'} {_verb_lines[0]}")
-            for _line in _verb_lines[1:]:
-                print("  " + _line)
+            try:
+                _verb_lines = _verb_usage_lines(verb_usage)
+            except (TypeError, KeyError):
+                print("  ⚠︎ verb usage UNREADABLE — v_integrity_digest verb_usage_30d "
+                      "did not come back · on breach: run integrity-digest by hand")
+                rc = _red("verb_usage", "verb_usage_30d unreadable", hard_error=True)
+            else:
+                _uncalled = len(verb_usage["uncalled"])
+                print(f"  {'OK' if not _uncalled else '→︎'} {_verb_lines[0]}")
+                for _line in _verb_lines[1:]:
+                    print("  " + _line)
 
         p = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_ROOT,
                            text=True, capture_output=True, timeout=30)
