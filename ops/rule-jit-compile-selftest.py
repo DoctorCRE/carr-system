@@ -190,9 +190,11 @@ if len(routing_rows) == 1:
           not any(routing_pattern.search(v) for v in routine_verbs),
           [v for v in routine_verbs if routing_pattern.search(v)])
 
-# 10. rule 8400cd3d (size every new piece of work) arrives at the planning
-# moment, including the two native plan tools, governed heavy-build planning,
-# and the briefs handed to Codex or Dot.
+# 10. rule 8400cd3d (size every new piece of work) arrives at every shape that
+# starts or hands off new work: the plan tool, a subagent, a cloud builder, a
+# workflow, a Codex desk dispatch, and the record-layer intake verbs. Only
+# structural kinds count, because content_regex rows no longer run on tool
+# payloads.
 SIZING = "8400cd3d"
 sizing_rows = [t for t in triggers if SIZING in t["rule_ids"]]
 sizing_planning_rows = [row for row in sizing_rows
@@ -203,23 +205,45 @@ check("new-work sizing rule is registered for JIT pack delivery",
       and SIZING in JIT_IDS
       and MAP["rule_load_layers"].get(SIZING, {}).get("load_layer") == "pack",
       sizing_rows)
-check("new-work sizing rule has one planning-moment detector",
-      len(sizing_planning_rows) == 1
-      and sizing_planning_rows[0]["kind"] == "content_regex"
-      and sizing_planning_rows[0]["rule_ids"] == [SIZING], sizing_rows)
-if len(sizing_planning_rows) == 1:
-    sizing_pattern = re.compile(sizing_planning_rows[0]["pattern"], re.I)
-    planning_moments = ["EnterPlanMode", "update_plan", "functions.update_plan",
-                        "propose-ready-plan", "heavy-build plan",
-                        "Codex brief", "Dot brief"]
-    routine_work = ["Read", "git status", "review the finished plan",
-                    "run the unit tests"]
-    check("sizing detector matches every required planning moment",
-          all(sizing_pattern.search(value) for value in planning_moments),
-          [value for value in planning_moments if not sizing_pattern.search(value)])
-    check("sizing detector stays silent on routine work",
-          not any(sizing_pattern.search(value) for value in routine_work),
-          [value for value in routine_work if sizing_pattern.search(value)])
+check("new-work sizing rule compiles one row per declared detector, none content_regex",
+      sorted(row["kind"] for row in sizing_planning_rows)
+      == ["bash_family", "verb", "verb"], sizing_rows)
+
+
+def sizing_fires(kind: str, subject: str) -> bool:
+    return any(row["kind"] == kind and re.search(row["pattern"], subject, re.I)
+               for row in sizing_planning_rows)
+
+
+new_work = [("verb", "EnterPlanMode"), ("verb", "Agent"), ("verb", "RemoteTrigger"),
+            ("verb", "Workflow"), ("verb", "mcp__Claude_Code_Remote__create_session"),
+            ("verb", "mcp__carr__write-work-shape"), ("verb", "mcp__carr__report-problem"),
+            ("verb", "mcp__CARR_Record_Layer__propose-ready-plan"),
+            ("bash_family", "python3 tools/room-bridge/dispatch.py send codex-desk brief")]
+routine_work = [("verb", "Read"), ("verb", "AgentStatus"), ("verb", "mcp__carr__read-work-shape"),
+                ("verb", "mcp__Claude_Code_Remote__list_sessions"),
+                ("bash_family", "git status"),
+                ("bash_family", "python3 tools/room-bridge/dispatch.py desks")]
+check("sizing detectors match every new-work shape",
+      all(sizing_fires(kind, subject) for kind, subject in new_work),
+      [s for s in new_work if not sizing_fires(*s)])
+check("sizing detectors stay silent on routine work",
+      not any(sizing_fires(kind, subject) for kind, subject in routine_work),
+      [s for s in routine_work if sizing_fires(*s)])
+
+# 11. a rule's `detectors` list compiles one row per entry, and a pattern it
+# shares with another rule's single `detector` merges into one row.
+multi = compiler.compile_triggers({"rules": [
+    {"id": "aaaaaaaa", "home": "jit",
+     "detectors": [{"kind": "verb", "pattern": "^Shared$"},
+                   {"kind": "bash_family", "pattern": "\\bonly-a\\b"}]},
+    {"id": "bbbbbbbb", "home": "jit", "detector": {"kind": "verb", "pattern": "^Shared$"}},
+]}, {"rule_load_layers": {}, "rule_packs": {}}, None)
+multi_seeded = sorted((r["kind"], r["pattern"], r["rule_ids"]) for r in multi
+                      if r["source"] == "seeded_detector")
+check("a detectors list compiles one row per entry and merges a shared pattern",
+      multi_seeded == [("bash_family", "\\bonly-a\\b", ["aaaaaaaa"]),
+                       ("verb", "^Shared$", ["aaaaaaaa", "bbbbbbbb"])], multi_seeded)
 
 if FAILURES:
     print("rule-jit-compile-selftest: FAIL")

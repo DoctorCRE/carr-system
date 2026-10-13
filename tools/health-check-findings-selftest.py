@@ -132,7 +132,7 @@ STRUCTURAL_KEYS = {
     "canonical_health_refused", "source_unreadable", "export_unreadable",
     "job_ledger", "control_state", "repo_status", "registry_integrity",
     "credential_health", "unrecorded_failure", "tailscale",
-    "storage_health_unavailable",
+    "storage_health_unavailable", "verb_usage",
 }
 ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity", "scheduled_jobs_evidence_unavailable"}
 
@@ -582,6 +582,69 @@ class RedHelper(unittest.TestCase):
         self.assertEqual(self.ns["_FINDINGS"][0]["count"], 2)
 
 
+def _load_verb_usage_lines():
+    wanted = {"VERB_USAGE_LIST_ALL_BELOW", "VERB_USAGE_LIST_HEAD"}
+    constants = [n for n in TREE.body if isinstance(n, ast.Assign)
+                 and any(isinstance(t, ast.Name) and t.id in wanted for t in n.targets)]
+    mod = ast.Module(body=constants + [_find_function("_verb_usage_lines")], type_ignores=[])
+    ast.fix_missing_locations(mod)
+    ns: dict = {}
+    exec(compile(mod, str(HEALTH_CHECK_PATH), "exec"), ns)  # noqa: S102 — trusted repo source
+    return ns["_verb_usage_lines"]
+
+
+VERB_USAGE_ACTION = ("each uncalled verb is retired through a SCAC successor or gets a named "
+                     "consumer; record the call on WR-000284")
+
+
+def _verb_usage_value(uncalled, registered):
+    return {"window_days": 30, "registered": registered,
+            "called": registered - len(uncalled), "uncalled": uncalled,
+            "action": VERB_USAGE_ACTION}
+
+
+class VerbUsageLines(unittest.TestCase):
+    """WR-000284 C5: v_integrity_digest's verb_usage_30d row as the canonical report prints it."""
+
+    def test_few_uncalled_verbs_are_all_named_under_the_sentence(self):
+        uncalled = [
+            {"verb": "add-loop", "write": True, "human_only": False,
+             "authority_only": False, "last_called_at": "2026-09-01T00:00:00+00:00"},
+            {"verb": "approve-rule", "write": True, "human_only": True,
+             "authority_only": False, "last_called_at": None},
+            {"verb": "find", "write": False, "human_only": False,
+             "authority_only": False, "last_called_at": None},
+        ]
+        self.assertEqual(_load_verb_usage_lines()(_verb_usage_value(uncalled, 411)), [
+            "verb usage: 3 of 411 registered verbs uncalled in 30 days (2 write, 1 read; "
+            "1 human/authority-only) — " + VERB_USAGE_ACTION,
+            "  add-loop, approve-rule, find",
+        ])
+
+    def test_sixty_uncalled_verbs_name_the_first_twenty_and_count_the_rest(self):
+        uncalled = [{"verb": f"v{i:02d}", "write": i < 50, "human_only": False,
+                     "authority_only": i < 5, "last_called_at": None} for i in range(60)]
+        self.assertEqual(_load_verb_usage_lines()(_verb_usage_value(uncalled, 411)), [
+            "verb usage: 60 of 411 registered verbs uncalled in 30 days (50 write, 10 read; "
+            "5 human/authority-only) — " + VERB_USAGE_ACTION,
+            "  v00, v01, v02, v03, v04, v05",
+            "  v06, v07, v08, v09, v10, v11",
+            "  v12, v13, v14, v15, v16, v17",
+            "  v18, v19",
+            "  … and 40 more (integrity-digest lists every one)",
+        ])
+
+    def test_nothing_uncalled_is_one_sentence(self):
+        self.assertEqual(_load_verb_usage_lines()(_verb_usage_value([], 411)), [
+            "verb usage: 0 of 411 registered verbs uncalled in 30 days (0 write, 0 read; "
+            "0 human/authority-only) — " + VERB_USAGE_ACTION,
+        ])
+
+    def test_a_missing_row_raises_rather_than_printing_zero(self):
+        with self.assertRaises(TypeError):
+            _load_verb_usage_lines()(None)
+
+
 class PaidCapCanonicalHealthTests(unittest.TestCase):
     """Execute the shipped health function and CLI with only external readers stubbed."""
 
@@ -601,6 +664,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   # hermetic suite is ops/health-act-selftest.py.
                   _breach_consumer=lambda: None,
                   _GREEN_EVIDENCE={},
+                  _verb_usage_lines=_load_verb_usage_lines(),
                   _jev_site_spend_row=lambda: "OK jev spend by site — fixture",
                   _grok_session_row=lambda: ("OK fixture Grok session", 0),
                   flashlib=Mock(health_row=Mock(return_value="OK Flash stopped")),
@@ -730,7 +794,8 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
     def all_namespace(self):
         from unittest.mock import Mock
         ns = self.namespace()
-        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}}
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
+                "verb_usage": _verb_usage_value([], 411)}
         ns.update(CANONICAL_SECTION="all", _canonical_snapshot=lambda: snap,
                   _seat_health_rows=lambda: ["PASS seat fixture"],
                   _branch_janitor_row=lambda: ("OK branch janitor fixture", False),
@@ -753,6 +818,34 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                      "_legacy_scheduled_definitions", "_calendar_prebrief_standing", "_calendar_prebrief_unknowns"):
             ns[name] = lambda *args: []
         return ns
+
+    def test_uncalled_verbs_print_without_turning_the_report_red(self):
+        import contextlib, io
+        uncalled = [{"verb": "add-loop", "write": True, "human_only": False,
+                     "authority_only": False, "last_called_at": None}]
+        ns = self.all_namespace()
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
+                "verb_usage": _verb_usage_value(uncalled, 411)}
+        ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 0)
+        self.assertIn("  →︎ verb usage: 1 of 411 registered verbs uncalled in 30 days "
+                      "(1 write, 0 read; 0 human/authority-only) — " + VERB_USAGE_ACTION + "\n"
+                      "    add-loop\n", out.getvalue())
+        self.assertEqual(ns["_FINDINGS"], [])
+
+    def test_an_unreadable_verb_usage_row_is_a_hard_error(self):
+        import contextlib, io
+        ns = self.all_namespace()
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}, "verb_usage": None}
+        ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 1)
+        self.assertIn("verb usage UNREADABLE", out.getvalue())
+        self.assertEqual([(f["key"], f["hard_error"]) for f in ns["_FINDINGS"]],
+                         [("verb_usage", True)])
 
     def test_builds_health_records_failure_and_prints_marker_last(self):
         import contextlib, io

@@ -957,10 +957,17 @@ model_choice_row = next(row for row in TRIGGER_ROWS.values()
 check("model-choice trigger delivers only rule ede4b241 via delegation-council",
       model_choice_row["rule_ids"] == ["ede4b241"]
       and model_choice_row["packs"] == ["delegation-council"])
-check("matched_triggers finds the council and model-choice verb triggers for an Agent call",
+sizing_tool_row = next((row for row in TRIGGER_ROWS.values()
+                       if row["kind"] == "verb" and "8400cd3d" in row["rule_ids"]
+                       and re.search(row["pattern"], "Agent")), None)
+check("an Agent call has a compiled sizing verb trigger", sizing_tool_row is not None)
+if sizing_tool_row is None:
+    sizing_tool_row = council_row
+check("matched_triggers finds the council, model-choice and sizing verb triggers for an Agent call",
       sorted(r["trigger_id"] for r in rail.matched_triggers(agent_call))
-      == sorted([council_row["trigger_id"], model_choice_row["trigger_id"]]))
-agent_rows = [council_row, model_choice_row]
+      == sorted([council_row["trigger_id"], model_choice_row["trigger_id"],
+                 sizing_tool_row["trigger_id"]]))
+agent_rows = [council_row, model_choice_row, sizing_tool_row]
 agent_packs = sorted({p for r in agent_rows for p in r["packs"]})
 agent_ids = sorted({i for r in agent_rows for i in r["rule_ids"]})
 agent_trigger_ids = sorted(r["trigger_id"] for r in agent_rows)
@@ -1008,14 +1015,19 @@ for dispatch_tool in ("mcp__Claude_Code_Remote__create_session",
     check(f"{dispatch_tool} hits the model-choice trigger",
           model_choice_row["trigger_id"]
           in [r["trigger_id"] for r in rail.matched_triggers(dispatch_call)])
-model_runner = Runner(gen_selector_result(packs=model_choice_row["packs"], ids=model_choice_row["rule_ids"]))
+# A cloud-session dispatch also starts new work, so the sizing trigger joins it.
+model_rows = [model_choice_row, sizing_tool_row]
+model_runner = Runner(gen_selector_result(
+    packs=sorted({p for r in model_rows for p in r["packs"]}),
+    ids=sorted({i for r in model_rows for i in r["rule_ids"]})))
 model_output = rail.process(
     gen_payload(tool="mcp__Claude_Code_Remote__create_session",
                 tool_input={"prompt": "fix the bug", "model": "sonnet"}), runner=model_runner)
 model_receipt = json.loads(context(model_output))
-check("a cloud-session dispatch delivers rule ede4b241 in one selector call",
-      len(model_runner.calls) == 1 and "ede4b241" in model_receipt["rule_ids"]
-      and model_receipt["trigger_ids"] == [model_choice_row["trigger_id"]], model_receipt)
+check("a cloud-session dispatch delivers rules ede4b241 and 8400cd3d in one selector call",
+      len(model_runner.calls) == 1 and model_receipt["rule_ids"] == ["8400cd3d", "ede4b241"]
+      and model_receipt["trigger_ids"] == sorted(r["trigger_id"] for r in model_rows),
+      model_receipt)
 for routine_tool, routine_input in (
         ("Read", {"file_path": "README.md"}), ("Grep", {"pattern": "model"}),
         ("Glob", {"pattern": "*.py"}), ("Bash", {"command": "git status"}),
@@ -1026,6 +1038,35 @@ for routine_tool, routine_input in (
                     rail.matched_triggers(gen_payload(tool=routine_tool, tool_input=routine_input))]
     check(f"{routine_tool} stays silent for the model-choice trigger",
           model_choice_row["trigger_id"] not in routine_hits, routine_hits)
+# Rule 8400cd3d (size new work first) reaches every shape that starts or hands
+# off new work through the compiled table alone, independent of the route file.
+for sizing_tool, sizing_input in (
+        ("EnterPlanMode", {}),
+        ("Agent", {"description": "build the importer",
+                   "prompt": "Implement the CSV importer and open a PR."}),
+        ("RemoteTrigger", {"action": "create", "name": "builder",
+                           "prompt": "BUILDER job: add the export verb."}),
+        ("Workflow", {"script": "export const meta = {name: 'review'}"}),
+        ("mcp__Claude_Code_Remote__create_session", {"prompt": "BUILDER job: fix the gate."}),
+        ("Bash", {"command": 'python3 tools/room-bridge/dispatch.py send codex-desk '
+                             '--writes ops/x.py "fix the review"'}),
+        ("mcp__carr__write-work-shape", {"title": "new capability"}),
+        ("mcp__carr__report-problem", {"summary": "the export is missing"}),
+        ("mcp__CARR_Record_Layer__propose-ready-plan", {"scope_summary": "new capability"})):
+    sizing_hits = sorted({rid for row in rail.matched_triggers(
+        gen_payload(tool=sizing_tool, tool_input=sizing_input)) for rid in row["rule_ids"]})
+    check(f"{sizing_tool} starts new work and delivers the sizing rule",
+          "8400cd3d" in sizing_hits, sizing_hits)
+for routine_tool, routine_input in (
+        ("Bash", {"command": "git status"}),
+        ("Read", {"file_path": "tools/room-bridge/dispatch.py"}),
+        ("Bash", {"command": "python3 tools/room-bridge/dispatch.py desks"}),
+        ("mcp__carr__read-work-shape", {"id": "x"})):
+    sizing_hits = sorted({rid for row in rail.matched_triggers(
+        gen_payload(tool=routine_tool, tool_input=routine_input)) for rid in row["rule_ids"]})
+    check(f"{routine_tool} routine work does not deliver the sizing rule",
+          "8400cd3d" not in sizing_hits, sizing_hits)
+
 silent_runner = Runner()
 check("a routine Read delivers nothing and makes no selector call",
       rail.process(gen_payload(tool="Read", tool_input={"file_path": "README.md"}),
@@ -1284,7 +1325,7 @@ check("the original exact background shape still takes the original rail, not th
 
 check_failure_cases(
     "generalized rail", agent_call,
-    gen_selector_result(packs=council_row["packs"], ids=council_row["rule_ids"]),
+    gen_selector_result(packs=agent_packs, ids=agent_ids),
     "selector did not return every triggered rule", rail.GENERALIZED_FAILURE_CONTEXT)
 
 # Tampering with a generalized receipt's content fails validate_generalized_receipt.
