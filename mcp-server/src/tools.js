@@ -8886,6 +8886,30 @@ export async function assertRegisteredToolInput(name, tool, args = {}) {
   }
 }
 
+// THE UNATTENDED RUNNER'S AUTHORITY ALLOWLIST (PR #1727 review, finding 1).
+// Joe's 2026-10-12 ruling (decision cbe91287) takes his approval off the acts
+// the system can do itself: closing and adjudicating incidents, triage, lead
+// approvals and plan acceptance. It does not reach a rule that binds both
+// partners, a production schedule, a deal or lease fact, a guidance registry,
+// a consent, a share grant or an identity merge, so those stay with a session a
+// partner attends. An unattended runner ingests outside content (Model Room
+// desks, Hermes), so this is a closed list that fails shut: a humanOnly or
+// authorityOnly verb added later is refused to it until someone adds it here.
+// humanCallerOnly verbs never belong on it.
+export const UNATTENDED_AUTHORITY_VERBS = Object.freeze([
+  "close-incident", "adjudicate-incident",
+  "review-and-triage",
+  "approve-lead-move", "undo-lead-move", "approve-lead-draft",
+  "accept-ready-plan", "accept-ready-plan-amendment",
+]);
+const UNATTENDED_AUTHORITY_VERB_SET = new Set(UNATTENDED_AUTHORITY_VERBS);
+
+// Server-derived only: identity.js's unattended door is the one writer of both
+// fields, and either one is enough to treat the actor as unattended.
+function isUnattendedActor(actor) {
+  return actor?.unattended === true || actor?.via === "unattended-token";
+}
+
 export async function executeRegisteredTool(client, actor, name, args = {}) {
   const tool = TOOLS[name];
   if (!tool) throw new ToolError({ error: "unknown_tool", name });
@@ -8941,6 +8965,14 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
               "or a server-verified native/local agent bound to that partner's sponsor-scoped " +
               "authority connection." });
   }
+  // The unattended runner holds partner authority only for the allowlisted
+  // verbs above; every other humanOnly/authorityOnly verb refuses it here, on
+  // every door, before schema validation or database access.
+  if ((tool.humanOnly === true || tool.authorityOnly === true) && isUnattendedActor(actor) &&
+      (tool.humanCallerOnly === true || !UNATTENDED_AUTHORITY_VERB_SET.has(name)))
+    throw new ToolError({ error: "unattended_runner_authority_not_admitted", verb: name,
+      hint: `${name} is not one of the partner-authority acts an unattended runner may perform; ` +
+            "leave it for a session a partner attends." });
   // ORACLE-SEAT-ONLY IS ENFORCED HERE, AND THIS IS THE ONLY PLACE THAT
   // ENFORCES IT (2026-09-13, DoctorCRE v5 slice V5-A02 Step B). It is a THIRD
   // authority shape beside humanOnly and the ordinary sponsored-agent surface,

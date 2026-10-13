@@ -427,23 +427,33 @@ export function continuityActorForTokenMaps(
  * for a human to open a session. This door gives that runner the attended
  * local actor's authority under its own credential.
  *
- * SAME SHAPE AS THE CONTINUITY MAPS: sponsor -> token, with the sponsor read
- * from the map key the server holds and never from anything the caller sends.
- * The function takes the request's own Authorization header and the server's
- * map, and nothing else, so a caller-claimed sponsor has no parameter to ride.
+ * SHAPE: sponsor -> runner -> token, e.g. {"joe":{"nightly-mac":"…"}}. The
+ * sponsor AND the runner are read from map keys the server holds and never from
+ * anything the caller sends. The function takes the request's own Authorization
+ * header and the server's map, and nothing else, so a caller-claimed sponsor or
+ * runner has no parameter to ride. One token per runner is what makes a single
+ * runner revocable without rotating every machine, and what lets the ledger
+ * name WHICH runner acted: the actor's client_id is `unattended-runner:<runner>`,
+ * written to tool_call/event beside `via` (PR #1727 review, finding 4).
  *
  * ONLY `joe` IS ACCEPTED. The ruling is Joe's, for his book. A `dell` key, an
- * unknown key, a probe/review/agent slug, a token held by two keys and a
- * malformed map all resolve to nothing. Dell's side would be a separate entry
+ * unknown key, a probe/review/agent slug, a token held by two runners or two
+ * sponsors, a runner name outside UNATTENDED_RUNNER and a malformed map all
+ * resolve to nothing. Dell's side would be a separate entry
  * in UNATTENDED_ACTOR made on Dell's own ruling, never a shared credential.
  *
  * The actor IS joe-local, so partner authority, the authority DB login and the
  * operational profile all fall out of the existing joe-local derivations. What
  * differs is provenance: `via: "unattended-token"` and `unattended: true` let
- * the ledger tell an unattended run from an attended one, and tools.js's
- * humanCallerOnly verbs (confirm-merge) refuse it like every other machine.
+ * the ledger tell an unattended run from an attended one. What it may DO is
+ * narrower than the attended door, by the PR #1727 review: mcp.js locks it to
+ * the `unattended` profile, and tools.js admits it to a humanOnly/authorityOnly
+ * verb only when that verb is in UNATTENDED_AUTHORITY_VERBS (humanCallerOnly
+ * verbs such as confirm-merge never are).
  */
 const UNATTENDED_ACTOR = Object.freeze({ joe: "joe-local" });
+
+const UNATTENDED_RUNNER = /^[a-z0-9][a-z0-9._-]{0,47}$/;
 
 export const unattendedActorForToken = closedCallable((authorizationHeader, unattendedTokensRaw) => {
   const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
@@ -451,18 +461,28 @@ export const unattendedActorForToken = closedCallable((authorizationHeader, unat
   let tokens;
   try { tokens = JSON.parse(unattendedTokensRaw || "{}"); }
   catch { return null; }
-  if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) return null;
-  const holders = Object.keys(tokens).filter(key =>
-    typeof tokens[key] === "string" && tokens[key].length > 0 && tokens[key] === token);
+  const isMap = value => !!value && typeof value === "object" && !Array.isArray(value);
+  if (!isMap(tokens)) return null;
+  const holders = [];
+  for (const sponsorKey of Object.keys(tokens)) {
+    const runners = tokens[sponsorKey];
+    if (!isMap(runners)) continue;
+    for (const runnerKey of Object.keys(runners))
+      if (typeof runners[runnerKey] === "string" && runners[runnerKey].length > 0 &&
+          runners[runnerKey] === token)
+        holders.push([sponsorKey, runnerKey]);
+  }
   if (holders.length !== 1) return null;
-  const sponsor = holders[0];
+  const [sponsor, runner] = holders[0];
   if (!Object.prototype.hasOwnProperty.call(UNATTENDED_ACTOR, sponsor)) return null;
+  if (!UNATTENDED_RUNNER.test(runner)) return null;
   const slug = UNATTENDED_ACTOR[sponsor];
   if (!isKnownActor(slug) || !isKnownPartner(sponsor) || LOCAL_SPONSOR[slug] !== sponsor) return null;
   return authenticateConnection({ slug, display: DISPLAY[slug], human: false, agent: true,
-           via: "unattended-token", client_id: null,
+           via: "unattended-token", client_id: `unattended-runner:${runner}`,
            sponsoring_human_slug: sponsor, human_slug: sponsor, sponsor_required: false,
-           native_agent_verified: true, unattended: true }, unattendedTokensRaw);
+           native_agent_verified: true, unattended: true, unattended_runner: runner },
+         unattendedTokensRaw);
 });
 
 /**
