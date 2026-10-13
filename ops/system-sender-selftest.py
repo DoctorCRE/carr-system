@@ -687,7 +687,7 @@ def test_send_script_shape() -> None:
           "first window" not in code and "set found to window 1" not in code)
     check("script: refuses zero and more than one match",
           "(count of matches) is 0" in code and "(count of matches) > 1" in code)
-    check("script: requires exactly one new window", "before + 1" in code)
+    check("script: requires exactly one new window", "priorCount + 1" in code)
     press = code.index("keystroke return using {command down}")
     check("script: frontmost is verified (with one re-activation) before the keystroke",
           code.index("outlookReady(targetName)") < press
