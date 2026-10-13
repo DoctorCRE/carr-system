@@ -57,4 +57,6 @@ pyobjc-framework-EventKit>=10.0; sys_platform == "darwin"
 # Preserve user TOML syntax while reconciling reserved Codex permission profiles.
 tomlkit>=0.13.3
 
+# Static instruction claims: workflow and config YAML parsing.
+PyYAML==6.0.3
 PyJWT[crypto]>=2.10
