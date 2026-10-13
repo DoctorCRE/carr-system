@@ -827,6 +827,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
                 "verb_usage": _verb_usage_value(uncalled, 411)}
         ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(ns["_canonical_health"](), 0)
         self.assertIn("  →︎ verb usage: 1 of 411 registered verbs uncalled in 30 days "
@@ -839,6 +840,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         ns = self.all_namespace()
         snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}, "verb_usage": None}
         ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(ns["_canonical_health"](), 1)
         self.assertIn("verb usage UNREADABLE", out.getvalue())
