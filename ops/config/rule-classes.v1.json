@@ -155,6 +155,14 @@
    "summary": "During decision reviews, invite Joe's framing first and log timing calls and overrides",
    "when": "Joe's decision/timing reviews and order-writing ramp"
   },
+  "19ebbeb3": {
+   "always_on": false,
+   "chars": 1217,
+   "class": "d",
+   "moment": "unfiled_bug stop_gate - turn end, when the turn's own prose reports a defect the session observed",
+   "summary": "A detected bug is recorded and fixed or given a Work Request in the same turn, never stepped over.",
+   "when": "unfiled_bug stop_gate"
+  },
   "1b8e7f43": {
    "always_on": false,
    "chars": 2078,
