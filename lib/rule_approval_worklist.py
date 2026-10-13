@@ -34,6 +34,17 @@ every result — the approval receipt id or the refusal verbatim — to
 out/rule-approvals.jsonl. A refusal is recorded, never retried and never
 worked around: a database refusal is the database's answer.
 
+PREFLIGHT BEFORE EVERY APPROVAL. AGENTS.md "Rule lifecycle evidence" makes
+`ops/rule-admission-audit.py --preflight --rule-id <id>` the readback before any
+rule is approved: it reports `ready` only when the prepared admission carries
+every projection.delivery key the installed writer reads. Under decision
+cbe91287 that readback IS the approval's technical check, so --apply runs it
+for each READY row, through the same subprocess door, and calls approve-rule
+only on `ready`. Any other status, a preflight error or no connection refuses
+that rule with the reason in the log line (outcome `preflight_refused`); it is
+never read as permission to infer readiness. A preflight refusal writes nothing
+server-side, so it does not count toward --max-refusals.
+
 NO SHEBANG AND NO __main__ BLOCK ON PURPOSE: a new file with either is a new
 script ingress on the sealed SCAC frontier. `./run.sh rule-approvals` imports
 main().
@@ -64,6 +75,7 @@ POLICY_KIND = "machine_enforceable"
 APPROVABLE_CLASSES = frozenset({"deny_gate", "stop_gate", "schema", "transactional_schema"})
 READINESS = ("ready", "held", "class_not_approvable", "rule_only_surfaced", "catalog_missing",
              "unmapped", "gone")
+PREFLIGHT_READY = "ready"
 
 DB_SQL = """select json_build_object(
   'rules', coalesce((
@@ -164,8 +176,9 @@ def approve_reason(short_id: str, control: str, klass: str) -> str:
     return (f"Decision {DECISION_ID} (Joe, 2026-10-12: remove his approval from everything "
             f"the system can do itself). Rule {short_id} names control {control} "
             f"({klass}) in ops/config/rule-enforcement-map.json, installed and verified in "
-            "ops.enforcement_control_catalog; a Joe-sponsored session carries the approval "
-            "via ./run.sh rule-approvals --apply.")
+            "ops.enforcement_control_catalog, and ops/rule-admission-audit.py --preflight read "
+            "this rule ready; ./run.sh rule-approvals --apply carries the approval as a "
+            "technical-check act.")
 
 
 def approve_payload(row: Mapping, idempotency_key: str) -> dict:
@@ -262,14 +275,51 @@ def record_verb(runtime_root: Path) -> Callable[[str, dict], dict]:
     return call
 
 
+def preflight_runner(runtime_root: Path) -> Callable[[str], dict]:
+    """`ops/rule-admission-audit.py --preflight --rule-id <id>`, read-only.
+
+    Returns {"status": <the preflight's status>, "detail": <its JSON>} or, when
+    it could not run, connect or answer in JSON, {"status": "error", "error": ...}.
+    Only status `ready` lets apply() call approve-rule.
+    """
+    def run(rule_id: str) -> dict:
+        py = runtime_root / ".venv" / "bin" / "python"
+        try:
+            proc = subprocess.run(
+                [str(py if py.exists() else sys.executable),
+                 str(runtime_root / "ops" / "rule-admission-audit.py"),
+                 "--preflight", "--rule-id", rule_id],
+                cwd=runtime_root, capture_output=True, text=True, timeout=180,
+                stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {"status": "error", "error": f"preflight did not run: {exc}"}
+        line = next((ln for ln in reversed((proc.stdout or "").splitlines())
+                     if ln.strip().startswith("{")), None)
+        try:
+            detail = json.loads(line) if line else None
+        except json.JSONDecodeError:
+            detail = None
+        if not isinstance(detail, dict) or not isinstance(detail.get("status"), str):
+            text = (proc.stderr or proc.stdout or "").strip()[:800]
+            return {"status": "error",
+                    "error": f"preflight exit {proc.returncode} with no JSON status: {text or 'no output'}"}
+        return {"status": detail["status"], "detail": detail}
+    return run
+
+
 def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
+          preflight: Callable[[str], dict],
           mint: Callable[[], str] = lambda: str(uuid.uuid4()),
           now: Callable[[], str] = lambda: _dt.datetime.now(_dt.timezone.utc).isoformat(),
           limit: int | None = None, max_refusals: int = 3) -> dict:
     """approve-rule for each READY row, one at a time; every result is appended to `log`.
 
-    Stops after `max_refusals` refusals. Every refusal the server cannot map to
-    a named error is also written to its incident store, so a refusal that is
+    Each row's preflight runs first and approve-rule is called only when it
+    answers `ready`; anything else is logged as `preflight_refused` with its
+    reason and the row is not approved.
+
+    Stops after `max_refusals` approve-rule refusals. Every refusal the server
+    cannot map to a named error is also written to its incident store, so a refusal that is
     structural (the same database precondition for every remaining row) would
     otherwise spray one identical incident per rule and teach nothing new. The
     rows not attempted are counted in the summary, never silently dropped.
@@ -285,6 +335,23 @@ def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
             if counts["refused"] >= max_refusals:
                 break
             attempted += 1
+            try:
+                pre = preflight(row["rule_id"])
+            except Exception as exc:  # a preflight that raises is a refusal, never a pass
+                pre = {"status": "error", "error": f"preflight raised {type(exc).__name__}: {exc}"}
+            pre_status = pre.get("status") if isinstance(pre, dict) else None
+            if pre_status != PREFLIGHT_READY:
+                counts["preflight_refused"] += 1
+                why = (pre.get("error") if isinstance(pre, dict) else None) or f"preflight status {pre_status!r}"
+                entry = {"schema": SCHEMA, "at": now(), "decision": DECISION_ID,
+                         "rule_id": row["rule_id"], "short_id": row["short_id"],
+                         "control": row["control"], "idempotency_key": None,
+                         "outcome": "preflight_refused", "preflight_status": pre_status,
+                         "approval_receipt_id": None, "enforcement_status": None,
+                         "refusal": f"approve-rule not called: {why}"}
+                fh.write(json.dumps(entry, sort_keys=True) + "\n")
+                fh.flush()
+                continue
             payload = approve_payload(row, mint())
             res = call("approve-rule", payload)
             result = res.get("result") if res.get("ok") else None
@@ -294,7 +361,8 @@ def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
             entry = {"schema": SCHEMA, "at": now(), "decision": DECISION_ID,
                      "rule_id": row["rule_id"], "short_id": row["short_id"],
                      "control": row["control"], "idempotency_key": payload["idempotency_key"],
-                     "outcome": outcome, "approval_receipt_id": receipt,
+                     "outcome": outcome, "preflight_status": pre_status,
+                     "approval_receipt_id": receipt,
                      "enforcement_status": (result or {}).get("enforcement_status"),
                      "refusal": None if receipt else (res.get("refusal") or json.dumps(result))}
             fh.write(json.dumps(entry, sort_keys=True) + "\n")
@@ -302,7 +370,8 @@ def apply(rows: list[dict], call: Callable[[str, dict], dict], log: Path, *,
         skipped = Counter(r["readiness"] for r in rows if r["readiness"] != "ready")
         summary = {"schema": SCHEMA, "at": now(), "kind": "summary", "decision": DECISION_ID,
                    "attempted": attempted, "approved": counts["approved"],
-                   "refused": counts["refused"], "not_attempted": len(ready) - attempted,
+                   "refused": counts["refused"], "preflight_refused": counts["preflight_refused"],
+                   "not_attempted": len(ready) - attempted,
                    "halted_after_refusals": attempted < len(ready),
                    "skipped": dict(sorted(skipped.items()))}
         fh.write(json.dumps(summary, sort_keys=True) + "\n")
@@ -333,7 +402,8 @@ def render(rows: list[dict], tot: dict) -> str:
                      "so approve-rule refuses them today ('active rule <id> lacks its immutable "
                      "exact control binding', measured 2026-10-12; WR-000262 asks for the "
                      "adoption path). --apply records each refusal verbatim.")
-    lines.append("(dry run — pass --apply to run approve-rule for the ready rows)")
+    lines.append("(dry run — pass --apply to run the per-rule preflight, then approve-rule for "
+                 "each ready row whose preflight answers ready)")
     return "\n".join(lines)
 
 
@@ -341,11 +411,13 @@ def render(rows: list[dict], tot: dict) -> str:
 
 def main(argv: list[str] | None = None, *, db: Mapping | None = None,
          call: Callable[[str, dict], dict] | None = None,
+         preflight: Callable[[str], dict] | None = None,
          mint: Callable[[], str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="run.sh rule-approvals", description=__doc__.split("\n\n")[0])
     ap.add_argument("--json", action="store_true", help="print the worklist as JSON")
     ap.add_argument("--apply", action="store_true",
-                    help="run approve-rule for each READY row (the only write)")
+                    help="for each READY row, run its preflight and call approve-rule only on a ready "
+                         "preflight (the only write)")
     ap.add_argument("--limit", type=int, default=None, help="apply to at most N ready rows")
     ap.add_argument("--max-refusals", type=int, default=3,
                     help="stop after N refusals (default 3); the rest are counted as not attempted")
@@ -370,8 +442,10 @@ def main(argv: list[str] | None = None, *, db: Mapping | None = None,
     applied: dict | None = None
     if args.apply:
         log = Path(args.log) if args.log else root / "out" / "rule-approvals.jsonl"
-        report["applied"] = applied = apply(rows, call or record_verb(root), log, mint=mint, limit=args.limit,
-                                  max_refusals=args.max_refusals)
+        report["applied"] = applied = apply(rows, call or record_verb(root), log,
+                                            preflight=preflight or preflight_runner(root),
+                                            mint=mint, limit=args.limit,
+                                            max_refusals=args.max_refusals)
         report["log"] = str(log)
     if args.json:
         print(json.dumps(report, indent=2))
@@ -380,7 +454,8 @@ def main(argv: list[str] | None = None, *, db: Mapping | None = None,
         if applied is not None:
             a = applied
             print(f"\napplied: {a['attempted']} attempted, {a['approved']} approved, "
-                  f"{a['refused']} refused, {a['not_attempted']} not attempted"
+                  f"{a['refused']} refused, {a['preflight_refused']} refused at preflight, "
+                  f"{a['not_attempted']} not attempted"
                   f"{' (halted at the refusal ceiling)' if a['halted_after_refusals'] else ''}; "
                   f"skipped {a['skipped']}; log {report['log']}")
     return 0

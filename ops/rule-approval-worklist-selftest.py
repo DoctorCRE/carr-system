@@ -14,10 +14,16 @@ What it proves:
     rule's mapped control, and a reason citing decision cbe91287;
   * every result is appended to the log: the receipt id on success, the
     refusal VERBATIM on a refusal, plus one summary line with the counts;
+  * --apply runs ops/rule-admission-audit.py --preflight --rule-id for each
+    ready row first and calls approve-rule only when it answers `ready`: a
+    non-ready status, a preflight that cannot connect (the real runner over a
+    stub script that exits 2) and a preflight that raises each refuse the call
+    and log `preflight_refused` with the reason;
   * source mutants must fail these expectations: one that approves a GONE
     rule, one that approves a held-control rule, one that drops the
-    idempotency key, and one that approves a rule the map records as only
-    surfaced;
+    idempotency key, one that approves a rule the map records as only
+    surfaced, one that drops the preflight gate, and one that reads a
+    preflight exception as ready;
   * lib/rule_approval_worklist.py stays a library (no shebang, no __main__),
     wired through run.sh, and ops/ci.sh's ops/*-selftest.py glob collects
     this file.
@@ -102,11 +108,28 @@ class FakeDoor:
         return {"ok": False, "refusal": REFUSAL}
 
 
-def run_apply(module, tmp: Path):
+class FakePreflight:
+    """Answers `ready` unless the rule id maps to another status (or an exception)."""
+
+    def __init__(self, answers: dict[str, object] | None = None):
+        self.answers = answers or {}
+        self.calls: list[str] = []
+
+    def __call__(self, rule_id: str) -> dict:
+        self.calls.append(rule_id)
+        answer = self.answers.get(rule_id, "ready")
+        if isinstance(answer, BaseException):
+            raise answer
+        if isinstance(answer, dict):
+            return answer
+        return {"status": answer, "detail": {"status": answer}}
+
+
+def run_apply(module, tmp: Path, preflight=None):
     rows = module.build_worklist(DB, RULE_CONTROLS, GONE)
     door = FakeDoor()
     log = tmp / "rule-approvals.jsonl"
-    summary = module.apply(rows, door, log)
+    summary = module.apply(rows, door, log, preflight=preflight or FakePreflight())
     lines = [json.loads(ln) for ln in log.read_text().splitlines()]
     return rows, door, lines, summary
 
@@ -131,6 +154,23 @@ def check_apply(tc: unittest.TestCase, module) -> None:
         tc.assertIn(w.DECISION_ID, p["reason"])
     tc.assertEqual(summary["approved"], 1)
     tc.assertEqual(summary["refused"], 1)
+
+
+def check_preflight_gate(tc: unittest.TestCase, module) -> None:
+    """A non-ready preflight and a raising preflight each stop approve-rule for that rule."""
+    for answer in ("delivery_projection_incomplete", RuntimeError("connection refused")):
+        with tempfile.TemporaryDirectory() as td:
+            pre = FakePreflight({rid(READY_B): answer})
+            _rows, door, lines, summary = run_apply(module, Path(td), preflight=pre)
+        tc.assertEqual(pre.calls, [rid(READY_A), rid(READY_B)], "every ready row is preflighted")
+        tc.assertEqual([p["rule_id"] for _, p in door.calls], [rid(READY_A)],
+                       "approve-rule is never called after a non-ready preflight")
+        refused = next(x for x in lines[:-1] if x["rule_id"] == rid(READY_B))
+        tc.assertEqual(refused["outcome"], "preflight_refused")
+        tc.assertIsNone(refused["idempotency_key"])
+        tc.assertIn("approve-rule not called", refused["refusal"])
+        tc.assertEqual(summary["preflight_refused"], 1)
+        tc.assertEqual(summary["refused"], 0)
 
 
 def mutant(old: str, new: str) -> types.ModuleType:
@@ -211,7 +251,8 @@ class WorklistTest(unittest.TestCase):
             rows = w.build_worklist(DB, RULE_CONTROLS, GONE)
             door = FakeDoor()
             # READY_A is approved, READY_B refused; a ceiling of 1 stops after B.
-            summary = w.apply(list(reversed(rows)), door, Path(td) / "log.jsonl", max_refusals=1)
+            summary = w.apply(list(reversed(rows)), door, Path(td) / "log.jsonl",
+                              preflight=FakePreflight(), max_refusals=1)
         self.assertEqual([p["rule_id"] for _, p in door.calls], [rid(READY_B)])
         self.assertEqual(summary["attempted"], 1)
         self.assertEqual(summary["not_attempted"], 1)
@@ -221,9 +262,57 @@ class WorklistTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             rows = w.build_worklist(DB, RULE_CONTROLS, GONE)
             door = FakeDoor()
-            summary = w.apply(rows, door, Path(td) / "log.jsonl", limit=1)
+            summary = w.apply(rows, door, Path(td) / "log.jsonl", preflight=FakePreflight(), limit=1)
         self.assertEqual(len(door.calls), 1)
         self.assertEqual(summary["attempted"], 1)
+
+    def test_non_ready_or_raising_preflight_refuses_the_call(self):
+        check_preflight_gate(self, w)
+
+    def test_ready_preflight_proceeds_and_is_logged(self):
+        with tempfile.TemporaryDirectory() as td:
+            pre = FakePreflight()
+            _rows, door, lines, summary = run_apply(w, Path(td), preflight=pre)
+        self.assertEqual(pre.calls, [rid(READY_A), rid(READY_B)])
+        self.assertEqual(len(door.calls), 2)
+        self.assertEqual({x["preflight_status"] for x in lines[:-1]}, {"ready"})
+        self.assertEqual(summary["preflight_refused"], 0)
+
+    def test_preflight_that_cannot_connect_refuses(self):
+        # The REAL runner over a stub audit script that behaves like the real
+        # one with no credential: message on stderr, exit 2, no JSON.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "ops").mkdir()
+            (root / "ops" / "rule-admission-audit.py").write_text(
+                "import sys\n"
+                "print('rule-admission-audit: DATABASE_URL or DATABASE_URL_READER required', file=sys.stderr)\n"
+                "sys.exit(2)\n")
+            runner = w.preflight_runner(root)
+            answer = runner(rid(READY_A))
+            self.assertEqual(answer["status"], "error")
+            self.assertIn("exit 2", answer["error"])
+            self.assertIn("DATABASE_URL", answer["error"])
+            rows = w.build_worklist(DB, RULE_CONTROLS, GONE)
+            door = FakeDoor()
+            summary = w.apply(rows, door, root / "log.jsonl", preflight=runner)
+            lines = [json.loads(ln) for ln in (root / "log.jsonl").read_text().splitlines()]
+        self.assertEqual(door.calls, [], "no approve-rule call without a ready preflight")
+        self.assertEqual(summary["preflight_refused"], 2)
+        self.assertEqual({x["outcome"] for x in lines[:-1]}, {"preflight_refused"})
+        self.assertEqual({x["preflight_status"] for x in lines[:-1]}, {"error"})
+
+    def test_preflight_runner_passes_the_rule_id_and_reads_ready(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "ops").mkdir()
+            (root / "ops" / "rule-admission-audit.py").write_text(
+                "import json, sys\n"
+                "assert sys.argv[1:3] == ['--preflight', '--rule-id'], sys.argv\n"
+                "print(json.dumps({'status': 'ready', 'rule': sys.argv[3]}))\n")
+            answer = w.preflight_runner(root)(rid(READY_A))
+        self.assertEqual(answer["status"], "ready")
+        self.assertEqual(answer["detail"]["rule"], rid(READY_A))
 
     def test_real_map_and_triage_load(self):
         controls = w.load_map()
@@ -252,8 +341,21 @@ class WorklistTest(unittest.TestCase):
     def test_mutant_that_approves_a_surfacing_only_rule_fails(self):
         self.assert_mutant_fails(mutant('    if map_class == "surfacing":\n', "    if False:\n"))
 
+    def test_mutant_that_drops_the_preflight_gate_fails(self):
+        with self.assertRaises(Exception):
+            check_preflight_gate(self, mutant("            if pre_status != PREFLIGHT_READY:\n",
+                                              "            if False:\n"))
+
+    def test_mutant_that_reads_a_preflight_exception_as_ready_fails(self):
+        with self.assertRaises(Exception):
+            check_preflight_gate(self, mutant(
+                '                pre = {"status": "error", "error": f"preflight raised {type(exc).__name__}: {exc}"}\n',
+                '                pre = {"status": "ready"}\n'))
+
     def test_unmutated_source_passes_the_same_check(self):
-        check_apply(self, mutant("SCHEMA = ", "SCHEMA  = "))
+        module = mutant("SCHEMA = ", "SCHEMA  = ")
+        check_apply(self, module)
+        check_preflight_gate(self, module)
 
     # ── wiring ──
     def test_library_shape_and_wiring(self):
@@ -268,6 +370,8 @@ class WorklistTest(unittest.TestCase):
         self.assertTrue(Path(__file__).resolve().match("ops/*-selftest.py"))
         self.assertIn('"run.sh"), "call", verb', src, "writes go through the ./run.sh call door")
         self.assertNotIn('"call-verb"', src, "never the generic passthrough verb")
+        self.assertIn('"rule-admission-audit.py"', src, "the preflight is the AGENTS.md readback")
+        self.assertIn('"--preflight", "--rule-id", rule_id', src)
 
 
 if __name__ == "__main__":
