@@ -1,0 +1,11 @@
+# Every Stop turn ops/gate-replay.py builds for hooks/unfiled-bug-stop-gate.py
+# from the committed fixture sets, replayed by ops/unfiled-bug-stop-gate-selftest.py.
+# One row per held turn (fixture, matched class, matched sentence), then one
+# totals row per fixture set and one for the whole corpus. Regenerate after a
+# deliberate verdict change with:
+#     .venv/bin/python ops/unfiled-bug-stop-gate-selftest.py --update-corpus
+# fixture	verdict	class	sentence
+scenarios:e5b100000001	reopen	refused	The rerun script keeps refusing with an error that names no field, so every retry fails the same way.
+(set) advisories	counts	stops=87	held=0 allowed=87
+(set) scenarios	counts	stops=1	held=1 allowed=0
+(all)	counts	stops=88	held=1 allowed=87

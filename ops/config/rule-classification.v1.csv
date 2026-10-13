@@ -15,6 +15,7 @@ id,layer,class,moment
 17ffd587,control,b,"rendering open-loops, heartbeat, or Monday brief"
 185013c6,pack,b,spawning a subagent/workflow or sizing 30+min work (model selection)
 19304882,pack,c,Joe's decision/timing reviews and order-writing ramp
+19ebbeb3,control,d,unfiled_bug stop_gate - turn end when the turn reports a defect it observed
 1b8e7f43,layer0,b,"add-loop verb, when a capability/verb call is blocked"
 1c21263c,pack,a,same-shape fix recurring about four times in one session
 1c42d80c,layer0,a,"hitting unexpected friction (refusal, error, workaround)"

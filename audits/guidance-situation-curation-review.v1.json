@@ -224,8 +224,8 @@
   "reviewed_base_inventory": {
     "excluded_rule_surface": "intro_politics",
     "path": "ops/config/rule-enforcement-map.json",
-    "sha256": "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e",
-    "standing_source_count": 197
+    "sha256": "dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08",
+    "standing_source_count": 198
   },
   "reviewed_source_manifest": {
     "path": "audits/guidance-migration-manifest.v1.tsv",

@@ -1,7 +1,7 @@
 {
   "counts": {
     "core": 20,
-    "gate": 60,
+    "gate": 61,
     "gone": 0,
     "jit": 131
   },
@@ -27,7 +27,7 @@
       ]
     }
   },
-  "generated_note": "Triage of the 219 active rules into gate/jit/core/gone homes. Classification and tooling only per S7 scope boundary; no rule was retired, amended, or taught by producing this file. Source data: standing-context (205 rules, full text) + ops/config/rule-enforcement-map.json rule_controls (all 219, including the 14 vendor-intros-pack rules that standing-context does not surface to this session -- see defect ad4e25bd-3c98-4334-a7d3-f53c8158711f). ROWS PRUNED 2026-08-27 (WR-000019 rule-retirement batch): Joe accepted and executed the batch this slice's 11 GONE rows named (each already carrying its merge_target in this file); the 11 rows are removed from `rules` and `counts.gone` moves 11 -> 0, keeping this file in exact id-for-id parity with the now-208-row ops/config/rule-enforcement-map.json rule_controls, per ops/rule-triage-selftest.py's coverage checks. The 219/205 figures above describe the file as generated at S7 time and are left as historical record. LIVE PARITY REPAIRED 2026-09-23: removed five retired ids and added three active rules (204391be, a2e78f48, b7ec8f3b) with their existing production pack memberships; current map and triage each carry 209 active rules. 2026-09-29: rule ede4b241 (cloud model choice) added as a JIT row with a delegation-council dispatch detector; current map and triage each carry 210 active rules. 2026-10-08: rule 8400cd3d (new-work sizing) added as a JIT row with planning-entry detectors; map and triage remain in id-for-id parity.",
+  "generated_note": "Triage of the 219 active rules into gate/jit/core/gone homes. Classification and tooling only per S7 scope boundary; no rule was retired, amended, or taught by producing this file. Source data: standing-context (205 rules, full text) + ops/config/rule-enforcement-map.json rule_controls (all 219, including the 14 vendor-intros-pack rules that standing-context does not surface to this session -- see defect ad4e25bd-3c98-4334-a7d3-f53c8158711f). ROWS PRUNED 2026-08-27 (WR-000019 rule-retirement batch): Joe accepted and executed the batch this slice's 11 GONE rows named (each already carrying its merge_target in this file); the 11 rows are removed from `rules` and `counts.gone` moves 11 -> 0, keeping this file in exact id-for-id parity with the now-208-row ops/config/rule-enforcement-map.json rule_controls, per ops/rule-triage-selftest.py's coverage checks. The 219/205 figures above describe the file as generated at S7 time and are left as historical record. LIVE PARITY REPAIRED 2026-09-23: removed five retired ids and added three active rules (204391be, a2e78f48, b7ec8f3b) with their existing production pack memberships; current map and triage each carry 209 active rules. 2026-09-29: rule ede4b241 (cloud model choice) added as a JIT row with a delegation-council dispatch detector; current map and triage each carry 210 active rules. 2026-10-08: rule 8400cd3d (new-work sizing) added as a JIT row with planning-entry detectors; map and triage remain in id-for-id parity. 2026-10-12: rule 19ebbeb3 (a detected bug is recorded and addressed in the same session) added as a GATE row carried by the new unfiled_bug Stop gate (hooks/unfiled-bug-stop-gate.py); map and triage remain in id-for-id parity.",
   "rules": [
     {
       "home": "jit",
@@ -146,6 +146,13 @@
       "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Joe's strength-training kit: COMPRESSION REPS \u2014 on major decisions and builds, the\u2026",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "Joe's strength-training kit: COMPRESSION REPS \u2014 on major decisions and builds, the session invites Joe's"
+    },
+    {
+      "carrying_control": "unfiled_bug",
+      "home": "gate",
+      "id": "19ebbeb3",
+      "reason": "Machine-enforced via control 'unfiled_bug' (hooks/unfiled-bug-stop-gate.py); binds at turn end when the turn's own prose reports a defect the session observed and the turn carries no record-defect, report-problem or add-loop filing and names no record or fixing PR. Failure mode on violation: Stop block",
+      "title_gist": "A DETECTED BUG IS RECORDED AND ADDRESSED IN THE SAME SESSION, NEVER STEPPED OVER"
     },
     {
       "home": "jit",
