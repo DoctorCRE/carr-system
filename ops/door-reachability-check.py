@@ -83,7 +83,7 @@ STEM_MIN = 10
 # Records and history: they name artifacts by construction, so they are neither
 # callers nor audited. The manifest is here because it names every declared path.
 INERT_PREFIXES = ("corpus/", "claude-tree/", "out/", "db/", "migrations/", "audits/",
-                  "phase0/", ".claude/worktrees/")
+                  "phase0/", ".claude/worktrees/", "_to_delete/")
 INERT_FILES = (MANIFEST,)
 WALK_SKIP = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache"}
 MAX_BYTES = 2 << 20

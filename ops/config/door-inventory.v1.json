@@ -72,7 +72,7 @@
       "path": "ops/guidance-registry-check.py",
       "class": "inert",
       "reason": "Validator for the typed Guidance Registry proposal; nothing runs it because the registry has never been activated.",
-      "evidence": "WR-000284"
+      "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
     },
     {
       "path": "ops/incident-fingerprint-shadow.py",
@@ -81,16 +81,10 @@
       "evidence": "8a0d4aaf (#568)"
     },
     {
-      "path": "ops/partner-continuity-gate.py",
-      "class": "inert",
-      "reason": "Partner continuity gate built with the control plane; only its selftest runs it, with no db-gate marker and no production caller.",
-      "evidence": "WR-000284; its DSN behaviour is left to the gate's owner"
-    },
-    {
       "path": "ops/propose-guidance-situation-curation.py",
       "class": "inert",
       "reason": "Proposes the situation curation the Guidance Registry waits on; no door runs it while the registry stays unactivated.",
-      "evidence": "WR-000284"
+      "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
     },
     {
       "path": "ops/registry-chain-postgres-proof.py",
@@ -135,12 +129,6 @@
       "evidence": "f163962f (ORDER 40, rehearsed)"
     },
     {
-      "path": "pipelines/import_dossier_analysis.py",
-      "class": "inert",
-      "reason": "ORDER 36 dossier-analysis importer that its own commit records as unrun; its markdown source is now retired, so the open question is deletion.",
-      "evidence": "WR-000284 (121d01c0 says dry-run default, unrun)"
-    },
-    {
       "path": "pipelines/import_idea_bank.py",
       "class": "one_shot",
       "reason": "ORDER 40 importer of idea-bank.md into loop_item rows; its markdown source was retired at the 2026-08-19 cutoff.",
@@ -169,18 +157,6 @@
       "class": "hand_tool",
       "reason": "A person runs it on downloaded FL DOH licensure files to rebuild the radar's license pool before a sweep.",
       "evidence": "pipelines/radar/build-license-pool-from-raw.py docstring (lookback fixed aa241723, #1206)"
-    },
-    {
-      "path": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
-      "class": "inert",
-      "reason": "Benny's setup skill is vendored with pstack but deliberately dormant: no scheduler or Slack contract exists here.",
-      "evidence": "WR-000284 (umbrella); plugins/pstack/PORT.md: Creation and activation remain dormant"
-    },
-    {
-      "path": "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
-      "class": "inert",
-      "reason": "Benny's Slack triage skill is vendored with pstack but deliberately dormant until a proven Slack adapter exists.",
-      "evidence": "WR-000284 (umbrella); plugins/pstack/PORT.md: Creation and activation remain dormant"
     },
     {
       "path": "tools/apply-graph-colors.py",
@@ -234,7 +210,7 @@
       "path": "tools/room-bridge/model_room_preview_server.py",
       "class": "inert",
       "reason": "Offline host for browser verification of the Model Room bundle; no harness launches it yet.",
-      "evidence": "WR-000284"
+      "evidence": "loop #1305 (launch it from the Model Room browser visual gate harness)"
     },
     {
       "path": "tools/staging-heavy-build-parity.py",

@@ -217,6 +217,12 @@ class DoorReachability(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("unreachable  tools/recorded_only.py", out)
 
+    def test_to_delete_is_a_record_not_an_artifact(self) -> None:
+        code, out = self.run_check({"_to_delete/benny/SKILL.md": "# benny\n",
+                                    "_to_delete/pipelines/old_import.py": "print(1)\n"})
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("_to_delete/", out)
+
     def test_short_skill_name_as_a_bare_word_does_not_reach(self) -> None:
         code, out = self.run_check({"ops/ci.sh": "python3 tools/wired-tool.py # zzq\n",
                                     "plugins/kit/skills/zzq/SKILL.md": "# zzq\n"})
