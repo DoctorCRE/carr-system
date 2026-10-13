@@ -42,6 +42,10 @@ TRACKER_RETIREMENT_REPIN = (
 UNFILED_BUG_CONTROL_REPIN = (
     REPO / "migrations" / "0871_repin_rule_delivery_activation_after_unfiled_bug_control.sql"
 )
+HELD_CONTROL_REPIN = REPO / "migrations" / "0875_repin_rule_delivery_activation_after_held_control_tests.sql"
+BURST_CONTROL_REPIN = (
+    REPO / "migrations" / "0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql"
+)
 PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
 CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
 # The chain has a fourth link as of 2026-09-01. Reinstating canonical_edit into
@@ -70,12 +74,18 @@ POST_0554_ACTIVATION_DIGEST = "c6e89d64de575b9c6e39c8c88cd6a32e97e494b381a7ac443
 # reviewed map moved its digest; migration 0772 carries the guarded forward repin.
 POST_0772_ACTIVATION_DIGEST = "43ac7f513c173114b1723a886baf56a83ec40e7fef8b187ed3dead7d16d90ada"
 POST_0837_ACTIVATION_DIGEST = "b4e0d6689df3d96be24fb0cb888587f545bef8ffeba79c3ee6757b447f3fb308"
+POST_0851_ACTIVATION_DIGEST = "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490bac4a76f4"
 # Retiring hooks/staging-observation-tracker.py moved the map again; 0859
 # carries the guarded forward repin from the post-0851 digest.
-POST_0851_ACTIVATION_DIGEST = "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490bac4a76f4"
+POST_0859_ACTIVATION_DIGEST = "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e"
 # Registering the unfiled_bug Stop-gate control moved the map again; 0871
 # carries the guarded forward repin from the post-0859 digest.
-POST_0859_ACTIVATION_DIGEST = "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e"
+POST_0871_ACTIVATION_DIGEST = "dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08"
+# Giving session_boot, ledger_capture and loop_guard CI-run tests moved the map
+# again; 0875 carries the guarded forward repin from the post-0871 digest.
+POST_0875_ACTIVATION_DIGEST = "7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f"
+# Registering the github-burst-guard control moved the map again; 0878
+# carries the guarded forward repin from the post-0875 digest.
 ACTIVATION_TO_TEST_REF = (
     "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; "
     "ops/rule-pack-preuse-reselection-selftest.py"
@@ -524,9 +534,29 @@ def main() -> int:
             """select count(*), count(*) filter (where map_digest=%s),
                       array_agg(short_id order by short_id)
                  from ops.rule_delivery_activation_target""",
+            (POST_0871_ACTIVATION_DIGEST,),
+        )
+        check("unfiled_bug control repins the exact targets to the post-0871 reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
+        # Replay the held-control-tests repin (0875) from that exact preimage.
+        cur.execute(HELD_CONTROL_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
+            (POST_0875_ACTIVATION_DIGEST,),
+        )
+        check("held-control tests repin the exact targets to the post-0875 reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
+        # Replay the github-burst-guard control repin (0878) from that exact preimage.
+        cur.execute(BURST_CONTROL_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
             (current_map_digest,),
         )
-        check("unfiled_bug control repins the exact targets to the current reviewed map",
+        check("github-burst-guard control repins the exact targets to the current reviewed map",
               one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
         cur.execute("""insert into actor (slug,kind,display_name) values ('joe','human','Joe')
                        on conflict (slug) do nothing returning id""")
