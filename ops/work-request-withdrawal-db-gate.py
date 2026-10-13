@@ -21,10 +21,16 @@ WHAT IT PROVES, in the order a reader would want it:
                            an earlier revision of this design would have made a
                            withdrawn row raise work_request_not_found, which is
                            the capability erasing the record it exists to write
-  captured only            a triaged request cannot be withdrawn, at two layers
-  the receipt is evidence  append-only by TRIGGER, not by a table comment; the
-                           sibling triage receipt claims append-only in a comment
-                           and has no trigger at all, which is filed separately
+  captured only, for a decline
+                           a triaged request cannot be declined, at two layers
+  triaged supersession     0883: a triaged request with nothing downstream is
+                           superseded, keeps its triage fields, and its triage
+                           receipt stays readable through superseded_by; one
+                           with a plan is refused by NAME, at the function and
+                           again at the trigger for a forged receipt
+  the receipts are evidence
+                           withdrawal and (since 0883) triage receipts are
+                           append-only by TRIGGER, not by a table comment
   the pointers hold        no self-supersession, no successor that is itself
                            withdrawn, no non-sourced successor, no two-row cycle
   no forged withdrawal     the immutability trigger was BEFORE UPDATE only, so a
@@ -35,15 +41,17 @@ WHAT IT PROVES, in the order a reader would want it:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import pathlib
 import sys
 import uuid
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from gate_runtime_role import rollback_only_connection  # noqa: E402
+from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection  # noqa: E402
 
 REFUSALS = 0
 
@@ -51,6 +59,7 @@ DOC = "aaaaaaaa-0000-4000-8000-00000000d0c1"
 SEC = "aaaaaaaa-0000-4000-8000-00000000cec1"
 REV = "aaaaaaaa-0000-4000-8000-000000000re1".replace("re", "01")
 CRITERIA = '[{"id":"ONE","text":"a criterion"}]'
+RUNBOOK = "Stop within the caps."
 
 
 def refuses(cur, sql, params, label):
@@ -67,6 +76,23 @@ def refuses(cur, sql, params, label):
     raise RuntimeError(f"{label} was ACCEPTED; it must be refused")
 
 
+def refuses_named(cur, sql, params, name, label):
+    """Require a refusal whose message starts with the database's own name for it."""
+    global REFUSALS
+    cur.execute("savepoint refusal")
+    try:
+        cur.execute(sql, params)
+    except psycopg.Error as exc:
+        cur.execute("rollback to savepoint refusal")
+        message = str(exc.diag.message_primary or exc)
+        if not message.startswith(name):
+            raise RuntimeError(f"{label} was refused, but not as {name}: {message}") from exc
+        REFUSALS += 1
+        return message
+    cur.execute("rollback to savepoint refusal")
+    raise RuntimeError(f"{label} was ACCEPTED; it must be refused as {name}")
+
+
 def fixture(cur):
     """A doctrine origin to capture against, built and rolled back with the gate."""
     actor = cur.execute("select id from public.actor order by slug limit 1").fetchone()[0]
@@ -78,9 +104,47 @@ def fixture(cur):
         " values (%s,%s,'origin','Origin',1,'active',1)", (SEC, DOC))
     cur.execute(
         "insert into public.doctrine_revision (id,section_id,version,actor_id,body,plain_text,content_hash)"
-        " values (%s,%s,1,%s,'{}'::jsonb,'x','h')", (REV, SEC, actor))
+        " values (%s,%s,1,%s,%s,'x',%s)",
+        (REV, SEC, actor, Jsonb({"text": "x"}), hashlib.sha256(b"x").hexdigest()))
     cur.execute("update public.doctrine_section set current_revision_id=%s where id=%s", (REV, SEC))
     return actor
+
+
+def runbook_fixture(cur, actor):
+    """A shared runbook section a bounded plan can cite."""
+    doc = cur.execute("select id from public.doctrine_document where slug='runbook'").fetchone()
+    doc = doc[0] if doc else cur.execute(
+        "insert into public.doctrine_document (slug,title,content_class,visibility)"
+        " values ('runbook','Runbook','reference','shared') returning id").fetchone()[0]
+    section = cur.execute(
+        "insert into public.doctrine_section (document_id,section_key,title,ordinal,status,current_version)"
+        " values (%s,'wr-withdrawal-gate','Withdrawal gate runbook',999,'active',1) returning id",
+        (doc,)).fetchone()[0]
+    revision = cur.execute(
+        "insert into public.doctrine_revision (section_id,version,actor_id,body,plain_text,content_hash)"
+        " values (%s,1,%s,%s,%s,%s) returning id",
+        (section, actor, Jsonb({"text": RUNBOOK}), RUNBOOK,
+         hashlib.sha256(RUNBOOK.encode()).hexdigest())).fetchone()[0]
+    cur.execute("update public.doctrine_section set current_revision_id=%s where id=%s", (revision, section))
+    return "doctrine:runbook#wr-withdrawal-gate"
+
+
+def triage(cur, ref):
+    """Triage as the Joe authority login, the only role the function admits."""
+    cur.execute("""do $$ begin
+      if not exists (select 1 from pg_roles where rolname='carr_authority_joe') then
+        create role carr_authority_joe login;
+      end if; end $$""")
+    cur.execute("grant carr_authority to carr_authority_joe")
+    grant_settable_runtime_roles(cur, "carr_authority_joe")
+    cur.execute("set session authorization carr_authority_joe")
+    try:
+        row = cur.execute("select state,version from ops.triage_sourced_work_request(%s,1,'operational',%s)",
+                          (ref, str(uuid.uuid4()))).fetchone()
+    finally:
+        cur.execute("reset session authorization")
+    if row != ("triaged", 2):
+        raise RuntimeError(f"fixture triage did not land: {row}")
 
 
 def capture(cur, title):
@@ -98,7 +162,7 @@ def main() -> int:
     try:
         with rollback_only_connection(dsn) as conn:
             cur = conn.cursor()
-            fixture(cur)
+            actor = fixture(cur)
             junk, real, third = capture(cur, "Junk"), capture(cur, "Real"), capture(cur, "Third")
 
             # --- supersede, and the record must survive it -------------------
@@ -172,13 +236,79 @@ def main() -> int:
                          "closed_at=now(),version=version+1 where ref=%s", (real,),
                     "an unreceipted UPDATE into a terminal state")
 
-            # --- captured only ---------------------------------------------------
+            # --- captured only, for a decline -------------------------------------
             refuses(cur, "select ops.decline_sourced_work_request(%s,2,'r','joe',%s)",
                     (real, str(uuid.uuid4())), "withdrawing at a version that is not the captured one")
 
+            # --- 0883: a triaged request with nothing downstream ------------------
+            retired, successor, planned = capture(cur, "Retired"), capture(cur, "Successor"), capture(cur, "Planned")
+            for ref in (retired, planned):
+                triage(cur, ref)
+            refuses(cur, "select ops.decline_sourced_work_request(%s,2,'r','joe',%s)",
+                    (retired, str(uuid.uuid4())), "declining a triaged request")
+            refuses_named(cur, "select ops.supersede_sourced_work_request(%s,1,'r',%s,'joe',%s)",
+                          (retired, successor, str(uuid.uuid4())), "work_request_not_supersedable",
+                          "superseding a triaged request at its captured version")
+
+            row = cur.execute(
+                "select state,version,superseded_by_ref from"
+                " ops.supersede_sourced_work_request(%s,2,%s,%s,'joe',%s)",
+                (retired, "every criterion carried forward by its successor", successor,
+                 str(uuid.uuid4()))).fetchone()
+            if row != ("superseded", 3, successor):
+                raise RuntimeError(f"a triaged supersession did not land: {row}")
+            card = cur.execute(
+                "select state,triage_classification,triaged_by_actor_slug,superseded_by_ref from"
+                " ops.work_request_card(%s,'carr-internal')", (retired,)).fetchone()
+            if card != ("superseded", "operational", "joe", successor):
+                raise RuntimeError(f"the card lost the triage of a superseded request: {card}")
+            kept = cur.execute(
+                "select r.classification,r.base_version,r.result_version,old.ref"
+                "  from ops.work_request succ"
+                "  join ops.work_request old on old.superseded_by = succ.id"
+                "  join ops.work_request_triage_receipt r on r.work_request_id = old.id"
+                " where succ.ref = %s", (successor,)).fetchall()
+            if kept != [("operational", 1, 2, retired)]:
+                raise RuntimeError(f"the triage receipt is not readable through superseded_by: {kept}")
+
+            # --- 0883: the triage receipt is evidence -----------------------------
+            refuses_named(cur, "update ops.work_request_triage_receipt set classification='safety_review'",
+                          (), "ops.work_request_triage_receipt is append-only", "rewriting a triage receipt")
+            refuses_named(cur, "delete from ops.work_request_triage_receipt", (),
+                          "ops.work_request_triage_receipt is append-only", "deleting a triage receipt")
+
+            # --- 0883: a triaged request with a plan is refused by name -----------
+            runbook = runbook_fixture(cur, actor)
+            cur.execute(
+                "select * from ops.propose_sourced_work_request_plan(%s,2,'Bounded scope',%s,%s,"
+                "'safe:recovery:stop','safe:observability:ops-run',%s,%s)",
+                (planned, runbook, Jsonb([]), Jsonb({"max_steps": 2, "max_duration_minutes": 10}),
+                 str(uuid.uuid4())))
+            message = refuses_named(
+                cur, "select ops.supersede_sourced_work_request(%s,2,'r',%s,'joe',%s)",
+                (planned, successor, str(uuid.uuid4())), "triaged_work_request_has_downstream_evidence",
+                "superseding a triaged request that holds a plan")
+            if "ops.sourced_work_request_plan.work_request_id" not in message:
+                raise RuntimeError(f"the refusal does not name what would be stranded: {message}")
+            # A forged receipt reaches the trigger, which runs the same census.
+            refuses(cur,
+                    "with r as (insert into ops.work_request_withdrawal_receipt (work_request_id,"
+                    "idempotency_key,base_version,result_version,final_state,exit_reason,superseded_by,"
+                    "withdrawn_by_actor_id) select w.id,gen_random_uuid(),2,3,'superseded','forged',s.id,%s"
+                    " from ops.work_request w, ops.work_request s where w.ref=%s and s.ref=%s returning 1)"
+                    " update ops.work_request set state='superseded',exit_reason='forged',closed_at=now(),"
+                    "superseded_by=(select id from ops.work_request where ref=%s),version=3"
+                    " where ref=%s and exists (select 1 from r)",
+                    (actor, planned, successor, successor, planned),
+                    "a receipt-backed UPDATE that strands a plan")
+            still = cur.execute("select state,version from ops.work_request where ref=%s", (planned,)).fetchone()
+            if still != ("triaged", 2):
+                raise RuntimeError(f"a refused supersession moved the planned request: {still}")
+
         print(f"PASS: decline and supersede land with receipts; a withdrawn request stays "
               f"readable on the card with reason, closing time and successor; both leave the "
-              f"queue; {REFUSALS} named refusals hold")
+              f"queue; a triaged request with nothing downstream is superseded with its triage "
+              f"receipt intact, one with a plan is refused by name; {REFUSALS} refusals hold")
         return 0
     except Exception as exc:
         print(f"work-request-withdrawal-db-gate: FAIL — {exc}", file=sys.stderr)
