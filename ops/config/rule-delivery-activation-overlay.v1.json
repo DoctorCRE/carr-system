@@ -5,7 +5,8 @@
   "_repin_note_2026_10_12": "hooks/staging-observation-tracker.py was retired and removed from the loose_work control's implementation list. None of the eight activation-target contracts changed; migration 0859 moves their guarded map-digest preimage forward.",
   "_repin_note_2026_10_12_held_controls": "The session_boot, ledger_capture and loop_guard control_catalog entries each gained a CI-run test (migration 0874 installs them). No rule_controls, rule_load_layers or active_rule_ids entry changed, so none of the eight activation-target contracts changed; migration 0875 moves their guarded map-digest preimage forward from the post-0871 digest.",
   "_repin_note_2026_10_12_unfiled_bug": "The unfiled_bug Stop-gate control was registered and rule 19ebbeb3 was bound to it. None of the eight activation-target contracts changed; migration 0871 moves their guarded map-digest preimage forward.",
-  "base_map_sha256": "7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f",
+  "_repin_note_2026_10_13_github_burst_guard": "The github-burst-guard control_catalog entry was registered (migration 0877 installs it). No rule_controls, rule_load_layers or active_rule_ids entry changed, so none of the eight activation-target contracts changed; migration 0878 moves their guarded map-digest preimage forward from the post-0875 digest.",
+  "base_map_sha256": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
   "schema": "rule-delivery-activation-overlay/v1",
   "targets": [
     {

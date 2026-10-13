@@ -627,6 +627,15 @@
         "command:python3 hooks/gate-integrity.py --selftest"
       ]
     },
+    "github-burst-guard": {
+      "failure_mode": "PreToolUse deny on Bash",
+      "implementation": [
+        "hooks/github-burst-guard.py"
+      ],
+      "test": [
+        "ops/github-burst-guard-selftest.py"
+      ]
+    },
     "glanceable_lead": {
       "failure_mode": "CI class failure",
       "implementation": [

@@ -24,6 +24,7 @@
     "executor_tier": "deny_gate",
     "gate_edit": "deny_gate",
     "gate_integrity": "stop_gate",
+    "github-burst-guard": "deny_gate",
     "glanceable_lead": "schema",
     "index_upkeep": "deny_gate",
     "lead_client_pair": "transactional_schema",

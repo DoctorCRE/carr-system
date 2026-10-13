@@ -58,6 +58,12 @@ HELD_CONTROL_REPIN_MIGRATION = "0875_repin_rule_delivery_activation_after_held_c
 HELD_CONTROL_REPIN_MIGRATION_SOURCE = (
     ROOT / "migrations" / HELD_CONTROL_REPIN_MIGRATION
 ).read_text(encoding="utf-8")
+BURST_CONTROL_REPIN_MIGRATION = (
+    "0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql"
+)
+BURST_CONTROL_REPIN_MIGRATION_SOURCE = (
+    ROOT / "migrations" / BURST_CONTROL_REPIN_MIGRATION
+).read_text(encoding="utf-8")
 SOURCE_MERGE_MIGRATION_SOURCE = (
     ROOT / "migrations" / SOURCE_MERGE_MIGRATION
 ).read_text(encoding="utf-8")
@@ -100,6 +106,7 @@ SIZING_REPIN_DIGEST = "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490ba
 TRACKER_RETIREMENT_REPIN_DIGEST = "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e"
 UNFILED_BUG_REPIN_DIGEST = "dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08"
 HELD_CONTROL_REPIN_DIGEST = "7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f"
+BURST_CONTROL_REPIN_DIGEST = "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6"
 EXPECTED_TARGETS = [
     "25fcddee", "3fa17fa0", "72e06bdf", "581cb3fe", "113b3833",
     "57d13061", "c66dc739", "49533583", "557838a5",
@@ -206,6 +213,9 @@ unfiled_bug_repin_ledger_applied = bool(
 held_control_repin_ledger_applied = bool(
     re.search(rf"^{re.escape(HELD_CONTROL_REPIN_MIGRATION)}\t", SNAPSHOT, re.M)
 )
+burst_control_repin_ledger_applied = bool(
+    re.search(rf"^{re.escape(BURST_CONTROL_REPIN_MIGRATION)}\t", SNAPSHOT, re.M)
+)
 cutover_ready_ledger_applied = bool(
     re.search(rf"^{re.escape(CUTOVER_READY_MIGRATION)}\t", SNAPSHOT, re.M)
 )
@@ -257,7 +267,8 @@ expected_snapshot_targets = (
 )
 assert [row[0] for row in snapshot_targets] == expected_snapshot_targets
 expected_snapshot_digest = (
-    HELD_CONTROL_REPIN_DIGEST if held_control_repin_ledger_applied
+    BURST_CONTROL_REPIN_DIGEST if burst_control_repin_ledger_applied
+    else HELD_CONTROL_REPIN_DIGEST if held_control_repin_ledger_applied
     else UNFILED_BUG_REPIN_DIGEST if unfiled_bug_repin_ledger_applied
     else TRACKER_RETIREMENT_REPIN_DIGEST if tracker_retirement_repin_ledger_applied
     else SIZING_REPIN_DIGEST if sizing_repin_ledger_applied
@@ -295,6 +306,9 @@ assert all(
 assert HELD_CONTROL_REPIN_DIGEST in HELD_CONTROL_REPIN_MIGRATION_SOURCE
 assert UNFILED_BUG_REPIN_DIGEST in HELD_CONTROL_REPIN_MIGRATION_SOURCE
 assert all(short_id in HELD_CONTROL_REPIN_MIGRATION_SOURCE for short_id in CURRENT_EXPECTED_TARGETS)
+assert BURST_CONTROL_REPIN_DIGEST in BURST_CONTROL_REPIN_MIGRATION_SOURCE
+assert HELD_CONTROL_REPIN_DIGEST in BURST_CONTROL_REPIN_MIGRATION_SOURCE
+assert all(short_id in BURST_CONTROL_REPIN_MIGRATION_SOURCE for short_id in CURRENT_EXPECTED_TARGETS)
 assert OLD_DIGEST in REFRESH_MIGRATION_SOURCE and DIGEST in REFRESH_MIGRATION_SOURCE
 assert THIRD_DIGEST in SECOND_REFRESH_MIGRATION_SOURCE
 assert all(short_id in SECOND_REFRESH_MIGRATION_SOURCE for short_id in EXPECTED_TARGETS)
