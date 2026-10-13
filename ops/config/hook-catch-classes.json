@@ -78,6 +78,7 @@
     "chat-lint-gate.py": {"catch_class": "writing lint on the turn's prose", "also_caught_by": "unverified"},
     "chat-lint-carryover.py": {"catch_class": "carryover of the previous turn's lint", "also_caught_by": "unverified"},
     "loose-work-gate.py": {"catch_class": "turn ended with loose work outstanding", "also_caught_by": "unverified"},
+    "unfiled-bug-stop-gate.py": {"catch_class": "observed defect reported at turn end with nothing filed", "also_caught_by": "unverified"},
     "unread-artifact-gate.py": {"catch_class": "artifact referenced but never read", "also_caught_by": "unverified"},
     "drift-claim-gate.py": {"catch_class": "drift claimed without a record", "also_caught_by": "unverified"},
     "drift-assertion-gate.py": {"catch_class": "drift asserted at turn end without a record", "also_caught_by": "unverified"},

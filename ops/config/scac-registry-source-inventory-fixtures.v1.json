@@ -119365,6 +119365,29 @@
           "classification_authorizing": false
         },
         {
+          "ingress_key": "script-entrypoint:hooks/unfiled-bug-stop-gate.py",
+          "ingress_kind": "script_entrypoint",
+          "operation": "hooks/unfiled-bug-stop-gate.py",
+          "effect_class": "administrative_mutation",
+          "source_locator": "hooks/unfiled-bug-stop-gate.py",
+          "schema_digest": "65719cd879c3c840226d8f0778194027712a794784867bdbbfbac294baf891da",
+          "handler_digest": "65719cd879c3c840226d8f0778194027712a794784867bdbbfbac294baf891da",
+          "write": true,
+          "human_only": false,
+          "authority_only": true,
+          "principal_mode": "existing_script_specific_credential_boundary",
+          "mutation_kind": "scac.mutation.admin",
+          "target_surface": "scac.surface.runtime",
+          "delegates_to": [],
+          "request_shape": "fixed_script_cli_contract",
+          "idempotency_mode": "script_specific_registered_current_control",
+          "rollback_class": "forward_fix_only",
+          "admission_class": "registered_inventory_only",
+          "owner_package": "11",
+          "implementation_state": "inventoried_not_atomically_mediated",
+          "classification_authorizing": false
+        },
+        {
           "ingress_key": "script-entrypoint:hooks/worktree-self-plumb.py",
           "ingress_kind": "script_entrypoint",
           "operation": "hooks/worktree-self-plumb.py",
@@ -119503,6 +119526,29 @@
           "classification_authorizing": false
         },
         {
+          "ingress_key": "script-entrypoint:ops/rule-delivery-local-pg-acceptance.py",
+          "ingress_kind": "script_entrypoint",
+          "operation": "ops/rule-delivery-local-pg-acceptance.py",
+          "effect_class": "administrative_mutation",
+          "source_locator": "ops/rule-delivery-local-pg-acceptance.py",
+          "schema_digest": "44c0b22e6ed068ac899d5f4180c72a2e597f361aacd35f432b3c19c61443a250",
+          "handler_digest": "44c0b22e6ed068ac899d5f4180c72a2e597f361aacd35f432b3c19c61443a250",
+          "write": true,
+          "human_only": false,
+          "authority_only": true,
+          "principal_mode": "existing_script_specific_credential_boundary",
+          "mutation_kind": "scac.mutation.admin",
+          "target_surface": "scac.surface.runtime",
+          "delegates_to": [],
+          "request_shape": "fixed_script_cli_contract",
+          "idempotency_mode": "script_specific_registered_current_control",
+          "rollback_class": "forward_fix_only",
+          "admission_class": "registered_inventory_only",
+          "owner_package": "11",
+          "implementation_state": "inventoried_not_atomically_mediated",
+          "classification_authorizing": false
+        },
+        {
           "ingress_key": "script-entrypoint:ops/self-closing-records-gate.py",
           "ingress_kind": "script_entrypoint",
           "operation": "ops/self-closing-records-gate.py",
@@ -119620,8 +119666,8 @@
           "classification_authorizing": false
         }
       ],
-      "expected_count": 1213,
-      "expected_sha256": "804c0777ef1d55394e91be9a724a6f74fff3722dea1de2ee877a8c24033e4ae1"
+      "expected_count": 1214,
+      "expected_sha256": "2ea32c94d417f7a7b6e6cd9ed714bf192618d42efd4ac6afc7057413ffa02763"
     }
   ],
   "current_source_review": {

@@ -720,6 +720,8 @@ session-presence-hook.py	SessionEnd	(all)	counts	allow=1
 session-presence-hook.py	UserPromptSubmit	(all)	counts	allow=6
 settings-change-gate.py	PostToolUse[Bash]	(all)	counts	allow=320
 settings-change-gate.py	PreToolUse[Bash]	(all)	counts	allow=320
+unfiled-bug-stop-gate.py	Stop	(all)	counts	allow=87 reopen=1
+unfiled-bug-stop-gate.py	Stop	scenarios:e5b100000001	reopen	UNFILED BUG — this turn reports a defect it observed and files nothing for it (rule <hex>: a detected bug is recorded and addressed in the s
 unread-artifact-gate.py	Stop	(all)	counts	allow=87 announce=1
 unread-artifact-gate.py	Stop	scenarios:d4a000000004	announce	UNREAD ARTIFACT — you are describing what a file DOES, and this session never opened it:
 weekend-quiet-gate.py	PreToolUse[PushNotification|mcp__.*__(send_message|create_draft|update_draft)]	(all)	counts	allow=7 deny=1

@@ -5865,10 +5865,10 @@
       "number": 118,
       "version": "scac-mutation-registry.v118",
       "predecessor": "scac-mutation-registry.v117",
-      "digest": "sha256:c736b5a902254d353d77a6b80398da65db8360e330c1d3a512e5aa883877c442",
-      "source_set_digest": "sha256:784fcc5a8c32c19f273cf2e0638dc5c43aacd96e8a19d2fe1d03279cab69df1e",
+      "digest": "sha256:d07ca85ac277b0ff10d616abe2f33347846e1b33f98b82225d11f37e12e1a812",
+      "source_set_digest": "sha256:a3671595208374e6bcacf4feb23b8c6df5932a9c39f4f65bf1ba386810c93d30",
       "catalog_digest": "sha256:b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877",
-      "artifact_sha256": "f9ca69957b105d29d5e593c5381ba24c53fe449935cc6a0c6487edaf3f29b399",
+      "artifact_sha256": "cd58edf9cb2a5647effeeb9ddb6889038c64e1c80caf8ea1161d91047b8d7661",
       "path": "mcp-server/src/scac-mutation-registry.current.generated.js",
       "catalog": {
         "column_dml": {
@@ -5897,11 +5897,11 @@
           "digest": "sha256:cd7e5cff7db2ff2d98fb626c15d0109af9af9de91927b7b32e53a2d7147e9ee6"
         }
       },
-      "commit": "55c30a1c9c0a0d6351ed940b3d98b781096e373c",
-      "source_count": 1213,
-      "entry_count": 2816,
+      "commit": "0dcbbbc8664a6c37528713363b1b378d99335894",
+      "source_count": 1214,
+      "entry_count": 2817,
       "migration": "migrations/0873_self_closing_records_scac_successor.sql",
-      "entry_set_digest": "sha256:2371b3fb4a79654de9c5ddda725e5a0ec245dfa6b79632af58108a16d197b3ea",
+      "entry_set_digest": "sha256:c64b89b68006498b9e5fdf6154200fd9fc0abb3fe1e5e6ddb0afa5c59692a7bd",
       "atomic_pair": [
         "0872_self_closing_records.sql",
         "0873_self_closing_records_scac_successor.sql"
@@ -5915,7 +5915,7 @@
         "include_current_entry_set": true,
         "catalog_function": "ops.scac_mutation_catalog_v118_current()"
       },
-      "migration_sha256": "cfdd54a9f8182826f529b2260cf62da955bdf0c3b8484eda86d33d3920d50587"
+      "migration_sha256": "16854bf998b06b9a01f30486537064e0e24ddc0c6010238b10e45b4f6ed5802c"
     }
   ],
   "atomic_groups": [

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the tracker-retirement repin against PostgreSQL and the current overlay."""
+"""Exercise the unfiled-bug control repin against PostgreSQL and the current overlay."""
 import importlib.util
 import os
 from pathlib import Path
@@ -22,8 +22,8 @@ TO_TEST_REF = "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-s
 
 
 def main():
-    migrations = list(ROOT.glob("migrations/[0-9][0-9][0-9][0-9]_repin_rule_delivery_activation_after_tracker_retirement.sql"))
-    assert len(migrations) == 1, "the tracker retirement needs one forward activation repin"
+    migrations = list(ROOT.glob("migrations/[0-9][0-9][0-9][0-9]_repin_rule_delivery_activation_after_unfiled_bug_control.sql"))
+    assert len(migrations) == 1, "the unfiled_bug control needs one forward activation repin"
     repin = migrations[0].read_text()
     contract_fields = (
         "short_id", "expected_scope", "expected_pack", "from_control",
@@ -33,7 +33,7 @@ def main():
     )
     for field in contract_fields:
         assert re.search(rf"\b{field}\b", repin), f"repin does not guard {field}"
-    prior = (ROOT / "migrations/0851_repin_rule_delivery_activation_after_sizing_rule.sql").read_text()
+    prior = (ROOT / "migrations/0859_repin_rule_delivery_activation_after_tracker_retirement.sql").read_text()
     old_digest = re.search(r"v_new constant text := '([0-9a-f]{64})'", prior)[1]
     _, overlay = load_validated()
     new_digest = overlay["base_map_sha256"]

@@ -213,7 +213,8 @@
       "a2e78f48",
       "b7ec8f3b",
       "ede4b241",
-      "8400cd3d"
+      "8400cd3d",
+      "19ebbeb3"
     ]
   },
   "categories": {
@@ -341,7 +342,8 @@
       "4402973a",
       "1d50a3bb",
       "d7f74c93",
-      "dcf98880"
+      "dcf98880",
+      "19ebbeb3"
     ],
     "session_task_rail": [
       "25fcddee",
@@ -895,6 +897,15 @@
         "ops/trigger-grant-selftest.py"
       ]
     },
+    "unfiled_bug": {
+      "failure_mode": "Stop block",
+      "implementation": [
+        "hooks/unfiled-bug-stop-gate.py"
+      ],
+      "test": [
+        "ops/unfiled-bug-stop-gate-selftest.py"
+      ]
+    },
     "vault_salvage": {
       "failure_mode": "quarantine, diff and intake evidence precede healing",
       "implementation": [
@@ -1083,6 +1094,13 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Same as above."
+    },
+    "19ebbeb3": {
+      "binding_moment": "turn end, when the turn's own prose reports a defect the session observed",
+      "category": "post_action_verification",
+      "control": "unfiled_bug",
+      "enforcement_class": "stop_gate",
+      "exceptions": "the turn filed it (record-defect, report-problem or add-loop accepted by the record layer), the sentence's paragraph names its record or fixing PR, or the sentence is a relay, a hypothetical, a fix already in hand, the PR build loop or an environment fault"
     },
     "1b8e7f43": {
       "category": "judgment_advisory",
@@ -2425,6 +2443,11 @@
       "packs": [
         "joe-development"
       ]
+    },
+    "19ebbeb3": {
+      "load_layer": "control",
+      "packs": [],
+      "why": "An installed stop gate delivers this at its binding moment."
     },
     "1b8e7f43": {
       "load_layer": "layer0",

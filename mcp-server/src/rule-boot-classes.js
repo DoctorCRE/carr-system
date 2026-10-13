@@ -9,7 +9,7 @@
 // at request time. A Worker has no filesystem, so this is a checked-in module.
 
 export const RULE_BOOT_CLASSES_SOURCE = "ops/config/rule-classes.v1.json";
-export const RULE_BOOT_CLASSES_DIGEST = "sha256:99ed32e6c647b2a245223a931d1244fa2987eeebdf82cf248ade279406560e64";
+export const RULE_BOOT_CLASSES_DIGEST = "sha256:0a0c6579b84eb4c932690910f01ff8227e5006623d9b3992b4c9f3484a67a0c7";
 export const RULE_BOOT_BUDGET_TOKENS = 48000;
 export const RULE_BOOT_CHARS_PER_TOKEN = 3.6;
 
@@ -30,6 +30,7 @@ export const RULE_BOOT_CLASSES = Object.freeze({
   "17ffd587": Object.freeze({"cls": "b", "on": false, "summary": "Never surface lead-outreach reminders on open-loops, heartbeat or Monday brief; leads live on Lead Board; deal follow-up dates excepted.", "when": "rendering open-loops, heartbeat, or Monday brief"}),
   "185013c6": Object.freeze({"cls": "b", "on": true, "summary": "When spawning a subagent or sizing 30+ min work, pick the cheapest fit-map executor and state it.", "when": "delegating or sizing 30+ minute work"}),
   "19304882": Object.freeze({"cls": "c", "on": false, "personal_to": "joe", "summary": "During decision reviews, invite Joe's framing first and log timing calls and overrides", "when": "Joe's decision/timing reviews and order-writing ramp"}),
+  "19ebbeb3": Object.freeze({"cls": "d", "on": false, "summary": "A detected bug is recorded and fixed or given a Work Request in the same turn, never stepped over.", "when": "unfiled_bug stop_gate"}),
   "1b8e7f43": Object.freeze({"cls": "b", "on": true, "summary": "When a verb or action is blocked, file a loop recording it; never just drop it.", "when": "add-loop verb, when a capability/verb call is blocked"}),
   "1c21263c": Object.freeze({"cls": "a", "on": true, "summary": "When the same problem shape needs fixing four times, stop and fix the instruction, not the instance.", "when": "four same-shape fixes in one session"}),
   "1c42d80c": Object.freeze({"cls": "a", "on": true, "summary": "When friction (refusal, error, workaround) hits, fix the root cause in-session; never route around it silently.", "when": "unexpected friction"}),
