@@ -3,20 +3,32 @@
   "jev_compiled_triggers": 120,
   "pack_fallback_triggers": 7,
   "seeded_detector_rule_ids": 52,
-  "seeded_detector_triggers": 16,
+  "seeded_detector_triggers": 18,
   "structural_extra_triggers": 2,
-  "triggers": 151
+  "triggers": 153
  },
  "generated_from": {
   "jev_triggers_sha256": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
   "map_sha256": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
-  "triage_sha256": "811c1c200de29efd2b8da3745b3fc79a51542cd3f5f89ab328ba87592c9f7cca"
+  "triage_sha256": "1a5b2d55e5b0b7c4322f82d270b8a9349c56f1bb7e73266968a1d6880a2ead44"
  },
  "generated_note": "Compiled by ops/rule-jit-compile.py from ops/config/rule-triage.v1.json's per-rule `detector` fields and ops/config/rule-enforcement-map.json's rule_packs/rule_load_layers. Never hand-edit this file \u2014 run the compiler again after changing either input, and `--check` verifies the two never drift apart.",
  "max_rules_per_trigger": 5,
  "schema": "rule-jit-triggers/v1",
  "slice": "s9",
  "triggers": [
+  {
+   "kind": "bash_family",
+   "packs": [
+    "governance-rules"
+   ],
+   "pattern": "\\bdispatch\\.py\\s+send\\b",
+   "rule_ids": [
+    "8400cd3d"
+   ],
+   "source": "seeded_detector",
+   "trigger_id": "db449490f0c5"
+  },
   {
    "kind": "bash_family",
    "packs": [
@@ -95,18 +107,6 @@
    ],
    "source": "seeded_detector",
    "trigger_id": "49a3410cc883"
-  },
-  {
-   "kind": "content_regex",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\b(?:EnterPlanMode|UpdatePlan|update_plan|propose-ready-plan|heavy[-\\s]?build(?:\\s+plan)?|Codex\\s+brief|Dot\\s+brief)\\b",
-   "rule_ids": [
-    "8400cd3d"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "265cbc0911b6"
   },
   {
    "kind": "content_regex",
@@ -1789,6 +1789,18 @@
   {
    "kind": "verb",
    "packs": [
+    "governance-rules"
+   ],
+   "pattern": "^(?:EnterPlanMode|Agent|RemoteTrigger|Workflow|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$",
+   "rule_ids": [
+    "8400cd3d"
+   ],
+   "source": "seeded_detector",
+   "trigger_id": "c84d0fe94cac"
+  },
+  {
+   "kind": "verb",
+   "packs": [
     "source-study"
    ],
    "pattern": "^(WebFetch|WebSearch)$",
@@ -1831,6 +1843,18 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "6aaeb8bad36b"
+  },
+  {
+   "kind": "verb",
+   "packs": [
+    "governance-rules"
+   ],
+   "pattern": "__(?:write-work-shape|report-problem|propose-ready-plan)$",
+   "rule_ids": [
+    "8400cd3d"
+   ],
+   "source": "seeded_detector",
+   "trigger_id": "e93e22d1c8c0"
   },
   {
    "kind": "verb",

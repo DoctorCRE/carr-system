@@ -2,7 +2,7 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:95094d2151cc2bcc7165ed15b71cf3295b52ef72610f928c62a8cd3dbd949b28",
+    "configuration_fingerprint": "sha256:fc1a607ccf61fba3a1e6ffc1c3da1264aa0313f7b2839d4d2b5a256983d474d8",
     "harness_id": "evals/rule-delivery/run_eval.py",
     "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
     "model_id": "deterministic-no-model",
@@ -20,7 +20,7 @@
     "total": 338,
     "train": 212
   },
-  "change": "Slim the rule boot to class A, unclassified rules and measured B/C route gaps; prove startup/compaction gating and accept only Joe's named D/E drop.",
+  "change": "Deliver sizing rule 8400cd3d through executed verb and bash_family trigger rows at the shapes that start or hand off new work, replacing its content_regex row that no longer runs.",
   "cost": {
     "baseline_usd_per_case": 0.0,
     "candidate_usd_per_case": 0.0
@@ -108,18 +108,18 @@
         "score": 0.260989010989011
       },
       "candidate": {
-        "ci_high": 0.3223684210526316,
-        "ci_low": 0.20306513409961685,
-        "score": 0.260989010989011
+        "ci_high": 0.34080717488789236,
+        "ci_low": 0.21467391304347827,
+        "score": 0.2768817204301075
       },
       "critical": true,
       "delta": {
-        "ci_high": 0.0,
-        "ci_low": 0.0,
-        "value": 0.0
+        "ci_high": 0.02344319533438205,
+        "ci_low": 0.007773335871565451,
+        "value": 0.015892709441096498
       },
       "dimension_id": "human-delivery-precision",
-      "direction_vs_baseline": "equivalent",
+      "direction_vs_baseline": "improved",
       "evidence_refs": [
         "evals/rule-delivery/evidence/baseline.jsonl",
         "evals/rule-delivery/evidence/candidate.jsonl"
@@ -165,7 +165,7 @@
       },
       "candidate": {
         "path": "evals/rule-delivery/evidence/candidate.jsonl",
-        "sha256": "194f50dbe67786ccb7045fe5ec6664bbb47714969c52edf242fd8ac83b35300f"
+        "sha256": "4f2e87b3da6d2fc43d15c850e9733417958499f6e8fa760be56504e0a27116f8"
       }
     },
     "dependencies": {
@@ -180,7 +180,7 @@
       "ops/config/rule-classes.v1.json": "65562d20e111656855175e9ee6fb6401e74f5b030aefc11a1e64c38abcf341a9",
       "ops/config/rule-enforcement-map.json": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
       "ops/config/rule-jev-triggers.v1.json": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
-      "ops/config/rule-jit-triggers.v1.json": "4c53e43289a819d64dd7945046aed7a30211ecbecef2a3c6b209c790aabadff6",
+      "ops/config/rule-jit-triggers.v1.json": "e1dc7cf4b5f48008d43c3ced64b9746f76a31fe2ce69048dbdf2f2da1d6c448a",
       "ops/config/rule-routes.v1.json": "a7d07fd53511114bb4b380074f27628ff945f133be01ead9b46c7ad2f1baac75",
       "ops/config/rule-selection-corpus.v1.json": "9d9aa0d84329fa29790ee36825caf22924b33717ee152f15c02e81d6872a7454",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
@@ -229,7 +229,8 @@
     "The native /claude-api slash commands are unavailable in this runtime. The existing deterministic replay and programmatic grader regenerated source-bound evidence without a model call.",
     "Frozen expectations and split remain unchanged. No production deployment or live-model quality improvement is claimed.",
     "The merged-source replay also preserves the measured complete-envelope prompt false-delivery reduction: test 14 to 0 and train 40 to 1 against the established historical baseline.",
-    "Joe decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01 accepts D/E full-text loss only. B/C gaps derived across train and test gold cases remain in Part 1 through keep_full_text. No critical flag was lowered."
+    "Joe decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01 accepts D/E full-text loss only. B/C gaps derived across train and test gold cases remain in Part 1 through keep_full_text. No critical flag was lowered.",
+    "WR-000284 C4 replay: the only cohort change is 8400cd3d delivered in 22 more cases (Agent briefs, dispatch.py send, notification and release dispatch cases). Human-delivery precision rises 0.2610 to 0.2769; human-required recall and envelope-prompt clean delivery are unchanged; full-text availability stays at 0.6764, identical to the previous receipt under the accepted D/E tradeoff. No case lost a delivered rule."
   ],
   "primary_dimension": "full-text-availability",
   "repeats": 2,
