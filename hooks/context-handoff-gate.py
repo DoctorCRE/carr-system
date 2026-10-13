@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """Cross-surface context lifecycle gate.
 
-Claude invokes this file at PostToolUse, PreCompact, and Stop. PostToolUse
-records high-water/density evidence and may announce once; PreCompact records
-but always allows; Stop is the only Claude refusal seam. Codex has no claimed
+Claude invokes this file at PreCompact and Stop. PreCompact records but
+always allows; Stop is the only Claude refusal seam. Codex has no claimed
 native Stop hook: its rollout and dispatcher adapters are explicit bare CLI
 commands exposed by this same file.
+
+The PostToolUse wiring was retired 2026-10-12. Measured over seven fleet days
+it fired 2,848 times (about 212 ms each, a full transcript parse per tool
+call) and caught nothing: its only effects were the per-generation activity
+counters below and a once-per-task notice that the Stop leg also gives at the
+next turn end. Every outcome is announce-only and native auto-compaction owns
+real exhaustion, so a mid-turn notice bought nothing a turn end does not. The
+PostToolUse branch stays callable (CARR_CONTEXT_HOOK_EVENT=PostToolUse) and
+covered by the selftest; without it the fallback caps advance on Stop cycles
+and active minutes only, and density can still come from a declared risk.
 
 Lifecycle mutations are expected-version CAS operations over one task file.
 State, immutable side objects, and native-identity bindings commit through one
