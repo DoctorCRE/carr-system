@@ -951,12 +951,15 @@ check("process() returns None (no injection, no selector call) for a non-match",
 agent_call = gen_payload(tool="Agent", tool_input={"description": "spawn helper", "prompt": "zzz"})
 # Rule ede4b241 (cloud model choice) adds a second verb trigger on the same
 # dispatch moment, so an Agent call hits the council trigger AND the model-choice
-# trigger; the council trigger alone still carries its own five rules.
+# trigger; the council trigger alone still carries its own five rules. The
+# rule is still proposed and out of the map's active inventory (2026-10-13,
+# loop 1304), so its trigger carries no pack until approval restores
+# delegation-council.
 model_choice_row = next(row for row in TRIGGER_ROWS.values()
                         if row["kind"] == "verb" and "ede4b241" in row["rule_ids"])
-check("model-choice trigger delivers only rule ede4b241 via delegation-council",
+check("model-choice trigger delivers only rule ede4b241, with no pack while proposed",
       model_choice_row["rule_ids"] == ["ede4b241"]
-      and model_choice_row["packs"] == ["delegation-council"])
+      and model_choice_row["packs"] == [])
 sizing_tool_row = next((row for row in TRIGGER_ROWS.values()
                        if row["kind"] == "verb" and "8400cd3d" in row["rule_ids"]
                        and re.search(row["pattern"], "Agent")), None)

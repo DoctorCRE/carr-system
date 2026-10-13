@@ -9,7 +9,7 @@
  },
  "generated_from": {
   "jev_triggers_sha256": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
-  "map_sha256": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
+  "map_sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
   "triage_sha256": "1a5b2d55e5b0b7c4322f82d270b8a9349c56f1bb7e73266968a1d6880a2ead44"
  },
  "generated_note": "Compiled by ops/rule-jit-compile.py from ops/config/rule-triage.v1.json's per-rule `detector` fields and ops/config/rule-enforcement-map.json's rule_packs/rule_load_layers. Never hand-edit this file \u2014 run the compiler again after changing either input, and `--check` verifies the two never drift apart.",
@@ -19,9 +19,7 @@
  "triggers": [
   {
    "kind": "bash_family",
-   "packs": [
-    "governance-rules"
-   ],
+   "packs": [],
    "pattern": "\\bdispatch\\.py\\s+send\\b",
    "rule_ids": [
     "8400cd3d"
@@ -1776,9 +1774,7 @@
   },
   {
    "kind": "verb",
-   "packs": [
-    "delegation-council"
-   ],
+   "packs": [],
    "pattern": "^(?:Agent|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$",
    "rule_ids": [
     "ede4b241"
@@ -1788,9 +1784,7 @@
   },
   {
    "kind": "verb",
-   "packs": [
-    "governance-rules"
-   ],
+   "packs": [],
    "pattern": "^(?:EnterPlanMode|Agent|RemoteTrigger|Workflow|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$",
    "rule_ids": [
     "8400cd3d"
@@ -1846,9 +1840,7 @@
   },
   {
    "kind": "verb",
-   "packs": [
-    "governance-rules"
-   ],
+   "packs": [],
    "pattern": "__(?:write-work-shape|report-problem|propose-ready-plan)$",
    "rule_ids": [
     "8400cd3d"

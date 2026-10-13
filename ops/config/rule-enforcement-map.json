@@ -21,7 +21,6 @@
       "113b3833",
       "faae6748",
       "30a189fb",
-      "9b081605",
       "25fab860",
       "57d13061",
       "bbffc139",
@@ -31,7 +30,11 @@
       "557838a5",
       "b3ea627f",
       "11b2b73b",
-      "6172e7d5"
+      "6172e7d5",
+      "a3da3d39",
+      "76fcbed6",
+      "67e48aaf",
+      "486584d6"
     ],
     "shared": [
       "9310827b",
@@ -132,7 +135,6 @@
       "9e3fb6d0",
       "3578d799",
       "9ff56260",
-      "5697071b",
       "c4a284b2",
       "d9ce2b08",
       "2e8b4840",
@@ -212,9 +214,17 @@
       "204391be",
       "a2e78f48",
       "b7ec8f3b",
-      "ede4b241",
-      "8400cd3d",
-      "19ebbeb3"
+      "19ebbeb3",
+      "661d7757",
+      "f673326b",
+      "08c4eda2",
+      "4a77c35d",
+      "a9fc3f0e",
+      "ac0a6579",
+      "578fdd91",
+      "07dde434",
+      "cfe6b5c6",
+      "c363bd8b"
     ]
   },
   "categories": {
@@ -310,7 +320,6 @@
       "4a53ff82",
       "ab814a26",
       "faae6748",
-      "9b081605",
       "25fab860"
     ],
     "post_action_verification": [
@@ -1450,11 +1459,6 @@
       "enforcement_class": "surfacing",
       "exceptions": "no quoted/link layer"
     },
-    "5697071b": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Legal/business-fact judgment with a stated expiry condition Joe must confirm."
-    },
     "57d13061": {
       "binding_moment": "X retrieval",
       "category": "session_task_rail",
@@ -1731,11 +1735,6 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Panel-composition and seat-diversity judgment."
     },
-    "8400cd3d": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "The planning moment is detectable and receives this rule through pack_delivery. Choosing tiny, medium-large, or beyond-one-session still requires judgment about the work's shape."
-    },
     "83b9a362": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1848,13 +1847,6 @@
       "control": "index_upkeep",
       "enforcement_class": "deny_gate",
       "exceptions": "categories without an existing INDEX.md"
-    },
-    "9b081605": {
-      "binding_moment": "before outbound send",
-      "category": "hard_pre_action",
-      "control": "no_send_worker",
-      "enforcement_class": "deny_gate",
-      "exceptions": "draft creation only"
     },
     "9d80fd2d": {
       "category": "judgment_advisory",
@@ -2223,11 +2215,6 @@
       "enforcement_class": "deny_gate",
       "exceptions": "explicitly unverified/failed disclosure"
     },
-    "ede4b241": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Whether a job is well-scoped with a checkable done-condition, or is design, gate, eval-design or review work, is a judgment about the job. No predicate over a dispatch call can decide it. The half a machine can carry is delivery: the rule is put in front of the session at the moment it dispatches work to another model or launches a cloud session (pack delegation-council, verb trigger compiled from the rule-triage detector), and the floors Joe set for specific lanes stay enforced by hooks/model-floor-gate.py."
-    },
     "ede4c735": {
       "binding_moment": "at each write, when the surface is classified",
       "category": "session_task_rail",
@@ -2356,6 +2343,76 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "The task-specific instruction is delivered by its rule pack; no deterministic predicate can decide every application."
+    },
+    "661d7757": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a bounded review judgment from Jev would be useful is a judgment about the work in hand. The half that must not blur is that Jev's result stays evidence: source checks, authenticated authority, hosted CI and any reviewer-of-record gate keep their own controls, and nothing can tell from a call whether a session treated Jev's answer as a substitute for them."
+    },
+    "f673326b": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a restriction, fence or protective step is one Joe asked for is a reading of his grant, and a fence a session invents lives in its own prose and plans rather than in a tool call. The one boundary the rule keeps, custody of a live credential raised once, is itself a judgment about what the session holds."
+    },
+    "a3da3d39": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Recognising that something is left waiting on Joe's approval, and that a passing mention of a proposed or pending item stands in for the direct question, is a reading of the session's own prose. hooks/escalation-gate.py lets such an approval question through to Joe; nothing refuses the reply that mentions a proposed rule without asking."
+    },
+    "76fcbed6": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Requires judging why Joe picked a source, whether every concept and linked source was read in full, and whether a decline names a property test the source genuinely failed. No predicate can tell a full study from a summary that looks like one."
+    },
+    "08c4eda2": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Legal and business-fact judgment with a stated amendment condition: whether Joe's Alabama licence has actually issued, and whether a given act is representation or only prospecting, research and outreach, cannot be read off any write the record layer receives."
+    },
+    "4a77c35d": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Ordering the Dot queue needs a judgment about which jobs would otherwise spend paid Claude or Codex tokens, and whether a PR's own review loop genuinely ended unresolved, stalled or ran out of budget. No dispatch predicate can decide that a review would be busy work."
+    },
+    "67e48aaf": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a reply warns Joe about transcript exposure, or suggests rotating on that ground, is a reading of the session's prose; nothing in a tool call carries it."
+    },
+    "a9fc3f0e": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a session searched beyond the research-site index, and whether a new source proved useful enough to index, are research-quality judgments. The egress guard that blocks sending data to unlisted hosts is a separate exfiltration control and does not decide where a session may read."
+    },
+    "ac0a6579": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The rule forbids proposing or raising something: a stronger password, extra sign-in steps or a guessable-password finding. That lives in a session's recommendations and review prose. The half still binding, one client page never showing another client's data or internal notes, is a content judgment per page."
+    },
+    "578fdd91": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The decision to apply rests on a judgment the rule spells out: whether identity is confirmed at high or medium confidence with a second corroborating field, and whether the corrected value is one clean value. The correct-party-identity verb refuses name and firm changes without independent matching evidence, which guards the apply step; nothing makes a session apply rather than park."
+    },
+    "486584d6": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The test the rule sets before asking Joe, whether finishing a console step needs something only he can supply right now, is a judgment about the step. A handoff of click-by-click steps is prose, not a refusable action."
+    },
+    "07dde434": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a prospect- or client-facing build gives the person a reason to contact Joe or Dell, or gives them the answer instead, is a product judgment about each design."
+    },
+    "cfe6b5c6": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a mechanism replaces a human step Joe already ruled on, and whether its first live run would be irreversible with checks never run on real inputs, are design judgments. A null live_from or an enabled:false default is legitimate in the narrow case the rule keeps, so no config scan can tell the two apart."
+    },
+    "c363bd8b": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Grouping open PRs by shared files and building one combined branch is an orchestrator's merge-planning act across many PRs. No single merge or push call shows whether an overlapping PR should have joined a batch."
     }
   },
   "rule_load_layers": {
@@ -2781,12 +2838,6 @@
         "joe-comms"
       ]
     },
-    "5697071b": {
-      "load_layer": "pack",
-      "packs": [
-        "client-deal"
-      ]
-    },
     "57d13061": {
       "load_layer": "pack",
       "packs": [
@@ -3017,13 +3068,6 @@
         "delegation-council"
       ]
     },
-    "8400cd3d": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "Sizing happens when a session starts planning new work. The governance-rules pack delivers this rule on native plan tools, governed heavy-build planning, propose-ready-plan, and Codex or Dot briefs."
-    },
     "83b9a362": {
       "load_layer": "pack",
       "packs": [
@@ -3132,13 +3176,6 @@
       "load_layer": "control",
       "packs": [
         "governance-rules"
-      ],
-      "why": "An installed deny gate delivers this at its binding moment."
-    },
-    "9b081605": {
-      "load_layer": "control",
-      "packs": [
-        "joe-comms"
       ],
       "why": "An installed deny gate delivers this at its binding moment."
     },
@@ -3498,13 +3535,6 @@
       "packs": [],
       "why": "An installed deny gate delivers this at its binding moment."
     },
-    "ede4b241": {
-      "load_layer": "pack",
-      "packs": [
-        "delegation-council"
-      ],
-      "why": "Model choice is made at the moment of dispatch, not at every boot. Delivered by pack delegation-council on the Agent tool and on Claude Code Remote create_session / create_trigger."
-    },
     "ede4c735": {
       "load_layer": "pack",
       "packs": [
@@ -3630,6 +3660,94 @@
       "load_layer": "pack",
       "packs": [
         "surface-doctrine"
+      ]
+    },
+    "661d7757": {
+      "load_layer": "pack",
+      "packs": [
+        "delegation-council"
+      ]
+    },
+    "f673326b": {
+      "load_layer": "pack",
+      "packs": [
+        "delegation-council"
+      ]
+    },
+    "a3da3d39": {
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ]
+    },
+    "76fcbed6": {
+      "load_layer": "pack",
+      "packs": [
+        "source-study"
+      ]
+    },
+    "08c4eda2": {
+      "load_layer": "pack",
+      "packs": [
+        "client-deal"
+      ]
+    },
+    "4a77c35d": {
+      "load_layer": "pack",
+      "packs": [
+        "delegation-council"
+      ]
+    },
+    "67e48aaf": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git",
+        "scheduled-automation"
+      ],
+      "why": "A credential Joe pastes arrives while wiring a connector, deploy or scheduled job, not at every boot. engineering-git and scheduled-automation (which already triggers on 'credential') are the packs whose work brings the paste."
+    },
+    "a9fc3f0e": {
+      "load_layer": "pack",
+      "packs": [
+        "records-intake",
+        "source-study"
+      ],
+      "why": "Research runs both as contact and deal enrichment (records-intake) and as source and market research (source-study); the rule binds on either."
+    },
+    "ac0a6579": {
+      "load_layer": "pack",
+      "packs": [
+        "client-deal"
+      ]
+    },
+    "578fdd91": {
+      "load_layer": "pack",
+      "packs": [
+        "records-intake"
+      ]
+    },
+    "486584d6": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
+      ]
+    },
+    "07dde434": {
+      "load_layer": "pack",
+      "packs": [
+        "client-deal"
+      ]
+    },
+    "cfe6b5c6": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
+      ]
+    },
+    "c363bd8b": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
       ]
     }
   },

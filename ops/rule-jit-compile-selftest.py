@@ -153,25 +153,27 @@ check("structural_extra count matches the hand-reviewed list",
       sum(1 for t in bare_doc["triggers"] if t["source"] == "structural_extra")
       == len(compiler.STRUCTURAL_EXTRA_TRIGGERS))
 
-# 9. rule ede4b241 (cloud model choice, taught 2026-09-29): JIT-home, delivered
-# by the delegation-council pack on the moment a session dispatches work to
-# another model or a cloud session, and on nothing else.
+# 9. rule ede4b241 (cloud model choice, taught 2026-09-29): JIT-home, fired
+# on the moment a session dispatches work to another model or a cloud session,
+# and on nothing else. It is still PROPOSED, so since 2026-10-13 (loop 1304)
+# it is out of the enforcement map's active inventory and its seeded trigger
+# carries no pack. When Joe approves it, it re-enters the map with pack
+# delegation-council and these two checks flip back.
 import re
 
 MODEL_CHOICE = "ede4b241"
 routing_rows = [t for t in triggers if MODEL_CHOICE in t["rule_ids"]
                 and t["kind"] == "verb"]
-check("cloud model choice rule ede4b241 is in the enforcement map",
-      MODEL_CHOICE in MAP["rule_controls"] and MODEL_CHOICE in MAP["active_rule_ids"]["shared"])
-check("cloud model choice rule is a JIT-home rule delivered by delegation-council",
-      MODEL_CHOICE in JIT_IDS
-      and MAP["rule_load_layers"].get(MODEL_CHOICE)
-      == {"load_layer": "pack", "packs": ["delegation-council"],
-          "why": MAP["rule_load_layers"].get(MODEL_CHOICE, {}).get("why")})
+check("proposed cloud model choice rule ede4b241 is not in the active enforcement map",
+      MODEL_CHOICE not in MAP["rule_controls"]
+      and MODEL_CHOICE not in MAP["rule_load_layers"]
+      and not any(MODEL_CHOICE in ids for ids in MAP["active_rule_ids"].values()))
+check("cloud model choice rule stays a JIT-home rule",
+      MODEL_CHOICE in JIT_IDS)
 check("cloud model choice rule has exactly one verb trigger, seeded from its detector",
       len(routing_rows) == 1 and routing_rows[0]["kind"] == "verb"
       and routing_rows[0]["source"] == "seeded_detector"
-      and routing_rows[0]["packs"] == ["delegation-council"]
+      and routing_rows[0]["packs"] == []
       and routing_rows[0]["rule_ids"] == [MODEL_CHOICE], routing_rows)
 if len(routing_rows) == 1:
     routing_pattern = re.compile(routing_rows[0]["pattern"])
@@ -194,16 +196,18 @@ if len(routing_rows) == 1:
 # starts or hands off new work: the plan tool, a subagent, a cloud builder, a
 # workflow, a Codex desk dispatch, and the record-layer intake verbs. Only
 # structural kinds count, because content_regex rows no longer run on tool
-# payloads.
+# payloads. Like ede4b241 it is still PROPOSED, so since 2026-10-13 (loop
+# 1304) it is out of the map's active inventory; on approval it returns with
+# pack governance-rules and the first check flips back.
 SIZING = "8400cd3d"
 sizing_rows = [t for t in triggers if SIZING in t["rule_ids"]]
 sizing_planning_rows = [row for row in sizing_rows
                         if row["source"] == "seeded_detector"]
-check("new-work sizing rule is registered for JIT pack delivery",
-      SIZING in MAP["rule_controls"]
-      and SIZING in MAP["active_rule_ids"]["shared"]
-      and SIZING in JIT_IDS
-      and MAP["rule_load_layers"].get(SIZING, {}).get("load_layer") == "pack",
+check("proposed new-work sizing rule is JIT-home but not in the active enforcement map",
+      SIZING not in MAP["rule_controls"]
+      and SIZING not in MAP["rule_load_layers"]
+      and not any(SIZING in ids for ids in MAP["active_rule_ids"].values())
+      and SIZING in JIT_IDS,
       sizing_rows)
 check("new-work sizing rule compiles one row per declared detector, none content_regex",
       sorted(row["kind"] for row in sizing_planning_rows)
