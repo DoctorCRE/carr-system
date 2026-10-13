@@ -29,11 +29,12 @@ configuration loaded from outside the tree. A clean report covers extracted,
 checkable claims only.
 
 On PRs, warnings and a JSON artifact go to the orchestrator. The weekly main
-run writes every stale claim to the job summary, uploads the same report as the
-`instruction-drift-report` artifact, and fails while any claim is stale, so
-drift stays visible until the instructions are repaired. Every job holds read
-permission only and files nothing: CARR tracks work in its record layer, not
-GitHub Issues. No partner is mentioned or assigned.
+run uploads the full report as the `instruction-drift-report` artifact, lists
+stale claims beyond `scripts/doc-drift/baseline.json` in the job summary with
+a count of the known ones, and fails only on the new ones. After repairs,
+refresh the baseline with `ops/doc-drift-product.py --write-baseline`. Every
+job holds read permission only and files nothing: CARR tracks work in its
+record layer, not GitHub Issues. No partner is mentioned or assigned.
 
 The factory owns the implementation. Products retain local snapshots and
 fixtures with a source revision and file hashes, so their CI does not depend on

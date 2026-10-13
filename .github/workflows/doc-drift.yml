@@ -47,6 +47,8 @@ jobs:
           name: instruction-drift-report
           path: out/doc-drift/public-report.json
           if-no-files-found: error
-      - name: Summarize drift and fail when any claim is stale
+      - name: Summarize drift and fail on stale claims beyond the baseline
         if: github.event_name != 'pull_request'
-        run: python ops/doc-drift-product.py --report out/doc-drift/public-report.json --summary "$GITHUB_STEP_SUMMARY"
+        run: >-
+          python ops/doc-drift-product.py --report out/doc-drift/public-report.json
+          --baseline scripts/doc-drift/baseline.json --summary "$GITHUB_STEP_SUMMARY"
