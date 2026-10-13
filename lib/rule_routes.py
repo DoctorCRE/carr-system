@@ -371,8 +371,12 @@ def _dedupe_root() -> Path:
         Path.home() / ".config/carr/claude-rule-delivery/routes"))
 
 
-def _dedupe_path(session_id: str) -> Path:
-    token = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+def _dedupe_path(session_id: str, agent_id: str | None = None) -> Path:
+    """One state file per CONTEXT: the main conversation keeps its historical
+    name; a subagent (agent_id) gets its own, because a rule the main context
+    holds is not in the child's window and vice versa."""
+    key = session_id if not agent_id else f"{session_id}\x00agent:{agent_id}"
+    token = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return _dedupe_root() / f"{token}.json"
 
 
@@ -384,43 +388,98 @@ def _read_state(path: Path) -> dict:
         return {}
 
 
+def _context_epoch(session_id: str, agent_id: str | None = None) -> str | None:
+    """The rule-boot gate's epoch for this CONTEXT, or None when unknown.
+
+    The boot gate rotates the main arm epoch at every SessionStart (compaction,
+    resume, clear): exactly the moments a context stops holding what it was
+    given. A subagent context has its own epoch, written when that child
+    booted, which the main arm's rotations do not touch and which the child's
+    own compaction rotates. Dedupe scoped to the context epoch therefore means
+    "delivered to THIS context", never "delivered somewhere in this session".
+    """
+    try:
+        from lib import rule_boot_gate
+        if agent_id:
+            epoch = rule_boot_gate._read_agent_epoch(session_id, agent_id)
+            return str(epoch) if epoch else None
+        arm = rule_boot_gate.read_arm(session_id) or {}
+        epoch = arm.get("epoch")
+        return str(epoch) if epoch else None
+    except Exception:
+        return None
+
+
+def _seen_in_context(state: dict, rid: str, epoch: str | None, now: float) -> bool:
+    """Whether rid's full text already reached this context.
+
+    With an epoch: any tool's delivery in this epoch counts (the text sits in
+    the same context whichever tool it arrived with). Without one: the older
+    per-tool-agnostic time window, so a machine with no boot state still
+    stops repeating a rule every few minutes.
+    """
+    tools = state.get(rid) or {}
+    if not isinstance(tools, dict):
+        return False
+    if epoch is not None and state.get("_epoch") == epoch:
+        return any(isinstance(ts, (int, float)) for ts in tools.values())
+    if epoch is not None:
+        return False  # a different context: nothing it holds is this one's
+    return any(isinstance(ts, (int, float)) and now - ts < DEDUPE_SECONDS
+               for ts in tools.values())
+
+
 def fresh_ids(session_id: str, tool_name: str, ids: list[str],
-              now: float | None = None) -> list[str]:
-    """The ids not delivered to this session for this same tool in the window.
+              now: float | None = None, *, agent_id: str | None = None) -> list[str]:
+    """The ids whose full text this context has not already been given.
+
+    2026-10-12: scoped to the context (the boot gate's arm epoch) and across
+    tools. The 30-minute per-tool window re-sent the same rule to one session
+    five times in two hours (57K of 137K rule characters were repeats); a rule
+    delivered for a Bash call is in context for the Write call that follows.
+
+    agent_id names a subagent context; its deliveries and epoch are its own
+    (reviewer finding on PR 1708: keyed by the main epoch alone, a rule the
+    main context held was withheld from every child, and a child's from main).
 
     FAILS OPEN: any error reading the state delivers everything, because a
     duplicate injection costs context while a dropped one costs the rule."""
     now = time.time() if now is None else now
     try:
-        state = _read_state(_dedupe_path(session_id))
+        state = _read_state(_dedupe_path(session_id, agent_id))
+        epoch = _context_epoch(session_id, agent_id)
     except Exception:
         return sorted(ids)
-    out = []
-    for rid in ids:
-        seen = (state.get(rid) or {}).get(tool_name)
-        if isinstance(seen, (int, float)) and now - seen < DEDUPE_SECONDS:
-            continue
-        out.append(rid)
-    return sorted(out)
+    return sorted(rid for rid in ids if not _seen_in_context(state, rid, epoch, now))
 
 
 def record_delivered(session_id: str, tool_name: str, ids: list[str],
-                     now: float | None = None) -> None:
-    """Remember full-text deliveries. Best effort; never raises."""
+                     now: float | None = None, *, agent_id: str | None = None) -> None:
+    """Remember full-text deliveries for one context. Best effort; never raises."""
     now = time.time() if now is None else now
     try:
-        path = _dedupe_path(session_id)
+        path = _dedupe_path(session_id, agent_id)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         lock = path.with_suffix(".lock")
         with open(lock, "a", encoding="utf-8") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             state = _read_state(path)
+            epoch = _context_epoch(session_id, agent_id)
+            if epoch is not None and state.get("_epoch") != epoch:
+                state = {"_epoch": epoch}  # a new context holds none of the old deliveries
             for rid in ids:
                 state.setdefault(rid, {})[tool_name] = now
-            # Forget anything older than the window so the file stays small.
+            # Forget anything older than the window so the file stays small
+            # (an epoch-scoped context keeps everything it was given).
             for rid in list(state):
+                if rid == "_epoch":
+                    continue
+                if not isinstance(state[rid], dict):
+                    del state[rid]
+                    continue
                 tools = {t: ts for t, ts in state[rid].items()
-                         if isinstance(ts, (int, float)) and now - ts < DEDUPE_SECONDS}
+                         if isinstance(ts, (int, float))
+                         and (epoch is not None or now - ts < DEDUPE_SECONDS)}
                 if tools:
                     state[rid] = tools
                 else:
