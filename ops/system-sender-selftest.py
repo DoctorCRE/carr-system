@@ -21,6 +21,7 @@ live_from still shadows.
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import json
 import os
 import shutil
@@ -593,24 +594,48 @@ class FakeProcs:
     probe, the `open -a` and the send step the way osascript and open would."""
 
     def __init__(self, *, probe: str = "COUNT 2 0", open_rc: int = 0, send: str = "SENT",
-                 send_rc: int = 0) -> None:
+                 send_rc: int = 0, state: Path | None = None) -> None:
         self.probe, self.open_rc, self.send, self.send_rc = probe, open_rc, send, send_rc
+        self.state = state
         self.calls: list[list[str]] = []
+        # What the send step saw at the moment it ran: the token file's text,
+        # its mode, the env's state dir, and whether the send lock was held.
+        self.at_send: dict[str, Any] = {}
 
-    def __call__(self, argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+    def __call__(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         self.calls.append(list(argv))
         if argv[0] == "open":
             return subprocess.CompletedProcess(argv, self.open_rc, "", "")
         if argv[2] == "probe":
             return subprocess.CompletedProcess(argv, 0, self.probe + "\n", "")
+        if self.state is not None:
+            token_file = self.state / ss.SEND_TOKEN_FILE
+            self.at_send = {"env_state": (kw.get("env") or {}).get(ss.STATE_DIR_ENV),
+                            "token_text": token_file.read_text(encoding="utf-8")
+                            if token_file.exists() else None,
+                            "token_mode": oct(token_file.stat().st_mode & 0o777)
+                            if token_file.exists() else None,
+                            "lock_held": _lock_is_held(self.state / ss.SEND_LOCK_FILE)}
         return subprocess.CompletedProcess(argv, self.send_rc, self.send + "\n", "")
 
     def steps(self) -> list[str]:
         return ["open" if c[0] == "open" else c[2] for c in self.calls]
 
 
-def _real_outlook(procs: FakeProcs) -> Any:
-    return lambda url, subject: ss._outlook_send(url, subject, run=procs)
+def _lock_is_held(path: Path) -> bool:
+    """True when another open file description holds an exclusive flock."""
+    with open(path, "a", encoding="utf-8") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        return False
+
+
+def _real_outlook(procs: FakeProcs, state: Path) -> Any:
+    procs.state = state
+    return lambda url, subject: ss._outlook_send(url, subject, state_dir=state, run=procs)
 
 
 @scenario
@@ -659,7 +684,7 @@ def test_outlook_transport_window_choice() -> None:
     for label, procs, outcome, reason, steps in cases:
         env = Env()
         try:
-            r = env.sender(outlook=_real_outlook(procs)).send_mail(
+            r = env.sender(outlook=_real_outlook(procs, env.state)).send_mail(
                 to=[JOE], subject=long_subject, body="The tour is set for Tuesday.")
             check(f"outlook ({label}): {outcome}/{reason}", (r.outcome, r.reason) == (outcome, reason), r)
             check(f"outlook ({label}): steps {steps}", procs.steps() == steps, procs.calls)
@@ -670,24 +695,110 @@ def test_outlook_transport_window_choice() -> None:
             check(f"outlook ({label}): the script gets the FULL subject, never a prefix",
                   all(c[3] == long_subject for c in scripts), scripts)
             if "send" in steps:
-                check(f"outlook ({label}): send carries the probe's window count",
-                      scripts[-1][2:] == ["send", long_subject, "3" if procs.probe == "COUNT 3 0" else "2"],
-                      scripts[-1])
+                check(f"outlook ({label}): send carries the probe's window count and a token",
+                      scripts[-1][2:5] == ["send", long_subject, "3" if procs.probe == "COUNT 3 0" else "2"]
+                      and len(scripts[-1]) == 6 and len(scripts[-1][5]) == 64, scripts[-1])
+            check(f"outlook ({label}): no token file is left behind",
+                  not (env.state / ss.SEND_TOKEN_FILE).exists())
         finally:
             env.close()
+
+
+def _script_code() -> str:
+    script = ss.SEND_SCRIPT.read_text(encoding="utf-8")
+    return "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("--"))
+
+
+def _handler_body(code: str, name: str) -> list[str]:
+    """The stripped non-comment lines between `on <name>` and `end <name>`."""
+    lines = [line.strip() for line in code.splitlines()]
+    start = next(i for i, line in enumerate(lines)
+                 if line.startswith((f"on {name}(", f"on {name} ")))
+    end = lines.index(f"end {name}", start)
+    return lines[start + 1:end]
+
+
+# The AppleScript titleMatches handler, verbatim, line by line. The Python
+# mirror below is tied to it: test_send_script_shape asserts every one of these
+# lines is present in the handler, so changing the script without changing the
+# mirror (and its table) fails the selftest.
+TITLE_MATCHES_LINES = (
+    'set sep to subj & " " & (character id 8226) & " "',
+    "considering case",
+    "if t is subj then return true",
+    "if (length of t) > (length of sep) and t starts with sep then",
+    "set rest to text ((length of sep) + 1) thru -1 of t",
+    'if rest contains "@" and rest does not contain " " then return true',
+    "end considering",
+    "return false",
+)
+MORE_THAN_ONE_NEW_WINDOW = ('if total > priorCount + 1 then return "REFUSED: " & (total - priorCount)'
+                            ' & " new windows appeared, expected exactly one; nothing pressed"')
+
+
+def title_matches(t: str, subj: str) -> bool:
+    """Python mirror of bin/outlook-send.applescript's titleMatches (see
+    TITLE_MATCHES_LINES): the exact subject, or the subject, " • " and a
+    single address-like token. Case-sensitive; never a prefix."""
+    sep = subj + " " + chr(8226) + " "
+    if t == subj:
+        return True
+    if len(t) > len(sep) and t.startswith(sep):
+        rest = t[len(sep):]
+        if "@" in rest and " " not in rest:
+            return True
+    return False
+
+
+@scenario
+def test_title_matches_mirror() -> None:
+    subj = "Tour schedule"
+    bullet = " " + chr(8226) + " "
+    table = (
+        ("exact title", subj, True),
+        ("prefix-only title (subject is a prefix of the title)", subj + " for the Lee Clinic", False),
+        ("truncated title (title is a prefix of the subject)", subj[:-3], False),
+        ("case variant", subj.upper(), False),
+        ("case variant with address", subj.lower() + bullet + "joe@example.com", False),
+        ("subject • addr", subj + bullet + "joe@example.com", True),
+        ("subject • text with spaces", subj + bullet + "a draft @ noon", False),
+        ("subject • text without @", subj + bullet + "draft", False),
+        ("subject • nothing", subj + bullet, False),
+        ("reply prefix", "Re: " + subj, False),
+        ("subject + plain space suffix", subj + " joe@example.com", False),
+    )
+    for label, title, want in table:
+        check(f"titleMatches mirror: {label} -> {want}", title_matches(title, subj) is want, title)
 
 
 @scenario
 def test_send_script_shape() -> None:
     script = ss.SEND_SCRIPT.read_text(encoding="utf-8")
-    code = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("--"))
+    code = _script_code()
     check("script: no prefix match on the title", "starts with titlePrefix" not in code
           and "titlePrefix" not in code)
+    body = _handler_body(code, "titleMatches")
+    check("script: titleMatches compares the exact title", "if t is subj then return true" in body, body)
+    check("script: titleMatches carries every line its Python mirror is built from",
+          [line for line in TITLE_MATCHES_LINES if line not in body] == [], body)
+    check("script: no `starts with subj` anywhere in code", "starts with subj" not in code)
+    starts = [line.strip() for line in code.splitlines() if "starts with" in line]
+    check("script: the only `starts with` is titleMatches' `t starts with sep`",
+          starts == ["if (length of t) > (length of sep) and t starts with sep then"], starts)
+    run_body = _handler_body(code, "run")
+    check("script: refuses when more than one new window appeared",
+          MORE_THAN_ONE_NEW_WINDOW in run_body, run_body)
+    wait = run_body.index("repeat 20 times")
+    check("script: that refusal sits inside the wait for the new window, before its exit",
+          wait < run_body.index(MORE_THAN_ONE_NEW_WINDOW)
+          < run_body.index("if total = priorCount + 1 then exit repeat"), run_body)
     check("script: never falls back to the first or front window for the send",
           "first window" not in code and "set found to window 1" not in code)
     check("script: refuses zero and more than one match",
           "(count of matches) is 0" in code and "(count of matches) > 1" in code)
-    check("script: requires exactly one new window", "priorCount + 1" in code)
+    check("script: requires exactly one new window",
+          'if total < priorCount + 1 then return "REFUSED: no new compose window appeared; nothing pressed"' in code
+          and 'if total is not priorCount + 1 then return "REFUSED: window count changed to "' in code)
     press = code.index("keystroke return using {command down}")
     check("script: frontmost is verified (with one re-activation) before the keystroke",
           code.index("outlookReady(targetName)") < press
@@ -695,6 +806,177 @@ def test_send_script_shape() -> None:
     check("script: the stale 'never pressed Send' claim is gone",
           "has never pressed Send" not in script)
     check("lib: no 40-character title prefix remains", not hasattr(ss, "TITLE_MATCH_LEN"))
+
+
+# ── review BLOCK finding 2: the send step needs a single-use token ───────────
+
+SCRATCH_TOKEN = "f" * 64
+
+
+@scenario
+def test_send_token_python_side() -> None:
+    env = Env()
+    try:
+        procs = FakeProcs()
+        r = env.sender(outlook=_real_outlook(procs, env.state)).send_mail(
+            to=[JOE], subject="Tour schedule", body="The tour is set for Tuesday.")
+        check("token: the send went through the chain", r.outcome == ss.SENT, r)
+        token = procs.calls[-1][5]
+        text = procs.at_send.get("token_text") or ""
+        parts = text.split("\n", 2)
+        check("token: written before the send step, as token, expiry, subject",
+              len(parts) == 3 and parts[0] == token and parts[2] == "Tour schedule", text)
+        now = int(__import__("time").time())
+        check("token: expires within the TTL", len(parts) == 3 and parts[1].isdigit()
+              and now < int(parts[1]) <= now + ss.SEND_TOKEN_TTL_SECONDS + 1, parts)
+        check("token: the file is mode 600", procs.at_send.get("token_mode") == "0o600", procs.at_send)
+        check("token: written while the send lock is held", procs.at_send.get("lock_held") is True,
+              procs.at_send)
+        check("token: the script is told where the state dir is",
+              procs.at_send.get("env_state") == str(env.state), procs.at_send)
+        check("token: deleted after the send", not (env.state / ss.SEND_TOKEN_FILE).exists())
+        check("token: the lock is released after the send",
+              not _lock_is_held(env.state / ss.SEND_LOCK_FILE))
+        procs2 = FakeProcs()
+        env.sender(outlook=_real_outlook(procs2, env.state)).send_mail(
+            to=[JOE], subject="Tour schedule 2", body="Second message.")
+        check("token: a fresh token per send", procs2.calls[-1][5] != token)
+    finally:
+        env.close()
+    for label, procs in (("send step raised", None),
+                         ("send step exited non-zero", FakeProcs(send="boom", send_rc=1))):
+        env = Env()
+        try:
+            if procs is None:
+                procs = FakeProcs()
+                original = procs.__call__
+
+                def raising(argv: list[str], _orig: Any = original, **kw: Any) -> Any:
+                    if argv[0] == "osascript" and argv[2] == "send":
+                        _orig(argv, **kw)
+                        raise subprocess.TimeoutExpired(argv, 120)
+                    return _orig(argv, **kw)
+                runner: Any = raising
+            else:
+                runner = procs
+            procs.state = env.state
+            env.sender(outlook=lambda url, subject: ss._outlook_send(
+                url, subject, state_dir=env.state, run=runner)).send_mail(
+                to=[JOE], subject="Tour schedule", body="The tour is set for Tuesday.")
+            check(f"token ({label}): the token existed when the send step ran",
+                  bool(procs.at_send.get("token_text")), procs.at_send)
+            check(f"token ({label}): the finally block still deleted it",
+                  not (env.state / ss.SEND_TOKEN_FILE).exists())
+        finally:
+            env.close()
+
+
+@scenario
+def test_send_token_script_shape() -> None:
+    code = _script_code()
+    run_body = _handler_body(code, "run")
+    token_lines = ('if (count of argv) < 4 then return "REFUSED: no valid send token; nothing pressed"',
+                   'if not my consumeSendToken(item 4 of argv, subj) then return "REFUSED: no valid send token; nothing pressed"')
+    check("token script: send checks the token", all(line in run_body for line in token_lines), run_body)
+    consume = run_body.index(token_lines[1])
+    first_tell = min(i for i, line in enumerate(run_body)
+                     if "tell application" in line and i > run_body.index('if mode is not "send" then return "REFUSED: unknown mode " & mode & "; nothing pressed"'))
+    check("token script: the token is checked before any `tell` in the send step", consume < first_tell,
+          (consume, first_tell))
+    check("token script: the Send keystroke comes after the consume",
+          consume < run_body.index("keystroke return using {command down}"))
+    body = _handler_body(code, "consumeSendToken")
+    check("token script: the token handler never tells an application",
+          not any("tell " in line for line in body), body)
+    check("token script: reads the token file",
+          "set stored to read (POSIX file tokenPath) as \u00abclass utf8\u00bb" in body
+          and 'set tokenPath to stateDir & "/' + ss.SEND_TOKEN_FILE + '"' in body
+          and 'set stateDir to system attribute "' + ss.STATE_DIR_ENV + '"' in body, body)
+    check("token script: the default state dir matches the library's",
+          '(POSIX path of (path to home folder)) & "' + ss.DEFAULT_STATE_DIR.removeprefix("~/") + '"'
+          in "\n".join(body))
+    check("token script: requires token, subject and expiry",
+          "if storedToken is not offered then return false" in body
+          and "if storedSubject is not subj then return false" in body
+          and "if nowSecs > expirySecs then return false" in body, body)
+    delete = 'do shell script "/bin/rm " & quoted form of tokenPath & " && test ! -e " & quoted form of tokenPath'
+    check("token script: consumes (deletes) the file before returning true",
+          delete in body and body.index(delete) < body.index("return true")
+          and body.index("if nowSecs > expirySecs then return false") < body.index(delete), body)
+
+
+def _osascript_or_skip(label: str) -> bool:
+    if shutil.which("osascript") is None:
+        print(f"  skip {label}: osascript is not on this machine (macOS only)")
+        return False
+    return True
+
+
+@scenario
+def test_send_token_runtime() -> None:
+    """Runs the REAL script with tokens that must be refused. Every case is
+    refused inside consumeSendToken, before the script's first `tell`, so
+    Outlook and System Events are never addressed."""
+    if not _osascript_or_skip("send token runtime"):
+        return
+    state = Path(tempfile.mkdtemp(prefix="system-sender-token-"))
+    try:
+        env = {**os.environ, ss.STATE_DIR_ENV: str(state)}
+
+        def send(*args: str) -> str:
+            proc = subprocess.run(["osascript", str(ss.SEND_SCRIPT), "send", *args],
+                                  capture_output=True, text=True, timeout=30, env=env)
+            return (proc.stdout or proc.stderr).strip()
+
+        refused = "REFUSED: no valid send token; nothing pressed"
+        future = int(__import__("time").time()) + 60
+        check("token runtime: a direct send with a bad token is refused",
+              send("x", "0", "badtoken") == refused)
+        check("token runtime: a direct send with no token is refused", send("x", "0") == refused)
+        token_file = state / ss.SEND_TOKEN_FILE
+        ss._write_send_token(token_file, SCRATCH_TOKEN, "x", future)
+        check("token runtime: a wrong token is refused", send("x", "0", "e" * 64) == refused)
+        check("token runtime: a token for another subject is refused",
+              send("X", "0", SCRATCH_TOKEN) == refused)
+        check("token runtime: refusals leave the stored token alone", token_file.exists())
+        ss._write_send_token(token_file, SCRATCH_TOKEN, "x", future - 120)
+        check("token runtime: an expired token is refused", send("x", "0", SCRATCH_TOKEN) == refused)
+    finally:
+        shutil.rmtree(state, ignore_errors=True)
+
+
+@scenario
+def test_send_token_handler_consumes_once() -> None:
+    """The consumeSendToken handler, lifted verbatim from the real script and
+    run alone (no `tell`, no Outlook): a valid token is accepted once and its
+    file is gone; the same token again is refused."""
+    if not _osascript_or_skip("send token handler"):
+        return
+    source = ss.SEND_SCRIPT.read_text(encoding="utf-8")
+    start = source.index("on consumeSendToken(")
+    handler = source[start:source.index("end consumeSendToken", start) + len("end consumeSendToken")]
+    state = Path(tempfile.mkdtemp(prefix="system-sender-handler-"))
+    try:
+        harness = state / "harness.applescript"
+        harness.write_text("on run argv\n  return consumeSendToken(item 1 of argv, item 2 of argv)\nend run\n\n"
+                           + handler + "\n", encoding="utf-8")
+        env = {**os.environ, ss.STATE_DIR_ENV: str(state)}
+
+        def consume(token: str, subject: str) -> str:
+            proc = subprocess.run(["osascript", str(harness), token, subject],
+                                  capture_output=True, text=True, timeout=30, env=env)
+            return (proc.stdout or proc.stderr).strip()
+
+        token_file = state / ss.SEND_TOKEN_FILE
+        subject = 'Tour "schedule" • Tuesday'
+        ss._write_send_token(token_file, SCRATCH_TOKEN, subject, int(__import__("time").time()) + 60)
+        check("token handler: a valid token for the exact subject is accepted",
+              consume(SCRATCH_TOKEN, subject) == "true")
+        check("token handler: the file is consumed", not token_file.exists())
+        check("token handler: the same token a second time is refused",
+              consume(SCRATCH_TOKEN, subject) == "false")
+    finally:
+        shutil.rmtree(state, ignore_errors=True)
 
 
 # ── finding 3: the self-test send ───────────────────────────────────────────
@@ -713,6 +995,17 @@ def test_send_self_test_goes_through_the_chain() -> None:
         env.fakes.signals.update(open=1)
         r = env.sender().send_self_test(subject="System sender self-test 2", body="Second.")
         check("self-test: the kill switch still refuses it", r.reason == "kill_switch_engaged", r)
+        bare = Env()
+        try:
+            bare.config["mail"] = {"self_addresses": [JOE]}
+            r = bare.sender().send_self_test(subject="System sender self-test", body="First live send.")
+            check("self-test: no self_test_address means config_invalid, never a fallback address",
+                  (r.outcome, r.reason) == (ss.REFUSED, "config_invalid")
+                  and bare.fakes.outlook_calls == [], (r, bare.fakes.outlook_calls))
+        finally:
+            bare.close()
+        check("self-test: the library carries no hard-coded address",
+              JOE not in ss.REPO.joinpath("lib/system_sender.py").read_text(encoding="utf-8"))
         check("self-test: the shipped config names Joe's address and says the first caller is the live test",
               ss.load_config()["mail"]["self_test_address"] == JOE
               and "FIRST CALLER IS THE LIVE TEST" in ss.load_config()["_note"])
@@ -770,7 +1063,10 @@ def test_bad_config_refuses_and_claims_nothing() -> None:
                                                 "api_base": "https://backend.blotato.com/v2"}}),
            ("bad timezone", {"timezone": "Mars/Olympus"}),
            ("receipts path escapes state_dir", {"receipts_file": "../sends.jsonl"}),
-           ("receipts name is a dot path", {"receipts_file": ".."}))
+           ("receipts name is a dot path", {"receipts_file": ".."}),
+           ("no self_test_address", {"mail": {"self_addresses": [JOE]}}),
+           ("self_test_address not an own address", {"mail": {"self_addresses": [JOE],
+                                                              "self_test_address": PARTICIPANT}}))
     for label, change in bad:
         env = Env()
         try:
@@ -936,7 +1232,12 @@ def main() -> int:
                  test_health_row,
                  test_empty_subject_refused_before_any_claim,
                  test_outlook_transport_window_choice,
+                 test_title_matches_mirror,
                  test_send_script_shape,
+                 test_send_token_python_side,
+                 test_send_token_script_shape,
+                 test_send_token_runtime,
+                 test_send_token_handler_consumes_once,
                  test_send_self_test_goes_through_the_chain,
                  test_state_dir_is_machine_wide,
                  test_bad_config_refuses_and_claims_nothing,

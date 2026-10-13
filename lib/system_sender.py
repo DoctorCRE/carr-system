@@ -91,9 +91,11 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -235,29 +237,72 @@ def _mailto_builder() -> Callable[[Mapping[str, Any]], str]:
     return builder
 
 
-def _osascript(run: ProcessRunner, *args: str, timeout: int) -> tuple[int, str]:
+def _osascript(run: ProcessRunner, *args: str, timeout: int,
+               env: Mapping[str, str] | None = None) -> tuple[int, str]:
     proc = run(["osascript", str(SEND_SCRIPT), *args], capture_output=True, text=True,
-               timeout=timeout)
+               timeout=timeout, env=None if env is None else dict(env))
     return proc.returncode, (proc.stdout or proc.stderr or "").strip()
 
 
-def _outlook_send(url: str, subject: str, *, run: ProcessRunner = subprocess.run) -> str:
+# THE SEND TOKEN. bin/outlook-send.applescript's `send` step presses nothing
+# unless it is handed the token in this file (state_dir/SEND_TOKEN_FILE), for
+# the same subject, before it expires; it deletes the file before it touches
+# Outlook, so a token works once. _outlook_send writes the token only after the
+# whole policy chain has passed, while it holds SEND_LOCK_FILE, and deletes it
+# again in a finally block. A direct `osascript bin/outlook-send.applescript
+# send ...` therefore refuses: it has no token. This stops a caller that skips
+# the library by accident or habit; a same-user process that deliberately
+# forges the file can still get through, which is a deliberate circumvention,
+# not a path a session can take without noticing.
+SEND_TOKEN_FILE = "send-token"
+SEND_LOCK_FILE = "send-token.lock"
+SEND_TOKEN_TTL_SECONDS = 60
+
+
+def _write_send_token(path: Path, token: str, subject: str, expires: int) -> None:
+    """Write `<token>\\n<expiry epoch seconds>\\n<subject>` mode 600, atomically
+    (the script must never read half a token)."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(f"{token}\n{expires}\n{subject}")
+    os.replace(tmp, path)
+
+
+def _outlook_send(url: str, subject: str, *, state_dir: Path,
+                  run: ProcessRunner = subprocess.run) -> str:
     """Open the compose window in the signed-in Outlook app (never a bare
     `open mailto:`, which lands in Joe's personal default handler) and press
-    Send through bin/outlook-send.applescript. Three steps:
+    Send through bin/outlook-send.applescript. Called only from Sender._run,
+    after the whole policy chain has passed. Under the machine-wide send lock
+    (state_dir/SEND_LOCK_FILE, so two senders never interleave windows), three
+    steps:
 
       1. probe: count Outlook's windows, and refuse if one is ALREADY titled
          with this subject (it could be Joe's own draft) or Outlook is not
          running (a launch adds a main window too, so "one new window" could
          not be proven).
       2. `open -a`: a non-zero exit means no compose window; nothing pressed.
-      3. send: the script proceeds only if exactly ONE new window appeared and
-         exactly one window carries this exact subject, and only while Outlook
-         is frontmost.
+      3. send: a fresh single-use token is written to state_dir/SEND_TOKEN_FILE
+         and passed to the script, which refuses without it (see SEND_TOKEN_FILE
+         above). The script then proceeds only if exactly ONE new window
+         appeared and exactly one window carries this exact subject, and only
+         while Outlook is frontmost. The token file is deleted afterwards
+         whatever happened.
 
     Every answer before step 3's keystroke is a definite non-send ("ERROR:",
     "REFUSED:", "NOT_FRONTMOST:"); a script that failed in step 3 is
     "AMBIGUOUS:" because it may have failed after pressing Send."""
+    state = Path(state_dir)
+    if not state.is_dir():
+        state.mkdir(parents=True, mode=0o700, exist_ok=True)
+        os.chmod(state, 0o700)
+    with open(state / SEND_LOCK_FILE, "a", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _outlook_send_locked(url, subject, state, run)
+
+
+def _outlook_send_locked(url: str, subject: str, state: Path, run: ProcessRunner) -> str:
     try:
         code, probe = _osascript(run, "probe", subject, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
@@ -278,7 +323,19 @@ def _outlook_send(url: str, subject: str, *, run: ProcessRunner = subprocess.run
         return f"ERROR: open failed ({type(exc).__name__}); Send never pressed"
     if opened.returncode != 0:
         return f"ERROR: open failed (exit {opened.returncode}); Send never pressed"
-    code, answer = _osascript(run, "send", subject, str(before), timeout=120)
+    token_path = state / SEND_TOKEN_FILE
+    token = secrets.token_hex(32)
+    try:
+        try:
+            _write_send_token(token_path, token, subject,
+                              int(time.time()) + SEND_TOKEN_TTL_SECONDS)
+        except OSError as exc:
+            return f"ERROR: send token could not be written ({type(exc).__name__}); Send never pressed"
+        code, answer = _osascript(run, "send", subject, str(before), token, timeout=120,
+                                  env={**os.environ, STATE_DIR_ENV: str(state)})
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            token_path.unlink()
     if code != 0:
         return f"AMBIGUOUS: outlook-send exited {code}: {answer[:120]}"
     return answer
@@ -372,9 +429,9 @@ def validate_config(config: Any) -> str | None:
     own = mail.get("self_addresses") if isinstance(mail, Mapping) else None
     if not (isinstance(own, list) and own and all(isinstance(a, str) and _EMAIL.fullmatch(a) for a in own)):
         problems.append("mail.self_addresses needs one or more email addresses")
-    elif isinstance(mail, Mapping) and mail.get("self_test_address") is not None and (
-            str(mail.get("self_test_address")).lower() not in {a.lower() for a in own}):
-        problems.append("mail.self_test_address must be one of mail.self_addresses")
+    elif not (isinstance(mail, Mapping) and isinstance(mail.get("self_test_address"), str)
+              and mail["self_test_address"].lower() in {a.lower() for a in own}):
+        problems.append("mail.self_test_address is required and must be one of mail.self_addresses")
     social = config.get("social")
     platforms = social.get("platforms") if isinstance(social, Mapping) else None
     if not (isinstance(platforms, list)
@@ -550,7 +607,7 @@ class Sender:
         self.root = Path(root)
         self._verb = verb or _default_verb
         self._lint = lint or run_lint
-        self._outlook = outlook or _outlook_send
+        self._outlook = outlook or self._default_outlook
         self._http = blotato_http or _blotato_post
         self._key = blotato_key or _blotato_key
         self._now = now or _utc_now
@@ -570,6 +627,11 @@ class Sender:
         self.ledger = _Ledger(self.state_dir / _bare(self.config.get("ledger_file"),
                                                      "system-sender-ledger.json"),
                               self._ensure_state_dir)
+
+    def _default_outlook(self, url: str, subject: str) -> str:
+        # The real transport, writing its single-use send token into THIS
+        # sender's state directory.
+        return _outlook_send(url, subject, state_dir=self.state_dir)
 
     def _ensure_state_dir(self) -> None:
         """Create the machine-wide state directory mode 700 on first use. Only
@@ -601,9 +663,12 @@ class Sender:
         pressed Send; this is the first live send, so the transport is proven
         on a self-send before any participant mail."""
         mail = self.config.get("mail")
-        address = str((mail.get("self_test_address") if isinstance(mail, Mapping) else None)
-                      or "joe.bookout@carr.us")
-        return self.send_mail(to=[address], subject=subject, body=body, dedupe_key=dedupe_key)
+        address = mail.get("self_test_address") if isinstance(mail, Mapping) else None
+        # No fallback address: validate_config requires self_test_address to be
+        # one of mail.self_addresses, and a config without one refuses this
+        # call as config_invalid inside send_mail.
+        return self.send_mail(to=[str(address or "")], subject=subject, body=body,
+                              dedupe_key=dedupe_key)
 
     def send_social(self, *, platform: str, text: str, media_urls: Sequence[str] = (),
                     dedupe_key: str | None = None) -> SendResult:

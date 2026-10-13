@@ -1,7 +1,7 @@
 -- outlook-send.applescript — press Send on ONE mailto-spawned New Outlook compose window.
 --
 -- argv: probe <subject>
---       send  <subject> <window count from the probe>
+--       send  <subject> <window count from the probe> <single-use send token>
 --
 -- THE SEND STEP, kept SEPARATE from bin/outlook-draft.applescript on purpose.
 -- The draft script carries a no-send guarantee and stays untouched; this file is
@@ -20,7 +20,20 @@
 --   2. open -a "Microsoft Outlook" "mailto:..."   exactly as bin/outlook-draft.py
 --               does (read its header for the two traps). A non-zero exit is a
 --               definite non-send.
---   3. `send`   this script, with the probe's window count.
+--   3. `send`   this script, with the probe's window count and a fresh
+--               single-use token the caller wrote to <state_dir>/send-token.
+--
+-- THE SEND TOKEN. `send` presses nothing without it, so running this script
+-- directly skips nothing: it refuses. lib/system_sender.py writes the token
+-- file (`<token>` LF `<expiry, epoch seconds>` LF `<subject>`, mode 600) only
+-- after the whole policy chain has passed, while it holds the send lock, and
+-- passes the state directory in CARR_SYSTEM_SENDER_STATE_DIR (unset means the
+-- default ~/carr-local/system-sender). The token is checked FIRST, before any
+-- `tell application`, so a refused call never touches Outlook: it must equal
+-- the stored token, the subject must equal the stored subject, and the expiry
+-- must not have passed. The file is then deleted (consume once) before any
+-- window is read or any key pressed. A wrong, missing, reused or expired token
+-- answers "REFUSED: no valid send token; nothing pressed".
 --
 -- WHICH WINDOW. The Send keystroke may only reach the window the policy chain
 -- checked. So `send` proceeds only if exactly ONE new window appeared since the
@@ -67,6 +80,10 @@ on run argv
     return "COUNT " & total & " " & (count of my matchingWindows(subj))
   end if
   if mode is not "send" then return "REFUSED: unknown mode " & mode & "; nothing pressed"
+
+  -- The send token, before anything else: no `tell` above this line in `send`.
+  if (count of argv) < 4 then return "REFUSED: no valid send token; nothing pressed"
+  if not my consumeSendToken(item 4 of argv, subj) then return "REFUSED: no valid send token; nothing pressed"
 
   set priorCount to (item 3 of argv) as integer
 
@@ -162,3 +179,47 @@ on titleMatches(t, subj)
   end considering
   return false
 end titleMatches
+
+-- True only if `offered` is the token lib/system_sender.py stored for this
+-- exact subject and it has not expired; the token file is then deleted before
+-- the caller reads a window or presses a key. No `tell application` here.
+on consumeSendToken(offered, subj)
+  if offered is "" then return false
+  set stateDir to system attribute "CARR_SYSTEM_SENDER_STATE_DIR"
+  if stateDir is "" then set stateDir to (POSIX path of (path to home folder)) & "carr-local/system-sender"
+  set tokenPath to stateDir & "/send-token"
+  try
+    set stored to read (POSIX file tokenPath) as «class utf8»
+  on error
+    return false
+  end try
+  set savedDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to linefeed
+  set parts to text items of stored
+  if (count of parts) < 3 then
+    set AppleScript's text item delimiters to savedDelims
+    return false
+  end if
+  set storedToken to item 1 of parts
+  set storedExpiry to item 2 of parts
+  set storedSubject to (items 3 thru -1 of parts) as text
+  set AppleScript's text item delimiters to savedDelims
+  considering case
+    if storedToken is not offered then return false
+    if storedSubject is not subj then return false
+  end considering
+  try
+    set expirySecs to storedExpiry as number
+    set nowSecs to (do shell script "/bin/date +%s") as number
+  on error
+    return false
+  end try
+  if nowSecs > expirySecs then return false
+  -- Consume once: the file is gone before anything is pressed.
+  try
+    do shell script "/bin/rm " & quoted form of tokenPath & " && test ! -e " & quoted form of tokenPath
+  on error
+    return false
+  end try
+  return true
+end consumeSendToken
