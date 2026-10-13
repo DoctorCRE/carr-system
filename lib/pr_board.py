@@ -540,7 +540,7 @@ def file_loops(board: dict, call: Callable[[str, dict], dict]) -> list[dict]:
                 payload.update(loop_id=loop["loop_id"], base_version=int(loop["version"]))
             else:
                 verb = "add-loop"
-                payload.update(kind="open_loop", domain="system", marker="none", blocker="ruling",
+                payload.update(kind="open_loop", domain="system", marker="none", blocker="other_lane",
                                blocker_detail=(f"the {lane} lane owner's call per stale PR: restack, fix, "
                                                f"or close; close is a human or orchestrator act"),
                                unblocks="frees hosted CI minutes and the files these branches hold")

@@ -42,6 +42,18 @@ SIZING_REPIN_MIGRATION = "0851_repin_rule_delivery_activation_after_sizing_rule.
 SIZING_REPIN_MIGRATION_SOURCE = (
     ROOT / "migrations" / SIZING_REPIN_MIGRATION
 ).read_text(encoding="utf-8")
+TRACKER_RETIREMENT_REPIN_MIGRATION = (
+    "0859_repin_rule_delivery_activation_after_tracker_retirement.sql"
+)
+TRACKER_RETIREMENT_REPIN_MIGRATION_SOURCE = (
+    ROOT / "migrations" / TRACKER_RETIREMENT_REPIN_MIGRATION
+).read_text(encoding="utf-8")
+UNFILED_BUG_REPIN_MIGRATION = (
+    "0871_repin_rule_delivery_activation_after_unfiled_bug_control.sql"
+)
+UNFILED_BUG_REPIN_MIGRATION_SOURCE = (
+    ROOT / "migrations" / UNFILED_BUG_REPIN_MIGRATION
+).read_text(encoding="utf-8")
 SOURCE_MERGE_MIGRATION_SOURCE = (
     ROOT / "migrations" / SOURCE_MERGE_MIGRATION
 ).read_text(encoding="utf-8")
@@ -81,6 +93,8 @@ CUTOVER_READY_DIGEST = "c6e89d64de575b9c6e39c8c88cd6a32e97e494b381a7ac4433026c4a
 MODEL_CHOICE_REPIN_DIGEST = "43ac7f513c173114b1723a886baf56a83ec40e7fef8b187ed3dead7d16d90ada"
 CONTROL_RETIREMENT_REPIN_DIGEST = "b4e0d6689df3d96be24fb0cb888587f545bef8ffeba79c3ee6757b447f3fb308"
 SIZING_REPIN_DIGEST = "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3f4f490bac4a76f4"
+TRACKER_RETIREMENT_REPIN_DIGEST = "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e"
+UNFILED_BUG_REPIN_DIGEST = "dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08"
 EXPECTED_TARGETS = [
     "25fcddee", "3fa17fa0", "72e06bdf", "581cb3fe", "113b3833",
     "57d13061", "c66dc739", "49533583", "557838a5",
@@ -178,6 +192,12 @@ control_retirement_repin_ledger_applied = bool(
 sizing_repin_ledger_applied = bool(
     re.search(rf"^{re.escape(SIZING_REPIN_MIGRATION)}\t", SNAPSHOT, re.M)
 )
+tracker_retirement_repin_ledger_applied = bool(
+    re.search(rf"^{re.escape(TRACKER_RETIREMENT_REPIN_MIGRATION)}\t", SNAPSHOT, re.M)
+)
+unfiled_bug_repin_ledger_applied = bool(
+    re.search(rf"^{re.escape(UNFILED_BUG_REPIN_MIGRATION)}\t", SNAPSHOT, re.M)
+)
 cutover_ready_ledger_applied = bool(
     re.search(rf"^{re.escape(CUTOVER_READY_MIGRATION)}\t", SNAPSHOT, re.M)
 )
@@ -229,7 +249,9 @@ expected_snapshot_targets = (
 )
 assert [row[0] for row in snapshot_targets] == expected_snapshot_targets
 expected_snapshot_digest = (
-    SIZING_REPIN_DIGEST if sizing_repin_ledger_applied
+    UNFILED_BUG_REPIN_DIGEST if unfiled_bug_repin_ledger_applied
+    else TRACKER_RETIREMENT_REPIN_DIGEST if tracker_retirement_repin_ledger_applied
+    else SIZING_REPIN_DIGEST if sizing_repin_ledger_applied
     else CONTROL_RETIREMENT_REPIN_DIGEST if control_retirement_repin_ledger_applied
     else MODEL_CHOICE_REPIN_DIGEST if model_choice_repin_ledger_applied
     else CUTOVER_READY_DIGEST if cutover_ready_ledger_applied
@@ -251,6 +273,16 @@ assert all(short_id in CONTROL_RETIREMENT_REPIN_MIGRATION_SOURCE for short_id in
 assert SIZING_REPIN_DIGEST in SIZING_REPIN_MIGRATION_SOURCE
 assert CONTROL_RETIREMENT_REPIN_DIGEST in SIZING_REPIN_MIGRATION_SOURCE
 assert all(short_id in SIZING_REPIN_MIGRATION_SOURCE for short_id in CURRENT_EXPECTED_TARGETS)
+assert TRACKER_RETIREMENT_REPIN_DIGEST in TRACKER_RETIREMENT_REPIN_MIGRATION_SOURCE
+assert SIZING_REPIN_DIGEST in TRACKER_RETIREMENT_REPIN_MIGRATION_SOURCE
+assert all(
+    short_id in TRACKER_RETIREMENT_REPIN_MIGRATION_SOURCE for short_id in CURRENT_EXPECTED_TARGETS
+)
+assert UNFILED_BUG_REPIN_DIGEST in UNFILED_BUG_REPIN_MIGRATION_SOURCE
+assert TRACKER_RETIREMENT_REPIN_DIGEST in UNFILED_BUG_REPIN_MIGRATION_SOURCE
+assert all(
+    short_id in UNFILED_BUG_REPIN_MIGRATION_SOURCE for short_id in CURRENT_EXPECTED_TARGETS
+)
 assert OLD_DIGEST in REFRESH_MIGRATION_SOURCE and DIGEST in REFRESH_MIGRATION_SOURCE
 assert THIRD_DIGEST in SECOND_REFRESH_MIGRATION_SOURCE
 assert all(short_id in SECOND_REFRESH_MIGRATION_SOURCE for short_id in EXPECTED_TARGETS)

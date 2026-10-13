@@ -82,7 +82,7 @@ run_canary() {
 
 if [ "${1:-}" = "--preflight" ]; then
   required=(
-    ops/seat-health.py ops/seat_health.py
+    ops/seat-health.py ops/seat_health.py ops/host_liveness.py tools/room-bridge/dispatch.py
     ops/vault-drift-watch.py bin/schema-snapshot.sh ops/p1-environment-gate.py
     ops/p1-rebuild-gate.py ops/p1-integration-gate.py pipelines/cadence_engine.py
     pipelines/availability_matcher.py ops/fetch-allowlist.py
@@ -90,8 +90,9 @@ if [ "${1:-}" = "--preflight" ]; then
     ops/vendor-level-drift-check.py bin/backup-dump.sh bin/archive-calendar.sh
     bin/sync-settings.sh bin/type-check.sh ops/store-markup-scan.py
     generators/build-open-items-dashboard.py ops/nightly-verb-probe.py
-    bin/smoke-and-record.sh tools/ops-record.py ops/staging-observed-prune.py
-    tools/health-check.py ops/jev_spend_health.py ops/grok_session.py
+    bin/smoke-and-record.sh tools/ops-record.py
+    tools/health-check.py ops/jev_spend_health.py ops/grok_session.py tools/health_breach.py
+    lib/claude_continuity_spool.py
     # bin/routine-canonical-seam-refusal.sh came off this list on 2026-08-23: the
     # chain stopped launching it when the refusals became tombstones, and a
     # preflight that requires a file no step runs is checking the wrong thing.
@@ -735,35 +736,21 @@ tombstone "environment integration proof" \
   "admin capability — the same rehearsal lane the rebuild proof above cannot open" \
   "an admin credential is provisioned here and ops/p1-integration-gate.py is restored to this line"
 
-# ── THE ENFORCEMENT STACK'S OTHER COST: DISK (2026-08-27) ────────────────────
-# On 2026-08-27 out/staging-observed held 152 orphaned temp files over 1MB
-# apiece (~3.2GB) beside per-session observation files, one of them 110MB. The
-# disk filled and no new worktree could be created — a hard stop on every
-# session on this Mac, not a slow morning.
-#
-# hooks/staging-observation-tracker.py now sweeps abandoned temps before each
-# of its own writes and bounds its state files in bytes. That handles the
-# machine while sessions are running on it and cannot handle anything else: a
-# hook only runs while a session runs, so the state file of a session that has
-# ENDED is precisely the one nothing will ever touch again. Reaping by
-# absence-of-activity is a question only something outside the sessions can
-# ask, which is why it is a line here and not more code in the hook.
-#
-# IT RUNS HERE, AHEAD OF EVERYTHING THAT WRITES, and the position is the point.
-# The first cut of this put it beside the hook telemetry rollup near the bottom,
-# on the reasoning that both price the enforcement stack — one in latency, one
-# in bytes. That is a tidy grouping and it is the wrong order: the encrypted
-# backup is the LAST step and it writes a dump, so a full disk fails the backup
-# and then frees 3.2GB immediately afterwards. Reclamation belongs before the
-# steps that need the space, not beside the report it rhymes with.
-#
-# NO NEW SCHEDULED JOB, same argument the rollup makes: one more step on a chain
-# that is already awake. It exits 0 whether or not it removes anything — a
-# housekeeping step that reddens the chain is a check people learn to skip.
-step "staging-observed prune (temp orphans + idle sessions)" \
-    ./.venv/bin/python ops/staging-observed-prune.py
-
 step "daily AI seat health" ./.venv/bin/python ops/seat-health.py
+
+# DISPATCH CLAIM RECONCILE (2026-10-12). A dispatch killed mid-run leaves its
+# write-ownership claim `held`, and a held claim refuses every later job whose
+# --writes overlap it; until now only a session that remembered
+# `dispatch.py reconcile --claim <msg_id>` ever released one. This step examines
+# ONLY held claims whose writer is verifiably gone or that are older than 6
+# hours (--older-than-hours 6); a legitimately running overnight job with a
+# live writer is not touched, so it is never tagged stuck and never turns this
+# step red. A dead-writer claim is released; a claim over 6 h whose writer is
+# not provably gone is marked stuck. Exit 1 = such a claim is still held; on
+# breach: owner orchestrator reads the printed claims JSON, confirms the
+# writer is dead, then `dispatch.py reconcile --claim <msg_id>`; verify the
+# next run exits 0; auto-clear when no over-age claim is held.
+step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py reconcile --older-than-hours 6
 
 # ── ORDER 14: the two writing steps, BEFORE the exports ──────────────────────
 # The cadence engine WRITES (next_action + event), so the read-only exporter
@@ -1125,9 +1112,40 @@ step "credential health (reports, never rotates; loops on a finding)" \
 step "Monthly system cost view and spike loops" \
      ./run.sh costs --publish --alerts
 
+# Re-sends Claude continuity receipts whose delivery was unknown, in order and
+# under their original keys, through the claude-continuity token (no human
+# credential); refused ones are archived with the store's reason. The row
+# ("continuity spool depth") opens or clears one deduplicated loop.
+step "Claude continuity spool drain" \
+     ./.venv/bin/python tools/health-check.py --section claude-continuity-spool
+
 # Authentication readback only; no model work and no interactive login.
 step "Grok authentication health" \
      ./.venv/bin/python tools/health-check.py --section grok-session
+
+# THE BOUND ACTIONS, EXECUTED (2026-10-12). Every red health row prints an
+# "on breach: open/update one deduplicated loop ..." clause, and until this
+# step nothing ran it: eleven rows sat red for days with the action as prose.
+# `run.sh health --act` files or updates ONE loop per red row through the
+# record layer (deduplicated by the key the row's own text names, found by
+# loop-board search, never by a local state file), leaves a loop the row's own
+# reader filed alone, and closes or notes-cleared its own loops whose row went
+# green. Placed after the seat probe, credential, cost and Grok steps above so
+# the rows it acts on are tonight's. Exit 1 means a loop write failed, never
+# that health is red. Receipts: out/health-act.jsonl.
+step "health breach response (one loop per red row)" ./run.sh health --act
+
+# ── DEFECT BRIDGE (WR-000269, Joe's ruling 2026-10-12) ─────────────────────
+# "you cant detect a bug and then step over it." Every recorded defect that no
+# Work Request names gets one: ONE request per defect class per open set,
+# through report-problem, naming every defect id, at most 10 a night (largest
+# class first, so 480-odd classes do not land in Joe's triage queue at once).
+# Dedupe is the record layer itself (an existing request naming the id, then a
+# derived idempotency key), never a local file; any unproven read files nothing
+# and exits 1. lib/defect_bridge.py holds the logic; tools/health-check.py's
+# `unaddressed defects` row prints the count and this step as its bound action.
+step "defect bridge (one Work Request per unaddressed defect class)" \
+     ./.venv/bin/python ops/defect-bridge.py
 
 step "encrypted backup -> R2"                        env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh
 # CAPTURED HERE, ON THE NEXT LINE, AND THAT IS THE WHOLE POINT (fixed 2026-08-23).

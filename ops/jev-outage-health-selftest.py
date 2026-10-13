@@ -247,6 +247,102 @@ class OutageTests(unittest.TestCase):
                 self.assertEqual(health.reconcile(recovered, state,
                     lambda name, payload: {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open"}), "cleared")
 
+    def test_every_outage_payload_satisfies_the_add_loop_residue_gate(self):
+        # add-loop refuses human_only/ruling/capability without a residue
+        # (mcp-server/src/tools.js RESIDUE_CLASSES, RESIDUE_KINDS). Read the
+        # contract from the verb's own source, so a drift fails here.
+        import re
+        source = (Path(__file__).resolve().parents[1] / "mcp-server/src/tools.js").read_text()
+        def frozen(name):
+            body = re.search(name + r" = Object\.freeze\(\[(.*?)\]\)", source, re.S).group(1)
+            return set(re.findall(r'"([a-z_]+)"', body))
+        classes, kinds, owners = frozen("RESIDUE_CLASSES"), frozen("RESIDUE_KINDS"), frozen("LOOP_OWNERS")
+        self.assertEqual(classes, {"human_only", "ruling", "capability"})
+        for reason in ("billing_exhausted", "auth_failed", "rate_limited", "timeout", "log_unreadable"):
+            with self.subTest(reason=reason):
+                fields = health.outage_blocker(reason)
+                self.assertIn(fields["owner"].lower(), owners)
+                self.assertGreaterEqual(len(fields["blocker_detail"].strip()), 12)
+                if fields["blocker"] == "capability":  # verb-gate-checks.js needsDecider()
+                    self.assertRegex(fields["blocker_detail"], re.compile(r"\b(joe|dell)\b", re.I))
+                if fields["blocker"] in classes:
+                    self.assertIn(fields["residue_kind"], kinds)
+                    self.assertGreaterEqual(len(fields["residue_host"].strip()), 2)
+                else:
+                    self.assertNotIn("residue_kind", fields)
+
+    def test_capability_blocker_names_its_decider(self):
+        """mcp-server/src/verb-gate-checks.js needsDecider() refuses an add-loop
+        whose blocker is `capability` unless the row names Joe or Dell. The
+        state_unreadable payload named neither, so every open was refused and
+        the health row read "loop error" (2026-10-12)."""
+        import re
+        for reason in ("state_unreadable", "log_unreadable", "invalid_data", "http_500"):
+            with tempfile.TemporaryDirectory() as directory:
+                calls = []
+                def verb(name, payload):
+                    calls.append((name, payload))
+                    return {"ok": True, "loop_id": "loop-1", "version": 1, "status": "open"}
+                health.reconcile({"status": "warn", "reason": reason, "age_hours": None},
+                                 Path(directory) / "state.json", verb)
+                payload = calls[0][1]
+                if payload["blocker"] == "capability":
+                    text = "\n".join(str(payload.get(f) or "") for f in
+                                     ("title", "body", "unblocks", "source_note", "blocker_detail"))
+                    self.assertRegex(text, re.compile(r"\b(joe|dell)\b", re.I), reason)
+
+    def test_refused_open_is_not_replayed_forever(self):
+        """A persisted open payload is replayed so a LOST reply cannot file a
+        second loop. A REFUSED one wrote nothing and can only be refused again:
+        it is dropped, so the next run sends the current payload (2026-10-12,
+        the stuck state_unreadable open on the Studio)."""
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(json.dumps({"open_key": "old-key", "open_payload": {
+                "idempotency_key": "old-key", "kind": "open_loop", "owner": "Joe", "domain": "system",
+                "blocker": "capability", "blocker_detail": "TypeSafe provider failure: state_unreadable",
+                "body": "stale"}}))
+            sent = []
+            def refusing(name, payload):
+                sent.append(payload)
+                return {"ok": False, "refused": True}
+            warning = {"status": "warn", "reason": "state_unreadable", "age_hours": None}
+            self.assertEqual(health.reconcile(warning, state, refusing), "error")
+            self.assertEqual(sent[0]["idempotency_key"], "old-key")
+            def accepting(name, payload):
+                sent.append(payload)
+                return {"ok": True, "loop_id": "loop-9", "version": 1, "status": "open"}
+            self.assertEqual(health.reconcile(warning, state, accepting), "opened")
+            self.assertNotEqual(sent[-1]["idempotency_key"], "old-key")
+            fresh = sent[-1]
+            if fresh["blocker"] == "capability":
+                self.assertIn("Joe", fresh["blocker_detail"])
+            else:
+                # Not Joe's: an internal outage files as other_lane (decision cbe91287).
+                self.assertEqual((fresh["blocker"], fresh["owner"]), ("other_lane", "claude"))
+            lost = []
+            def transient(name, payload):
+                lost.append(payload)
+                return {"ok": False}
+            state.write_text(json.dumps({"open_key": "kept", "open_payload": dict(sent[0], idempotency_key="kept")}))
+            health.reconcile(warning, state, transient)
+            self.assertEqual(json.loads(state.read_text())["open_key"], "kept",
+                             "an unconfirmed (not refused) reply must keep its key for replay")
+
+    def test_call_verb_marks_only_a_record_layer_refusal(self):
+        """repair_loop drops a persisted open payload only on `refused`; an
+        unconfirmed reply must keep it for replay."""
+        from unittest import mock
+        from lib.record_call import VerbResult
+        for kind, refused in (("refused", True), ("transient", False), ("failed", False)):
+            with self.subTest(kind=kind), mock.patch.object(
+                    health.record_call, "call_verb",
+                    return_value=VerbResult("add-loop", kind, reply={"error": "fixture"})):
+                self.assertEqual(health.call_verb("add-loop", {}), {"ok": False, "refused": refused})
+        with mock.patch.object(health.record_call, "call_verb",
+                               return_value=VerbResult("add-loop", "ok", reply={"ok": True, "loop_id": "l"})):
+            self.assertEqual(health.call_verb("add-loop", {}), {"ok": True, "loop_id": "l"})
+
     def test_one_loop_then_auto_close_after_success(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "state.json"

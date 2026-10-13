@@ -258,7 +258,9 @@ def config_wirings(hooks_config: Path = HOOKS_CONFIG,
                     if len(tail) == 2 and tail[1].strip():
                         names = [tail[1].strip().split()[0]]
                     env = ENV_TOKEN.search(command)
-                    for name in names[:1]:
+                    # A chain command (lib/hook_execution.py run_chain) wires
+                    # every gate it names; any other command wires its first.
+                    for name in (names if " --chain " in command else names[:1]):
                         found[wiring_key(name, event, matcher, env.group(1) if env else "")] = label
     return found
 

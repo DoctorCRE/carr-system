@@ -153,7 +153,11 @@ def wired_gate_files():
                 toks = [t for t in toks if t != "hook-meter-run.py"]
                 if not toks:
                     continue
-                if toks[0] == "run-record-gate.py" and len(toks) > 1:
+                if " --chain " in cmd:
+                    # One interpreter running several gates (WR-000259):
+                    # every member is wired, each as a `T:PATH` token.
+                    names.update(toks)
+                elif toks[0] == "run-record-gate.py" and len(toks) > 1:
                     names.add(toks[1])
                 else:
                     names.add(toks[0])

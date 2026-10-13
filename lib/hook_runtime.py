@@ -1,6 +1,5 @@
 """Claude hook event transport and verdicts, shared by gates and fixtures."""
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
 from functools import wraps
 import io
 import json
@@ -8,11 +7,41 @@ import os
 import sys
 
 
-@dataclass(frozen=True)
 class Verdict:
-    code: int = 0
-    stdout: str = ''
-    stderr: str = ''
+    """An immutable (code, stdout, stderr) triple.
+
+    Hand-written rather than a frozen dataclass: every hook process imports
+    this module, and `dataclasses` (with `inspect` behind it) was about 20 ms
+    of CPU per hook start on the 2026-10-12 measurement, paid dozens of times
+    per tool call for three fields.
+    """
+    __slots__ = ('code', 'stdout', 'stderr')
+
+    def __init__(self, code=0, stdout='', stderr=''):
+        object.__setattr__(self, 'code', code)
+        object.__setattr__(self, 'stdout', stdout)
+        object.__setattr__(self, 'stderr', stderr)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field {name!r}")
+
+    def __delattr__(self, name):
+        raise AttributeError(f"cannot delete field {name!r}")
+
+    def _fields(self):
+        return (self.code, self.stdout, self.stderr)
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._fields() == other._fields()
+
+    def __hash__(self):
+        return hash(self._fields())
+
+    def __repr__(self):
+        return (f"{self.__class__.__qualname__}(code={self.code!r}, "
+                f"stdout={self.stdout!r}, stderr={self.stderr!r})")
 
     @classmethod
     def block(cls, reason):

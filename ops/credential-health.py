@@ -757,6 +757,8 @@ def file_loop_if_needed(cred, bucket, dedup_state, dry_run=False, timeout_s=30):
         "domain": "system",
         "blocker": "capability",
         "blocker_detail": f"{name} credential-health probe",
+        "residue_kind": "provider_login",
+        "residue_host": name,
         "body": _loop_body(cred, bucket),
     }
     filed_ok = call_verb("add-loop", payload, timeout=timeout_s, runner=SUBPROCESS_RUN).ok
