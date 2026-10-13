@@ -94,6 +94,11 @@ esac
 CI_SELFTEST_TIMEOUT_SECONDS=120
 CI_TIMEOUT_HELPER="$REPO/bin/with-timeout.py"
 
+if [ "${1:-}" = "--doc-drift" ]; then
+  shift
+  exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
+fi
+
 STRICT=0
 ONLY=""
 RESULT_FILE=""
@@ -627,7 +632,8 @@ PYEOF
   local eligible=""
   for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
            tools/room-bridge/test_*_unit.py \
-           tools/room-bridge/test_activation_reliability.py; do
+           tools/room-bridge/test_activation_reliability.py \
+           test/doc_drift/test_*.py test/doc_drift_product/test_*.py; do
     [ -f "$t" ] || continue
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"

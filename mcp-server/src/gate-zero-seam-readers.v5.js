@@ -285,6 +285,7 @@ const OUTCOME_HASH = /^sha256:[0-9a-f]{64}$/;
  *   .github/workflows/backup-nightly.yml:116   pg_dump -> age-encrypt -> artifact
  *   .github/workflows/ci.yml:89                ops/ci.sh --strict
  *   .github/workflows/db-acceptance.yml:71     local-db-ci --class migration
+ *   .github/workflows/doc-drift.yml:14         check   (job id; the job declares no name:)
  *   .github/workflows/edge-liveness.yml:70     is anything that should be reporting not reporting
  *   .github/workflows/main-canary.yml:77       main canary (gates, migration, types, freshness)
  *   .github/workflows/source-merge-controller.yml:20  merge   (job id; the job declares no name:)
@@ -312,6 +313,7 @@ const OUTCOME_HASH = /^sha256:[0-9a-f]{64}$/;
  * the maintenance contract for this constant.
  */
 const DECLARED_CHECK_NAMES = Object.freeze([
+  "check",
   "Plan against current GitHub evidence",
   "Read-only exact merge-ref verification",
   "Conditional squash merge from protected main",

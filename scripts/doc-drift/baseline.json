@@ -1,0 +1,2261 @@
+{
+  "schema": "doc-drift-baseline/v1",
+  "source_sha": "c992a50908d0eb83a368dc68355de23e7e9935dc",
+  "findings": [
+    {
+      "file": ".agents/skills/codebase-design/UPSTREAM.md",
+      "kind": "path",
+      "target": "GLOSSARY.md"
+    },
+    {
+      "file": ".agents/skills/codebase-design/UPSTREAM.md",
+      "kind": "path",
+      "target": "agents/openai.yaml"
+    },
+    {
+      "file": "README.md",
+      "kind": "path",
+      "target": "CRITIQUE-LOG.md"
+    },
+    {
+      "file": "README.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "README.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "README.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "README.md",
+      "kind": "path",
+      "target": "renewal-radar.json"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/setup-benny/SKILL.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/benny/configuration.yaml"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/benny/feature-map.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/benny/routing.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": "FOR_AGENTS.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": "FOR_AGENTS.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": "FOR_AGENTS.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/setup-benny/SKILL.md",
+      "kind": "path",
+      "target": "FOR_AGENTS.md"
+    },
+    {
+      "file": "_to_delete/benny-skills/triage-issue-reports/SKILL.md",
+      "kind": "path",
+      "target": "trigger.ts"
+    },
+    {
+      "file": "_to_delete/benny-skills/triage-issue-reports/references/routing.example.md",
+      "kind": "path",
+      "target": ".cursor/benny/routing.md"
+    },
+    {
+      "file": "claude-tree/agents/README.md",
+      "kind": "path",
+      "target": "Management/pipeline-coo-doctrine.md"
+    },
+    {
+      "file": "claude-tree/agents/README.md",
+      "kind": "path",
+      "target": "content-fuel-engine.md"
+    },
+    {
+      "file": "claude-tree/agents/README.md",
+      "kind": "path",
+      "target": "council-marketing.md"
+    },
+    {
+      "file": "claude-tree/agents/README.md",
+      "kind": "path",
+      "target": "performance-loop.md"
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-it-support.md",
+      "kind": "path",
+      "target": "record-layer-dictionary.md"
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-it-support.md",
+      "kind": "path",
+      "target": "skills-rule.md"
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+      "kind": "path",
+      "target": "code.claude.com/docs/en/sub-agents.md"
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+      "kind": "path",
+      "target": "intake/README.md"
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+      "kind": "path",
+      "target": "playbooks/deal-post-mortem-template.md"
+    },
+    {
+      "file": "claude-tree/agents/benefit-summary.md",
+      "kind": "path",
+      "target": "build-benefit-summary.js"
+    },
+    {
+      "file": "claude-tree/agents/client-intake.md",
+      "kind": "path",
+      "target": "clients-active.md"
+    },
+    {
+      "file": "claude-tree/agents/client-intake.md",
+      "kind": "path",
+      "target": "intake/README.md"
+    },
+    {
+      "file": "claude-tree/agents/council-attorney.md",
+      "kind": "path",
+      "target": "legal-considerations-lease-review.md"
+    },
+    {
+      "file": "claude-tree/agents/council-attorney.md",
+      "kind": "path",
+      "target": "playbooks/renewals.md"
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "kind": "path",
+      "target": "dental-vertical-guide.md"
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "kind": "path",
+      "target": "medical-vertical-guide.md"
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "kind": "path",
+      "target": "other-healthcare-vertical-guide.md"
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "kind": "path",
+      "target": "vet-vertical-guide.md"
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "kind": "path",
+      "target": "vision-vertical-guide.md"
+    },
+    {
+      "file": "claude-tree/agents/council-lender.md",
+      "kind": "path",
+      "target": "purchase-vs-lease-fill-guide.md"
+    },
+    {
+      "file": "claude-tree/agents/council-skeptic.md",
+      "kind": "path",
+      "target": "purchase-vs-lease-fill-guide.md"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "Management/panhandle-team-deals.json"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "build-lead-board.py"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "clients-active.md"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "conflict-surfacing-latest.md"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "correction-miner-latest.md"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "entity-formation-leads.json"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "lead-board-decisions.json"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "lead-board-hot.json"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "panhandle-team-deals.json"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "pre-entity-watch.json"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "promotion-review-latest.md"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "record-layer-dictionary.md"
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "kind": "path",
+      "target": "weekly-learning-latest.md"
+    },
+    {
+      "file": "claude-tree/agents/it-support.md",
+      "kind": "path",
+      "target": "conflict-surfacing-latest.md"
+    },
+    {
+      "file": "claude-tree/agents/it-support.md",
+      "kind": "path",
+      "target": "record-layer-dictionary.md"
+    },
+    {
+      "file": "claude-tree/agents/it-support.md",
+      "kind": "path",
+      "target": "skills-rule.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "kind": "path",
+      "target": "Media/facebook-ads-playbook-2026.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "kind": "path",
+      "target": "lead-magnet-five-numbers-2026-07-18.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "kind": "path",
+      "target": "performance-loop.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "kind": "path",
+      "target": "platform-playbook-2026.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "correction-miner-latest.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "council-marketing.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "performance-loop.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "post-performance-log.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "style-contract.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "kind": "path",
+      "target": "weekly-learning-latest.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-research.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-research.md",
+      "kind": "path",
+      "target": "model-study-healthcarereguy-2026-07-18.md"
+    },
+    {
+      "file": "claude-tree/agents/marketing-research.md",
+      "kind": "path",
+      "target": "peer-gap-2026-07-18.md"
+    },
+    {
+      "file": "claude-tree/agents/salesforce-reader.md",
+      "kind": "path",
+      "target": "panhandle-team-deals.json"
+    },
+    {
+      "file": "claude-tree/skills/council/SKILL.md",
+      "kind": "path",
+      "target": "marketing-coo.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "Media/content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "Prospects/prospects-roster.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "deals-reciprocity.generated.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "engine.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "engine.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "engine.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "open-loops-backlog.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "team-loops.md"
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "kind": "path",
+      "target": "weekly-routine.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "post-performance-log.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "claude-tree/skills/write-content/SKILL.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/write-content/SKILL.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "claude-tree/skills/write-content/SKILL.md",
+      "kind": "path",
+      "target": "x-reply-engine-2026.md"
+    },
+    {
+      "file": "corpus/00_Context/model-tiering.md",
+      "kind": "path",
+      "target": "Management/system-evolution-plan.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/deal-analysis-toolkit.md",
+      "kind": "path",
+      "target": "Media/content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
+      "kind": "path",
+      "target": "Management/deal-enrichment-sop.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
+      "kind": "path",
+      "target": "Management/panhandle-team-deals.json"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "kind": "path",
+      "target": "deals.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "kind": "path",
+      "target": "engine.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+      "kind": "path",
+      "target": "fill-engine/fill-it-in-workflow.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+      "kind": "path",
+      "target": "fill-engine/fill-it-in-workflow.md"
+    },
+    {
+      "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+      "kind": "path",
+      "target": "fill-it-in-workflow.md"
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "path",
+      "target": "lead-system.md"
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "path",
+      "target": "lead-system.md"
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "path",
+      "target": "lead-system.md"
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "path",
+      "target": "lead-system.md"
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "path",
+      "target": "national-accounts-toolkit.md"
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "kind": "path",
+      "target": "national-accounts-toolkit.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+      "kind": "path",
+      "target": "voice-profile.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-strategy-2026.md",
+      "kind": "path",
+      "target": "Media/x-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/instagram-strategy-2026.md",
+      "kind": "path",
+      "target": "Media/x-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/instagram-strategy-2026.md",
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/linkedin-strategy-2026.md",
+      "kind": "path",
+      "target": "Media/x-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "kind": "path",
+      "target": "vendor_intro_for_stage.py"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "kind": "path",
+      "target": "vendor_intro_for_stage.py"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-relationship-craft.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-relationship-craft.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "clients-active.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "clients-active.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "compiled-rules-dell.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "compiled-rules-dell.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "dell-profile.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "dell-profile.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "idea-bank.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "open-loops.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "open-loops.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "prospects.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "settings.json"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "kind": "path",
+      "target": "voice-profile.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "path",
+      "target": "facebook-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "path",
+      "target": "instagram-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "path",
+      "target": "linkedin-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "path",
+      "target": "model-tiering.md"
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "kind": "path",
+      "target": "social-media-workflow.md"
+    },
+    {
+      "file": "corpus/DNA/brand-voice.md",
+      "kind": "path",
+      "target": "instagram-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/brand-voice.md",
+      "kind": "path",
+      "target": "linkedin-strategy-2026.md"
+    },
+    {
+      "file": "corpus/DNA/brand-voice.md",
+      "kind": "path",
+      "target": "social-media-workflow.md"
+    },
+    {
+      "file": "corpus/DNA/carr-profile.md",
+      "kind": "path",
+      "target": "Media/social-media-workflow.md"
+    },
+    {
+      "file": "corpus/DNA/carr-profile.md",
+      "kind": "path",
+      "target": "clients-active.md"
+    },
+    {
+      "file": "corpus/DNA/objection-bank.md",
+      "kind": "path",
+      "target": "question-bank.md"
+    },
+    {
+      "file": "corpus/DNA/objection-bank.md",
+      "kind": "path",
+      "target": "referral-network.md"
+    },
+    {
+      "file": "corpus/DNA/writing-rules.md",
+      "kind": "path",
+      "target": "write-content/SKILL.md"
+    },
+    {
+      "file": "corpus/DNA/writing-rules.md",
+      "kind": "path",
+      "target": "write-content/SKILL.md"
+    },
+    {
+      "file": "corpus/DNA/writing-rules.md",
+      "kind": "path",
+      "target": "writing-audit/SKILL.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "Management/deal-room-kit.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "Management/playbooks/practice-os-playbooks.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "Management/property-feed-sop.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "Management/system-evolution-plan.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "Output/INDEX.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "alabama-lead-system.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "associate-lane-sop.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "costar-playbook.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "instagram-strategy-2026.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "lease-term-estimator.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "linkedin-strategy-2026.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "open-loops-backlog.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "open-loops.md"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "kind": "path",
+      "target": "renewal-radar-sop.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "Assets/asset-checklist.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "content-fuel-inbox.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "linkedin-comment-queue.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "linkedin-engagement-engine.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "performance-loop.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "plan-animated-static.py"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "post-performance-log.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "post-performance-log.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "profile-audit-2026-07-20.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "published-log.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "scripts/blotato.sh"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "social-media-manager/SKILL.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "stock-license-note.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "talking-head-scripts-2026-07.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "video/graphics"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "x-reply-engine-2026.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "x-sound-design-playbook-2026.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "kind": "path",
+      "target": "x-strategy-2026.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/x-article-playbook.md",
+      "kind": "path",
+      "target": "content-inspiration-bank.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/x-article-playbook.md",
+      "kind": "path",
+      "target": "x-article-draft-medical-lease-2026-07-17.md"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/x-article-playbook.md",
+      "kind": "path",
+      "target": "x-strategy-2026.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "kind": "path",
+      "target": "action-required.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "kind": "path",
+      "target": "idea-bank.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "kind": "path",
+      "target": "open-loops-backlog.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "kind": "path",
+      "target": "open-loops.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "kind": "path",
+      "target": "team-loops.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/checkpoint/SKILL.md",
+      "kind": "path",
+      "target": "checkpoints/2025-06-01-1430.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "path",
+      "target": "DECISIONS.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "path",
+      "target": "decisions.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "path",
+      "target": "decisions.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "kind": "path",
+      "target": "docs/adr"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
+      "kind": "path",
+      "target": "idea-bank.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
+      "kind": "path",
+      "target": "open-loops.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/loose-ends/SKILL.md",
+      "kind": "path",
+      "target": "open-loops-backlog.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/loose-ends/SKILL.md",
+      "kind": "path",
+      "target": "open-loops.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/til/SKILL.md",
+      "kind": "path",
+      "target": "CLAUDE.md/AGENTS.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/til/SKILL.md",
+      "kind": "path",
+      "target": "LESSONS.md"
+    },
+    {
+      "file": "corpus/_home/.claude/skills/til/SKILL.md",
+      "kind": "path",
+      "target": "gotchas.md"
+    },
+    {
+      "file": "design/doctrine-store-build-2026-08-07.md",
+      "kind": "path",
+      "target": "shared/personal"
+    },
+    {
+      "file": "design/situation-retrieval-build-plan-2026-08-16.md",
+      "kind": "path",
+      "target": "workspace/tenant"
+    },
+    {
+      "file": "docs/agents/domain.md",
+      "kind": "path",
+      "target": "docs/adr"
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "kind": "path",
+      "target": "migrations/0454-0471"
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "kind": "path",
+      "target": "migrations/0454-0471"
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "kind": "path",
+      "target": "migrations/0454-0471"
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "kind": "path",
+      "target": "migrations/0454-0471"
+    },
+    {
+      "file": "docs/frontier-finding/cs-review-trail.md",
+      "kind": "path",
+      "target": "db-tap.py"
+    },
+    {
+      "file": "docs/frontier-finding/cs-review-trail.md",
+      "kind": "path",
+      "target": "db-tap.py"
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "breakglass-run.py"
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "docs/frontier-finding/breakglass-run.py"
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "gen-breakglass-run.py"
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "gen-census-matrix.py"
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "gen-frontier-manifest.py"
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "migrations/0467"
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "kind": "path",
+      "target": "migrations/0471"
+    },
+    {
+      "file": "docs/frontier-finding/target-identity-contract.md",
+      "kind": "path",
+      "target": "migrations/0454"
+    },
+    {
+      "file": "evals/rule-delivery/README.md",
+      "kind": "path",
+      "target": "lib/rule_delivery_preuse.semantic_delivery"
+    },
+    {
+      "file": "evals/rule-delivery/README.md",
+      "kind": "path",
+      "target": "ops/rule_trigger_delivery.advise"
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "kind": "path",
+      "target": "gate-baseline.json"
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "kind": "path",
+      "target": "hooks/install-record-home-gate.py"
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "kind": "path",
+      "target": "hooks/ledger-boundary-sweep.py"
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "kind": "path",
+      "target": "ledger-boundary-sweep.py"
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "kind": "path",
+      "target": "settings.json"
+    },
+    {
+      "file": "migrations/0066_marketing_campaign_and_measurement_spec.md",
+      "kind": "path",
+      "target": "pull_placement_metrics.py"
+    },
+    {
+      "file": "migrations/README.md",
+      "kind": "path",
+      "target": "bin/migrate-prod.sh --through NNNN_name.sql"
+    },
+    {
+      "file": "migrations/README.md",
+      "kind": "path",
+      "target": "record-layer/schema-draft-2026-07-30.sql"
+    },
+    {
+      "file": "ops/fixtures/brief-check/gap17.md",
+      "kind": "command",
+      "target": "are"
+    },
+    {
+      "file": "ops/joe-batch-queue.v1.md",
+      "kind": "path",
+      "target": "codex-hooks.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "backup-dump.sh"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/*.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/lead-board.html"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "baselines/renewal-radar.json"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "check.sh"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "exporters/templates"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "exporters/templates"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "exporters/templates"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "kind": "path",
+      "target": "renewal-radar.json"
+    },
+    {
+      "file": "ops/scheduled-tasks/ai-capability-builder.SKILL.md",
+      "kind": "path",
+      "target": "SKILL.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/cc-update-audit.SKILL.md",
+      "kind": "path",
+      "target": "repos/anthropics/claude-code/contents/CHANGELOG.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
+      "kind": "path",
+      "target": "Media/linkedin-comment-queue.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
+      "kind": "path",
+      "target": "Media/linkedin-engagement-engine.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+      "kind": "path",
+      "target": "Management/record-layer/runbook.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+      "kind": "path",
+      "target": "db-tap.py"
+    },
+    {
+      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+      "kind": "path",
+      "target": "db-tap.py"
+    },
+    {
+      "file": "ops/scheduled-tasks/notes-sweep-hourly.SKILL.md",
+      "kind": "path",
+      "target": "tasks/notes-sweep-hourly.SKILL.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/content-inspiration-bank.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/social-media-workflow.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/style-contract.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/voice-samples.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/x-posting-spec.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "kind": "path",
+      "target": "AI/Automation/Learning/correction-miner-latest.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "kind": "path",
+      "target": "AI/Automation/Learning/placement-pull-latest.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "kind": "path",
+      "target": "AI/Automation/Learning/weekly-learning-latest.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/post-performance-log.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/published-log.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "kind": "path",
+      "target": "Media/x-posting-spec.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "kind": "path",
+      "target": "voice-samples.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "kind": "path",
+      "target": "x-reply-targets.md"
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "kind": "path",
+      "target": "x-strategy-2026.md"
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "kind": "path",
+      "target": "carr-control-room-bduf.md"
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "kind": "path",
+      "target": "carr-production-maturity-baseline.md"
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "kind": "path",
+      "target": "carr-workspace-bduf.md"
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "kind": "path",
+      "target": "council-review-register.v1.json"
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "kind": "path",
+      "target": "council-review.v1.json"
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "kind": "path",
+      "target": "phase0-acceptance.v1.json"
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "kind": "path",
+      "target": "phase0-acceptance.v1.json"
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "kind": "path",
+      "target": "conflict-surfacing-latest.md"
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "kind": "path",
+      "target": "correction-miner-latest.md"
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "kind": "path",
+      "target": "it-lane-worker.md"
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "kind": "path",
+      "target": "it-support.md"
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "kind": "path",
+      "target": "placement-pull-latest.md"
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "kind": "path",
+      "target": "promotion-review-latest.md"
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "kind": "path",
+      "target": "weekly-learning-latest.md"
+    },
+    {
+      "file": "plugins/pstack/PORT.md",
+      "kind": "path",
+      "target": "api2.cursor.sh"
+    },
+    {
+      "file": "plugins/pstack/PORT.md",
+      "kind": "path",
+      "target": "plugin.json"
+    },
+    {
+      "file": "plugins/pstack/PORT.md",
+      "kind": "path",
+      "target": "worktree-audit.sh"
+    },
+    {
+      "file": "plugins/pstack/agents/poteto-agent.md",
+      "kind": "path",
+      "target": "SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/agents/poteto-agent.md",
+      "kind": "path",
+      "target": "SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/setup-benny/SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": "SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "kind": "path",
+      "target": "skills/setup-benny/SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/README.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/README.md",
+      "kind": "path",
+      "target": ".cursor/settings.json"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "kind": "path",
+      "target": "trigger.ts"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/references/feature-map.example.md",
+      "kind": "path",
+      "target": ".cursor/benny/feature-map.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/templates/reproduce-automation-prompt.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/templates/triage-automation-prompt.md",
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/docs/guide/09-make-it-yours.md",
+      "kind": "path",
+      "target": "SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/docs/guide/10-recipes-and-pitfalls.md",
+      "kind": "path",
+      "target": "SKILL.md"
+    },
+    {
+      "file": "plugins/pstack/skills/automate-me/SKILL.md",
+      "kind": "path",
+      "target": "test/iterate"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/SKILL.md",
+      "kind": "path",
+      "target": "main.js"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/autopilot-full.md",
+      "kind": "path",
+      "target": "mode/playbooks/autopilot-full.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/autopilot-stack.md",
+      "kind": "path",
+      "target": "mode/playbooks/autopilot-stack.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/multi-phase-plan.md",
+      "kind": "path",
+      "target": "mode/playbooks/opening-a-pr.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "bun scripts/orch/orch.ts"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "frontier.json"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "frontier.json"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "frontier.json"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "frontier.json"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "gates.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "gates.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "overview.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "preferences.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "preferences.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "status.md"
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "kind": "path",
+      "target": "status.md"
+    },
+    {
+      "file": "plugins/pstack/skills/principle-separate-before-serializing-shared-state/SKILL.md",
+      "kind": "path",
+      "target": "indexer-state.json"
+    },
+    {
+      "file": "plugins/pstack/skills/principle-separate-before-serializing-shared-state/SKILL.md",
+      "kind": "path",
+      "target": "metrics-state.json"
+    },
+    {
+      "file": "plugins/pstack/skills/principle-separate-before-serializing-shared-state/SKILL.md",
+      "kind": "path",
+      "target": "state.json"
+    },
+    {
+      "file": "plugins/pstack/skills/show-me-your-work/SKILL.md",
+      "kind": "path",
+      "target": "scripts/snapshot.sh"
+    },
+    {
+      "file": "plugins/pstack/skills/technical-writing/SKILL.md",
+      "kind": "path",
+      "target": "budget.json"
+    },
+    {
+      "file": "plugins/pstack/skills/technical-writing/SKILL.md",
+      "kind": "path",
+      "target": "budget.mjs"
+    },
+    {
+      "file": "plugins/pstack/skills/typescript-best-practices/SKILL.md",
+      "kind": "path",
+      "target": "**/*.tsx"
+    },
+    {
+      "file": "plugins/pstack/skills/why/SKILL.md",
+      "kind": "path",
+      "target": "incident-postmortem.md"
+    },
+    {
+      "file": "plugins/pstack/skills/why/references/sources/code-archaeology.md",
+      "kind": "path",
+      "target": "docs/adr"
+    },
+    {
+      "file": "plugins/pstack/skills/why/references/synthesizer-prompt.md",
+      "kind": "path",
+      "target": "plugins/pstack/skills/why/references/url"
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "kind": "path",
+      "target": "server/wrangler.toml"
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "kind": "path",
+      "target": "wrangler.toml"
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "kind": "path",
+      "target": "wrangler.toml"
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "kind": "path",
+      "target": "wrangler.toml"
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "kind": "path",
+      "target": "wrangler.toml"
+    },
+    {
+      "file": "secrets-inventory.md",
+      "kind": "path",
+      "target": "google-oidc.js"
+    },
+    {
+      "file": "specs/agent-write-attribution.md",
+      "kind": "path",
+      "target": "DECISIONS.md"
+    },
+    {
+      "file": "specs/agent-write-attribution.md",
+      "kind": "path",
+      "target": "DECISIONS.md"
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "kind": "path",
+      "target": "config.json"
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "kind": "path",
+      "target": "config.json"
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "kind": "path",
+      "target": "meta.json"
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "kind": "path",
+      "target": "meta.json"
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "kind": "path",
+      "target": "transcript.json"
+    },
+    {
+      "file": "specs/party-graph-ref-fallback.md",
+      "kind": "path",
+      "target": "build-graph-notes.py"
+    },
+    {
+      "file": "specs/party-graph-ref-fallback.md",
+      "kind": "path",
+      "target": "build-graph-notes.py"
+    },
+    {
+      "file": "specs/post-call-workflow-2026-08-10.md",
+      "kind": "path",
+      "target": "ingested.json"
+    },
+    {
+      "file": "specs/read-path-traversal.md",
+      "kind": "path",
+      "target": "DECISIONS.md"
+    },
+    {
+      "file": "specs/read-path-traversal.md",
+      "kind": "path",
+      "target": "DECISIONS.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "AI/CLAUDE.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "INDEX.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "INDEX.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "action-required.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "agents/README.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "agents/README.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "ai-operating-notes.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "compiled-rules-dell.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "compiled-rules-joe.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "compiled-rules-joe.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "compiled-rules-shared.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "compiled-rules-shared.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "compiled-rules-shared.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "decision-history.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "independent-audit-2026-08-02.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "introduction-rules.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "marketing-coo.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "marketing-coo.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "marketing-coo.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "open-loops-closed.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "open-loops.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "pipelines/import_operating_notes.py"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "pipelines/import_operating_notes.py"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "pipelines/import_operating_notes.py"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "session-marker.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "system-report-card-2026-07-07.md"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "kind": "path",
+      "target": "team-loops.md"
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "kind": "path",
+      "target": "call-context.json"
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "kind": "path",
+      "target": "meta.json"
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "kind": "path",
+      "target": "transcribe-session.sh"
+    },
+    {
+      "file": "tools/doc-convo/README.md",
+      "kind": "path",
+      "target": "assets/hot-context.md"
+    },
+    {
+      "file": "tools/link-model-bakeoff/README.md",
+      "kind": "path",
+      "target": "results.json"
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "kind": "path",
+      "target": "partner_ping.py"
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "kind": "path",
+      "target": "partner_ping.py"
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "kind": "path",
+      "target": "partner_ping.py"
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "kind": "path",
+      "target": "partner_ping.py"
+    },
+    {
+      "file": "vendor-patches/README.md",
+      "kind": "path",
+      "target": "parser.py"
+    },
+    {
+      "file": "vendor-patches/README.md",
+      "kind": "path",
+      "target": "pyproject.toml"
+    }
+  ]
+}
