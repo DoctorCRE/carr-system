@@ -29,18 +29,11 @@ configuration loaded from outside the tree. A clean report covers extracted,
 checkable claims only.
 
 On PRs, warnings and a JSON artifact go to the orchestrator. The weekly main
-run reconciles GitHub issue loops through `loops.py`: one stable marker per
-repository and stale file, with all findings grouped into its issue body.
-The issue names the orchestrator, repair command and clearance test. Full clean
-scans close loops; recurring drift reopens the same issue. PR jobs hold read
-permission; only the main-only weekly job holds issue-write permission. No
-partner is mentioned or assigned. This is a development loop, not a production
-CARR record mutation.
-
-`loops.py --report REPORT --repo OWNER/REPOSITORY` previews changes read-only.
-`--apply` reconciles them. It reads all issue pages, refuses duplicate markers,
-and reports failures without printing authentication or API error bodies.
-After an interrupted write, read issues again before retrying.
+run writes every stale claim to the job summary, uploads the same report as the
+`instruction-drift-report` artifact, and fails while any claim is stale, so
+drift stays visible until the instructions are repaired. Every job holds read
+permission only and files nothing: CARR tracks work in its record layer, not
+GitHub Issues. No partner is mentioned or assigned.
 
 The factory owns the implementation. Products retain local snapshots and
 fixtures with a source revision and file hashes, so their CI does not depend on

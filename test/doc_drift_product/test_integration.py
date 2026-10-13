@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -29,11 +30,6 @@ class ProductIntegrationTest(unittest.TestCase):
         self.assertNotIn('secret', json.dumps(public))
         self.assertIn('person@', json.dumps(report))
 
-    def test_all_main_events_share_one_writer_group(self):
-        workflow = yaml.load((ROOT / '.github/workflows/doc-drift.yml').read_text(), Loader=yaml.BaseLoader)
-        self.assertEqual(workflow['concurrency']['group'], "doc-drift-${{ github.event.pull_request.number || 'main' }}")
-        self.assertEqual(workflow['concurrency']['cancel-in-progress'], 'false')
-
     def test_dependency_projection_refuses_changed_snapshot_version(self):
         module = self.load('doc-drift-product')
         with tempfile.TemporaryDirectory() as directory:
@@ -45,7 +41,6 @@ class ProductIntegrationTest(unittest.TestCase):
                 module.verify_dependencies(root)
             (root / 'scripts/doc-drift/requirements.txt').write_text('PyYAML==6.0.3\n')
             module.verify_dependencies(root)
-
 
     def test_actual_registered_verbs_equal_checker_inventory(self):
         spec = importlib.util.spec_from_file_location('doc_drift_check', ROOT / 'scripts/doc-drift/check.py')
@@ -69,6 +64,58 @@ class ProductIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(install)
         self.assertLess(install, scan)
 
+
+    def report(self, findings):
+        return dict(schema='doc-drift/v1', owner='orchestrator', scope='full', source_sha='a' * 40,
+                    files_checked=['README.md', 'RECOVERY.md'], claims=[], unchecked=[], findings=findings)
+
+    def summarize(self, report):
+        with tempfile.TemporaryDirectory() as directory:
+            source, summary = Path(directory) / 'report.json', Path(directory) / 'summary.md'
+            source.write_text(json.dumps(report))
+            summary.write_text('earlier step\n')
+            result = subprocess.run([sys.executable, str(ROOT / 'ops/doc-drift-product.py'), '--report', str(source),
+                                     '--summary', str(summary)], capture_output=True, text=True)
+            return result.returncode, summary.read_text()
+
+    def test_drift_is_summarized_and_fails_the_run(self):
+        code, text = self.summarize(self.report([
+            dict(file='README.md', line=3, kind='path', target='bin/gone.sh', suggestion='bin/here.sh'),
+            dict(file='README.md', line=9, kind='verb', target='gone', suggestion=None)]))
+        self.assertEqual(code, 1)
+        self.assertEqual(text, 'earlier step\n'
+                         '## Instruction drift at `aaaaaaaaaaaa`\n\n'
+                         '2 stale claims in 1 of 2 instruction files. Owner: orchestrator. '
+                         'Repair the instruction, then rerun `ops/ci.sh --doc-drift`.\n\n'
+                         '- `README.md:3` missing path `bin/gone.sh`; candidate `bin/here.sh`\n'
+                         '- `README.md:9` missing verb `gone`\n')
+
+    def test_clean_scan_passes_with_a_summary(self):
+        code, text = self.summarize(self.report([]))
+        self.assertEqual(code, 0)
+        self.assertIn('0 stale claims in 0 of 2 instruction files.', text)
+
+    def test_weekly_run_summarizes_after_upload_and_pull_requests_only_warn(self):
+        workflow = yaml.load((ROOT / '.github/workflows/doc-drift.yml').read_text(), Loader=yaml.BaseLoader)
+        steps = workflow['jobs']['check']['steps']
+        upload = next(i for i, step in enumerate(steps) if step.get('uses', '').startswith('actions/upload-artifact@'))
+        summary = next(i for i, step in enumerate(steps) if '--summary' in step.get('run', ''))
+        self.assertLess(upload, summary)
+        self.assertEqual(steps[upload]['if'], 'always()')
+        self.assertEqual(steps[summary]['if'], "github.event_name != 'pull_request'")
+        self.assertIn('"$GITHUB_STEP_SUMMARY"', steps[summary]['run'])
+        self.assertIn('schedule', workflow['on'])
+
+    def test_no_job_can_write_github_issues(self):
+        workflow = yaml.load((ROOT / '.github/workflows/doc-drift.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(workflow['permissions'], dict(contents='read'))
+        self.assertEqual(list(workflow['jobs']), ['check'])
+        self.assertNotIn('permissions', workflow['jobs']['check'])
+        self.assertFalse((ROOT / 'scripts/doc-drift/loops.py').exists())
+        sources = [ROOT / '.github/workflows/doc-drift.yml', ROOT / 'ops/doc-drift-product.py',
+                   *sorted((ROOT / 'scripts/doc-drift').glob('*.py'))]
+        for source in sources:
+            self.assertNotRegex(source.read_text(), r'issues', source.name)
 
 if __name__ == '__main__':
     unittest.main()
