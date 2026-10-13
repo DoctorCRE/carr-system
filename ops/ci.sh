@@ -934,6 +934,25 @@ check_replay() {
 
 # ---------------------------------------------------------------- secret
 check_secret() {
+  local leak_args="--staged"
+  if [ "${GITHUB_EVENT_NAME:-}" = "pull_request" ]; then
+    leak_args="--ci"
+  elif [ -n "${CARR_CI_RANGE:-}" ]; then
+    leak_args="--range $CARR_CI_RANGE"
+  fi
+  for t in security/test_*.py; do
+    if ! run_quiet "$LOGDIR/leak-guard-tests.log" "$PY" "$t"; then
+      cat "$LOGDIR/leak-guard-tests.log" >&2
+      bad secret "leak guard qualification failed"
+      return
+    fi
+  done
+  # shellcheck disable=SC2086
+  if ! run_quiet "$LOGDIR/leak-guard.log" "$PY" security/leak_guard.py $leak_args; then
+    cat "$LOGDIR/leak-guard.log" >&2
+    bad secret "secret or client data in introduced Git blobs"
+    return
+  fi
   # SCOPE IS A FLAG ON ONE SCANNER, never a second scanner (rule a8c55a47).
   # Unset CARR_CI_RANGE -- hosted CI -- reads every tracked file, which is the
   # depth a merge is judged at. Set, it reads only the blobs the range
