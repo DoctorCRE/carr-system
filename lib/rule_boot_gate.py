@@ -673,6 +673,9 @@ def fetch_instructions(pages, digest=None, pages_total=None):
     return (
         f"RULE BOOT: this context must read the CARR rules ({head}) before any other tool.\n"
         f"Fetch each missing page ({shown}), one call per page, then continue:\n"
+        f"  Bash, digest only (cheapest, ~200 characters a page; run every page in one parallel batch): "
+        f"cd {REPO} && ./run.sh call standing-context "
+        f"'{{\"detail\":\"boot\",\"page\":{first}}}' | jq -c '{{ok: .ok, rule_boot: {{digest: .rule_boot.digest}}}}'\n"
         f"  MCP (CARR connector):  standing-context with {{\"detail\":\"boot\",\"page\":{first}}}\n"
         f"  Bash: {os.path.join(REPO, 'run.sh')} call standing-context "
         f"'{{\"detail\":\"boot\",\"page\":{first}}}'\n"

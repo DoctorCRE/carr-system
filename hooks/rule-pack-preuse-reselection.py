@@ -400,19 +400,6 @@ def _deduped_context(payload: dict, receipt: dict) -> dict | None:
     return _context(text)
 
 
-def _scheduled_oversize_notice(ids: list[str]) -> str:
-    # The original receipt contract credits the pack only when every rule is
-    # present in full. Claude hides oversized additionalContext behind a file
-    # preview, so a partial receipt would falsely certify delivery.
-    return (
-        "RULE PACK PREUSE DELIVERY TOO LARGE: scheduled-automation rules were "
-        "NOT delivered. The full receipt exceeds the visible hook context cap. "
-        "The tool call was not blocked or changed. Before acting, fetch these "
-        "rules with standing-context rule_ids in batches and read their full "
-        "text: " + ", ".join(ids) + "."
-    )
-
-
 # ---------------------------------------------------------------------------
 # GENERALIZED RAIL (WR-000019 slice S9) — same shape as the four functions
 # above, parameterized over the compiled trigger table's (trigger_ids, packs,
@@ -695,6 +682,13 @@ def _route_statements(response: dict, packs: list[str], ids: list[str]):
     return identity, delivery, found, not_found
 
 
+def _agent_id(payload: dict) -> str | None:
+    """The subagent this call runs in, or None for the main conversation; the
+    same field the boot gate keys its per-child epoch on."""
+    value = payload.get("agent_id") or payload.get("agentId")
+    return str(value) if value else None
+
+
 def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
                     runner: Callable) -> dict | None:
     tool_name = payload["tool_name"]
@@ -702,7 +696,8 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
                                             else ([], [], []))
     candidates = sorted(set(routed) | set(table_ids)
                         | (set(scheduled_rule_ids()) if _matches(payload) else set()))
-    ids = rule_routes.fresh_ids(payload["session_id"], tool_name, candidates)
+    ids = rule_routes.fresh_ids(payload["session_id"], tool_name, candidates,
+                                agent_id=_agent_id(payload))
     if not ids:
         return None
     try:
@@ -752,7 +747,8 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         # receipt at all. Then nothing is claimed as delivered: the compact
         # notice names every id and records nothing for dedupe.
         return _context(rule_routes.notice_too_large(ids))
-    rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full])
+    rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full],
+                                 agent_id=_agent_id(payload))
     try:
         from lib.rule_recall import log_delivery
         log_delivery(Path(REPO) / "out/rule-route-delivery.jsonl", json.loads(text)["receipt_id"],
@@ -795,9 +791,12 @@ def process(payload: dict, *, runner: Callable = subprocess.run,
             response = _run_selector(ids, runner)
             row = _receipt(payload, response, ids)
             if not rule_routes.within_cap(canonical(row).decode("utf-8")):
-                notice = _scheduled_oversize_notice(ids)
-                return _context(notice if rule_routes.within_cap(notice)
-                                else rule_routes.notice_too_large(ids))
+                # 2026-10-12: an oversized pack used to yield only a notice
+                # telling the model to fetch every rule again (75 times in one
+                # 37-hour session: two context spends per call for the same
+                # rules). The route rail already knows how to FIT: full text
+                # for what the budget carries, one-line entries for the rest.
+                return _route_delivery(payload, rows, [], runner)
             return _deduped_context(payload, row)
         except Exception as exc:
             # Known selector failures retain their safe cause; arbitrary
