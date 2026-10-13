@@ -19,6 +19,10 @@ What it proves:
     non-ready status, a preflight that cannot connect (the real runner over a
     stub script that exits 2) and a preflight that raises each refuse the call
     and log `preflight_refused` with the reason;
+  * against the REAL ops/config/control-enforcement-classes.v1.json and the
+    REAL migrations/0874 SQL, session_boot and ledger_capture are classed
+    surfacing, and a rule on either reads class_not_approvable from the
+    catalog 0874 installs; flipping both back to stop_gate fails it;
   * source mutants must fail these expectations: one that approves a GONE
     rule, one that approves a held-control rule, one that drops the
     idempotency key, one that approves a rule the map records as only
@@ -69,7 +73,10 @@ DB = {
     "catalog": [
         {"control_key": "deny_ok", "installed": True, "verified": True, "enforcement_class": "deny_gate"},
         {"control_key": "stop_ok", "installed": True, "verified": True, "enforcement_class": "stop_gate"},
-        {"control_key": "session_boot", "installed": False, "verified": False, "enforcement_class": "stop_gate"},
+        # gate_integrity is the real held stop_gate (0874 leaves it held). This
+        # fixture once modelled session_boot here as a held stop_gate; 0874
+        # installs session_boot as surfacing, which the REAL-file case below pins.
+        {"control_key": "gate_integrity", "installed": False, "verified": False, "enforcement_class": "stop_gate"},
         {"control_key": "chat_lint", "installed": True, "verified": True, "enforcement_class": "surfacing"},
     ],
     "status_counts": [],
@@ -78,7 +85,7 @@ RULE_CONTROLS = {
     READY_A: {"control": "deny_ok", "enforcement_class": "deny_gate"},
     READY_B: {"control": "stop_ok", "enforcement_class": "stop_gate"},
     SURFACED: {"control": "deny_ok", "enforcement_class": "surfacing"},
-    HELD: {"control": "session_boot"},
+    HELD: {"control": "gate_integrity"},
     SURFACING: {"control": "chat_lint"},
     NOT_IN_CATALOG: {"control": "never_registered"},
     GONE_INSTALLED: {"control": "deny_ok"},
@@ -89,6 +96,25 @@ EXPECTED = {
     NOT_IN_CATALOG: "catalog_missing", UNMAPPED: "unmapped", GONE_INSTALLED: "gone",
     SURFACED: "rule_only_surfaced",
 }
+# The REAL sources, not fixture copies: the class file --render-control reads,
+# and the migration that installs the catalog rows approve_rule consults.
+REAL_CLASSES = ROOT / "ops" / "config" / "control-enforcement-classes.v1.json"
+MIGRATION_0874 = ROOT / "migrations" / "0874_register_session_boot_ledger_capture_loop_guard_controls.sql"
+REMINDER_CONTROLS = ("session_boot", "ledger_capture")
+INSERT_RE = re.compile(r"^values \('(?P<key>[a-z_]+)', '[^']*', '[^']*', '(?P<klass>[a-z_]+)', "
+                       r"(?P<installed>true|false), now\(\), now\(\)\)$", re.M)
+
+
+def catalog_rows_from_0874() -> dict[str, dict]:
+    """The ops.enforcement_control_catalog rows 0874 leaves behind, read from its SQL."""
+    rows = {m["key"]: {"control_key": m["key"], "installed": m["installed"] == "true",
+                       "verified": True,  # every 0874 row sets verified_at = now()
+                       "enforcement_class": m["klass"]}
+            for m in INSERT_RE.finditer(MIGRATION_0874.read_text(encoding="utf-8"))}
+    assert set(rows) == {"session_boot", "ledger_capture", "loop_guard"}, sorted(rows)
+    return rows
+
+
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 REFUSAL = ('TOOL ERROR {\n  "error": "db_error",\n  "message": "active rule '
            + rid(READY_B) + ' lacks its immutable exact control binding"\n}')
@@ -194,7 +220,48 @@ class WorklistTest(unittest.TestCase):
         tot = w.totals(rows)
         self.assertEqual(tot["blocked"], 8)
         self.assertEqual(tot["ready"], 2)
-        self.assertEqual(tot["held_by_control"], {"session_boot": 1})
+        self.assertEqual(tot["held_by_control"], {"gate_integrity": 1})
+
+    def test_real_class_file_and_0874_class_the_reminders_surfacing(self):
+        classes = json.loads(REAL_CLASSES.read_text(encoding="utf-8"))["control_enforcement_class"]
+        rows = catalog_rows_from_0874()
+        sql = MIGRATION_0874.read_text(encoding="utf-8")
+        for key in REMINDER_CONTROLS:
+            self.assertEqual(classes[key], "surfacing", f"{REAL_CLASSES.name} classes {key}")
+            self.assertEqual(rows[key]["enforcement_class"], "surfacing", f"0874 installs {key}")
+            self.assertIn(f"(control_key = '{key}' and enforcement_class = 'surfacing'", sql,
+                          f"0874's postcondition pins {key} as surfacing")
+        for key, row in rows.items():
+            self.assertEqual(row["enforcement_class"], classes[key],
+                             f"0874 and {REAL_CLASSES.name} agree on {key}")
+
+    def test_real_reminder_controls_read_class_not_approvable(self):
+        # Catalog = what 0874 installs (installed, verified). Rules = every real
+        # map rule on either reminder, plus one per reminder whose map class is
+        # stop_gate, so only the CONTROL's class can refuse it. loop_guard is
+        # the control: same migration, approvable class, reads ready.
+        catalog = catalog_rows_from_0874()
+        real = w.load_map()
+        mapped = {s: e for s, e in real.items() if e.get("control") in REMINDER_CONTROLS}
+        self.assertTrue({e["control"] for e in mapped.values()} == set(REMINDER_CONTROLS),
+                        "the real map names rules on both reminders")
+        controls = dict(mapped)
+        controls["5b000001"] = {"control": "session_boot", "enforcement_class": "stop_gate"}
+        controls["5b000002"] = {"control": "ledger_capture", "enforcement_class": "stop_gate"}
+        controls["5b000003"] = {"control": "loop_guard", "enforcement_class": "transactional_schema"}
+        db = {"rules": [{"rule_id": rid(s), "policy_status": "active",
+                         "enforcement_class": "machine_enforceable", "enforcement_status": "blocked",
+                         "control_bound": False} for s in controls],
+              "catalog": list(catalog.values()), "status_counts": []}
+        got = {r["short_id"]: r for r in w.build_worklist(db, controls, set())}
+        self.assertEqual(got["5b000003"]["readiness"], "ready")
+        for short, entry in controls.items():
+            if entry["control"] not in REMINDER_CONTROLS:
+                continue
+            self.assertEqual(got[short]["readiness"], "class_not_approvable",
+                             f"{short} on {entry['control']}: {got[short]['why']}")
+            self.assertIsNone(got[short]["approve_rule"])
+            self.assertIn("surfacing", got[short]["why"])
 
     def test_ready_row_carries_the_exact_approve_rule_json(self):
         rows = {r["short_id"]: r for r in w.build_worklist(DB, RULE_CONTROLS, GONE)}
