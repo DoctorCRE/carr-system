@@ -43,6 +43,179 @@ def load():
     return mod
 
 
+def write_catalog(path, placements):
+    """A services.json with one launchd service per (plist, runs_on)."""
+    services = [{"key": name.removesuffix(".plist"), "runtime": "launchd",
+                 "environments": [{"environment": "production",
+                                   "deploy_mechanism": f"ops/launchd/{name}",
+                                   "runs_on": where}]}
+                for name, where in placements.items()]
+    path.write_text(json.dumps({"services": services}), encoding="utf-8")
+
+
+def launchd_rows(mod, primary, catalog, agents, holds=None):
+    mod.ROWS.clear()
+    mod.audit_launchd(primary, str(catalog), str(agents), holds={} if holds is None else holds)
+    return {label: (state, detail) for section, label, state, detail in mod.ROWS
+            if section == "launchd"}
+
+
+def check_launchd_placement(mod):
+    """The catalog's runs_on joined with what launchd actually has installed.
+
+    Every case runs on fixtures: the cloud container has no launchd, and a test
+    that read the real ~/Library/LaunchAgents would assert one machine's state.
+    """
+    sys.path.insert(0, REPO)
+    from lib import launchd_scope
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        catalog, agents = root / "services.json", root / "LaunchAgents"
+        agents.mkdir()
+
+        # ---- launchd_scope derives the two sets from the catalog
+        write_catalog(catalog, {"com.carr.a.plist": "primary", "com.carr.b.plist": "secondary",
+                                "com.carr.c.plist": "every"})
+        derived = launchd_scope.placements(str(catalog))
+        check("placements reads runs_on per plist",
+              derived == {"com.carr.a.plist": "primary", "com.carr.b.plist": "secondary",
+                          "com.carr.c.plist": "every"}, f"got {derived}")
+        catalog.write_text(json.dumps({"services": [
+            {"key": "x", "environments": [{"environment": "production",
+                                           "deploy_mechanism": "ops/launchd/com.carr.a.plist"}]}]}))
+        try:
+            launchd_scope.placements(str(catalog))
+            refused = ""
+        except ValueError as exc:
+            refused = str(exc)
+        check("a launchd environment without runs_on is refused",
+              "x:production" in refused and "runs_on" in refused, f"got {refused!r}")
+        catalog.write_text(json.dumps({"services": [
+            {"key": k, "environments": [{"environment": "production", "runs_on": w,
+                                         "deploy_mechanism": "ops/launchd/com.carr.a.plist"}]}
+            for k, w in (("x", "primary"), ("y", "every"))]}))
+        try:
+            launchd_scope.placements(str(catalog))
+            refused = ""
+        except ValueError as exc:
+            refused = str(exc)
+        check("two services placing one plist differently are refused",
+              "com.carr.a.plist" in refused, f"got {refused!r}")
+
+        # ---- the four cells of the join, on a primary machine
+        write_catalog(catalog, {"com.carr.here.plist": "primary",
+                                "com.carr.there.plist": "secondary",
+                                "com.carr.missing.plist": "every",
+                                "com.carr.held.plist": "primary",
+                                "com.carr.misplaced.plist": "secondary"})
+        for name in ("com.carr.here.plist", "com.carr.stray.plist", "com.carr.misplaced.plist",
+                     "com.apple.unrelated.plist"):
+            (agents / name).write_text("<plist/>", encoding="utf-8")
+        rows = launchd_rows(mod, True, catalog, agents,
+                            holds={"com.carr.held": launchd_hold_stub("paused by Joe")})
+        install = "action: python3 ops/config-as-code.py install --apply"
+        check("declared here and installed is OK",
+              rows.get("com.carr.here") == (mod.OK, "runs on primary · installed"),
+              f"got {rows.get('com.carr.here')}")
+        check("declared for the other machine and absent is BY DESIGN",
+              rows.get("com.carr.there") == (mod.DESIGN, "runs on secondary · not installed here"),
+              f"got {rows.get('com.carr.there')}")
+        check("declared here and absent is a GAP naming the install door",
+              rows.get("com.carr.missing") == (
+                  mod.GAP, "runs on every · not installed — " + install),
+              f"got {rows.get('com.carr.missing')}")
+        check("installed and undeclared is a GAP naming the register action",
+              rows.get("com.carr.stray") == (
+                  mod.GAP, "installed but declared nowhere — action: uninstall it or add its "
+                           "plist to ops/launchd and register it in ops/config/services.json"),
+              f"got {rows.get('com.carr.stray')}")
+        check("a held job absent here is BY DESIGN with the hold's words",
+              rows.get("com.carr.held") == (mod.DESIGN, "runs on primary · HELD: paused by Joe"),
+              f"got {rows.get('com.carr.held')}")
+        check("a job for the other machine that is installed here is a GAP",
+              rows.get("com.carr.misplaced", (None, ""))[0] == mod.GAP
+              and "action: launchctl bootout" in rows["com.carr.misplaced"][1],
+              f"got {rows.get('com.carr.misplaced')}")
+        check("only com.carr agents are audited", "com.apple.unrelated" not in rows,
+              f"rows {sorted(rows)}")
+        check("every GAP row carries its action",
+              all("action: " in detail for state, detail in rows.values() if state == mod.GAP))
+
+        # The same catalog on a secondary flips which side is by design.
+        rows = launchd_rows(mod, False, catalog, agents)
+        check("on a secondary, a primary job that is installed is a GAP",
+              rows.get("com.carr.here", (None,))[0] == mod.GAP, f"got {rows.get('com.carr.here')}")
+        check("on a secondary, an absent secondary job is a GAP",
+              rows.get("com.carr.there", (None,))[0] == mod.GAP, f"got {rows.get('com.carr.there')}")
+
+        # An ops/launchd plist nobody registered is the resource-collector shape:
+        # the installer places it, so uninstalling alone does not stick.
+        repo_launchd = root / "ops-launchd"
+        repo_launchd.mkdir()
+        (repo_launchd / "com.carr.stray.plist").write_text("<plist/>", encoding="utf-8")
+        mod.ROWS.clear()
+        mod.audit_launchd(True, str(catalog), str(agents), holds={},
+                          repo_launchd=str(repo_launchd))
+        stray = {label: detail for _, label, _, detail in mod.ROWS}.get("com.carr.stray", "")
+        check("an undeclared ops/launchd plist names DEFINITION_ONLY as the alternative",
+              "lib/launchd_hold.DEFINITION_ONLY" in stray, f"got {stray!r}")
+
+        (agents / "com.carr.repo-hygiene-janitor.plist").write_text("<plist/>", encoding="utf-8")
+        janitor = launchd_rows(mod, True, catalog, agents).get("com.carr.repo-hygiene-janitor", ("", ""))
+        check("an installed DEFINITION_ONLY agent is a GAP whose action removes it",
+              janitor[0] == mod.GAP and "launchctl bootout gui/$(id -u)/com.carr.repo-hygiene-janitor"
+              in janitor[1], f"got {janitor}")
+        (agents / "com.carr.repo-hygiene-janitor.plist").unlink()
+
+        rows = launchd_rows(mod, None, catalog, agents)
+        check("an unknown machine role is one GAP, not a guess",
+              list(rows) == ["placement"] and rows["placement"][0] == mod.GAP,
+              f"got {rows}")
+        rows = launchd_rows(mod, True, catalog, root / "absent")
+        check("a host without LaunchAgents is one GAP",
+              list(rows) == ["LaunchAgents"] and rows["LaunchAgents"][0] == mod.GAP,
+              f"got {rows}")
+
+        # ---- --strict exits 1 on a GAP and 0 otherwise; plain always exits 0
+        def run_main(argv):
+            mod.ROWS.clear()
+            saved = {name: getattr(mod, name) for name in
+                     ("load_config_as_code", "audit_identity", "audit_repo",
+                      "audit_config_and_gates", "audit_toolchain", "audit_optional")}
+            mod.load_config_as_code = lambda: None
+            mod.audit_identity = lambda cac: True
+            for name in ("audit_repo", "audit_config_and_gates", "audit_toolchain",
+                         "audit_optional"):
+                setattr(mod, name, lambda: None)
+            try:
+                with open(os.devnull, "w") as sink:
+                    stdout, sys.stdout = sys.stdout, sink
+                    try:
+                        return mod.main(argv)
+                    finally:
+                        sys.stdout = stdout
+            finally:
+                for name, value in saved.items():
+                    setattr(mod, name, value)
+
+        paths = ["--services", str(catalog), "--launch-agents", str(agents)]
+        check("--strict exits 1 when a launchd row is a GAP",
+              run_main(["--strict", "--json"] + paths) == 1)
+        check("without --strict a GAP still exits 0", run_main(["--json"] + paths) == 0)
+        write_catalog(catalog, {"com.carr.here.plist": "primary",
+                                "com.carr.there.plist": "secondary"})
+        for name in ("com.carr.stray.plist", "com.carr.misplaced.plist"):
+            (agents / name).unlink()
+        check("--strict exits 0 when every launchd row is OK or BY DESIGN",
+              run_main(["--strict"] + paths) == 0)
+
+
+def launchd_hold_stub(reason):
+    from lib.launchd_hold import Hold
+    return Hold("com.carr.held", reason, 0.0, "fixture")
+
+
 def main():
     mod = load()
 
@@ -167,6 +340,8 @@ def main():
           f"the audit altered: {changed[:3]}")
     check("the read-only detector catches a tracked mutation",
           detected == [" M requirements.txt"], f"observed {detected}")
+
+    check_launchd_placement(mod)
 
     failed = sum(1 for _, ok, _ in RESULTS if not ok)
     print(f"\nmachine-sync-audit-selftest: {len(RESULTS) - failed}/{len(RESULTS)} passed")
