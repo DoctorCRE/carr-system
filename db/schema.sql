@@ -90595,7 +90595,34 @@ UNION ALL
  SELECT 'merge_queue'::text AS line,
     to_jsonb(( SELECT count(*) AS count
            FROM public.ingest_inbox
-          WHERE (ingest_inbox.status = 'new'::text))) AS value;
+          WHERE (ingest_inbox.status = 'new'::text))) AS value
+UNION ALL
+ SELECT 'verb_usage_30d'::text AS line,
+    ( WITH registered AS (
+                 SELECT substr(e.ingress_key, (length('mcp-tool:'::text) + 1)) AS verb,
+                    ((e.contract ->> 'write'::text))::boolean AS write,
+                    ((e.contract ->> 'human_only'::text))::boolean AS human_only,
+                    ((e.contract ->> 'authority_only'::text))::boolean AS authority_only
+                   FROM ops.scac_mutation_registry_entry e
+                  WHERE ((e.ingress_key ~~ 'mcp-tool:%'::text) AND (e.registry_version = ( SELECT v.registry_version
+                           FROM ops.scac_mutation_registry_version v
+                          ORDER BY (split_part(v.registry_version, '.v'::text, 2))::integer DESC
+                         LIMIT 1)))
+                ), last_call AS (
+                 SELECT c.verb,
+                    max(c.created_at) AS last_called_at
+                   FROM ( SELECT tool_call.verb,
+                            tool_call.created_at
+                           FROM public.tool_call
+                        UNION ALL
+                         SELECT tool_read_call.verb,
+                            tool_read_call.created_at
+                           FROM public.tool_read_call) c
+                  GROUP BY c.verb
+                )
+         SELECT jsonb_build_object('window_days', 30, 'registered', count(*), 'called', count(*) FILTER (WHERE (l.last_called_at > (now() - '30 days'::interval))), 'uncalled', COALESCE(jsonb_agg(jsonb_build_object('verb', r.verb, 'write', r.write, 'human_only', r.human_only, 'authority_only', r.authority_only, 'last_called_at', l.last_called_at) ORDER BY r.write DESC, r.verb) FILTER (WHERE ((l.last_called_at IS NULL) OR (l.last_called_at <= (now() - '30 days'::interval)))), '[]'::jsonb), 'action', 'each uncalled verb is retired through a SCAC successor or gets a named consumer; record the call on WR-000284') AS jsonb_build_object
+           FROM (registered r
+             LEFT JOIN last_call l ON ((l.verb = r.verb)))) AS value;
 
 
 --
@@ -122750,6 +122777,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0876_a02_fallback_rung_human_only.sql	b3c4c95e923cf6a5b7a09a2733c20b989cd6241c589896f7ef56cd164c39a820	2026-10-13 11:50:55.565638+00
 0877_register_github_burst_guard_control.sql	bb66b4aa92b365cd8f0ca9a0eb3c4d65d304342438d4b277bc583e866f879dc2	2026-10-13 11:50:55.570087+00
 0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql	6f204142df1ea786ee2310548231ea7a31e64b8c034443753892614564fc08a8	2026-10-13 11:50:55.573651+00
+0879_verb_usage_digest.sql	ee2ad2f28337f78685247946262be6869eec9a3e67f2216207f8d302ad7f92e4	2026-10-13 13:39:24.208163+00
 \.
 
 
