@@ -1447,6 +1447,31 @@
         }
       ],
       "paired_selftest": "ops/github-burst-guard-selftest.py"
+    },
+    "unfiled-bug-stop-gate.py": {
+      "role": "gate",
+      "wirings": [
+        {
+          "event": "Stop",
+          "matcher": "",
+          "fixtures": [
+            "advisories",
+            "scenarios"
+          ],
+          "executions": [
+            {
+              "source": "ops/config/hooks.json",
+              "group": 0,
+              "order": 12,
+              "matcher_present": false,
+              "type": "command",
+              "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/unfiled-bug-stop-gate.py",
+              "timeout": 15
+            }
+          ]
+        }
+      ],
+      "paired_selftest": "ops/unfiled-bug-stop-gate-selftest.py"
     }
   }
 }

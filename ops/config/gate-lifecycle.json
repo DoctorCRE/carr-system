@@ -843,6 +843,25 @@
       },
       "review_date": "2026-11-24",
       "mode": "shadow"
+    },
+    "unfiled-bug-stop-gate.py": {
+      "failure_class": "a defect observed and reported in a turn with nothing filed for it",
+      "catch_metric": {
+        "log_path": "out/unfiled-bug-gate.jsonl",
+        "log_format": "jsonl",
+        "ts_field": "ts",
+        "hook_filter": {
+          "field": "hook",
+          "equals": "unfiled-bug-stop-gate"
+        },
+        "true_positive": {
+          "kind": "row_exists"
+        },
+        "rule_description": "the gate writes a row only when it holds a turn, and every row carries the matched sentences and their defect classes; presence in the window is the catch.",
+        "note": "dedicated log written by the gate itself; the selftest session never writes to it."
+      },
+      "review_date": "2026-11-24",
+      "mode": "enforcing"
     }
   }
 }

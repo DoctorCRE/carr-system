@@ -51,6 +51,7 @@
     "staged_gate_bless": "deny_gate",
     "stale_count": "schema",
     "trigger_grant": "schema",
+    "unfiled_bug": "stop_gate",
     "vault_salvage": "judgment_ambient",
     "vendor_level_drift": "surfacing",
     "verification_status": "surfacing",

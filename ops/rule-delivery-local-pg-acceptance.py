@@ -39,6 +39,9 @@ SIZING_REPIN = REPO / "migrations" / "0851_repin_rule_delivery_activation_after_
 TRACKER_RETIREMENT_REPIN = (
     REPO / "migrations" / "0859_repin_rule_delivery_activation_after_tracker_retirement.sql"
 )
+UNFILED_BUG_CONTROL_REPIN = (
+    REPO / "migrations" / "0871_repin_rule_delivery_activation_after_unfiled_bug_control.sql"
+)
 HELD_CONTROL_REPIN = REPO / "migrations" / "0875_repin_rule_delivery_activation_after_held_control_tests.sql"
 PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
 CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
@@ -72,8 +75,11 @@ POST_0851_ACTIVATION_DIGEST = "2b217aec8841409c9a9c4aa659dad74f81da4750795b03ec3
 # Retiring hooks/staging-observation-tracker.py moved the map again; 0859
 # carries the guarded forward repin from the post-0851 digest.
 POST_0859_ACTIVATION_DIGEST = "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e"
+# Registering the unfiled_bug Stop-gate control moved the map again; 0871
+# carries the guarded forward repin from the post-0859 digest.
+POST_0871_ACTIVATION_DIGEST = "dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08"
 # Giving session_boot, ledger_capture and loop_guard CI-run tests moved the map
-# again; 0875 carries the guarded forward repin from the post-0859 digest.
+# again; 0875 carries the guarded forward repin from the post-0871 digest.
 ACTIVATION_TO_TEST_REF = (
     "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; "
     "ops/rule-pack-preuse-reselection-selftest.py"
@@ -515,6 +521,16 @@ def main() -> int:
             (POST_0859_ACTIVATION_DIGEST,),
         )
         check("tracker retirement repins the exact targets to the post-0859 reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
+        # Replay the unfiled_bug control repin, again through its guarded preimage.
+        cur.execute(UNFILED_BUG_CONTROL_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
+            (POST_0871_ACTIVATION_DIGEST,),
+        )
+        check("unfiled_bug control repins the exact targets to the post-0871 reviewed map",
               one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
         # Replay the held-control-tests repin (0875) from that exact preimage.
         cur.execute(HELD_CONTROL_REPIN.read_text(encoding="utf-8"), prepare=False)

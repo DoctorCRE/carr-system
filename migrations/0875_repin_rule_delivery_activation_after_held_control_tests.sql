@@ -2,12 +2,12 @@
 -- CI-run test in ops/config/rule-enforcement-map.json, which moves the map
 -- digest. The eight pack-cutover contracts stay unchanged (their frozen
 -- from_test_ref is the activation target's own record, not the catalog row),
--- so advance only their guarded identity from the post-0859 map to this one.
+-- so advance only their guarded identity from the post-0871 map to this one.
 -- rollback: repin the same eight targets to v_old after verifying the exact v_new preimage
 do $rule_delivery_0875$
 declare
-  v_old constant text := 'f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e';
-  v_new constant text := 'b7666273937390aa3f1161ab5ce223cb652e18be2d21167b554d86fd2d76b1ff';
+  v_old constant text := 'dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08';
+  v_new constant text := '7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f';
   v_ids constant text[] := array[
     '113b3833','25fcddee','3fa17fa0','49533583',
     '557838a5','57d13061','72e06bdf','c66dc739'
