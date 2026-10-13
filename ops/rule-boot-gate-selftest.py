@@ -1381,7 +1381,27 @@ def case_no_transcript_keeps_todays_behaviour(c):
     assert c.call(*READ, agent="sub-a") is None, "and no child is re-gated on a guess"
 
 
-CASES = [case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
+def case_fetch_instructions_leads_with_digest_only(c):
+    """The re-arm message's FIRST instruction is the cheapest accepted form,
+    and the gate itself parses that exact line as a page fetch (filtered, so
+    it confirms the page with digest-only output); the plain Bash form still
+    parses too."""
+    _hook, lib, _pkg = _load(c.tree)
+    text = lib.fetch_instructions([1, 2, 3], digest="sha256:" + "ab" * 32, pages_total=3)
+    lines = text.splitlines()
+    assert lines[2].lstrip().startswith("Bash, digest only"), lines[2]
+    command = lines[2].split("): ", 1)[1]
+    assert "jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'" in command, command
+    parsed = lib.parse_bash_fetch(command, c.tree)
+    assert parsed is not None, "the digest-only instruction must parse as a fetch"
+    args, direct = parsed
+    assert lib._page_of(args) == 1 and direct is False, (args, direct)
+    plain = lines[4].split("Bash: ", 1)[1]
+    parsed = lib.parse_bash_fetch(plain, c.tree)
+    assert parsed is not None and parsed[1] is True and lib._page_of(parsed[0]) == 1, plain
+
+
+CASES = [case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
          case_child_start_keeps_parent_boot, case_child_compaction_rearms_only_that_child,
          case_child_rearm_digest_change_regates_all, case_child_rearm_outage_keeps_parent,
          case_unflagged_child_compaction_keeps_parent, case_unflagged_child_compactions_chain,

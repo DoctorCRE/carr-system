@@ -41,6 +41,14 @@ def reconcile(row, desired, verb, save, *, outcome=None, refresh=False):
         save()
         response = verb("add-loop", row["open_payload"])
         if not response.get("ok") or not response.get("loop_id"):
+            if response.get("refused"):
+                # The record layer answered no, so nothing was written under
+                # this key, and replaying the identical payload can only be
+                # refused again. Drop it; the next run sends the current one.
+                # An unconfirmed reply (no `refused`) keeps its key for replay.
+                row.pop("open_payload", None)
+                row.pop("open_key", None)
+                save()
             raise RuntimeError("repair loop open response failed")
         row.update(loop_id=response["loop_id"], body=row["open_payload"]["body"])
         del row["open_payload"]

@@ -19,8 +19,29 @@ WHAT IT REFUSES (PreToolUse, Bash and the Codex exec shapes):
      named PRs this way is routine: replaying recorded Bash commands showed
      most loop refusals under a three-item cap were exactly that.
   2. A release-pipeline tick (ops/release-pipeline*.py tick, any path or copy)
-     or out/orch/shepherd.sh started within five minutes of the last one this
-     hook saw start. One shared window: shepherd ticks the pipeline itself.
+     or out/orch/shepherd.sh, in either of two cases. One shared window:
+     shepherd ticks the pipeline itself.
+     a. Within five minutes of the start of the last tick or shepherd run that
+        RAN AND DID REAL WORK. That is the 2026-10-06 shape: sequential hand
+        ticks, each finishing before the next, and a hand tick in shepherd's
+        gap between its own ticks. A run counts only when PostToolUse saw it
+        finish with exit 0 after at least sixty seconds, or saw it launched in
+        the background (its exit is not visible, so the launch counts).
+     b. While a tick is RUNNING NOW: another process holds the pipeline's
+        single-run flock on out/release-pipeline/lock. The hook probes it with
+        a non-blocking shared flock and releases it at once; it never creates,
+        deletes or holds the file, and a missing file means nothing runs.
+     Never a tick: `--help` / `-h` anywhere in the statement, and `report` as
+     shepherd's subcommand (`release-pipeline.py ... tick` is matched on its
+     `tick` subcommand, so `tick --lane report` is still a tick).
+     Costs removed on 2026-10-12, each measured at 5 minutes while GitHub core
+     usage read 0/5000: `tick --help` stamped as a tick; a tick a permission
+     check denied, which never ran, stamped at PreToolUse; a tick that failed
+     in about three seconds blocking its own retry. Now PreToolUse only notes
+     when an allowed tick started; the window is stamped at PostToolUse, which
+     a denied tick never reaches, and a non-zero exit (PostToolUseFailure
+     included) or a run under sixty seconds leaves no stamp. Cost kept: a
+     backgrounded tick that then fails fast still holds the window.
   3. During a fifteen-minute cooldown after a recorded GitHub rate-limit answer:
      every gh call and the release tick, except `gh api rate_limit`.
   4. Two or more gh calls where one is sent to the background with a single
@@ -40,6 +61,9 @@ GitHub (gh, the release tick, shepherd, api.github.com), and then either:
      the phrase. Diff lines (+/-) and indented PR-body lines do not qualify.
 A `gh pr diff`, PR body or run log that merely mentions the phrase therefore
 records nothing, and neither does reading this file.
+It also stamps the tick window (2a above) when a release tick or shepherd run
+finishes with exit 0 after sixty seconds or more, or was launched in the
+background.
 
 ALWAYS ALLOWED outside the cooldown, when not inside a loop: a single gh
 command, gh --paginate, and gh api graphql. One paginated call is the cheap
@@ -48,7 +72,12 @@ commit message, a --body or grep pattern in quotes) is not scanned for gh.
 
 STATE: out/github-burst-guard-state.json (out/ is git-ignored), shared by every
 session on the machine because the limit is per account, not per session.
-CARR_GITHUB_BURST_STATE overrides the path for the selftest.
+CARR_GITHUB_BURST_STATE overrides the path for the selftest. Keys:
+`release_tick_started` maps a tool-use id to when PreToolUse allowed that tick
+(entries over six hours old are dropped); `release_tick_ran_at` is the start of
+the last tick that ran and did real work, the only key that refuses a tick.
+The older `release_tick_at` (stamped at PreToolUse before 2026-10-12) is no
+longer read. CARR_RELEASE_PIPELINE_LOCK overrides the lock path probed.
 
 KNOWN LIMIT. It sees the command a session issues, not what a script does
 inside itself, and a loop hidden behind a variable or a script file is not
@@ -59,6 +88,7 @@ allows the call and logs the reason to out/hook-guard.log.
 
 Fixtures: ops/github-burst-guard-selftest.py
 """
+import fcntl
 import json
 import os
 import re
@@ -78,12 +108,17 @@ except Exception:                       # a missing meter must not change a verd
     LOG = os.environ.get("CARR_HOOK_GUARD_LOG") or os.path.join(REPO, "out", "hook-guard.log")
 STATE = os.environ.get("CARR_GITHUB_BURST_STATE") or os.path.join(
     REPO, "out", "github-burst-guard-state.json")
+# The pipeline's single-run flock (ops/release-pipeline.py single_run_lock).
+TICK_LOCK = os.environ.get("CARR_RELEASE_PIPELINE_LOCK") or os.path.join(
+    REPO, "out", "release-pipeline", "lock")
 
 MIN_LOOP_SLEEP = 2
 POLL_SLEEP_HINT = 30                    # named in refusals; any sleep >= 2 passes
 MAX_LITERAL_CALLS = 10                  # items x gh calls per pass, literal lists only
-TICK_WINDOW = 5 * 60
 COOLDOWN = 15 * 60
+TICK_WINDOW = 5 * 60
+TICK_REAL_WORK = 60                     # a tick shorter than this did no real work
+TICK_PENDING_TTL = 6 * 3600
 
 # A gh word: `gh` on its own followed by a subcommand. `gh-pages`, `ghost`
 # and paths ending in /gh-something do not match. Only counted where it is
@@ -368,8 +403,51 @@ def loop_reason(cmd):
     return None
 
 
+HELP_ARGS = {"-h", "--help"}
+
+
 def runs_release_tick(cmd):
-    return bool(TICK_RE.search(cmd) or SHEPHERD_RE.search(cmd))
+    """True when the command runs a real tick or shepherd. `--help` / `-h`
+    anywhere in that statement means it only prints; `report` means so only
+    as shepherd's subcommand, its first argument. TICK_RE already requires
+    the `tick` subcommand, so `tick --lane report` stays a tick."""
+    for rx in (TICK_RE, SHEPHERD_RE):
+        for m in rx.finditer(cmd):
+            words = cmd[m.start():statement_end(cmd, m.end())].split()
+            if HELP_ARGS.intersection(words):
+                continue
+            args = cmd[m.end():statement_end(cmd, m.end())].split()
+            if rx is SHEPHERD_RE and args[:1] == ["report"]:
+                continue
+            return True
+    return False
+
+
+def tick_running():
+    """True while another process holds the pipeline's single-run flock.
+
+    Probe only: open the existing file read-only, try a non-blocking shared
+    flock and drop it at once. A missing file means no tick has the lock; it
+    is never created, deleted or held here. Any other error fails open."""
+    try:
+        fd = os.open(TICK_LOCK, os.O_RDONLY)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        log(f"ALLOW(lock-unreadable) {exc}")
+        return False
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except OSError as exc:
+            log(f"ALLOW(lock-probe-failed) {exc}")
+            return False
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
 
 
 def gh_calls_only_rate_probe(cmd):
@@ -382,8 +460,25 @@ def touches_github(cmd):
 
 
 # ---- the two halves -------------------------------------------------------
-def pre_verdict(cmd, now):
-    """Return a refusal reason, or None to allow. Records an allowed tick."""
+def tick_key(payload):
+    """Pairs a tick's PreToolUse with its PostToolUse."""
+    for key in ("tool_use_id", "toolUseId", "session_id"):
+        if isinstance(payload.get(key), str) and payload[key]:
+            return payload[key]
+    return "-"
+
+
+def pending_ticks(state, now):
+    starts = state.get("release_tick_started")
+    if not isinstance(starts, dict):
+        return {}
+    return {k: v for k, v in starts.items()
+            if isinstance(v, (int, float)) and now - v < TICK_PENDING_TTL}
+
+
+def pre_verdict(cmd, now, key="-"):
+    """Return a refusal reason, or None to allow. Notes when an allowed tick
+    starts; only PostToolUse (observe_tick) stamps the window."""
     scan = mask_quoted_data(inert_stripped(cmd))
     has_gh = bool(gh_calls(scan))
     tick = runs_release_tick(scan)
@@ -425,17 +520,28 @@ def pre_verdict(cmd, now):
                     f"is also allowed (rule 74ddb23c, never burst GitHub).")
 
     if tick:
-        last = stamp(state, "release_tick_at")
+        last = stamp(state, "release_tick_ran_at")
         if last is not None and now - last < TICK_WINDOW:
             wait = int(TICK_WINDOW - (now - last)) + 1
-            return (f"GITHUB BURST GUARD: a release-pipeline tick or shepherd run "
-                    f"started {int(now - last)}s ago. Each tick makes many GitHub calls, "
-                    f"and hand-run ticks stacked on the scheduled ones are what tripped "
-                    f"the rate limit on 2026-10-06. Wait {wait}s, or read the pipeline's "
-                    f"state instead of ticking it again; one `gh pr view <n> --json "
+            return (f"GITHUB BURST GUARD: a release-pipeline tick or shepherd run that "
+                    f"did real work started {int(now - last)}s ago. Each tick makes many "
+                    f"GitHub calls, and hand-run ticks stacked on earlier ones are what "
+                    f"tripped the rate limit on 2026-10-06 (three in five minutes). Wait "
+                    f"{wait}s, or read the pipeline's state instead of ticking it again; "
+                    f"one `gh pr view <n> --json state,mergedAt` answers most status "
+                    f"questions (rule 74ddb23c, never burst GitHub).")
+        if tick_running():
+            return (f"GITHUB BURST GUARD: a release-pipeline tick is running right now "
+                    f"(it holds the single-run lock {TICK_LOCK}). Each tick makes many "
+                    f"GitHub calls, and ticks stacked on a running one are what tripped "
+                    f"the rate limit on 2026-10-06. Retry as soon as that tick finishes "
+                    f"and releases the lock; there is no fixed wait. Meanwhile read the "
+                    f"pipeline's state instead; one `gh pr view <n> --json "
                     f"state,mergedAt` answers most status questions (rule 74ddb23c, "
                     f"never burst GitHub).")
-        write_state(release_tick_at=now)
+        starts = pending_ticks(state, now)
+        starts[key] = now
+        write_state(release_tick_started=starts)
     return None
 
 
@@ -506,9 +612,50 @@ def line_start_rate_limit(text):
     return False
 
 
+def backgrounded_launch(payload):
+    ti = payload.get("tool_input") or payload.get("toolInput") or {}
+    if isinstance(ti, dict) and ti.get("run_in_background") is True:
+        return True
+    resp = payload.get("tool_response")
+    return isinstance(resp, dict) and bool(resp.get("backgroundTaskId"))
+
+
+def observe_tick(payload, now, event):
+    """Stamp the tick window only for a tick that ran and did real work:
+    exit 0 after TICK_REAL_WORK seconds, or a background launch."""
+    try:
+        state = read_state()
+    except StateUnreadable:
+        state = {}
+    starts = pending_ticks(state, now)
+    key = tick_key(payload)
+    started = starts.pop(key, None)
+    ran = None
+    if call_failed(payload, event):
+        why = "failed"
+    elif backgrounded_launch(payload):
+        ran, why = (started if started is not None else now), "background launch"
+    elif started is None:
+        # Its start went unseen (state lost, an older hook): it ran and exited
+        # 0, so keep the catch rather than guess it was short.
+        ran, why = now, "start unseen"
+    elif now - started >= TICK_REAL_WORK:
+        ran, why = started, f"ran {int(now - started)}s"
+    else:
+        why = f"ran only {int(now - started)}s"
+    if ran is not None:
+        write_state(release_tick_started=starts, release_tick_ran_at=ran)
+    else:
+        write_state(release_tick_started=starts)
+    log(f"TICK {'STAMPED' if ran is not None else 'NOT-STAMPED'} ({why})")
+
+
 def observe(payload, cmd, now, event):
-    if not touches_github(mask_quoted_data(inert_stripped(cmd))):
+    scan = mask_quoted_data(inert_stripped(cmd))
+    if not touches_github(scan):
         return
+    if runs_release_tick(scan):
+        observe_tick(payload, now, event)
     text = response_lines(payload)
     # Path 1: the call failed and the phrase is on gh's error line.
     # Path 2: no failure is visible, as when gh is piped (`gh pr list | head`
@@ -549,7 +696,7 @@ def main():
         if event in ("PostToolUse", "PostToolUseFailure"):
             observe(payload, cmd, now, event)
             return 0
-        reason = pre_verdict(cmd, now)
+        reason = pre_verdict(cmd, now, tick_key(payload))
         if reason:
             log(f"DENY {reason[:120]} :: {cmd[:300]}")
             # Exit 2 + stderr, as guard-unattended.py: it blocks on every build.

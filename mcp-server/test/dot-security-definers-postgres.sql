@@ -2,7 +2,20 @@
 -- transaction (either would conceal a SECURITY DEFINER write escape).
 -- Fixtures and every successful call roll back. No production data is used.
 \set ON_ERROR_STOP on
+-- WR-000258: the typed calls below are independent, and each pays for a full
+-- hash of every public/ops row (the sealed SCAC registry alone is ~240k rows),
+-- so the CI runner splits them across disposable database copies. Run as
+-- `-v shards=N -v shard=K` each session executes only calls whose position in
+-- signature order is K modulo N; every session still builds the whole fixture,
+-- the positive control and every other assertion. With neither variable set
+-- (the default, and what a human typing psql gets) one session runs all calls.
+\if :{?shards}
+\else
+\set shards 1
+\set shard 0
+\endif
 begin;
+select set_config('dot.shards', :'shards', true), set_config('dot.shard', :'shard', true);
 set local search_path = pg_catalog;
 
 create temp table dot_definer_calls(signature text primary key, arguments text not null,
@@ -133,15 +146,31 @@ end $coverage$;
 set session authorization dot_reader;
 do $calls$
 declare call record; before_state jsonb; after_state jsonb; refusal text; changed text;
+  shards integer := current_setting('dot.shards')::integer;
+  shard integer := current_setting('dot.shard')::integer;
 begin
   if session_user<>'dot_reader' or current_user<>'dot_reader' then
     raise exception 'proof must use the Dot session identity';
   end if;
   perform set_config('carr.organization_tenant_id','carr-internal',true);
-  for call in select c.*,p.prorettype from pg_temp.dot_definer_calls c
-              join pg_proc p on p.oid=to_regprocedure(c.signature) order by c.signature
+  -- Machine-read by ops/ci-migration-gates.py (scenario_coverage): the shards
+  -- together must run every reviewed call exactly once.
+  raise notice 'gate-scenarios-declared: %',
+    (select string_agg(signature,' ' order by signature) from pg_temp.dot_definer_calls);
+  if shards<1 or shard<0 or shard>=shards then
+    raise exception 'invalid Dot call shard %/%',shard,shards;
+  end if;
+  -- One baseline for the whole session. The loop below requires every call to
+  -- leave the relation state exactly as it found it, so each call's "before"
+  -- is this baseline; hashing it again per call only repeated the same scan.
+  before_state := pg_temp.dot_relation_state();
+  for call in select * from (
+                select c.*,p.prorettype,
+                       (row_number() over (order by c.signature))-1 as position
+                  from pg_temp.dot_definer_calls c
+                  join pg_proc p on p.oid=to_regprocedure(c.signature)) numbered
+              where numbered.position % shards = shard order by numbered.signature
   loop
-    before_state := pg_temp.dot_relation_state();
     refusal := null;
     begin
       execute format('select %s(%s)',split_part(call.signature,'(',1),call.arguments);
@@ -157,6 +186,7 @@ begin
         from jsonb_each(after_state) where value is distinct from before_state->key;
       raise exception 'Dot changed relation state through %: %',call.signature,changed;
     end if;
+    raise notice 'gate-scenario-ran: %',call.signature;
     raise notice 'Dot call %: %; table and sequence state unchanged',
       call.signature,coalesce('refused '||refusal,'returned');
   end loop;
