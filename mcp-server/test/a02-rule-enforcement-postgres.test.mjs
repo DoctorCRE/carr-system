@@ -50,9 +50,14 @@ const R = Object.freeze({
   oneOfTwoChanged:    "a0200010-0000-4000-8000-000000000000", // N8
   catalogMovedEarlier: "a0200011-0000-4000-8000-000000000000", // "changed" means either direction
   // 0876: a current exact machine_enforceable/hard_enforced approval whose
-  // controls all hold is covered WITHOUT a fallback receipt; the fallback
-  // rung binds human_only rules (the four fallback cases above are human_only).
+  // controls all hold AND all report their own unavailability (hooks/*.py
+  // only, or transactional_schema) is covered WITHOUT a fallback receipt; the
+  // fallback rung binds human_only rules (the four fallback cases above are
+  // human_only) and hard_enforced rules on any other kind of control.
   hardEnforcedNoFallback: "a0200012-0000-4000-8000-000000000000",
+  hardEnforcedTransactional: "a0200013-0000-4000-8000-000000000000",
+  hardEnforcedNonHook: "a0200014-0000-4000-8000-000000000000",
+  hardEnforcedHookPlusScript: "a0200015-0000-4000-8000-000000000000",
 });
 
 const EXPECTED_GAPS = Object.freeze({
@@ -71,6 +76,8 @@ const EXPECTED_GAPS = Object.freeze({
   [R.fallbackOldVersion]: "active_rule_fallback_absent",
   [R.fallbackOldHash]: "active_rule_fallback_absent",
   [R.writerTarget]: "active_rule_fallback_absent",
+  [R.hardEnforcedNonHook]: "active_rule_fallback_absent",
+  [R.hardEnforcedHookPlusScript]: "active_rule_fallback_absent",
 });
 
 const JOE = { slug: "joe", display: "Joe", human: true, via: "mcp", client_id: "a02-postgres-test" };
@@ -106,9 +113,9 @@ async function seedRule(db, ctx, id, spec) {
   await db.query(
     `insert into ops.enforcement_control_catalog
        (control_key, implementation_ref, test_ref, enforcement_class, installed, verified_at)
-     values ($1, 'synthetic/impl', 'synthetic/test', 'deny_gate', true,
+     values ($1, $2, 'synthetic/test', $3, true,
              ${spec.catalogVerifiedAt ?? verified})`,
-    [control]);
+    [control, spec.implementationRef ?? "synthetic/impl", spec.controlClass ?? "deny_gate"]);
   const controls = [control];
   if (spec.second) {
     // Two approved controls; the first is fully good, the second carries the
@@ -135,9 +142,9 @@ async function seedRule(db, ctx, id, spec) {
   await db.query(
     `insert into ops.rule_enforcement_point
        (rule_id, control_key, implementation_ref, test_ref, enforcement_class, installed, verified_at)
-     values ($1, $2, 'synthetic/impl', 'synthetic/test', 'deny_gate', true,
+     values ($1, $2, $3, 'synthetic/test', $4, true,
              ${spec.pointVerifiedNull ? "null" : verified})`,
-    [id, control]);
+    [id, control, spec.implementationRef ?? "synthetic/impl", spec.controlClass ?? "deny_gate"]);
   await db.query(
     `insert into ops.rule_control_binding (rule_id, control_key, statement_hash, binding_contract)
      values ($1, $2, $3, '{}'::jsonb)`,
@@ -298,7 +305,15 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       statement: "a02 current statement B", fallbackStatement: "a02 earlier statement A" });
     await seedRule(db, ctx, R.proposed, { status: "proposed" });
     await seedRule(db, ctx, R.writerTarget, { ...HUMAN, fallback: false });
-    await seedRule(db, ctx, R.hardEnforcedNoFallback, { fallback: false });
+    // 0876: the exemption follows the CONTROL's kind, read from the catalog.
+    await seedRule(db, ctx, R.hardEnforcedNoFallback, { fallback: false,
+      implementationRef: "hooks/a02-synthetic-gate.py; hooks/a02_synthetic_helper.py" });
+    await seedRule(db, ctx, R.hardEnforcedTransactional, { fallback: false,
+      controlClass: "transactional_schema", implementationRef: "mcp-server/src/tools.js" });
+    await seedRule(db, ctx, R.hardEnforcedNonHook, { fallback: false,
+      implementationRef: "tools/room-bridge/dispatch.py" });
+    await seedRule(db, ctx, R.hardEnforcedHookPlusScript, { fallback: false,
+      implementationRef: "hooks/a02-synthetic-gate.py; ops/a02-synthetic-check.py" });
     await db.query("commit");
 
     await t.test("every leg of the guard reports its exact named gap (S2 S3 S4 S5 S6 S9 S10 S20 N7 N8, rulings 5a, corrections 1-2)", async () => {
@@ -306,11 +321,13 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       assert.equal(record.schema_version, "doctorcre-v5-a02-rule-enforcement-coverage.v2");
       assert.deepEqual(gapsByRule(record), EXPECTED_GAPS);
       // S6: the proposed rule is never counted, covered or not.
-      assert.equal(record.active_rule_count, 17);
-      assert.equal(record.covered_rule_count, 2);
-      assert.equal(record.gap_count, 15);
-      // 0876: hard_enforced with every control holding needs no fallback.
+      assert.equal(record.active_rule_count, 20);
+      assert.equal(record.covered_rule_count, 3);
+      assert.equal(record.gap_count, 17);
+      // 0876: hard_enforced on hook-only or transactional_schema controls
+      // needs no fallback; a control with any file outside hooks/ still does.
       assert.equal(gapsByRule(record)[R.hardEnforcedNoFallback], undefined);
+      assert.equal(gapsByRule(record)[R.hardEnforcedTransactional], undefined);
       assert.equal(record.coverage_state, "gaps");
       assert.equal(record.coverage_complete, false);
       for (const gap of record.gaps) assert.ok(gap.detail.trim().length > 0);
@@ -322,7 +339,7 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
         const read = await readRuleEnforcementCoverage(reader);
         assert.equal(read.status, "available", JSON.stringify(read));
         assert.equal(read.coverage_state, "gaps");
-        assert.equal(read.gap_count, 15);
+        assert.equal(read.gap_count, 17);
         assert.deepEqual(Object.fromEntries(read.gaps.map(g => [g.rule_id, g.reason_id])), EXPECTED_GAPS);
       } finally {
         await reader.end();
@@ -392,7 +409,7 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       const expected = { ...EXPECTED_GAPS };
       delete expected[R.writerTarget];
       assert.deepEqual(gapsByRule(record), expected);
-      assert.equal(record.covered_rule_count, 3);
+      assert.equal(record.covered_rule_count, 4);
     });
 
     await t.test("S7 and item 2: UPDATE, DELETE and the owner's TRUNCATE are refused", async () => {

@@ -1,7 +1,8 @@
 -- 0876_a02_fallback_rung_human_only.sql
 -- rollback: re-run the create or replace from migrations/0721_a02_rule_enforcement_coverage.sql (the fallback rung then binds every rule again); no data is written here
 --
--- V5-A02: THE FALLBACK RUNG BINDS HUMAN-ONLY RULES, NOT HARD-ENFORCED ONES.
+-- V5-A02: THE FALLBACK RUNG BINDS HUMAN-ONLY RULES, NOT HARD-ENFORCED ONES
+-- WHOSE CONTROLS ALREADY REPORT THEIR OWN UNAVAILABILITY.
 --
 -- ops.v5_a02_rule_enforcement_coverage() (0721) demanded a Joe-authority
 -- fallback receipt for EVERY active rule, after its approved controls passed.
@@ -17,14 +18,50 @@
 --
 -- WHAT CHANGES. One new fact, fallback_required: false only when the rule's
 -- CURRENT exact approval (same version and statement hash) is
--- machine_enforceable with enforcement_status hard_enforced. The
--- active_rule_fallback_absent rung fires only when it is required. Fail-safe
--- by construction: a rule with no approval, an approval for an earlier
--- version, or a human_only approval still needs its receipt. Every earlier
--- rung (control mapped, all controls installed, tests recorded, passing, not
+-- machine_enforceable with enforcement_status hard_enforced AND every control
+-- that approval names is of a kind whose unavailability the system already
+-- reports by machine (below). The active_rule_fallback_absent rung fires only
+-- when it is required. Fail-safe by construction: a rule with no approval, an
+-- approval for an earlier version, a human_only approval, or an approval that
+-- names any other kind of control still needs its receipt. Every earlier rung
+-- (control mapped, all controls installed, tests recorded, passing, not
 -- future-dated, unchanged since approval) is untouched, so a hard_enforced
--- rule is covered only when its controls hold. The returned shape,
--- schema_version and evidence-digest preimage are unchanged.
+-- rule is covered only when its controls hold. The returned shape and
+-- schema_version are unchanged; fallback_required joins the per-rule facts,
+-- so the evidence-digest preimage gains that one key.
+--
+-- WHAT THIS GIVES UP, AND WHY THAT IS ACCEPTABLE. For an exempt rule the
+-- system no longer holds a receipt saying what it does when the installed
+-- control is unavailable: a disabled hook, the Worker down, catalog drift.
+-- The exemption is limited to the two kinds where a machine check already
+-- answers that question:
+--   * Hook controls: every implementation_ref entry is a hooks/*.py file.
+--     hooks/gate-integrity.py runs at every SessionStart, hashes every
+--     hooks/*.py against ops/config/gate-baseline.json (changed, missing and
+--     unblessed hooks are each named) and compares the live settings hooks
+--     block with ops/config/hooks.json (a hook that is no longer invoked is
+--     named); the `machine config` row of ./run.sh health repeats the wiring
+--     comparison. A missing, changed or disabled gate is therefore named the
+--     next time any session boots, which is the receipt's job.
+--   * transactional_schema controls: the refusal runs inside the write's own
+--     transaction or request, so when the database or the Worker is
+--     unavailable the write does not happen at all. That is refuse_closed,
+--     the receipt's own answer, made structural.
+-- Catalog drift is caught for both by this function's own earlier rungs (an
+-- uninstalled control, or a verified_at that moved since approval, is a named
+-- gap). For those kinds the rung duplicated a check the system already makes.
+-- The claim is FALSE for the other kinds, so they keep the rung: githook
+-- deny gates (commit_claims, index_upkeep, path_hygiene, staged_gate_bless),
+-- CI and script deny gates (eval_receipt, source_merge_eligibility,
+-- calendar_intake, client_asset_packet, delegation_names_model_and_effort,
+-- control-plane-workflow-manifest, platform_metering_pre_dispatch,
+-- close_before_open), schema-class checks run as scripts (glanceable_lead,
+-- stale_count, trigger_grant), and any control whose implementation names a
+-- file outside hooks/. gate-integrity does not hash those files, so nothing
+-- names their unavailability at boot; the existing fallback receipt stays the
+-- record for them. On 2026-10-12 that keeps 6cfb67f5 (control
+-- delegation_names_model_and_effort, tools/room-bridge/dispatch.py) on the
+-- rung.
 
 create or replace function ops.v5_a02_rule_enforcement_coverage()
 returns jsonb
@@ -59,7 +96,17 @@ begin
                     and btrim(ep.test_ref) <> '' and btrim(c.test_ref) <> '', false) as recorded,
            coalesce(ep.verified_at > v_observed_at
                     or c.verified_at > v_observed_at, false) as future_dated,
-           c.verified_at is distinct from ep.verified_at as changed_since_approval
+           c.verified_at is distinct from ep.verified_at as changed_since_approval,
+           -- 0876: a control whose unavailability the system already names by
+           -- machine (see the header): transactional_schema, or implemented
+           -- only by hooks/*.py files that gate-integrity hashes and wires.
+           -- A missing catalog row is never self-alarming.
+           coalesce(c.control_key is not null
+                    and (c.enforcement_class = 'transactional_schema'
+                         or not exists (
+                           select 1
+                             from regexp_split_to_table(btrim(c.implementation_ref), '\s*;\s*') ref(path)
+                            where ref.path !~ '^hooks/[A-Za-z0-9_.-]+[.]py$')), false) as self_alarming
       from active_rule a
       join ops.rule_approval_receipt ar
         on ar.rule_id = a.rule_id
@@ -79,7 +126,8 @@ begin
            bool_and(mapped) as all_mapped,
            bool_and(recorded) as all_recorded,
            bool_or(recorded and future_dated) as any_future_dated,
-           bool_and(recorded and not future_dated and not changed_since_approval) as all_passing
+           bool_and(recorded and not future_dated and not changed_since_approval) as all_passing,
+           bool_and(self_alarming) as all_self_alarming
       from approved_control
      group by rule_id, approval_id
   ), facts as (
@@ -110,17 +158,20 @@ begin
                 and fr.rule_version = a.version
                 and fr.statement_hash = a.statement_hash
            ) as fallback_recorded,
-           -- 0876: the fallback rung binds human_only rules (and any rule
-           -- without a current exact hard_enforced approval). A rule whose
-           -- current exact approval is machine_enforceable/hard_enforced is
-           -- enforced by its installed control; the control IS the procedure.
+           -- 0876: the fallback rung binds human_only rules, any rule without
+           -- a current exact hard_enforced approval, and any approval naming a
+           -- control whose unavailability nothing names by machine. Only a
+           -- machine_enforceable/hard_enforced approval whose EVERY control is
+           -- self-alarming (header) is exempt.
            not exists (
              select 1 from ops.rule_approval_receipt ar
+               join approval p on p.approval_id = ar.id and p.rule_id = ar.rule_id
               where ar.rule_id = a.rule_id
                 and ar.rule_version = a.version
                 and ar.statement_hash = a.statement_hash
                 and ar.policy_kind = 'machine_enforceable'
                 and ar.enforcement_status = 'hard_enforced'
+                and p.all_self_alarming
            ) as fallback_required
       from active_rule a
   ), classified as (
@@ -171,7 +222,8 @@ begin
            'all_controls_mapped', all_controls_mapped,
            'approved_earlier_version', approved_earlier_version,
            'tests_recorded', tests_recorded, 'tests_passing', tests_passing,
-           'fallback_recorded', fallback_recorded)
+           'fallback_recorded', fallback_recorded,
+           'fallback_required', fallback_required)
            order by rule_id), '[]'::jsonb)
     into v_active, v_covered, v_gap_count, v_gaps, v_facts
     from explained;
@@ -217,9 +269,11 @@ comment on function ops.v5_a02_rule_enforcement_coverage() is
   'Universal V5-A02 read: every active rule must have a current exact approval '
   'whose EVERY named control is installed and bound, with recorded test evidence '
   'that is not future-dated and whose catalog verified_at still equals the value '
-  'the approval captured on the enforcement point. A rule whose current exact '
-  'approval is not machine_enforceable/hard_enforced (human_only, or none) also '
-  'needs an exact Joe-authority-connection fallback receipt (0876). Missing '
+  'the approval captured on the enforcement point. A rule also needs an exact '
+  'Joe-authority-connection fallback receipt unless its current exact approval is '
+  'machine_enforceable/hard_enforced and every approved control is transactional_schema '
+  'or implemented only by hooks/*.py, whose unavailability gate-integrity names at '
+  'every session start (0876). Missing '
   'evidence is a named gap, and zero active rules is coverage_state empty, never complete.';
 
 do $v5_a02_0876$
@@ -227,6 +281,10 @@ begin
   if position('fallback_required and not fallback_recorded' in
        pg_get_functiondef('ops.v5_a02_rule_enforcement_coverage()'::regprocedure)) = 0 then
     raise exception '0876 FAILED: the fallback rung is not conditioned on fallback_required';
+  end if;
+  if position('p.all_self_alarming' in
+       pg_get_functiondef('ops.v5_a02_rule_enforcement_coverage()'::regprocedure)) = 0 then
+    raise exception '0876 FAILED: the fallback exemption is not limited to self-alarming controls';
   end if;
   if not has_function_privilege('carr_reader',
        'ops.v5_a02_rule_enforcement_coverage()'::regprocedure, 'execute')
