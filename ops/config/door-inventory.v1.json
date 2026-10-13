@@ -69,6 +69,12 @@
       "evidence": "ops/doctorcre-sibling-manifest.py docstring (added 7c75c878, #853, defect b7936d5d)"
     },
     {
+      "path": "ops/export-leak-guard-hashes.py",
+      "class": "hand_tool",
+      "reason": "A person with record-layer database access runs it to refresh security/client-hashes.json, the salted-hash corpus the leak guard reads; CI has no database credential, so no door can run it.",
+      "evidence": "39778c41 (#1590); its docstring and the read-only export queries in main()"
+    },
+    {
       "path": "ops/guidance-registry-check.py",
       "class": "inert",
       "reason": "Validator for the typed Guidance Registry proposal; nothing runs it because the registry has never been activated.",
@@ -157,6 +163,12 @@
       "class": "hand_tool",
       "reason": "A person runs it on downloaded FL DOH licensure files to rebuild the radar's license pool before a sweep.",
       "evidence": "pipelines/radar/build-license-pool-from-raw.py docstring (lookback fixed aa241723, #1206)"
+    },
+    {
+      "path": "security/install_hook.py",
+      "class": "hand_tool",
+      "reason": "Part of the pinned leak-guard bundle (security/bundle.json); a person runs it once per worktree to point core.hooksPath at the repo pre-push hook, which then runs the guard.",
+      "evidence": "39778c41 (#1590); security/bundle.json pins its bytes"
     },
     {
       "path": "tools/apply-graph-colors.py",
