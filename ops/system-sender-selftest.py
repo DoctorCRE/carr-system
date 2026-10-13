@@ -843,12 +843,12 @@ def test_send_token_python_side() -> None:
         check("token: a fresh token per send", procs2.calls[-1][5] != token)
     finally:
         env.close()
-    for label, procs in (("send step raised", None),
-                         ("send step exited non-zero", FakeProcs(send="boom", send_rc=1))):
+    for label, preset in (("send step raised", None),
+                          ("send step exited non-zero", FakeProcs(send="boom", send_rc=1))):
         env = Env()
         try:
-            if procs is None:
-                procs = FakeProcs()
+            procs = preset if preset is not None else FakeProcs()
+            if preset is None:
                 original = procs.__call__
 
                 def raising(argv: list[str], _orig: Any = original, **kw: Any) -> Any:
