@@ -174,13 +174,13 @@
       "path": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
       "class": "inert",
       "reason": "Benny's setup skill is vendored with pstack but deliberately dormant: no scheduler or Slack contract exists here.",
-      "evidence": "plugins/pstack/PORT.md: Creation and activation remain dormant"
+      "evidence": "WR-000284 (umbrella); plugins/pstack/PORT.md: Creation and activation remain dormant"
     },
     {
       "path": "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
       "class": "inert",
       "reason": "Benny's Slack triage skill is vendored with pstack but deliberately dormant until a proven Slack adapter exists.",
-      "evidence": "plugins/pstack/PORT.md: Creation and activation remain dormant"
+      "evidence": "WR-000284 (umbrella); plugins/pstack/PORT.md: Creation and activation remain dormant"
     },
     {
       "path": "tools/apply-graph-colors.py",
