@@ -2,7 +2,7 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:b51dfc1c5c68eae0ac77036545bd11f1330f2d029725ced7b71e81d9528f36d1",
+    "configuration_fingerprint": "sha256:95094d2151cc2bcc7165ed15b71cf3295b52ef72610f928c62a8cd3dbd949b28",
     "harness_id": "evals/rule-delivery/run_eval.py",
     "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
     "model_id": "deterministic-no-model",
@@ -170,19 +170,17 @@
     },
     "dependencies": {
       "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
-      "hooks/rule-pack-preuse-reselection.py": "dbb3268002ab1fb448fd114f1366b8a1fcfd39de73e7ba08a7fe6dd399740b25",
-      "lib/claude_continuity_config.py": "9e6d1afd1c5714bd61892ca1da7de058dbcfebae84f9131fd70d24d6a91985f5",
-      "lib/claude_rule_delivery_dedupe.py": "6b37b3e0cd950410332fcc4099c17b61650d87eb63158bf550c5d259ca0540b4",
-      "lib/hook_runtime.py": "98fb90335be414e80e52aac30d93f9d150a6f8112287692a1b4c9d296e5afa5a",
+      "hooks/rule-pack-preuse-reselection.py": "c05412a674990f701adecb8b4ee43e6ff6dd28429c097d2ccf5ec4a9c7b3ecae",
+      "lib/hook_runtime.py": "924ebbdf3a4af705e08250950c298fadb257025f0abb9a80c5666fdcfee643d6",
       "lib/rule_delivery_preuse.py": "144dba02f5555287b65d0eb0da050cd6a2cba6fd2ad5b8a9dbe8f920947b6914",
       "lib/rule_delivery_shadow.py": "b39b504ff0bf77819b578a12f97821bc3da2e8226e90b5f17d3a40ccb1cb7417",
-      "lib/rule_routes.py": "03358163502892be114cb13de447c589ee1e8a7bcf1c0034408992885ad38ad0",
+      "lib/rule_routes.py": "0e9a3db2afe77ca8c5de1279cf2934fd4de51c01dc841a830e3ab7a8d382d924",
       "mcp-server/src/jev-request-contract.v1.json": "0687a4cda641c5f08bb856de5b9f234f7e8a097e21e92762b5ed3f582ddca185",
       "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
-      "ops/config/rule-classes.v1.json": "c419bb0cfda3fd1a614eab166fec1744c0234b92dd2d912c8caf7285332ed384",
-      "ops/config/rule-enforcement-map.json": "f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e",
+      "ops/config/rule-classes.v1.json": "65562d20e111656855175e9ee6fb6401e74f5b030aefc11a1e64c38abcf341a9",
+      "ops/config/rule-enforcement-map.json": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
       "ops/config/rule-jev-triggers.v1.json": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
-      "ops/config/rule-jit-triggers.v1.json": "7138a719486b36973adddbf84ad3e1e7e1157512b909b6d519f50f9ff8b90481",
+      "ops/config/rule-jit-triggers.v1.json": "4c53e43289a819d64dd7945046aed7a30211ecbecef2a3c6b209c790aabadff6",
       "ops/config/rule-routes.v1.json": "a7d07fd53511114bb4b380074f27628ff945f133be01ead9b46c7ad2f1baac75",
       "ops/config/rule-selection-corpus.v1.json": "9d9aa0d84329fa29790ee36825caf22924b33717ee152f15c02e81d6872a7454",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
@@ -219,7 +217,7 @@
       "result": "pass"
     }
   },
-  "measured_on": "2026-10-12",
+  "measured_on": "2026-10-13",
   "min_useful_gain": 0.7,
   "noise_floor": 0.3,
   "notes": [

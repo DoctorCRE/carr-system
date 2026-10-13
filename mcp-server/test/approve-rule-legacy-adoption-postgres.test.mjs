@@ -21,8 +21,9 @@
 //              class mismatch, a non-Joe activator and a Dell caller are each
 //              refused by name, and a refusal writes nothing.
 //   AC-A02     V5-A02 sees the adopted rule's controls as mapped and passing;
-//              its only remaining gap is the fallback rung, which 0866
-//              (PR 1723) lifts for hard_enforced rules.
+//              its only remaining gap is the fallback rung, which 0876
+//              (PR 1723) lifts for hard_enforced rules on hook-only controls
+//              (the gate fixture below is a hooks/*.py control).
 //
 // Skips in the unit class. The migration class supplies DATABASE_URL and sets
 // CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1, which turns a skip into a failure.
@@ -204,7 +205,7 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
       await db.query(
         `insert into ops.enforcement_control_catalog
            (control_key, implementation_ref, test_ref, enforcement_class, installed, verified_at)
-         values ($1, 'synthetic/impl', 'tests/' || $1, $2, $3,
+         values ($1, 'hooks/wr262-synthetic-gate.py', 'tests/' || $1, $2, $3,
                  case when $3 then now() - interval '1 hour' end)`, [key, klass, installed]);
     // The receipt cutover: one receipt older than the post-cutover fixture and
     // newer than every legacy fixture, so ops.legacy_rule_admission_note()
@@ -337,10 +338,10 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
       const def = (await db.query(
         "select pg_get_functiondef('ops.v5_a02_rule_enforcement_coverage()'::regprocedure) as d")).rows[0].d;
       if (def.includes("fallback_required")) {
-        assert.equal(gap, null, "with 0866 applied the adopted hard_enforced rule is covered");
+        assert.equal(gap, null, "with 0876 applied the adopted hard_enforced rule is covered");
       } else {
         assert.equal(gap, "active_rule_fallback_absent",
-          "before 0866 the adopted rule clears every control rung and waits only on the fallback rung");
+          "before 0876 the adopted rule clears every control rung and waits only on the fallback rung");
       }
       for (const id of [R.held, R.surfacing, R.postCutover])
         assert.equal(record.gaps.find(g => g.rule_id === id)?.reason_id, "active_rule_control_unmapped");
