@@ -1631,7 +1631,10 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   # V5-RW02 joins it: the evidence store's replay projection, its typed
   # conflict and its write-time refusal of malformed or double-counted
   # readback evidence only exist on real rows as carr_writer.
-  for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
+  # WR-000262 approve-rule legacy adoption joins it: binding, receipt and
+  # hard_enforced admission for an active legacy rule are one transaction on
+  # real rows as carr_authority_joe, and each refusal must write nothing.
+  for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
     if [ -f "mcp-server/test/$proof.test.mjs" ]; then
       if ! DATABASE_URL="$dsn" CARR_COST_LEDGER_DB_REQUIRED=1 \
            CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -1641,6 +1644,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
            CARR_V5_A03_DB_REQUIRED=1 \
            CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
            CARR_RW02_DB_REQUIRED=1 \
+           CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
            CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
            run_quiet "$LOGDIR/$proof-db.log" \
            node --test "mcp-server/test/$proof.test.mjs"; then

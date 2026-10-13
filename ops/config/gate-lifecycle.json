@@ -231,7 +231,7 @@
           "field": "caught"
         },
         "rule_description": "a timestamped context-handoff-gate row whose signal crossed the configured surface policy; Claude lifecycle outcomes are advisory and never refuse Stop solely for context.",
-        "note": "Claude PostToolUse and Stop announce; PreCompact records without blocking. Explicit CLI handoff commands retain their own refusal semantics."
+        "note": "Claude Stop announces; PreCompact records without blocking. The PostToolUse wiring was retired 2026-10-12 (2,848 fires, 0 catches in 7 days; its only effects were activity counters and a once-per-task notice the Stop leg also gives). Explicit CLI handoff commands retain their own refusal semantics."
       },
       "review_date": "2026-11-24",
       "mode": "announce"
@@ -769,31 +769,6 @@
       "review_date": "2026-11-24",
       "mode": "announce"
     },
-    "staging-observation-tracker.py": {
-      "failure_class": "observation tracking for staged work",
-      "catch_metric": {
-        "log_path": "out/hook-telemetry.jsonl",
-        "log_format": "jsonl",
-        "ts_field": "ts",
-        "hook_filter": {
-          "field": "hook",
-          "equals": "staging-observation-tracker.py"
-        },
-        "true_positive": {
-          "kind": "field_in",
-          "field": "register",
-          "values": [
-            "block",
-            "reopen",
-            "announce"
-          ]
-        },
-        "rule_description": "a row for staging-observation-tracker.py in out/hook-telemetry.jsonl whose register is block, reopen, or announce (the gate spoke or blocked, rather than firing silently) -- the same 'intervened' definition ops/hook-telemetry-rollup.py already uses for its retire-candidate rule.",
-        "note": ""
-      },
-      "review_date": "2026-11-24",
-      "mode": "shadow"
-    },
     "unread-artifact-gate.py": {
       "failure_class": "artifact referenced but never read",
       "catch_metric": {
@@ -868,6 +843,25 @@
       },
       "review_date": "2026-11-24",
       "mode": "shadow"
+    },
+    "unfiled-bug-stop-gate.py": {
+      "failure_class": "a defect observed and reported in a turn with nothing filed for it",
+      "catch_metric": {
+        "log_path": "out/unfiled-bug-gate.jsonl",
+        "log_format": "jsonl",
+        "ts_field": "ts",
+        "hook_filter": {
+          "field": "hook",
+          "equals": "unfiled-bug-stop-gate"
+        },
+        "true_positive": {
+          "kind": "row_exists"
+        },
+        "rule_description": "the gate writes a row only when it holds a turn, and every row carries the matched sentences and their defect classes; presence in the window is the catch.",
+        "note": "dedicated log written by the gate itself; the selftest session never writes to it."
+      },
+      "review_date": "2026-11-24",
+      "mode": "enforcing"
     }
   }
 }

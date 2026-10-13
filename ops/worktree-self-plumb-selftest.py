@@ -84,6 +84,45 @@ for required in (
         failures.append(f"Claude current-state boot guidance is missing: {required}")
 
 
+# A refused shared runtime is SAID, not swallowed (2026-10-12). For weeks the
+# venv guard refused every app-created worktree on one machine and this hook
+# printed nothing, so every session there ran without a .venv and found out at
+# the pre-push floor. The session must hear the refusal and the remedy once.
+import subprocess as _sp
+from types import SimpleNamespace as _NS
+with tempfile.TemporaryDirectory() as canon_root, tempfile.TemporaryDirectory() as wt_root:
+    for name in (".venv", "out", os.path.join("mcp-server", "node_modules")):
+        os.makedirs(os.path.join(canon_root, name))
+    refusal = _NS(returncode=1, stdout=(
+        "  !! shared .venv does not match this worktree's requirements.lock — not trusted\n"
+        "     build this worktree's own frozen runtime:  ./run.sh worktree --install wt\n"), stderr="")
+    buf = io.StringIO()
+    with patch.object(mod, "resolve_cwd", return_value=wt_root), \
+            patch.object(mod, "run_git", return_value=wt_root), \
+            patch.object(mod, "canonical_root", return_value=os.path.realpath(canon_root)), \
+            patch.object(mod, "emit_delivery_policy", return_value=True), \
+            patch.object(mod, "mark_alive", return_value=None), \
+            patch.object(mod, "maybe_spawn_reaper", return_value=0), \
+            patch.object(_sp, "run", return_value=refusal):
+        said = mod.decide({"cwd": wt_root, "hook_event_name": "SessionStart"}).stdout
+    if "self-plumb REFUSED" not in said or "requirements.lock" not in said or ".venv" not in said:
+        failures.append(f"a refused --plumb must tell the session why and how to repair; got: {said[:200]!r}")
+    if "pip install -r requirements.lock" not in said:
+        failures.append("the refusal message must name the shared-runtime repair")
+    # and a plumb that SUCCEEDS still reports what it applied, as before
+    applied = _NS(returncode=0, stdout="  ok  .venv -> canon/.venv\n", stderr="")
+    buf = io.StringIO()
+    with patch.object(mod, "resolve_cwd", return_value=wt_root), \
+            patch.object(mod, "run_git", return_value=wt_root), \
+            patch.object(mod, "canonical_root", return_value=os.path.realpath(canon_root)), \
+            patch.object(mod, "emit_delivery_policy", return_value=True), \
+            patch.object(mod, "mark_alive", return_value=None), \
+            patch.object(mod, "maybe_spawn_reaper", return_value=0), \
+            patch.object(_sp, "run", return_value=applied):
+        said_ok = mod.decide({"cwd": wt_root, "hook_event_name": "SessionStart"}).stdout
+    if "Applied: ok  .venv" not in said_ok or "REFUSED" in said_ok:
+        failures.append(f"a successful plumb must report what it applied, not a refusal; got: {said_ok[:200]!r}")
+
 if failures:
     print("worktree-self-plumb selftest FAILED")
     for f in failures:

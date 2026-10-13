@@ -85,32 +85,8 @@
       "hooks": [
         {
           "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-          "timeout": 20
-        },
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
-        },
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/bash-write-gate.py",
-          "timeout": 15
-        },
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/write-effect-check.py",
-          "timeout": 10
-        },
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/draft-export-gate.py",
-          "timeout": 10
-        },
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/github-burst-guard.py",
-          "timeout": 5
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py --chain 60:{{REPO}}/hooks/settings-change-gate.py 15:{{REPO}}/hooks/bash-write-gate.py 10:{{REPO}}/hooks/write-effect-check.py 10:{{REPO}}/hooks/draft-export-gate.py 5:{{REPO}}/hooks/github-burst-guard.py",
+          "timeout": 105
         }
       ]
     },
@@ -186,15 +162,6 @@
   ],
   "PostToolUse": [
     {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "CARR_CONTEXT_HOOK_EVENT=PostToolUse {{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/context-handoff-gate.py",
-          "timeout": 20
-        }
-      ]
-    },
-    {
       "matcher": "Write|Edit|MultiEdit|apply_patch|functions\\.apply_patch",
       "hooks": [
         {
@@ -207,11 +174,6 @@
     {
       "matcher": "Bash",
       "hooks": [
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/staging-observation-tracker.py",
-          "timeout": 20
-        },
         {
           "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/settings-change-gate.py"
@@ -229,7 +191,6 @@
       ]
     },
     {
-      "matcher": "Bash|Read|Write|Edit|MultiEdit|WebFetch|WebSearch|Grep",
       "hooks": [
         {
           "type": "command",
@@ -343,6 +304,11 @@
           "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/jev-supervisor.py",
           "timeout": 25
+        },
+        {
+          "type": "command",
+          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/unfiled-bug-stop-gate.py",
+          "timeout": 15
         }
       ]
     }
