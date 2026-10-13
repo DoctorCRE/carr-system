@@ -15,7 +15,11 @@
     "reads and writes the PRODUCTION record layer. The environment field answers",
     "'what was affected', not 'what machine was it typed on' — a Control Room",
     "asking which environment last night's export damaged wants the first answer.",
-    "The machine is carried by runtime instead.",
+    "The machine is carried by runtime instead, and for a launchd job by",
+    "runs_on: 'primary', 'secondary' or 'every'. lib/launchd_scope.py derives",
+    "PRIMARY_ONLY and SECONDARY_ONLY from it, so the installer and this catalog",
+    "cannot disagree. sync-registry deliberately does not carry runs_on into",
+    "ops.service_environment: placement is installer policy, read from this file.",
     "",
     "CADENCE IS WHAT MAKES SILENCE DETECTABLE, so every scheduled service declares",
     "one, and the grace is sized to the real schedule rather than to the ideal:",
@@ -83,6 +87,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.orphan-reaper.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 300,
           "cadence_grace_seconds": 2700,
           "notes": "Safe local signal evidence survives reporting outages. Failed censuses or pending record transport exit nonzero and are recorded by run-scheduled.sh; grace covers the thirty-minute run-spool flush."
@@ -102,6 +107,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.flash-idle-stop.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 300,
           "cadence_grace_seconds": 600,
           "notes": "No credential or model call. Completion means idle decision checked; failures exit nonzero in out/flash-idle-stop.log and surface as flash_residency health findings."
@@ -121,6 +127,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.tailscale-up.plist",
+          "runs_on": "primary",
           "notes": "Primary-only RunAtLoad, no repeating cadence or KeepAlive. ops/tailscale_health.py reads the backend independently of login frequency."
         }
       ]
@@ -180,6 +187,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.nightly-record-layer.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 7200,
           "notes": "Daily at 02:05. Two hours of grace covers a long backup."
@@ -199,6 +207,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.nightly-exports-daytime-retry.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 7200,
           "notes": "Daily at 11:00 local (StartCalendarInterval Hour/Minute are local time, not UTC), one fixed calendar fire. A no-op most days (exits immediately once tonight's own nightly-record-layer run already landed exports OK), so absence of a RETRY line in out/nightly.log is the expected common case, not an anomaly — same posture as migrate-prod above."
@@ -218,6 +227,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.rules-refresh.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 39600,
           "cadence_grace_seconds": 3600,
           "notes": "Hourly 07:00-20:00 by fourteen calendar entries, so the real worst-case gap is the eleven hours overnight — not one hour."
@@ -237,6 +247,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.local-briefs.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 172800,
           "notes": "Weekdays 06:45. The grace spans the weekend stand-down; weekends are off for both partners."
@@ -256,6 +267,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.notes-sweep.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 3600,
           "notes": "Grace widened 1800→3600 on 2026-08-18: run rows now ride the local spool (tools/ops-spool.py) and land at the next run-spool-flush, so a row can be inserted up to 1800s after its fire; the old grace put the worst honest gap exactly at the window edge."
@@ -275,6 +287,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.partner-ping.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "Wakes every two minutes, but bin/run-scheduled.sh's --heartbeat-interval (Program 4 follow-up) throttles a SUCCEEDED row to at most one per 1800s — recording all ~720 fires/day as rows would be pure noise from a healthy channel. Every FAILURE is still recorded immediately regardless of the throttle, so cadence here reflects the succeeded heartbeat, not the wake. Grace widened 900→2700 on 2026-08-18: the succeeded row now rides the local spool (tools/ops-spool.py) and is inserted at the next run-spool-flush, up to 1800s after the throttle emitted it, so the honest worst-case gap between inserts is throttle+flush (3600s) against a window of cadence+grace (4500s). Also 2026-08-18: the plist passes --scheduled, which skips the QUERY (never the wake, never the row) outside weekdays 07:00-19:00 local — the last thing keeping the Neon compute from autosuspending. The 2-minute interrupt Joe promised on 2026-08-03 is unchanged during the working day; outside it the job still wakes, still exits 0, and still records its heartbeat through the spool, so this service and carr-local-edge-node stay observable overnight exactly as before. This job once logged 382 consecutive identical 'nothing new' lines to a local log with a broken query, because a channel with nothing to say and a channel that cannot ask produce byte-identical output — a run row (even throttled) still distinguishes them, since a genuinely broken query fails loud and goes to the ledger direct, ahead of the spool."
@@ -293,6 +306,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.capture-poll.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "Wakes every 5 min, but bin/run-scheduled.sh's --heartbeat-interval (Program 4 follow-up) throttles a SUCCEEDED row to at most one per 1800s (30 min) — recording all ~288 fires/day would be noise from a quiet inbox. Every FAILURE is still recorded immediately regardless of the throttle. Grace widened 900→2700 on 2026-08-18 for the spool delay (tools/ops-spool.py): a succeeded row is inserted at the next run-spool-flush, up to 1800s after it was emitted."
@@ -312,6 +326,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.room-bridge.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "Wakes every 60s, but bin/run-scheduled.sh's --heartbeat-interval throttles a SUCCEEDED row to at most one per 900s (15 min) — recording all ~1440 fires/day would be noise from a quiet room, the same reasoning capture-poll and partner-ping already state above. Every FAILURE (e.g. read-room unreachable) is still recorded immediately regardless of the throttle. Cadence/grace mirror capture-poll's own widened figures for the same tools/ops-spool.py flush-delay reason: a succeeded row can land up to ~1800s after the throttle emitted it."
@@ -331,6 +346,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.calendar-eventkit.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 172800,
           "notes": "Weekdays at 07:20 only. Grace spans the weekend stand-down (Joe, 2026-07-11), same shape as local-briefs: the real worst-case gap is Friday to Monday, not one day. PR #97 (Program 4 slice 1) wired the other six launchd jobs and deliberately left this one out for lack of a registration; this entry and the plist's own routing through bin/run-scheduled.sh close that gap."
@@ -350,6 +366,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.storage-hygiene.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 172800,
           "notes": "Daily at 04:10 local after nightly record-layer work. Source ships uninstalled; activation and first watched run are separate machine effects."
@@ -369,6 +386,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.timebomb-audit.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 604800,
           "cadence_grace_seconds": 259200,
           "notes": "Weekly, Monday 03:30 local. Grace spans a long weekend / a missed Monday plus buffer to the following run — same reasoning calendar-eventkit and local-briefs use for their own weekend stand-down."
@@ -388,6 +406,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 172800,
           "notes": "Daily, 07:00 local, before the working day. Grace spans a missed day plus buffer to the following run, matching timebomb-audit's own weekend-spanning reasoning."
@@ -407,6 +426,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.calendar-prebrief-joe.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 172800,
           "notes": "The local LaunchAgent wakes every minute, but the receipt-gated runtime schedules weekday work at 06:30 America/Chicago for a 06:45 prebrief target. The daily cadence and weekend-spanning grace make the Mac edge lifecycle visible without treating an installed plist as activation authority. Durable work evidence remains the exact ops.job lease and calendar-prebrief receipts; Joe live activation and the isolated canary retain their existing typed gates."
@@ -426,6 +446,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.fleet-sync.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 3600,
           "notes": "Fires hourly (StartCalendarInterval at :31, lib/launchd_calendar.py) and again at RunAtLoad (login/wake), changed 2026-09-23 from four fixed daily fires so a Mac asleep or unused for a stretch catches up immediately instead of reading up to twelve hours stale. Cadence is 3600s; 3600s grace covers launch delay and the local spool's next-flush delay, matching the grace already used by this repo's other hourly local jobs (e.g. notes-sweep). The plist routes through bin/run-scheduled.sh as service fleet-sync with run key fleet.sync, and now also fast-forwards the sibling checkouts declared in ops/config/fleet-sync-siblings.json (doctorcre-app, software-factory) under the same fail-closed contract; a sibling's own outcome is reported but never affects this service's own run status. This declaration makes the job representable; it does not claim the LaunchAgent is installed or loaded, or that ops.service has been synced."
@@ -445,6 +466,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.partner-ping.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "Recorded by bin/run-scheduled.sh's --also-heartbeat flag, riding partner-ping's own 2-minute launchd wake as an independent second provenance line (key=launchd.heartbeat), throttled to at most one succeeded row per 1800s by the SAME --heartbeat-interval — regardless of whether the partner-ping buzz query itself succeeds. Grace widened 900→2700 on 2026-08-18 for the spool delay (tools/ops-spool.py): the row is inserted at the next run-spool-flush. A Mac that is asleep or logged out stops waking the LaunchAgent at all, so this service goes stale within 4500s (75 min) of the last real wake rather than reading healthy on a stopped clock — the price of letting Neon autosuspend between flushes, accepted in the 2026-08-18 cloud-usage decision."
@@ -464,6 +486,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.control-plane-tick.plist",
+          "runs_on": "primary",
           "notes": "Definition only: this repository change neither installs nor enables the agent. The tick has no ops.run heartbeat because it is itself a jobs-role ledger client; its durable effect is the idempotent ledger enqueue, and legacy schedules remain independently active until accepted cutover evidence and approval."
         }
       ]
@@ -481,6 +504,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.cc-version-sentinel.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 3600,
           "notes": "Grace widened 1800→3600 on 2026-08-18: run rows now ride the local spool (tools/ops-spool.py) and land at the next run-spool-flush, so a row can be inserted up to 1800s after its fire; the old grace put the worst honest gap exactly at the window edge."
@@ -500,6 +524,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.cutover-watch.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 3600,
           "notes": "Grace is 2x the 1800s interval, same reasoning as cc-version-sentinel: run rows ride the local spool (tools/ops-spool.py) and land at the next run-spool-flush, so a row can be inserted up to ~1800s after its fire. NOT YET INSTALLED (built in worktree cutover-watch, 2026-08-27) — the orchestrating session installs it after this branch merges to main; see tools/scheduler-truth.py's INSTALL_EXEMPT for the same statement in machine-checkable form."
@@ -518,6 +543,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.recordings-purge.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 7200
         }
@@ -536,6 +562,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.run-spool-flush.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "Criticality HIGH although the job is small: every wrapper-recorded service's freshness now depends on this one draining the queue, so a silently stopped flusher would age every heartbeat at once. Its OWN succeeded row rides the spool it just drained and lands on the NEXT flush — hence a grace wider than its cadence: the steady-state gap between its inserts is one full flush interval plus the next flush's delay. A genuinely failed flush is state=failed and goes to the ledger direct (the spool tries failures direct first), so a broken flusher does not have to wait for itself to be reported."
@@ -556,6 +583,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.canonical-fast-forward.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 108000,
           "notes": "Daily at 03:20 local, per Joe's AC-FRESH cadence ruling (decision fa8ae14b-e6fe-4e1b-ae98-0b6eb5a255f8, 2026-09-11). Grace is 1.25x the cadence because a succeeded row rides the local spool (tools/ops-spool.py) and lands at the next run-spool-flush, up to ~1800s after the fire. A REFUSAL IS NOT A FAILURE OF THIS SERVICE: exit 3 (tracked dirt), 4 (ahead of origin) and 7 (wrong branch) mean the job correctly declined to move somebody's tree, and com.carr.canonical-dirty-watchdog is the surface that pages about the condition. This service going quiet is what matters here, which is why it has a cadence at all."
@@ -576,6 +604,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.release-pipeline.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 5400,
           "notes": "Wakes every 60s; bin/run-scheduled.sh --heartbeat-interval 3600 throttles SUCCEEDED rows to one an hour, and every failure (a stopped release, or exit 3 for a missing unattended credential) is recorded immediately. Grace covers the ops-spool flush delay, as for room-bridge. What shipped, failed or blocked is in out/release-pipeline/releases.jsonl; `ops/release-pipeline.py report --date D` prints it for a daily note."
@@ -596,6 +625,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.merge-queue.plist",
+          "runs_on": "primary",
           "notes": "Continuous service with bounded per-entry waits; queue.sqlite3 and queue.log carry progress and stopped-state reasons. No periodic scheduled-run heartbeat is claimed."
         }
       ]
@@ -614,6 +644,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.canonical-dirty-watchdog.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 5400,
           "notes": "Hourly, per the same AC-FRESH cadence ruling. Criticality HIGH although the job only reads: it is the only surface that reports the fast-forward never having fired, and launchd says nothing when it drops an agent. It pages by two independent routes — a report-problem record through run.sh, and a nonzero exit that this wrapper turns into a failed run row — so an unreachable store cannot silence it. Grace is 1.5x the cadence for the same spool delay as its sibling."
@@ -634,6 +665,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.gate-zero-canary.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 3600,
           "cadence_grace_seconds": 5400,
           "notes": "NOT YET ACTIVATED, deliberately: the plist is held in DEFINITION_ONLY in lib/launchd_hold.py, so installing it is Joe's own act and its presence in ~/Library/LaunchAgents is a drift finding until he takes it off that list. Until then this service has no runs and reads unknown — the honest answer for a job nobody has started, and the same posture carr-mcp already takes. CRITICALITY IS LOW because nothing depends on the canary's own work: it has none. What depends on it is one gate's ability to ask a question, and that gate reads a missing canary correctly today. Grace 5400s against a 3600s cadence covers the 30-minute run-spool flush (tools/ops-spool.py) exactly as notes-sweep's and run-spool-flush's graces do: a succeeded row queues locally and lands at the next flush, so the worst honest gap is one interval plus one flush."
@@ -916,6 +948,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.logitech-keymap.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 7200,
           "cadence_grace_seconds": 3600,
           "notes": "Wakes every 10 min and is idempotent by design, so a missed pass costs a keyboard that behaves oddly until the next one. The cadence is deliberately 2h rather than 10 min, with run-scheduled.sh's heartbeat throttle doing the same job it does for capture-poll: recording 144 identical successes a day would be noise, and a low-criticality cosmetic repair does not earn a row that goes stale within the hour."
@@ -935,6 +968,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.fetch-allowlist.plist",
+          "runs_on": "secondary",
           "notes": "NO CADENCE ON PURPOSE, and this one is not a scheduled job that happens to lack a schedule. The plist is SECONDARY MACHINE ONLY: on Joe's primary Mac the allowlist is regenerated as a step of the nightly chain, so this agent is deliberately not installed here and a cadence would report it missing every single day on the one machine where its absence is correct. It is registered so the service EXISTS in the catalog for the machines that do run it."
         }
       ]
@@ -952,6 +986,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.call-mode.plist",
+          "runs_on": "every",
                     "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "KeepAlive server, so the health question is 'is it up' and never 'did it fire recently'. bin/probe-keepalive.py answers it every 10 min by opening a TCP connection to 127.0.0.1:4682 — a connect proves it is ACCEPTING, which is a real answer rather than a PID sighting. Still exempt from bin/run-scheduled.sh: the wrapper records on child exit, and a KeepAlive child exiting means launchd restarted it. Grace widened 900→2700 on 2026-08-18: an UP row rides the local spool (tools/ops-spool.py) and is inserted at the next run-spool-flush, up to 1800s after the probe saw it; a DOWN row still goes to the ledger direct and becomes an incident on the spot."
@@ -971,6 +1006,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.doc-engine.plist",
+          "runs_on": "every",
                     "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "KeepAlive server. Probed every 10 min by a TCP connect to 127.0.0.1:4680, which proves it is ACCEPTING rather than merely running. Same wrapper exemption and the same reason as call-mode; same 2026-08-18 grace widening (900→2700) for the spool delay — an UP row lands at the next run-spool-flush, a DOWN row still lands direct. Proven end to end on 2026-08-14: stopping the agent produced SEV-3 INC-20260814-08 within one probe pass, and restarting it moved the incident to monitoring."
@@ -990,6 +1026,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.quill-dictate.plist",
+          "runs_on": "every",
                     "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "KeepAlive server with NO PORT TO KNOCK ON, so its probe is process liveness only — a weaker claim than the other two, and the run detail says which signal was used so the row is never read as more than it is. A wedged process and a healthy one both have a PID. Same wrapper exemption and reason as call-mode; same 2026-08-18 grace widening (900→2700) for the spool delay."
@@ -1009,6 +1046,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.canary-ingest-sink.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "KeepAlive server, same shape as doc-engine and call-mode: the health question is 'is it up', never 'did it fire recently', so it is probed by bin/probe-keepalive.py opening a TCP connection to 127.0.0.1:4684 rather than by recent-run freshness — a connect proves it is ACCEPTING. Same wrapper exemption and reason as the other two KeepAlive servers: bin/run-scheduled.sh records on child exit, and a KeepAlive child exiting just means launchd restarted it. Refuses to bind unless a mode-0600 credential file is present, so it will show DOWN until ~/.config/carr/notes-canary.env exists — that is a config precondition, not a service defect."
@@ -1028,6 +1066,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.capture-watch.plist",
+          "runs_on": "every",
           "notes": "WatchPaths-triggered, so SILENCE IS THE NORMAL STATE — it fires only when a recording session starts. Any cadence would cry wolf on every day Joe records nothing, which is most days, and an alarm that fires on a quiet day is how both partners learn to stop reading alarms."
         }
       ]
@@ -1045,6 +1084,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.dictation-consent.plist",
+          "runs_on": "every",
           "notes": "WatchPaths-triggered; silence is normal, so no cadence. Criticality is HIGH despite being a small watcher: it is what makes the rig announce recording aloud, and Florida is an all-party-consent state. A failure here is a legal exposure rather than an inconvenience, which is why it is registered even though nothing can currently observe it firing."
         }
       ]
@@ -1062,6 +1102,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.videopipeline.plist",
+          "runs_on": "primary",
           "notes": "WatchPaths-triggered; silence is normal, so no cadence. Its script lives OUTSIDE the repo, under ~/Movies, which means it is not version-controlled and would not survive the Mac — worth naming here because the catalog is where that kind of exposure becomes visible."
         }
       ]
@@ -1079,6 +1120,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.keepalive-probe.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 2700,
           "notes": "Wakes every 10 min; cadence declared at 30 min so one missed pass is not an alarm. It is itself wrapped by bin/run-scheduled.sh, because a watcher whose own failure is invisible is the one thing nothing watches. Grace widened 900→2700 on 2026-08-18 for the spool delay (tools/ops-spool.py). It returns EX_CONFIG (78) rather than a failure when NOTHING could be recorded at all — since the spool, that means the local recording path itself is broken (not even the SQLite queue writable), not merely an unreachable database — and a probe that alarmed every 10 minutes on a Mac in that state would be the smoke-suite mistake again."
@@ -1117,6 +1159,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.job-watchdog.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 120,
           "cadence_grace_seconds": 300,
           "notes": "Primary-only schedule. Cadence is a checked projection of ops/config/job-watchdog.json. This draft ships source definitions; the orchestrator owns activation and replacement of the scratch auto-enqueue process. Findings and dated scan completion ledger are durable; scanner makes no model judgments."
@@ -1136,6 +1179,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.session-trace-archive.plist",
+          "runs_on": "every",
           "expected_cadence_seconds": 86400,
           "cadence_grace_seconds": 7200,
           "notes": "Daily at 03:10 local, plus RunAtLoad. Per-machine by design (both the source transcripts and the destination archive are local to whichever Mac runs it), so it is neither PRIMARY_ONLY nor SECONDARY_ONLY in ops/config-as-code.py, and it depends on nothing in the record layer — no dependencies entry below."
@@ -1155,6 +1199,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.expert-reply-watch.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 604800,
           "cadence_grace_seconds": 86400,
           "notes": "Monday 06:00 local. Primary only; Grok stdout proposals pass deterministic validation. CLI failure records one defect and exits nonzero. No X writes."
@@ -1174,6 +1219,7 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.build-duration-check.plist",
+          "runs_on": "primary",
           "expected_cadence_seconds": 600,
           "cadence_grace_seconds": 1800,
           "notes": "Primary only. bin/run-scheduled.sh records every firing; checker writes dated receipt and deduplicated loops. Scan bounded to 300s plus record calls; unavailable is a failed run. Quiet when clean."
