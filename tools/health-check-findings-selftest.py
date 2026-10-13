@@ -708,6 +708,25 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         self.assertIn("OK storage hygiene fixture", out.getvalue())
         self.assertEqual(ns["_FINDINGS"], [])
 
+    def test_sends_section_reports_its_own_row_and_breach(self):
+        import contextlib, io
+        for row, breach, hard, rc in (("OK system sends fixture", False, False, 0),
+                                      ("WARN system sends fixture · held claims 1", True, False, 1),
+                                      ("UNKNOWN system sends fixture", True, True, 1)):
+            with self.subTest(row=row):
+                ns = self.namespace()
+
+                def unrelated_snapshot():
+                    raise AssertionError("sends-only health read the canonical snapshot")
+
+                ns.update(CANONICAL_SECTION="sends", _canonical_snapshot=unrelated_snapshot,
+                          _system_sends_row=lambda row=row, breach=breach, hard=hard: (row, breach, hard))
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(ns["_canonical_health"](), rc)
+                self.assertIn(row, out.getvalue())
+                self.assertEqual([(f["key"], f["subject"], f["hard_error"]) for f in ns["_FINDINGS"]],
+                                 [("system_sends", "system-sender", hard)] if breach else [])
+
     def all_namespace(self):
         from unittest.mock import Mock
         ns = self.namespace()
@@ -720,6 +739,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _canonical_contradiction_alarm=lambda: 0,
                   _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,
                   _tailscale_row=lambda: ("OK fixture node", False),
+                  _system_sends_row=lambda: ("OK system sends fixture", False, False),
                   _host_liveness_rows=lambda: [("OK fixture host", False, "fixture")],
                   _claude_continuity_spool_row=lambda drain: ("OK continuity spool depth — fixture", 0),
                   _build_duration_row=lambda: ("OK fixture build duration", 0),
