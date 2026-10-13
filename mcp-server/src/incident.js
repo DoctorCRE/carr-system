@@ -235,72 +235,118 @@ function formatWindow(date) {
  *
  * This is the predicate behind close-incident's evidence route, the route a
  * sponsored agent uses with no root cause of its own. It is deterministic and
- * pure, like closePreconditions: the caller reads the rows, this decides. Four
- * checks, each answerable from what the ledger already holds:
+ * pure, like closePreconditions: the caller reads the rows, this decides.
+ *
+ * SOME INCIDENTS IT NEVER SETTLES. A SEV-0 or SEV-1, and anything security
+ * class, keeps the partner route: closing one writes 'reviewed', which is a
+ * human's conclusion (0117), and the evidence route would be an agent
+ * reviewing its own outage. Four checks, each answerable from what the ledger
+ * already holds:
  *
  *   evidence_attached    recovery evidence is on the incident (a collector or
  *                        pr-evidence wrote it; nothing the caller typed)
  *   watch_elapsed        the incident is monitoring and its window has run out.
  *                        open-incident moves a recurrence back to detected, so
  *                        monitoring means no failure since the recovery
- *   cause_recorded       a confirmed hypothesis, or a linked defect, says what
- *                        was wrong
- *   remediation_receipt  something fixed it: a linked defect's close receipt, a
- *                        linked deployment that completed, or a merged pull
- *                        request that named this incident (pr-evidence)
+ *   cause_recorded       a linked defect that is RESOLVED (close-defect) says
+ *                        what was wrong; an open defect is a suspicion
+ *   remediation_receipt  something fixed it, and it is a DIFFERENT receipt from
+ *                        the recovery evidence: a linked defect's close receipt,
+ *                        a linked deployment that completed, or a merged pull
+ *                        request that named this incident (pr-evidence). One
+ *                        pr:N cannot be both the recovery and the fix
  *
  * A duplicate of an incident that already closed is complete on that
  * incident's record, the same arm closePreconditions gives a partner.
  *
- * `snapshot` = { incident, now, confirmedHypotheses: [text],
+ * `snapshot` = { incident, now,
  *   linkedDefects: [{ id, defect_class, claimed, actual, resolution|null }],
  *   completedDeployments: [id], mergedPullRequests: [fact text],
  *   canonical: { ref, state, root_cause } | null }.
  */
+const EVIDENCE_ROUTE_HUMAN_SEVERITIES = new Set(["SEV-0", "SEV-1"]);
+// There is no class column on ops.incident, so a security-class incident is
+// recognised from what it records itself: its title and its fingerprint
+// (service|environment|operation|failure_class). Read wide on purpose: a false
+// positive sends an incident to a partner, a false negative lets an agent
+// review a security event on its own.
+const SECURITY_CLASS = /secur|credential|secret|token|auth|permission|forbidden|unauthori[sz]ed|leak|breach|exfiltrat|inject|\bphi\b|\bpii\b|privacy/i;
+
+/** Why this incident keeps the partner route, or null when the evidence route may decide it. */
+export function evidenceRouteRefusal(inc) {
+  if (EVIDENCE_ROUTE_HUMAN_SEVERITIES.has(String(inc?.severity || "")))
+    return `${inc.severity} keeps human review`;
+  const text = `${inc?.title || ""} ${inc?.fingerprint || ""}`;
+  if (SECURITY_CLASS.test(text)) return "a security-class incident keeps human review";
+  return null;
+}
+
+/** One identity per receipt, so the recovery and the fix can be told apart. */
+export function receiptIdentity(ref) {
+  const text = String(ref || "").trim();
+  if (!text) return null;
+  const pr = text.match(/^(?:pr[-:#]?\s*|#)([1-9][0-9]*)$/i) || text.match(/\/pull\/([1-9][0-9]*)\/?$/);
+  if (pr) return `pr:${pr[1]}`;
+  if (/^[0-9a-f]{7,40}$/i.test(text)) return `commit:${text.toLowerCase()}`;
+  if (/^(ops\.run|ops\.deployment|defect-resolution):[0-9a-f-]{36}$/i.test(text)) return text.toLowerCase();
+  return text;
+}
+
+function sameReceipt(a, b) {
+  if (!a || !b) return false;
+  if (a.startsWith("commit:") && b.startsWith("commit:")) return a.startsWith(b) || b.startsWith(a);
+  return a === b;
+}
+
 export function incidentEvidenceVerdict(snapshot) {
   const inc = snapshot?.incident || {};
   const verdict = (complete, missing, extra = {}) => ({ complete, missing, root_cause: null,
-    followup_disposition: null, evidence_ref: null, ...extra });
+    followup_disposition: null, evidence_ref: null, duplicate: false, ...extra });
   if (inc.state === "resolved" || inc.state === "reviewed") return verdict(false, ["open_incident"]);
+  const humanReview = evidenceRouteRefusal(inc);
+  if (humanReview) return verdict(false, ["human_review_required"], { human_review_reason: humanReview });
 
   const canonical = snapshot.canonical;
   if (inc.duplicate_of && canonical && (canonical.state === "resolved" || canonical.state === "reviewed"))
     return verdict(true, [], {
+      duplicate: true,
       root_cause: `the same operational event as ${canonical.ref}, which closed with root cause: ` +
                   `${canonical.root_cause || "(none recorded)"}`,
       followup_disposition: `remediated with ${canonical.ref}; nothing further owed on the duplicate`,
       evidence_ref: inc.recovery_evidence_ref || `ops.incident:${canonical.ref}`,
     });
 
-  const hypotheses = (snapshot.confirmedHypotheses || []).map(t => String(t).trim()).filter(Boolean);
-  const defects = snapshot.linkedDefects || [];
-  const resolved = defects.filter(d => d.resolution);
+  const resolved = (snapshot.linkedDefects || []).filter(d => d.resolution);
   const deployments = snapshot.completedDeployments || [];
   const pullRequests = (snapshot.mergedPullRequests || []).map(t => String(t).trim()).filter(Boolean);
   const until = inc.monitoring_until ? new Date(inc.monitoring_until).getTime() : null;
   const now = snapshot.now ? new Date(snapshot.now).getTime() : NaN;
+  const recovery = receiptIdentity(inc.recovery_evidence_ref);
+
+  // A defect close's identity is the evidence it was closed on, so a close on
+  // the very run or PR that is the recovery evidence is not a second receipt.
+  const remediations = [
+    ...resolved.map(d => ({
+      identity: d.resolution.evidence_kind === "pull_request" ? `pr:${d.resolution.evidence_ref}`
+        : receiptIdentity(d.resolution.evidence_ref),
+      label: `defect-resolution:${d.resolution.id} (${d.resolution.evidence_kind} ${d.resolution.evidence_ref})` })),
+    ...deployments.map(id => ({ identity: receiptIdentity(`ops.deployment:${id}`), label: `ops.deployment:${id}` })),
+    ...pullRequests.map(t => { const n = t.match(/#([1-9][0-9]*)/);
+      return { identity: n ? `pr:${n[1]}` : t, label: t }; }),
+  ].filter(r => !sameReceipt(r.identity, recovery));
 
   const checks = {
-    evidence_attached: Boolean(String(inc.recovery_evidence_ref || "").trim()),
+    evidence_attached: Boolean(recovery),
     watch_elapsed: inc.state === "monitoring" && until !== null && Number.isFinite(now) && until <= now,
-    cause_recorded: hypotheses.length > 0 || defects.length > 0,
-    remediation_receipt: resolved.length > 0 || deployments.length > 0 || pullRequests.length > 0 ||
-      /^pr:[1-9][0-9]*$/.test(String(inc.recovery_evidence_ref || "")),
+    cause_recorded: resolved.length > 0,
+    remediation_receipt: remediations.length > 0,
   };
   const missing = Object.keys(checks).filter(k => !checks[k]);
   if (missing.length) return verdict(false, missing);
 
-  const causes = hypotheses.length ? hypotheses
-    : defects.map(d => `defect ${d.defect_class}: claimed "${d.claimed}", actually "${d.actual}"`);
-  const receipts = [
-    ...resolved.map(d => `defect-resolution:${d.resolution.id} (${d.resolution.evidence_kind} ${d.resolution.evidence_ref})`),
-    ...deployments.map(id => `ops.deployment:${id}`),
-    ...pullRequests,
-    ...(/^pr:/.test(inc.recovery_evidence_ref) ? [`merged ${inc.recovery_evidence_ref}`] : []),
-  ];
   return verdict(true, [], {
-    root_cause: causes.join("; "),
-    followup_disposition: `remediated: ${receipts.join("; ")}`,
+    root_cause: resolved.map(d => `defect ${d.defect_class}: claimed "${d.claimed}", actually "${d.actual}"`).join("; "),
+    followup_disposition: `remediated: ${remediations.map(r => r.label).join("; ")}`,
     evidence_ref: inc.recovery_evidence_ref,
   });
 }
@@ -559,9 +605,7 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
 
   /** Every row the evidence predicate reads, from the incident's own ledger. */
   const evidenceSnapshot = async (c, inc) => {
-    const [hypotheses, defects, deployments, pullRequests, canonical] = await Promise.all([
-      c.query(`select text from ops.incident_hypothesis
-                where incident_id = $1 and settled_as = 'confirmed' order by recorded_at`, [inc.id]),
+    const [defects, deployments, pullRequests, canonical] = await Promise.all([
       c.query(`select d.id, d.defect_class, d.claimed, d.actual,
                       r.id as resolution_id, r.evidence_kind, r.evidence_ref
                  from ops.incident_link l
@@ -583,7 +627,6 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
     ]);
     return {
       incident: inc, now: inc.db_now,
-      confirmedHypotheses: hypotheses.rows.map(r => r.text),
       linkedDefects: defects.rows.map(r => ({ id: r.id, defect_class: r.defect_class, claimed: r.claimed,
         actual: r.actual, resolution: r.resolution_id
           ? { id: r.resolution_id, evidence_kind: r.evidence_kind, evidence_ref: r.evidence_ref } : null })),
@@ -604,27 +647,55 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
           hint: "closing on complete evidence reads only the incident's own rows. To close on your own " +
                 "evidence or reason, use the partner route: pass root_cause with it." });
     return withEnvelope(c, actor, "close-incident", args, async () => {
+      // THE ROW IS HELD FROM HERE TO THE UPDATE. A recurrence (open-incident
+      // moving it back to detected) either commits before this lock, and the
+      // read below sees it, or waits for this transaction.
+      await c.query("select id from ops.incident where ref = $1 for update /* close-incident:evidence-lock */",
+        [String(args.ref || "").trim()]);
       const inc = await loadIncident(c, args.ref);
       const verdict = incidentEvidenceVerdict(await evidenceSnapshot(c, inc));
       if (!verdict.complete)
-        throw new ToolError({ error: "evidence_incomplete", ref: inc.ref, state: inc.state,
-          missing: verdict.missing,
-          hint: "the incident's own rows do not yet show it is safe to close. Supply what is missing " +
-                "(a confirmed hypothesis or linked defect for the cause; close-defect, a complete deployment " +
-                "or a merged PR for the remediation; a green run and an elapsed watch for the recovery), or " +
-                "close it on the partner route with a root_cause. Nothing was written." });
+        throw new ToolError({ error: verdict.human_review_reason ? "human_review_required" : "evidence_incomplete",
+          ref: inc.ref, state: inc.state, severity: inc.severity, missing: verdict.missing,
+          ...(verdict.human_review_reason ? { reason: verdict.human_review_reason } : {}),
+          hint: verdict.human_review_reason
+            ? "SEV-0, SEV-1 and security-class incidents are never closed on the evidence route: a partner " +
+              "closes them on the partner route, with a root_cause. Nothing was written."
+            : "the incident's own rows do not yet show it is safe to close. Supply what is missing (a linked " +
+              "defect closed with close-defect for the cause; a complete deployment, a merged PR or a defect " +
+              "close that is a different receipt from the recovery evidence for the remediation; a green run " +
+              "and an elapsed watch for the recovery), or close it on the partner route with a root_cause. " +
+              "Nothing was written." });
 
       // CLOSED AND ADJUDICATED IN ONE ACT. A partner close leaves 'review and
       // record a followup disposition' behind, which is a second human pile;
       // here the disposition is the remediation receipt itself, so it is written.
-      await c.query(
+      // The guard re-states what the verdict stood on, in the database's own
+      // terms: still monitoring with the window run out (or, for a duplicate,
+      // still in the state that was read). Zero rows means something moved the
+      // incident since the read, and nothing else is written.
+      const updated = await c.query(
         `update ops.incident
             set state = 'reviewed', resolved_at = now(), reviewed_at = now(),
                 monitoring_until = coalesce(monitoring_until, now()),
                 recovery_evidence_ref = $1, root_cause = $2, followup_disposition = $3,
                 next_action = 'none: closed and reviewed on complete evidence'
-          where ref = $4 and state not in ('resolved','reviewed')`,
-        [verdict.evidence_ref, verdict.root_cause, verdict.followup_disposition, inc.ref]);
+          where ref = $4 and ${verdict.duplicate
+            ? "state = $5 and duplicate_of_id is not null"
+            : "state = 'monitoring' and monitoring_until <= now()"}
+          returning id`,
+        [verdict.evidence_ref, verdict.root_cause, verdict.followup_disposition, inc.ref,
+         ...(verdict.duplicate ? [inc.state] : [])]);
+      if (!updated.rows.length) {
+        const current = (await c.query(
+          "select state, to_jsonb(monitoring_until)#>>'{}' as monitoring_until from ops.incident where ref = $1",
+          [inc.ref])).rows[0] || {};
+        throw new ToolError({ error: "incident_state_changed", ref: inc.ref, state: current.state ?? null,
+          monitoring_until: current.monitoring_until ?? null,
+          hint: `the incident is ${current.state || "gone"} now, not the monitoring state with an elapsed ` +
+                "window the evidence was read against (a recurrence moves it back to detected). Nothing was " +
+                "written; read get-incident and decide again." });
+      }
       const fact = `closed on complete evidence — cause: ${verdict.root_cause} — ${verdict.followup_disposition}`;
       await c.query(
         "insert into ops.incident_fact (incident_id, text, source_ref) values ($1,$2,$3)",
@@ -1142,10 +1213,13 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
         "get-incident first: the root cause is in the evidence trail. " +
         "OMIT root_cause TO CLOSE ON COMPLETE EVIDENCE (decision cbe91287): a deterministic check of the " +
         "incident's own rows decides, with no story from the caller — recovery evidence attached, " +
-        "monitoring window elapsed with no recurrence, the cause recorded (a confirmed hypothesis or a " +
-        "linked defect), and a remediation receipt (a linked defect's close-defect receipt, a linked " +
-        "complete deployment, or a merged pull request naming the incident); or a duplicate of an " +
-        "incident already closed. When it holds, the incident is closed AND adjudicated in one act: " +
+        "monitoring window elapsed with no recurrence, the cause recorded (a linked defect already " +
+        "closed with close-defect), and a remediation receipt that is a DIFFERENT receipt from the " +
+        "recovery evidence (a linked defect's close-defect receipt, a linked complete deployment, or a " +
+        "merged pull request naming the incident); or a duplicate of an incident already closed. " +
+        "SEV-0, SEV-1 and security-class incidents are refused on this route and keep the partner " +
+        "route. A recurrence between the read and the write refuses the close (incident_state_changed). " +
+        "When it holds, the incident is closed AND adjudicated in one act: " +
         "resolved, reviewed, root cause and followup disposition written from those rows. When it does " +
         "not, the call is refused naming what is missing and nothing is written; the partner route " +
         "above, with a root_cause, stays open for everything the check cannot settle.",

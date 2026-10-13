@@ -13,6 +13,14 @@
 // defect: the same evidence twice is the same act and returns the first
 // receipt; different evidence is refused rather than rewriting what the
 // defect was closed on.
+//
+// AND THE SERVER MUST ALREADY HOLD THE EVIDENCE. A close's receipt is bound
+// as Work Request and incident evidence, so a well-formed string is not enough:
+// ops.defect_resolution_evidence_receipt resolves it to a row (a commit or pull
+// request recorded as merged and shipped in ops.release_slice_member, a
+// succeeded run, a complete deployment, a resolved incident) or refuses. The
+// table's own insert trigger asks the same function, so this check is the
+// early, explained refusal and the trigger is the one that cannot be bypassed.
 
 import { ToolError as DefaultToolError } from "./tool-error.js";
 
@@ -24,6 +32,9 @@ export const RESOLUTION_EVIDENCE_KINDS = Object.freeze(["commit", "pull_request"
 const COMMIT = /^[0-9a-f]{7,40}$/;
 const PULL_REQUEST = /^[1-9][0-9]{0,6}$/;
 const RECEIPT = /^[a-z][a-z0-9_.-]{0,40}:[A-Za-z0-9][A-Za-z0-9:_./-]{0,250}$/;
+// ops.work_request_evidence_receipt_normalized's rule: a server receipt's uuid
+// is stored lowercase, so an uppercase uuid is the same receipt.
+const SERVER_RECEIPT = /^(ops\.run|ops\.deployment|defect-resolution):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** {evidence_kind, evidence_ref} normalized, or a ToolError naming what is wrong. */
 export function resolutionEvidence(args, ToolError = DefaultToolError) {
@@ -34,7 +45,7 @@ export function resolutionEvidence(args, ToolError = DefaultToolError) {
       hint: "a defect closes on the evidence of its fix: evidence_kind (commit, pull_request or receipt) " +
             "and evidence_ref (the commit sha, the pull request number, or a server receipt such as " +
             "ops.run:<uuid>). Nothing was written." });
-  if (kind === "commit") ref = ref.toLowerCase();
+  if (kind === "commit" || (kind === "receipt" && SERVER_RECEIPT.test(ref))) ref = ref.toLowerCase();
   if (kind === "pull_request") {
     const url = ref.match(/\/pull\/([0-9]+)\/?$/);
     ref = url ? url[1] : ref.replace(/^(?:#|pr[-:#]?\s*)/i, "");
@@ -53,8 +64,11 @@ export function defectResolutionTools({ withEnvelope, writeEvent, ToolError }) {
     "close-defect": {
       write: true,
       description:
-        "Close ONE defect on the evidence of its fix: the commit, the pull request, or a server receipt " +
-        "(ops.run:<uuid>, ops.deployment:<uuid>, incident:<ref>). Joe's 2026-10-12 ruling (decision " +
+        "Close ONE defect on evidence of its fix that the server already holds: a commit or pull request " +
+        "recorded as merged and shipped (a release slice member), or a server receipt " +
+        "(ops.run:<uuid> that succeeded, ops.deployment:<uuid> that completed, incident:<ref> that is resolved). " +
+        "A sha or PR number the server has no record of is refused, because the close's receipt is later bound " +
+        "as Work Request and incident evidence. Joe's 2026-10-12 ruling (decision " +
         "cbe91287) removed the human from closing records the system can close on evidence; until then " +
         "record-defect had no close at all. A CLOSE IS A RECEIPT, NOT A DELETE: the defect row never " +
         "changes and still counts toward its class in v_defect_class, because a defect must accumulate " +
@@ -82,6 +96,16 @@ export function defectResolutionTools({ withEnvelope, writeEvent, ToolError }) {
         if (!found.rows.length)
           throw new ToolError({ error: "no_such_defect", defect_id: defectId,
             hint: "no defect has this id; read v_defect for the open ones. Nothing was written." });
+
+        const resolved = (await c.query(
+          "select ops.defect_resolution_evidence_receipt($1::text, $2::text) as receipt /* close-defect:resolve-evidence */",
+          [evidence.evidence_kind, evidence.evidence_ref])).rows[0]?.receipt || null;
+        if (!resolved)
+          throw new ToolError({ error: "unresolved_resolution_evidence", ...evidence,
+            hint: "the server holds no record of this evidence: a commit or pull request must be recorded as " +
+                  "merged and shipped (record-release-slice-members), and a receipt must be a succeeded " +
+                  "ops.run:<uuid>, a complete ops.deployment:<uuid> or a resolved incident:<ref>. A bare sha " +
+                  "or PR number is not evidence. Nothing was written." });
 
         // Two racing closes meet at the one-per-defect constraint; the loser
         // reads the winner's receipt below instead of writing a second one.
@@ -112,13 +136,13 @@ export function defectResolutionTools({ withEnvelope, writeEvent, ToolError }) {
         const resolutionId = inserted.rows[0].id;
         await writeEvent(c, actor, "close-defect", "defect", defectId, {
           field: "resolution",
-          new: { resolution_id: resolutionId, ...evidence },
+          new: { resolution_id: resolutionId, ...evidence, resolved_to: resolved },
           agent_rationale: note,
           idempotency_key: args.idempotency_key,
         });
         return { ok: true, closed: true, already_closed: false, defect_id: defectId,
           defect_class: found.rows[0].defect_class, resolution_id: resolutionId,
-          receipt_ref: `defect-resolution:${resolutionId}`, ...evidence,
+          receipt_ref: `defect-resolution:${resolutionId}`, ...evidence, resolved_to: resolved,
           resolved_by: actor.slug, resolved_at: inserted.rows[0].created_at,
           note: "the defect still counts toward its class; the close is the receipt beside it" };
       }),

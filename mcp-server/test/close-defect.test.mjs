@@ -10,6 +10,11 @@
 //   2. A second close that quietly rewrites the first. The receipt is what a
 //      reader stands on; a later call with different evidence is refused, and
 //      the same evidence twice is the same act, not a second row.
+//   3. A close on evidence the server has never seen. The receipt is later
+//      bound as Work Request and incident evidence, so a well-formed sha or PR
+//      number is not enough: ops.defect_resolution_evidence_receipt must
+//      resolve it to a row (a merged and shipped release slice member, a
+//      succeeded run, a complete deployment, a resolved incident) first.
 //
 // Run with: node --test mcp-server/test/close-defect.test.mjs
 
@@ -21,6 +26,8 @@ import { PROFILES } from "../src/mcp.js";
 
 const DEFECT = "6b1d4c2e-0000-4000-8000-000000000001";
 const RESOLUTION = "7c2e5d3f-0000-4000-8000-000000000002";
+const MEMBER = "release-slice-member:8d3f6e40-0000-4000-8000-000000000003";
+const RESOLVES = { "ops.defect_resolution_evidence_receipt": [{ receipt: MEMBER }] };
 const joeLocal = { id: "10000000-0000-0000-0000-000000000007", slug: "joe-local",
   human: false, agent: true, via: "local-token", sponsoring_human_slug: "joe",
   native_agent_verified: true };
@@ -87,6 +94,48 @@ test("a malformed defect id is refused before the database is asked", async () =
   assert.ok(!fake.sql.some(([s]) => s.includes("public.defect")));
 });
 
+// ── 2. THE SERVER MUST HOLD THE EVIDENCE ────────────────────────────────────
+
+const unresolved = (extra = {}) => new Fake({
+  "from tool_call where idempotency_key": [],
+  "from public.defect where id": [{ id: DEFECT, defect_class: "x" }],
+  "ops.defect_resolution_evidence_receipt": [{ receipt: null }], ...extra });
+
+test("a bare commit sha the server holds no record of is refused, and nothing is written", async () => {
+  const fake = unresolved();
+  const payload = await refuse(() => close(fake, { evidence_kind: "commit", evidence_ref: "abcdef0" }));
+  assert.equal(payload.error, "unresolved_resolution_evidence");
+  assert.equal(payload.evidence_ref, "abcdef0");
+  const asked = fake.sql.find(([s]) => s.includes("ops.defect_resolution_evidence_receipt"));
+  assert.deepEqual(asked[1], ["commit", "abcdef0"], "the server resolves the evidence, not the caller");
+  assert.ok(!fake.sql.some(([s]) => s.includes("insert into public.defect_resolution")));
+  assert.ok(!fake.sql.some(([s]) => s.startsWith("insert into event")));
+});
+
+test("a pull request number nobody recorded as merged is refused", async () => {
+  const fake = unresolved();
+  const payload = await refuse(() => close(fake, { evidence_kind: "pull_request", evidence_ref: "#999999" }));
+  assert.equal(payload.error, "unresolved_resolution_evidence");
+  assert.match(payload.hint, /bare sha or PR number is not evidence/);
+  assert.ok(!fake.sql.some(([s]) => s.includes("insert into public.defect_resolution")));
+});
+
+test("a receipt the server resolves is accepted, and an uppercase uuid is the same receipt", async () => {
+  const run = "ops.run:8c9e3adf-a3d5-46e6-b134-eee5a60d1b80";
+  const fake = new Fake({
+    "from tool_call where idempotency_key": [],
+    "from public.defect where id": [{ id: DEFECT, defect_class: "x" }],
+    "ops.defect_resolution_evidence_receipt": (params) => [{ receipt: params[1] === run ? run : null }],
+    "insert into public.defect_resolution": [{ id: RESOLUTION, created_at: "2026-10-12T12:00:00.000Z" }],
+  });
+  const out = await close(fake, { evidence_kind: "receipt", evidence_ref: run.toUpperCase().replace("OPS.RUN", "ops.run") });
+  assert.equal(out.closed, true);
+  assert.equal(out.evidence_ref, run, "stored in the one spelling every matcher uses");
+  assert.equal(out.resolved_to, run);
+  const insert = fake.sql.find(([s]) => s.includes("insert into public.defect_resolution"));
+  assert.deepEqual(insert[1].slice(0, 3), [DEFECT, "receipt", run]);
+});
+
 test("a defect that does not exist is refused, and nothing is written", async () => {
   const fake = new Fake({ "from tool_call where idempotency_key": [] });
   const payload = await refuse(() => close(fake, { evidence_kind: "commit", evidence_ref: "abc1234" }));
@@ -94,12 +143,13 @@ test("a defect that does not exist is refused, and nothing is written", async ()
   assert.ok(!fake.sql.some(([s]) => s.includes("insert into public.defect_resolution")));
 });
 
-// ── 2. THE CLOSE ITSELF ─────────────────────────────────────────────────────
+// ── 3. THE CLOSE ITSELF ─────────────────────────────────────────────────────
 
 test("a close with evidence appends one resolution receipt and an event", async () => {
   const fake = new Fake({
     "from tool_call where idempotency_key": [],
     "from public.defect where id": [{ id: DEFECT, defect_class: "success-signal-from-the-wrong-function" }],
+    ...RESOLVES,
     "insert into public.defect_resolution": [{ id: RESOLUTION, created_at: "2026-10-12T12:00:00.000Z" }],
   });
   const out = await close(fake, { evidence_kind: "pull_request", evidence_ref: "#1711",
@@ -109,6 +159,7 @@ test("a close with evidence appends one resolution receipt and an event", async 
   assert.equal(out.receipt_ref, `defect-resolution:${RESOLUTION}`,
     "the receipt must be addressable, because incidents and Work Requests bind to it");
   assert.equal(out.evidence_ref, "1711");
+  assert.equal(out.resolved_to, MEMBER, "the close names the server row it stands on");
   const insert = fake.sql.find(([s]) => s.includes("insert into public.defect_resolution"));
   assert.ok(insert[0].includes("on conflict (defect_id) do nothing"),
     "two racing closes must meet at the constraint, not both write");
@@ -123,6 +174,7 @@ test("closing an already-closed defect with the same evidence returns the first 
   const fake = new Fake({
     "from tool_call where idempotency_key": [],
     "from public.defect where id": [{ id: DEFECT, defect_class: "x" }],
+    ...RESOLVES,
     "insert into public.defect_resolution": [],
     "from public.defect_resolution r": [{ id: RESOLUTION, evidence_kind: "commit",
       evidence_ref: "abc1234", created_at: "2026-10-11T00:00:00.000Z", resolved_by: "codex" }],
@@ -138,6 +190,7 @@ test("closing an already-closed defect with different evidence is refused, namin
   const fake = new Fake({
     "from tool_call where idempotency_key": [],
     "from public.defect where id": [{ id: DEFECT, defect_class: "x" }],
+    ...RESOLVES,
     "insert into public.defect_resolution": [],
     "from public.defect_resolution r": [{ id: RESOLUTION, evidence_kind: "commit",
       evidence_ref: "abc1234", created_at: "2026-10-11T00:00:00.000Z", resolved_by: "codex" }],
@@ -148,7 +201,7 @@ test("closing an already-closed defect with different evidence is refused, namin
   assert.equal(payload.existing.receipt_ref, `defect-resolution:${RESOLUTION}`);
 });
 
-// ── 3. THE REGISTRY ENTRY ───────────────────────────────────────────────────
+// ── 4. THE REGISTRY ENTRY ───────────────────────────────────────────────────
 
 test("close-defect is a keyed write that any session holding the full surface may call", () => {
   const tool = TOOLS["close-defect"];

@@ -307,6 +307,11 @@ export const PROFILES = {
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
     "record-signal", "record-branch-evidence",
     "report-problem",
+    // propose-outcome-feedback proposes and completes nothing (0872). Its
+    // completion door, bind-work-request-criterion-evidence, is deliberately
+    // absent from this and every unattended profile: completing a Work Request
+    // on bound evidence replaces a human, so it stays with a partner's session
+    // or a sponsored agent on the full surface.
     "propose-outcome-feedback",
     // record-defect (0103) belongs in the NARROWEST writing profile, not the widest.
     // An unattended run is exactly where an error is least likely to be caught by a
