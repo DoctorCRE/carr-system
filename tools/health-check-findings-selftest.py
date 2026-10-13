@@ -847,6 +847,19 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         self.assertEqual([(f["key"], f["hard_error"]) for f in ns["_FINDINGS"]],
                          [("verb_usage", True)])
 
+    def test_a_verb_usage_line_not_yet_deployed_is_a_soft_finding(self):
+        import contextlib, io
+        ns = self.all_namespace()
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
+                "verb_usage": None, "verb_usage_absent": True}
+        ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 1)
+        self.assertIn("verb usage NOT DEPLOYED", out.getvalue())
+        self.assertEqual([(f["key"], f["hard_error"]) for f in ns["_FINDINGS"]],
+                         [("verb_usage", False)])
+
     def test_builds_health_records_failure_and_prints_marker_last(self):
         import contextlib, io
         for line, expected in (("OK build duration", 0), ("WARN build duration", 1),
