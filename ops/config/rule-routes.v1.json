@@ -1161,24 +1161,6 @@
     }
    ]
   },
-  "5697071b": {
-   "moment": "an Alabama lead or deal arriving",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "new-client",
-      "new-deal",
-      "new-lead",
-      "prepare-document",
-      "set-market-agent",
-      "update-deal"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
   "57d13061": {
    "moment": "any X/x.com retrieval",
    "routes": [
@@ -2276,29 +2258,6 @@
     }
    ],
    "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
-  },
-  "9b081605": {
-   "moment": "no_send_worker check (outbound send)",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "mcp-server/src/mcp.js"
-    },
-    {
-     "kind": "trigger",
-     "tools": [
-      "mcp__*__create_draft",
-      "mcp__*__forward",
-      "mcp__*__reply",
-      "mcp__*__send_message",
-      "mcp__*__update_draft"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bgmail-handover\\b"
-     ]
-    }
-   ]
   },
   "9d80fd2d": {
    "moment": "planning prospect outreach cadence",
@@ -3704,6 +3663,264 @@
    "routes": [
     {
      "kind": "boot"
+    }
+   ]
+  },
+  "661d7757": {
+   "moment": "seeking an independent review judgment (Jev) on code, CI, a PR, product or a record",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "ask-jev",
+      "review-engineering-slice",
+      "review-heavy-build-plan"
+     ],
+     "bash_patterns": [
+      "\\bgh\\s+pr\\s+review\\b"
+     ]
+    }
+   ]
+  },
+  "f673326b": {
+   "moment": "granting or briefing an agent's access to CARR knowledge, records or tools",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [
+      "assign-execution-route",
+      "issue-execution-envelope"
+     ],
+     "bash_patterns": [
+      "\\bdispatch\\.py\\s+send\\b"
+     ]
+    }
+   ]
+  },
+  "a3da3d39": {
+   "moment": "leaving a rule, decision or retirement waiting on Joe's approval",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "AskUserQuestion"
+     ],
+     "verbs": [
+      "teach",
+      "amend-rule",
+      "retire-rule",
+      "log-decision",
+      "admit-rule"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "76fcbed6": {
+   "moment": "Joe sends a link, article, repo, video or other source",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation"
+     ],
+     "bash_patterns": [
+      "\\bcurl\\b",
+      "\\bwget\\b",
+      "\\byt-dlp\\b",
+      "\\bpdftotext\\b"
+     ]
+    }
+   ]
+  },
+  "08c4eda2": {
+   "moment": "assigning, working or representing an Alabama lead or deal",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "new-client",
+      "new-deal",
+      "new-lead",
+      "prepare-document",
+      "set-market-agent",
+      "update-deal",
+      "claim-lead",
+      "record-representation-agreement",
+      "record-loi-submission"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "4a77c35d": {
+   "moment": "filling or ordering the Dot's work queue",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bdot-relay\\b"
+     ]
+    }
+   ]
+  },
+  "67e48aaf": {
+   "moment": "Joe pastes a token or credential into chat or a screenshot",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bwrangler\\s+secret\\b",
+      "\\bgh\\s+auth\\b",
+      "\\bexport\\s+\\w*(?:TOKEN|KEY|SECRET|PASSWORD)\\w*=",
+      "\\bpbpaste\\b"
+     ]
+    }
+   ]
+  },
+  "a9fc3f0e": {
+   "moment": "running research or a fact-check",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch"
+     ],
+     "verbs": [
+      "list-research-sites",
+      "add-research-site",
+      "remove-research-site"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "ac0a6579": {
+   "moment": "building or reviewing access for a client share-site page",
+   "routes": [
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*share*"
+     ]
+    }
+   ]
+  },
+  "578fdd91": {
+   "moment": "contact enrichment finds a wrong or blank field",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "correct-party-identity",
+      "update-party-contact",
+      "update-vendor",
+      "record-finding"
+     ],
+     "bash_patterns": [
+      "\\bnppes\\b",
+      "\\benrich"
+     ]
+    }
+   ]
+  },
+  "486584d6": {
+   "moment": "work needs a web console Joe is signed into on the MacBook",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__navigate",
+      "mcp__*__get_page_text"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bpbpaste\\b",
+      "\\bwrangler\\s+login\\b"
+     ]
+    }
+   ]
+  },
+  "07dde434": {
+   "moment": "designing or reviewing anything a prospect or client will use",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "create-tour-public-projection-draft",
+      "issue-tour-share-grant",
+      "seal-tour-public-projection"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "read_only": true,
+     "path_globs": [
+      "*dealroom/*",
+      "*workspace/public/*",
+      "*control-room/public/*",
+      "*design/*",
+      "*.html",
+      "*share*"
+     ]
+    }
+   ]
+  },
+  "cfe6b5c6": {
+   "moment": "designing or reviewing a mechanism that defaults to shadow, dry-run or record-only",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "propose-ready-plan",
+      "review-heavy-build-plan"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*hooks/*.py",
+      "*ops/launchd/*",
+      "*ops/config/*.json"
+     ]
+    }
+   ]
+  },
+  "c363bd8b": {
+   "moment": "preparing to merge open PRs",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "confirm-merge"
+     ],
+     "bash_patterns": [
+      "\\bgh\\s+pr\\s+merge\\b"
+     ]
     }
    ]
   }

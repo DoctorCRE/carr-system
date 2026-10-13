@@ -1,8 +1,8 @@
 {
  "counts": {
   "residual": 3,
-  "rules": 107,
-  "triggered": 104
+  "rules": 104,
+  "triggered": 101
  },
  "generated_note": "Written only by ops/rule-trigger-compile.py: one Jev request per pack-layer rule, keyed to the rule's statement digest. ops/rule-jit-compile.py turns these into rows of ops/config/rule-jit-triggers.v1.json. Never hand-edit.",
  "proposals": {},
@@ -962,33 +962,6 @@
     "verbs": {}
    }
   },
-  "5697071b": {
-   "always_on_probability": 0.1,
-   "id": "5697071b",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "vendor party": 0.66
-   },
-   "no_cue_probability": 0.19,
-   "packs": [
-    "client-deal"
-   ],
-   "statement_sha256": "9618ee17dec36a05f8c23871d7c8f66b70e09b61f073ce2db9c7019a2c303d6c",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "alabama exam": 0.52,
-     "dell's": 0.51,
-     "licensed party": 0.58,
-     "licensure grounds": 0.6,
-     "may joe advertise into alabama": 0.55
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
   "57d13061": {
    "always_on_probability": 0.07,
    "id": "57d13061",
@@ -1643,38 +1616,6 @@
      "caveat": 0.51,
      "confirm this pairing logic": 0.74,
      "suggest caveat": 0.7
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "8400cd3d": {
-   "always_on_probability": 0.13,
-   "id": "8400cd3d",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "visible step": 0.6
-   },
-   "no_cue_probability": 0.12,
-   "packs": [
-    "governance-rules"
-   ],
-   "statement_sha256": "8ae8c4068f67b109d5dba3fb8d8d2026afd863603bab0d0de9ac4ac2df4ef017",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "grill-with-docs": 0.73,
-     "grill-with-docs work": 0.61,
-     "medium-to-large": 0.54,
-     "medium-to-large work": 0.54,
-     "moves wayfinder": 0.63,
-     "opens grill-with-docs": 0.71,
-     "outgrows": 0.55,
-     "sizing": 0.59,
-     "sizing step": 0.69,
-     "starts sizing": 0.67
     },
     "paths": {},
     "tools": {},
@@ -2866,34 +2807,6 @@
      "verticals": 0.57,
      "veterinary-only": 0.67,
      "whitelisting": 0.71
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "ede4b241": {
-   "always_on_probability": 0.05,
-   "id": "ede4b241",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "staffing model": 0.72
-   },
-   "no_cue_probability": 0.19,
-   "packs": [
-    "delegation-council"
-   ],
-   "statement_sha256": "1d64a4910ca6904e925ac5944bbb71ed11e79bb4a0e3c7151e89b7b2dee2af6d",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "batches": 0.5,
-     "cloud model": 0.52,
-     "cloud pick": 0.54,
-     "model choice": 0.54,
-     "pick model": 0.55,
-     "work's shape": 0.56
     },
     "paths": {},
     "tools": {},

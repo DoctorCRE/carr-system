@@ -2,7 +2,7 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:fc1a607ccf61fba3a1e6ffc1c3da1264aa0313f7b2839d4d2b5a256983d474d8",
+    "configuration_fingerprint": "sha256:de71f8deee7e8681fedb2b903c6811bb7a2ef7c14332749e5efaafac7f54cd75",
     "harness_id": "evals/rule-delivery/run_eval.py",
     "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
     "model_id": "deterministic-no-model",
@@ -83,15 +83,15 @@
         "score": 0.39375
       },
       "candidate": {
-        "ci_high": 0.4970414201183432,
-        "ci_low": 0.2810810810810811,
-        "score": 0.39375
+        "ci_high": 0.49295774647887325,
+        "ci_low": 0.273224043715847,
+        "score": 0.3875
       },
       "critical": true,
       "delta": {
         "ci_high": 0.0,
-        "ci_low": 0.0,
-        "value": 0.0
+        "ci_low": -0.021897810218978075,
+        "value": -0.006249999999999978
       },
       "dimension_id": "human-required-recall",
       "direction_vs_baseline": "equivalent",
@@ -108,15 +108,15 @@
         "score": 0.260989010989011
       },
       "candidate": {
-        "ci_high": 0.34080717488789236,
-        "ci_low": 0.21467391304347827,
-        "score": 0.2768817204301075
+        "ci_high": 0.3552941176470588,
+        "ci_low": 0.22739018087855298,
+        "score": 0.29023746701846964
       },
       "critical": true,
       "delta": {
-        "ci_high": 0.02344319533438205,
-        "ci_low": 0.007773335871565451,
-        "value": 0.015892709441096498
+        "ci_high": 0.040687812245846444,
+        "ci_low": 0.015807962529273994,
+        "value": 0.029248456029458636
       },
       "dimension_id": "human-delivery-precision",
       "direction_vs_baseline": "improved",
@@ -165,7 +165,7 @@
       },
       "candidate": {
         "path": "evals/rule-delivery/evidence/candidate.jsonl",
-        "sha256": "4f2e87b3da6d2fc43d15c850e9733417958499f6e8fa760be56504e0a27116f8"
+        "sha256": "8a0e34f9315e0e1a0dde202b44697573bdeb0ce50ba4eed9484b69b9c866f448"
       }
     },
     "dependencies": {
@@ -177,15 +177,15 @@
       "lib/rule_routes.py": "0e9a3db2afe77ca8c5de1279cf2934fd4de51c01dc841a830e3ab7a8d382d924",
       "mcp-server/src/jev-request-contract.v1.json": "0687a4cda641c5f08bb856de5b9f234f7e8a097e21e92762b5ed3f582ddca185",
       "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
-      "ops/config/rule-classes.v1.json": "65562d20e111656855175e9ee6fb6401e74f5b030aefc11a1e64c38abcf341a9",
-      "ops/config/rule-enforcement-map.json": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
-      "ops/config/rule-jev-triggers.v1.json": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
-      "ops/config/rule-jit-triggers.v1.json": "e1dc7cf4b5f48008d43c3ced64b9746f76a31fe2ce69048dbdf2f2da1d6c448a",
-      "ops/config/rule-routes.v1.json": "a7d07fd53511114bb4b380074f27628ff945f133be01ead9b46c7ad2f1baac75",
-      "ops/config/rule-selection-corpus.v1.json": "9d9aa0d84329fa29790ee36825caf22924b33717ee152f15c02e81d6872a7454",
+      "ops/config/rule-classes.v1.json": "fec56bcff6575c469466c4758b42b8cbf42d7de2daf0de75dc131ded1950401a",
+      "ops/config/rule-enforcement-map.json": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
+      "ops/config/rule-jev-triggers.v1.json": "facb30252ec1790d45bffc25dbfae62d95122b34a87718a21bd671497f04b631",
+      "ops/config/rule-jit-triggers.v1.json": "3766e39e276066c9cbb56dbbb43965247ae660cd6dc43e0923b1a6435cd1e350",
+      "ops/config/rule-routes.v1.json": "936a564d1c490620debc1b3dffb5bd1005a7bb0a5ef8f3f2d17695f5dea02e02",
+      "ops/config/rule-selection-corpus.v1.json": "22949b641b0e44a2ce99e95fb63a9a763c5376acade2b1f91e45de4e347b4ed4",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
       "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
-      "ops/fixtures/rule-delivery-eval/cases.v2.json": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
+      "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
       "ops/machine_envelope.py": "749970f4dfb838af4e6cd1e6537988a278fc0006a02b32f665dfd0f943266c3f",
       "ops/rule_delivery_eval.py": "10723a68d807fc54538c5e25cd6eb92f8006abeb0e8741e4249fce26768660f0",
       "ops/rule_trigger_compile.py": "26e0595e793aaba54df070f206edfa9d72f33d861f77741e0f3947bf7dbccdce",

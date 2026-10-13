@@ -46,6 +46,9 @@ HELD_CONTROL_REPIN = REPO / "migrations" / "0875_repin_rule_delivery_activation_
 BURST_CONTROL_REPIN = (
     REPO / "migrations" / "0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql"
 )
+REGISTRY_INVENTORY_REPIN = (
+    REPO / "migrations" / "0880_repin_rule_delivery_activation_after_registry_inventory_refresh.sql"
+)
 PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
 CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
 # The chain has a fourth link as of 2026-09-01. Reinstating canonical_edit into
@@ -86,6 +89,9 @@ POST_0871_ACTIVATION_DIGEST = "dc78a38699e5fb0178761cc479268c30ed84a382036fcca57
 POST_0875_ACTIVATION_DIGEST = "7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f"
 # Registering the github-burst-guard control moved the map again; 0878
 # carries the guarded forward repin from the post-0875 digest.
+POST_0878_ACTIVATION_DIGEST = "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6"
+# Fourteen approved rules entering the map and four leaving it moved it again;
+# 0880 carries the guarded forward repin from the post-0878 digest.
 ACTIVATION_TO_TEST_REF = (
     "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; "
     "ops/rule-pack-preuse-reselection-selftest.py"
@@ -554,9 +560,19 @@ def main() -> int:
             """select count(*), count(*) filter (where map_digest=%s),
                       array_agg(short_id order by short_id)
                  from ops.rule_delivery_activation_target""",
+            (POST_0878_ACTIVATION_DIGEST,),
+        )
+        check("github-burst-guard control repins the exact targets to the post-0878 reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
+        # Replay the registry inventory repin (0880) from that exact preimage.
+        cur.execute(REGISTRY_INVENTORY_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
             (current_map_digest,),
         )
-        check("github-burst-guard control repins the exact targets to the current reviewed map",
+        check("registry inventory refresh repins the exact targets to the current reviewed map",
               one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
         cur.execute("""insert into actor (slug,kind,display_name) values ('joe','human','Joe')
                        on conflict (slug) do nothing returning id""")

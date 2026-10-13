@@ -949,28 +949,19 @@ check("process() returns None (no injection, no selector call) for a non-match",
 
 # Verb match injects: the Agent tool exactly matches the council trigger.
 agent_call = gen_payload(tool="Agent", tool_input={"description": "spawn helper", "prompt": "zzz"})
-# Rule ede4b241 (cloud model choice) adds a second verb trigger on the same
-# dispatch moment, so an Agent call hits the council trigger AND the model-choice
-# trigger; the council trigger alone still carries its own five rules. The
-# rule is still proposed and out of the map's active inventory (2026-10-13,
-# loop 1304), so its trigger carries no pack until approval restores
-# delegation-council.
-model_choice_row = next(row for row in TRIGGER_ROWS.values()
-                        if row["kind"] == "verb" and "ede4b241" in row["rule_ids"])
-check("model-choice trigger delivers only rule ede4b241, with no pack while proposed",
-      model_choice_row["rule_ids"] == ["ede4b241"]
-      and model_choice_row["packs"] == [])
-sizing_tool_row = next((row for row in TRIGGER_ROWS.values()
-                       if row["kind"] == "verb" and "8400cd3d" in row["rule_ids"]
-                       and re.search(row["pattern"], "Agent")), None)
-check("an Agent call has a compiled sizing verb trigger", sizing_tool_row is not None)
-if sizing_tool_row is None:
-    sizing_tool_row = council_row
-check("matched_triggers finds the council, model-choice and sizing verb triggers for an Agent call",
-      sorted(r["trigger_id"] for r in rail.matched_triggers(agent_call))
-      == sorted([council_row["trigger_id"], model_choice_row["trigger_id"],
-                 sizing_tool_row["trigger_id"]]))
-agent_rows = [council_row, model_choice_row, sizing_tool_row]
+# Rules ede4b241 (cloud model choice) and 8400cd3d (new-work sizing) are
+# still PROPOSED, and a proposed rule binds nobody (rule a3da3d39). Since
+# 2026-10-13 (loop 1304) they are in neither the map nor rule-triage.v1.json,
+# so the compiled table carries no trigger for either and an Agent call hits
+# the council trigger alone. Their detector patterns stay tested in
+# ops/rule-jit-compile-selftest.py; on approval their triage rows return and
+# these checks flip back.
+PROPOSED_IDS = {"ede4b241", "8400cd3d"}
+check("the compiled table delivers neither proposed rule (ede4b241, 8400cd3d)",
+      not any(PROPOSED_IDS & set(row["rule_ids"]) for row in TRIGGER_ROWS.values()))
+check("matched_triggers finds exactly the council verb trigger for an Agent call",
+      [r["trigger_id"] for r in rail.matched_triggers(agent_call)] == [council_row["trigger_id"]])
+agent_rows = [council_row]
 agent_packs = sorted({p for r in agent_rows for p in r["packs"]})
 agent_ids = sorted({i for r in agent_rows for i in r["rule_ids"]})
 agent_trigger_ids = sorted(r["trigger_id"] for r in agent_rows)
@@ -992,8 +983,8 @@ check("generalized receipt binds exactly the matched triggers, packs, and rule_i
       and agent_row["packs"] == agent_packs
       and agent_row["rule_ids"] == agent_ids)
 # The cap lives per trigger in the compiler (lib/rule_delivery_preuse.py,
-# merge_trigger_delivery): an Agent call hits two triggers, so the merged set
-# may exceed one trigger's cap, and each matched trigger must stay inside it.
+# merge_trigger_delivery): each matched trigger must stay inside it. The
+# multi-trigger union is exercised by the git push case below.
 check("over-delivery stays inside the compiler's per-trigger cap",
       all(len(r["rule_ids"]) <= MAX_PER_TRIGGER for r in agent_rows)
       and set(agent_row["rule_ids"]) == set(agent_ids))
@@ -1010,65 +1001,26 @@ write_output = rail.process(
 write_row = json.loads(context(write_output))
 check("path_pattern match delivers exactly the structural extra rule",
       write_row["rule_ids"] == path_row["rule_ids"] and write_row["packs"] == path_row["packs"])
-# Cloud model choice fires on a cloud-session dispatch and stays silent on
-# routine reads, including the read-only calls of the same remote server.
-for dispatch_tool in ("mcp__Claude_Code_Remote__create_session",
-                      "mcp__Claude_Code_Remote__create_trigger"):
-    dispatch_call = gen_payload(tool=dispatch_tool, tool_input={"prompt": "fix the bug", "model": "sonnet"})
-    check(f"{dispatch_tool} hits the model-choice trigger",
-          model_choice_row["trigger_id"]
-          in [r["trigger_id"] for r in rail.matched_triggers(dispatch_call)])
-# A cloud-session dispatch also starts new work, so the sizing trigger joins it.
-model_rows = [model_choice_row, sizing_tool_row]
-model_runner = Runner(gen_selector_result(
-    packs=sorted({p for r in model_rows for p in r["packs"]}),
-    ids=sorted({i for r in model_rows for i in r["rule_ids"]})))
-model_output = rail.process(
-    gen_payload(tool="mcp__Claude_Code_Remote__create_session",
-                tool_input={"prompt": "fix the bug", "model": "sonnet"}), runner=model_runner)
-model_receipt = json.loads(context(model_output))
-check("a cloud-session dispatch delivers rules ede4b241 and 8400cd3d in one selector call",
-      len(model_runner.calls) == 1 and model_receipt["rule_ids"] == ["8400cd3d", "ede4b241"]
-      and model_receipt["trigger_ids"] == sorted(r["trigger_id"] for r in model_rows),
-      model_receipt)
-for routine_tool, routine_input in (
-        ("Read", {"file_path": "README.md"}), ("Grep", {"pattern": "model"}),
-        ("Glob", {"pattern": "*.py"}), ("Bash", {"command": "git status"}),
-        ("mcp__Claude_Code_Remote__list_sessions", {}),
-        ("mcp__Claude_Code_Remote__get_session", {"session_id": "x"}),
-        ("mcp__Claude_Code_Remote__list_repos", {})):
-    routine_hits = [r["trigger_id"] for r in
-                    rail.matched_triggers(gen_payload(tool=routine_tool, tool_input=routine_input))]
-    check(f"{routine_tool} stays silent for the model-choice trigger",
-          model_choice_row["trigger_id"] not in routine_hits, routine_hits)
-# Rule 8400cd3d (size new work first) reaches every shape that starts or hands
-# off new work through the compiled table alone, independent of the route file.
-for sizing_tool, sizing_input in (
+# While ede4b241 and 8400cd3d are proposed, no dispatch, planning or intake
+# shape delivers either through the compiled table (see above).
+for proposed_tool, proposed_input in (
+        ("mcp__Claude_Code_Remote__create_session", {"prompt": "fix the bug", "model": "sonnet"}),
+        ("mcp__Claude_Code_Remote__create_trigger", {"prompt": "fix the bug", "model": "sonnet"}),
         ("EnterPlanMode", {}),
         ("Agent", {"description": "build the importer",
                    "prompt": "Implement the CSV importer and open a PR."}),
         ("RemoteTrigger", {"action": "create", "name": "builder",
                            "prompt": "BUILDER job: add the export verb."}),
         ("Workflow", {"script": "export const meta = {name: 'review'}"}),
-        ("mcp__Claude_Code_Remote__create_session", {"prompt": "BUILDER job: fix the gate."}),
         ("Bash", {"command": 'python3 tools/room-bridge/dispatch.py send codex-desk '
                              '--writes ops/x.py "fix the review"'}),
         ("mcp__carr__write-work-shape", {"title": "new capability"}),
         ("mcp__carr__report-problem", {"summary": "the export is missing"}),
         ("mcp__CARR_Record_Layer__propose-ready-plan", {"scope_summary": "new capability"})):
-    sizing_hits = sorted({rid for row in rail.matched_triggers(
-        gen_payload(tool=sizing_tool, tool_input=sizing_input)) for rid in row["rule_ids"]})
-    check(f"{sizing_tool} starts new work and delivers the sizing rule",
-          "8400cd3d" in sizing_hits, sizing_hits)
-for routine_tool, routine_input in (
-        ("Bash", {"command": "git status"}),
-        ("Read", {"file_path": "tools/room-bridge/dispatch.py"}),
-        ("Bash", {"command": "python3 tools/room-bridge/dispatch.py desks"}),
-        ("mcp__carr__read-work-shape", {"id": "x"})):
-    sizing_hits = sorted({rid for row in rail.matched_triggers(
-        gen_payload(tool=routine_tool, tool_input=routine_input)) for rid in row["rule_ids"]})
-    check(f"{routine_tool} routine work does not deliver the sizing rule",
-          "8400cd3d" not in sizing_hits, sizing_hits)
+    proposed_hits = sorted({rid for row in rail.matched_triggers(
+        gen_payload(tool=proposed_tool, tool_input=proposed_input)) for rid in row["rule_ids"]})
+    check(f"{proposed_tool} delivers no proposed rule through the compiled table",
+          not PROPOSED_IDS & set(proposed_hits), proposed_hits)
 
 silent_runner = Runner()
 check("a routine Read delivers nothing and makes no selector call",

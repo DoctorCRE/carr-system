@@ -153,23 +153,44 @@ check("structural_extra count matches the hand-reviewed list",
       sum(1 for t in bare_doc["triggers"] if t["source"] == "structural_extra")
       == len(compiler.STRUCTURAL_EXTRA_TRIGGERS))
 
-# 9. rule ede4b241 (cloud model choice, taught 2026-09-29): JIT-home, fired
-# on the moment a session dispatches work to another model or a cloud session,
-# and on nothing else. It is still PROPOSED, so since 2026-10-13 (loop 1304)
-# it is out of the enforcement map's active inventory and its seeded trigger
-# carries no pack. When Joe approves it, it re-enters the map with pack
-# delegation-council and these two checks flip back.
+# 9. rule ede4b241 (cloud model choice, taught 2026-09-29) fires on the
+# moment a session dispatches work to another model or a cloud session, and on
+# nothing else. It is still PROPOSED, and a proposed rule binds nobody (rule
+# a3da3d39), so since 2026-10-13 (loop 1304) it is in neither the active map
+# nor rule-triage.v1.json (whose rows must match the map id for id) and the
+# committed table delivers nothing for it. Its reviewed detectors are kept
+# here, verbatim from the triage rows they left, so the patterns stay tested;
+# when Joe approves the rules, the rows return to triage with their packs and
+# the "delivers nothing" checks flip back.
 import re
 
+PROPOSED_ROWS = [
+    {"id": "ede4b241", "home": "jit",
+     "detector": {"kind": "verb",
+                  "pattern": "^(?:Agent|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$"}},
+    {"id": "8400cd3d", "home": "jit",
+     "detectors": [
+         {"kind": "verb",
+          "pattern": "^(?:EnterPlanMode|Agent|RemoteTrigger|Workflow|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$"},
+         {"kind": "verb", "pattern": "__(?:write-work-shape|report-problem|propose-ready-plan)$"},
+         {"kind": "bash_family", "pattern": "\\bdispatch\\.py\\s+send\\b"}]},
+]
+proposed_triggers = compiler.compile_triggers({"rules": PROPOSED_ROWS}, MAP, None)
+
+
+def proposed_and_undelivered(rid: str) -> bool:
+    return (rid not in MAP["rule_controls"]
+            and rid not in MAP["rule_load_layers"]
+            and not any(rid in ids for ids in MAP["active_rule_ids"].values())
+            and rid not in {r["id"] for r in TRIAGE["rules"]}
+            and not any(rid in t["rule_ids"] for t in triggers))
+
+
 MODEL_CHOICE = "ede4b241"
-routing_rows = [t for t in triggers if MODEL_CHOICE in t["rule_ids"]
+routing_rows = [t for t in proposed_triggers if MODEL_CHOICE in t["rule_ids"]
                 and t["kind"] == "verb"]
-check("proposed cloud model choice rule ede4b241 is not in the active enforcement map",
-      MODEL_CHOICE not in MAP["rule_controls"]
-      and MODEL_CHOICE not in MAP["rule_load_layers"]
-      and not any(MODEL_CHOICE in ids for ids in MAP["active_rule_ids"].values()))
-check("cloud model choice rule stays a JIT-home rule",
-      MODEL_CHOICE in JIT_IDS)
+check("proposed cloud model choice rule ede4b241 is in neither the map nor triage, and delivers nothing",
+      proposed_and_undelivered(MODEL_CHOICE))
 check("cloud model choice rule has exactly one verb trigger, seeded from its detector",
       len(routing_rows) == 1 and routing_rows[0]["kind"] == "verb"
       and routing_rows[0]["source"] == "seeded_detector"
@@ -196,19 +217,14 @@ if len(routing_rows) == 1:
 # starts or hands off new work: the plan tool, a subagent, a cloud builder, a
 # workflow, a Codex desk dispatch, and the record-layer intake verbs. Only
 # structural kinds count, because content_regex rows no longer run on tool
-# payloads. Like ede4b241 it is still PROPOSED, so since 2026-10-13 (loop
-# 1304) it is out of the map's active inventory; on approval it returns with
-# pack governance-rules and the first check flips back.
+# payloads. Like ede4b241 it is still PROPOSED (see 9): its detectors are
+# tested from PROPOSED_ROWS, and the committed table delivers nothing for it.
 SIZING = "8400cd3d"
-sizing_rows = [t for t in triggers if SIZING in t["rule_ids"]]
+sizing_rows = [t for t in proposed_triggers if SIZING in t["rule_ids"]]
 sizing_planning_rows = [row for row in sizing_rows
                         if row["source"] == "seeded_detector"]
-check("proposed new-work sizing rule is JIT-home but not in the active enforcement map",
-      SIZING not in MAP["rule_controls"]
-      and SIZING not in MAP["rule_load_layers"]
-      and not any(SIZING in ids for ids in MAP["active_rule_ids"].values())
-      and SIZING in JIT_IDS,
-      sizing_rows)
+check("proposed new-work sizing rule is in neither the map nor triage, and delivers nothing",
+      proposed_and_undelivered(SIZING), sizing_rows)
 check("new-work sizing rule compiles one row per declared detector, none content_regex",
       sorted(row["kind"] for row in sizing_planning_rows)
       == ["bash_family", "verb", "verb"], sizing_rows)
