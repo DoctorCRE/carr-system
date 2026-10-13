@@ -69,7 +69,6 @@
   "surface_contracts": {
     "claude": {
       "events": [
-        "PostToolUse",
         "PreCompact",
         "Stop"
       ],
@@ -81,7 +80,6 @@
         "controller_callback_id"
       ],
       "advisory_events": [
-        "PostToolUse",
         "Stop"
       ],
       "receipt_only_event": "PreCompact",

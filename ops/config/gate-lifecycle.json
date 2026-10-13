@@ -231,7 +231,7 @@
           "field": "caught"
         },
         "rule_description": "a timestamped context-handoff-gate row whose signal crossed the configured surface policy; Claude lifecycle outcomes are advisory and never refuse Stop solely for context.",
-        "note": "Claude PostToolUse and Stop announce; PreCompact records without blocking. Explicit CLI handoff commands retain their own refusal semantics."
+        "note": "Claude Stop announces; PreCompact records without blocking. The PostToolUse wiring was retired 2026-10-12 (2,848 fires, 0 catches in 7 days; its only effects were activity counters and a once-per-task notice the Stop leg also gives). Explicit CLI handoff commands retain their own refusal semantics."
       },
       "review_date": "2026-11-24",
       "mode": "announce"
