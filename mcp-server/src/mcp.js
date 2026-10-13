@@ -14,7 +14,7 @@
 import { neon, Pool } from "@neondatabase/serverless";
 import { mcpOriginRefusal } from "./oauth-policy.js";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.js";
-import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput,
+import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
   pgConstraintError, describeConstraint } from "./tools.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
@@ -497,6 +497,30 @@ export const PROFILES = {
     "project-room-queue", "record-dispatch-link",
   ]),
 
+  // UNATTENDED (PR #1727 review, finding 2; rule b42e217e: unattended runs get
+  // a narrow profile). The profile of the UNATTENDED_TOKENS runner, forced in
+  // profileForActor on that door like probe/reviewer/hermes, so ?profile= can
+  // neither widen it to `full` nor change it. Written out rather than spread
+  // from capture, for hermes's reason: a verb added to capture must not land in
+  // a runner with partner authority without somebody editing this list.
+  //
+  // capture's additive set, plus close-loop (Joe's ruling names loop closes),
+  // plus the two V5-A05 cadence doors so the daily sweep can run here as the
+  // system seat (delivery-cadence-a05-tools.js), plus exactly the
+  // partner-authority acts tools.js's UNATTENDED_AUTHORITY_VERBS admits. The
+  // authority half is that same exported list, so the profile and the
+  // executeRegisteredTool gate cannot disagree. Nothing here merges, re-points
+  // ownership, creates a party, touches a rule or schedule, or sends.
+  unattended: new Set([
+    "log-activity", "stamp-touch", "add-loop", "update-loop",
+    "set-next-action", "complete-action", "add-critical-date", "record-finding",
+    "record-signal", "record-branch-evidence", "report-problem", "record-defect",
+    "open-incident", "triage-incident",
+    "close-loop",
+    "record-cadence-receipt", "raise-delivery-cadence-alert",
+    ...UNATTENDED_AUTHORITY_VERBS,
+  ]),
+
   // HERMES CoS (loop #459). This is a separate server-locked capability door,
   // never a request-side profile override. It inherits the ordinary Hermes
   // business-write set and adds exactly the two bounded brief/premises verbs.
@@ -562,6 +586,13 @@ const PROFILE_NOTICE = {
     "widened by this token under any request. You carry Joe's personal brain and never Dell's. " +
     "File what he tells you to file; for anything outside those nine business verbs and two dispatch doors, say what you would have " +
     "written and hand it back for a human.</notice>",
+  unattended:
+    "\n\n<notice>This session runs on the UNATTENDED profile: nobody is watching. You hold " +
+    "reads, the additive capture verbs, close-loop, the cadence doors, and exactly these " +
+    "partner-authority acts on Joe's behalf: " + UNATTENDED_AUTHORITY_VERBS.join(", ") + ". " +
+    "Every other write refuses with not_in_profile, and the profile is locked server-side by an " +
+    "UNATTENDED_TOKENS bearer, not by ?profile=. Rules, schedules, merges, deal facts and anything " +
+    "outward stay with a session a partner attends: report what you would have done.</notice>",
   "hermes-cos":
     "\n\n<notice>This session runs on the HERMES CoS profile: the ordinary Hermes business-write set " +
     "plus exactly update-deal (deal_type, segment, city and lane only) and add-premises against " +
@@ -602,6 +633,7 @@ export function profileForActor(actor, request) {
   if (actor?.benchmarkAuthor === true && actor?.via === "review-token") return "benchmark-author";
   if (actor?.benchmarkReviewer === true && actor?.via === "review-token") return "benchmark-reviewer";
   if (actor?.review) return "reviewer";
+  if (actor?.unattended === true || actor?.via === "unattended-token") return "unattended";
   if (actor?.hermesCos === true && actor?.via === "hermes-cos-token") return "hermes-cos";
   if (actor?.hermes) return "hermes";
   return profileFor(request);
