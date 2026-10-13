@@ -841,6 +841,10 @@ PYEOF
   # db/schema.sql's ledger names every migration with its runner checksum, so the
   # reference schema cannot fall behind the migrations again. Static, no DB; the
   # migration class proves the snapshot by actually building it.
+  # door-reachability-check JOINED 2026-10-13 (WR-000284, defect 96b57c6c): every
+  # script under the audited trees and every repo SKILL.md is reached from a
+  # door, or is declared in ops/config/door-inventory.v1.json. Same kind:
+  # repository content only. ci-only and prose-only are printed, not failed.
   for inv in enforcement-coverage-check audit-queue-freshness-check map-row-evidence-check \
              rule-enforcement-map-check rule-load-layer-check rule-classification-parity-check \
              reachability-check selftest-git-isolation-check \
@@ -848,7 +852,7 @@ PYEOF
              mechanism-doctrine-gate scheduler-cutover-coverage-gate \
              boot-budget-check sync-core-rule-ids rule-route-coverage \
              sync-rule-boot-classes check-eval-receipt migration-order-gate \
-             migration-safety-gate check-jev-conformance; do
+             migration-safety-gate check-jev-conformance door-reachability-check; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
