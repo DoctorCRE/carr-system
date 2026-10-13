@@ -322,11 +322,12 @@ and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
 Before opening or updating any pull request, apply both skills to the diff:
 
-1. `~/.agents/skills/codebase-design/SKILL.md`: deep modules, real seams, design the interface twice when it matters.
-2. `~/.agents/skills/zero-tech-debt/SKILL.md`: rework the change from its intended end state; delete dead compatibility paths and duplicated rules.
+1. `.agents/skills/codebase-design/SKILL.md`: deep modules, real seams, design the interface twice.
+2. `.agents/skills/zero-tech-debt/SKILL.md`: rework from the intended end state; delete dead compatibility paths and duplicated rules.
 
-Both passes are required. Read the skill files before applying them; if either
-is unavailable, report the missing skill instead of claiming the pass.
+Both are required. Read each skill first; if one is missing, report it rather
+than claim the pass. The PR body's `Design and debt pass` section gives one
+line per skill: what it changed, or why nothing did.
 This section is the canonical policy for both client entry points.
 
 Rigorous engineering work uses `/poteto-mode` from [pstack](plugins/pstack/skills/poteto-mode/SKILL.md).
