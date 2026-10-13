@@ -255,7 +255,7 @@ BREW_PATH = ("/opt/homebrew/opt/node@22/bin:/usr/local/opt/node@22/bin:/opt/home
              "/opt/homebrew/sbin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin:"
              "/usr/sbin:/sbin")
 CHILD_ENV_NAMES = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL",
-                   "SSL_CERT_FILE", "SSL_CERT_DIR")
+                   "SSL_CERT_FILE", "SSL_CERT_DIR", "CARR_GITHUB_READ_BUDGET")
 
 # The Workers deploy credential. Loaded from its file into the environment of
 # the wrangler-running steps ONLY (never child_env, never argv, never a log
