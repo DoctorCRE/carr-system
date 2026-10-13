@@ -420,11 +420,25 @@ def decide(payload):
                         "— a door other than run.sh worktree created it. Applied: "
                         + "; ".join(applied)
                     )
-                # A non-zero exit (not a registered worktree, or some other
-                # refusal) is deliberately silent here — the boot hook proposes
-                # the fix, it does not surface --plumb's own refusal reasoning
-                # at every session start; run `./run.sh worktree --plumb` by
-                # hand to see it.
+                else:
+                    # 2026-10-12: a refusal used to be silent here, and that
+                    # silence cost every session on this MacBook its .venv for
+                    # weeks (out/worktree-venv-guard.jsonl: refused, refused,
+                    # refused; nobody told). The session that pays for the
+                    # missing runtime is the one that must hear why, in one
+                    # line, with the remedy --plumb itself names.
+                    said = [ln.strip() for ln in plumb.stdout.splitlines()
+                            if ln.strip().startswith("!!") or "./run.sh worktree --install" in ln
+                            or "requirements.lock" in ln or "npm --prefix" in ln]
+                    print(
+                        "worktree self-plumb REFUSED: this session's worktree "
+                        f"({os.path.basename(toplevel)}) is missing {', '.join(missing)} "
+                        "and the shared runtime could not be linked. Selftests and the "
+                        "pre-push floor will fail here until one of these runs: "
+                        + (" | ".join(said[:4]) if said else plumb.stdout.strip()[-400:] or "run ./run.sh worktree --plumb to see the reason")
+                        + " | to repair the SHARED runtime instead: in the canonical checkout, "
+                        ".venv/bin/python -m pip install -r requirements.lock and npm --prefix mcp-server ci"
+                    )
 
         # The orphan reaper runs for canonical AND worktree sessions — the
         # canonical tree is where a human most often sits, and its sessions
