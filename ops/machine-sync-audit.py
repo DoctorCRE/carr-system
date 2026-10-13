@@ -34,6 +34,9 @@ import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SERVICES = os.path.join(REPO, "ops", "config", "services.json")
+LAUNCH_AGENTS = os.path.expanduser("~/Library/LaunchAgents")
+INSTALL = "action: python3 ops/config-as-code.py install --apply"
 
 # The interpreter floor, kept in step with requirements.txt's mypy marker and
 # with bin/migrate-dell.sh's PY_MIN_MINOR. Three places name 3.10; if one moves
@@ -169,7 +172,7 @@ def audit_toolchain():
         row("toolchain", "github cli", GAP, "not installed")
 
 
-def audit_optional(primary):
+def audit_optional():
     db = os.path.expanduser("~/.config/carr/db.env")
     row("optional", "database credential", OK if os.path.exists(db) else GAP,
         "present" if os.path.exists(db)
@@ -186,24 +189,89 @@ def audit_optional(primary):
     row("optional", "codex adapter", DESIGN,
         "present" if codex else "absent (supported on a Claude-only machine)")
 
-    if primary is False:
-        row("optional", "shared-state jobs", DESIGN,
-            "not installed here — they run on the primary machine only")
+
+def audit_launchd(primary, services, agents, holds=None,
+                  repo_launchd=os.path.join(REPO, "ops", "launchd")):
+    """Join the catalog's runs_on with the com.carr agents launchd has installed.
+
+    WR-000284 C6: on 2026-10-13 eighteen declared jobs were absent from the
+    MacBook and one installed job was declared nowhere, and both were found by
+    hand. Each declared plist is OK when installed where it runs, BY DESIGN
+    when absent from a machine it does not run on (or held there), and a GAP
+    otherwise; every GAP names the command that closes it.
+    """
+    sys.path.insert(0, REPO)
+    try:
+        from lib import launchd_hold, launchd_scope
+        placed = launchd_scope.placements(services)
+        holds = launchd_hold.read_holds() if holds is None else holds
+    except (ImportError, OSError, ValueError, KeyError) as exc:
+        row("launchd", "catalog", GAP, f"{type(exc).__name__}: {exc} — action: fix "
+            "ops/config/services.json, lib/launchd_scope.py or ~/.config/carr/launchd-hold")
+        return
+    if primary is None:
+        row("launchd", "placement", GAP,
+            "machine role unknown — action: fix the identity rows above, then re-run")
+        return
+    if not os.path.isdir(agents):
+        row("launchd", "LaunchAgents", GAP,
+            f"{agents} absent — action: run this audit on a Mac; launchd exists only there")
+        return
+    installed = {f for f in os.listdir(agents)
+                 if f.startswith("com.carr.") and f.endswith(".plist")}
+    in_repo = set(os.listdir(repo_launchd)) if os.path.isdir(repo_launchd) else set()
+    here = "primary" if primary else "secondary"
+
+    def remove(label, name):
+        return (f"action: launchctl bootout gui/$(id -u)/{label}, then delete "
+                f"~/Library/LaunchAgents/{name}")
+
+    for name in sorted(set(placed) | installed):
+        label = name.removesuffix(".plist")
+        where = placed.get(name)
+        if where is None and name in launchd_hold.DEFINITION_ONLY:
+            row("launchd", label, GAP, "definition only, awaiting its activation packet, "
+                "yet installed — " + remove(label, name))
+        elif where is None:
+            row("launchd", label, GAP, "installed but declared nowhere — " + (
+                "action: register its ops/launchd plist in ops/config/services.json, or "
+                "list it in lib/launchd_hold.DEFINITION_ONLY so install stops placing it"
+                if name in in_repo else
+                "action: uninstall it or add its plist to ops/launchd and register it "
+                "in ops/config/services.json"))
+        elif where in ("every", here):
+            if name in installed:
+                row("launchd", label, OK, f"runs on {where} · installed")
+            elif label in holds:
+                row("launchd", label, DESIGN, f"runs on {where} · HELD: {holds[label].reason}")
+            else:
+                row("launchd", label, GAP, f"runs on {where} · not installed — {INSTALL}")
+        elif name in installed:
+            # install --apply retires a primary-only plist from a secondary; it
+            # only skips a secondary-only plist on the primary, never removes it.
+            row("launchd", label, GAP, f"runs on {where} only but is installed here — " + (
+                INSTALL if where == "primary" else remove(label, name)))
+        else:
+            row("launchd", label, DESIGN, f"runs on {where} · not installed here")
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--strict", action="store_true",
                     help="exit 1 when any GAP is found")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
-    args = ap.parse_args()
+    ap.add_argument("--services", default=SERVICES, help="the service catalog to place jobs by")
+    ap.add_argument("--launch-agents", default=LAUNCH_AGENTS,
+                    help="the LaunchAgents directory to read installed jobs from")
+    args = ap.parse_args(argv)
 
     cac = load_config_as_code()
     primary = audit_identity(cac)
     audit_repo()
     audit_config_and_gates()
     audit_toolchain()
-    audit_optional(primary)
+    audit_optional()
+    audit_launchd(primary, args.services, args.launch_agents)
 
     gaps = [r for r in ROWS if r[2] == GAP]
 
