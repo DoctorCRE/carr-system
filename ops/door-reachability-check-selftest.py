@@ -179,6 +179,62 @@ class DoorReachability(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("0 ci-only, 1 prose-only, 2 declared", out)
 
+    def test_db_gate_marker_outside_the_ci_glob_is_not_a_door(self) -> None:
+        code, out = self.run_check({"tools/marked-elsewhere.py": "# ci: db-gate\nprint(1)\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("unreachable  tools/marked-elsewhere.py", out)
+
+    def test_db_gate_marker_on_an_ops_gate_is_a_door(self) -> None:
+        code, out = self.run_check({"ops/marked-gate.py": "# ci: db-gate\nprint(1)\n"})
+        self.assertEqual(code, 0, out)
+        self.assertIn("3 wired", out)
+
+    def test_unwired_extensionless_executable_fails(self) -> None:
+        code, out = self.run_check({"bin/orphan-tool": "#!/bin/sh\necho hi\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("unreachable  bin/orphan-tool", out)
+
+    def test_unwired_zsh_script_fails(self) -> None:
+        code, out = self.run_check({"tools/orphan.zsh": "echo hi\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("unreachable  tools/orphan.zsh", out)
+
+    def test_unwired_hook_fails(self) -> None:
+        code, out = self.run_check({"hooks/orphan-hook.py": "print(1)\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("unreachable  hooks/orphan-hook.py", out)
+
+    def test_json_under_docs_is_a_record_not_prose(self) -> None:
+        code, out = self.run_check({"docs/inventory.json": '["tools/listed_only.py"]\n',
+                                    "tools/listed_only.py": "print(1)\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("unreachable  tools/listed_only.py", out)
+
+    def test_records_are_not_callers(self) -> None:
+        code, out = self.run_check({"out/test-report.py": "run('tools/recorded_only.py')\n",
+                                    "corpus/README.md": "tools/recorded_only.py\n",
+                                    "tools/recorded_only.py": "print(1)\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("unreachable  tools/recorded_only.py", out)
+
+    def test_short_skill_name_as_a_bare_word_does_not_reach(self) -> None:
+        code, out = self.run_check({"ops/ci.sh": "python3 tools/wired-tool.py # zzq\n",
+                                    "plugins/kit/skills/zzq/SKILL.md": "# zzq\n"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("unreachable  plugins/kit/skills/zzq/SKILL.md", out)
+
+    def test_short_skill_name_in_skill_form_reaches(self) -> None:
+        code, out = self.run_check({"ops/ci.sh": "python3 tools/wired-tool.py # run /zzq\n",
+                                    "plugins/kit/skills/zzq/SKILL.md": "# zzq\n"})
+        self.assertEqual(code, 0, out)
+        self.assertIn("3 wired", out)
+
+    def test_inert_without_a_loop_or_work_request_fails(self) -> None:
+        bad = manifest(declare("tools/oneshot.py", cls="inert", evidence="989f4122"))
+        code, out = self.run_check({"ops/config/door-inventory.v1.json": bad})
+        self.assertEqual(code, 1, out)
+        self.assertIn("invalid declaration  tools/oneshot.py — inert needs the loop", out)
+
 
 if __name__ == "__main__":
     unittest.main()

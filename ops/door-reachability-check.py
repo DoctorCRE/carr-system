@@ -12,9 +12,9 @@ ops/judgment-wiring-selftest.py (judgment libraries), ops/reachability-check.py
 (declared controls) and ops/ci.sh's `# ci: db-gate` self-registration loop.
 This generalises them to every script and skill.
 
-THE GRAPH. Nodes are the artifacts under audit plus conduits: hooks/ (the hook
-configs name hooks/*.py, which call on) and the zsh scripts and extensionless
-executables beside the audited scripts. A file reaches an artifact when its text
+THE GRAPH. Nodes are the artifacts under audit: scripts under the audited
+trees (including their zsh scripts and extensionless executables such as
+bin/dot-relay), hooks/ code, and repo SKILL.md files. A file reaches an artifact when its text
 names the artifact's basename, or its stem when the stem is at least
 STEM_MIN characters (shorter stems are ordinary words), and a Python file
 reaches every .py node whose module name it imports, at any length. A skill's needle is its
@@ -24,7 +24,8 @@ tiers, and the first tier to reach a file decides its status:
 
   wired       reached from a production door (ops/ci.sh, ops/githooks/,
               .github/workflows/, ops/launchd/, run.sh, the hook configs,
-              mcp-server/src/, any file marked `# ci: db-gate`)
+              mcp-server/src/, any ops/*-gate.py marked `# ci: db-gate`,
+              the same glob ci.sh runs)
   ci-only     reached only from a test-shaped file
   prose-only  reached only from AGENTS.md, CLAUDE.md, a README.md or docs/**.md
               (a JSON inventory under docs/ is a record, not prose)
@@ -33,10 +34,18 @@ A plugin's README, docs/ and plugin.json are a production door for that
 plugin's own skills when AGENTS.md or CLAUDE.md names the plugin, and prose
 otherwise.
 
+WHAT AN EDGE IS NOT. An edge is a mention, not a proven call: a comment, a
+preflight file list or a SQL string in a reached file counts the same as an
+invocation, and two files sharing a basename share the edge. So a wired status
+is an upper bound and an unreachable one is trustworthy. Verbs, workflows and
+launchd services are roots here, never audited; ops/reachability-check.py owns
+whether hooks and launchd jobs are registered.
+
 DECLARATIONS live in ops/config/door-inventory.v1.json: one_shot (ran once by
 design; evidence is the commit or receipt), hand_tool (a human runs it by name;
 evidence is the doc or run.sh line), inert (built, no caller yet; evidence is
-the loop or Work Request that will wire it). A declaration means "no production
+the loop or Work Request that will wire it, so an inert row must name a
+WR-NNNNNN or a loop number). A declaration means "no production
 door, on purpose", so it goes stale when the artifact becomes wired or is
 deleted, and the stale entry is itself a finding.
 
@@ -68,7 +77,6 @@ WORK_REQUEST = "WR-000284"
 AUDIT_DIRS = ("ops/", "tools/", "bin/", "scripts/", "lib/", "pipelines/", "generators/",
               "evals/", "security/", "control-room/", "mcp-server/scripts/", "mcp-server/tools/")
 CODE_SUFFIXES = (".py", ".sh", ".mjs", ".js", ".ts")
-CONDUIT_DIRS = ("hooks/",)
 SHELL_SUFFIXES = (".zsh", ".bash")
 STEM_MIN = 10
 
@@ -83,6 +91,7 @@ MAX_BYTES = 2 << 20
 PRODUCTION_FILES = ("ops/ci.sh", "run.sh", "ops/config/hooks.json", "ops/config/codex-hooks.json",
                     "ops/config/delegation-gate-hook.json", ".claude/settings.json")
 DB_GATE_MARKER = re.compile(r"^# ci: db-gate", re.M)
+DB_GATE_GLOB = re.compile(r"ops/[^/]+-gate\.py")
 PROSE_NAMES = ("AGENTS.md", "CLAUDE.md", "README.md")
 PLUGIN = re.compile(r"^plugins/([^/]+)/")
 
@@ -90,6 +99,7 @@ TIERS = ("wired", "ci-only", "prose-only")
 CLASSES = ("one_shot", "hand_tool", "inert")
 PLACEHOLDER = re.compile(r"^\W*(n/?a|none|tbd|todo|trivial|minor|unknown|-+)\W*$", re.I)
 MIN_REASON_WORDS = 6
+LOOP_OR_WR = re.compile(r"\bWR-\d{6}\b|\bloop #?\d+\b", re.I)
 
 BOUND_ACTION = {
     "ci-only": "exercised only by a test; wire it to a door or declare it in "
@@ -137,20 +147,16 @@ def is_inert(rel: str) -> bool:
     return rel in INERT_FILES or rel.startswith(INERT_PREFIXES) or "/fixtures/" in "/" + rel
 
 
-def is_script_artifact(rel: str) -> bool:
-    return (rel.startswith(AUDIT_DIRS) and rel.endswith(CODE_SUFFIXES)
-            and not rel.startswith("mcp-server/src/") and not is_test_shaped(rel))
-
-
-def is_conduit(repo: str, rel: str) -> bool:
-    """A file that runs and passes reach on, but is not judged here: hooks/,
-    and the zsh scripts and extensionless executables (bin/dot-relay) that sit
-    beside the audited scripts and call them."""
-    if rel.startswith(CONDUIT_DIRS):
-        return rel.endswith(CODE_SUFFIXES + SHELL_SUFFIXES)
-    if not rel.startswith(AUDIT_DIRS) or is_test_shaped(rel) or is_script_artifact(rel):
+def is_script_artifact(repo: str, rel: str) -> bool:
+    """A script under the audited trees or hooks/: a code suffix, a zsh or bash
+    script, or an extensionless file that starts with a shebang."""
+    if is_test_shaped(rel) or rel.startswith("mcp-server/src/"):
         return False
-    if rel.endswith(SHELL_SUFFIXES):
+    if rel.startswith("hooks/"):
+        return rel.endswith(CODE_SUFFIXES + SHELL_SUFFIXES)
+    if not rel.startswith(AUDIT_DIRS):
+        return False
+    if rel.endswith(CODE_SUFFIXES + SHELL_SUFFIXES):
         return True
     if "." in os.path.basename(rel):
         return False
@@ -255,7 +261,7 @@ def roots(repo: str, files: list[str], skills: list[str]) -> dict[str, list[tupl
         if (f in PRODUCTION_FILES or f.startswith(("ops/githooks/", "mcp-server/src/"))
                 or (f.startswith(".github/workflows/") and f.endswith((".yml", ".yaml")))
                 or (f.startswith("ops/launchd/") and f.endswith(".plist"))
-                or (f.endswith(CODE_SUFFIXES) and DB_GATE_MARKER.search(read(repo, f)))):
+                or (DB_GATE_GLOB.fullmatch(f) and DB_GATE_MARKER.search(read(repo, f)))):
             production.append((f, None))
         elif is_test_shaped(f):
             ci_only.append((f, None))
@@ -319,6 +325,9 @@ def load_declarations(repo: str, findings: list[str]) -> dict[str, dict]:
         elif not evidence or PLACEHOLDER.match(evidence):
             findings.append(f"invalid declaration  {rel} — no evidence (commit, receipt, doc "
                             "path, run.sh line, loop or Work Request)")
+        elif entry["class"] == "inert" and not LOOP_OR_WR.search(evidence):
+            findings.append(f"invalid declaration  {rel} — inert needs the loop or Work Request "
+                            "that will wire it (WR-NNNNNN or loop #N) as evidence")
         declared[rel] = entry
     return declared
 
@@ -327,9 +336,8 @@ def check(repo: str, why: str | None = None) -> tuple[bool, list[str]]:
     files = tree_files(repo)
     live = [f for f in files if not is_inert(f)]
     skills = [f for f in live if is_skill(f)]
-    artifacts = sorted([f for f in live if is_script_artifact(f)] + skills)
-    conduits = [f for f in live if is_conduit(repo, f)]
-    status, parent = classify(Graph(repo, artifacts + conduits), roots(repo, files, skills))
+    artifacts = sorted([f for f in live if is_script_artifact(repo, f)] + skills)
+    status, parent = classify(Graph(repo, artifacts), roots(repo, files, skills))
     if why is not None:
         chain = [why]
         while chain[-1] in parent:
