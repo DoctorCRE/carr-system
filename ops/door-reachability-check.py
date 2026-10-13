@@ -196,7 +196,7 @@ def imported_modules(text: str) -> set[str]:
 
 
 def mentions(text: str) -> set[str]:
-    """Every string a needle can equal, read off the text.
+    r"""Every string a needle can equal, read off the text.
 
     A run of [\w.-] is split on dots so a module path (`pkg.module_name`) and
     a basename ending a sentence (`module_name.py.`) both yield their parts.
