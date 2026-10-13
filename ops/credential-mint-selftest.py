@@ -73,6 +73,7 @@ class FakeProviders:
         self.bad_children: set[str] = set()   # values whose verify must fail
         self.fail_revoke: set[str] = set()    # ids whose DELETE must fail
         self.refuse_root = False
+        self.crash_on: str | None = None      # "mint_post" | "verify": raise mid-night
         self.counter = 0
 
     def _mint(self, provider: str) -> tuple[str, str]:
@@ -100,6 +101,10 @@ class FakeProviders:
         is_root = token in ROOTS.values()
         if is_root and self.refuse_root and method != "GET":
             return 401, None
+        if self.crash_on == "mint_post" and method == "POST":
+            raise Crash("the night died while the provider was minting")
+        if self.crash_on == "verify" and method == "GET" and not is_root:
+            raise Crash("the night died between the mint and the store")
         if parts.netloc == "api.cloudflare.com":
             if path.endswith("/user/tokens/verify"):
                 ok = token in self.active["cloudflare"] or token == ROOTS["CLOUDFLARE_TOKEN_ROOT"]
@@ -123,6 +128,7 @@ class FakeProviders:
                     and token not in self.bad_children and "org_id=org-dry-dew-75906281" in parts.query
                 return (200, {"projects": []}) if ok else (401, None)
             if method == "POST" and path.endswith("/api_keys"):
+                self.payloads.append(body)
                 child_id, value = self._mint("neon")
                 return 200, {"id": child_id, "key": value}
             if method == "DELETE":
@@ -139,6 +145,11 @@ class FakeProviders:
             if method == "DELETE":
                 return self._revoke("openai", path.rsplit("/", 1)[1]), None
         return 599, None
+
+
+class Crash(BaseException):
+    """Stands in for the process dying (kill, power loss): not an Exception, so
+    no handler in the lane can swallow it."""
 
 
 class FakeBoard:
@@ -195,7 +206,8 @@ class FakeCodex:
 class World:
     """One scratch HOME + out/ directory, and the fakes wired into a Minter."""
 
-    def __init__(self, tmp: Path, *, machine: str = "studio", roots: tuple[str, ...] = ()):
+    def __init__(self, tmp: Path, *, machine: str = "studio", roots: tuple[str, ...] = (),
+                 billing_yes: bool = True, grants_edit: Any = None):
         self.home = tmp / "home"
         self.home.mkdir()
         os.environ["HOME"] = str(self.home)
@@ -204,7 +216,7 @@ class World:
         self.http, self.board, self.clock, self.codex = FakeProviders(), FakeBoard(), Clock(), FakeCodex()
         self.state, self.receipts = tmp / "out" / "state.json", tmp / "out" / "receipts.jsonl"
         self.machine = machine
-        self.plan = cm.load_plan()
+        self.plan = plan_with(tmp, billing_yes=billing_yes, edit=grants_edit)
 
     def night(self) -> list[dict]:
         minter = cm.Minter(self.plan, self.machine, http=self.http, clock=self.clock,
@@ -230,6 +242,19 @@ def world(**kw: Any):
                 os.environ["HOME"] = old_home
 
 
+def plan_with(tmp: Path, *, billing_yes: bool, edit: Any = None) -> cm.Plan:
+    """The real plan, with Joe's Codex billing yes set as asked (the shipped
+    file says false) and any other edit a test needs."""
+    doc = json.loads(cm.GRANTS_PATH.read_text())
+    openai = next(g for g in doc["grants"] if g["name"] == "openai")
+    openai["params"]["codex_api_billing_approved"] = billing_yes
+    if edit is not None:
+        edit(doc)
+    path = tmp / "grants.json"
+    path.write_text(json.dumps(doc))
+    return cm.load_plan(path, cm.INVENTORY_PATH)
+
+
 def outcomes(receipts: list[dict], credential: str) -> list[str]:
     return [f"{r['step']}:{r['outcome']}" for r in receipts if r["credential"] == credential]
 
@@ -240,8 +265,9 @@ def test_plan_is_consistent_and_refuses_disagreement() -> None:
     print("plan: grant file and inventory agree, and a disagreement is refused")
     plan = cm.load_plan()
     inventory = json.loads(cm.INVENTORY_PATH.read_text())["credentials"]
-    check("every inventory row is self_mintable_from XOR holder_only",
-          all(bool(r.get("self_mintable_from")) != bool(r.get("holder_only")) for r in inventory))
+    check("every inventory row carries exactly one of self_mintable_from, holder_only, root_grant",
+          all(sum(bool(r.get(k)) for k in ("self_mintable_from", "holder_only", "root_grant")) == 1
+              for r in inventory))
     check("grok-cli-auth row exists and is holder_only",
           any(r["name"] == "grok-cli-auth" and r.get("holder_only") for r in inventory))
     names = {g.name for g in plan.grants}
@@ -302,6 +328,11 @@ def test_missing_grant_is_never_a_live_call_and_files_one_loop_each() -> None:
         check("the deferred xAI grant files nothing", not any("xai" in a["body"] for a in adds))
         check("every absent grant leaves a receipt",
               sum(r["outcome"] == "absent" for r in receipts) == 4)
+        grants = {g.name: g for g in w.plan.grants}
+        for a in adds:
+            gname = a["body"].split("]")[0].split(":")[1]
+            check(f"the {gname} loop states the root's real reach word for word",
+                  f"Reach: {grants[gname].reach}" in a["body"].splitlines())
 
         w.board.calls.clear()
         w.night()
@@ -576,6 +607,201 @@ def test_cli_refuses_arguments_and_a_broken_plan() -> None:
         cm.load_plan = real
 
 
+# ── PR #1725 review findings ────────────────────────────────────────────────
+
+def _refused_by(grants_edit: Any = None, inventory_edit: Any = None) -> bool:
+    with tempfile.TemporaryDirectory() as raw:
+        grants = json.loads(cm.GRANTS_PATH.read_text())
+        inventory = json.loads(cm.INVENTORY_PATH.read_text())
+        if grants_edit:
+            grants_edit({g["name"]: g for g in grants["grants"]})
+        if inventory_edit:
+            inventory_edit({r["name"]: r for r in inventory["credentials"]})
+        gp, ip = Path(raw) / "g.json", Path(raw) / "i.json"
+        gp.write_text(json.dumps(grants))
+        ip.write_text(json.dumps(inventory))
+        try:
+            cm.load_plan(gp, ip)
+        except cm.PlanError:
+            return True
+        return False
+
+
+def test_root_reach_is_stated_and_pinned() -> None:
+    print("finding 1: each root grant states its real reach, and the inventory repeats it")
+    grants = {g.name: g for g in cm.load_plan().grants}
+    cf, neon, openai = grants["cloudflare"].reach, grants["neon"].reach, grants["openai"].reach
+    check("cloudflare: the root is equivalent to Joe's whole user (any permission, R2, DNS)",
+          "WHOLE CLOUDFLARE USER" in cf and "ANY permission" in cf and "R2" in cf and "DNS" in cf, cf)
+    check("cloudflare: the old 'and nothing else' understatement is gone",
+          "nothing else" not in grants["cloudflare"].scope + cf)
+    check("neon: the root is org admin and can delete the production project",
+          "ADMIN" in neon and "DELETE any project" in neon and "steep-field-48688294" in neon, neon)
+    check("neon: the old 'create and revoke ... and read its projects' understatement is gone",
+          "read its projects" not in grants["neon"].scope + neon)
+    check("openai: the root is org admin over projects, members and billing",
+          "ADMIN" in openai and "members" in openai and "billing" in openai, openai)
+    inventory = {r["name"]: r for r in json.loads(cm.INVENTORY_PATH.read_text())["credentials"]}
+    check("each root's inventory row repeats its reach exactly",
+          all(r["reach"] == grants[r["root_grant"]].reach for r in inventory.values() if r.get("root_grant")))
+    check("the neon child's row says it is org-wide admin, not read-only",
+          "ORG-WIDE" in inventory["neon-api-key"]["replacement_plan"]
+          and "can delete a project" in inventory["neon-api-key"]["replacement_plan"])
+
+    def drop_reach(g):
+        g["xai"].pop("reach")  # a grant with no root row, so only the reach check can refuse it
+
+    def soften_row(r):
+        r["neon-org-root-key"]["reach"] = "can create and revoke API keys"
+    check("a grant with no reach is refused", _refused_by(grants_edit=drop_reach))
+    check("an inventory root row that understates the grant's reach is refused",
+          _refused_by(inventory_edit=soften_row))
+
+
+def test_neon_child_scope_is_explicit() -> None:
+    print("finding 2: the Neon child's scope is a recorded choice, and project scope is honoured")
+    scope = next(g for g in cm.load_plan().grants if g.name == "neon").params["child_scope"]
+    check("the shipped child is org-wide with a recorded reason naming its org-level consumers",
+          scope["kind"] == "organization" and "staging-project-replacement" in scope["because"]
+          and "system_costs" in scope["because"] and "consumption_history" in scope["because"], scope)
+
+    def no_scope(g):
+        g["neon"]["params"].pop("child_scope")
+
+    def no_reason(g):
+        g["neon"]["params"]["child_scope"] = {"kind": "organization"}
+
+    def no_project(g):
+        g["neon"]["params"]["child_scope"] = {"kind": "project"}
+    check("a Neon grant with no child_scope is refused", _refused_by(grants_edit=no_scope))
+    check("an org-wide child with no recorded reason is refused", _refused_by(grants_edit=no_reason))
+    check("a project-scoped child with no project_id is refused", _refused_by(grants_edit=no_project))
+
+    with world(roots=("NEON_ORG_ROOT_KEY",)) as w:
+        w.night()
+        check("the org-wide child's mint asks for no project", "project_id" not in w.http.payloads[0],
+              w.http.payloads)
+
+    def project_scoped(doc):
+        neon = next(g for g in doc["grants"] if g["name"] == "neon")
+        neon["params"]["child_scope"] = {"kind": "project", "project_id": "steep-field-48688294"}
+    with world(roots=("NEON_ORG_ROOT_KEY",), grants_edit=project_scoped) as w:
+        w.night()
+        check("a project-scoped child is minted with that project_id (member access, cannot delete it)",
+              w.http.payloads and w.http.payloads[0].get("project_id") == "steep-field-48688294",
+              w.http.payloads)
+
+
+def test_every_minted_root_has_a_health_row() -> None:
+    print("finding 3: a root that mints children must have its own verify-and-age row")
+
+    def drop_root_row(r):
+        r["openai-admin-key"].pop("root_grant")
+        r["openai-admin-key"]["holder_only"] = "pretend nobody ages it"
+
+    def wrong_name(r):
+        r["neon-org-root-key"]["probe"]["store_name"] = "NEON_API_KEY"
+    check("a minted grant with no root_grant row is refused", _refused_by(inventory_edit=drop_root_row))
+    check("a root row that probes some other stored name is refused", _refused_by(inventory_edit=wrong_name))
+
+
+def test_codex_billing_waits_on_joes_yes() -> None:
+    print("non-blocking 1: no Codex child, so no billing change, until Joe says yes")
+    shipped = next(g for g in cm.load_plan().grants if g.name == "openai")
+    check("the shipped file has not said yes", shipped.params["codex_api_billing_approved"] is False)
+    with world(roots=("OPENAI_ADMIN_KEY",), billing_yes=False) as w:
+        receipts = w.night()
+        check("no OpenAI call at all with the admin key placed", w.http.calls == [], w.http.calls)
+        check("nothing installed into Codex", w.codex.calls == [])
+        check("the receipt names the wait",
+              outcomes(receipts, "codex-cli-auth-studio") == ["mint:awaiting_joe_billing_yes"],
+              outcomes(receipts, "codex-cli-auth-studio"))
+        adds = [a for v, a in w.board.calls if v == "add-loop" and "credential-root-grant:openai" in a["body"]]
+        check("the OpenAI loop asks Joe for the billing yes",
+              len(adds) == 1 and "metered Codex billing" in adds[0]["body"]
+              and "codex_api_billing_approved" in adds[0]["blocker_detail"], adds)
+
+    def not_a_bool(doc):
+        next(g for g in doc["grants"] if g["name"] == "openai")["params"]["codex_api_billing_approved"] = "yes"
+    with tempfile.TemporaryDirectory() as raw:
+        try:
+            plan_with(Path(raw), billing_yes=True, edit=not_a_bool)
+            refused = False
+        except cm.PlanError:
+            refused = True
+    check("a billing flag that is not true/false is refused", refused)
+
+
+def test_interrupted_mint_is_recovered() -> None:
+    print("non-blocking 2: a night that dies mid-rotation leaves no unknown live child")
+    with world(roots=("CLOUDFLARE_TOKEN_ROOT",)) as w:
+        w.night()
+        first = w.stored("CLOUDFLARE_API_TOKEN")
+        w.clock.now = T0 + timedelta(days=85)
+        w.http.crash_on = "verify"
+        try:
+            w.night()
+            died = False
+        except Crash:
+            died = True
+        orphan = w.http.minted[-1]
+        pending = w.saved_state().get("minting", {}).get("cloudflare-deploy-token", {})
+        check("the night died after the mint", died and len(w.http.minted) == 2)
+        check("the in-flight record holds the orphan's id, not its value",
+              pending.get("child_id") == "cloudflare-id-2" and orphan not in w.state.read_text(), pending)
+        w.http.crash_on = None
+        receipts = w.night()
+        check("the next night revokes the unstored orphan",
+              orphan not in w.http.active["cloudflare"]
+              and "recover_mint:unstored_child_revoking" in outcomes(receipts, "cloudflare-deploy-token"),
+              outcomes(receipts, "cloudflare-deploy-token"))
+        check("the orphan is never stored; the night's own rotation replaces the first child cleanly",
+              w.stored("CLOUDFLARE_API_TOKEN") == w.http.minted[-1] != orphan
+              and first not in w.http.active["cloudflare"] and len(w.http.minted) == 3)
+        check("and clears the in-flight record", w.saved_state()["minting"] == {})
+
+    with world(roots=("CLOUDFLARE_TOKEN_ROOT",)) as w:
+        w.night()
+        first = w.stored("CLOUDFLARE_API_TOKEN")
+        w.clock.now = T0 + timedelta(days=85)
+        real_adopt = cm.Minter._adopt
+
+        def die(self: Any, *a: Any, **k: Any) -> None:
+            raise Crash("died after the store, before the state write")
+        cm.Minter._adopt = die  # type: ignore[method-assign]
+        try:
+            w.night()
+        except Crash:
+            pass
+        finally:
+            cm.Minter._adopt = real_adopt  # type: ignore[method-assign]
+        second = w.stored("CLOUDFLARE_API_TOKEN")
+        check("the second child was stored before the night died", second != first and second == w.http.minted[-1])
+        receipts = w.night()
+        check("the next night adopts the stored child instead of revoking it",
+              second in w.http.active["cloudflare"]
+              and "recover_mint:stored_child_adopted" in outcomes(receipts, "cloudflare-deploy-token"),
+              outcomes(receipts, "cloudflare-deploy-token"))
+        check("then finishes the rotation by revoking the previous child", first not in w.http.active["cloudflare"])
+        check("without minting a third", len(w.http.minted) == 2)
+        check("state now names the adopted child",
+              w.saved_state()["credentials"]["cloudflare-deploy-token"]["child_id"] == "cloudflare-id-2")
+
+    with world(roots=("CLOUDFLARE_TOKEN_ROOT",)) as w:
+        w.http.crash_on = "mint_post"
+        try:
+            w.night()
+        except Crash:
+            pass
+        w.http.crash_on = None
+        check("a mint that died in flight is still on record by label",
+              w.saved_state()["minting"]["cloudflare-deploy-token"]["label"] == "carr-cloudflare-deploy-token-20261012")
+        receipts = w.night()
+        check("the next night names the label to look for at the provider",
+              "recover_mint:no_id_recorded_check_provider_for_label_carr-cloudflare-deploy-token-20261012"
+              in outcomes(receipts, "cloudflare-deploy-token"), outcomes(receipts, "cloudflare-deploy-token"))
+
+
 def main() -> int:
     for test in (test_plan_is_consistent_and_refuses_disagreement,
                  test_missing_grant_is_never_a_live_call_and_files_one_loop_each,
@@ -591,7 +817,12 @@ def main() -> int:
                  test_children_are_minted_only_on_their_own_machine,
                  test_refused_root_grant_files_the_loop,
                  test_no_value_reaches_stdout_receipts_or_state,
-                 test_cli_refuses_arguments_and_a_broken_plan):
+                 test_cli_refuses_arguments_and_a_broken_plan,
+                 test_root_reach_is_stated_and_pinned,
+                 test_neon_child_scope_is_explicit,
+                 test_every_minted_root_has_a_health_row,
+                 test_codex_billing_waits_on_joes_yes,
+                 test_interrupted_mint_is_recovered):
         test()
     if FAILURES:
         print(f"\ncredential-mint-selftest: {len(FAILURES)} failure(s) of {PASSED + len(FAILURES)}")

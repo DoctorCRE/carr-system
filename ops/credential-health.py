@@ -63,12 +63,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from lib.credential_file import read_env_file  # noqa: E402
 from lib.credential_shape import valid_claude_token  # noqa: E402
+from lib import token_store  # noqa: E402
 from lib.record_call import call_verb  # noqa: E402
 
 INVENTORY_PATH = REPO_ROOT / "ops" / "config" / "credential-inventory.v1.json"
 OUT_JSONL = REPO_ROOT / "out" / "credential-health.jsonl"
 DEDUP_PATH = REPO_ROOT / "out" / "credential-health-loop-dedup.json"
 MINT_STATE_PATH = REPO_ROOT / "out" / "credential-health-mint-state.json"
+# The nightly credential-mint lane's own state (lib/credential_mint.py): per
+# minted credential the child's nominal expiry. Read for `expiry.from_mint_state`
+# rows only; it holds ids and dates, never a value. Injectable like MINT_STATE.
+MINT_LANE_STATE_PATH = REPO_ROOT / "out" / "credential-mint-state.json"
 
 BUCKETS = ("ok", "expiring_soon", "failed", "unknown")
 # The org tools/db-tap.py and tools/rotate-credential.py pin; see _probe_neon.
@@ -386,6 +391,73 @@ def _probe_claude_cli_token_age(cred, timeout_s):
     return ProbeResult("ok", "active", expires_at)
 
 
+def _probe_root_grant(cred, timeout_s):
+    """A ROOT GRANT (ops/config/credential-root-grants.v1.json): the one
+    credential per provider Joe places and the mint lane mints every child
+    from. Nothing rotates it, so this row is what keeps a leaked or forgotten
+    root from living silently forever (PR #1725 review, finding 3).
+
+    Verify-only: the grant's own read-only call, Bearer the root, HTTP status
+    plus Cloudflare's result.status/expires_on and nothing else. Aged like the
+    Claude token: the first date this lane saw the root's FINGERPRINT (never
+    the value) starts its clock, and expires_at is that date + max_age_days, or
+    the provider's own expires_on when sooner. The bucket then comes from
+    `_apply_expiry_window` with the row's expiring_soon_days.
+
+    The value is read through lib/token_store (the one NAME -> file map the
+    mint lane and tools/store-token.py share), so this probe has no `path`
+    key: an absent root is a quiet `unknown`, never a nightly loop, because
+    the mint lane already files the one loop that asks for it."""
+    spec = cred["probe"]
+    dest = token_store.destination(spec["store_name"])
+    token, mode, err = _read_token_from_env_file(str(dest.path), dest.key)
+    if mode is not None and (mode & 0o077):
+        token = None
+        return ProbeResult("failed", "insecure_file_permissions")
+    if err == "token_file_unreadable":
+        return ProbeResult("failed", err)
+    if err:
+        return ProbeResult("unknown", "root_grant_not_placed")
+    status, body = HTTP_GET(spec["url"], {"Authorization": f"Bearer {token}",
+                                          "Accept": "application/json"}, timeout_s)
+    token_sha256 = _sha256_hex(token)
+    token = None  # the only local name that ever held it; done with it now
+    if status is None:
+        return ProbeResult("unknown", "timeout")
+    if status in (401, 403):
+        return ProbeResult("failed", "root_grant_unauthorized")
+    if not 200 <= status < 300:
+        return ProbeResult("unknown", f"http_status_{status}")
+    result = (body or {}).get("result") if isinstance(body, dict) else None
+    provider_expiry = (result or {}).get("expires_on") if isinstance(result, dict) else None
+    if isinstance(result, dict) and "status" in result and result.get("status") != "active":
+        return ProbeResult("failed", "token_status_not_active", provider_expiry)
+    first_seen = _record_mint_date_if_new(
+        cred["name"], token_sha256, MINT_STATE, datetime.now(timezone.utc).date().isoformat())
+    expires_at = None
+    try:
+        aged = datetime.strptime(first_seen, "%Y-%m-%d") + timedelta(days=int(spec["max_age_days"]))
+        expires_at = aged.date().isoformat()
+    except (KeyError, TypeError, ValueError):
+        return ProbeResult("unknown", "config_incomplete")
+    if provider_expiry and str(provider_expiry)[:10] < expires_at:
+        expires_at = str(provider_expiry)[:10]
+    return ProbeResult("ok", "root_grant_active", expires_at)
+
+
+def _mint_lane_expiry(cred_name):
+    """The child's nominal expiry from the mint lane's state, or None. Lets a
+    child with no provider-side expiry (Neon, OpenAI) go amber, then red, when
+    the lane that should rotate it has stopped (PR #1725 review, low finding)."""
+    try:
+        with open(MINT_LANE_STATE_PATH) as fh:
+            entry = (json.load(fh).get("credentials") or {}).get(cred_name) or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    value = entry.get("expires_at") if isinstance(entry, dict) else None
+    return str(value)[:10] if value else None
+
+
 def _read_token_file_first(spec, default_token_key):
     """Shared file-first, env-fallback-only-if-absent policy for a bearer-style
     credential. If `spec["path"]` is configured, that FILE is authoritative
@@ -533,6 +605,7 @@ PROBE_HANDLERS = {
     "worker_bearer_health": _probe_worker_bearer,
     "file_presence_age": _probe_file_presence_age,
     "config_only": _probe_config_only,
+    "root_grant": _probe_root_grant,
 }
 
 
@@ -571,6 +644,8 @@ def _apply_expiry_window(cred, result, now):
         return ProbeResult("unknown", "not_configured")
     elif expiry_cfg.get("configured_rotation_date"):
         expires_at = expires_at or expiry_cfg["configured_rotation_date"]
+    elif expiry_cfg.get("from_mint_state"):
+        expires_at = expires_at or _mint_lane_expiry(cred.get("name"))
 
     if not expires_at:
         return result

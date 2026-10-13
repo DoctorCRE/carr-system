@@ -1403,6 +1403,145 @@ test_mint_state_save_failure_is_non_fatal()
 test_dedup_save_failure_is_non_fatal()
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# root grants: verify-only, aged, never silent (PR #1725 review, finding 3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+ROOT_FIXTURE = "fake-root-grant-DO-NOT-LEAK"
+
+
+def _root_cred(**probe_extra):
+    probe = {"type": "root_grant", "store_name": "CLOUDFLARE_TOKEN_ROOT",
+             "url": "https://api.cloudflare.com/client/v4/user/tokens/verify",
+             "max_age_days": 90, "timeout_s": 1}
+    probe.update(probe_extra)
+    return _cred("root-fixture", "root_grant", probe=probe, expiring_soon_days=14)
+
+
+def _with_root_home(td, value=ROOT_FIXTURE, mode=0o600):
+    """Point HOME at a scratch dir; write the root's tokens.env line there."""
+    os.environ["HOME"] = td
+    if value is not None:
+        cfg = Path(td) / ".config" / "carr"
+        cfg.mkdir(parents=True, exist_ok=True)
+        path = cfg / "tokens.env"
+        path.write_text(f"CLOUDFLARE_TOKEN_ROOT={value}\n")
+        os.chmod(path, mode)
+
+
+def test_root_grant_probes():
+    from datetime import date, timedelta as _td
+    old_home = os.environ.get("HOME")
+    today = date.today()
+    try:
+        inventory = json.loads((REPO / "ops" / "config" / "credential-inventory.v1.json").read_text())
+        grants = json.loads((REPO / "ops" / "config" / "credential-root-grants.v1.json").read_text())
+        minted = {g["name"] for g in grants["grants"]
+                  if g.get("children") and not g.get("self_minting") and not g.get("deferred")}
+        roots = {r["root_grant"]: r for r in inventory["credentials"] if r.get("root_grant")}
+        check("every minted root grant has a root_grant health row",
+              set(roots) == minted, sorted(roots))
+        check("every root row probes with the root_grant probe and ages it",
+              all(r["probe"]["type"] == "root_grant" and r["probe"].get("max_age_days") for r in roots.values()))
+        check("no root row names a probe `path` (absent root stays a quiet unknown, no nightly loop)",
+              not any(ch._credential_file_exists(r) for r in roots.values()))
+
+        calls = []
+        def spying_get(url, headers, timeout_s):
+            calls.append(headers.get("Authorization"))
+            return 200, {"result": {"status": "active"}}
+
+        with tempfile.TemporaryDirectory() as td:
+            _with_root_home(td, value=None)
+            ch.HTTP_GET, ch.MINT_STATE = spying_get, {}
+            r = ch.evaluate_credential(_root_cred())
+            check("an absent root is unknown/root_grant_not_placed with no HTTP call",
+                  (r.bucket, r.detail) == ("unknown", "root_grant_not_placed") and calls == [],
+                  f"{r.bucket}/{r.detail} {calls}")
+
+        with tempfile.TemporaryDirectory() as td:
+            _with_root_home(td)
+            ch.HTTP_GET, ch.MINT_STATE = spying_get, {}
+            r = ch.evaluate_credential(_root_cred())
+            check("a placed root is verified with itself as Bearer",
+                  calls == [f"Bearer {ROOT_FIXTURE}"], calls)
+            check("a fresh root is ok and expires max_age_days after first sight",
+                  r.bucket == "ok" and r.expires_at == (today + _td(days=90)).isoformat(),
+                  f"{r.bucket} {r.expires_at}")
+            check("first sight is recorded by fingerprint, never the value",
+                  ROOT_FIXTURE not in json.dumps(ch.MINT_STATE)
+                  and ch.MINT_STATE["root-fixture"]["minted_at"] == today.isoformat())
+
+            sha = ch.MINT_STATE["root-fixture"]["token_sha256"]
+            ch.MINT_STATE = {"root-fixture": {"token_sha256": sha,
+                                              "minted_at": (today - _td(days=80)).isoformat()}}
+            r = ch.evaluate_credential(_root_cred())
+            check("a root seen 80 days ago is expiring_soon (14-day warning)",
+                  r.bucket == "expiring_soon", f"{r.bucket}/{r.detail}")
+            ch.MINT_STATE = {"root-fixture": {"token_sha256": sha,
+                                              "minted_at": (today - _td(days=100)).isoformat()}}
+            r = ch.evaluate_credential(_root_cred())
+            check("a root seen 100 days ago is failed past_expiry",
+                  (r.bucket, r.detail) == ("failed", "past_expiry"), f"{r.bucket}/{r.detail}")
+
+            soon = (today + _td(days=5)).isoformat()
+            ch.HTTP_GET = lambda *a, **k: (200, {"result": {"status": "active", "expires_on": soon + "T00:00:00Z"}})
+            ch.MINT_STATE = {}
+            r = ch.evaluate_credential(_root_cred())
+            check("a provider expires_on sooner than max age wins",
+                  r.expires_at == soon and r.bucket == "expiring_soon", f"{r.bucket} {r.expires_at}")
+
+            ch.HTTP_GET = lambda *a, **k: (401, None)
+            r = ch.evaluate_credential(_root_cred())
+            check("a refused root is failed", (r.bucket, r.detail) == ("failed", "root_grant_unauthorized"))
+
+        with tempfile.TemporaryDirectory() as td:
+            _with_root_home(td, mode=0o644)
+            calls.clear()
+            ch.HTTP_GET = spying_get
+            r = ch.evaluate_credential(_root_cred())
+            check("a loose tokens.env fails before the root is used",
+                  (r.bucket, r.detail) == ("failed", "insecure_file_permissions") and calls == [])
+    finally:
+        if old_home is not None:
+            os.environ["HOME"] = old_home
+
+
+def test_mint_lane_expiry_window():
+    """A child with no provider-side expiry goes amber, then red, when the
+    mint lane stops rotating it (PR #1725 review, low finding)."""
+    from datetime import date, timedelta as _td
+    today = date.today()
+    real = ch.MINT_LANE_STATE_PATH
+    ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, b"", b"")
+    cred = _cred("neon-api-key", "shell_exit_status",
+                 probe={"type": "shell_exit_status", "command": ["true"], "timeout_s": 1},
+                 expiry={"from_mint_state": True})
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ch.MINT_LANE_STATE_PATH = Path(td) / "absent.json"
+            check("no mint-lane state leaves the probe's own result",
+                  ch.evaluate_credential(cred).bucket == "ok")
+            state = Path(td) / "state.json"
+            ch.MINT_LANE_STATE_PATH = state
+            for days, want in ((40, "ok"), (2, "expiring_soon"), (-1, "failed")):
+                state.write_text(json.dumps({"credentials": {"neon-api-key": {
+                    "expires_at": (today + _td(days=days)).isoformat() + "T08:00:00+00:00"}}}))
+                r = ch.evaluate_credential(cred)
+                check(f"mint-lane expiry {days:+d} days reads {want}", r.bucket == want, f"{r.bucket}/{r.detail}")
+        inventory = json.loads((REPO / "ops" / "config" / "credential-inventory.v1.json").read_text())
+        rows = {r["name"]: r for r in inventory["credentials"]}
+        check("neon and both Codex rows take their expiry from the mint lane",
+              all(rows[n]["expiry"].get("from_mint_state") is True
+                  for n in ("neon-api-key", "codex-cli-auth-studio", "codex-cli-auth-macbook")))
+    finally:
+        ch.MINT_LANE_STATE_PATH = real
+
+
+test_root_grant_probes()
+test_mint_lane_expiry_window()
+
+
 print(f"\ncredential-health-selftest: {PASSED}/{PASSED + len(FAILED)} passed")
 if FAILED:
     print("FAILED: " + ", ".join(FAILED))

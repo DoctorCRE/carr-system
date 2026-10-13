@@ -38,10 +38,23 @@ this lane knows, so its first rotation leaves the hand-made one in place and
 says so (`unmanaged_previous_left_in_place`).
 
 STATE in out/credential-mint-state.json: per credential the current child's id,
-mint date and expiry, plus the queue of children still to revoke. RECEIPTS in
+mint date and expiry, plus the queue of children still to revoke, plus a
+`minting` record written BEFORE each provider mint (label, then the child's id
+and the sha256 fingerprint of its value) so a night that dies between the mint
+and the store is finished or cleaned up by the next one. RECEIPTS in
 out/credential-mint-receipts.jsonl: {at, credential, provider, step, outcome},
 nothing else, ever. Neither file holds a credential value; ids are provider
 handles, not secrets.
+
+REACH. Every grant states `reach`: what its root can really do, which for a
+Cloudflare token-minting token or a Neon/OpenAI org key is far more than its
+one-line scope suggests. The loop that asks Joe for the grant carries it word
+for word, and the inventory row that verifies and ages the root (`root_grant`)
+must repeat it exactly, or load_plan() refuses.
+
+CODEX BILLING. Installing a minted OpenAI key moves Codex to metered API
+billing, so no Codex child is minted until codex_api_billing_approved is true
+in the grant file (Joe's explicit yes, by a PR he approves).
 
 A MISSING ROOT GRANT is never a live call. It files (or updates) exactly one
 open loop per provider naming the one-time grant, deduplicated by searching
@@ -60,6 +73,7 @@ No value is ever printed, logged, written to a receipt, or placed on argv.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -115,6 +129,7 @@ class GrantPlan:
     provider: str
     store_name: str | None
     scope: str
+    reach: str
     one_time_command: str | None
     ttl_days: int | None
     params: Mapping[str, Any]
@@ -140,11 +155,23 @@ def load_plan(grants_path: Path = GRANTS_PATH, inventory_path: Path = INVENTORY_
     grant_docs = {g["name"]: g for g in grants_doc["grants"]}
 
     for name, row in rows.items():
-        source, holder = row.get("self_mintable_from"), row.get("holder_only")
-        if bool(source) == bool(holder):
-            raise PlanError(f"{name}: needs exactly one of self_mintable_from or holder_only")
+        source, holder, root = (row.get("self_mintable_from"), row.get("holder_only"),
+                                row.get("root_grant"))
+        if sum(bool(x) for x in (source, holder, root)) != 1:
+            raise PlanError(f"{name}: needs exactly one of self_mintable_from, holder_only or root_grant")
         if source and source not in grant_docs:
             raise PlanError(f"{name}: self_mintable_from names unknown grant {source!r}")
+        if root:
+            # The row that health-probes and ages a root grant: it must point at
+            # that grant's stored name and repeat its reach word for word, so
+            # the inventory never understates what the root can do.
+            g = grant_docs.get(root)
+            if g is None:
+                raise PlanError(f"{name}: root_grant names unknown grant {root!r}")
+            if (row.get("probe") or {}).get("store_name") != g.get("store_name"):
+                raise PlanError(f"{name}: probes a different name than root {g.get('store_name')}")
+            if row.get("reach") != g.get("reach"):
+                raise PlanError(f"{name}: reach differs from grant {root}'s reach")
 
     grants: list[GrantPlan] = []
     for gname, g in grant_docs.items():
@@ -162,14 +189,20 @@ def load_plan(grants_path: Path = GRANTS_PATH, inventory_path: Path = INVENTORY_
             children.append(ChildPlan(c["credential"], tuple(row.get("machines", [])),
                                       store_name, install))
         self_minting = bool(g.get("self_minting"))
+        if not str(g.get("reach") or "").strip():
+            raise PlanError(f"grant {gname}: no reach (what the grant can really do) is stated")
         if children and not self_minting:
             if gname not in PROVIDERS:
                 raise PlanError(f"grant {gname}: no mint adapter")
+            if sum(1 for row in rows.values() if row.get("root_grant") == gname) != 1:
+                raise PlanError(f"grant {gname}: needs exactly one inventory row with root_grant "
+                                f"{gname!r}, so the root itself is verified and aged")
+            _check_params(gname, g.get("params") or {})
             if g.get("store_name") not in token_store.DESTINATIONS:
                 raise PlanError(f"grant {gname}: root {g.get('store_name')} has no token_store destination")
             if not isinstance(g.get("ttl_days"), int) or any(c.store_name is None for c in children):
                 raise PlanError(f"grant {gname}: a minted child needs ttl_days and a store_name")
-        grants.append(GrantPlan(gname, g["provider"], g.get("store_name"), g["scope"],
+        grants.append(GrantPlan(gname, g["provider"], g.get("store_name"), g["scope"], g["reach"],
                                 g.get("one_time_command"), g.get("ttl_days"),
                                 g.get("params") or {}, tuple(children), self_minting,
                                 g.get("deferred")))
@@ -179,6 +212,31 @@ def load_plan(grants_path: Path = GRANTS_PATH, inventory_path: Path = INVENTORY_
                               for c in g.children):
             raise PlanError(f"{name}: grant {source} does not list it as a child")
     return Plan(int(grants_doc["rotate_within_days"]), tuple(grants))
+
+
+def _check_params(gname: str, params: Mapping[str, Any]) -> None:
+    """Per-provider settings that decide how much a child can do; refused, not
+    defaulted, when absent, so no child is minted wider than the file says."""
+    if gname == "neon":
+        raw = params.get("child_scope")
+        scope: Mapping[str, Any] = raw if isinstance(raw, dict) else {}
+        kind = scope.get("kind")
+        if kind == "project":
+            if not str(scope.get("project_id") or "").strip():
+                raise PlanError("grant neon: a project-scoped child needs child_scope.project_id")
+        elif kind == "organization":
+            if not str(scope.get("because") or "").strip():
+                raise PlanError("grant neon: an org-wide child needs child_scope.because, "
+                                "the recorded reason a project-scoped key cannot serve")
+        else:
+            raise PlanError("grant neon: child_scope.kind must be 'project' or 'organization'")
+    if gname == "openai" and not isinstance(params.get("codex_api_billing_approved"), bool):
+        raise PlanError("grant openai: codex_api_billing_approved must be true or false")
+
+
+def awaiting_billing_yes(grant: GrantPlan, child: ChildPlan) -> bool:
+    """A Codex child moves Codex to metered API billing; it waits on Joe's yes."""
+    return child.install == "codex" and grant.params.get("codex_api_billing_approved") is not True
 
 
 # ── provider adapters ─────────────────────────────────────────────────────────
@@ -257,6 +315,10 @@ class Neon:
 
     def __init__(self, http: Http, params: Mapping[str, Any]):
         self.http, self.org = http, str(params["org_id"])
+        scope = params.get("child_scope") or {}
+        # Project-scoped org keys have member access to one project and cannot
+        # delete it; org-wide ones are admin. load_plan makes the choice explicit.
+        self.project_id = str(scope["project_id"]) if scope.get("kind") == "project" else None
 
     def verify_root(self, token: str) -> bool:
         status, _ = self.http("GET", f"{self.API}/projects?org_id={self.org}&limit=1", _bearer(token), None)
@@ -265,8 +327,11 @@ class Neon:
     verify_child = verify_root
 
     def mint(self, root: str, label: str, expires_at: datetime) -> tuple[Child | None, str]:
+        payload: dict[str, str] = {"key_name": label}
+        if self.project_id is not None:
+            payload["project_id"] = self.project_id
         status, body = self.http("POST", f"{self.API}/organizations/{self.org}/api_keys",
-                                 _bearer(root), {"key_name": label})
+                                 _bearer(root), payload)
         child_id, value = _field(body, "id"), _field(body, "key")
         if status is None or not 200 <= status < 300:
             return None, _status(status)
@@ -425,6 +490,7 @@ class Minter:
             state = {}
         state.setdefault("credentials", {})
         state.setdefault("pending_revoke", [])
+        state.setdefault("minting", {})
         return state
 
     def _save_state(self, state: dict[str, Any]) -> None:
@@ -442,6 +508,14 @@ class Minter:
             here = [c for c in grant.children if self.machine in c.machines]
             if grant.deferred or not here:
                 continue
+            gated = [c for c in here if awaiting_billing_yes(grant, c)]
+            here = [c for c in here if c not in gated]
+            if gated and not here:
+                # No live call: nothing may be minted until Joe says yes.
+                for c in gated:
+                    self._receipt(c.credential, grant.name, "mint", "awaiting_joe_billing_yes")
+                self._ensure_grant_loop(grant, "billing")
+                continue
             if grant.self_minting:
                 if not _github_app_key_present():
                     self._receipt(f"root-grant:{grant.name}", grant.name, "root_grant", "absent")
@@ -454,6 +528,7 @@ class Minter:
                 self._ensure_grant_loop(grant, "missing")
                 continue
             adapter = PROVIDERS[grant.name](self.http, grant.params)
+            self._recover_interrupted_mints(grant, adapter, root, here, state)
             self._retry_revocations(grant, adapter, root, state)
             results = []
             for child in here:
@@ -478,20 +553,31 @@ class Minter:
                 state: dict[str, Any]) -> str:
         name, store_name = child.credential, str(child.store_name)
         entry = state["credentials"].get(name)
-        if entry and entry.get("install_pending"):
+        if entry and (entry.get("install_pending") or entry.get("previous_child_id")):
+            # An unfinished rotation (a failed install, or one recovered after a
+            # crash) finishes before anything new is minted.
             return self._finish_install(grant, adapter, root, child, entry, state, retried=True)
         if not self._due(entry):
             return "not_due"
 
         now = self.clock()
-        new, detail = adapter.mint(root, f"carr-{name}-{now:%Y%m%d}",
-                                   now + timedelta(days=int(grant.ttl_days or 0)))
+        label = f"carr-{name}-{now:%Y%m%d}"
+        # Written BEFORE the provider is asked, so a crash anywhere between the
+        # mint and the store leaves a record the next night acts on, never a
+        # live child nobody knows about (see _recover_interrupted_mints).
+        state["minting"][name] = {"grant": grant.name, "label": label, "since": _iso(now)}
+        self._save_state(state)
+        new, detail = adapter.mint(root, label, now + timedelta(days=int(grant.ttl_days or 0)))
         if new is None:
+            state["minting"].pop(name, None)
             self._receipt(name, grant.name, "mint", f"failed_{detail}")
             return detail
+        state["minting"][name].update(child_id=new.child_id, fingerprint=_fingerprint(new.value))
+        self._save_state(state)
         self._receipt(name, grant.name, "mint", "minted")
 
         if not adapter.verify_child(new.value):
+            state["minting"].pop(name, None)
             self._receipt(name, grant.name, "verify", "failed_new_child_revoked_previous_kept")
             self._revoke_or_queue(grant, adapter, root, name, new.child_id, state, "revoke_new")
             return "verify_failed"
@@ -500,22 +586,58 @@ class Minter:
         try:
             token_store.store(store_name, new.value)
         except OSError:
+            state["minting"].pop(name, None)
             self._receipt(name, grant.name, "store", "failed_new_child_revoked_previous_kept")
             self._revoke_or_queue(grant, adapter, root, name, new.child_id, state, "revoke_new")
             return "store_failed"
         self._receipt(name, grant.name, "store", f"stored_{store_name}")
-
-        state["credentials"][name] = {
-            "grant": grant.name,
-            "child_id": new.child_id,
-            "minted_at": _iso(now),
-            "expires_at": _iso(now + timedelta(days=int(grant.ttl_days or 0))),
-            "install_pending": child.install is not None,
-            "previous_child_id": (entry or {}).get("child_id"),
-        }
+        self._adopt(grant, child, entry, new.child_id, now, state)
         self._save_state(state)  # the new child is real now; never lose its id
         return self._finish_install(grant, adapter, root, child, state["credentials"][name], state,
                                     retried=False)
+
+    def _adopt(self, grant: GrantPlan, child: ChildPlan, entry: Mapping[str, Any] | None,
+               child_id: str, minted: datetime, state: dict[str, Any]) -> None:
+        """The stored child becomes the current one; the in-flight record ends."""
+        state["credentials"][child.credential] = {
+            "grant": grant.name,
+            "child_id": child_id,
+            "minted_at": _iso(minted),
+            "expires_at": _iso(minted + timedelta(days=int(grant.ttl_days or 0))),
+            "install_pending": child.install is not None,
+            "previous_child_id": (entry or {}).get("child_id"),
+        }
+        state["minting"].pop(child.credential, None)
+
+    def _recover_interrupted_mints(self, grant: GrantPlan, adapter: Provider, root: str,
+                                   here: list[ChildPlan], state: dict[str, Any]) -> None:
+        """A `minting` record still present means a night died mid-rotation.
+        Its child id and value fingerprint (sha256, never the value) say what
+        happened: stored already -> adopt it, so the rotation finishes (install,
+        revoke the previous); minted but not stored -> revoke it, it is an orphan;
+        no id recorded -> the provider may hold a live child only its label
+        identifies, which the receipt names."""
+        for child in here:
+            pending = state["minting"].get(child.credential)
+            if not pending or pending.get("grant") != grant.name:
+                continue
+            name = child.credential
+            child_id = pending.get("child_id")
+            if not child_id:
+                state["minting"].pop(name, None)
+                self._receipt(name, grant.name, "recover_mint",
+                              f"no_id_recorded_check_provider_for_label_{pending.get('label')}")
+                continue
+            stored = token_store.read(str(child.store_name))
+            if stored is not None and _fingerprint(stored) == pending.get("fingerprint"):
+                minted = datetime.fromisoformat(pending["since"])
+                self._adopt(grant, child, state["credentials"].get(name), str(child_id), minted, state)
+                self._receipt(name, grant.name, "recover_mint", "stored_child_adopted")
+            else:
+                state["minting"].pop(name, None)
+                self._receipt(name, grant.name, "recover_mint", "unstored_child_revoking")
+                self._revoke_or_queue(grant, adapter, root, name, str(child_id), state, "revoke_new")
+        self._save_state(state)
 
     def _finish_install(self, grant: GrantPlan, adapter: Provider, root: str, child: ChildPlan,
                         entry: dict[str, Any], state: dict[str, Any], *, retried: bool) -> str:
@@ -566,13 +688,25 @@ class Minter:
         if reason == "missing":
             headline = f"{marker} Place the {grant.provider} root grant once so CARR mints its own credentials."
             state_line = f"{held_as} is not stored on this machine."
+        elif reason == "billing":
+            headline = (f"{marker} Say yes to metered Codex billing before CARR mints {grant.provider} keys.")
+            state_line = ("Installing a minted key with `codex login --with-api-key` moves Codex from "
+                          "ChatGPT-subscription auth to metered API billing. Nothing is minted until a PR "
+                          "Joe approves sets codex_api_billing_approved true in "
+                          "ops/config/credential-root-grants.v1.json; place the root grant too if it is "
+                          "not placed yet.")
         else:
             headline = f"{marker} The {grant.provider} root grant was refused; replace it once."
             state_line = f"{held_as} is stored but the provider refused it (HTTP 401/403) on a mint."
-        detail = (f"{grant.provider} root grant {reason}: Joe runs once `{grant.one_time_command}`; "
-                  f"waiting on it: {waiting}")
+        if reason == "billing":
+            detail = (f"{grant.provider} children await Joe's yes to metered Codex billing "
+                      f"(codex_api_billing_approved); waiting on it: {waiting}")
+        else:
+            detail = (f"{grant.provider} root grant {reason}: Joe runs once `{grant.one_time_command}`; "
+                      f"waiting on it: {waiting}")
         body = "\n".join([
             headline,
+            f"Reach: {grant.reach}",
             f"Scope: {grant.scope}",
             f"Run once: {grant.one_time_command}",
             state_line,
@@ -629,6 +763,10 @@ class Minter:
                 "base_version": loop.get("version"), "outcome": outcome, "resolution": "done",
                 "idempotency_key": str(uuid.uuid5(uuid.NAMESPACE_URL, key))})
             self._receipt(tag, grant.name, "loop", "closed" if result.ok else f"close-loop_{result.kind}")
+
+
+def _fingerprint(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _github_app_key_present() -> bool:
