@@ -270,6 +270,11 @@ const EVIDENCE_ROUTE_HUMAN_SEVERITIES = new Set(["SEV-0", "SEV-1"]);
 // (service|environment|operation|failure_class). Read wide on purpose: a false
 // positive sends an incident to a partner, a false negative lets an agent
 // review a security event on its own.
+// STATED LIMIT: this is a text screen, not a classification. An agent-opened
+// incident defaults to SEV-3 (open-incident), so a security event recorded
+// under a neutral title and fingerprint still takes the evidence route; only a
+// severity of SEV-0/SEV-1 or a matching word keeps it with a partner. Closing
+// that gap needs a class column on ops.incident, which this change does not add.
 const SECURITY_CLASS = /secur|credential|secret|token|auth|permission|forbidden|unauthori[sz]ed|leak|breach|exfiltrat|inject|\bphi\b|\bpii\b|privacy/i;
 
 /** Why this incident keeps the partner route, or null when the evidence route may decide it. */
@@ -940,9 +945,20 @@ export function incidentTools({ withEnvelope, writeEvent, ToolError, authorizati
         // own pattern, and it takes the correlation lock BEFORE this one while
         // this path takes only this one, so the two orderings cannot form a
         // cycle.
+        //
+        // THE ROW IT ATTACHES TO IS LOCKED. close-incident takes the same row
+        // FOR UPDATE, so a recurrence read just before a close commits used to
+        // attach its fact to the now-closed incident. FOR UPDATE waits for that
+        // close and re-checks the state filter on the committed row, so a
+        // closed incident drops out and the recurrence mints a fresh one below,
+        // and a close that starts after this lock sees the recurrence (the
+        // monitoring -> detected move) instead of closing over it. The attach
+        // already took this row lock at its observed_at update below; taking it
+        // at the read only moves it earlier, so no new writer is waited on.
         const findOpen = () => c.query(
           `select id, ref, severity, state, owner_actor from ops.incident
-            where signature = $1 and state not in ('resolved','reviewed') limit 1`,
+            where signature = $1 and state not in ('resolved','reviewed') limit 1
+              for update`,
           [fingerprint.signature]);
         let open = await findOpen();
         if (!open.rows.length) {

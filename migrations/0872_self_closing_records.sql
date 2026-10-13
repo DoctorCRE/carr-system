@@ -1,5 +1,5 @@
 -- rollback: forward-only — every row these objects hold is a closing receipt another record now stands on; stop writing by revoking execute on the two ops completion functions and insert on public.defect_resolution, and leave the rows in place.
--- lock-review: two new tables (one with a unique index on its receipt reference), eight new functions and three trigger functions; v_defect is replaced with the same columns plus four appended ones; ops.sourced_work_request_outcome_feedback_acceptance_receipt gains two columns with a constant default (metadata-only) and one CHECK validated over its 22 rows under a brief ACCESS EXCLUSIVE lock.
+-- lock-review: two new tables (one with a unique index on its receipt reference), nine new functions and three trigger functions; v_defect is replaced with the same columns plus four appended ones; ops.sourced_work_request_outcome_feedback_acceptance_receipt gains two columns with a constant default (metadata-only) and one CHECK validated over its 22 rows under a brief ACCESS EXCLUSIVE lock.
 -- 0872: self-closing records (Joe, 2026-10-12, decision cbe91287: "this system
 -- needs to be able to function without me micromanaging it").
 --
@@ -47,6 +47,19 @@
 --     recorded as a release slice member, a succeeded run, a complete deployment
 --     or a resolved incident. A bare sha or a PR number nobody recorded is
 --     refused by the table itself.
+--   * and only on evidence ABOUT THAT DEFECT
+--     (ops.defect_resolution_evidence_mismatch): the slice member's merged
+--     commit subject, the run's run_key, source_ref or evidence_ref, or the
+--     deployment's shipped subject names the defect's id or a Work Request that
+--     names it (the defect bridge's filing), and an incident is linked to the
+--     defect or to such a Work Request. A real shipped commit about something
+--     else closes nothing, so a close cannot launder unrelated work into Work
+--     Request or incident evidence.
+--
+-- STATED LIMIT: ops.release_slice_member is self-asserted. Its subject,
+-- commit_sha and pr_number come from the slice-marker seat, and the database
+-- cannot see git, so a commit or pull request close stands on that seat's
+-- record of what shipped, not on proof that the commit is in the release.
 
 -- ── 1. defect resolution ─────────────────────────────────────────────────────
 
@@ -130,12 +143,84 @@ end $fn$;
 comment on function ops.defect_resolution_evidence_receipt(text, text) is
   'What a defect close stands on (0872): release-slice-member:<uuid> for a commit or pull request the server recorded as merged and shipped, or the receipt itself when it is a succeeded run, a complete deployment or a resolved incident. Null otherwise; public.defect_resolution refuses the insert on null.';
 
+-- WHY RESOLVING EVIDENCE IS NOT YET EVIDENCE FOR THIS DEFECT, or null when it
+-- is. Existence is not enough: a close's receipt is later bound as Work Request
+-- and incident evidence, so the evidence must name the defect, the same way the
+-- run and deployment arms of ops.work_request_evidence_receipt_mismatch name a
+-- request. A name is the defect's full id, or the ref of a Work Request whose
+-- title, desired outcome or acceptance criteria name that id (how the defect
+-- bridge files one), each as a whole token in:
+--   commit / pull request   a release slice member's merged commit subject
+--   run                     run_key, source_ref or evidence_ref, or a release
+--                           recorded for such a Work Request
+--   deployment              a shipped release slice member's subject
+--   incident                an incident_link to the defect, or to such a
+--                           Work Request
+-- SECURITY DEFINER for the same reason as the resolver: carr_writer holds no
+-- grant on the slice ledger.
+create function ops.defect_resolution_evidence_mismatch(p_defect_id uuid, p_kind text, p_ref text) returns text
+language plpgsql stable security definer set search_path = pg_catalog, ops, public, pg_temp as $fn$
+declare
+  v_ref constant text := ops.work_request_evidence_receipt_normalized(p_ref);
+  v_defect constant text := lower(p_defect_id::text);
+  v_requests text[];
+  v_names text;
+begin
+  if ops.defect_resolution_evidence_receipt(p_kind, p_ref) is null then
+    return format('defect_resolution_evidence_unresolved: %s %s resolves to no merged commit or pull request the server recorded, succeeded run, complete deployment or resolved incident',
+                  coalesce(p_kind, 'null'), coalesce(v_ref, 'null'));
+  end if;
+  select coalesce(array_agg(w.ref order by w.ref), '{}') into v_requests
+    from ops.work_request w
+   where position(v_defect in lower(coalesce(w.title, '') || ' ' || coalesce(w.desired_outcome, '')
+                                    || ' ' || w.acceptance_criteria::text)) > 0;
+  v_names := '(^|[^A-Za-z0-9])(' || array_to_string(v_defect || v_requests, '|') || ')([^A-Za-z0-9]|$)';
+  if p_kind = 'commit' then
+    if exists (select 1 from ops.release_slice_member m
+                where m.commit_sha like v_ref || '%' and m.subject ~* v_names) then
+      return null;
+    end if;
+  elsif p_kind = 'pull_request' then
+    if exists (select 1 from ops.release_slice_member m
+                where m.pr_number = v_ref::integer and m.subject ~* v_names) then
+      return null;
+    end if;
+  elsif v_ref ~ '^ops\.run:' then
+    if exists (select 1 from ops.run r left join ops.release rel on rel.id = r.release_id
+                where r.id = substring(v_ref from 9)::uuid
+                  and (rel.work_request_ref = any (v_requests) or coalesce(r.run_key, '') ~* v_names
+                       or coalesce(r.source_ref, '') ~* v_names or coalesce(r.evidence_ref, '') ~* v_names)) then
+      return null;
+    end if;
+  elsif v_ref ~ '^ops\.deployment:' then
+    if exists (select 1 from ops.deployment d
+                 join ops.release_slice_member m on m.release_id = d.release_id
+                where d.id = substring(v_ref from 16)::uuid and m.subject ~* v_names) then
+      return null;
+    end if;
+  elsif v_ref ~ '^incident:' then
+    if exists (select 1 from ops.incident i
+                 join ops.incident_link l on l.incident_id = i.id
+                where i.ref = substring(v_ref from 10)
+                  and ((l.kind = 'defect' and lower(btrim(l.ref)) = v_defect)
+                       or (l.kind = 'work_request' and l.ref = any (v_requests)))) then
+      return null;
+    end if;
+  end if;
+  return format('defect_resolution_evidence_not_about_defect: %s %s names neither defect %s nor a Work Request that names it (%s)',
+                p_kind, v_ref, v_defect, coalesce(nullif(array_to_string(v_requests, ', '), ''), 'none does'));
+end $fn$;
+
+comment on function ops.defect_resolution_evidence_mismatch(uuid, text, text) is
+  'Why fix evidence may not close this defect (0872), or null when it may: the evidence must resolve (ops.defect_resolution_evidence_receipt) and name the defect''s id, or a Work Request naming it, in the slice member subject, the run''s key or references, the deployment''s shipped subject, or an incident link. public.defect_resolution refuses the insert on a non-null answer.';
+
 create function public.defect_resolution_evidence_must_resolve() returns trigger
 language plpgsql set search_path = pg_catalog, public, pg_temp as $fn$
+declare
+  v_mismatch constant text := ops.defect_resolution_evidence_mismatch(new.defect_id, new.evidence_kind, new.evidence_ref);
 begin
-  if ops.defect_resolution_evidence_receipt(new.evidence_kind, new.evidence_ref) is null then
-    raise exception 'defect_resolution_evidence_unresolved: % % resolves to no merged commit or pull request the server recorded, succeeded run, complete deployment or resolved incident',
-      new.evidence_kind, new.evidence_ref using errcode = '23514';
+  if v_mismatch is not null then
+    raise exception '%', v_mismatch using errcode = '23514';
   end if;
   return new;
 end $fn$;
@@ -226,8 +311,8 @@ comment on function ops.work_request_evidence_receipt_kind(text) is
 --   run          belongs to a release recorded for the request
 --                (ops.release.work_request_ref), or names the request in its
 --                run_key, source_ref or evidence_ref
---   deployment   ships a release slice member whose slice id is the request or
---                whose merged commit subject names it
+--   deployment   ships a release slice member whose merged commit subject
+--                names it
 --   defect       the closed defect is one the request names (title, desired
 --                outcome or acceptance criteria), as the defect bridge files it
 --   incident     linked to the request (link-incident-work-request)
@@ -260,10 +345,10 @@ begin
     if exists (select 1 from ops.deployment d
                  join ops.release_slice_member m on m.release_id = d.release_id
                 where d.id = substring(v_ref from 16)::uuid
-                  and (m.slice_id = w.ref or m.subject ~ v_names)) then
+                  and m.subject ~ v_names) then
       return null;
     end if;
-    return format('deployment_not_linked_to_work_request: %s ships no release slice member whose slice or merged commit subject names %s',
+    return format('deployment_not_linked_to_work_request: %s ships no release slice member whose merged commit subject names %s',
                   v_ref, w.ref);
   elsif v_kind = 'defect_resolution' then
     if exists (select 1 from public.defect_resolution x
@@ -602,6 +687,7 @@ comment on function ops.bind_work_request_criterion_evidence(text, text, text, u
 
 revoke all on function ops.work_request_evidence_receipt_normalized(text) from public;
 revoke all on function ops.defect_resolution_evidence_receipt(text, text) from public;
+revoke all on function ops.defect_resolution_evidence_mismatch(uuid, text, text) from public;
 revoke all on function public.defect_resolution_evidence_must_resolve() from public;
 revoke all on function ops.work_request_evidence_receipt_mismatch(text, uuid) from public;
 revoke all on function ops.work_request_completion_actor() from public;
@@ -611,6 +697,7 @@ revoke all on function ops.complete_sourced_work_request_on_bound_evidence(text,
 revoke all on function ops.bind_work_request_criterion_evidence(text, text, text, uuid) from public;
 grant execute on function ops.work_request_evidence_receipt_normalized(text) to carr_writer, carr_reader;
 grant execute on function ops.defect_resolution_evidence_receipt(text, text) to carr_writer;
+grant execute on function ops.defect_resolution_evidence_mismatch(uuid, text, text) to carr_writer;
 grant execute on function ops.work_request_evidence_receipt_kind(text) to carr_writer, carr_reader;
 grant execute on function ops.work_request_bound_evidence_verdict(jsonb, jsonb) to carr_writer, carr_reader;
 grant execute on function ops.complete_sourced_work_request_on_bound_evidence(text, uuid) to carr_writer;

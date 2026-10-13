@@ -649,6 +649,37 @@ test("open-incident takes the same ref-allocation lock the Python writer takes",
     "the first look is unlocked, the second is the one the lock protects");
 });
 
+test("the attach locks the incident it reads, so a close that commits first sends the recurrence to a fresh incident", async () => {
+  // The race: a recurrence read the open incident, then close-incident
+  // (which holds the same row FOR UPDATE) reviewed it, and the recurrence's
+  // fact landed on the closed incident. The lookup now locks the row; once the
+  // close commits, PostgreSQL re-checks the state filter on the new row
+  // version, the reviewed incident drops out, and the recurrence mints.
+  let looks = 0;
+  const fake = new Fake({
+    "from tool_call where idempotency_key": [],
+    "from ops.service where key": [{ id: "svc-1", key: "carr-mcp" }],
+    // the locked lookup waited out the close: no open incident remains
+    "from ops.incident where signature": () => { looks += 1; return []; },
+    "as occurrences from ops.incident": [{ occurrences: 1 }],
+    "coalesce(max(substring(ref": [{ day: "20260823", seq: 2 }],
+    "insert into ops.incident (": [{ id: "inc-new" }],
+  });
+  const out = await TOOLS["open-incident"].handler(fake, joe, {
+    idempotency_key: "k-race", service: "carr-mcp", environment: "production",
+    operation: "mcp:tools/call:find", failure_class: "verb_internal_error",
+  });
+  const lookups = fake.sql.filter(([s]) => s.includes("from ops.incident where signature")).map(([s]) => s);
+  assert.equal(looks, 2);
+  for (const s of lookups)
+    assert.match(s, /state not in \('resolved','reviewed'\) limit 1 for update$/,
+      "every lookup an attach can act on holds the row against a concurrent close");
+  assert.equal(out.opened, true, "the recurrence opens a fresh incident instead of joining the closed one");
+  assert.equal(out.ref, "INC-20260823-02");
+  const fact = fake.sql.find(([s]) => s.includes("insert into ops.incident_fact"));
+  assert.equal(fact[1][0], "inc-new", "the fact lands on the new incident, never on the reviewed one");
+});
+
 test("an attach never takes the global mint lock", async () => {
   // The liveness half. ops-record.py's assess holds this lock for its whole
   // transaction; an unattended run recording a repeat must not queue behind it

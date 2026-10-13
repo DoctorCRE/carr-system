@@ -16,7 +16,9 @@
 //      agent binds or completes; an unsponsored runtime is refused (42501).
 //   5. public.defect_resolution: one close per defect, evidence of a fixed
 //      shape that the server already holds (a bare sha or an unknown PR is
-//      refused by the table), and no update, delete or truncate once written.
+//      refused by the table) AND that names the defect or a Work Request
+//      naming it (a real shipped commit about something else is refused), and
+//      no update, delete or truncate once written.
 //   6. One receipt binds to one criterion, ever.
 //
 // The tables are the current db/schema.sql definitions; the objects under test
@@ -89,6 +91,7 @@ test("0872's predicates decide on a real PostgreSQL", { skip: !bin && "local Pos
     await c.query(lift(/create function public\.defect_resolution_is_append_only\(\)[\s\S]*?end \$fn\$;/, "the append-only trigger"));
     await c.query(lift(/create function ops\.work_request_evidence_receipt_normalized\([\s\S]*?\n\$fn\$;/, "the receipt normaliser"));
     await c.query(lift(/create function ops\.defect_resolution_evidence_receipt\([\s\S]*?end \$fn\$;/, "the defect evidence resolver"));
+    await c.query(lift(/create function ops\.defect_resolution_evidence_mismatch\([\s\S]*?end \$fn\$;/, "the defect relevance check"));
     await c.query(lift(/create function public\.defect_resolution_evidence_must_resolve\(\)[\s\S]*?end \$fn\$;/, "the evidence trigger"));
     await c.query(lift(/create trigger defect_resolution_evidence_resolves[\s\S]*?;/, "the evidence insert trigger"));
     await c.query(lift(/create trigger defect_resolution_append_only[\s\S]*?;/, "the row trigger"));
@@ -212,13 +215,57 @@ test("0872's predicates decide on a real PostgreSQL", { skip: !bin && "local Pos
     await refused(`insert into public.defect_resolution (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
       values ($1, 'receipt', $3, 'k-red', $2)`, [defect, JOE, `ops.run:${red}`], "a failed run as fix evidence",
       /defect_resolution_evidence_unresolved/);
+
+    // ── relevance: real shipped evidence about something else closes nothing ─
+    const relevance = async (defectId, evidenceKind, ref) =>
+      (await c.query("select ops.defect_resolution_evidence_mismatch($1, $2, $3) as m", [defectId, evidenceKind, ref])).rows[0].m;
+    assert.equal(await resolver("commit", "1111111"), `release-slice-member:${(await c.query(
+      "select id from ops.release_slice_member where pr_number = 1712")).rows[0].id}`,
+      "the unrelated commit really is merged and shipped");
+    await refused(`insert into public.defect_resolution (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+      values ($1, 'commit', '1111111', 'k-unrelated-commit', $2)`, [defect, JOE],
+      "an unrelated shipped commit as this defect's fix", /^defect_resolution_evidence_not_about_defect: commit 1111111 .*WR-000201/);
+    await refused(`insert into public.defect_resolution (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+      values ($1, 'pull_request', '1712', 'k-unrelated-pr', $2)`, [defect, JOE],
+      "an unrelated merged pull request", /^defect_resolution_evidence_not_about_defect/);
+    await refused(`insert into public.defect_resolution (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+      values ($1, 'receipt', $3, 'k-unrelated-run', $2)`, [otherDefect, JOE, `ops.run:${namingGreen}`],
+      "a green run naming a request that does not name this defect", /^defect_resolution_evidence_not_about_defect/);
+    await refused(`insert into public.defect_resolution (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+      values ($1, 'commit', 'abcdef0', 'k-other-commit', $2)`, [otherDefect, JOE],
+      "a commit naming another defect's request", /^defect_resolution_evidence_not_about_defect/);
+    await refused(`insert into public.defect_resolution (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+      values ($1, 'receipt', $3, 'k-other-deploy', $2)`, [otherDefect, JOE, `ops.deployment:${await deployment(shippingRelease)}`],
+      "a deployment shipping only another defect's fix", /^defect_resolution_evidence_not_about_defect/);
+    await refused(`insert into public.defect_resolution (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+      values ($1, 'receipt', 'incident:INC-20260901-05', 'k-other-incident', $2)`, [otherDefect, JOE],
+      "a resolved incident linked to nothing about this defect", /^defect_resolution_evidence_not_about_defect/);
     await c.query("commit");
+    assert.equal(await relevance(defect, "commit", "abcdef0"), null,
+      "a shipped commit whose subject names a Work Request that names the defect is its fix");
+    assert.equal(await relevance(defect, "pull_request", "1711"), null);
+    assert.equal(await relevance(defect, "receipt", `ops.deployment:${await deployment(shippingRelease)}`), null,
+      "a deployment shipping that commit is its fix");
+    const namedByIdRelease = await release(null);
+    await member(namedByIdRelease, `fix: defect ${otherDefect.toUpperCase()} (#1713)`, { sha: "2".repeat(40), pr: 1713 });
+    assert.equal(await relevance(otherDefect, "commit", "2222222"), null, "a subject naming the defect id itself, in any case");
+    await member(namedByIdRelease, `fix: defect ${otherDefect}0 (#1714)`, { sha: "3".repeat(40), pr: 1714 });
+    assert.match(await relevance(otherDefect, "commit", "3333333"), /^defect_resolution_evidence_not_about_defect/,
+      "a longer token that merely starts with the id does not name it");
+    const incidentFix = (await incident("INC-20260901-06", "resolved")).rows[0].id;
+    await c.query("insert into ops.incident_link (incident_id, kind, ref) values ($1, 'defect', $2)", [incidentFix, otherDefect]);
+    assert.equal(await relevance(otherDefect, "receipt", "incident:INC-20260901-06"), null, "an incident linked to the defect");
+    assert.equal(await relevance(defect, "receipt", "incident:INC-20260901-03"), null,
+      "an incident linked to a Work Request that names the defect");
+    assert.match(await relevance(defect, "commit", "abcdef9"), /^defect_resolution_evidence_unresolved/,
+      "evidence that does not exist is refused as unresolved first");
     assert.equal(await resolver("commit", "abcdef0"), `release-slice-member:${shippedMember}`,
       "a merged commit the server recorded resolves, by prefix when the prefix is unique");
     assert.equal(await resolver("pull_request", "1711"), `release-slice-member:${shippedMember}`);
     assert.equal(await resolver("receipt", `ops.run:${green.toUpperCase()}`), `ops.run:${green}`);
     const resolution = (await close(defect, "commit", "abcdef0", "k-1")).rows[0].id;
-    const otherResolution = (await close(otherDefect, "receipt", `ops.run:${namingGreen}`, "k-o")).rows[0].id;
+    const otherFix = await run("succeeded", { runKey: `fix defect:${otherDefect}` });
+    const otherResolution = (await close(otherDefect, "receipt", `ops.run:${otherFix}`, "k-o")).rows[0].id;
     assert.equal(await kind(`defect-resolution:${resolution}`), "defect_resolution");
     assert.equal(await mismatch(`defect-resolution:${resolution}`), null, "the close of a defect the request names");
     assert.match(await mismatch(`defect-resolution:${otherResolution}`), /^defect_not_linked_to_work_request/,

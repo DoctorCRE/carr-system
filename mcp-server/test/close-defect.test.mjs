@@ -15,6 +15,10 @@
 //      number is not enough: ops.defect_resolution_evidence_receipt must
 //      resolve it to a row (a merged and shipped release slice member, a
 //      succeeded run, a complete deployment, a resolved incident) first.
+//   4. A close on real evidence about something else. A shipped commit that
+//      fixed another defect is not this defect's fix, so
+//      ops.defect_resolution_evidence_mismatch must find the defect (or a Work
+//      Request naming it) named in that evidence, or nothing is written.
 //
 // Run with: node --test mcp-server/test/close-defect.test.mjs
 
@@ -107,7 +111,7 @@ test("a bare commit sha the server holds no record of is refused, and nothing is
   assert.equal(payload.error, "unresolved_resolution_evidence");
   assert.equal(payload.evidence_ref, "abcdef0");
   const asked = fake.sql.find(([s]) => s.includes("ops.defect_resolution_evidence_receipt"));
-  assert.deepEqual(asked[1], ["commit", "abcdef0"], "the server resolves the evidence, not the caller");
+  assert.deepEqual(asked[1], [DEFECT, "commit", "abcdef0"], "the server resolves the evidence, not the caller");
   assert.ok(!fake.sql.some(([s]) => s.includes("insert into public.defect_resolution")));
   assert.ok(!fake.sql.some(([s]) => s.startsWith("insert into event")));
 });
@@ -125,7 +129,7 @@ test("a receipt the server resolves is accepted, and an uppercase uuid is the sa
   const fake = new Fake({
     "from tool_call where idempotency_key": [],
     "from public.defect where id": [{ id: DEFECT, defect_class: "x" }],
-    "ops.defect_resolution_evidence_receipt": (params) => [{ receipt: params[1] === run ? run : null }],
+    "ops.defect_resolution_evidence_receipt": (params) => [{ receipt: params[2] === run ? run : null }],
     "insert into public.defect_resolution": [{ id: RESOLUTION, created_at: "2026-10-12T12:00:00.000Z" }],
   });
   const out = await close(fake, { evidence_kind: "receipt", evidence_ref: run.toUpperCase().replace("OPS.RUN", "ops.run") });
@@ -134,6 +138,24 @@ test("a receipt the server resolves is accepted, and an uppercase uuid is the sa
   assert.equal(out.resolved_to, run);
   const insert = fake.sql.find(([s]) => s.includes("insert into public.defect_resolution"));
   assert.deepEqual(insert[1].slice(0, 3), [DEFECT, "receipt", run]);
+});
+
+test("real shipped evidence that does not name the defect is refused, and nothing is written", async () => {
+  const reason = `defect_resolution_evidence_not_about_defect: commit abcdef0 names neither defect ${DEFECT} nor a Work Request that names it (WR-000201)`;
+  const fake = new Fake({
+    "from tool_call where idempotency_key": [],
+    "from public.defect where id": [{ id: DEFECT, defect_class: "x" }],
+    "ops.defect_resolution_evidence_receipt": [{ receipt: MEMBER, mismatch: reason }],
+  });
+  const payload = await refuse(() => close(fake, { evidence_kind: "commit", evidence_ref: "abcdef0" }));
+  assert.equal(payload.error, "resolution_evidence_not_about_defect");
+  assert.equal(payload.reason, reason, "the refusal carries the server's named reason");
+  assert.equal(payload.defect_id, DEFECT);
+  const asked = fake.sql.find(([s]) => s.includes("ops.defect_resolution_evidence_mismatch"));
+  assert.ok(asked, "the relevance check is the server's, asked before any write");
+  assert.deepEqual(asked[1], [DEFECT, "commit", "abcdef0"], "the defect being closed is part of the question");
+  assert.ok(!fake.sql.some(([s]) => s.includes("insert into public.defect_resolution")));
+  assert.ok(!fake.sql.some(([s]) => s.startsWith("insert into event")));
 });
 
 test("a defect that does not exist is refused, and nothing is written", async () => {

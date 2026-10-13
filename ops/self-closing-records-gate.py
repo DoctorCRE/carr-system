@@ -16,7 +16,7 @@ Proves, on the real schema and as the runtime role that fires each door:
   receipt already bound to another criterion, and a second different receipt
   for a bound criterion;
 * a defect closes only on evidence the server holds: a bare sha is refused by
-  the table itself;
+  the table itself, and so is a real green run that does not name the defect;
 * both doors replay exactly on their idempotency key;
 * the human acceptance path is untouched and still stamps human_acceptance;
 * defect_resolution and work_request_criterion_evidence are append-only.
@@ -168,19 +168,25 @@ def main() -> int:
             criteria = [{"id": "ALPHA", "text": f"defect:{defect_a} is fixed"},
                         {"id": "BETA", "text": f"defect:{defect_b} is fixed"}]
             request_id, ref, version, plan_hash = ready_request(p6, cur, joe_id, "Self-closing", criteria)
-            fix = evidence_run(cur)
+            unrelated_run = evidence_run(cur, "nightly")
 
-            # A defect closes only on evidence the server holds.
+            # A defect closes only on evidence the server holds, about that defect.
             set_local_role(cur, "carr_writer")
             refused_with(cur, """insert into public.defect_resolution
                 (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
                 values (%s,'commit','abcdef0',%s,%s)""", (defect_a, str(uuid.uuid4()), joe_id),
                 "closing a defect on a bare sha", "defect_resolution_evidence_unresolved")
+            refused_with(cur, """insert into public.defect_resolution
+                (defect_id, evidence_kind, evidence_ref, idempotency_key, resolved_by)
+                values (%s,'receipt',%s,%s,%s)""", (defect_a, unrelated_run, str(uuid.uuid4()), joe_id),
+                "closing a defect on a green run that does not name it",
+                "defect_resolution_evidence_not_about_defect")
             cur.execute("reset role")
-            receipt_a = resolve_defect(cur, joe_id, defect_a, fix)
-            receipt_b = resolve_defect(cur, joe_id, defect_b, fix)
-            receipt_stranger = resolve_defect(cur, joe_id, defect_stranger, fix)
-            unrelated_run = evidence_run(cur, "nightly")
+            receipt_a = resolve_defect(cur, joe_id, defect_a, evidence_run(cur, f"fix defect:{defect_a}"))
+            # The request's own ref names defect_b: the defect bridge's link.
+            receipt_b = resolve_defect(cur, joe_id, defect_b, evidence_run(cur, f"self-closing-gate {ref}"))
+            receipt_stranger = resolve_defect(cur, joe_id, defect_stranger,
+                                              evidence_run(cur, f"fix defect:{defect_stranger}"))
 
             set_local_role(cur, "carr_writer")
             act_as(cur, None)

@@ -21,6 +21,13 @@
 // succeeded run, a complete deployment, a resolved incident) or refuses. The
 // table's own insert trigger asks the same function, so this check is the
 // early, explained refusal and the trigger is the one that cannot be bypassed.
+//
+// AND THE EVIDENCE MUST BE ABOUT THIS DEFECT. A real shipped commit that fixed
+// something else would otherwise close any defect, and that close would then
+// count as Work Request and incident evidence. ops.defect_resolution_evidence_mismatch
+// requires the slice member's subject, the run's key or references, the
+// deployment's shipped subject, or an incident link to name the defect's id or
+// a Work Request that names it; the same insert trigger enforces it.
 
 import { ToolError as DefaultToolError } from "./tool-error.js";
 
@@ -67,6 +74,8 @@ export function defectResolutionTools({ withEnvelope, writeEvent, ToolError }) {
         "Close ONE defect on evidence of its fix that the server already holds: a commit or pull request " +
         "recorded as merged and shipped (a release slice member), or a server receipt " +
         "(ops.run:<uuid> that succeeded, ops.deployment:<uuid> that completed, incident:<ref> that is resolved). " +
+        "The evidence must name THIS defect: its id, or a Work Request that names it, in the merged commit " +
+        "subject, the run's key or references, the deployment's shipped subject, or an incident link. " +
         "A sha or PR number the server has no record of is refused, because the close's receipt is later bound " +
         "as Work Request and incident evidence. Joe's 2026-10-12 ruling (decision " +
         "cbe91287) removed the human from closing records the system can close on evidence; until then " +
@@ -97,15 +106,25 @@ export function defectResolutionTools({ withEnvelope, writeEvent, ToolError }) {
           throw new ToolError({ error: "no_such_defect", defect_id: defectId,
             hint: "no defect has this id; read v_defect for the open ones. Nothing was written." });
 
-        const resolved = (await c.query(
-          "select ops.defect_resolution_evidence_receipt($1::text, $2::text) as receipt /* close-defect:resolve-evidence */",
-          [evidence.evidence_kind, evidence.evidence_ref])).rows[0]?.receipt || null;
+        const checked = (await c.query(
+          `select ops.defect_resolution_evidence_receipt($2::text, $3::text) as receipt,
+                  ops.defect_resolution_evidence_mismatch($1::uuid, $2::text, $3::text) as mismatch
+             /* close-defect:resolve-evidence */`,
+          [defectId, evidence.evidence_kind, evidence.evidence_ref])).rows[0] || {};
+        const resolved = checked.receipt || null;
         if (!resolved)
           throw new ToolError({ error: "unresolved_resolution_evidence", ...evidence,
             hint: "the server holds no record of this evidence: a commit or pull request must be recorded as " +
                   "merged and shipped (record-release-slice-members), and a receipt must be a succeeded " +
                   "ops.run:<uuid>, a complete ops.deployment:<uuid> or a resolved incident:<ref>. A bare sha " +
                   "or PR number is not evidence. Nothing was written." });
+        if (checked.mismatch)
+          throw new ToolError({ error: "resolution_evidence_not_about_defect", defect_id: defectId, ...evidence,
+            reason: checked.mismatch,
+            hint: "the evidence exists but does not name this defect: the merged commit subject, the run's " +
+                  "run_key/source_ref/evidence_ref, or the deployment's shipped subject must name the defect id " +
+                  "or a Work Request that names it, or the incident must be linked to the defect or to that " +
+                  "Work Request. Nothing was written." });
 
         // Two racing closes meet at the one-per-defect constraint; the loser
         // reads the winner's receipt below instead of writing a second one.
