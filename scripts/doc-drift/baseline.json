@@ -1,0 +1,5435 @@
+{
+  "schema": "doc-drift/v1",
+  "owner": "orchestrator",
+  "scope": "full",
+  "source_sha": "11acb2c9a2016fd5cdacd0e411bb9159a137f8f3",
+  "files_checked": [
+    ".github/PULL_REQUEST_TEMPLATE.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "RECOVERY.md",
+    "SUMMARY.md",
+    "audits/rule-delivery-finding-cause-split-2026-08-27.md",
+    "claude-tree/agents/README.md",
+    "claude-tree/agents/_ROSTER-ADDITIONS-it-support.md",
+    "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+    "claude-tree/agents/benefit-summary.md",
+    "claude-tree/agents/client-intake.md",
+    "claude-tree/agents/costar-operator.md",
+    "claude-tree/agents/council-attorney.md",
+    "claude-tree/agents/council-contractor.md",
+    "claude-tree/agents/council-landlord.md",
+    "claude-tree/agents/council-lender.md",
+    "claude-tree/agents/council-listing-agent.md",
+    "claude-tree/agents/council-skeptic.md",
+    "claude-tree/agents/it-lane-worker.md",
+    "claude-tree/agents/it-support.md",
+    "claude-tree/agents/marketing-ads.md",
+    "claude-tree/agents/marketing-coo.md",
+    "claude-tree/agents/marketing-research.md",
+    "claude-tree/agents/salesforce-reader.md",
+    "claude-tree/skills/build-interactive-map/SKILL.md",
+    "claude-tree/skills/council/SKILL.md",
+    "claude-tree/skills/network-debrief/SKILL.md",
+    "claude-tree/skills/social-media-manager/SKILL.md",
+    "claude-tree/skills/surface-review/SKILL.md",
+    "claude-tree/skills/watch-video/SKILL.md",
+    "claude-tree/skills/write-content/SKILL.md",
+    "claude-tree/skills/write-content/graphics/fonts/README.md",
+    "claude-tree/skills/writing-audit/SKILL.md",
+    "control-room/README.md",
+    "corpus/00_Context/model-tiering.md",
+    "corpus/DNA/Deal Management/deal-analysis-toolkit.md",
+    "corpus/DNA/Deal Management/legal-considerations-lease-review.md",
+    "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
+    "corpus/DNA/Deal Management/playbooks/diligence-and-valuation.md",
+    "corpus/DNA/Deal Management/playbooks/financing.md",
+    "corpus/DNA/Deal Management/playbooks/negotiation.md",
+    "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+    "corpus/DNA/Deal Management/playbooks/renewals.md",
+    "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+    "corpus/DNA/Deal Management/record-layer/dell-onboarding-runbook-2026-08-01.md",
+    "corpus/DNA/Leads/costar-playbook.md",
+    "corpus/DNA/Leads/pipeline-craft.md",
+    "corpus/DNA/Marketing/Social Media/community-group-playbook-2026.md",
+    "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+    "corpus/DNA/Marketing/Social Media/facebook-strategy-2026.md",
+    "corpus/DNA/Marketing/Social Media/instagram-strategy-2026.md",
+    "corpus/DNA/Marketing/Social Media/linkedin-strategy-2026.md",
+    "corpus/DNA/Marketing/Social Media/marketing-playbook.md",
+    "corpus/DNA/Network/vendor-by-industry-reference.md",
+    "corpus/DNA/Network/vendor-intro-timeline.md",
+    "corpus/DNA/Network/vendor-relationship-craft.md",
+    "corpus/DNA/Reference/dental-vertical-guide.md",
+    "corpus/DNA/Reference/medical-vertical-guide.md",
+    "corpus/DNA/Reference/other-healthcare-vertical-guide.md",
+    "corpus/DNA/Reference/vet-vertical-guide.md",
+    "corpus/DNA/Reference/vision-vertical-guide.md",
+    "corpus/DNA/Research/costar-how-to.md",
+    "corpus/DNA/Research/maps-and-demographics.md",
+    "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+    "corpus/DNA/Team/dell-starter-kit/dell-project-instructions.md",
+    "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+    "corpus/DNA/Team/dell-starter-kit/template-INDEX.md",
+    "corpus/DNA/brand-voice.md",
+    "corpus/DNA/carr-profile.md",
+    "corpus/DNA/objection-bank.md",
+    "corpus/DNA/templates.md",
+    "corpus/DNA/ux-doctrine.md",
+    "corpus/DNA/writing-rules.md",
+    "corpus/INDEX.md",
+    "corpus/Marketing/Social Media/social-media-workflow.md",
+    "corpus/Marketing/Social Media/x-article-playbook.md",
+    "corpus/README.md",
+    "corpus/_home/.claude/skills/catchup/SKILL.md",
+    "corpus/_home/.claude/skills/checkpoint/SKILL.md",
+    "corpus/_home/.claude/skills/crux/SKILL.md",
+    "corpus/_home/.claude/skills/decide/SKILL.md",
+    "corpus/_home/.claude/skills/handoff/SKILL.md",
+    "corpus/_home/.claude/skills/loose-ends/SKILL.md",
+    "corpus/_home/.claude/skills/onboard/SKILL.md",
+    "corpus/_home/.claude/skills/options/SKILL.md",
+    "corpus/_home/.claude/skills/premortem/SKILL.md",
+    "corpus/_home/.claude/skills/redteam/SKILL.md",
+    "corpus/_home/.claude/skills/til/SKILL.md",
+    "corpus/_home/.claude/skills/understand-check/SKILL.md",
+    "dealroom/SUMMARY.md",
+    "deliverables/instagram-grid-reset-2026-08-11/README.md",
+    "deliverables/instagram-grid-reset-2026-08-11/captions.md",
+    "design/doctrine-store-build-2026-08-07.md",
+    "design/situation-retrieval-build-plan-2026-08-16.md",
+    "docs/frontier-finding/README.md",
+    "docs/frontier-finding/comparison-report.md",
+    "docs/frontier-finding/cs-review-trail.md",
+    "docs/frontier-finding/gated-register-plan.md",
+    "docs/frontier-finding/r13-frontier-forensics.md",
+    "docs/frontier-finding/r14-migration-tool-gating.md",
+    "docs/frontier-finding/target-identity-contract.md",
+    "evals/README.md",
+    "evals/importers/clients-active.md",
+    "evals/retrieval/observations/README.md",
+    "evals/rule-delivery/README.md",
+    "evals/rule-delivery/runs/results.md",
+    "evals/rule-delivery/runs/v1/change.md",
+    "evals/rule-delivery/runs/v2/change.md",
+    "evals/rule-delivery/runs/v3/change.md",
+    "hooks/SETTINGS-BLOCK.md",
+    "migrations/0059_org_identity_spec.md",
+    "migrations/0061_national_account_spec.md",
+    "migrations/0064_counterparty_scorecard_spec.md",
+    "migrations/0066_marketing_campaign_and_measurement_spec.md",
+    "migrations/README.md",
+    "ops/calendar-prebrief-joe-runtime.md",
+    "ops/joe-batch-queue.v1.md",
+    "ops/order42b-history-purge.md",
+    "ops/scheduled-tasks/ai-capability-builder.SKILL.md",
+    "ops/scheduled-tasks/calendar-fetch-daily.SKILL.md",
+    "ops/scheduled-tasks/calendar-prebrief-canary-dell-daily.SKILL.md",
+    "ops/scheduled-tasks/calendar-prebrief-canary-joe-daily.SKILL.md",
+    "ops/scheduled-tasks/calendar-prebrief-projection-dell-daily.SKILL.md",
+    "ops/scheduled-tasks/calendar-prebrief-projection-joe-daily.SKILL.md",
+    "ops/scheduled-tasks/cc-update-audit.SKILL.md",
+    "ops/scheduled-tasks/contact-enrichment-weekly.SKILL.md",
+    "ops/scheduled-tasks/content-fuel-harvest-weekly.SKILL.md",
+    "ops/scheduled-tasks/deal-history-research-weekly.SKILL.md",
+    "ops/scheduled-tasks/dell/dell-daily-heartbeat.SKILL.md",
+    "ops/scheduled-tasks/dell/dell-monday-brief.SKILL.md",
+    "ops/scheduled-tasks/dell/dell-social-batch-weekly.SKILL.md",
+    "ops/scheduled-tasks/engineering-slice.SKILL.md",
+    "ops/scheduled-tasks/health-audit-monthly.SKILL.md",
+    "ops/scheduled-tasks/idea-resurface-monthly.SKILL.md",
+    "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
+    "ops/scheduled-tasks/loop-drain-weekdays.SKILL.md",
+    "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+    "ops/scheduled-tasks/notes-sweep-hourly.SKILL.md",
+    "ops/scheduled-tasks/npi-sweep-weekly.SKILL.md",
+    "ops/scheduled-tasks/playbook-review-monthly.SKILL.md",
+    "ops/scheduled-tasks/radar-weekly.SKILL.md",
+    "ops/scheduled-tasks/renewal-radar-source-daily.SKILL.md",
+    "ops/scheduled-tasks/restore-rehearse-weekly.SKILL.md",
+    "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+    "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+    "ops/scheduled-tasks/system-sweep-monthly.SKILL.md",
+    "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+    "phase0/audit/2026-08-12-audit-council-packet.md",
+    "pipelines/learning-reports.md",
+    "plugins/pstack/PORT.md",
+    "plugins/pstack/README.md",
+    "plugins/pstack/agents/comment-sicko.md",
+    "plugins/pstack/agents/poteto-agent.md",
+    "plugins/pstack/automations/benny/FOR_AGENTS.md",
+    "plugins/pstack/automations/benny/README.md",
+    "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+    "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/references/control-adapter.md",
+    "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/references/feature-map.example.md",
+    "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/references/verify-existing-fix.md",
+    "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+    "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
+    "plugins/pstack/automations/benny/skills/triage-issue-reports/references/routing.example.md",
+    "plugins/pstack/automations/benny/templates/reproduce-automation-prompt.md",
+    "plugins/pstack/automations/benny/templates/triage-automation-prompt.md",
+    "plugins/pstack/docs/guide/01-setup.md",
+    "plugins/pstack/docs/guide/02-poteto-mode.md",
+    "plugins/pstack/docs/guide/03-understand.md",
+    "plugins/pstack/docs/guide/04-design.md",
+    "plugins/pstack/docs/guide/05-build-and-clean.md",
+    "plugins/pstack/docs/guide/06-verify-and-ship.md",
+    "plugins/pstack/docs/guide/07-overnight.md",
+    "plugins/pstack/docs/guide/08-principles.md",
+    "plugins/pstack/docs/guide/09-make-it-yours.md",
+    "plugins/pstack/docs/guide/10-recipes-and-pitfalls.md",
+    "plugins/pstack/docs/guide/README.md",
+    "plugins/pstack/pstack-models.md",
+    "plugins/pstack/skills/architect/SKILL.md",
+    "plugins/pstack/skills/architect/references/design-red-flags.md",
+    "plugins/pstack/skills/architect/references/rationale-template.md",
+    "plugins/pstack/skills/architect/references/runner-prompt.md",
+    "plugins/pstack/skills/arena/SKILL.md",
+    "plugins/pstack/skills/automate-me/SKILL.md",
+    "plugins/pstack/skills/benchmark-checklist/SKILL.md",
+    "plugins/pstack/skills/blast-radius/SKILL.md",
+    "plugins/pstack/skills/bro/SKILL.md",
+    "plugins/pstack/skills/control-cli/SKILL.md",
+    "plugins/pstack/skills/control-ui/SKILL.md",
+    "plugins/pstack/skills/correct/SKILL.md",
+    "plugins/pstack/skills/create-skill/SKILL.md",
+    "plugins/pstack/skills/create-verification-skill/SKILL.md",
+    "plugins/pstack/skills/create-verification-skill/references/feature-map-example/README.md",
+    "plugins/pstack/skills/create-verification-skill/references/feature-map-example/create-note.md",
+    "plugins/pstack/skills/create-verification-skill/references/feature-map-example/search.md",
+    "plugins/pstack/skills/deslop/SKILL.md",
+    "plugins/pstack/skills/figure-it-out/SKILL.md",
+    "plugins/pstack/skills/how/SKILL.md",
+    "plugins/pstack/skills/how/references/explainer-prompt.md",
+    "plugins/pstack/skills/how/references/explorer-prompt.md",
+    "plugins/pstack/skills/interrogate/SKILL.md",
+    "plugins/pstack/skills/interrogate/references/code-quality-review.md",
+    "plugins/pstack/skills/interrogate/references/lead-judgment.md",
+    "plugins/pstack/skills/interrogate/references/reviewer-prompt.md",
+    "plugins/pstack/skills/interrogate/references/rubric.md",
+    "plugins/pstack/skills/maintain-verification-skill/SKILL.md",
+    "plugins/pstack/skills/make-bot-ui/SKILL.md",
+    "plugins/pstack/skills/no-comments/SKILL.md",
+    "plugins/pstack/skills/poteto-mode/SKILL.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/authoring-a-skill.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/autonomous-run.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/autopilot-full.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/autopilot-stack.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/babysit.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/bug-fix.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/eval.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/feature.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/hillclimb.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/investigation.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/multi-phase-plan.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/opening-a-pr.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/pause-safely.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/perf-issue.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/prototype.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/refactoring.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/runtime-forensics.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/session-pickup.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/shipping.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/trace-forensics.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/visual-parity.md",
+    "plugins/pstack/skills/poteto-mode/playbooks/worktree-cleanup.md",
+    "plugins/pstack/skills/poteto-mode/references/bugbot-triage.md",
+    "plugins/pstack/skills/principle-attack-the-premise/SKILL.md",
+    "plugins/pstack/skills/principle-boundary-discipline/SKILL.md",
+    "plugins/pstack/skills/principle-build-the-lever/SKILL.md",
+    "plugins/pstack/skills/principle-encode-lessons-in-structure/SKILL.md",
+    "plugins/pstack/skills/principle-exhaust-the-design-space/SKILL.md",
+    "plugins/pstack/skills/principle-experience-first/SKILL.md",
+    "plugins/pstack/skills/principle-explain-the-number/SKILL.md",
+    "plugins/pstack/skills/principle-fix-root-causes/SKILL.md",
+    "plugins/pstack/skills/principle-foundational-thinking/SKILL.md",
+    "plugins/pstack/skills/principle-guard-the-context-window/SKILL.md",
+    "plugins/pstack/skills/principle-laziness-protocol/SKILL.md",
+    "plugins/pstack/skills/principle-make-operations-idempotent/SKILL.md",
+    "plugins/pstack/skills/principle-migrate-callers-then-delete-legacy-apis/SKILL.md",
+    "plugins/pstack/skills/principle-minimize-reader-load/SKILL.md",
+    "plugins/pstack/skills/principle-model-the-domain/SKILL.md",
+    "plugins/pstack/skills/principle-never-block-on-the-human/SKILL.md",
+    "plugins/pstack/skills/principle-outcome-oriented-execution/SKILL.md",
+    "plugins/pstack/skills/principle-prove-it-works/SKILL.md",
+    "plugins/pstack/skills/principle-redesign-from-first-principles/SKILL.md",
+    "plugins/pstack/skills/principle-separate-before-serializing-shared-state/SKILL.md",
+    "plugins/pstack/skills/principle-sequence-verifiable-units/SKILL.md",
+    "plugins/pstack/skills/principle-subtract-before-you-add/SKILL.md",
+    "plugins/pstack/skills/principle-test-behavior-not-implementation/SKILL.md",
+    "plugins/pstack/skills/principle-type-system-discipline/SKILL.md",
+    "plugins/pstack/skills/recall/SKILL.md",
+    "plugins/pstack/skills/reflect/SKILL.md",
+    "plugins/pstack/skills/reflect/references/divergent-reviewer.md",
+    "plugins/pstack/skills/reflect/references/judgment-reviewer.md",
+    "plugins/pstack/skills/reflect/references/synthesizer.md",
+    "plugins/pstack/skills/reflect/references/tooling-reviewer.md",
+    "plugins/pstack/skills/setup-pstack/SKILL.md",
+    "plugins/pstack/skills/show-me-your-work/SKILL.md",
+    "plugins/pstack/skills/swarm/SKILL.md",
+    "plugins/pstack/skills/tdd/SKILL.md",
+    "plugins/pstack/skills/teach/SKILL.md",
+    "plugins/pstack/skills/technical-writing/SKILL.md",
+    "plugins/pstack/skills/typescript-best-practices/SKILL.md",
+    "plugins/pstack/skills/typescript-best-practices/references/patterns.md",
+    "plugins/pstack/skills/unslop/SKILL.md",
+    "plugins/pstack/skills/why/SKILL.md",
+    "plugins/pstack/skills/why/references/epistemics.md",
+    "plugins/pstack/skills/why/references/investigator-prompt.md",
+    "plugins/pstack/skills/why/references/source-playbook.md",
+    "plugins/pstack/skills/why/references/sources/code-archaeology.md",
+    "plugins/pstack/skills/why/references/sources/databricks.md",
+    "plugins/pstack/skills/why/references/sources/datadog.md",
+    "plugins/pstack/skills/why/references/sources/incident-postmortem.md",
+    "plugins/pstack/skills/why/references/sources/linear.md",
+    "plugins/pstack/skills/why/references/sources/notion.md",
+    "plugins/pstack/skills/why/references/sources/sentry.md",
+    "plugins/pstack/skills/why/references/sources/slack.md",
+    "plugins/pstack/skills/why/references/synthesizer-prompt.md",
+    "runbooks/rollback-worker.md",
+    "scripts/doc-drift/README.md",
+    "secrets-inventory.md",
+    "specs/agent-write-attribution.md",
+    "specs/dictation-rig-build-plan-2026-08-07.md",
+    "specs/party-graph-ref-fallback.md",
+    "specs/party-identity-and-contact-type.md",
+    "specs/post-call-workflow-2026-08-10.md",
+    "specs/read-path-traversal.md",
+    "specs/rule-curation-plan-2026-08-02.md",
+    "tools/dictation-rig/README.md",
+    "tools/doc-convo/README.md",
+    "tools/doc-convo/prompt/preamble.md",
+    "tools/doc-voice/RECIPE.md",
+    "tools/partner-line/README.md",
+    "vendor-patches/README.md"
+  ],
+  "findings": [
+    {
+      "file": "README.md",
+      "line": 20,
+      "kind": "path",
+      "target": "CRITIQUE-LOG.md",
+      "sources": [
+        "CRITIQUE-LOG.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: CRITIQUE-LOG.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/README.md",
+      "line": 229,
+      "kind": "path",
+      "target": "performance-loop.md",
+      "sources": [
+        "performance-loop.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: performance-loop.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/README.md",
+      "line": 229,
+      "kind": "path",
+      "target": "content-fuel-engine.md",
+      "sources": [
+        "content-fuel-engine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-fuel-engine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-it-support.md",
+      "line": 64,
+      "kind": "path",
+      "target": "skills-rule.md",
+      "sources": [
+        "skills-rule.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: skills-rule.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-it-support.md",
+      "line": 137,
+      "kind": "path",
+      "target": "record-layer-dictionary.md",
+      "sources": [
+        "record-layer-dictionary.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: record-layer-dictionary.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+      "line": 33,
+      "kind": "path",
+      "target": "intake/README.md",
+      "sources": [
+        "intake/README.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: intake/README.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+      "line": 34,
+      "kind": "path",
+      "target": "playbooks/deal-post-mortem-template.md",
+      "sources": [
+        "playbooks/deal-post-mortem-template.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: playbooks/deal-post-mortem-template.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/_ROSTER-ADDITIONS-sop-specialists.md",
+      "line": 82,
+      "kind": "path",
+      "target": "code.claude.com/docs/en/sub-agents.md",
+      "sources": [
+        "code.claude.com/docs/en/sub-agents.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: code.claude.com/docs/en/sub-agents.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/benefit-summary.md",
+      "line": 90,
+      "kind": "path",
+      "target": "build-benefit-summary.js",
+      "sources": [
+        "build-benefit-summary.js"
+      ],
+      "unchecked": null,
+      "message": "missing path: build-benefit-summary.js",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/client-intake.md",
+      "line": 25,
+      "kind": "path",
+      "target": "intake/README.md",
+      "sources": [
+        "intake/README.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: intake/README.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/client-intake.md",
+      "line": 116,
+      "kind": "path",
+      "target": "clients-active.md",
+      "sources": [
+        "clients-active.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: clients-active.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-attorney.md",
+      "line": 34,
+      "kind": "path",
+      "target": "legal-considerations-lease-review.md",
+      "sources": [
+        "legal-considerations-lease-review.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: legal-considerations-lease-review.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-attorney.md",
+      "line": 45,
+      "kind": "path",
+      "target": "playbooks/renewals.md",
+      "sources": [
+        "playbooks/renewals.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: playbooks/renewals.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "line": 43,
+      "kind": "path",
+      "target": "dental-vertical-guide.md",
+      "sources": [
+        "dental-vertical-guide.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: dental-vertical-guide.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "line": 44,
+      "kind": "path",
+      "target": "medical-vertical-guide.md",
+      "sources": [
+        "medical-vertical-guide.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: medical-vertical-guide.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "line": 45,
+      "kind": "path",
+      "target": "vet-vertical-guide.md",
+      "sources": [
+        "vet-vertical-guide.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: vet-vertical-guide.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "line": 46,
+      "kind": "path",
+      "target": "vision-vertical-guide.md",
+      "sources": [
+        "vision-vertical-guide.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: vision-vertical-guide.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-contractor.md",
+      "line": 47,
+      "kind": "path",
+      "target": "other-healthcare-vertical-guide.md",
+      "sources": [
+        "other-healthcare-vertical-guide.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: other-healthcare-vertical-guide.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-lender.md",
+      "line": 41,
+      "kind": "path",
+      "target": "purchase-vs-lease-fill-guide.md",
+      "sources": [
+        "purchase-vs-lease-fill-guide.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: purchase-vs-lease-fill-guide.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/council-skeptic.md",
+      "line": 44,
+      "kind": "path",
+      "target": "purchase-vs-lease-fill-guide.md",
+      "sources": [
+        "purchase-vs-lease-fill-guide.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: purchase-vs-lease-fill-guide.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 100,
+      "kind": "path",
+      "target": "record-layer-dictionary.md",
+      "sources": [
+        "record-layer-dictionary.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: record-layer-dictionary.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 151,
+      "kind": "path",
+      "target": "weekly-learning-latest.md",
+      "sources": [
+        "weekly-learning-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: weekly-learning-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 152,
+      "kind": "path",
+      "target": "correction-miner-latest.md",
+      "sources": [
+        "correction-miner-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: correction-miner-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 153,
+      "kind": "path",
+      "target": "promotion-review-latest.md",
+      "sources": [
+        "promotion-review-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: promotion-review-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 153,
+      "kind": "path",
+      "target": "conflict-surfacing-latest.md",
+      "sources": [
+        "conflict-surfacing-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: conflict-surfacing-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 185,
+      "kind": "path",
+      "target": "published-log.md",
+      "sources": [
+        "published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 199,
+      "kind": "path",
+      "target": "Management/panhandle-team-deals.json",
+      "sources": [
+        "Management/panhandle-team-deals.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/panhandle-team-deals.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 208,
+      "kind": "path",
+      "target": "panhandle-team-deals.json",
+      "sources": [
+        "panhandle-team-deals.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: panhandle-team-deals.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 267,
+      "kind": "path",
+      "target": "clients-active.md",
+      "sources": [
+        "clients-active.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: clients-active.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 277,
+      "kind": "path",
+      "target": "entity-formation-leads.json",
+      "sources": [
+        "entity-formation-leads.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: entity-formation-leads.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 277,
+      "kind": "path",
+      "target": "pre-entity-watch.json",
+      "sources": [
+        "pre-entity-watch.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: pre-entity-watch.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 277,
+      "kind": "path",
+      "target": "lead-board-decisions.json",
+      "sources": [
+        "lead-board-decisions.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: lead-board-decisions.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 278,
+      "kind": "path",
+      "target": "lead-board-hot.json",
+      "sources": [
+        "lead-board-hot.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: lead-board-hot.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-lane-worker.md",
+      "line": 281,
+      "kind": "path",
+      "target": "build-lead-board.py",
+      "sources": [
+        "build-lead-board.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: build-lead-board.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-support.md",
+      "line": 187,
+      "kind": "path",
+      "target": "record-layer-dictionary.md",
+      "sources": [
+        "record-layer-dictionary.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: record-layer-dictionary.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-support.md",
+      "line": 282,
+      "kind": "path",
+      "target": "skills-rule.md",
+      "sources": [
+        "skills-rule.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: skills-rule.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/it-support.md",
+      "line": 568,
+      "kind": "path",
+      "target": "conflict-surfacing-latest.md",
+      "sources": [
+        "conflict-surfacing-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: conflict-surfacing-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "line": 9,
+      "kind": "path",
+      "target": "Media/facebook-ads-playbook-2026.md",
+      "sources": [
+        "Media/facebook-ads-playbook-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/facebook-ads-playbook-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "line": 153,
+      "kind": "path",
+      "target": "lead-magnet-five-numbers-2026-07-18.md",
+      "sources": [
+        "lead-magnet-five-numbers-2026-07-18.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: lead-magnet-five-numbers-2026-07-18.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "line": 154,
+      "kind": "path",
+      "target": "platform-playbook-2026.md",
+      "sources": [
+        "platform-playbook-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: platform-playbook-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "line": 154,
+      "kind": "path",
+      "target": "performance-loop.md",
+      "sources": [
+        "performance-loop.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: performance-loop.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-ads.md",
+      "line": 154,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "line": 62,
+      "kind": "path",
+      "target": "published-log.md",
+      "sources": [
+        "published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "line": 63,
+      "kind": "path",
+      "target": "post-performance-log.md",
+      "sources": [
+        "post-performance-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: post-performance-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "line": 163,
+      "kind": "path",
+      "target": "weekly-learning-latest.md",
+      "sources": [
+        "weekly-learning-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: weekly-learning-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "line": 163,
+      "kind": "path",
+      "target": "correction-miner-latest.md",
+      "sources": [
+        "correction-miner-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: correction-miner-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "line": 205,
+      "kind": "path",
+      "target": "performance-loop.md",
+      "sources": [
+        "performance-loop.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: performance-loop.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "line": 235,
+      "kind": "path",
+      "target": "style-contract.md",
+      "sources": [
+        "style-contract.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: style-contract.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-coo.md",
+      "line": 296,
+      "kind": "path",
+      "target": "council-marketing.md",
+      "sources": [
+        "council-marketing.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: council-marketing.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-research.md",
+      "line": 78,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-research.md",
+      "line": 161,
+      "kind": "path",
+      "target": "model-study-healthcarereguy-2026-07-18.md",
+      "sources": [
+        "model-study-healthcarereguy-2026-07-18.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: model-study-healthcarereguy-2026-07-18.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/marketing-research.md",
+      "line": 161,
+      "kind": "path",
+      "target": "peer-gap-2026-07-18.md",
+      "sources": [
+        "peer-gap-2026-07-18.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: peer-gap-2026-07-18.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/agents/salesforce-reader.md",
+      "line": 139,
+      "kind": "path",
+      "target": "panhandle-team-deals.json",
+      "sources": [
+        "panhandle-team-deals.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: panhandle-team-deals.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/council/SKILL.md",
+      "line": 80,
+      "kind": "path",
+      "target": "marketing-coo.md",
+      "sources": [
+        "marketing-coo.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: marketing-coo.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "line": 19,
+      "kind": "path",
+      "target": "Media/content-inspiration-bank.md",
+      "sources": [
+        "Media/content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "line": 35,
+      "kind": "path",
+      "target": "engine.md",
+      "sources": [
+        "engine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: engine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "line": 43,
+      "kind": "path",
+      "target": "weekly-routine.md",
+      "sources": [
+        "weekly-routine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: weekly-routine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "line": 45,
+      "kind": "path",
+      "target": "engine.md",
+      "sources": [
+        "engine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: engine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/network-debrief/SKILL.md",
+      "line": 92,
+      "kind": "path",
+      "target": "engine.md",
+      "sources": [
+        "engine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: engine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "line": 40,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "line": 43,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "line": 51,
+      "kind": "path",
+      "target": "published-log.md",
+      "sources": [
+        "published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "line": 98,
+      "kind": "path",
+      "target": "published-log.md",
+      "sources": [
+        "published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "line": 98,
+      "kind": "path",
+      "target": "post-performance-log.md",
+      "sources": [
+        "post-performance-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: post-performance-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "line": 100,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/social-media-manager/SKILL.md",
+      "line": 105,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/write-content/SKILL.md",
+      "line": 11,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/write-content/SKILL.md",
+      "line": 40,
+      "kind": "path",
+      "target": "x-reply-engine-2026.md",
+      "sources": [
+        "x-reply-engine-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-reply-engine-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "claude-tree/skills/write-content/SKILL.md",
+      "line": 131,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/00_Context/model-tiering.md",
+      "line": 5,
+      "kind": "path",
+      "target": "Management/system-evolution-plan.md",
+      "sources": [
+        "Management/system-evolution-plan.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/system-evolution-plan.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/deal-analysis-toolkit.md",
+      "line": 49,
+      "kind": "path",
+      "target": "Media/content-inspiration-bank.md",
+      "sources": [
+        "Media/content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
+      "line": 61,
+      "kind": "path",
+      "target": "Management/panhandle-team-deals.json",
+      "sources": [
+        "Management/panhandle-team-deals.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/panhandle-team-deals.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/pipeline-coo-doctrine.md",
+      "line": 70,
+      "kind": "path",
+      "target": "Management/deal-enrichment-sop.md",
+      "sources": [
+        "Management/deal-enrichment-sop.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/deal-enrichment-sop.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "line": 7,
+      "kind": "path",
+      "target": "deals.md",
+      "sources": [
+        "deals.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: deals.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "line": 7,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "line": 51,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "line": 95,
+      "kind": "path",
+      "target": "engine.md",
+      "sources": [
+        "engine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: engine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+      "line": 5,
+      "kind": "path",
+      "target": "fill-engine/fill-it-in-workflow.md",
+      "sources": [
+        "fill-engine/fill-it-in-workflow.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: fill-engine/fill-it-in-workflow.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+      "line": 14,
+      "kind": "path",
+      "target": "fill-engine/fill-it-in-workflow.md",
+      "sources": [
+        "fill-engine/fill-it-in-workflow.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: fill-engine/fill-it-in-workflow.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Deal Management/purchase-vs-lease-fill-guide.md",
+      "line": 52,
+      "kind": "path",
+      "target": "fill-it-in-workflow.md",
+      "sources": [
+        "fill-it-in-workflow.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: fill-it-in-workflow.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "line": 5,
+      "kind": "path",
+      "target": "lead-system.md",
+      "sources": [
+        "lead-system.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: lead-system.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "line": 28,
+      "kind": "path",
+      "target": "lead-system.md",
+      "sources": [
+        "lead-system.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: lead-system.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "line": 91,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "line": 146,
+      "kind": "path",
+      "target": "lead-system.md",
+      "sources": [
+        "lead-system.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: lead-system.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "line": 186,
+      "kind": "path",
+      "target": "lead-system.md",
+      "sources": [
+        "lead-system.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: lead-system.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Leads/pipeline-craft.md",
+      "line": 195,
+      "kind": "path",
+      "target": "national-accounts-toolkit.md",
+      "sources": [
+        "national-accounts-toolkit.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: national-accounts-toolkit.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+      "line": 136,
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md",
+      "sources": [
+        "hooks-deep-reference-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: hooks-deep-reference-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+      "line": 168,
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md",
+      "sources": [
+        "hooks-deep-reference-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: hooks-deep-reference-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-ads-playbook-2026.md",
+      "line": 168,
+      "kind": "path",
+      "target": "voice-profile.md",
+      "sources": [
+        "voice-profile.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: voice-profile.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/facebook-strategy-2026.md",
+      "line": 162,
+      "kind": "path",
+      "target": "Media/x-strategy-2026.md",
+      "sources": [
+        "Media/x-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/x-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/instagram-strategy-2026.md",
+      "line": 96,
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md",
+      "sources": [
+        "hooks-deep-reference-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: hooks-deep-reference-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/instagram-strategy-2026.md",
+      "line": 153,
+      "kind": "path",
+      "target": "Media/x-strategy-2026.md",
+      "sources": [
+        "Media/x-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/x-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Marketing/Social Media/linkedin-strategy-2026.md",
+      "line": 144,
+      "kind": "path",
+      "target": "Media/x-strategy-2026.md",
+      "sources": [
+        "Media/x-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/x-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
+      "line": 5,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-by-industry-reference.md",
+      "line": 145,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "line": 8,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "line": 25,
+      "kind": "path",
+      "target": "vendor_intro_for_stage.py",
+      "sources": [
+        "vendor_intro_for_stage.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: vendor_intro_for_stage.py",
+      "suggestion": "shared/vendor_intro_for_stage.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "line": 26,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-intro-timeline.md",
+      "line": 44,
+      "kind": "path",
+      "target": "vendor_intro_for_stage.py",
+      "sources": [
+        "vendor_intro_for_stage.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: vendor_intro_for_stage.py",
+      "suggestion": "shared/vendor_intro_for_stage.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-relationship-craft.md",
+      "line": 107,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Network/vendor-relationship-craft.md",
+      "line": 173,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 5,
+      "kind": "path",
+      "target": "open-loops.md",
+      "sources": [
+        "open-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 5,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 5,
+      "kind": "path",
+      "target": "idea-bank.md",
+      "sources": [
+        "idea-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: idea-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 22,
+      "kind": "path",
+      "target": "open-loops.md",
+      "sources": [
+        "open-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 22,
+      "kind": "path",
+      "target": "clients-active.md",
+      "sources": [
+        "clients-active.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: clients-active.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 22,
+      "kind": "path",
+      "target": "compiled-rules-dell.md",
+      "sources": [
+        "compiled-rules-dell.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: compiled-rules-dell.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 44,
+      "kind": "path",
+      "target": "dell-profile.md",
+      "sources": [
+        "dell-profile.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: dell-profile.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 44,
+      "kind": "path",
+      "target": "voice-profile.md",
+      "sources": [
+        "voice-profile.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: voice-profile.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 48,
+      "kind": "path",
+      "target": "prospects.md",
+      "sources": [
+        "prospects.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: prospects.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 58,
+      "kind": "path",
+      "target": "settings.json",
+      "sources": [
+        "settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: settings.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 68,
+      "kind": "path",
+      "target": "dell-profile.md",
+      "sources": [
+        "dell-profile.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: dell-profile.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 91,
+      "kind": "path",
+      "target": "clients-active.md",
+      "sources": [
+        "clients-active.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: clients-active.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/DELL-START-HERE.md",
+      "line": 97,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "line": 54,
+      "kind": "path",
+      "target": "model-tiering.md",
+      "sources": [
+        "model-tiering.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: model-tiering.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/Team/dell-starter-kit/structure-manifest.md",
+      "line": 54,
+      "kind": "path",
+      "target": "social-media-workflow.md",
+      "sources": [
+        "social-media-workflow.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: social-media-workflow.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/brand-voice.md",
+      "line": 130,
+      "kind": "path",
+      "target": "social-media-workflow.md",
+      "sources": [
+        "social-media-workflow.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: social-media-workflow.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/carr-profile.md",
+      "line": 159,
+      "kind": "path",
+      "target": "clients-active.md",
+      "sources": [
+        "clients-active.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: clients-active.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/objection-bank.md",
+      "line": 74,
+      "kind": "path",
+      "target": "question-bank.md",
+      "sources": [
+        "question-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: question-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/objection-bank.md",
+      "line": 75,
+      "kind": "path",
+      "target": "referral-network.md",
+      "sources": [
+        "referral-network.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: referral-network.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/writing-rules.md",
+      "line": 5,
+      "kind": "path",
+      "target": "write-content/SKILL.md",
+      "sources": [
+        "write-content/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: write-content/SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/writing-rules.md",
+      "line": 5,
+      "kind": "path",
+      "target": "writing-audit/SKILL.md",
+      "sources": [
+        "writing-audit/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: writing-audit/SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/DNA/writing-rules.md",
+      "line": 11,
+      "kind": "path",
+      "target": "write-content/SKILL.md",
+      "sources": [
+        "write-content/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: write-content/SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 22,
+      "kind": "path",
+      "target": "open-loops.md",
+      "sources": [
+        "open-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 22,
+      "kind": "path",
+      "target": "open-loops-backlog.md",
+      "sources": [
+        "open-loops-backlog.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops-backlog.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 38,
+      "kind": "path",
+      "target": "instagram-strategy-2026.md",
+      "sources": [
+        "instagram-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: instagram-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 38,
+      "kind": "path",
+      "target": "linkedin-strategy-2026.md",
+      "sources": [
+        "linkedin-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: linkedin-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 44,
+      "kind": "path",
+      "target": "Management/property-feed-sop.md",
+      "sources": [
+        "Management/property-feed-sop.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/property-feed-sop.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 46,
+      "kind": "path",
+      "target": "costar-playbook.md",
+      "sources": [
+        "costar-playbook.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: costar-playbook.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 46,
+      "kind": "path",
+      "target": "renewal-radar-sop.md",
+      "sources": [
+        "renewal-radar-sop.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: renewal-radar-sop.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 46,
+      "kind": "path",
+      "target": "associate-lane-sop.md",
+      "sources": [
+        "associate-lane-sop.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: associate-lane-sop.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 46,
+      "kind": "path",
+      "target": "lease-term-estimator.md",
+      "sources": [
+        "lease-term-estimator.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: lease-term-estimator.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 46,
+      "kind": "path",
+      "target": "alabama-lead-system.md",
+      "sources": [
+        "alabama-lead-system.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: alabama-lead-system.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 48,
+      "kind": "path",
+      "target": "Management/deal-room-kit.md",
+      "sources": [
+        "Management/deal-room-kit.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/deal-room-kit.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 53,
+      "kind": "path",
+      "target": "Management/playbooks/practice-os-playbooks.md",
+      "sources": [
+        "Management/playbooks/practice-os-playbooks.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/playbooks/practice-os-playbooks.md",
+      "suggestion": "corpus/DNA/Deal Management/playbooks/practice-os-playbooks.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 55,
+      "kind": "path",
+      "target": "Management/system-evolution-plan.md",
+      "sources": [
+        "Management/system-evolution-plan.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Management/system-evolution-plan.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/INDEX.md",
+      "line": 72,
+      "kind": "path",
+      "target": "Output/INDEX.md",
+      "sources": [
+        "Output/INDEX.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Output/INDEX.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 29,
+      "kind": "path",
+      "target": "post-performance-log.md",
+      "sources": [
+        "post-performance-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: post-performance-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 30,
+      "kind": "path",
+      "target": "linkedin-engagement-engine.md",
+      "sources": [
+        "linkedin-engagement-engine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: linkedin-engagement-engine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 30,
+      "kind": "path",
+      "target": "linkedin-comment-queue.md",
+      "sources": [
+        "linkedin-comment-queue.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: linkedin-comment-queue.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 32,
+      "kind": "path",
+      "target": "talking-head-scripts-2026-07.md",
+      "sources": [
+        "talking-head-scripts-2026-07.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: talking-head-scripts-2026-07.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 32,
+      "kind": "path",
+      "target": "profile-audit-2026-07-20.md",
+      "sources": [
+        "profile-audit-2026-07-20.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: profile-audit-2026-07-20.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 49,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 53,
+      "kind": "path",
+      "target": "published-log.md",
+      "sources": [
+        "published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 55,
+      "kind": "path",
+      "target": "social-media-manager/SKILL.md",
+      "sources": [
+        "social-media-manager/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: social-media-manager/SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 61,
+      "kind": "path",
+      "target": "scripts/blotato.sh",
+      "sources": [
+        "scripts/blotato.sh"
+      ],
+      "unchecked": null,
+      "message": "missing path: scripts/blotato.sh",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 61,
+      "kind": "path",
+      "target": "published-log.md",
+      "sources": [
+        "published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 86,
+      "kind": "path",
+      "target": "Assets/asset-checklist.md",
+      "sources": [
+        "Assets/asset-checklist.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Assets/asset-checklist.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 92,
+      "kind": "path",
+      "target": "content-fuel-inbox.md",
+      "sources": [
+        "content-fuel-inbox.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-fuel-inbox.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 92,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 129,
+      "kind": "path",
+      "target": "plan-animated-static.py",
+      "sources": [
+        "plan-animated-static.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: plan-animated-static.py",
+      "suggestion": "video/plan-animated-static.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 144,
+      "kind": "path",
+      "target": "x-sound-design-playbook-2026.md",
+      "sources": [
+        "x-sound-design-playbook-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-sound-design-playbook-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 166,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 175,
+      "kind": "path",
+      "target": "published-log.md",
+      "sources": [
+        "published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 175,
+      "kind": "path",
+      "target": "post-performance-log.md",
+      "sources": [
+        "post-performance-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: post-performance-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 184,
+      "kind": "path",
+      "target": "video/graphics",
+      "sources": [
+        "video/graphics"
+      ],
+      "unchecked": null,
+      "message": "missing path: video/graphics",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 184,
+      "kind": "path",
+      "target": "stock-license-note.md",
+      "sources": [
+        "stock-license-note.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: stock-license-note.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 201,
+      "kind": "path",
+      "target": "x-strategy-2026.md",
+      "sources": [
+        "x-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 201,
+      "kind": "path",
+      "target": "x-reply-engine-2026.md",
+      "sources": [
+        "x-reply-engine-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-reply-engine-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/social-media-workflow.md",
+      "line": 240,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/x-article-playbook.md",
+      "line": 5,
+      "kind": "path",
+      "target": "x-strategy-2026.md",
+      "sources": [
+        "x-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/x-article-playbook.md",
+      "line": 11,
+      "kind": "path",
+      "target": "content-inspiration-bank.md",
+      "sources": [
+        "content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/Marketing/Social Media/x-article-playbook.md",
+      "line": 45,
+      "kind": "path",
+      "target": "x-article-draft-medical-lease-2026-07-17.md",
+      "sources": [
+        "x-article-draft-medical-lease-2026-07-17.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-article-draft-medical-lease-2026-07-17.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "line": 28,
+      "kind": "path",
+      "target": "open-loops.md",
+      "sources": [
+        "open-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "line": 28,
+      "kind": "path",
+      "target": "open-loops-backlog.md",
+      "sources": [
+        "open-loops-backlog.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops-backlog.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "line": 28,
+      "kind": "path",
+      "target": "action-required.md",
+      "sources": [
+        "action-required.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: action-required.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "line": 28,
+      "kind": "path",
+      "target": "team-loops.md",
+      "sources": [
+        "team-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: team-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "line": 28,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/catchup/SKILL.md",
+      "line": 28,
+      "kind": "path",
+      "target": "idea-bank.md",
+      "sources": [
+        "idea-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: idea-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/checkpoint/SKILL.md",
+      "line": 33,
+      "kind": "path",
+      "target": "checkpoints/2025-06-01-1430.md",
+      "sources": [
+        "checkpoints/2025-06-01-1430.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: checkpoints/2025-06-01-1430.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "line": 10,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "line": 24,
+      "kind": "path",
+      "target": "docs/adr",
+      "sources": [
+        "docs/adr"
+      ],
+      "unchecked": null,
+      "message": "missing path: docs/adr",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "line": 24,
+      "kind": "path",
+      "target": "decisions.md",
+      "sources": [
+        "decisions.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decisions.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "line": 24,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "line": 28,
+      "kind": "path",
+      "target": "decisions.md",
+      "sources": [
+        "decisions.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decisions.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "line": 30,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/decide/SKILL.md",
+      "line": 30,
+      "kind": "path",
+      "target": "DECISIONS.md",
+      "sources": [
+        "DECISIONS.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: DECISIONS.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
+      "line": 66,
+      "kind": "path",
+      "target": "open-loops.md",
+      "sources": [
+        "open-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
+      "line": 66,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/handoff/SKILL.md",
+      "line": 66,
+      "kind": "path",
+      "target": "idea-bank.md",
+      "sources": [
+        "idea-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: idea-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/loose-ends/SKILL.md",
+      "line": 25,
+      "kind": "path",
+      "target": "open-loops.md",
+      "sources": [
+        "open-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/loose-ends/SKILL.md",
+      "line": 25,
+      "kind": "path",
+      "target": "open-loops-backlog.md",
+      "sources": [
+        "open-loops-backlog.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops-backlog.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/til/SKILL.md",
+      "line": 32,
+      "kind": "path",
+      "target": "LESSONS.md",
+      "sources": [
+        "LESSONS.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: LESSONS.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/til/SKILL.md",
+      "line": 32,
+      "kind": "path",
+      "target": "gotchas.md",
+      "sources": [
+        "gotchas.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: gotchas.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "corpus/_home/.claude/skills/til/SKILL.md",
+      "line": 46,
+      "kind": "path",
+      "target": "CLAUDE.md/AGENTS.md",
+      "sources": [
+        "CLAUDE.md/AGENTS.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: CLAUDE.md/AGENTS.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "design/doctrine-store-build-2026-08-07.md",
+      "line": 31,
+      "kind": "path",
+      "target": "shared/personal",
+      "sources": [
+        "shared/personal"
+      ],
+      "unchecked": null,
+      "message": "missing path: shared/personal",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "design/situation-retrieval-build-plan-2026-08-16.md",
+      "line": 107,
+      "kind": "path",
+      "target": "workspace/tenant",
+      "sources": [
+        "workspace/tenant"
+      ],
+      "unchecked": null,
+      "message": "missing path: workspace/tenant",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "line": 5,
+      "kind": "path",
+      "target": "migrations/0454-0471",
+      "sources": [
+        "migrations/0454-0471"
+      ],
+      "unchecked": null,
+      "message": "missing path: migrations/0454-0471",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "line": 163,
+      "kind": "path",
+      "target": "migrations/0454-0471",
+      "sources": [
+        "migrations/0454-0471"
+      ],
+      "unchecked": null,
+      "message": "missing path: migrations/0454-0471",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "line": 181,
+      "kind": "path",
+      "target": "migrations/0454-0471",
+      "sources": [
+        "migrations/0454-0471"
+      ],
+      "unchecked": null,
+      "message": "missing path: migrations/0454-0471",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/comparison-report.md",
+      "line": 199,
+      "kind": "path",
+      "target": "migrations/0454-0471",
+      "sources": [
+        "migrations/0454-0471"
+      ],
+      "unchecked": null,
+      "message": "missing path: migrations/0454-0471",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/cs-review-trail.md",
+      "line": 178,
+      "kind": "path",
+      "target": "db-tap.py",
+      "sources": [
+        "db-tap.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: db-tap.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/cs-review-trail.md",
+      "line": 219,
+      "kind": "path",
+      "target": "db-tap.py",
+      "sources": [
+        "db-tap.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: db-tap.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "line": 15,
+      "kind": "path",
+      "target": "migrations/0471",
+      "sources": [
+        "migrations/0471"
+      ],
+      "unchecked": null,
+      "message": "missing path: migrations/0471",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "line": 15,
+      "kind": "path",
+      "target": "migrations/0467",
+      "sources": [
+        "migrations/0467"
+      ],
+      "unchecked": null,
+      "message": "missing path: migrations/0467",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "line": 36,
+      "kind": "path",
+      "target": "gen-frontier-manifest.py",
+      "sources": [
+        "gen-frontier-manifest.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: gen-frontier-manifest.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "line": 37,
+      "kind": "path",
+      "target": "gen-census-matrix.py",
+      "sources": [
+        "gen-census-matrix.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: gen-census-matrix.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "line": 38,
+      "kind": "path",
+      "target": "breakglass-run.py",
+      "sources": [
+        "breakglass-run.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: breakglass-run.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "line": 38,
+      "kind": "path",
+      "target": "gen-breakglass-run.py",
+      "sources": [
+        "gen-breakglass-run.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: gen-breakglass-run.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "docs/frontier-finding/gated-register-plan.md",
+      "line": 39,
+      "kind": "path",
+      "target": "docs/frontier-finding/breakglass-run.py",
+      "sources": [
+        "docs/frontier-finding/breakglass-run.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: docs/frontier-finding/breakglass-run.py",
+      "suggestion": "docs/frontier-finding/breakglass_run.py",
+      "suggestion_evidence": "git rename history; git log --follow: 3bf8b052 Fix duplicate snapshot identity handling (#871)"
+    },
+    {
+      "file": "docs/frontier-finding/target-identity-contract.md",
+      "line": 23,
+      "kind": "path",
+      "target": "migrations/0454",
+      "sources": [
+        "migrations/0454"
+      ],
+      "unchecked": null,
+      "message": "missing path: migrations/0454",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "evals/rule-delivery/README.md",
+      "line": 12,
+      "kind": "path",
+      "target": "ops/rule_trigger_delivery.advise",
+      "sources": [
+        "ops/rule_trigger_delivery.advise"
+      ],
+      "unchecked": null,
+      "message": "missing path: ops/rule_trigger_delivery.advise",
+      "suggestion": "ops/rule_trigger_delivery.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "evals/rule-delivery/README.md",
+      "line": 12,
+      "kind": "path",
+      "target": "lib/rule_delivery_preuse.semantic_delivery",
+      "sources": [
+        "lib/rule_delivery_preuse.semantic_delivery"
+      ],
+      "unchecked": null,
+      "message": "missing path: lib/rule_delivery_preuse.semantic_delivery",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "line": 28,
+      "kind": "path",
+      "target": "ledger-boundary-sweep.py",
+      "sources": [
+        "ledger-boundary-sweep.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: ledger-boundary-sweep.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "line": 32,
+      "kind": "path",
+      "target": "gate-baseline.json",
+      "sources": [
+        "gate-baseline.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: gate-baseline.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "line": 42,
+      "kind": "path",
+      "target": "hooks/ledger-boundary-sweep.py",
+      "sources": [
+        "hooks/ledger-boundary-sweep.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: hooks/ledger-boundary-sweep.py",
+      "suggestion": "hooks/ledger-sweep.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "line": 42,
+      "kind": "path",
+      "target": "hooks/install-record-home-gate.py",
+      "sources": [
+        "hooks/install-record-home-gate.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: hooks/install-record-home-gate.py",
+      "suggestion": "hooks/record-home-gate.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "hooks/SETTINGS-BLOCK.md",
+      "line": 46,
+      "kind": "path",
+      "target": "settings.json",
+      "sources": [
+        "settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: settings.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "migrations/0066_marketing_campaign_and_measurement_spec.md",
+      "line": 136,
+      "kind": "path",
+      "target": "pull_placement_metrics.py",
+      "sources": [
+        "pull_placement_metrics.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: pull_placement_metrics.py",
+      "suggestion": "pipelines/pull_placement_metrics.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "migrations/README.md",
+      "line": 17,
+      "kind": "path",
+      "target": "bin/migrate-prod.sh --through NNNN_name.sql",
+      "sources": [
+        "bin/migrate-prod.sh --through NNNN_name.sql"
+      ],
+      "unchecked": null,
+      "message": "missing path: bin/migrate-prod.sh --through NNNN_name.sql",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "migrations/README.md",
+      "line": 23,
+      "kind": "path",
+      "target": "record-layer/schema-draft-2026-07-30.sql",
+      "sources": [
+        "record-layer/schema-draft-2026-07-30.sql"
+      ],
+      "unchecked": null,
+      "message": "missing path: record-layer/schema-draft-2026-07-30.sql",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/joe-batch-queue.v1.md",
+      "line": 289,
+      "kind": "path",
+      "target": "codex-hooks.json",
+      "sources": [
+        "codex-hooks.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: codex-hooks.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 1,
+      "kind": "path",
+      "target": "baselines/*.html",
+      "sources": [
+        "baselines/*.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/*.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 11,
+      "kind": "path",
+      "target": "exporters/templates",
+      "sources": [
+        "exporters/templates"
+      ],
+      "unchecked": null,
+      "message": "missing path: exporters/templates",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 15,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 16,
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html",
+      "sources": [
+        "baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 22,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 23,
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html",
+      "sources": [
+        "baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 30,
+      "kind": "path",
+      "target": "exporters/templates",
+      "sources": [
+        "exporters/templates"
+      ],
+      "unchecked": null,
+      "message": "missing path: exporters/templates",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 36,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 52,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 52,
+      "kind": "path",
+      "target": "baselines/deal-room-",
+      "sources": [
+        "baselines/deal-room-"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 60,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 60,
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html",
+      "sources": [
+        "baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 62,
+      "kind": "path",
+      "target": "renewal-radar.json",
+      "sources": [
+        "renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 100,
+      "kind": "path",
+      "target": "backup-dump.sh",
+      "sources": [
+        "backup-dump.sh"
+      ],
+      "unchecked": null,
+      "message": "missing path: backup-dump.sh",
+      "suggestion": "bin/backup-dump.sh",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 100,
+      "kind": "path",
+      "target": "check.sh",
+      "sources": [
+        "check.sh"
+      ],
+      "unchecked": null,
+      "message": "missing path: check.sh",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 152,
+      "kind": "path",
+      "target": "exporters/templates",
+      "sources": [
+        "exporters/templates"
+      ],
+      "unchecked": null,
+      "message": "missing path: exporters/templates",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 154,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 155,
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html",
+      "sources": [
+        "baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 169,
+      "kind": "path",
+      "target": "shasum -a 256 baselines/lead-board.html baselines/deal-room-panhandle.html",
+      "sources": [
+        "shasum -a 256 baselines/lead-board.html baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: shasum -a 256 baselines/lead-board.html baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 184,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 185,
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html",
+      "sources": [
+        "baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 198,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 216,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 222,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 223,
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html",
+      "sources": [
+        "baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 245,
+      "kind": "path",
+      "target": "baselines/lead-board.html",
+      "sources": [
+        "baselines/lead-board.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/lead-board.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 245,
+      "kind": "path",
+      "target": "baselines/deal-room-panhandle.html",
+      "sources": [
+        "baselines/deal-room-panhandle.html"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/deal-room-panhandle.html",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 256,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 324,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 327,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 335,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 341,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/order42b-history-purge.md",
+      "line": 343,
+      "kind": "path",
+      "target": "baselines/renewal-radar.json",
+      "sources": [
+        "baselines/renewal-radar.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: baselines/renewal-radar.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/cc-update-audit.SKILL.md",
+      "line": 38,
+      "kind": "path",
+      "target": "repos/anthropics/claude-code/contents/CHANGELOG.md",
+      "sources": [
+        "repos/anthropics/claude-code/contents/CHANGELOG.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: repos/anthropics/claude-code/contents/CHANGELOG.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
+      "line": 10,
+      "kind": "path",
+      "target": "Media/linkedin-engagement-engine.md",
+      "sources": [
+        "Media/linkedin-engagement-engine.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/linkedin-engagement-engine.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
+      "line": 17,
+      "kind": "path",
+      "target": "Media/linkedin-comment-queue.md",
+      "sources": [
+        "Media/linkedin-comment-queue.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/linkedin-comment-queue.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+      "line": 78,
+      "kind": "path",
+      "target": "db-tap.py",
+      "sources": [
+        "db-tap.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: db-tap.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
+      "line": 84,
+      "kind": "path",
+      "target": "db-tap.py",
+      "sources": [
+        "db-tap.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: db-tap.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/notes-sweep-hourly.SKILL.md",
+      "line": 8,
+      "kind": "path",
+      "target": "tasks/notes-sweep-hourly.SKILL.md",
+      "sources": [
+        "tasks/notes-sweep-hourly.SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: tasks/notes-sweep-hourly.SKILL.md",
+      "suggestion": "ops/scheduled-tasks/notes-sweep-hourly.SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "line": 12,
+      "kind": "path",
+      "target": "Media/social-media-workflow.md",
+      "sources": [
+        "Media/social-media-workflow.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/social-media-workflow.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "line": 14,
+      "kind": "path",
+      "target": "Media/x-posting-spec.md",
+      "sources": [
+        "Media/x-posting-spec.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/x-posting-spec.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "line": 14,
+      "kind": "path",
+      "target": "Media/voice-samples.md",
+      "sources": [
+        "Media/voice-samples.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/voice-samples.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "line": 14,
+      "kind": "path",
+      "target": "Media/style-contract.md",
+      "sources": [
+        "Media/style-contract.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/style-contract.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-batch-weekly.SKILL.md",
+      "line": 29,
+      "kind": "path",
+      "target": "Media/content-inspiration-bank.md",
+      "sources": [
+        "Media/content-inspiration-bank.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/content-inspiration-bank.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "line": 23,
+      "kind": "path",
+      "target": "AI/Automation/Learning/placement-pull-latest.md",
+      "sources": [
+        "AI/Automation/Learning/placement-pull-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/Automation/Learning/placement-pull-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "line": 24,
+      "kind": "path",
+      "target": "AI/Automation/Learning/weekly-learning-latest.md",
+      "sources": [
+        "AI/Automation/Learning/weekly-learning-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/Automation/Learning/weekly-learning-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "line": 25,
+      "kind": "path",
+      "target": "AI/Automation/Learning/correction-miner-latest.md",
+      "sources": [
+        "AI/Automation/Learning/correction-miner-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/Automation/Learning/correction-miner-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "line": 30,
+      "kind": "path",
+      "target": "Media/post-performance-log.md",
+      "sources": [
+        "Media/post-performance-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/post-performance-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "line": 31,
+      "kind": "path",
+      "target": "Media/published-log.md",
+      "sources": [
+        "Media/published-log.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/published-log.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/social-metrics-pull-weekly.SKILL.md",
+      "line": 32,
+      "kind": "path",
+      "target": "Media/x-posting-spec.md",
+      "sources": [
+        "Media/x-posting-spec.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: Media/x-posting-spec.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "line": 17,
+      "kind": "path",
+      "target": "x-reply-targets.md",
+      "sources": [
+        "x-reply-targets.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-reply-targets.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "line": 17,
+      "kind": "path",
+      "target": "x-strategy-2026.md",
+      "sources": [
+        "x-strategy-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: x-strategy-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "line": 17,
+      "kind": "path",
+      "target": "voice-samples.md",
+      "sources": [
+        "voice-samples.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: voice-samples.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "ops/scheduled-tasks/x-reply-run-daily.SKILL.md",
+      "line": 17,
+      "kind": "path",
+      "target": "hooks-deep-reference-2026.md",
+      "sources": [
+        "hooks-deep-reference-2026.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: hooks-deep-reference-2026.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "line": 18,
+      "kind": "path",
+      "target": "carr-workspace-bduf.md",
+      "sources": [
+        "carr-workspace-bduf.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: carr-workspace-bduf.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "line": 18,
+      "kind": "path",
+      "target": "carr-control-room-bduf.md",
+      "sources": [
+        "carr-control-room-bduf.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: carr-control-room-bduf.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "line": 18,
+      "kind": "path",
+      "target": "carr-production-maturity-baseline.md",
+      "sources": [
+        "carr-production-maturity-baseline.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: carr-production-maturity-baseline.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "line": 19,
+      "kind": "path",
+      "target": "phase0-acceptance.v1.json",
+      "sources": [
+        "phase0-acceptance.v1.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: phase0-acceptance.v1.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "line": 19,
+      "kind": "path",
+      "target": "council-review-register.v1.json",
+      "sources": [
+        "council-review-register.v1.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: council-review-register.v1.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "line": 20,
+      "kind": "path",
+      "target": "phase0-acceptance.v1.json",
+      "sources": [
+        "phase0-acceptance.v1.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: phase0-acceptance.v1.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "phase0/audit/2026-08-12-audit-council-packet.md",
+      "line": 20,
+      "kind": "path",
+      "target": "council-review.v1.json",
+      "sources": [
+        "council-review.v1.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: council-review.v1.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "line": 15,
+      "kind": "path",
+      "target": "placement-pull-latest.md",
+      "sources": [
+        "placement-pull-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: placement-pull-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "line": 16,
+      "kind": "path",
+      "target": "weekly-learning-latest.md",
+      "sources": [
+        "weekly-learning-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: weekly-learning-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "line": 17,
+      "kind": "path",
+      "target": "correction-miner-latest.md",
+      "sources": [
+        "correction-miner-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: correction-miner-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "line": 18,
+      "kind": "path",
+      "target": "promotion-review-latest.md",
+      "sources": [
+        "promotion-review-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: promotion-review-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "line": 19,
+      "kind": "path",
+      "target": "conflict-surfacing-latest.md",
+      "sources": [
+        "conflict-surfacing-latest.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: conflict-surfacing-latest.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "line": 44,
+      "kind": "path",
+      "target": "it-lane-worker.md",
+      "sources": [
+        "it-lane-worker.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: it-lane-worker.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "pipelines/learning-reports.md",
+      "line": 44,
+      "kind": "path",
+      "target": "it-support.md",
+      "sources": [
+        "it-support.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: it-support.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/PORT.md",
+      "line": 52,
+      "kind": "path",
+      "target": "plugin.json",
+      "sources": [
+        "plugin.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: plugin.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/agents/poteto-agent.md",
+      "line": 3,
+      "kind": "path",
+      "target": "SKILL.md",
+      "sources": [
+        "SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/agents/poteto-agent.md",
+      "line": 9,
+      "kind": "path",
+      "target": "SKILL.md",
+      "sources": [
+        "SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "line": 31,
+      "kind": "path",
+      "target": "SKILL.md",
+      "sources": [
+        "SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "line": 32,
+      "kind": "path",
+      "target": ".cursor/settings.json",
+      "sources": [
+        ".cursor/settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/settings.json",
+      "suggestion": ".claude/settings.json",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "line": 65,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/setup-benny/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/setup-benny/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/setup-benny/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "line": 67,
+      "kind": "path",
+      "target": ".cursor/settings.json",
+      "sources": [
+        ".cursor/settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/settings.json",
+      "suggestion": ".claude/settings.json",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "line": 87,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/FOR_AGENTS.md",
+      "line": 87,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/README.md",
+      "line": 11,
+      "kind": "path",
+      "target": ".cursor/settings.json",
+      "sources": [
+        ".cursor/settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/settings.json",
+      "suggestion": ".claude/settings.json",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/README.md",
+      "line": 22,
+      "kind": "path",
+      "target": ".cursor/settings.json",
+      "sources": [
+        ".cursor/settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/settings.json",
+      "suggestion": ".claude/settings.json",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "line": 39,
+      "kind": "path",
+      "target": "trigger.ts",
+      "sources": [
+        "trigger.ts"
+      ],
+      "unchecked": null,
+      "message": "missing path: trigger.ts",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/references/feature-map.example.md",
+      "line": 5,
+      "kind": "path",
+      "target": ".cursor/benny/feature-map.md",
+      "sources": [
+        ".cursor/benny/feature-map.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/benny/feature-map.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 11,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/setup-benny/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/setup-benny/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/setup-benny/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 34,
+      "kind": "path",
+      "target": ".cursor/settings.json",
+      "sources": [
+        ".cursor/settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/settings.json",
+      "suggestion": ".claude/settings.json",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 67,
+      "kind": "path",
+      "target": ".cursor/settings.json",
+      "sources": [
+        ".cursor/settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/settings.json",
+      "suggestion": ".claude/settings.json",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 80,
+      "kind": "path",
+      "target": ".cursor/benny/configuration.yaml",
+      "sources": [
+        ".cursor/benny/configuration.yaml"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/benny/configuration.yaml",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 81,
+      "kind": "path",
+      "target": ".cursor/benny/feature-map.md",
+      "sources": [
+        ".cursor/benny/feature-map.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/benny/feature-map.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 82,
+      "kind": "path",
+      "target": ".cursor/benny/routing.md",
+      "sources": [
+        ".cursor/benny/routing.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/benny/routing.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 192,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 203,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 225,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 234,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/setup-benny/SKILL.md",
+      "line": 254,
+      "kind": "path",
+      "target": ".cursor/settings.json",
+      "sources": [
+        ".cursor/settings.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/settings.json",
+      "suggestion": ".claude/settings.json",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "line": 36,
+      "kind": "path",
+      "target": "trigger.ts",
+      "sources": [
+        "trigger.ts"
+      ],
+      "unchecked": null,
+      "message": "missing path: trigger.ts",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/skills/triage-issue-reports/references/routing.example.md",
+      "line": 3,
+      "kind": "path",
+      "target": ".cursor/benny/routing.md",
+      "sources": [
+        ".cursor/benny/routing.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/benny/routing.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/automations/benny/templates/reproduce-automation-prompt.md",
+      "line": 5,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/reproduce-and-fix-issues/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/automations/benny/templates/triage-automation-prompt.md",
+      "line": 5,
+      "kind": "path",
+      "target": ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "sources": [
+        ".cursor/automations/benny/skills/triage-issue-reports/SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: .cursor/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion": "plugins/pstack/automations/benny/skills/triage-issue-reports/SKILL.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "plugins/pstack/docs/guide/09-make-it-yours.md",
+      "line": 39,
+      "kind": "path",
+      "target": "SKILL.md",
+      "sources": [
+        "SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/docs/guide/10-recipes-and-pitfalls.md",
+      "line": 90,
+      "kind": "path",
+      "target": "SKILL.md",
+      "sources": [
+        "SKILL.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: SKILL.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/automate-me/SKILL.md",
+      "line": 100,
+      "kind": "path",
+      "target": "test/iterate",
+      "sources": [
+        "test/iterate"
+      ],
+      "unchecked": null,
+      "message": "missing path: test/iterate",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/SKILL.md",
+      "line": 110,
+      "kind": "path",
+      "target": "main.js",
+      "sources": [
+        "main.js"
+      ],
+      "unchecked": null,
+      "message": "missing path: main.js",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/autopilot-stack.md",
+      "line": 6,
+      "kind": "path",
+      "target": "mode/playbooks/autopilot-stack.md",
+      "sources": [
+        "mode/playbooks/autopilot-stack.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: mode/playbooks/autopilot-stack.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/multi-phase-plan.md",
+      "line": 39,
+      "kind": "path",
+      "target": "mode/playbooks/opening-a-pr.md",
+      "sources": [
+        "mode/playbooks/opening-a-pr.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: mode/playbooks/opening-a-pr.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 23,
+      "kind": "path",
+      "target": "bun scripts/orch/orch.ts",
+      "sources": [
+        "bun scripts/orch/orch.ts"
+      ],
+      "unchecked": null,
+      "message": "missing path: bun scripts/orch/orch.ts",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 25,
+      "kind": "path",
+      "target": "preferences.md",
+      "sources": [
+        "preferences.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: preferences.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 26,
+      "kind": "path",
+      "target": "overview.md",
+      "sources": [
+        "overview.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: overview.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 28,
+      "kind": "path",
+      "target": "frontier.json",
+      "sources": [
+        "frontier.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: frontier.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 30,
+      "kind": "path",
+      "target": "gates.md",
+      "sources": [
+        "gates.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: gates.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 32,
+      "kind": "path",
+      "target": "status.md",
+      "sources": [
+        "status.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: status.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 61,
+      "kind": "path",
+      "target": "frontier.json",
+      "sources": [
+        "frontier.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: frontier.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 75,
+      "kind": "path",
+      "target": "status.md",
+      "sources": [
+        "status.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: status.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 79,
+      "kind": "path",
+      "target": "frontier.json",
+      "sources": [
+        "frontier.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: frontier.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/poteto-mode/playbooks/orchestrate.md",
+      "line": 105,
+      "kind": "path",
+      "target": "gates.md",
+      "sources": [
+        "gates.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: gates.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/principle-separate-before-serializing-shared-state/SKILL.md",
+      "line": 15,
+      "kind": "path",
+      "target": "state.json",
+      "sources": [
+        "state.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: state.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/principle-separate-before-serializing-shared-state/SKILL.md",
+      "line": 15,
+      "kind": "path",
+      "target": "indexer-state.json",
+      "sources": [
+        "indexer-state.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: indexer-state.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/principle-separate-before-serializing-shared-state/SKILL.md",
+      "line": 15,
+      "kind": "path",
+      "target": "metrics-state.json",
+      "sources": [
+        "metrics-state.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: metrics-state.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/show-me-your-work/SKILL.md",
+      "line": 33,
+      "kind": "path",
+      "target": "scripts/snapshot.sh",
+      "sources": [
+        "scripts/snapshot.sh"
+      ],
+      "unchecked": null,
+      "message": "missing path: scripts/snapshot.sh",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/technical-writing/SKILL.md",
+      "line": 110,
+      "kind": "path",
+      "target": "budget.mjs",
+      "sources": [
+        "budget.mjs"
+      ],
+      "unchecked": null,
+      "message": "missing path: budget.mjs",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/technical-writing/SKILL.md",
+      "line": 110,
+      "kind": "path",
+      "target": "budget.json",
+      "sources": [
+        "budget.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: budget.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/typescript-best-practices/SKILL.md",
+      "line": 4,
+      "kind": "path",
+      "target": "**/*.tsx",
+      "sources": [
+        "**/*.tsx"
+      ],
+      "unchecked": null,
+      "message": "missing path: **/*.tsx",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/why/SKILL.md",
+      "line": 161,
+      "kind": "path",
+      "target": "incident-postmortem.md",
+      "sources": [
+        "incident-postmortem.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: incident-postmortem.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/why/references/sources/code-archaeology.md",
+      "line": 55,
+      "kind": "path",
+      "target": "docs/adr",
+      "sources": [
+        "docs/adr"
+      ],
+      "unchecked": null,
+      "message": "missing path: docs/adr",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "plugins/pstack/skills/why/references/synthesizer-prompt.md",
+      "line": 65,
+      "kind": "path",
+      "target": "plugins/pstack/skills/why/references/url",
+      "sources": [
+        "plugins/pstack/skills/why/references/url"
+      ],
+      "unchecked": null,
+      "message": "missing path: plugins/pstack/skills/why/references/url",
+      "suggestion": "plugins/pstack/skills/why/references/sources/slack.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "line": 76,
+      "kind": "path",
+      "target": "wrangler.toml",
+      "sources": [
+        "wrangler.toml"
+      ],
+      "unchecked": null,
+      "message": "missing path: wrangler.toml",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "line": 118,
+      "kind": "path",
+      "target": "wrangler.toml",
+      "sources": [
+        "wrangler.toml"
+      ],
+      "unchecked": null,
+      "message": "missing path: wrangler.toml",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "line": 135,
+      "kind": "path",
+      "target": "wrangler.toml",
+      "sources": [
+        "wrangler.toml"
+      ],
+      "unchecked": null,
+      "message": "missing path: wrangler.toml",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "line": 136,
+      "kind": "path",
+      "target": "wrangler.toml",
+      "sources": [
+        "wrangler.toml"
+      ],
+      "unchecked": null,
+      "message": "missing path: wrangler.toml",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "runbooks/rollback-worker.md",
+      "line": 137,
+      "kind": "path",
+      "target": "server/wrangler.toml",
+      "sources": [
+        "server/wrangler.toml"
+      ],
+      "unchecked": null,
+      "message": "missing path: server/wrangler.toml",
+      "suggestion": "mcp-server/wrangler.toml",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "secrets-inventory.md",
+      "line": 38,
+      "kind": "path",
+      "target": "google-oidc.js",
+      "sources": [
+        "google-oidc.js"
+      ],
+      "unchecked": null,
+      "message": "missing path: google-oidc.js",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/agent-write-attribution.md",
+      "line": 57,
+      "kind": "path",
+      "target": "DECISIONS.md",
+      "sources": [
+        "DECISIONS.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: DECISIONS.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/agent-write-attribution.md",
+      "line": 102,
+      "kind": "path",
+      "target": "DECISIONS.md",
+      "sources": [
+        "DECISIONS.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: DECISIONS.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "line": 28,
+      "kind": "path",
+      "target": "meta.json",
+      "sources": [
+        "meta.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: meta.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "line": 63,
+      "kind": "path",
+      "target": "config.json",
+      "sources": [
+        "config.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: config.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "line": 63,
+      "kind": "path",
+      "target": "meta.json",
+      "sources": [
+        "meta.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: meta.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/dictation-rig-build-plan-2026-08-07.md",
+      "line": 65,
+      "kind": "path",
+      "target": "transcript.json",
+      "sources": [
+        "transcript.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: transcript.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/party-graph-ref-fallback.md",
+      "line": 92,
+      "kind": "path",
+      "target": "build-graph-notes.py",
+      "sources": [
+        "build-graph-notes.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: build-graph-notes.py",
+      "suggestion": "pipelines/build-graph-notes.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/party-graph-ref-fallback.md",
+      "line": 111,
+      "kind": "path",
+      "target": "build-graph-notes.py",
+      "sources": [
+        "build-graph-notes.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: build-graph-notes.py",
+      "suggestion": "pipelines/build-graph-notes.py",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/post-call-workflow-2026-08-10.md",
+      "line": 82,
+      "kind": "path",
+      "target": "ingested.json",
+      "sources": [
+        "ingested.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: ingested.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/read-path-traversal.md",
+      "line": 79,
+      "kind": "path",
+      "target": "DECISIONS.md",
+      "sources": [
+        "DECISIONS.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: DECISIONS.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/read-path-traversal.md",
+      "line": 161,
+      "kind": "path",
+      "target": "DECISIONS.md",
+      "sources": [
+        "DECISIONS.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: DECISIONS.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 29,
+      "kind": "path",
+      "target": "pipelines/import_operating_notes.py",
+      "sources": [
+        "pipelines/import_operating_notes.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: pipelines/import_operating_notes.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 37,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 37,
+      "kind": "path",
+      "target": "ai-operating-notes.md",
+      "sources": [
+        "ai-operating-notes.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: ai-operating-notes.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 62,
+      "kind": "path",
+      "target": "ai-operating-notes.md",
+      "sources": [
+        "ai-operating-notes.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: ai-operating-notes.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 93,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 104,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 114,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 117,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 121,
+      "kind": "path",
+      "target": "ai-operating-notes.md",
+      "sources": [
+        "ai-operating-notes.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: ai-operating-notes.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 145,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 146,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 187,
+      "kind": "path",
+      "target": "ai-operating-notes.md",
+      "sources": [
+        "ai-operating-notes.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: ai-operating-notes.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 221,
+      "kind": "path",
+      "target": "compiled-rules-shared.md",
+      "sources": [
+        "compiled-rules-shared.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: compiled-rules-shared.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 221,
+      "kind": "path",
+      "target": "compiled-rules-joe.md",
+      "sources": [
+        "compiled-rules-joe.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: compiled-rules-joe.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 221,
+      "kind": "path",
+      "target": "compiled-rules-dell.md",
+      "sources": [
+        "compiled-rules-dell.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: compiled-rules-dell.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 221,
+      "kind": "path",
+      "target": "introduction-rules.md",
+      "sources": [
+        "introduction-rules.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: introduction-rules.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 221,
+      "kind": "path",
+      "target": "action-required.md",
+      "sources": [
+        "action-required.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: action-required.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 221,
+      "kind": "path",
+      "target": "team-loops.md",
+      "sources": [
+        "team-loops.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: team-loops.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 222,
+      "kind": "path",
+      "target": "decision-history.md",
+      "sources": [
+        "decision-history.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: decision-history.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 222,
+      "kind": "path",
+      "target": "open-loops-closed.md",
+      "sources": [
+        "open-loops-closed.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: open-loops-closed.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 222,
+      "kind": "path",
+      "target": "independent-audit-2026-08-02.md",
+      "sources": [
+        "independent-audit-2026-08-02.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: independent-audit-2026-08-02.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 222,
+      "kind": "path",
+      "target": "system-report-card-2026-07-07.md",
+      "sources": [
+        "system-report-card-2026-07-07.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: system-report-card-2026-07-07.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 223,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 231,
+      "kind": "path",
+      "target": "ai-operating-notes.md",
+      "sources": [
+        "ai-operating-notes.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: ai-operating-notes.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 237,
+      "kind": "path",
+      "target": "compiled-rules-shared.md",
+      "sources": [
+        "compiled-rules-shared.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: compiled-rules-shared.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 243,
+      "kind": "path",
+      "target": "ai-operating-notes.md",
+      "sources": [
+        "ai-operating-notes.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: ai-operating-notes.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 255,
+      "kind": "path",
+      "target": "ai-operating-notes.md",
+      "sources": [
+        "ai-operating-notes.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: ai-operating-notes.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 270,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 310,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 312,
+      "kind": "path",
+      "target": "AI/CLAUDE.md",
+      "sources": [
+        "AI/CLAUDE.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: AI/CLAUDE.md",
+      "suggestion": "CLAUDE.md",
+      "suggestion_evidence": "name similarity, unverified"
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 324,
+      "kind": "path",
+      "target": "agents/README.md",
+      "sources": [
+        "agents/README.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: agents/README.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 324,
+      "kind": "path",
+      "target": "marketing-coo.md",
+      "sources": [
+        "marketing-coo.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: marketing-coo.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "specs/rule-curation-plan-2026-08-02.md",
+      "line": 340,
+      "kind": "path",
+      "target": "INDEX.md",
+      "sources": [
+        "INDEX.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: INDEX.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "line": 58,
+      "kind": "path",
+      "target": "call-context.json",
+      "sources": [
+        "call-context.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: call-context.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "line": 160,
+      "kind": "path",
+      "target": "meta.json",
+      "sources": [
+        "meta.json"
+      ],
+      "unchecked": null,
+      "message": "missing path: meta.json",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/dictation-rig/README.md",
+      "line": 189,
+      "kind": "path",
+      "target": "transcribe-session.sh",
+      "sources": [
+        "transcribe-session.sh"
+      ],
+      "unchecked": null,
+      "message": "missing path: transcribe-session.sh",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/doc-convo/README.md",
+      "line": 15,
+      "kind": "path",
+      "target": "assets/hot-context.md",
+      "sources": [
+        "assets/hot-context.md"
+      ],
+      "unchecked": null,
+      "message": "missing path: assets/hot-context.md",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "line": 27,
+      "kind": "path",
+      "target": "partner_ping.py",
+      "sources": [
+        "partner_ping.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: partner_ping.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "line": 53,
+      "kind": "path",
+      "target": "partner_ping.py",
+      "sources": [
+        "partner_ping.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: partner_ping.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "line": 124,
+      "kind": "path",
+      "target": "partner_ping.py",
+      "sources": [
+        "partner_ping.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: partner_ping.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "tools/partner-line/README.md",
+      "line": 142,
+      "kind": "path",
+      "target": "partner_ping.py",
+      "sources": [
+        "partner_ping.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: partner_ping.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "vendor-patches/README.md",
+      "line": 27,
+      "kind": "path",
+      "target": "parser.py",
+      "sources": [
+        "parser.py"
+      ],
+      "unchecked": null,
+      "message": "missing path: parser.py",
+      "suggestion": null,
+      "suggestion_evidence": null
+    },
+    {
+      "file": "vendor-patches/README.md",
+      "line": 46,
+      "kind": "path",
+      "target": "pyproject.toml",
+      "sources": [
+        "pyproject.toml"
+      ],
+      "unchecked": null,
+      "message": "missing path: pyproject.toml",
+      "suggestion": null,
+      "suggestion_evidence": null
+    }
+  ],
+  "scanned_at": "2026-10-05T20:04:14.902967+00:00",
+  "unchecked_count": 1091,
+  "note": "Remaining static-reference candidates for orchestrator triage. Archived, intended, machine-local, upstream and generated references require context; only source paths with certain replacements were corrected in this PR."
+}

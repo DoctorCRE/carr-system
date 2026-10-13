@@ -312,6 +312,8 @@ const OUTCOME_HASH = /^sha256:[0-9a-f]{64}$/;
  * the maintenance contract for this constant.
  */
 const DECLARED_CHECK_NAMES = Object.freeze([
+  "check",
+  "weekly-loops",
   "Plan against current GitHub evidence",
   "Read-only exact merge-ref verification",
   "Conditional squash merge from protected main",
