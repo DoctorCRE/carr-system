@@ -1015,14 +1015,19 @@ for dispatch_tool in ("mcp__Claude_Code_Remote__create_session",
     check(f"{dispatch_tool} hits the model-choice trigger",
           model_choice_row["trigger_id"]
           in [r["trigger_id"] for r in rail.matched_triggers(dispatch_call)])
-model_runner = Runner(gen_selector_result(packs=model_choice_row["packs"], ids=model_choice_row["rule_ids"]))
+# A cloud-session dispatch also starts new work, so the sizing trigger joins it.
+model_rows = [model_choice_row, sizing_tool_row]
+model_runner = Runner(gen_selector_result(
+    packs=sorted({p for r in model_rows for p in r["packs"]}),
+    ids=sorted({i for r in model_rows for i in r["rule_ids"]})))
 model_output = rail.process(
     gen_payload(tool="mcp__Claude_Code_Remote__create_session",
                 tool_input={"prompt": "fix the bug", "model": "sonnet"}), runner=model_runner)
 model_receipt = json.loads(context(model_output))
-check("a cloud-session dispatch delivers rule ede4b241 in one selector call",
-      len(model_runner.calls) == 1 and "ede4b241" in model_receipt["rule_ids"]
-      and model_receipt["trigger_ids"] == [model_choice_row["trigger_id"]], model_receipt)
+check("a cloud-session dispatch delivers rules ede4b241 and 8400cd3d in one selector call",
+      len(model_runner.calls) == 1 and model_receipt["rule_ids"] == ["8400cd3d", "ede4b241"]
+      and model_receipt["trigger_ids"] == sorted(r["trigger_id"] for r in model_rows),
+      model_receipt)
 for routine_tool, routine_input in (
         ("Read", {"file_path": "README.md"}), ("Grep", {"pattern": "model"}),
         ("Glob", {"pattern": "*.py"}), ("Bash", {"command": "git status"}),
@@ -1320,7 +1325,7 @@ check("the original exact background shape still takes the original rail, not th
 
 check_failure_cases(
     "generalized rail", agent_call,
-    gen_selector_result(packs=council_row["packs"], ids=council_row["rule_ids"]),
+    gen_selector_result(packs=agent_packs, ids=agent_ids),
     "selector did not return every triggered rule", rail.GENERALIZED_FAILURE_CONTEXT)
 
 # Tampering with a generalized receipt's content fails validate_generalized_receipt.
