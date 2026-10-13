@@ -1377,15 +1377,37 @@ def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=Fal
     return 1
 
 
+_HOST_LIVENESS: list = []
+
+
+def _host_liveness():
+    """(config, liveness) from one `Tailscale status` read per health run."""
+    if not _HOST_LIVENESS:
+        sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
+        import host_liveness
+        config = host_liveness.load_config()
+        _HOST_LIVENESS.append((host_liveness, config, host_liveness.observe(config=config)))
+    return _HOST_LIVENESS[0]
+
+
+def _host_liveness_rows():
+    """[(line, failed, host)]: RED only for a peer the tailnet reports offline."""
+    module, config, live = _host_liveness()
+    return module.rows(live, config)
+
+
 def _seat_health_rows():
+    """Seat rows from the record layer first (read-resource-dashboard, so the
+    other Mac's probes count) and this Mac's report second; a seat whose host
+    is offline reads SKIP, an unrun probe STALE, and only a run that failed FAIL."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
-    from seat_health import health_rows
+    import seat_health
     try:
-        with open(os.path.join(REPO_ROOT, "out", "orch", "budget", "seat-health.json")) as source:
-            report = json.load(source)
-    except (OSError, ValueError):
-        report = {}
-    return health_rows(report)
+        module, config, live = _host_liveness()
+        offline = module.offline_seats(live, config)
+    except (OSError, ValueError, KeyError, ImportError):
+        offline = {}
+    return seat_health.health_rows(seat_health.current_report(REPO_ROOT), offline=offline)
 
 
 def _tailscale_row():
@@ -1955,10 +1977,13 @@ def _canonical_health():
         # health_breach.py act): until the rows are read, no seat is green.
         _GREEN_EVIDENCE["ai_seat_health"] = None
         try:
+            # FAIL (a probe ran and failed) and STALE-RED (no probe row for
+            # over 72 h while the seat's host is online or unknown) are red;
+            # STALE inside the bound and SKIP (host offline) are not.
             _seats_green = set()
             for _seat_line in _seat_health_rows():
                 print("  " + _seat_line)
-                if _seat_line.startswith("FAIL"):
+                if _seat_line.startswith(("FAIL ", "STALE-RED ")):
                     # One finding per seat: without a subject the six rows
                     # merged into one (count 6) that kept only the last
                     # seat's text, so five bound actions were unreachable.
@@ -2093,6 +2118,23 @@ def _canonical_health():
                       "owner orchestrator · fix: restore ops/tailscale_health.py · "
                       "verify: rerun health · auto-clear: next successful node read")
             rc = _red("tailscale", detail, subject="local-node", hard_error=True)
+
+    if CANONICAL_SECTION in ("all", "tailscale"):
+        # Host liveness (2026-10-12): one row per Mac a seat runs on. The row
+        # above sees only THIS Mac's backend; the Studio sat offline for days
+        # while it stayed green and six seat rows blamed their wrappers.
+        try:
+            for _host_line, _host_failed, _host in _host_liveness_rows():
+                print(_host_line)
+                if _host_failed:
+                    rc = _red("host_liveness", _host_line.strip(), subject=_host)
+        except Exception as exc:
+            _host_detail = (f"host liveness check unavailable ({type(exc).__name__}) · on breach: "
+                            "owner orchestrator · fix: restore ops/host_liveness.py and "
+                            "ops/config/seat-hosts.v1.json · verify: python3 ops/host_liveness.py "
+                            "prints one row per host · auto-clear: next health run prints host rows")
+            print("  ✗✗ " + _host_detail)
+            rc = _red("host_liveness", _host_detail, subject="checker")
 
     # WHOLE-RUN backstop, alongside the static AST proof in tools/health-
     # check-findings-selftest.py (round 8 of an independent review of PR

@@ -30,6 +30,8 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
+from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SESSION = "sess-selftest"
@@ -46,6 +48,35 @@ class Case:
         self.env.pop("CARR_RULE_BOOT_FETCH_STUB", None)
         self.env.pop("PYTHONPATH", None)
         self.digest, self.pages = None, 0
+        self.transcript = None
+
+    def transcripts(self):
+        """Claude Code's transcript layout: <project>/<session>.jsonl for the main
+        context and <project>/<session>/subagents/agent-<id>.jsonl per subagent.
+        Every hook payload names the MAIN transcript, a subagent's included
+        (2.1.287-2.1.295 build transcript_path from the session id)."""
+        root = os.path.join(self.work, "projects")
+        os.makedirs(os.path.join(root, SESSION, "subagents"), exist_ok=True)
+        self.transcript = os.path.join(root, f"{SESSION}.jsonl")
+        self.entry(None, time.time() - 3600)
+
+    def entry(self, agent, ts, boundary=False, sidechain_of=None):
+        """Append one transcript line: an ordinary entry or a compact_boundary,
+        to the main file (agent None) or that subagent's own file. sidechain_of
+        mirrors a subagent's entry into the main file the way older layouts did."""
+        path = self.transcript if agent is None else os.path.join(
+            self.transcript[:-len(".jsonl")], "subagents", f"agent-{agent}.jsonl")
+        stamp = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+        line = {"type": "system", "subtype": "compact_boundary"} if boundary else {"type": "user"}
+        line.update(timestamp=stamp, sessionId=SESSION)
+        if agent or sidechain_of:
+            line.update(isSidechain=True, agentId=agent or sidechain_of)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line) + "\n")
+
+    def arm_state(self):
+        with open(os.path.join(self.state, SESSION, "arm.json"), encoding="utf-8") as fh:
+            return json.load(fh)
 
     def stub(self, digest=None, pages=3):
         if digest in (None, "not_deployed"):
@@ -87,6 +118,8 @@ class Case:
                    "tool_name": "Bash", "tool_input": args}
         if agent:
             payload["agent_id"] = agent
+        if self.transcript:
+            payload["transcript_path"] = self.transcript
         if answer == "boot":
             body = json.dumps({"ok": True, "rule_boot": boot or self.boot(page)})
             payload["tool_response"] = {"stdout": stdout(body) if stdout else body, "stderr": "",
@@ -113,10 +146,13 @@ class Case:
         return "PYTHONPATH" in self.env
 
     def arm(self, source="startup", agent=None):
-        """SessionStart as the host sends it. A subagent's own SessionStart
-        (its start, its compaction) carries the PARENT's session_id plus the
-        subagent's agent_id (Claude Code 2.1.288: compaction calls the
-        SessionStart hooks with the compacting context's agentContext)."""
+        """SessionStart as the host sends it. `agent` is the FLAGGED form: a
+        SessionStart that names the subagent in agent_id. Claude Code 2.1.287,
+        2.1.293 and 2.1.295 never send it: a subagent's compaction runs the
+        SessionStart hooks with the parent's session_id and transcript_path and
+        no agent_id (the hook input is built without the agent's context), so
+        the real child compaction is c.arm("compact") with the transcripts
+        showing whose it was (see case_unflagged_child_compaction_*)."""
         if not self.subprocess_only():
             with InProcess(self) as (_hook, lib):
                 return lib.arm_session(SESSION, source, **({"agent_id": agent} if agent else {})) + "\n"
@@ -165,6 +201,8 @@ class Case:
             payload["agent_id"] = agent
         if agent_type:
             payload["agent_type"] = agent_type
+        if self.transcript:
+            payload["transcript_path"] = self.transcript
         return self.hook(payload)
 
     def fetch(self, page, agent=None, form="mcp", answer="boot", digest=None, pages=None):
@@ -178,6 +216,8 @@ class Case:
         payload = {"session_id": SESSION, "cwd": REPO, "tool_name": tool, "tool_input": args}
         if agent:
             payload["agent_id"] = agent
+        if self.transcript:
+            payload["transcript_path"] = self.transcript
         if answer == "boot":
             body = json.dumps({"ok": True, "rule_boot": self.boot(page, digest, pages)})
             payload.update(hook_event_name="PostToolUse", tool_response=(
@@ -1179,7 +1219,9 @@ def case_child_compaction_rearms_only_that_child(c):
     re-armed main within a second each time (main re-read 6 times for 2 real
     compactions). A child's compaction re-arms that child and nothing else."""
     _booted_parent_and_child(c)
+    before = c.arm_state()
     c.arm("compact", agent="sub-a")
+    assert c.arm_state() == before, "a flagged child's SessionStart leaves the session arm untouched"
     assert c.call(*READ) is None, "parent's completed boot survives a child compacting"
     assert denied(c.call(*READ, agent="sub-a")), "the compacted child has lost its rules: re-fetch"
     c.fetch(1, agent="sub-a")
@@ -1198,7 +1240,11 @@ def case_child_rearm_digest_change_regates_all(c):
     _booted_parent_and_child(c)
     c.stub("b", pages=2)
     c.arm("compact", agent="sub-a")
-    assert denied(c.call(*READ)), "a new digest re-gates the parent"
+    r = c.call(*READ)
+    assert denied(r), "a new digest re-gates the parent"
+    why = r["permissionDecisionReason"]
+    assert "A subagent's SessionStart (compact) found a new rule digest" in why, why
+    assert "This context compacted" not in why and "no longer holds them" not in why, why
     assert denied(c.call(*READ, agent="sub-a")), "and the child"
 
 
@@ -1212,9 +1258,155 @@ def case_child_rearm_outage_keeps_parent(c):
     assert denied(c.call(*READ, agent="sub-a")), "the compacted child is held"
 
 
-CASES = [case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
+# --- unflagged compaction (WR-000265, 2026-10-12): the SessionStart a subagent's
+# compaction sends carries no agent_id, so the transcripts say whose it was.
+
+def _after():
+    """Now, strictly after every page confirmation already written: a
+    compaction stamped here follows the boot, as it does in a real session.
+    The pause outlasts a coarse filesystem clock (Linux file times move in
+    ticks of up to 4 ms) and the transcript's millisecond stamp."""
+    time.sleep(0.006)
+    return time.time()
+
+
+def _child_compacts(c, child="sub-a"):
+    """The real sequence: the child's compact_boundary lands in its own
+    transcript, SessionStart(compact) arrives with no agent_id, and the parent
+    keeps working (a main-transcript line after the arm)."""
+    c.entry(child, _after(), boundary=True)
+    c.arm("compact")
+    c.entry(None, time.time() + 5)
+
+
+def case_unflagged_child_compaction_keeps_parent(c):
+    """out/rule-boot-gate/396a6a8a-.../arm.json, 18:28:50Z: subagent
+    af4b9440c21ae18ce compacted, the unflagged SessionStart re-armed the
+    session, and the parent (no compaction since 18:11:30Z) was held and paid
+    six re-fetches. The parent's confirmed pages must still count."""
+    c.transcripts()
+    _booted_parent_and_child(c)
+    for page in (1, 2):
+        c.fetch(page, agent="sub-b")
+    before = c.arm_state()
+    # Older layouts also mirrored a child's boundary into the main file as a
+    # sidechain entry; that is still the child's compaction, not the parent's.
+    c.entry(None, _after(), boundary=True, sidechain_of="sub-a")
+    _child_compacts(c)
+    assert c.arm_state().get("carry_epoch") == before["epoch"], c.arm_state()
+    assert c.call(*READ) is None, "the parent's confirmed pages still count after a child compacted"
+    assert c.call(*READ) is None, "and keep counting"
+    assert not c.holds(), f"the parent was never held: {c.holds()}"
+    assert c.call(*READ, agent="sub-b") is None, "a sibling that did not compact keeps its boot"
+    r = c.call(*READ, agent="sub-a")
+    assert denied(r) and "this subagent compacted" in r["permissionDecisionReason"], \
+        f"the compacted child gets its own epoch and must fetch: {r}"
+    _after()  # the re-read follows the compaction on the file clock too
+    for page in (1, 2):
+        assert not denied(c.fetch(page, agent="sub-a")[0])
+    assert c.call(*READ, agent="sub-a") is None, "the child re-read every page"
+    assert c.call(*READ) is None, "and the parent stayed booted throughout"
+
+
+def case_unflagged_child_compactions_chain(c):
+    """Two children compact before the parent's next call: the parent's boot
+    from before both still counts."""
+    c.transcripts()
+    _booted_parent_and_child(c)
+    for page in (1, 2):
+        c.fetch(page, agent="sub-b")
+    first = c.arm_state()["epoch"]
+    _child_compacts(c, "sub-a")
+    _child_compacts(c, "sub-b")
+    assert c.arm_state().get("carry_epoch") == first, c.arm_state()
+    assert c.call(*READ) is None, "two child compactions leave the parent's boot standing"
+    _child_compacts(c, "sub-a")
+    assert c.call(*READ) is None, "a third, after the parent was attributed, too"
+
+
+def case_parent_own_compaction_still_rearms(c):
+    """The parent's own compaction behaves exactly as today, even when a child
+    compacted around the same time, and the hold names it as its own."""
+    c.transcripts()
+    _booted_parent_and_child(c)
+    c.entry(None, _after(), boundary=True)
+    _child_compacts(c)
+    r = c.call(*READ)
+    assert denied(r), "the parent's own compaction re-arms the parent"
+    assert "This context compacted at" in r["permissionDecisionReason"], r
+    assert denied(c.call(*READ)), "and stays held"
+    for page in (1, 2):
+        c.fetch(page)
+    assert c.call(*READ) is None, "the parent re-read every page"
+
+
+def case_unattributed_compaction_holds(c):
+    """No subagent transcript shows a compaction: the parent is held as today,
+    and the hold says the payload could not name the context."""
+    c.transcripts()
+    _booted_parent_and_child(c)
+    c.arm("compact")
+    c.entry(None, time.time() + 5)
+    r = c.call(*READ)
+    assert denied(r), "an unattributed compaction holds the parent"
+    assert "does not say whether this context or one of its subagents compacted" in \
+        r["permissionDecisionReason"], r
+    assert c.call(*READ, agent="sub-a") is None, "a child whose transcript shows no compaction keeps its boot"
+
+
+def case_carry_waits_for_the_transcript(c):
+    """Until the main transcript has a line written after the re-arm, its
+    silence proves nothing (the parent's own boundary may not be written yet):
+    held. Once it has one, the child's compaction is attributed."""
+    c.transcripts()
+    _booted_parent_and_child(c)
+    c.entry("sub-a", _after(), boundary=True)
+    c.arm("compact")
+    assert denied(c.call(*READ)), "no main-transcript line after the arm: cannot attribute"
+    c.entry(None, time.time() + 5)
+    # Real transcripts end in bursts of untimestamped bookkeeping lines
+    # (custom-title, last-prompt, agent-name, ...): they hide nothing.
+    with open(c.transcript, "a", encoding="utf-8") as fh:
+        for i in range(120):
+            fh.write(json.dumps({"type": "custom-title", "title": f"t{i}", "sessionId": SESSION}) + "\n")
+    assert c.call(*READ) is None, "now attributed to the child"
+
+
+def case_no_transcript_keeps_todays_behaviour(c):
+    """A host that names no transcript (Codex, a replay): a compaction re-arms
+    the parent exactly as before."""
+    _booted_parent_and_child(c)
+    c.arm("compact")
+    assert denied(c.call(*READ)), "no transcript: the parent is held as before"
+    assert c.call(*READ, agent="sub-a") is None, "and no child is re-gated on a guess"
+
+
+def case_fetch_instructions_leads_with_digest_only(c):
+    """The re-arm message's FIRST instruction is the cheapest accepted form,
+    and the gate itself parses that exact line as a page fetch (filtered, so
+    it confirms the page with digest-only output); the plain Bash form still
+    parses too."""
+    _hook, lib, _pkg = _load(c.tree)
+    text = lib.fetch_instructions([1, 2, 3], digest="sha256:" + "ab" * 32, pages_total=3)
+    lines = text.splitlines()
+    assert lines[2].lstrip().startswith("Bash, digest only"), lines[2]
+    command = lines[2].split("): ", 1)[1]
+    assert "jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'" in command, command
+    parsed = lib.parse_bash_fetch(command, c.tree)
+    assert parsed is not None, "the digest-only instruction must parse as a fetch"
+    args, direct = parsed
+    assert lib._page_of(args) == 1 and direct is False, (args, direct)
+    plain = lines[4].split("Bash: ", 1)[1]
+    parsed = lib.parse_bash_fetch(plain, c.tree)
+    assert parsed is not None and parsed[1] is True and lib._page_of(parsed[0]) == 1, plain
+
+
+CASES = [case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
          case_child_start_keeps_parent_boot, case_child_compaction_rearms_only_that_child,
          case_child_rearm_digest_change_regates_all, case_child_rearm_outage_keeps_parent,
+         case_unflagged_child_compaction_keeps_parent, case_unflagged_child_compactions_chain,
+         case_parent_own_compaction_still_rearms, case_unattributed_compaction_holds,
+         case_carry_waits_for_the_transcript, case_no_transcript_keeps_todays_behaviour,
          case_deny_cap, case_outage_after_good_arm, case_out_of_range_not_outage,
          case_mid_session_digest_change, case_foreign_mcp_prefix, case_toolless_subagent,
          case_not_deployed_distinct, case_state_unwritable_armed, case_disk_full_armed,
@@ -1232,7 +1424,10 @@ CASES = [case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cann
          case_filtered_fetch_counts_with_digest, case_unreadable_input_holds_effects]
 
 
-def run_all(tree):
+def run_all(tree, first_only=False):
+    """Every case's failure; with first_only, stop at the first (a mutant
+    needs one red case to be killed, and the full set per mutant costs CI's
+    120s per-selftest budget)."""
     failures = []
     for case in CASES:
         work = tempfile.mkdtemp(prefix="rule-boot-gate-")
@@ -1242,6 +1437,8 @@ def run_all(tree):
             failures.append(f"{case.__name__}: {exc}")
         finally:
             shutil.rmtree(work, ignore_errors=True)
+        if failures and first_only:
+            break
     return failures
 
 
@@ -1261,8 +1458,9 @@ def check_gate_integrity_rearms():
         with open(os.path.join(c.state, SESSION, "arm.json"), encoding="utf-8") as fh:
             arm = json.load(fh)
         assert arm["status"] == "armed" and arm["source"] == "compact", arm
-        # A subagent's compaction: same session_id, plus agent_id. The hook must
-        # hand the agent through, so the session arm (and main's epoch) stand.
+        # A FLAGGED subagent SessionStart (agent_id present; no Claude Code
+        # release sends it yet, see Case.arm). The hook must hand the agent
+        # through, so the session arm (and main's epoch) stand.
         child = {**payload, "agent_id": "sub-gi"}
         out = subprocess.run([sys.executable, os.path.join(REPO, "hooks", "gate-integrity.py")],
                              input=json.dumps(child), capture_output=True, text=True,
@@ -1372,6 +1570,22 @@ MUTANTS = {
     "compaction-hold-silent": [('    if not agent_id and not confirmed and source in ("compact", "resume", "clear"):',
                                 '    if False:')],
     "python-any-cwd": [('    if uses_python and not _is_checkout_root(base):', '    if False:')],
+    # Whose compaction (WR-000265).
+    "child-compaction-rotates-parent": [('            if carry:\n                arm["carry_epoch"] = carry',
+                                         '            if False:\n                arm["carry_epoch"] = carry')],
+    "flagged-child-rotates-parent": [('    if agent_id and stored_armed and (same_corpus or not live_armed):',
+                                      '    if False:')],
+    "own-compaction-carried": [('    if own:\n        return "own", max(own)', '    if False:\n        return "own", max(own)')],
+    "sidechain-counted-as-own": [('        if not sub and (entry.get("isSidechain") or entry.get("agentId")):\n            continue',
+                                  '        if False:\n            continue')],
+    "carry-without-child-evidence": [('            return "child", max(hits)\n    return None, None',
+                                      '            return "child", max(hits)\n    return "child", None')],
+    "carry-before-transcript-catches-up": [('    if events[1] is None or events[1] <= armed_at:\n        return None, None',
+                                           '    if False:\n        return None, None')],
+    "compacted-child-keeps-boot": [('        if compacted is not None:', '        if False:')],
+    "own-compaction-misnamed": [('    if owner == "own":\n        return (f"This context compacted',
+                                 '    if False:\n        return (f"This context compacted')],
+    "child-digest-change-misnamed": [('    if arm.get("by_agent"):', '    if False:')],
 }
 
 
@@ -1407,7 +1621,7 @@ def main():
     for name, replacements in MUTANTS.items():
         root = tempfile.mkdtemp(prefix=f"rule-boot-mutant-{name}-")
         try:
-            caught = run_all(mutant_tree(root, replacements))
+            caught = run_all(mutant_tree(root, replacements), first_only=True)
         finally:
             shutil.rmtree(root, ignore_errors=True)
         if caught:
