@@ -28,9 +28,21 @@ ARCHIVES = {
 PII = {
     'pii-email': re.compile(r'(?<![A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+'),
     'pii-phone': re.compile(r'(?<![\w])(?:\+?1[ .-]?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[ .-]?[2-9]\d{2}[ .-]?\d{4}(?![\w])'),
-    'pii-address': re.compile(r'\b\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,6}(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd|Court|Ct|Way|Place|Pl|Parkway|Pkwy)\b', re.I),
+    # The street word must be capitalized: "one place" in prose is not an address.
+    'pii-address': re.compile(r'\b\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,6}(?:' + '|'.join(
+        word + '|' + word.upper() for word in ('Street', 'St', 'Avenue', 'Ave', 'Road', 'Rd', 'Drive', 'Dr', 'Lane',
+                                               'Ln', 'Boulevard', 'Blvd', 'Court', 'Ct', 'Way', 'Place', 'Pl',
+                                               'Parkway', 'Pkwy')) + r')\b'),
     'pii-ssn': re.compile(r'(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)'),
 }
+# Mail at a reserved domain (RFC 2606/6761), an IP literal or GitHub's public
+# noreply identity reaches no person, so it is not contact data.
+RESERVED_MAIL = re.compile(r'(?:^|\.)(?:example|invalid|test|localhost)$|^example\.(?:com|net|org)$'
+                           r'|^users\.noreply\.github\.com$|^[\d.]+$', re.I)
+# A one-token client value (a first name, a town, a word like "health") matches
+# ordinary prose and source identifiers, so client data is matched on two or more
+# tokens only. One-token corpus entries are dropped when the corpus is loaded.
+MIN_CLIENT_TOKENS = 2
 
 
 def tokens(text):
@@ -82,23 +94,36 @@ def make_corpus(values, salt):
                             'start_lengths': {h: sorted(ns) for h, ns in sorted(start_lengths.items())}})
 
 
+def prepare_corpus(corpus):
+    start_lengths = {h: {n for n in ns if n >= MIN_CLIENT_TOKENS}
+                     for h, ns in corpus.get('start_lengths', {}).items()}
+    start_lengths = {h: ns for h, ns in start_lengths.items() if ns}
+    return {**corpus, '_hashes': set(corpus['hashes']),
+            '_lengths': {n for n in corpus['lengths'] if n >= MIN_CLIENT_TOKENS},
+            '_prefix': hashlib.sha256((corpus['salt'] + '\0').encode()),
+            '_starts': set(start_lengths) if 'start_lengths' in corpus else
+                       set(corpus['starts']) if 'starts' in corpus else None,
+            '_start_lengths': start_lengths, '_first_cache': {}, '_window_cache': {}}
+
+
 def pii_findings(text, corpus):
     words, numbers = [], []
     for number, line in enumerate(text.split('\n'), 1):
         line = decode_source(line)
         for rule, regex in PII.items():
-            if regex.search(line):
+            if any(rule != 'pii-email' or not RESERVED_MAIL.search(match[0].rpartition('@')[2])
+                   for match in regex.finditer(line)):
                 yield number, rule, ''
         normalized = tokens(line)
         words.extend(normalized)
         numbers.extend([number] * len(normalized))
-    if corpus:
-        hashes = corpus.get('_hashes') or set(corpus['hashes'])
-        prefix = corpus.get('_prefix') or hashlib.sha256((corpus['salt'] + '\0').encode())
-        lengths = corpus.get('_lengths') or set(corpus['lengths'])
-        starts = corpus.get('_starts')
-        first_cache = corpus.get('_first_cache', {})
-        window_cache = corpus.get('_window_cache', {})
+    if corpus and corpus['_lengths']:
+        hashes = corpus['_hashes']
+        prefix = corpus['_prefix']
+        lengths = corpus['_lengths']
+        starts = corpus['_starts']
+        first_cache = corpus['_first_cache']
+        window_cache = corpus['_window_cache']
         for start in range(len(words)):
             word = words[start]
             if word not in first_cache:
@@ -109,7 +134,7 @@ def pii_findings(text, corpus):
             first = first_cache[word]
             if first is None:
                 continue
-            candidates = corpus.get('_start_lengths', {}).get(first, lengths)
+            candidates = corpus['_start_lengths'].get(first, lengths)
             longest = max(candidates)
             window = tuple(words[start:start + longest])
             if window in window_cache:
@@ -119,9 +144,6 @@ def pii_findings(text, corpus):
             digest = prefix.copy()
             digest.update(word.encode())
             found = []
-            if 1 in candidates and first in hashes:
-                found.append(first)
-                yield numbers[start], 'client-data', first
             for end in range(start + 1, min(len(words), start + longest)):
                 digest.update(words[end].encode())
                 if end - start + 1 in candidates and digest.copy().hexdigest() in hashes:
@@ -181,8 +203,11 @@ def staged(root):
 def history(root, revisions):
     if git(root, 'rev-parse', '--is-shallow-repository').strip() != b'false':
         raise ValueError('shallow history')
+    # A merge contributes only the paths whose result differs from every parent
+    # (a conflict resolution or an evil merge); a blob equal to one parent's was
+    # introduced by that parent's own commit, scanned there or already upstream.
     changes = git(root, 'log', '--format=', '--raw', '-z', '--no-abbrev', '--no-renames',
-                  '--root', '-m', *revisions, '--').split(b'\0')
+                  '--root', '--diff-merges=combined', *revisions, '--').split(b'\0')
     objects = {}
     index = 0
     while index < len(changes):
@@ -192,14 +217,15 @@ def history(root, revisions):
             continue
         if not header.startswith(b':') or index >= len(changes):
             raise ValueError('invalid raw history')
+        parents = len(header) - len(header.lstrip(b':'))
         fields = header.split()
-        if len(fields) != 5:
+        if len(fields) != 2 * parents + 3:
             raise ValueError('invalid raw history')
         path = changes[index].decode('utf-8', 'surrogateescape')
         index += 1
-        if fields[1] in (b'000000', b'160000'):
+        if fields[parents] in (b'000000', b'160000'):
             continue
-        objects.setdefault(fields[3], set()).add(path)
+        objects.setdefault(fields[2 * parents + 1], set()).add(path)
     child = subprocess.Popen(['git', '--no-replace-objects', '-C', str(root), 'cat-file', '--batch'],
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
@@ -232,15 +258,16 @@ def pushed(root, stream, remote_name):
         if local == zero:
             continue
         git(root, 'rev-parse', '--verify', local + '^{commit}')
-        # New refs scan their complete ancestry, including every intermediate commit.
-        # Existing refs exclude only ancestry Git says the receiver already has.
+        # Every intermediate commit is scanned; ancestry the receiver already has
+        # (the ref's old value, or any of its tracking refs, e.g. a merged-in main)
+        # is excluded.
         revisions.append(local)
         if remote != zero:
             git(root, 'rev-parse', '--verify', remote + '^{commit}')
             revisions.append('^' + remote)
-        elif re.fullmatch(r'[A-Za-z0-9._-]+', remote_name):
-            known = git(root, 'for-each-ref', '--format=%(objectname)', 'refs/remotes/' + remote_name)
-            revisions.extend('^' + oid for oid in known.decode().splitlines())
+    if revisions and re.fullmatch(r'[A-Za-z0-9._-]+', remote_name):
+        known = git(root, 'for-each-ref', '--format=%(objectname)', 'refs/remotes/' + remote_name)
+        revisions.extend('^' + oid for oid in known.decode().splitlines())
     return history(root, revisions) if revisions else iter(())
 
 
@@ -275,11 +302,7 @@ def scan(root, source, corpus, allowed, report_path=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith('GITLEAKS_')}
     findings, sensitive_paths, pii_cache = set(), set(), {}
     if corpus:
-        corpus = {**corpus, '_hashes': set(corpus['hashes']), '_lengths': set(corpus['lengths']),
-                  '_prefix': hashlib.sha256((corpus['salt'] + '\0').encode()),
-                  '_starts': set(corpus['starts']) if 'starts' in corpus else None,
-                  '_start_lengths': {h: set(ns) for h, ns in corpus.get('start_lengths', {}).items()},
-                  '_first_cache': {}, '_window_cache': {}}
+        corpus = prepare_corpus(corpus)
     chunks, locations, starts, digests, hits = [], [], [], [], []
     line, batch_bytes = 1, 0
 

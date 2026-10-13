@@ -44,7 +44,7 @@ class LeakGuardTest(unittest.TestCase):
                   'hashes': [hashlib.sha256((salt + '\0fictionalperson').encode()).hexdigest()]}
         corpus_path = self.root / 'corpus.json'
         corpus_path.write_text(json.dumps(corpus))
-        values = [name, 'contact' + '@private.invalid', '(212)' + ' 234-6789', '843' + ' Imaginary Avenue']
+        values = [name, 'contact@' + 'fictional-mail.com', '(212)' + ' 234-6789', '843' + ' Imaginary Avenue']
         (self.root / 'sample.txt').write_text('\n'.join(values))
         subprocess.run(['git', '-C', str(self.root), 'add', 'sample.txt'], check=True)
         result = self.run_guard('--staged', '--corpus', str(corpus_path))
@@ -74,8 +74,65 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(hook.returncode, 1, hook.stderr)
         self.assertNotIn(value, result.stdout + hook.stdout + hook.stderr)
 
+    def git(self, *args):
+        return subprocess.check_output(['git', '-C', str(self.root), *args]).decode().strip()
+
+    def test_merging_main_scans_only_what_the_branch_introduces(self):
+        (self.root / 'sample.txt').write_text('safe\n')
+        self.git('add', 'sample.txt')
+        self.commit()
+        self.git('branch', '-M', 'main')
+        self.git('checkout', '-qb', 'feature')
+        (self.root / 'feature.txt').write_text('feature work\n')
+        self.git('add', 'feature.txt')
+        before_merge = self.commit()
+        self.git('checkout', '-q', 'main')
+        value = 'ghp_' + base64.b64encode(bytes(range(27))).decode()
+        (self.root / 'main-side.txt').write_text('token="' + value + '"\n')
+        self.git('add', 'main-side.txt')
+        main = self.commit()
+        self.git('checkout', '-q', 'feature')
+        self.git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid',
+                 'merge', '-q', '--no-edit', 'main')
+        head = self.git('rev-parse', 'HEAD')
+        result = self.run_guard('--range', main + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        refs = f'refs/heads/feature {head} refs/heads/feature {before_merge}\n'
+        self.git('update-ref', 'refs/remotes/origin/main', main)
+        hook = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--pre-push', '--generic-only'],
+                              input=refs, env=self.env, capture_output=True, text=True)
+        self.assertEqual(hook.returncode, 0, hook.stdout + hook.stderr)
+        new_ref = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--pre-push', '--generic-only'],
+                                 input=refs.replace(before_merge, '0' * 40), env=self.env, capture_output=True,
+                                 text=True)
+        self.assertEqual(new_ref.returncode, 0, new_ref.stdout + new_ref.stderr)
+
+    def test_merge_resolution_content_is_still_scanned(self):
+        (self.root / 'sample.txt').write_text('safe\n')
+        self.git('add', 'sample.txt')
+        self.commit()
+        self.git('branch', '-M', 'main')
+        self.git('checkout', '-qb', 'feature')
+        (self.root / 'feature.txt').write_text('feature work\n')
+        self.git('add', 'feature.txt')
+        self.commit()
+        self.git('checkout', '-q', 'main')
+        (self.root / 'main.txt').write_text('main work\n')
+        self.git('add', 'main.txt')
+        main = self.commit()
+        self.git('checkout', '-q', 'feature')
+        self.git('merge', '-q', '--no-commit', 'main')
+        value = 'ghp_' + base64.b64encode(bytes(range(27))).decode()
+        (self.root / 'sample.txt').write_text('token="' + value + '"\n')
+        self.git('add', 'sample.txt')
+        head = self.commit()
+        result = self.run_guard('--range', main + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('sample.txt:1', result.stdout)
+        self.assertNotIn(value, result.stdout + result.stderr)
+
     def test_allowlist_is_bound_to_fixture_bytes_and_requires_reason(self):
-        raw = ('test' + '@synthetic.invalid\n').encode()
+        raw = ('test@' + 'fictional-mail.com\n').encode()
         (self.root / 'fixture.txt').write_bytes(raw)
         subprocess.run(['git', '-C', str(self.root), 'add', 'fixture.txt'], check=True)
         allow = self.root / 'allow.json'
@@ -94,7 +151,7 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_hash_export_contains_no_original_values(self):
-        values = ['Fictional' + ' Person', 'contact' + '@private.invalid', '843' + ' Imaginary Avenue']
+        values = ['Fictional' + ' Person', 'contact@' + 'fictional-mail.com', '843' + ' Imaginary Avenue']
         exporter = SCRIPT.with_name('hash_export.py')
         result = subprocess.run(['python3', str(exporter)], input=json.dumps({'values': values}),
                                 capture_output=True, text=True)
@@ -106,7 +163,7 @@ class LeakGuardTest(unittest.TestCase):
             self.assertNotIn(value, result.stdout)
 
     def test_non_latin_name_export_and_detection_preserve_letters(self):
-        value = chr(0x6f22) + chr(0x5b57)
+        value = chr(0x6f22) + chr(0x5b57) + ' ' + chr(0x540d) + chr(0x524d)
         export = subprocess.run(['python3', str(SCRIPT.with_name('hash_export.py'))],
                                 input=json.dumps({'values': [value]}), capture_output=True, text=True)
         self.assertEqual(export.returncode, 0, export.stderr)
@@ -118,6 +175,29 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn('sample.txt:1 client-data', result.stdout)
         self.assertTrue(value not in result.stdout + result.stderr, 'Matched value escaped diagnostics')
+
+    def test_client_data_needs_more_than_one_token(self):
+        salt = '12' * 32
+        corpus = self.root / 'corpus.json'
+        corpus.write_text(json.dumps({'schema': 'leak-guard-corpus.v1', 'salt': salt, 'lengths': [1, 2],
+                                      'hashes': [hashlib.sha256((salt + '\0' + word).encode()).hexdigest()
+                                                 for word in ('ordinary', 'fictionalperson')]}))
+        (self.root / 'sample.py').write_text('ordinary = 1\n' + 'Fictional' + ' Person\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', 'sample.py'], check=True)
+        result = self.run_guard('--staged', '--corpus', str(corpus))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn('sample.py:1', result.stdout)
+        self.assertIn('sample.py:2 client-data', result.stdout)
+
+    def test_reserved_domains_and_prose_are_not_contact_data(self):
+        ignored = ['fixture@' + 'example.invalid', 'user.email=64207374+jbookout@' + 'users.noreply.github.com',
+                   '*@' + '127.0.0.1:*', 'probe@' + 'example.com', '2026-08-06 and ran in exactly one ' + 'place']
+        flagged = ['contact@' + 'fictional-mail.com', '843' + ' Imaginary Avenue']
+        (self.root / 'sample.txt').write_text('\n'.join(ignored + flagged) + '\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', 'sample.txt'], check=True)
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, 'sample.txt:6 pii-email\nsample.txt:7 pii-address\n')
 
     def test_export_indexes_only_possible_lengths_for_each_hashed_start(self):
         exporter = SCRIPT.with_name('hash_export.py')
@@ -149,7 +229,7 @@ class LeakGuardTest(unittest.TestCase):
 
     def test_private_history_report_contains_counts_and_paths_only(self):
         (self.root / '.gitignore').write_text('out/\n')
-        (self.root / 'sample.txt').write_text('contact' + '@private.invalid\n')
+        (self.root / 'sample.txt').write_text('contact@' + 'fictional-mail.com\n')
         subprocess.run(['git', '-C', str(self.root), 'add', '.gitignore', 'sample.txt'], check=True)
         self.commit()
         report = self.root / 'out/history.json'
