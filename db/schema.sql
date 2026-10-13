@@ -67408,7 +67408,7 @@ COMMENT ON FUNCTION ops.triage_sourced_work_request(p_work_request text, p_base_
 CREATE FUNCTION ops.v5_a02_rule_enforcement_coverage() RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'ops', 'public', 'pg_temp'
-    AS $_$
+    AS $$
 declare
   v_active integer;
   v_covered integer;
@@ -67438,17 +67438,7 @@ begin
                     and btrim(ep.test_ref) <> '' and btrim(c.test_ref) <> '', false) as recorded,
            coalesce(ep.verified_at > v_observed_at
                     or c.verified_at > v_observed_at, false) as future_dated,
-           c.verified_at is distinct from ep.verified_at as changed_since_approval,
-           -- 0876: a control whose unavailability the system already names by
-           -- machine (see the header): transactional_schema, or implemented
-           -- only by hooks/*.py files that gate-integrity hashes and wires.
-           -- A missing catalog row is never self-alarming.
-           coalesce(c.control_key is not null
-                    and (c.enforcement_class = 'transactional_schema'
-                         or not exists (
-                           select 1
-                             from regexp_split_to_table(btrim(c.implementation_ref), '\s*;\s*') ref(path)
-                            where ref.path !~ '^hooks/[A-Za-z0-9_.-]+[.]py$')), false) as self_alarming
+           c.verified_at is distinct from ep.verified_at as changed_since_approval
       from active_rule a
       join ops.rule_approval_receipt ar
         on ar.rule_id = a.rule_id
@@ -67468,8 +67458,7 @@ begin
            bool_and(mapped) as all_mapped,
            bool_and(recorded) as all_recorded,
            bool_or(recorded and future_dated) as any_future_dated,
-           bool_and(recorded and not future_dated and not changed_since_approval) as all_passing,
-           bool_and(self_alarming) as all_self_alarming
+           bool_and(recorded and not future_dated and not changed_since_approval) as all_passing
       from approved_control
      group by rule_id, approval_id
   ), facts as (
@@ -67499,22 +67488,7 @@ begin
               where fr.rule_id = a.rule_id
                 and fr.rule_version = a.version
                 and fr.statement_hash = a.statement_hash
-           ) as fallback_recorded,
-           -- 0876: the fallback rung binds human_only rules, any rule without
-           -- a current exact hard_enforced approval, and any approval naming a
-           -- control whose unavailability nothing names by machine. Only a
-           -- machine_enforceable/hard_enforced approval whose EVERY control is
-           -- self-alarming (header) is exempt.
-           not exists (
-             select 1 from ops.rule_approval_receipt ar
-               join approval p on p.approval_id = ar.id and p.rule_id = ar.rule_id
-              where ar.rule_id = a.rule_id
-                and ar.rule_version = a.version
-                and ar.statement_hash = a.statement_hash
-                and ar.policy_kind = 'machine_enforceable'
-                and ar.enforcement_status = 'hard_enforced'
-                and p.all_self_alarming
-           ) as fallback_required
+           ) as fallback_recorded
       from active_rule a
   ), classified as (
     select f.*,
@@ -67528,7 +67502,7 @@ begin
              when not tests_passing and tests_future_dated
                then 'rule_test_evidence_future_dated'
              when not tests_passing then 'rule_test_evidence_changed_since_approval'
-             when fallback_required and not fallback_recorded then 'active_rule_fallback_absent'
+             when not fallback_recorded then 'active_rule_fallback_absent'
              else null
            end as reason_id
       from facts f
@@ -67564,8 +67538,7 @@ begin
            'all_controls_mapped', all_controls_mapped,
            'approved_earlier_version', approved_earlier_version,
            'tests_recorded', tests_recorded, 'tests_passing', tests_passing,
-           'fallback_recorded', fallback_recorded,
-           'fallback_required', fallback_required)
+           'fallback_recorded', fallback_recorded)
            order by rule_id), '[]'::jsonb)
     into v_active, v_covered, v_gap_count, v_gaps, v_facts
     from explained;
@@ -67605,14 +67578,14 @@ begin
     'evidence_digest', v_evidence_digest
   );
 end
-$_$;
+$$;
 
 
 --
 -- Name: FUNCTION v5_a02_rule_enforcement_coverage(); Type: COMMENT; Schema: ops; Owner: -
 --
 
-COMMENT ON FUNCTION ops.v5_a02_rule_enforcement_coverage() IS 'Universal V5-A02 read: every active rule must have a current exact approval whose EVERY named control is installed and bound, with recorded test evidence that is not future-dated and whose catalog verified_at still equals the value the approval captured on the enforcement point. A rule also needs an exact Joe-authority-connection fallback receipt unless its current exact approval is machine_enforceable/hard_enforced and every approved control is transactional_schema or implemented only by hooks/*.py, whose unavailability gate-integrity names at every session start (0876). Missing evidence is a named gap, and zero active rules is coverage_state empty, never complete.';
+COMMENT ON FUNCTION ops.v5_a02_rule_enforcement_coverage() IS 'Universal V5-A02 read: every active rule must have a current exact approval whose EVERY named control is installed and bound, with recorded test evidence that is not future-dated and whose catalog verified_at still equals the value the approval captured on the enforcement point, plus an exact Joe-authority-connection fallback receipt. Missing evidence is a named gap, and zero active rules is coverage_state empty, never complete.';
 
 
 --
@@ -121760,9 +121733,6 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0869_loop_residue_scac_successor.sql	7e301d9a91c003f0b1fc813b2e98b98dcb385155b2ca4bc5ce34e7a95fdd9271	2026-10-12 21:27:43.231075+00
 0870_register_unfiled_bug_stop_gate_control.sql	613478b740b4a75bc76602f17125671e27f453b0775658e77f663b7719e5f922	2026-10-12 23:18:25.467601+00
 0871_repin_rule_delivery_activation_after_unfiled_bug_control.sql	7428d56acb61a3ba06225787d8d34577b1453dc7c9f9caa87770602e8a16d555	2026-10-12 23:18:25.485499+00
-0874_register_session_boot_ledger_capture_loop_guard_controls.sql	d063d14383c3b59a47b932ec9bef90d07210cc145a4be58d3a487c00584bf9ea	2026-10-13 10:43:06.20984+00
-0875_repin_rule_delivery_activation_after_held_control_tests.sql	d6a77135a34497f341b6f28b3f65945c050716fc4fb821f9f4e71fdbfd76e0c1	2026-10-13 10:43:06.235247+00
-0876_a02_fallback_rung_human_only.sql	b3c4c95e923cf6a5b7a09a2733c20b989cd6241c589896f7ef56cd164c39a820	2026-10-13 10:43:06.244481+00
 \.
 
 
@@ -121850,14 +121820,14 @@ COPY ops.guidance_registry (id, singleton, created_by, created_at) FROM stdin;
 --
 
 COPY ops.rule_delivery_activation_target (short_id, expected_scope, expected_pack, from_control, from_enforcement_class, from_implementation_ref, from_test_ref, to_control, to_enforcement_class, to_implementation_ref, to_test_ref, map_digest) FROM stdin;
-25fcddee	shared	governance-rules	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
-3fa17fa0	shared	client-deal	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
-72e06bdf	shared	client-deal	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
-113b3833	joe	governance-rules	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
-57d13061	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
-c66dc739	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
-49533583	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
-557838a5	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f
+25fcddee	shared	governance-rules	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
+3fa17fa0	shared	client-deal	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
+72e06bdf	shared	client-deal	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
+113b3833	joe	governance-rules	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
+57d13061	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
+c66dc739	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
+49533583	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
+557838a5	joe	joe-comms	session_boot	surfacing	hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js	command:python3 hooks/gate-integrity.py --selftest	pack_delivery	stop_gate	hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py	ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py	dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08
 \.
 
 
@@ -122293,8 +122263,8 @@ insert into ops.enforcement_control_catalog (control_key,implementation_ref,test
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('human_authority_runtime','migrations/0161_control_plane_authority_boundary.sql; mcp-server/src/mcp.js','mcp-server/test/control-plane-authority-boundary.test.mjs; ops/control-plane-authority-runtime-preflight-selftest.py','transactional_schema','t','2026-08-20T15:09:01.704306Z'::timestamptz,'2026-08-20T15:09:01.704306Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('index_upkeep','ops/githooks/index-upkeep-check.py; ops/githooks/pre-commit','ops/path-index-hygiene-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('lead_client_pair','mcp-server/src/tools.js','mcp-server/test/confirm-merge-lead-client.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('ledger_capture','hooks/ledger-sweep.py','tools/test-ledger-sweep.py; tools/test-ledger-scope.py','surfacing','t','2026-10-13T10:43:06.209840Z'::timestamptz,'2026-10-13T10:43:06.209840Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('loop_guard','migrations/0081_loop_blocker.sql; mcp-server/src/tools.js','ops/loop-guard-selftest.py','transactional_schema','t','2026-10-13T10:43:06.209840Z'::timestamptz,'2026-10-13T10:43:06.209840Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('ledger_capture','hooks/ledger-sweep.py','external:ledger scope regressions','stop_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('loop_guard','migrations/0081_loop_blocker.sql; mcp-server/src/tools.js','external:migration probes','transactional_schema','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('loop_successor','mcp-server/src/tools.js','mcp-server/test/loop-version-and-marker.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('loose_work','hooks/loose-work-gate.py','ops/loose-work-gate-selftest.py','stop_gate','t','2026-08-27T13:22:25.132713Z'::timestamptz,'2026-10-12T16:34:34.412172Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('map_architecture','hooks/map-architecture-gate.py','ops/map-architecture-gate-selftest.py; mcp-server/test/map-architecture.test.mjs','stop_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
@@ -122312,7 +122282,7 @@ insert into ops.enforcement_control_catalog (control_key,implementation_ref,test
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('record_research','mcp-server/src/tools.js','mcp-server/test/intake-research-gates.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('rule_shape','hooks/rule-shape-gate.py; migrations/0194_atomic_rule_approval.sql; migrations/0228_atomic_rule_lifecycle_forward_upgrade.sql; mcp-server/src/tools.js','ops/rule-shape-gate-selftest.py; ops/atomic-rule-approval-selftest.py; mcp-server/test/rule-admission.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('scheduled_run_record','hooks/scheduled-run-record.py','ops/scheduled-run-record-selftest.py','stop_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('session_boot','hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js','ops/session-brief-selftest.py; ops/machine-converge-selftest.py','surfacing','t','2026-10-13T10:43:06.209840Z'::timestamptz,'2026-10-13T10:43:06.209840Z'::timestamptz) on conflict (control_key) do nothing;
+insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('session_boot','hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js','command:python3 hooks/gate-integrity.py --selftest','stop_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('settings_change','hooks/settings-change-gate.py','ops/settings-change-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('shared_rename_absence','mcp-server/src/tools.js','mcp-server/test/shared-row-rename-registry.test.mjs','schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('source_merge_eligibility','.github/workflows/source-merge-controller.yml; mcp-server/src/engineering-runtime.js; mcp-server/src/work-request-intake.js; mcp-server/src/source-merge-policy.js; mcp-server/bin/run-source-merge.mjs; migrations/0470_source_merge_authority_projection.sql; ops/source-merge-authority-local-pg-gate.py','mcp-server/test/engineering-runtime.test.mjs; mcp-server/test/source-merge-policy.test.mjs; mcp-server/test/source-merge-migration.test.mjs; mcp-server/test/work-request-ready-plan.test.mjs; ops/local-pg-ci-selftest.py','deny_gate','t','2026-09-04T17:30:06.801098Z'::timestamptz,'2026-09-04T17:30:06.801098Z'::timestamptz) on conflict (control_key) do nothing;

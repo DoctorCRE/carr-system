@@ -35,6 +35,7 @@ import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { claudeContinuityTools } from "./claude-continuity.js";
 import { incidentTools } from "./incident.js";
+import { defectResolutionTools } from "./defect-resolution.js";
 import { evidenceActivationTools } from "./evidence-activation.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
@@ -9084,6 +9085,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "codex-continuity": "mcp-server/src/codex-continuity.js",
   "claude-continuity": "mcp-server/src/claude-continuity.js",
   "incident": "mcp-server/src/incident.js",
+  "defect-resolution": "mcp-server/src/defect-resolution.js",
   "engineering-runtime": "mcp-server/src/engineering-runtime.js",
   "work-portfolio": "mcp-server/src/work-portfolio.js",
   "tour-rights-projection": "mcp-server/src/tour-rights-projection.js",
@@ -10253,6 +10255,11 @@ registerTools(claudeContinuityTools({ withEnvelope, writeEvent, ToolError, asser
 // boundary into the grants and the verb surface should not be laxer than the
 // grants are. See migrations/0286 for the permission half.
 registerTools(incidentTools({ withEnvelope, writeEvent, ToolError, authorizationClassForActor }), "incident");
+
+// The defect log's close door (decision cbe91287). A close is an append-only
+// resolution receipt beside the defect, never a change to it: defects still
+// accumulate by class. See src/defect-resolution.js and migrations/0872.
+registerTools(defectResolutionTools({ withEnvelope, writeEvent, ToolError }), "defect-resolution");
 
 // Engineering Passport runtime: typed plan registration, server-derived
 // admission, and read-only closure projection over the canonical job ledger.
