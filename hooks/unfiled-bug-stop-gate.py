@@ -24,11 +24,12 @@ held once with the sentence quoted and the two ways to close it named.
 A RECEIPT is either:
   (1) a tool call in the same turn to record-defect, report-problem or add-loop
       that the record layer accepted: the MCP form under any server prefix, the
-      `./run.sh call <verb> '<json>'` / tools/call-verb.py Bash forms, the
-      call-verb passthrough, or a seat dispatched with one of those verbs in its
-      brief. An empty-argument schema probe (`'{}'`) is not a receipt, and
-      neither is a call the verb refused (missing field, bad vocabulary): a
-      refused filing recorded nothing.
+      `./run.sh call <verb> '<json>'` / tools/call-verb.py Bash forms, or the
+      call-verb passthrough, counted only when that call's own tool RESULT in
+      the transcript shows the write ("ok": true, a defect id, a WR number). An
+      empty-argument schema probe (`'{}'`) is not a receipt, a call the verb
+      refused (missing field, bad vocabulary) recorded nothing, and a seat
+      brief or any other prose that only NAMES a verb filed nothing either.
   (2) the sentence's own paragraph naming the record: a WR number, a loop
       number, a defect id, "recorded", "filed", "on record", or a fix named by
       PR or commit.
@@ -292,12 +293,11 @@ def _has_arguments(value):
 
 _BASH_RECEIPT = re.compile(
     r"(?:run\.sh\s+call|call-verb(?:\.py)?)\s+(record-defect|report-problem|add-loop)\b(?!\s+'\{\s*\}')")
-# What a verb answers when it wrote something, and when it refused. A filing the
-# record layer refused is not a receipt: nothing was recorded.
+# What a verb answers when it wrote something, and when it refused. A receipt
+# needs the first in the call's own result: a filing the record layer refused
+# recorded nothing, and a call with no result shows nothing was recorded.
 _WROTE = re.compile(r'"ok"\s*:\s*true|"defect_id"|"human_ref"|"loop_id"|\bWR-\d{4,}\b')
-_REFUSED = re.compile(
-    r'TOOL ERROR|"error"\s*:|"ok"\s*:\s*false|"hint"\s*:'
-    r'|\b(?:missing_required|invalid_\w+|unregistered_\w+|value_not_in_declared_vocabulary)\b')
+_FAILED = re.compile(r'TOOL ERROR|"ok"\s*:\s*false')
 # Record references a sentence can name: a Work Request, a loop, a defect id.
 _REF = re.compile(r'\bWR-\d{4,}\b|"number"\s*:\s*"?(\d{3,})|"defect_id"\s*:\s*"([0-9a-f]{8})')
 
@@ -323,8 +323,10 @@ def _refs(text):
 
 
 def receipts(window):
-    """Every capture call in the turn the record layer did not refuse:
-    [{"verb", "text" (its arguments, for matching), "refs" (records it wrote)}]."""
+    """Every capture call in the turn whose result shows the record layer wrote it:
+    [{"verb", "text" (its arguments, for matching), "refs" (records it wrote)}].
+    An Agent or Task brief that names a capture verb is not a call to it: the
+    seat may never run it, so only the verb's own result counts."""
     results = _results(window)
     found = []
     for rec in window:
@@ -345,16 +347,10 @@ def receipts(window):
                 match = _BASH_RECEIPT.search(str(args.get("command") or ""))
                 if match:
                     verb, text = match.group(1), str(args.get("command") or "")
-            elif name in ("Agent", "Task"):
-                brief = str(args.get("prompt") or "")
-                named = [v for v in ("record-defect", "report-problem") if v in brief]
-                if named:
-                    verb, text = named[0], brief
             if verb is None:
                 continue
             result, is_error = results.get(block.get("id"), ("", False))
-            refused = is_error or (_REFUSED.search(result) and not _WROTE.search(result))
-            if refused and name not in ("Agent", "Task"):
+            if is_error or not _WROTE.search(result) or _FAILED.search(result):
                 continue
             found.append({"verb": verb, "text": text, "refs": _refs(result)})
     return found

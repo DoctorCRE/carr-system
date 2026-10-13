@@ -16,13 +16,24 @@ same outcome as never building it.
 The orchestrator cases quote the real 2026-10-12 sentences, so the headline
 miss cannot quietly come back.
 
+THE COMMITTED CORPUS. The last case replays every Stop turn ops/gate-replay.py
+builds for this gate from the committed fixture sets its declaration names
+(ops/config/gate-declarations.json), through the same transcript builder, and
+compares the holds and totals with ops/fixtures/real-replay/
+unfiled-bug-stop-gate-corpus.tsv. That file is the gate's reproducible
+measurement; regenerate it after a deliberate verdict change with:
+
     .venv/bin/python ops/unfiled-bug-stop-gate-selftest.py
+    .venv/bin/python ops/unfiled-bug-stop-gate-selftest.py --update-corpus
 """
+import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import types
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.environ.get("UNFILED_BUG_GATE_HOOK") or os.path.join(REPO, "hooks", "unfiled-bug-stop-gate.py")
@@ -31,7 +42,21 @@ from selftest_harness import Checker, hook_env  # noqa: E402
 
 CHECK = Checker()
 TMP = tempfile.mkdtemp(prefix="unfiled-bug-gate-")
-CARR_CWD = "/Users/booko/carr-system"
+CARR_CWD = REPO
+# Outside any checkout and with no "carr" in its name, so is_carr() says no.
+OTHER_CWD = tempfile.mkdtemp(prefix="other-project-")
+GATE = "unfiled-bug-stop-gate.py"
+CORPUS = os.path.join(REPO, "ops", "fixtures", "real-replay", "unfiled-bug-stop-gate-corpus.tsv")
+CORPUS_HEADER = (
+    "# Every Stop turn ops/gate-replay.py builds for hooks/unfiled-bug-stop-gate.py\n"
+    "# from the committed fixture sets, replayed by ops/unfiled-bug-stop-gate-selftest.py.\n"
+    "# One row per held turn (fixture, matched class, matched sentence), then one\n"
+    "# totals row per fixture set and one for the whole corpus. Regenerate after a\n"
+    "# deliberate verdict change with:\n"
+    "#     .venv/bin/python ops/unfiled-bug-stop-gate-selftest.py --update-corpus\n"
+    "# fixture\tverdict\tclass\tsentence\n"
+)
+MATCHED = re.compile(r'^\s+- "(.*)" \((\w+)\)$', re.M)
 _ids = iter(range(1, 10_000))
 
 
@@ -198,7 +223,7 @@ def main():
         say("The grok-session selftest pins the literal preflight list, so every reorder turns it red.")))
     allows("report-problem over the run.sh Bash door", flat(
         prompt("go"),
-        call("Bash", {"command": "cd /Users/booko/carr-system && ./run.sh call report-problem "
+        call("Bash", {"command": f"cd {REPO} && ./run.sh call report-problem "
                                  "\"$(python3 -c 'print(1)')\""}, OK_WR),
         say("The SubagentHandback hook cannot deliver a seat's report outside auto mode.")))
     allows("add-loop over the claude.ai connector", flat(
@@ -210,10 +235,21 @@ def main():
         prompt("go"),
         call("mcp__carr__call-verb", {"verb": "record-defect", "args": DEFECT_ARGS}, OK_DEFECT),
         say("The question gate misread a rule-approval question as an internal decision.")))
-    allows("a seat dispatched with record-defect in its brief", flat(
+    # A brief that names the verb is not a filing: only the verb's own result is.
+    holds("a seat brief naming record-defect is not a receipt", flat(
         prompt("go"),
         call("Agent", {"description": "file it", "prompt": "Run record-defect for the re-arm, then fix it."},
              "Async agent launched successfully."),
+        say("The rule-boot gate misread a seat's compaction as the parent's and re-armed it.")))
+    holds("a capture call with no result shown is not a receipt", flat(
+        prompt("go"),
+        call("mcp__carr__record-defect", DEFECT_ARGS, ""),
+        say("The rule-boot gate misread a seat's compaction as the parent's and re-armed it.")))
+    allows("a seat brief plus the verb's own ok result", flat(
+        prompt("go"),
+        call("Agent", {"description": "fix it", "prompt": "Run record-defect for the re-arm, then fix it."},
+             "Async agent launched successfully."),
+        call("mcp__carr__record-defect", DEFECT_ARGS, OK_DEFECT),
         say("The rule-boot gate misread a seat's compaction as the parent's and re-armed it.")))
 
     # ---- MUST ALLOW: the sentence or its paragraph names the record
@@ -236,6 +272,10 @@ def main():
                           "that names no field.")])
     allows("hypothetical", [
         prompt("go"), say("If the preflight list is reordered, the selftest would fail on every run.")])
+    # Matches the `failing` DEFECT pattern ("was failing") and no other screen:
+    # only HYPOTHETICAL ("if", "would") stands between this and a hold.
+    allows("hypothetical that names a defect pattern", [
+        prompt("go"), say("If this were a bug, the nightly report job would show it was failing on every run.")])
     allows("negated", [
         prompt("go"), say("Hosted CI is green: nothing failed with an error and no regressions.")])
     allows("red CI on the PR under work is the build loop", [
@@ -257,7 +297,7 @@ def main():
            stop_hook_active=True)
     allows("not a CARR session",
            [prompt("go"), say("The merge queue's progress-board write keeps failing.")],
-           cwd="/Users/booko/other-project")
+           cwd=OTHER_CWD)
     allows("empty transcript", [])
     held, _reason, code = fire([], raw_lines=["{not json"])
     CHECK.check("allows: unreadable transcript fails open", not held and code == 0, f"held={held} code={code}")
@@ -266,7 +306,65 @@ def main():
     CHECK.check("allows: malformed hook input fails open",
                 proc.returncode == 0 and "block" not in proc.stdout, (proc.returncode, proc.stdout[:120]))
 
+    replay_corpus()
     return CHECK.summary()
+
+
+# ------------------------------------------------------- the committed corpus
+
+def corpus_rows():
+    """[(fixture, verdict, class, sentence)] for every held Stop, plus totals,
+    from the turns gate-replay builds for this gate out of committed files."""
+    # Registered before it runs: gate-replay's dataclasses look their module up.
+    spec = importlib.util.spec_from_file_location("gate_replay_for_unfiled_bug",
+                                                  os.path.join(REPO, "ops", "gate-replay.py"))
+    assert spec is not None and spec.loader is not None
+    replay = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = replay
+    spec.loader.exec_module(replay)
+    manifest = replay.load_manifest()
+    fixtures = replay.load_fixtures(manifest)
+    turns = [inv for inv in replay.invocations(manifest, fixtures)
+             if inv.gate == GATE and inv.event == "Stop"]
+    # transcript_lines reads only the worker's repo and home paths.
+    worker = types.SimpleNamespace(repo=REPO, home=TMP)
+    held_rows, totals = [], {}
+    for inv in turns:
+        records = replay.transcript_lines(inv, worker, manifest)
+        held, reason, code = fire(records, cwd=REPO)
+        CHECK.check(f"corpus turn {inv.fixture_key} exits 0", code == 0, f"code={code}")
+        counts = totals.setdefault(inv.fixture_set, [0, 0])
+        counts[0] += 1
+        if held:
+            counts[1] += 1
+            for sentence, klass in MATCHED.findall(reason):
+                held_rows.append((inv.fixture_key, "reopen", klass, sentence))
+    total = [sum(c[0] for c in totals.values()), sum(c[1] for c in totals.values())]
+    rows = sorted(held_rows)
+    for name, (stops, held) in sorted(totals.items()):
+        rows.append((f"(set) {name}", "counts", f"stops={stops}", f"held={held} allowed={stops - held}"))
+    rows.append(("(all)", "counts", f"stops={total[0]}", f"held={total[1]} allowed={total[0] - total[1]}"))
+    return rows
+
+
+def replay_corpus():
+    rows = corpus_rows()
+    text = CORPUS_HEADER + "".join("\t".join(row) + "\n" for row in rows)
+    if "--update-corpus" in sys.argv:
+        with open(CORPUS, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        print(f"wrote {os.path.relpath(CORPUS, REPO)}")
+    try:
+        with open(CORPUS, encoding="utf-8") as handle:
+            expected = handle.read()
+    except OSError:
+        expected = ""
+    for row in rows:
+        if row[1] == "counts":
+            print(f"  corpus {row[0]}: {row[2]} {row[3]}")
+    CHECK.check("committed corpus replay matches unfiled-bug-stop-gate-corpus.tsv",
+                text == expected,
+                "rerun with --update-corpus after a deliberate verdict change, and commit the file")
 
 
 if __name__ == "__main__":
