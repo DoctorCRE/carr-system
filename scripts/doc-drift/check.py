@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Static instruction claims and warning-only reports. Never runs doc commands."""
 import argparse
 import difflib

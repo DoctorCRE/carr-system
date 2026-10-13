@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Reconcile one GitHub issue loop per stale file, addressed to the orchestrator."""
 import argparse
 from collections import defaultdict

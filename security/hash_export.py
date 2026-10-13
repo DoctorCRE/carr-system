@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Read private values on stdin and emit only a normalized salted hash corpus."""
 import json
 import secrets

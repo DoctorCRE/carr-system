@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Run instruction-checker fixtures and emit warnings through the same local/CI path."""
 import argparse
 import hashlib

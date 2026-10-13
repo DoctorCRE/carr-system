@@ -183,7 +183,12 @@ class LeakGuardTest(unittest.TestCase):
 
     def test_git_push_hook_refuses_seeded_secret_before_receiver_gets_it(self):
         (self.root / 'security').symlink_to(SCRIPT.parent, target_is_directory=True)
-        subprocess.run(['git', '-C', str(self.root), 'config', 'core.hooksPath', str(SCRIPT.parent)], check=True)
+        # The committed hook carries no executable bit; Git runs only executable hooks.
+        hooks = self.root / '.git' / 'leak-guard-hooks'
+        hooks.mkdir()
+        (hooks / 'pre-push').write_bytes(SCRIPT.with_name('pre-push').read_bytes())
+        (hooks / 'pre-push').chmod(0o700)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'core.hooksPath', str(hooks)], check=True)
         value = 'ghp_' + base64.b64encode(bytes(range(27))).decode()
         (self.root / 'sample.txt').write_text('token="' + value + '"\n')
         subprocess.run(['git', '-C', str(self.root), 'add', 'sample.txt'], check=True)

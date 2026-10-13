@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Install this worktree's leak hook without redirecting other worktrees."""
 import pathlib
 import subprocess

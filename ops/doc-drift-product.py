@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """CARR dependency projection and public instruction-report artifact."""
 import argparse
 import copy
