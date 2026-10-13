@@ -1,5 +1,6 @@
 {
   "_comment": "system-sender.v1.json — policy data for lib/system_sender.py, the system's own outbound sender (mail through New Outlook, social through Blotato). Authority: Joe's autonomy ruling of 2026-10-12, decision cbe91287-10a2-48d0-bda7-3b1784b4bb93 (\"I don't even want credential minting, external sends, mailbox and CRM consent ... to require me\"), and rule c66dc739 as amended the same day: sending is no longer a human gate. The gate is this policy chain instead: kill switch, writing lint, recipient allowlist, dedupe, daily caps, shadow mode, receipts. LIVE FROM 2026-10-12: Joe ruled the same day that an obvious improvement needs no shadow period, so the sender sends on merge. A bare date in live_from means midnight of that day in `timezone`; a full timestamp needs an offset (an offset-less time of day is ambiguous and keeps shadow). SHADOW MODE stays available: set live_from to null or a future time and every call runs the whole chain, records would_send, and nothing leaves the machine. Never put a credential value in this file; the Blotato key is named in ops/config/credential-inventory.v1.json (blotato-api-key) and lives where that row says.",
+  "_note": "LIVE ON MERGE OVER AN UNPROVEN TRANSPORT, SAID PLAINLY: Joe's standing ruling is no shadow mode on an obvious improvement, so live_from stays in the past. The Outlook keystroke path (bin/outlook-send.applescript) and the Blotato post had never sent a real message when this shipped, so the FIRST CALLER IS THE LIVE TEST. The first live send must be lib.system_sender.send_self_test(subject, body), a mail to mail.self_test_address (Joe's own, already allowlisted) through the whole chain, so the transport is proven on a self-send before any participant mail. STATE IS PER MACHINE: the dedupe ledger, sends.jsonl and the stop file live in state_dir (default ~/carr-local/system-sender, created mode 700, outside every checkout; the CARR_SYSTEM_SENDER_STATE_DIR environment variable overrides it for tests). Every checkout and worktree on one machine shares them, so dedupe and the daily caps are per MACHINE, not global; the stop file stops this machine only. The record-layer system_send_stop signal remains the GLOBAL kill switch. The whole config is validated when a Sender is built; a malformed value refuses every send (reason config_invalid) before anything is claimed.",
   "schema": "carr-system-sender/v1",
   "live_from": "2026-10-12",
   "timezone": "America/Chicago",
@@ -12,7 +13,8 @@
       "joe.bookout@carr.us",
       "dell.mccraney@carr.us"
     ],
-    "_self_addresses_note": "Joe's and Dell's own CARR addresses, the same pair bin/gmail-handover.py allows. Any other recipient must be an exact participant email on the deal named in the call, read live through get-call-context."
+    "_self_addresses_note": "Joe's and Dell's own CARR addresses, the same pair bin/gmail-handover.py allows. Any other recipient must be an exact participant email on the deal named in the call, read live through get-call-context.",
+    "self_test_address": "joe.bookout@carr.us"
   },
   "social": {
     "platforms": [
@@ -26,10 +28,12 @@
     "_platforms_note": "A platform must be listed here AND carry an accountId in accounts_file; the account and page ids come from that file, never from the caller."
   },
   "kill_switch": {
-    "stop_file": "out/system-send.stop",
+    "stop_file": "system-send.stop",
     "signal_kind": "system_send_stop",
-    "_note": "Either one stops every send: the stop file existing, or an open or claimed record-layer signal of this kind (read through next-signals). A kill-switch read that fails refuses the send."
+    "_note": "Either one stops every send: the stop file (a bare name inside state_dir; stops THIS machine) existing, or an open or claimed record-layer signal of this kind (read through next-signals; stops EVERY machine). A kill-switch read that fails refuses the send."
   },
-  "receipts_file": "out/sends.jsonl",
-  "ledger_file": "out/system-sender-ledger.json"
+  "receipts_file": "sends.jsonl",
+  "ledger_file": "system-sender-ledger.json",
+  "state_dir": "~/carr-local/system-sender",
+  "_state_note": "receipts_file and ledger_file are bare names inside state_dir. The ledger holds the dedupe keys AND today's cap slots, reserved under one lock at claim time."
 }

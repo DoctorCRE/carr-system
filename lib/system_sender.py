@@ -10,43 +10,75 @@ what replaces the human gate. Two calls, one chain:
 
 Every call runs the SAME chain, in this order, before anything leaves:
 
-  a. kill switch   the stop file under out/, or an open or claimed record-layer
-                   signal of kind system_send_stop (read through next-signals).
-                   A read that fails refuses: an unreadable switch is not "off".
+  0. config        the whole config is validated when the Sender is built
+                   (live_from, caps, platforms, addresses, file names); a bad
+                   config refuses every send with reason config_invalid and
+                   claims nothing.
+  a. kill switch   the stop file in the state directory, or an open or claimed
+                   record-layer signal of kind system_send_stop (read through
+                   next-signals). A read that fails refuses: an unreadable
+                   switch is not "off".
   b. writing lint  `run.sh lint <file> --surface email|social`. ANY finding
                    refuses, REVIEW and RATION included, because no human reads
                    the draft after this point.
-  c. allowlist     mail: Joe's or Dell's own address, or an exact participant
+  c. allowlist     mail: a non-empty subject (the transport finds the compose
+                   window by its exact title), then Joe's or Dell's own address,
+                   or an exact participant
                    email on the named deal (get-call-context, read live). A
                    participant send also needs follow_up {next_on, next_step},
                    because log-outreach refuses a sent touch with no next step.
                    Social: a platform in the config that also has an accountId
                    in claude-tree/.../blotato-accounts.json.
-  d. dedupe        a key claimed in out/system-sender-ledger.json BEFORE the
-                   send and released only on a DEFINITE non-send. A crash or an
-                   ambiguous transport answer leaves it held, so a retry is
-                   refused instead of sending twice (resolve_claim settles it).
-  e. daily caps    from config (20 mail, 5 social), counted per local day in
-                   the config's timezone from out/sends.jsonl.
+  d. dedupe        a key claimed in the ledger BEFORE the send and released
+                   only on a DEFINITE non-send. A crash or an ambiguous transport
+                   answer leaves it held, so a retry is refused instead of
+                   sending twice (resolve_claim settles it). The default key is
+                   a hash of the message AND its Central calendar date, so the
+                   same words may go again on a later day; a caller's explicit
+                   dedupe_key is used as given.
+  e. daily caps    from config (20 mail, 5 social) per local day in the
+                   config's timezone. The slot is counted and reserved in the
+                   SAME ledger lock as the dedupe claim, so concurrent senders
+                   cannot overshoot; a released claim frees its slot.
   f. shadow mode   while live_from is null or in the future, the call does all
                    of the above, records would_send, and sends nothing. The
                    shipped config is live (Joe, 2026-10-12: no shadow period
                    for an obvious improvement); shadow stays available by
                    moving live_from forward.
   g. receipts      every attempt, refusals included, appends one line to
-                   out/sends.jsonl, then reaches the record layer: a live mail
-                   to a deal participant through log-outreach, everything else
-                   through record-signal at severity info.
+                   sends.jsonl in the state directory, then reaches the record
+                   layer: a live mail to a deal participant through
+                   log-outreach (ref = the deal's id), everything else through
+                   record-signal at severity info.
+
+STATE IS PER MACHINE. The dedupe ledger, sends.jsonl and the stop file live in
+one machine-wide directory OUTSIDE the repo, default ~/carr-local/system-sender/
+(config key state_dir; environment variable CARR_SYSTEM_SENDER_STATE_DIR
+overrides it, which is how the selftest points at a temp dir). It is created
+mode 700 on first use. Every checkout and worktree on one machine shares it, so
+dedupe and the caps are per MACHINE: two machines could each send the same
+message and each has its own cap. The record-layer system_send_stop signal is
+the GLOBAL kill switch; the stop file stops this machine only.
+
+LIVE ON MERGE, AND THE FIRST CALLER IS THE LIVE TEST. Joe ruled there is no
+shadow period for an obvious improvement, so live_from is in the past. The
+Outlook transport had never pressed Send when this shipped; the first live send
+should be send_self_test(subject, body), a message to Joe's own address through
+the whole chain, so the transport is proven on a self-send before any
+participant mail goes out.
 
 Outcomes (SendResult.outcome): sent · would_send · refused (the chain said no)
-· failed (the transport said no, definitely) · send_unknown (the transport
-may have sent; the dedupe key stays held).
+· failed (DEFINITELY not sent: the key is released and the receipt names the
+reason, e.g. outlook_open_failed, outlook_not_frontmost,
+compose_window_refused, mailto_builder_unavailable, blotato_unreachable,
+blotato_key_unavailable) · send_unknown (the transport may have sent; the
+dedupe key stays held).
 
 Seams, all injectable through Sender(...) and all defaulted to the real thing:
 `verb` (record-layer door, default `./run.sh call` via lib.record_call),
 `lint`, `outlook` (open the mailto compose window and run
-bin/outlook-send.applescript), `blotato_http`, `blotato_key`, `now`, and `root`
-(where out/ lives). This is a library: no shebang and no main, so it adds no
+bin/outlook-send.applescript), `blotato_http`, `blotato_key`, `now`, `root`
+(the repo, for the Blotato accounts file) and `state_dir`. This is a library: no shebang and no main, so it adds no
 script ingress.
 """
 from __future__ import annotations
@@ -78,22 +110,30 @@ CONFIG_PATH = REPO / "ops" / "config" / "system-sender.v1.json"
 SEND_SCRIPT = REPO / "bin" / "outlook-send.applescript"
 DRAFT_HELPER = REPO / "bin" / "outlook-draft.py"
 
+DEFAULT_STATE_DIR = "~/carr-local/system-sender"
+STATE_DIR_ENV = "CARR_SYSTEM_SENDER_STATE_DIR"
+
 SENT, WOULD_SEND, REFUSED, FAILED, UNKNOWN = (
     "sent", "would_send", "refused", "failed", "send_unknown")
-# What a cap counts. Live: anything that did or may have gone out. Shadow: the
-# rehearsal of the same, so a shadow week shows where the cap would bite.
-_CAP_COUNTS = {True: (SENT, UNKNOWN), False: (WOULD_SEND,)}
+# A cap slot is reserved at claim time and counts until it is released. Live:
+# reserved (in flight, or held after an ambiguous answer) and sent. Shadow: the
+# rehearsal (would_send), so a shadow week shows where the cap would bite.
+_SLOT_COUNTS = ("reserved", "sent", "would_send")
+# Slots older than this are dropped from the ledger; only today's count.
+_SLOT_KEEP_DAYS = 7
 
 # bin/outlook-draft.py's ceiling for the mailto route: a silently truncated
 # message is worse than a refusal.
 MAILTO_LIMIT = 1900
-# Outlook titles a compose window "<subject> • <account>" and truncates a long
-# subject in the title bar; match on a prefix short enough to survive that.
-TITLE_MATCH_LEN = 40
+# The FULL subject goes to bin/outlook-send.applescript, which matches the
+# compose window by exact title. A subject Outlook truncates in the title bar
+# matches no window and is refused, never matched on a prefix.
 
 _EMAIL = re.compile(r"[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}")
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _LINT_COUNTS = re.compile(r"(\d+) HARD, (\d+) REVIEW, (\d+) RATION")
+_PROBE = re.compile(r"COUNT (\d+) (\d+)")
+_BARE_NAME = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 
 VerbDoor = Callable[[str, Mapping[str, Any]], VerbResult]
 Linter = Callable[[str, str], "tuple[bool, str]"]
@@ -101,6 +141,7 @@ OutlookRunner = Callable[[str, str], str]
 BlotatoHttp = Callable[[str, Mapping[str, str], bytes], "tuple[int, Any]"]
 KeySource = Callable[[], "str | None"]
 Clock = Callable[[], dt.datetime]
+ProcessRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
 @dataclass(frozen=True)
@@ -123,6 +164,7 @@ class _Delivery:
     state: str          # sent | not_sent | unknown
     detail: str = ""
     ref: str = ""
+    reason: str = "transport_refused"   # the receipt's reason on a definite non-send
 
 
 @dataclass
@@ -140,6 +182,15 @@ class _Attempt:
 
 class LedgerError(Exception):
     """The dedupe ledger exists but cannot be read as a ledger."""
+
+
+class TransportNotSent(Exception):
+    """Raised by a transport seam when it KNOWS nothing left the machine (the
+    connection never opened, the key could not be read). The key is released."""
+
+    def __init__(self, reason: str, detail: str) -> None:
+        super().__init__(detail)
+        self.reason = reason
 
 
 # ── default adapters ────────────────────────────────────────────────────────
@@ -184,15 +235,53 @@ def _mailto_builder() -> Callable[[Mapping[str, Any]], str]:
     return builder
 
 
-def _outlook_send(url: str, title_prefix: str) -> str:
+def _osascript(run: ProcessRunner, *args: str, timeout: int) -> tuple[int, str]:
+    proc = run(["osascript", str(SEND_SCRIPT), *args], capture_output=True, text=True,
+               timeout=timeout)
+    return proc.returncode, (proc.stdout or proc.stderr or "").strip()
+
+
+def _outlook_send(url: str, subject: str, *, run: ProcessRunner = subprocess.run) -> str:
     """Open the compose window in the signed-in Outlook app (never a bare
     `open mailto:`, which lands in Joe's personal default handler) and press
-    Send through bin/outlook-send.applescript. Returns the script's answer."""
-    subprocess.run(["open", "-a", "Microsoft Outlook", url], check=False,
-                   capture_output=True, timeout=30)
-    proc = subprocess.run(["osascript", str(SEND_SCRIPT), title_prefix],
-                          capture_output=True, text=True, timeout=120)
-    return (proc.stdout or proc.stderr or "").strip()
+    Send through bin/outlook-send.applescript. Three steps:
+
+      1. probe: count Outlook's windows, and refuse if one is ALREADY titled
+         with this subject (it could be Joe's own draft) or Outlook is not
+         running (a launch adds a main window too, so "one new window" could
+         not be proven).
+      2. `open -a`: a non-zero exit means no compose window; nothing pressed.
+      3. send: the script proceeds only if exactly ONE new window appeared and
+         exactly one window carries this exact subject, and only while Outlook
+         is frontmost.
+
+    Every answer before step 3's keystroke is a definite non-send ("ERROR:",
+    "REFUSED:", "NOT_FRONTMOST:"); a script that failed in step 3 is
+    "AMBIGUOUS:" because it may have failed after pressing Send."""
+    try:
+        code, probe = _osascript(run, "probe", subject, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"ERROR: window probe could not run ({type(exc).__name__}); nothing opened"
+    if code == 0 and probe.startswith("NOT_RUNNING"):
+        return "ERROR: Outlook is not running; nothing opened"
+    counts = _PROBE.fullmatch(probe) if code == 0 else None
+    if counts is None:
+        return f"ERROR: window probe unreadable ({probe[:120]}); nothing opened"
+    before, already = (int(n) for n in counts.groups())
+    if already:
+        return (f"REFUSED: {already} window(s) already titled with this subject; "
+                "nothing opened, nothing pressed")
+    try:
+        opened = run(["open", "-a", "Microsoft Outlook", url], capture_output=True,
+                     text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"ERROR: open failed ({type(exc).__name__}); Send never pressed"
+    if opened.returncode != 0:
+        return f"ERROR: open failed (exit {opened.returncode}); Send never pressed"
+    code, answer = _osascript(run, "send", subject, str(before), timeout=120)
+    if code != 0:
+        return f"AMBIGUOUS: outlook-send exited {code}: {answer[:120]}"
+    return answer
 
 
 def _blotato_post(url: str, headers: Mapping[str, str], body: bytes) -> tuple[int, Any]:
@@ -203,6 +292,13 @@ def _blotato_post(url: str, headers: Mapping[str, str], body: bytes) -> tuple[in
             raw = response.read()
     except urllib.error.HTTPError as exc:
         return exc.code, None
+    except urllib.error.URLError as exc:
+        # urlopen wraps only failures while connecting and writing the request
+        # (DNS, refused, TLS) as URLError; a failure reading the answer raises
+        # raw and stays ambiguous. A request that was never fully written
+        # cannot have created a post.
+        raise TransportNotSent("blotato_unreachable",
+                               f"Blotato unreachable ({type(exc.reason).__name__})") from exc
     try:
         return status, json.loads(raw)
     except ValueError:
@@ -234,32 +330,123 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     return config
 
 
+def _parse_live_from(value: Any, tz: dt.tzinfo) -> dt.datetime | None:
+    """The instant sending goes live, or None for shadow. Raises ValueError on
+    a value that is not null, a date, or an ISO timestamp."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise TypeError("live_from must be null, YYYY-MM-DD or an ISO timestamp")
+    if _DATE.fullmatch(value):
+        # A bare date means midnight of that day in the config's timezone.
+        return dt.datetime.fromisoformat(value).replace(tzinfo=tz)
+    start = dt.datetime.fromisoformat(value)
+    # An offset-less time of day is ambiguous: stay in shadow.
+    return start if start.tzinfo is not None else None
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def validate_config(config: Any) -> str | None:
+    """Every problem with a sender config, joined, or None when it is sound.
+    Run once when a Sender is built, so a bad config refuses every send before
+    anything is claimed instead of raising halfway through one."""
+    if not isinstance(config, Mapping):
+        return "config is not a JSON object"
+    problems: list[str] = []
+    tz: dt.tzinfo | None = None
+    try:
+        tz = ZoneInfo(str(config.get("timezone")))
+    except (ValueError, KeyError, OSError):
+        problems.append(f"timezone {config.get('timezone')!r} is not an IANA zone")
+    try:
+        _parse_live_from(config.get("live_from"), tz or dt.timezone.utc)
+    except (TypeError, ValueError):
+        problems.append(f"live_from {config.get('live_from')!r} is not null, a date or an ISO timestamp")
+    caps = config.get("daily_caps")
+    if not (isinstance(caps, Mapping) and all(_is_count(caps.get(ch)) for ch in ("mail", "social"))):
+        problems.append("daily_caps needs mail and social as non-negative integers")
+    mail = config.get("mail")
+    own = mail.get("self_addresses") if isinstance(mail, Mapping) else None
+    if not (isinstance(own, list) and own and all(isinstance(a, str) and _EMAIL.fullmatch(a) for a in own)):
+        problems.append("mail.self_addresses needs one or more email addresses")
+    elif isinstance(mail, Mapping) and mail.get("self_test_address") is not None and (
+            str(mail.get("self_test_address")).lower() not in {a.lower() for a in own}):
+        problems.append("mail.self_test_address must be one of mail.self_addresses")
+    social = config.get("social")
+    platforms = social.get("platforms") if isinstance(social, Mapping) else None
+    if not (isinstance(platforms, list)
+            and all(isinstance(p, str) and p.strip() and p == p.strip().lower() for p in platforms)):
+        problems.append("social.platforms must be a list of lower-case platform names")
+    if not (isinstance(social, Mapping) and isinstance(social.get("accounts_file"), str)
+            and str(social.get("api_base", "")).startswith("https://")):
+        problems.append("social needs accounts_file and an https api_base")
+    switch = config.get("kill_switch")
+    if not (isinstance(switch, Mapping) and isinstance(switch.get("signal_kind"), str)
+            and switch["signal_kind"].strip()
+            and _BARE_NAME.fullmatch(str(switch.get("stop_file", "")))):
+        problems.append("kill_switch needs signal_kind and a bare stop_file name")
+    for name in ("receipts_file", "ledger_file"):
+        if not _BARE_NAME.fullmatch(str(config.get(name, ""))):
+            problems.append(f"{name} must be a bare file name inside state_dir")
+    state_dir = config.get("state_dir")
+    if state_dir is not None and not (isinstance(state_dir, str)
+                                      and Path(state_dir).expanduser().is_absolute()):
+        problems.append("state_dir must be an absolute path or start with ~")
+    return "; ".join(problems) or None
+
+
+def resolve_state_dir(config: Mapping[str, Any], override: Path | str | None = None) -> Path:
+    """The machine-wide state directory: an explicit argument, else the
+    CARR_SYSTEM_SENDER_STATE_DIR environment variable, else config state_dir,
+    else ~/carr-local/system-sender. Never inside the repo by default."""
+    chosen = override or os.environ.get(STATE_DIR_ENV) or config.get("state_dir")
+    if not isinstance(chosen, (str, Path)) or not str(chosen):
+        chosen = DEFAULT_STATE_DIR
+    return Path(chosen).expanduser()
+
+
+def _bare(value: Any, default: str) -> str:
+    return value if isinstance(value, str) and _BARE_NAME.fullmatch(value) else default
+
+
 # ── the dedupe ledger ───────────────────────────────────────────────────────
 
-class _Ledger:
-    """One JSON object of claimed and sent keys, changed only under an
-    exclusive lock and replaced atomically, so two senders cannot both claim
-    one key and a crash mid-write never leaves half a ledger."""
+_State = dict[str, dict[str, dict[str, str]]]
 
-    def __init__(self, path: Path) -> None:
+
+class _Ledger:
+    """One JSON object of claimed and sent keys plus today's cap slots, changed
+    only under an exclusive lock and replaced atomically, so two senders cannot
+    both claim one key or both take the last slot, and a crash mid-write never
+    leaves half a ledger.
+
+    keys:  dedupe key -> {state claimed|sent, attempt_id, channel, at}
+    slots: attempt_id -> {channel, day, mode live|shadow, state, key}; state
+           reserved (claimed, in flight or held) | sent | would_send."""
+
+    def __init__(self, path: Path, ensure_dir: Callable[[], None]) -> None:
         self.path = path
+        self._ensure_dir = ensure_dir
 
     @contextlib.contextmanager
-    def _locked(self) -> Iterator[dict[str, dict[str, str]]]:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def _locked(self) -> Iterator[_State]:
+        self._ensure_dir()
         with open(self.path.with_suffix(".lock"), "a", encoding="utf-8") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            keys = self._read()
-            before = json.dumps(keys, sort_keys=True)
-            yield keys
-            if json.dumps(keys, sort_keys=True) != before:
-                self._write(keys)
+            state = self._read()
+            before = json.dumps(state, sort_keys=True)
+            yield state
+            if json.dumps(state, sort_keys=True) != before:
+                self._write(state)
 
-    def _read(self) -> dict[str, dict[str, str]]:
+    def _read(self) -> _State:
         try:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            return {}
+            return {"keys": {}, "slots": {}}
         except OSError as exc:
             raise LedgerError(f"ledger unreadable ({type(exc).__name__})") from exc
         try:
@@ -269,51 +456,97 @@ class _Ledger:
         keys = data.get("keys") if isinstance(data, dict) else None
         if not isinstance(keys, dict):
             raise LedgerError("ledger has no keys object")
-        return keys
+        slots = data.get("slots", {})      # a v1 ledger has keys only
+        if not isinstance(slots, dict):
+            raise LedgerError("ledger slots is not an object")
+        return {"keys": keys, "slots": slots}
 
-    def _write(self, keys: dict[str, dict[str, str]]) -> None:
+    def _write(self, state: _State) -> None:
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), prefix=".ledger-")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump({"schema": "carr-system-sender-ledger/v1", "keys": keys}, fh,
+            json.dump({"schema": "carr-system-sender-ledger/v2", **state}, fh,
                       indent=1, sort_keys=True)
             fh.write("\n")
         os.replace(tmp, self.path)
 
-    def claim(self, key: str, attempt: _Attempt, at: dt.datetime) -> bool:
-        with self._locked() as keys:
+    @staticmethod
+    def _used(slots: Mapping[str, Mapping[str, str]], channel: str, day: str, mode: str) -> int:
+        return sum(1 for v in slots.values() if v.get("channel") == channel and v.get("day") == day
+                   and v.get("mode") == mode and v.get("state") in _SLOT_COUNTS)
+
+    def claim(self, key: str, attempt: _Attempt, at: dt.datetime, *, day: str, mode: str,
+              cap: int) -> tuple[str, int]:
+        """("claimed" | "duplicate" | "capped", slots used before this one).
+        The dedupe check, the cap count and the reservation are one locked step."""
+        with self._locked() as state:
+            keys, slots = state["keys"], state["slots"]
             if key in keys:
-                return False
+                return "duplicate", 0
+            used = self._used(slots, attempt.channel, day, mode)
+            if used >= cap:
+                return "capped", used
             keys[key] = {"state": "claimed", "attempt_id": attempt.attempt_id,
                          "channel": attempt.channel, "at": at.isoformat()}
-            return True
+            oldest = (dt.date.fromisoformat(day) - dt.timedelta(days=_SLOT_KEEP_DAYS)).isoformat()
+            for stale in [a for a, v in slots.items() if str(v.get("day", "")) < oldest]:
+                del slots[stale]
+            slots[attempt.attempt_id] = {"channel": attempt.channel, "day": day, "mode": mode,
+                                         "state": "reserved", "key": key}
+            return "claimed", used
 
     def release(self, key: str, attempt_id: str) -> None:
-        with self._locked() as keys:
-            if keys.get(key, {}).get("attempt_id") == attempt_id:
-                del keys[key]
+        """A definite non-send: the key and its cap slot are both freed."""
+        with self._locked() as state:
+            if state["keys"].get(key, {}).get("attempt_id") == attempt_id:
+                del state["keys"][key]
+            state["slots"].pop(attempt_id, None)
+
+    def rehearsed(self, key: str, attempt_id: str) -> None:
+        """A shadow would_send: the key is freed (nothing left), the slot keeps
+        counting against the shadow cap."""
+        with self._locked() as state:
+            if state["keys"].get(key, {}).get("attempt_id") == attempt_id:
+                del state["keys"][key]
+            if attempt_id in state["slots"]:
+                state["slots"][attempt_id]["state"] = "would_send"
 
     def settle(self, key: str, attempt_id: str | None, at: dt.datetime) -> bool:
-        with self._locked() as keys:
-            entry = keys.get(key)
+        with self._locked() as state:
+            entry = state["keys"].get(key)
             if entry is None or (attempt_id is not None and entry.get("attempt_id") != attempt_id):
                 return False
             entry.update(state="sent", at=at.isoformat())
+            slot = state["slots"].get(str(entry.get("attempt_id")))
+            if slot is not None:
+                slot["state"] = "sent"
             return True
 
-    def held(self) -> list[tuple[str, dict[str, str]]]:
+    def used(self, channel: str, day: str, mode: str) -> int:
         # A plain read, no lock: writes replace the file atomically, and a
-        # health read must not create out/ files as a side effect.
-        return [(k, dict(v)) for k, v in sorted(self._read().items()) if v.get("state") == "claimed"]
+        # health read must not create state files as a side effect.
+        return self._used(self._read()["slots"], channel, day, mode)
+
+    def held(self) -> list[tuple[str, dict[str, str]]]:
+        return [(k, dict(v)) for k, v in sorted(self._read()["keys"].items())
+                if v.get("state") == "claimed"]
 
 
 # ── the sender ──────────────────────────────────────────────────────────────
 
 class Sender:
     def __init__(self, *, config: Mapping[str, Any] | None = None, root: Path = REPO,
+                 state_dir: Path | str | None = None,
                  verb: VerbDoor | None = None, lint: Linter | None = None,
                  outlook: OutlookRunner | None = None, blotato_http: BlotatoHttp | None = None,
                  blotato_key: KeySource | None = None, now: Clock | None = None) -> None:
-        self.config: dict[str, Any] = dict(config) if config is not None else load_config()
+        unreadable: str | None = None
+        try:
+            loaded: Any = dict(config) if config is not None else load_config()
+        except (OSError, ValueError, TypeError) as exc:
+            loaded, unreadable = {}, f"config unreadable ({type(exc).__name__})"
+        self.config: dict[str, Any] = loaded if isinstance(loaded, dict) else {}
+        # Validated whole, here, before any send can claim anything (finding 5).
+        self.config_error = unreadable or validate_config(loaded)
         self.root = Path(root)
         self._verb = verb or _default_verb
         self._lint = lint or run_lint
@@ -321,9 +554,29 @@ class Sender:
         self._http = blotato_http or _blotato_post
         self._key = blotato_key or _blotato_key
         self._now = now or _utc_now
-        self.tz = ZoneInfo(self.config["timezone"])
-        self.receipts = self.root / self.config["receipts_file"]
-        self.ledger = _Ledger(self.root / self.config["ledger_file"])
+        try:
+            self.tz: dt.tzinfo = ZoneInfo(str(self.config.get("timezone")))
+        except (ValueError, KeyError, OSError):
+            self.tz = ZoneInfo("America/Chicago")   # receipts only: the config already refuses
+        try:
+            self._live_start = _parse_live_from(self.config.get("live_from"), self.tz)
+        except (TypeError, ValueError):
+            self._live_start = None                 # shadow: the config already refuses
+        self.state_dir = resolve_state_dir(self.config, state_dir)
+        self.receipts = self.state_dir / _bare(self.config.get("receipts_file"), "sends.jsonl")
+        switch = self.config.get("kill_switch")
+        self.stop_file = self.state_dir / _bare(
+            switch.get("stop_file") if isinstance(switch, Mapping) else None, "system-send.stop")
+        self.ledger = _Ledger(self.state_dir / _bare(self.config.get("ledger_file"),
+                                                     "system-sender-ledger.json"),
+                              self._ensure_state_dir)
+
+    def _ensure_state_dir(self) -> None:
+        """Create the machine-wide state directory mode 700 on first use. Only
+        writes call this; reads (health, kill switch) never create it."""
+        if not self.state_dir.is_dir():
+            self.state_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+            os.chmod(self.state_dir, 0o700)
 
     # ── public interface ──
 
@@ -336,10 +589,21 @@ class Sender:
         attempt = _Attempt(channel="mail", target=",".join(recipients), subject=subject,
                            text_sha256=_sha256(text),
                            dedupe_key=dedupe_key or _sha256(json.dumps(
-                               ["mail", recipients, subject, body])))
+                               ["mail", self._today(), recipients, subject, body])))
         return self._run(attempt, text, "email",
-                         lambda: self._allow_mail(attempt, recipients, deal_id, follow_up),
+                         lambda: self._allow_mail(attempt, recipients, subject, deal_id, follow_up),
                          lambda: self._deliver_mail(recipients, subject, body))
+
+    def send_self_test(self, *, subject: str, body: str,
+                       dedupe_key: str | None = None) -> SendResult:
+        """A mail to Joe's own address (config mail.self_test_address) through
+        the WHOLE chain. The sender shipped live over a transport that had never
+        pressed Send; this is the first live send, so the transport is proven
+        on a self-send before any participant mail."""
+        mail = self.config.get("mail")
+        address = str((mail.get("self_test_address") if isinstance(mail, Mapping) else None)
+                      or "joe.bookout@carr.us")
+        return self.send_mail(to=[address], subject=subject, body=body, dedupe_key=dedupe_key)
 
     def send_social(self, *, platform: str, text: str, media_urls: Sequence[str] = (),
                     dedupe_key: str | None = None) -> SendResult:
@@ -347,29 +611,21 @@ class Sender:
         media = [u for u in media_urls if u]
         attempt = _Attempt(channel="social", target=platform, text_sha256=_sha256(text),
                            dedupe_key=dedupe_key or _sha256(json.dumps(
-                               ["social", platform, text, media])))
+                               ["social", self._today(), platform, text, media])))
         return self._run(attempt, text, "social",
                          lambda: self._allow_social(attempt, platform),
                          lambda: self._deliver_social(attempt, platform, text, media))
 
     def is_live(self, at: dt.datetime | None = None) -> bool:
-        live_from = self.config.get("live_from")
-        if not live_from:
+        if self._live_start is None:
             return False
-        if _DATE.fullmatch(live_from):
-            # A bare date means midnight of that day in the config's timezone.
-            start = dt.datetime.fromisoformat(live_from).replace(tzinfo=self.tz)
-        else:
-            start = dt.datetime.fromisoformat(live_from)
-            if start.tzinfo is None:
-                return False  # an offset-less time of day is ambiguous: stay in shadow
-        return (at or self._now()) >= start
+        return (at or self._now()) >= self._live_start
 
     def kill_switch(self) -> KillSwitch:
         spec = self.config["kill_switch"]
         try:
-            if (self.root / spec["stop_file"]).exists():
-                return KillSwitch("engaged", f"stop file {spec['stop_file']}")
+            if self.stop_file.exists():
+                return KillSwitch("engaged", f"stop file {self.stop_file}")
         except OSError as exc:
             return KillSwitch("unreadable", f"stop file ({type(exc).__name__})")
         for status in ("open", "claimed"):
@@ -383,34 +639,26 @@ class Sender:
         return KillSwitch("clear")
 
     def sends_today(self, channel: str, *, live: bool | None = None) -> int:
-        """Today's counted attempts for one channel, in the config's timezone.
-        Raises OSError when the receipts file exists and cannot be read."""
+        """Today's reserved cap slots for one channel, in the config's timezone,
+        read from the ledger the cap is enforced in. Raises LedgerError or
+        OSError when the ledger exists and cannot be read."""
         now = self._now()
         live = self.is_live(now) if live is None else live
-        today = now.astimezone(self.tz).date()
-        counted = _CAP_COUNTS[live]
-        n = 0
-        for row in self._receipt_rows():
-            if row.get("kind") != "attempt" or row.get("channel") != channel:
-                continue
-            if row.get("outcome") not in counted:
-                continue
-            try:
-                at = dt.datetime.fromisoformat(row["at"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if at.astimezone(self.tz).date() == today:
-                n += 1
-        return n
+        return self.ledger.used(channel, self._today(now), "live" if live else "shadow")
 
     def held_claims(self) -> list[tuple[str, dict[str, str]]]:
         return self.ledger.held()
+
+    def _today(self, at: dt.datetime | None = None) -> str:
+        return (at or self._now()).astimezone(self.tz).date().isoformat()
 
     # ── the chain ──
 
     def _run(self, attempt: _Attempt, text: str, surface: str,
              allow: Callable[[], "tuple[str, str] | None"],
              deliver: Callable[[], _Delivery]) -> SendResult:
+        if self.config_error:
+            return self._finish(attempt, REFUSED, "config_invalid", self.config_error)
         switch = self.kill_switch()
         if switch.state != "clear":
             return self._finish(attempt, REFUSED, f"kill_switch_{switch.state}", switch.detail)
@@ -423,30 +671,27 @@ class Sender:
 
         now = self._now()
         key = attempt.dedupe_key
-        try:
-            claimed = self.ledger.claim(key, attempt, now)
-        except (LedgerError, OSError) as exc:
-            return self._finish(attempt, REFUSED, "ledger_unreadable", str(exc))
-        if not claimed:
-            return self._finish(attempt, REFUSED, "duplicate", "dedupe key already held or sent")
-
         live = self.is_live(now)
         cap = int(self.config["daily_caps"][attempt.channel])
         try:
-            used = self.sends_today(attempt.channel, live=live)
-        except OSError as exc:
-            self._release(key, attempt)
-            return self._finish(attempt, REFUSED, "receipts_unreadable", type(exc).__name__)
-        if used >= cap:
-            self._release(key, attempt)
+            claimed, used = self.ledger.claim(key, attempt, now, day=self._today(now),
+                                              mode="live" if live else "shadow", cap=cap)
+        except (LedgerError, OSError) as exc:
+            return self._finish(attempt, REFUSED, "ledger_unreadable", str(exc))
+        if claimed == "duplicate":
+            return self._finish(attempt, REFUSED, "duplicate", "dedupe key already held or sent")
+        if claimed == "capped":
             return self._finish(attempt, REFUSED, "daily_cap", f"{used}/{cap} today")
         if not live:
-            self._release(key, attempt)
+            with contextlib.suppress(LedgerError, OSError):
+                self.ledger.rehearsed(key, attempt.attempt_id)
             return self._finish(attempt, WOULD_SEND, "shadow",
                                 f"live_from {self.config.get('live_from')}")
 
         try:
             delivery = deliver()
+        except TransportNotSent as exc:
+            delivery = _Delivery("not_sent", str(exc), reason=exc.reason)
         except Exception as exc:   # a transport that raised may have sent: hold the key
             delivery = _Delivery("unknown", f"transport raised {type(exc).__name__}")
         if delivery.state == "sent":
@@ -460,7 +705,7 @@ class Sender:
             return self._finish(attempt, SENT, "sent", detail, ref=delivery.ref)
         if delivery.state == "not_sent":
             self._release(key, attempt)
-            return self._finish(attempt, FAILED, "transport_refused", delivery.detail)
+            return self._finish(attempt, FAILED, delivery.reason, delivery.detail)
         return self._finish(attempt, UNKNOWN, "transport_ambiguous", delivery.detail)
 
     def _release(self, key: str, attempt: _Attempt) -> None:
@@ -471,8 +716,13 @@ class Sender:
 
     # ── (c) allowlists ──
 
-    def _allow_mail(self, attempt: _Attempt, recipients: list[str], deal_id: str | None,
+    def _allow_mail(self, attempt: _Attempt, recipients: list[str], subject: str,
+                    deal_id: str | None,
                     follow_up: Mapping[str, str] | None) -> tuple[str, str] | None:
+        if not subject.strip():
+            # The transport finds the compose window by its exact title; an
+            # empty title would identify no window of its own.
+            return "empty_subject", "a mail needs a subject"
         if not recipients:
             return "no_recipient", ""
         malformed = [r for r in recipients if not _EMAIL.fullmatch(r)]
@@ -526,19 +776,36 @@ class Sender:
     # ── (f) the final send ──
 
     def _deliver_mail(self, recipients: list[str], subject: str, body: str) -> _Delivery:
-        url = _mailto_builder()({"to": recipients, "subject": subject, "body": body})
+        try:
+            url = _mailto_builder()({"to": recipients, "subject": subject, "body": body})
+        except (Exception, SystemExit) as exc:   # build_url refuses with SystemExit
+            return _Delivery("not_sent", f"bin/outlook-draft.py build_url failed ({type(exc).__name__})",
+                             reason="mailto_builder_unavailable")
         if len(url) > MAILTO_LIMIT:
             return _Delivery("not_sent", f"mailto URL {len(url)} chars exceeds {MAILTO_LIMIT}")
-        answer = self._outlook(url, subject[:TITLE_MATCH_LEN])
-        if answer.startswith("SENT"):
+        # The FULL subject: the script matches the compose window by exact title.
+        answer = self._outlook(url, subject)
+        if answer == "SENT":
             return _Delivery("sent", "outlook compose window closed after Send")
-        if answer.startswith("ERROR: no compose window"):
-            return _Delivery("not_sent", "no compose window; Send never pressed")
+        # Every answer below was given before the Send keystroke: definite non-sends.
+        if answer.startswith("ERROR: open failed"):
+            return _Delivery("not_sent", answer[:160], reason="outlook_open_failed")
+        if answer.startswith("NOT_FRONTMOST:"):
+            return _Delivery("not_sent", answer[:160], reason="outlook_not_frontmost")
+        if answer.startswith("REFUSED:"):
+            return _Delivery("not_sent", answer[:160], reason="compose_window_refused")
+        if answer.startswith("ERROR:"):
+            return _Delivery("not_sent", answer[:160])
+        # NOT_SENT (pressed, window still open), AMBIGUOUS, or anything else.
         return _Delivery("unknown", answer[:160] or "no answer from outlook-send")
 
     def _deliver_social(self, attempt: _Attempt, platform: str, text: str,
                         media: list[str]) -> _Delivery:
-        key = self._key()
+        try:
+            key = self._key()
+        except Exception as exc:
+            return _Delivery("not_sent", f"blotato key lookup failed ({type(exc).__name__})",
+                             reason="blotato_key_unavailable")
         if not key:
             return _Delivery("not_sent", "blotato key not available")
         account = attempt.platform_account or {}
@@ -580,11 +847,11 @@ class Sender:
     def _record_call(self, attempt: _Attempt, row: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         if row["outcome"] == SENT and attempt.channel == "mail" and attempt.deal and attempt.follow_up:
             return "log-outreach", {
-                "idempotency_key": attempt.attempt_id, "ref": attempt.deal["name"],
+                "idempotency_key": attempt.attempt_id, "ref": attempt.deal["id"],
                 "channel": "email", "outcome": "sent", "occurred_at": row["at"],
                 "summary": f"System sender emailed {attempt.target}: {attempt.subject}",
                 "next_on": attempt.follow_up["next_on"], "next_step": attempt.follow_up["next_step"],
-                "detail": f"system-sender attempt {attempt.attempt_id}"}
+                "detail": f"system-sender attempt {attempt.attempt_id}; deal {attempt.deal['name']}"}
         return "record-signal", {
             "idempotency_key": attempt.attempt_id, "producer": "system-sender",
             "signal_key": f"send:{attempt.attempt_id}", "signal_kind": "system_send",
@@ -592,27 +859,14 @@ class Sender:
             "subject_ref": attempt.channel if attempt.channel == "mail" else f"social:{attempt.target}",
             "metric_name": "send_attempt", "observed_value": 1, "threshold_value": 1,
             "comparison": "gte", "severity": "info", "detected_at": row["at"],
-            "evidence_refs": [f"{self.config['receipts_file']}#{attempt.attempt_id}"],
+            "evidence_refs": [f"{self.receipts}#{attempt.attempt_id}"],
             "payload": {k: row[k] for k in ("outcome", "reason", "mode", "target", "deal_id",
                                              "dedupe_key", "ref")}}
 
     def _append(self, row: Mapping[str, Any]) -> None:
-        self.receipts.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_state_dir()
         with open(self.receipts, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
-
-    def _receipt_rows(self) -> Iterator[dict[str, Any]]:
-        try:
-            lines = self.receipts.read_text(encoding="utf-8").splitlines()
-        except FileNotFoundError:
-            return
-        for line in lines:
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue      # a torn last line from a crash; the ledger still holds its key
-            if isinstance(row, dict):
-                yield row
 
 
 def _sha256(text: str) -> str:
@@ -629,11 +883,16 @@ def send_social(**kwargs: Any) -> SendResult:
     return Sender().send_social(**kwargs)
 
 
-def resolve_claim(dedupe_key: str, *, sent: bool, root: Path = REPO) -> bool:
+def send_self_test(subject: str, body: str, **kwargs: Any) -> SendResult:
+    """The first live send: a mail to Joe's own address through the whole chain."""
+    return Sender().send_self_test(subject=subject, body=body, **kwargs)
+
+
+def resolve_claim(dedupe_key: str, *, sent: bool, state_dir: Path | str | None = None) -> bool:
     """Settle a key left held by a crash or an ambiguous send, after checking
     Outlook's Sent folder or Blotato: sent=True keeps it as sent (no resend),
-    sent=False releases it (the message may be sent again)."""
-    sender = Sender(root=root)
+    sent=False releases it and its cap slot (the message may be sent again)."""
+    sender = Sender(state_dir=state_dir)
     held = dict(sender.held_claims())
     if dedupe_key not in held:
         return False
@@ -646,22 +905,26 @@ def resolve_claim(dedupe_key: str, *, sent: bool, root: Path = REPO) -> bool:
 def health_row(*, sender: Sender | None = None) -> tuple[str, bool, bool]:
     """(line, breach, hard_error) for tools/health-check.py's `sends` row.
     Breach: a cap reached, a held claim, or a kill switch that cannot be read.
-    Hard error: the receipts or the ledger cannot be read at all."""
+    Hard error: the config is invalid, or the ledger cannot be read at all.
+    State is the machine-wide state_dir, so the row is per MACHINE."""
     s = sender or Sender()
+    on_breach = ("on breach: owner orchestrator · cap hit: the sender refuses that channel until "
+                 f"midnight Central, read {s.receipts} for a runaway caller · held claim: check "
+                 "Outlook Sent or Blotato for that key, then lib.system_sender.resolve_claim · "
+                 "kill switch unreadable: restore the next-signals read, sends stay refused meanwhile "
+                 "· config invalid: fix ops/config/system-sender.v1.json, every send is refused meanwhile "
+                 "· verify: run.sh health --section sends · auto-clear: next local day or after resolve")
+    if s.config_error:
+        return (f"UNKNOWN system sends — config invalid ({s.config_error}) · " + on_breach, True, True)
     caps = s.config["daily_caps"]
     live = s.is_live()
     mode = "LIVE" if live else f"shadow (live_from {s.config.get('live_from') or 'unset'})"
     word = "sent" if live else "would_send"
-    on_breach = ("on breach: owner orchestrator · cap hit: the sender refuses that channel until "
-                 "midnight Central, read out/sends.jsonl for a runaway caller · held claim: check "
-                 "Outlook Sent or Blotato for that key, then lib.system_sender.resolve_claim · "
-                 "kill switch unreadable: restore the next-signals read, sends stay refused meanwhile "
-                 "· verify: run.sh health --section sends · auto-clear: next local day or after resolve")
     try:
         counts = {ch: s.sends_today(ch, live=live) for ch in ("mail", "social")}
         held = len(s.held_claims())
     except (OSError, LedgerError) as exc:
-        return (f"UNKNOWN system sends — receipts or ledger unreadable ({type(exc).__name__}) · "
+        return (f"UNKNOWN system sends — ledger unreadable ({type(exc).__name__}) · "
                 + on_breach, True, True)
     switch = s.kill_switch()
     capped = [ch for ch in counts if counts[ch] >= int(caps[ch])]

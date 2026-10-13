@@ -1,77 +1,164 @@
--- outlook-send.applescript — press Send on a mailto-spawned New Outlook compose window.
+-- outlook-send.applescript — press Send on ONE mailto-spawned New Outlook compose window.
 --
--- argv: 1 window-title prefix (the subject)
+-- argv: probe <subject>
+--       send  <subject> <window count from the probe>
 --
 -- THE SEND STEP, kept SEPARATE from bin/outlook-draft.applescript on purpose.
 -- The draft script carries a no-send guarantee and stays untouched; this file is
 -- the only place the system presses Send, and it is reached only from
--- lib/system_sender.py, after that module's whole policy chain (kill switch,
--- writing lint, recipient allowlist, dedupe, daily cap, shadow mode) has passed.
--- Authority: Joe's autonomy ruling, decision cbe91287-10a2-48d0-bda7-3b1784b4bb93
--- (2026-10-12), and rule c66dc739 as amended that day.
+-- lib/system_sender.py, after that module's whole policy chain (config, kill
+-- switch, writing lint, subject and recipient allowlist, dedupe, daily cap,
+-- shadow mode) has passed. Authority: Joe's autonomy ruling, decision
+-- cbe91287-10a2-48d0-bda7-3b1784b4bb93 (2026-10-12), and rule c66dc739 as
+-- amended that day.
 --
--- The compose window is opened by the caller with
---   open -a "Microsoft Outlook" "mailto:..."
--- exactly the way bin/outlook-draft.py does (read its header for the two traps:
--- a bare `open mailto:` composes in the wrong account, and urlencode() breaks
--- spaces). The window is matched by TITLE PREFIX because Outlook renders it as
--- "<subject> • joe.bookout@carr.us". Every value arrives via argv so a subject
--- full of quotes is inert data.
+-- The caller (lib/system_sender.py _outlook_send) runs three steps:
+--   1. `probe`  count Outlook's windows and the ones already titled with this
+--               subject. The caller refuses, opening nothing, if any window
+--               already carries the subject (it could be Joe's own draft) or
+--               Outlook is not running.
+--   2. open -a "Microsoft Outlook" "mailto:..."   exactly as bin/outlook-draft.py
+--               does (read its header for the two traps). A non-zero exit is a
+--               definite non-send.
+--   3. `send`   this script, with the probe's window count.
 --
--- The send itself is Command+Return, Outlook for Mac's Send shortcut. Success is
--- read from the window, never assumed: a compose window that closes after Send
--- was sent; one that is still open was not. The three answers, and what the
--- caller does with each:
---   SENT                         the window closed after Send.        -> sent
---   ERROR: no compose window ... nothing was found, nothing pressed.  -> definite non-send
---   NOT_SENT: ...                Send pressed, window still open.     -> unknown; key held
+-- WHICH WINDOW. The Send keystroke may only reach the window the policy chain
+-- checked. So `send` proceeds only if exactly ONE new window appeared since the
+-- probe, and exactly ONE window's title matches the FULL subject exactly
+-- ("<subject>" or "<subject> • <account address>"; case-sensitive, never a
+-- prefix). Zero or more than one match refuses. There is no fallback to the
+-- first or front window. A subject Outlook truncates in the title bar matches
+-- nothing and refuses. Every value arrives via argv, so a subject full of
+-- quotes is inert data.
 --
--- UNPROVEN LIVE: written while the sender ships in shadow mode, so this script
--- has never pressed Send on a real message. Watch the first live send.
+-- WHERE THE KEYSTROKE GOES. Command+Return goes to the frontmost app, so Outlook
+-- is re-activated and `frontmost` is verified, together with the front window
+-- being the matched one, immediately before the keystroke. If Outlook is not
+-- frontmost after one re-activation, nothing is pressed. New Outlook exposes no
+-- mailbox or outgoing message to AppleScript (see bin/outlook-draft.py), so a
+-- scripted `send` is not available; the keystroke is the only route.
+--
+-- Success is read from the window, never assumed: a compose window that closes
+-- after Send was sent; one that is still open was not. The answers, and what
+-- the caller does with each:
+--   COUNT <windows> <matching>   probe answer.
+--   NOT_RUNNING                  probe: Outlook is not running.          -> refuse, nothing opened
+--   REFUSED: ...                 window not unique; nothing pressed.     -> definite non-send
+--   NOT_FRONTMOST: ...           Outlook not frontmost; nothing pressed. -> definite non-send
+--   SENT                         the window closed after Send.           -> sent
+--   NOT_SENT: ...                Send pressed, window still open.        -> unknown; key held
+--
+-- LIVE, AND THE FIRST LIVE SEND IS THE PROOF. The sender ships live (Joe,
+-- 2026-10-12: no shadow period for an obvious improvement). Until the first
+-- live send is recorded, this keystroke path is unproven on a real message, so
+-- the first live send is lib.system_sender.send_self_test(), a mail to Joe's
+-- own address, before any participant mail.
 
 on run argv
-  set titlePrefix to item 1 of argv
+  set mode to item 1 of argv
+  set subj to item 2 of argv
+  if subj is "" then return "REFUSED: empty subject; nothing pressed"
 
-  tell application "Microsoft Outlook" to activate
-  delay 1
+  if mode is "probe" then
+    tell application "System Events"
+      if not (exists process "Microsoft Outlook") then return "NOT_RUNNING"
+      set total to count of windows of process "Microsoft Outlook"
+    end tell
+    return "COUNT " & total & " " & (count of my matchingWindows(subj))
+  end if
+  if mode is not "send" then return "REFUSED: unknown mode " & mode & "; nothing pressed"
 
+  set before to (item 3 of argv) as integer
+
+  -- Exactly one NEW window, then exactly one window with this exact title.
+  set total to before
+  repeat 20 times
+    tell application "System Events" to set total to count of windows of process "Microsoft Outlook"
+    if total > before + 1 then return "REFUSED: " & (total - before) & " new windows appeared, expected exactly one; nothing pressed"
+    if total = before + 1 then exit repeat
+    delay 0.5
+  end repeat
+  if total < before + 1 then return "REFUSED: no new compose window appeared; nothing pressed"
+
+  set matches to {}
+  repeat 10 times
+    set matches to my matchingWindows(subj)
+    if (count of matches) > 0 then exit repeat
+    delay 0.5
+  end repeat
+  if (count of matches) is 0 then return "REFUSED: no window titled exactly with the subject; nothing pressed"
+  if (count of matches) > 1 then return "REFUSED: " & (count of matches) & " windows titled with the subject; nothing pressed"
+  tell application "System Events" to set total to count of windows of process "Microsoft Outlook"
+  if total is not before + 1 then return "REFUSED: window count changed to " & total & " while matching; nothing pressed"
+
+  set found to item 1 of matches
+  tell application "System Events" to set targetName to name of found
+  tell application "System Events" to perform action "AXRaise" of found
+
+  -- Re-activate and verify, immediately before the keystroke. One retry.
+  if not my outlookReady(targetName) then
+    if not my outlookReady(targetName) then return "NOT_FRONTMOST: Outlook or its compose window is not frontmost after re-activation; nothing pressed"
+  end if
   tell application "System Events"
     tell process "Microsoft Outlook"
-      set found to missing value
-      repeat 20 times
-        repeat with w in windows
-          if (name of w) starts with titlePrefix then
-            set found to w
-            exit repeat
-          end if
-        end repeat
-        if found is not missing value then exit repeat
-        delay 0.5
-      end repeat
-
-      if found is missing value then
-        return "ERROR: no compose window titled " & titlePrefix
-      end if
-
-      perform action "AXRaise" of found
-      delay 1
-
+      if not frontmost then return "NOT_FRONTMOST: focus moved before the keystroke; nothing pressed"
       keystroke return using {command down}
-
-      -- Poll for the window to close: that is the only evidence of a send.
-      repeat 20 times
-        delay 0.5
-        set stillOpen to false
-        repeat with w in windows
-          if (name of w) starts with titlePrefix then
-            set stillOpen to true
-            exit repeat
-          end if
-        end repeat
-        if not stillOpen then return "SENT"
-      end repeat
-
-      return "NOT_SENT: compose window still open after Send"
     end tell
   end tell
+
+  -- Poll for the window to close: that is the only evidence of a send.
+  repeat 20 times
+    delay 0.5
+    if (count of my matchingWindows(subj)) is 0 then return "SENT"
+  end repeat
+  return "NOT_SENT: compose window still open after Send"
 end run
+
+-- Activate Outlook, then true only if it is frontmost AND its front window is
+-- the matched compose window.
+on outlookReady(targetName)
+  tell application "Microsoft Outlook" to activate
+  delay 0.5
+  tell application "System Events"
+    tell process "Microsoft Outlook"
+      if not frontmost then return false
+      try
+        set frontName to name of window 1
+      on error
+        return false
+      end try
+    end tell
+  end tell
+  considering case
+    return frontName is targetName
+  end considering
+end outlookReady
+
+-- Every Outlook window whose title is the subject, or the subject followed by
+-- " • " and an account address. Exact and case-sensitive: never a prefix.
+on matchingWindows(subj)
+  set found to {}
+  tell application "System Events"
+    if not (exists process "Microsoft Outlook") then return found
+    repeat with w in (windows of process "Microsoft Outlook")
+      set t to ""
+      try
+        set t to (name of w) as text
+      end try
+      if my titleMatches(t, subj) then set end of found to contents of w
+    end repeat
+  end tell
+  return found
+end matchingWindows
+
+on titleMatches(t, subj)
+  set sep to subj & " " & (character id 8226) & " "
+  considering case
+    if t is subj then return true
+    if (length of t) > (length of sep) and t starts with sep then
+      set rest to text ((length of sep) + 1) thru -1 of t
+      if rest contains "@" and rest does not contain " " then return true
+    end if
+  end considering
+  return false
+end titleMatches

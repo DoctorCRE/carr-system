@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Selftest for lib/system_sender.py, the system's own outbound sender.
 
-Hermetic: a fake Outlook runner, a fake Blotato HTTP call, a fake record-layer
-verb door, a fixed clock and a temporary out/ directory. Nothing here opens
+Hermetic: a fake Outlook runner (and a fake process runner under the real
+_outlook_send, so the probe/open/send sequencing is exercised without
+osascript), a fake Blotato HTTP call, a fake record-layer verb door, a fixed
+clock and a temporary state_dir. Nothing here opens
 Outlook, reaches Blotato, or calls the record layer. The one real collaborator
 is the writing lint (tools/writing-lint.py through run.sh lint), which is
 local, read-only and deterministic, and is exercised once on purpose so the
@@ -20,7 +22,10 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import shutil
+import subprocess
+import urllib.error
 import sys
 import tempfile
 from pathlib import Path
@@ -111,6 +116,7 @@ class Env:
     def __init__(self, *, live_from: str | None = "2026-10-01T00:00:00-05:00",
                  caps: dict[str, int] | None = None) -> None:
         self.root = Path(tempfile.mkdtemp(prefix="system-sender-selftest-"))
+        self.state = self.root / "state"
         accounts = self.root / "accounts.json"
         accounts.write_text(json.dumps(ACCOUNTS))
         self.config = ss.load_config()
@@ -119,11 +125,14 @@ class Env:
         self.fakes = Fakes()
         self.clock = Clock(T0)
 
-    def sender(self, *, lint: Any = None) -> ss.Sender:
+    def sender(self, *, lint: Any = None, **kw: Any) -> ss.Sender:
         f = self.fakes
-        return ss.Sender(config=self.config, root=self.root, verb=f.verb, lint=lint or f.lint,
-                         outlook=f.outlook, blotato_http=f.http, blotato_key=lambda: f.key,
-                         now=self.clock)
+        args: dict[str, Any] = {"config": self.config, "root": self.root, "state_dir": self.state,
+                                "verb": f.verb, "lint": lint or f.lint, "outlook": f.outlook,
+                                "blotato_http": f.http, "blotato_key": lambda: f.key,
+                                "now": self.clock}
+        args.update(kw)
+        return ss.Sender(**args)
 
     def mail(self, **kw: Any) -> ss.SendResult:
         args: dict[str, Any] = {"to": [JOE], "subject": "Tour schedule", "body": "The tour is set for Tuesday."}
@@ -136,7 +145,7 @@ class Env:
         return self.sender().send_social(**args)
 
     def receipts(self, kind: str = "attempt") -> list[dict[str, Any]]:
-        path = self.root / "out" / "sends.jsonl"
+        path = self.state / "sends.jsonl"
         if not path.exists():
             return []
         rows = [json.loads(line) for line in path.read_text().splitlines()]
@@ -221,7 +230,7 @@ def test_shipped_config_is_live() -> None:
 
 @scenario
 def test_kill_switch_refuses_before_anything_else() -> None:
-    cases = (("stop file", lambda e: (e.root / "out").mkdir() or (e.root / "out/system-send.stop").touch(),
+    cases = (("stop file", lambda e: e.state.mkdir() or (e.state / "system-send.stop").touch(),
               "kill_switch_engaged"),
              ("open signal", lambda e: e.fakes.signals.update(open=1), "kill_switch_engaged"),
              ("claimed signal", lambda e: e.fakes.signals.update(claimed=1), "kill_switch_engaged"),
@@ -317,7 +326,8 @@ def test_mail_allowlist() -> None:
         check("mail: an exact deal participant sends", r.outcome == ss.SENT, r)
         outreach = env.fakes.verbs("log-outreach")
         check("mail: a live participant send is logged through log-outreach on the deal",
-              len(outreach) == 1 and outreach[0]["ref"] == "Lee Clinic Relocation"
+              len(outreach) == 1 and outreach[0]["ref"] == DEAL
+              and "Lee Clinic Relocation" in outreach[0]["detail"]
               and outreach[0]["outcome"] == "sent" and outreach[0]["channel"] == "email"
               and outreach[0]["next_on"] == "2026-10-20", outreach)
         url = env.fakes.outlook_calls[-1][0]
@@ -448,7 +458,7 @@ def test_crash_mid_send_holds_the_key_across_processes() -> None:
               and len(env.fakes.outlook_calls) == 1, retry)
         key = env.held()[0]
         check("crash: resolve_claim(sent=False) releases a held key",
-              ss.resolve_claim(key, sent=False, root=env.root))
+              ss.resolve_claim(key, sent=False, state_dir=env.state))
         check("crash: after release the message sends", env.mail().outcome == ss.SENT)
     finally:
         env.close()
@@ -458,8 +468,8 @@ def test_crash_mid_send_holds_the_key_across_processes() -> None:
 def test_corrupt_ledger_refuses() -> None:
     env = Env()
     try:
-        (env.root / "out").mkdir()
-        (env.root / "out/system-sender-ledger.json").write_text("{not json")
+        env.state.mkdir()
+        (env.state / "system-sender-ledger.json").write_text("{not json")
         r = env.mail()
         check("ledger: an unreadable ledger refuses the send",
               (r.outcome, r.reason) == (ss.REFUSED, "ledger_unreadable") and env.fakes.outlook_calls == [], r)
@@ -467,7 +477,7 @@ def test_corrupt_ledger_refuses() -> None:
         env.close()
     env = Env()
     try:
-        ledger = env.root / "out/system-sender-ledger.json"
+        ledger = env.state / "system-sender-ledger.json"
 
         def send_then_break_ledger(url: str, title: str) -> str:
             ledger.write_text("{not json")
@@ -532,7 +542,8 @@ def test_receipts_on_every_attempt() -> None:
         signals = env.fakes.verbs("record-signal")
         check("receipts: record-signal is severity info, threshold met, evidence points at sends.jsonl",
               all(s["severity"] == "info" and s["observed_value"] >= s["threshold_value"]
-                  and s["evidence_refs"][0].startswith("out/sends.jsonl#") for s in signals), signals[0])
+                  and s["evidence_refs"][0].startswith(f"{env.state}/sends.jsonl#") for s in signals),
+              signals[0])
         check("receipts: a self-addressed live mail is not a deal touch (record-signal, not log-outreach)",
               env.fakes.verbs("log-outreach") == [])
     finally:
@@ -566,12 +577,343 @@ def test_health_row() -> None:
         line, breach, _ = ss.health_row(sender=env.sender())
         check("health: an unreadable kill switch is a breach", breach and "kill switch unreadable" in line, line)
         env.fakes.signal_read_ok = True
-        (env.root / "out/system-send.stop").touch()
+        (env.state / "system-send.stop").touch()
         line, _, _ = ss.health_row(sender=env.sender())
         check("health: an engaged stop file is shown", "kill switch engaged (stop file" in line, line)
-        (env.root / "out/system-sender-ledger.json").write_text("[]")
+        (env.state / "system-sender-ledger.json").write_text("[]")
         line, breach, hard = ss.health_row(sender=env.sender())
         check("health: an unreadable ledger is a hard error", line.startswith("UNKNOWN") and breach and hard, line)
+    finally:
+        env.close()
+
+# ── finding 1/2/8: the Outlook transport picks one checked window ───────────
+
+class FakeProcs:
+    """Stands in for subprocess.run under the REAL _outlook_send: answers the
+    probe, the `open -a` and the send step the way osascript and open would."""
+
+    def __init__(self, *, probe: str = "COUNT 2 0", open_rc: int = 0, send: str = "SENT",
+                 send_rc: int = 0) -> None:
+        self.probe, self.open_rc, self.send, self.send_rc = probe, open_rc, send, send_rc
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str], **_: Any) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(argv))
+        if argv[0] == "open":
+            return subprocess.CompletedProcess(argv, self.open_rc, "", "")
+        if argv[2] == "probe":
+            return subprocess.CompletedProcess(argv, 0, self.probe + "\n", "")
+        return subprocess.CompletedProcess(argv, self.send_rc, self.send + "\n", "")
+
+    def steps(self) -> list[str]:
+        return ["open" if c[0] == "open" else c[2] for c in self.calls]
+
+
+def _real_outlook(procs: FakeProcs) -> Any:
+    return lambda url, subject: ss._outlook_send(url, subject, run=procs)
+
+
+@scenario
+def test_empty_subject_refused_before_any_claim() -> None:
+    for label, subject in (("empty", ""), ("whitespace", "   \t")):
+        env = Env()
+        try:
+            r = env.mail(subject=subject)
+            check(f"empty subject ({label}): refused empty_subject",
+                  (r.outcome, r.reason) == (ss.REFUSED, "empty_subject"), r)
+            check(f"empty subject ({label}): no transport call", env.fakes.outlook_calls == [])
+            check(f"empty subject ({label}): nothing claimed (no ledger written)",
+                  not (env.state / "system-sender-ledger.json").exists())
+            check(f"empty subject ({label}): the refusal has a receipt",
+                  [x["reason"] for x in env.receipts()] == ["empty_subject"], env.receipts())
+        finally:
+            env.close()
+
+
+@scenario
+def test_outlook_transport_window_choice() -> None:
+    long_subject = "Tour schedule for the Lee Clinic relocation, Tuesday and Wednesday"
+    cases = (
+        # label, procs, outcome, reason, steps
+        ("one new window, exact match", FakeProcs(), ss.SENT, "sent", ["probe", "open", "send"]),
+        ("a window already titled with the subject", FakeProcs(probe="COUNT 3 1"),
+         ss.FAILED, "compose_window_refused", ["probe"]),
+        ("Outlook not running", FakeProcs(probe="NOT_RUNNING"), ss.FAILED, "transport_refused", ["probe"]),
+        ("probe unreadable", FakeProcs(probe="garbage"), ss.FAILED, "transport_refused", ["probe"]),
+        ("open -a failed", FakeProcs(open_rc=1), ss.FAILED, "outlook_open_failed", ["probe", "open"]),
+        ("zero matching windows", FakeProcs(send="REFUSED: no window titled exactly with the subject; nothing pressed"),
+         ss.FAILED, "compose_window_refused", ["probe", "open", "send"]),
+        ("duplicate matching windows", FakeProcs(send="REFUSED: 2 windows titled with the subject; nothing pressed"),
+         ss.FAILED, "compose_window_refused", ["probe", "open", "send"]),
+        ("two new windows", FakeProcs(send="REFUSED: 2 new windows appeared, expected exactly one; nothing pressed"),
+         ss.FAILED, "compose_window_refused", ["probe", "open", "send"]),
+        ("no new window", FakeProcs(send="REFUSED: no new compose window appeared; nothing pressed"),
+         ss.FAILED, "compose_window_refused", ["probe", "open", "send"]),
+        ("Outlook not frontmost", FakeProcs(send="NOT_FRONTMOST: Outlook or its compose window is not frontmost after re-activation; nothing pressed"),
+         ss.FAILED, "outlook_not_frontmost", ["probe", "open", "send"]),
+        ("send step exited non-zero", FakeProcs(send="execution error", send_rc=1),
+         ss.UNKNOWN, "transport_ambiguous", ["probe", "open", "send"]),
+        ("pressed, window still open", FakeProcs(send="NOT_SENT: compose window still open after Send"),
+         ss.UNKNOWN, "transport_ambiguous", ["probe", "open", "send"]),
+    )
+    for label, procs, outcome, reason, steps in cases:
+        env = Env()
+        try:
+            r = env.sender(outlook=_real_outlook(procs)).send_mail(
+                to=[JOE], subject=long_subject, body="The tour is set for Tuesday.")
+            check(f"outlook ({label}): {outcome}/{reason}", (r.outcome, r.reason) == (outcome, reason), r)
+            check(f"outlook ({label}): steps {steps}", procs.steps() == steps, procs.calls)
+            held = env.held()
+            check(f"outlook ({label}): key {'held' if outcome == ss.UNKNOWN else 'not held'}",
+                  bool(held) == (outcome == ss.UNKNOWN), held)
+            scripts = [c for c in procs.calls if c[0] == "osascript"]
+            check(f"outlook ({label}): the script gets the FULL subject, never a prefix",
+                  all(c[3] == long_subject for c in scripts), scripts)
+            if "send" in steps:
+                check(f"outlook ({label}): send carries the probe's window count",
+                      scripts[-1][2:] == ["send", long_subject, "3" if procs.probe == "COUNT 3 0" else "2"],
+                      scripts[-1])
+        finally:
+            env.close()
+
+
+@scenario
+def test_send_script_shape() -> None:
+    script = ss.SEND_SCRIPT.read_text(encoding="utf-8")
+    code = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("--"))
+    check("script: no prefix match on the title", "starts with titlePrefix" not in code
+          and "titlePrefix" not in code)
+    check("script: never falls back to the first or front window for the send",
+          "first window" not in code and "set found to window 1" not in code)
+    check("script: refuses zero and more than one match",
+          "(count of matches) is 0" in code and "(count of matches) > 1" in code)
+    check("script: requires exactly one new window", "before + 1" in code)
+    press = code.index("keystroke return using {command down}")
+    check("script: frontmost is verified (with one re-activation) before the keystroke",
+          code.index("outlookReady(targetName)") < press
+          and code.rindex("if not frontmost then return", 0, press) < press)
+    check("script: the stale 'never pressed Send' claim is gone",
+          "has never pressed Send" not in script)
+    check("lib: no 40-character title prefix remains", not hasattr(ss, "TITLE_MATCH_LEN"))
+
+
+# ── finding 3: the self-test send ───────────────────────────────────────────
+
+@scenario
+def test_send_self_test_goes_through_the_chain() -> None:
+    env = Env()
+    try:
+        r = env.sender().send_self_test(subject="System sender self-test", body="First live send.")
+        f = env.fakes
+        check("self-test: sent", r.outcome == ss.SENT, r)
+        check("self-test: addressed to Joe's own address only",
+              f.outlook_calls and f.outlook_calls[0][0].startswith("mailto:joe.bookout@carr.us?"), f.outlook_calls)
+        check("self-test: ran the kill switch and lint", len(f.verbs("next-signals")) == 2
+              and len(f.lint_calls) == 1, f.verb_calls)
+        env.fakes.signals.update(open=1)
+        r = env.sender().send_self_test(subject="System sender self-test 2", body="Second.")
+        check("self-test: the kill switch still refuses it", r.reason == "kill_switch_engaged", r)
+        check("self-test: the shipped config names Joe's address and says the first caller is the live test",
+              ss.load_config()["mail"]["self_test_address"] == JOE
+              and "FIRST CALLER IS THE LIVE TEST" in ss.load_config()["_note"])
+    finally:
+        env.close()
+
+
+# ── finding 4: machine-wide state ───────────────────────────────────────────
+
+@scenario
+def test_state_dir_is_machine_wide() -> None:
+    env = Env()
+    try:
+        config = ss.load_config()
+        saved = os.environ.pop(ss.STATE_DIR_ENV, None)
+        try:
+            default = ss.Sender(config=config, verb=Fakes().verb)
+            check("state: the shipped default is ~/carr-local/system-sender, outside the repo",
+                  default.state_dir == Path.home() / "carr-local" / "system-sender"
+                  and ss.REPO not in default.state_dir.parents, default.state_dir)
+            os.environ[ss.STATE_DIR_ENV] = str(env.root / "from-env")
+            check("state: the environment variable overrides config state_dir",
+                  ss.Sender(config=config, verb=Fakes().verb).state_dir == env.root / "from-env")
+        finally:
+            os.environ.pop(ss.STATE_DIR_ENV, None)
+            if saved is not None:
+                os.environ[ss.STATE_DIR_ENV] = saved
+        a = env.sender(root=env.root / "checkout-a")
+        b = env.sender(root=env.root / "checkout-b")
+        first = a.send_mail(to=[JOE], subject="Shared", body="Once per machine.")
+        second = b.send_mail(to=[JOE], subject="Shared", body="Once per machine.")
+        check("state: two checkouts on one machine share dedupe",
+              first.outcome == ss.SENT and second.reason == "duplicate", (first, second))
+        check("state: created mode 700", (env.state.stat().st_mode & 0o777) == 0o700,
+              oct(env.state.stat().st_mode))
+        check("state: ledger, receipts and stop file all live in state_dir",
+              {x.name for x in env.state.iterdir()} >= {"system-sender-ledger.json", "sends.jsonl"}
+              and a.stop_file == env.state / "system-send.stop")
+        (env.state / "system-send.stop").touch()
+        r = b.send_mail(to=[JOE], subject="Other", body="Stopped.")
+        check("state: one stop file stops every checkout on the machine", r.reason == "kill_switch_engaged", r)
+    finally:
+        env.close()
+
+
+# ── finding 5: config validated before any claim ────────────────────────────
+
+@scenario
+def test_bad_config_refuses_and_claims_nothing() -> None:
+    bad = (("malformed live_from", {"live_from": "next tuesday"}),
+           ("negative cap", {"daily_caps": {"mail": -1, "social": 5}}),
+           ("boolean cap", {"daily_caps": {"mail": True, "social": 5}}),
+           ("string cap", {"daily_caps": {"mail": "20", "social": 5}}),
+           ("platforms not a list", {"social": {"platforms": "linkedin", "accounts_file": "x",
+                                                "api_base": "https://backend.blotato.com/v2"}}),
+           ("bad timezone", {"timezone": "Mars/Olympus"}),
+           ("receipts path escapes state_dir", {"receipts_file": "../sends.jsonl"}),
+           ("receipts name is a dot path", {"receipts_file": ".."}))
+    for label, change in bad:
+        env = Env()
+        try:
+            env.config.update(change)
+            sender = env.sender()
+            check(f"config ({label}): the Sender reports it", bool(sender.config_error), sender.config_error)
+            r, s = sender.send_mail(to=[JOE], subject="Hi", body="x"), sender.send_social(platform="linkedin", text="x")
+            check(f"config ({label}): mail and social refused config_invalid",
+                  r.reason == s.reason == "config_invalid" and r.outcome == ss.REFUSED, (r, s))
+            check(f"config ({label}): nothing claimed, nothing linted, no transport",
+                  not (env.state / "system-sender-ledger.json").exists() and env.fakes.lint_calls == []
+                  and env.fakes.outlook_calls == [] and env.fakes.http_calls == [])
+            check(f"config ({label}): the refusal still has a receipt",
+                  [x["reason"] for x in env.receipts()] == ["config_invalid"] * 2, env.receipts())
+            line, breach, hard = ss.health_row(sender=sender)
+            check(f"config ({label}): health is a hard UNKNOWN", line.startswith("UNKNOWN") and breach and hard, line)
+        finally:
+            env.close()
+    check("config: the shipped config validates", ss.validate_config(ss.load_config()) is None,
+          ss.validate_config(ss.load_config()))
+
+
+# ── finding 6: the cap slot is reserved inside the ledger lock ──────────────
+
+@scenario
+def test_cap_reserved_with_the_claim() -> None:
+    env = Env(caps={"mail": 1, "social": 5})
+    try:
+        inner: list[ss.SendResult] = []
+
+        def concurrent(url: str, title: str) -> str:
+            # A second sender runs while the first is mid-delivery.
+            inner.append(env.sender().send_mail(to=[JOE], subject="Second", body="Other words."))
+            return "SENT"
+        first = env.sender(outlook=concurrent).send_mail(to=[JOE], subject="First", body="Words.")
+        check("cap race: the first send goes", first.outcome == ss.SENT, first)
+        check("cap race: the concurrent second, with one slot left, is refused daily_cap",
+              len(inner) == 1 and (inner[0].outcome, inner[0].reason) == (ss.REFUSED, "daily_cap"), inner)
+    finally:
+        env.close()
+    env = Env(caps={"mail": 1, "social": 5})
+    try:
+        sender = env.sender()
+        a = ss._Attempt(channel="mail", target=JOE, dedupe_key="k1")
+        b = ss._Attempt(channel="mail", target=JOE, dedupe_key="k2")
+        one = sender.ledger.claim("k1", a, T0, day="2026-10-13", mode="live", cap=1)
+        two = sender.ledger.claim("k2", b, T0, day="2026-10-13", mode="live", cap=1)
+        check("cap ledger: two claims when one slot remains, the second is capped",
+              one == ("claimed", 0) and two == ("capped", 1), (one, two))
+        sender.ledger.release("k1", a.attempt_id)
+        check("cap ledger: a released claim frees its slot",
+              sender.ledger.claim("k2", b, T0, day="2026-10-13", mode="live", cap=1)[0] == "claimed")
+    finally:
+        env.close()
+    env = Env(caps={"mail": 1, "social": 5})
+    try:
+        env.fakes.outlook_answer = "ERROR: open failed (exit 1); Send never pressed"
+        failed = env.mail(subject="Fails")
+        env.fakes.outlook_answer = "SENT"
+        after = env.mail(subject="Goes")
+        check("cap: a definite non-send frees the slot for the next send",
+              failed.outcome == ss.FAILED and after.outcome == ss.SENT, (failed, after))
+        env.fakes.outlook_answer = "NOT_SENT: compose window still open after Send"
+        env.clock.at = T0 + dt.timedelta(days=1)
+        held = env.mail(subject="Held")
+        env.fakes.outlook_answer = "SENT"
+        nxt = env.mail(subject="Next")
+        check("cap: an ambiguous (held) send keeps its slot", held.outcome == ss.UNKNOWN
+              and nxt.reason == "daily_cap", (held, nxt))
+    finally:
+        env.close()
+
+
+# ── finding 8: definite non-sends release the key ───────────────────────────
+
+@scenario
+def test_definite_non_send_classes() -> None:
+    env = Env()
+    real_builder = ss._mailto_builder
+    try:
+        def broken_builder() -> Any:
+            raise ImportError("bin/outlook-draft.py unavailable")
+        ss._mailto_builder = broken_builder   # type: ignore[assignment]
+        r = env.mail(subject="Builder")
+        check("non-send class: mailto builder import failure is definite",
+              (r.outcome, r.reason) == (ss.FAILED, "mailto_builder_unavailable") and env.held() == []
+              and env.fakes.outlook_calls == [], r)
+    finally:
+        ss._mailto_builder = real_builder     # type: ignore[assignment]
+    try:
+        env.fakes.outlook_answer = "NOT_FRONTMOST: Outlook or its compose window is not frontmost after re-activation; nothing pressed"
+        r = env.mail(subject="Front")
+        check("non-send class: Outlook not frontmost is definite, with its own reason",
+              (r.outcome, r.reason) == (ss.FAILED, "outlook_not_frontmost") and env.held() == [], r)
+        env.fakes.outlook_answer = "ERROR: open failed (exit 1); Send never pressed"
+        r = env.mail(subject="Open")
+        check("non-send class: open -a failure is definite",
+              (r.outcome, r.reason) == (ss.FAILED, "outlook_open_failed") and env.held() == [], r)
+
+        def key_raises() -> str:
+            raise subprocess.TimeoutExpired("zsh", 15)
+        r = env.sender(blotato_key=key_raises).send_social(platform="linkedin", text="Key lookup breaks.")
+        check("non-send class: a key-lookup error is definite",
+              (r.outcome, r.reason) == (ss.FAILED, "blotato_key_unavailable") and env.held() == []
+              and env.fakes.http_calls == [], r)
+
+        real_urlopen = ss.urllib.request.urlopen
+
+        def no_dns(*_: Any, **__: Any) -> Any:
+            raise urllib.error.URLError(OSError("nodename nor servname provided"))
+        ss.urllib.request.urlopen = no_dns   # type: ignore[assignment]
+        try:
+            r = env.sender(blotato_http=ss._blotato_post).send_social(platform="linkedin", text="DNS fails.")
+        finally:
+            ss.urllib.request.urlopen = real_urlopen   # type: ignore[assignment]
+        check("non-send class: a Blotato DNS/URLError is definite",
+              (r.outcome, r.reason) == (ss.FAILED, "blotato_unreachable") and env.held() == [], r)
+        reasons = [x["reason"] for x in env.receipts()]
+        check("non-send class: every one wrote a receipt naming its reason",
+              reasons == ["mailto_builder_unavailable", "outlook_not_frontmost", "outlook_open_failed",
+                          "blotato_key_unavailable", "blotato_unreachable"], reasons)
+    finally:
+        env.close()
+
+
+# ── finding 9: the default dedupe key carries the Central date ──────────────
+
+@scenario
+def test_default_dedupe_key_is_per_day() -> None:
+    env = Env()
+    try:
+        first, again = env.mail(), env.mail()
+        explicit = env.mail(subject="Weekly", dedupe_key="weekly-2026-10-13")
+        env.clock.at = T0 + dt.timedelta(days=1)
+        tomorrow = env.mail()
+        explicit_tomorrow = env.mail(subject="Weekly", dedupe_key="weekly-2026-10-13")
+        check("dedupe by day: the same message twice in one day is refused",
+              first.outcome == ss.SENT and again.reason == "duplicate", (first, again))
+        check("dedupe by day: the same message on a later Central day sends", tomorrow.outcome == ss.SENT, tomorrow)
+        check("dedupe by day: an explicit dedupe_key is unchanged (still refused)",
+              explicit.outcome == ss.SENT and explicit_tomorrow.reason == "duplicate", explicit_tomorrow)
+        env.clock.at = dt.datetime(2026, 10, 15, 4, 59, tzinfo=dt.timezone.utc)   # 23:59 Central, Oct 14
+        check("dedupe by day: the day is Central, not UTC", env.mail().reason == "duplicate")
     finally:
         env.close()
 
@@ -591,7 +933,16 @@ def main() -> int:
                  test_corrupt_ledger_refuses,
                  test_daily_caps,
                  test_receipts_on_every_attempt,
-                 test_health_row):
+                 test_health_row,
+                 test_empty_subject_refused_before_any_claim,
+                 test_outlook_transport_window_choice,
+                 test_send_script_shape,
+                 test_send_self_test_goes_through_the_chain,
+                 test_state_dir_is_machine_wide,
+                 test_bad_config_refuses_and_claims_nothing,
+                 test_cap_reserved_with_the_claim,
+                 test_definite_non_send_classes,
+                 test_default_dedupe_key_is_per_day):
         test()
     return CHECK.summary()
 

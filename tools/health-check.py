@@ -1466,8 +1466,11 @@ def _storage_hygiene_row():
 
 def _system_sends_row():
     """lib/system_sender.py's own row: today's sends against the cap, shadow vs
-    live, kill-switch state, held dedupe claims. Same reader the sender's cap
-    uses (rule a8c55a47), so the row cannot disagree with the refusal."""
+    live, kill-switch state, held dedupe claims, config validity. Same reader
+    the sender's cap uses (rule a8c55a47), so the row cannot disagree with the
+    refusal. It reads the machine-wide state_dir (default
+    ~/carr-local/system-sender: ledger with the cap slots, sends.jsonl, stop
+    file), not this checkout's out/, so it reports this MACHINE."""
     try:
         from lib.system_sender import health_row
         return health_row()
