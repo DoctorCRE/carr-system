@@ -2,7 +2,7 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:102f87b2f2c0cb8637d486e8b04de79d8c18ef525df595f08f10691a1c8bfd1b",
+    "configuration_fingerprint": "sha256:279aea9560072f62f45cd01c50f681cea4fef1612c095fa4a88c165184e326a3",
     "harness_id": "evals/rule-delivery/run_eval.py",
     "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
     "model_id": "deterministic-no-model",
@@ -170,10 +170,8 @@
     },
     "dependencies": {
       "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
-      "hooks/rule-pack-preuse-reselection.py": "f2a95e5130c37c1fe465a3b4e77e32ce454ebbcd5fbceb139972fc3cb640552e",
-      "lib/claude_continuity_config.py": "9e6d1afd1c5714bd61892ca1da7de058dbcfebae84f9131fd70d24d6a91985f5",
-      "lib/claude_rule_delivery_dedupe.py": "6b37b3e0cd950410332fcc4099c17b61650d87eb63158bf550c5d259ca0540b4",
-      "lib/hook_runtime.py": "98fb90335be414e80e52aac30d93f9d150a6f8112287692a1b4c9d296e5afa5a",
+      "hooks/rule-pack-preuse-reselection.py": "c05412a674990f701adecb8b4ee43e6ff6dd28429c097d2ccf5ec4a9c7b3ecae",
+      "lib/hook_runtime.py": "924ebbdf3a4af705e08250950c298fadb257025f0abb9a80c5666fdcfee643d6",
       "lib/rule_delivery_preuse.py": "144dba02f5555287b65d0eb0da050cd6a2cba6fd2ad5b8a9dbe8f920947b6914",
       "lib/rule_delivery_shadow.py": "b39b504ff0bf77819b578a12f97821bc3da2e8226e90b5f17d3a40ccb1cb7417",
       "lib/rule_routes.py": "0e9a3db2afe77ca8c5de1279cf2934fd4de51c01dc841a830e3ab7a8d382d924",
