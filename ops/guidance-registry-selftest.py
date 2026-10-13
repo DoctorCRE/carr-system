@@ -417,15 +417,12 @@ def main():
     # ENTERING the active set, nothing reclassified.
     # procedure 78 -> 79 on 2026-10-08: rule 8400cd3d (new-work sizing) is a
     # judgment_ambient rule and owes one procedure row. Nothing was reclassified.
-    # constraint 70 -> 72, procedure 79 -> 78 on 2026-10-12, when the
-    # unfiled_bug Stop gate was installed: rule 19ebbeb3 (a detected bug is
-    # recorded or gets a Work Request) ENTERED the map as a stop_gate rule (+1
-    # constraint), and rule 1b8e7f43 (a blocked action is filed) was
-    # RECLASSIFIED from judgment_ambient to stop_gate, so its procedure
-    # manifest row left audits/guidance-migration-manifest.v1.tsv (-1
-    # procedure) and it now compiles as a constraint (+1 constraint).
+    # constraint 70 -> 71 on 2026-10-12, when the unfiled_bug Stop gate was
+    # installed: rule 19ebbeb3 (a detected bug is recorded and addressed in the
+    # same session) ENTERED the map as a stop_gate rule, so it compiles as a
+    # constraint and needs no manifest row. Nothing was reclassified.
     reviewed_counts = {
-        "constraint": 72, "procedure": 78, "doctrine": 12, "rubric": 35,
+        "constraint": 71, "procedure": 79, "doctrine": 12, "rubric": 35,
         "preference": 12, "precedent": 3, "example": 0,
     }
     split_compile_pass = (
@@ -463,7 +460,7 @@ def main():
         "source_manifest_provenance": {
             "path": "audits/guidance-migration-manifest.v1.tsv", "sha256": "a" * 64,
             "manifest": "carr-guidance-migration", "schema_version": "1.0.0",
-            "source_classification": "judgment_ambient", "entry_count": 94,
+            "source_classification": "judgment_ambient", "entry_count": 95,
         },
         "base_inventory": {
             "path": "ops/config/rule-enforcement-map.json", "sha256": "b" * 64,

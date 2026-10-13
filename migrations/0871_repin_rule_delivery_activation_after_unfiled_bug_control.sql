@@ -1,13 +1,14 @@
--- Registering the unfiled_bug control (rules 19ebbeb3 and 1b8e7f43, carried by
--- hooks/unfiled-bug-stop-gate.py) adds a control_catalog entry and two
--- rule_controls entries to the reviewed enforcement map, which moves the map
--- digest. The eight pack-cutover contracts stay unchanged, so advance only
+-- Registering the unfiled_bug control (rule 19ebbeb3, carried by
+-- hooks/unfiled-bug-stop-gate.py) adds a control_catalog entry and one
+-- rule_controls entry to the reviewed enforcement map, which moves the map
+-- digest. Rule 1b8e7f43 stays judgment_advisory in the map until production's
+-- admission record is refreshed. The eight pack-cutover contracts stay unchanged, so advance only
 -- their guarded identity from the post-0859 map to the post-registration map.
 -- rollback: repin the same eight targets to v_old after verifying the exact v_new preimage
 do $rule_delivery_0871$
 declare
   v_old constant text := 'f1d16ff39227ab58a8fd09bde84a5af590629829c4a8bc219a12b0b5e6acc72e';
-  v_new constant text := '21241f16f01d82f32e8d46610288684de34c00eee7d51304da5f54c0b7df403a';
+  v_new constant text := 'dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cbb4eca7f61b08';
   v_ids constant text[] := array[
     '113b3833','25fcddee','3fa17fa0','49533583',
     '557838a5','57d13061','72e06bdf','c66dc739'

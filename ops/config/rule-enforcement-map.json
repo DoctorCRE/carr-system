@@ -343,8 +343,7 @@
       "1d50a3bb",
       "d7f74c93",
       "dcf98880",
-      "19ebbeb3",
-      "1b8e7f43"
+      "19ebbeb3"
     ],
     "session_task_rail": [
       "25fcddee",
@@ -1104,11 +1103,9 @@
       "exceptions": "the turn filed it (record-defect, report-problem or add-loop accepted by the record layer), the sentence's paragraph names its record or fixing PR, or the sentence is a relay, a hypothetical, a fix already in hand, the PR build loop or an environment fault"
     },
     "1b8e7f43": {
-      "binding_moment": "turn end, when the turn's own prose reports a refusal or block it hit",
-      "category": "post_action_verification",
-      "control": "unfiled_bug",
-      "enforcement_class": "stop_gate",
-      "exceptions": "a block never mentioned in prose stays judgment: the omission of a filing has no tool call to deny, so only the reported half is gated (rule 647f843d's loop_guard still shapes the loop when one is filed)"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The omission of ever calling add-loop cannot be gated -- there is no tool call to deny. (When a loop IS filed, its shape is separately gated by rule 647f843d's loop_guard.)"
     },
     "1c21263c": {
       "category": "judgment_advisory",
@@ -2453,9 +2450,9 @@
       "why": "An installed stop gate delivers this at its binding moment."
     },
     "1b8e7f43": {
-      "load_layer": "control",
+      "load_layer": "layer0",
       "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "Any withheld capability in any session; the filing is what survives the block."
     },
     "1c21263c": {
       "load_layer": "pack",
