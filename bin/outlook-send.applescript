@@ -68,17 +68,17 @@ on run argv
   end if
   if mode is not "send" then return "REFUSED: unknown mode " & mode & "; nothing pressed"
 
-  set before to (item 3 of argv) as integer
+  set priorCount to (item 3 of argv) as integer
 
   -- Exactly one NEW window, then exactly one window with this exact title.
-  set total to before
+  set total to priorCount
   repeat 20 times
     tell application "System Events" to set total to count of windows of process "Microsoft Outlook"
-    if total > before + 1 then return "REFUSED: " & (total - before) & " new windows appeared, expected exactly one; nothing pressed"
-    if total = before + 1 then exit repeat
+    if total > priorCount + 1 then return "REFUSED: " & (total - priorCount) & " new windows appeared, expected exactly one; nothing pressed"
+    if total = priorCount + 1 then exit repeat
     delay 0.5
   end repeat
-  if total < before + 1 then return "REFUSED: no new compose window appeared; nothing pressed"
+  if total < priorCount + 1 then return "REFUSED: no new compose window appeared; nothing pressed"
 
   set matches to {}
   repeat 10 times
@@ -89,7 +89,7 @@ on run argv
   if (count of matches) is 0 then return "REFUSED: no window titled exactly with the subject; nothing pressed"
   if (count of matches) > 1 then return "REFUSED: " & (count of matches) & " windows titled with the subject; nothing pressed"
   tell application "System Events" to set total to count of windows of process "Microsoft Outlook"
-  if total is not before + 1 then return "REFUSED: window count changed to " & total & " while matching; nothing pressed"
+  if total is not priorCount + 1 then return "REFUSED: window count changed to " & total & " while matching; nothing pressed"
 
   set found to item 1 of matches
   tell application "System Events" to set targetName to name of found
