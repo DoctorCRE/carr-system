@@ -415,6 +415,77 @@ export function continuityActorForTokenMaps(
 }
 
 /**
+ * UNATTENDED_TOKENS bearer -> Joe's sponsored joe-local machine actor, marked
+ * unattended, or null.
+ *
+ * WHY IT EXISTS (Joe's ruling 2026-10-12, decision cbe91287: remove his
+ * approval from everything the system can do itself). A partner-sponsored
+ * ATTENDED session already holds partner authority: joe-local through the
+ * LOCAL_TOKENS door, and native Claude/Codex through OAuth. The runners nobody
+ * sits beside (the launchd/nightly runner, Model Room desks) held no sponsor,
+ * so every authority verb, loop close, rule approval and incident close waited
+ * for a human to open a session. This door gives that runner the attended
+ * local actor's authority under its own credential.
+ *
+ * SHAPE: sponsor -> runner -> token, e.g. {"joe":{"nightly-mac":"…"}}. The
+ * sponsor AND the runner are read from map keys the server holds and never from
+ * anything the caller sends. The function takes the request's own Authorization
+ * header and the server's map, and nothing else, so a caller-claimed sponsor or
+ * runner has no parameter to ride. One token per runner is what makes a single
+ * runner revocable without rotating every machine, and what lets the ledger
+ * name WHICH runner acted: the actor's client_id is `unattended-runner:<runner>`,
+ * written to tool_call/event beside `via` (PR #1727 review, finding 4).
+ *
+ * ONLY `joe` IS ACCEPTED. The ruling is Joe's, for his book. A `dell` key, an
+ * unknown key, a probe/review/agent slug, a token held by two runners or two
+ * sponsors, a runner name outside UNATTENDED_RUNNER and a malformed map all
+ * resolve to nothing. Dell's side would be a separate entry
+ * in UNATTENDED_ACTOR made on Dell's own ruling, never a shared credential.
+ *
+ * The actor IS joe-local, so partner authority, the authority DB login and the
+ * operational profile all fall out of the existing joe-local derivations. What
+ * differs is provenance: `via: "unattended-token"` and `unattended: true` let
+ * the ledger tell an unattended run from an attended one. What it may DO is
+ * narrower than the attended door, by the PR #1727 review: mcp.js locks it to
+ * the `unattended` profile, and tools.js admits it to a humanOnly/authorityOnly
+ * verb only when that verb is in UNATTENDED_AUTHORITY_VERBS (humanCallerOnly
+ * verbs such as confirm-merge never are).
+ */
+const UNATTENDED_ACTOR = Object.freeze({ joe: "joe-local" });
+
+const UNATTENDED_RUNNER = /^[a-z0-9][a-z0-9._-]{0,47}$/;
+
+export const unattendedActorForToken = closedCallable((authorizationHeader, unattendedTokensRaw) => {
+  const token = String(authorizationHeader || "").replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+  let tokens;
+  try { tokens = JSON.parse(unattendedTokensRaw || "{}"); }
+  catch { return null; }
+  const isMap = value => !!value && typeof value === "object" && !Array.isArray(value);
+  if (!isMap(tokens)) return null;
+  const holders = [];
+  for (const sponsorKey of Object.keys(tokens)) {
+    const runners = tokens[sponsorKey];
+    if (!isMap(runners)) continue;
+    for (const runnerKey of Object.keys(runners))
+      if (typeof runners[runnerKey] === "string" && runners[runnerKey].length > 0 &&
+          runners[runnerKey] === token)
+        holders.push([sponsorKey, runnerKey]);
+  }
+  if (holders.length !== 1) return null;
+  const [sponsor, runner] = holders[0];
+  if (!Object.prototype.hasOwnProperty.call(UNATTENDED_ACTOR, sponsor)) return null;
+  if (!UNATTENDED_RUNNER.test(runner)) return null;
+  const slug = UNATTENDED_ACTOR[sponsor];
+  if (!isKnownActor(slug) || !isKnownPartner(sponsor) || LOCAL_SPONSOR[slug] !== sponsor) return null;
+  return authenticateConnection({ slug, display: DISPLAY[slug], human: false, agent: true,
+           via: "unattended-token", client_id: `unattended-runner:${runner}`,
+           sponsoring_human_slug: sponsor, human_slug: sponsor, sponsor_required: false,
+           native_agent_verified: true, unattended: true, unattended_runner: runner },
+         unattendedTokensRaw);
+});
+
+/**
  * HERMES_TOKENS bearer -> the R0 evaluation runtime's actor, or null.
  *
  * The pure half of index.js's hermesActorFor, split out for the same reason as
@@ -722,6 +793,7 @@ const SERVER_CREDENTIAL_NAMES = Object.freeze([
   "REVIEW_TOKENS", "AGENT_TOKENS", "LOCAL_TOKENS",
   "HERMES_TOKENS", "HERMES_TOKENS_EXTRA", "HERMES_COS_TOKENS",
   "CODEX_CONTINUITY_TOKENS", "CLAUDE_CONTINUITY_TOKENS",
+  "UNATTENDED_TOKENS",
   "GOOGLE_CLIENT_SECRET",
 ]);
 
@@ -781,7 +853,8 @@ const CALL_CORRELATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
  *
  * Called at every return in this file that turns a verified CREDENTIAL into an
  * actor — the OAuth grant's props, the agent bearer, the two continuity bearers,
- * the two Hermes bearers, and the review bearer below — and nowhere else. It is
+ * the unattended bearer, the two Hermes bearers, and the review bearer below —
+ * and nowhere else. It is
  * not exported, and nothing exported is a synonym for it.
  *
  * `credentialBytes` is THE BYTES THE DOOR VERIFIED AGAINST: the token map it
