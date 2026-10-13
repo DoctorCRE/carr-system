@@ -387,10 +387,14 @@ RESULT
             shutil.copy(ROOT / relative, self.root / relative)
         (self.root / "bin").mkdir()
         shutil.copy(ROOT / "bin/with-timeout.py", self.root / "bin/with-timeout.py")
-        for stub in ["hooks/gate-integrity.py", "ops/no-client-deliverables-gate.py", "ops/stale-config-check.py"]:
+        # The secret class runs the leak guard before ci-secret-scan.py; this case
+        # is about the latter, so the guard and its qualification test are stubs.
+        (self.root / "security").mkdir()
+        for stub in ["hooks/gate-integrity.py", "ops/no-client-deliverables-gate.py", "ops/stale-config-check.py",
+                     "security/leak_guard.py", "security/test_leak_guard.py"]:
             (self.root / stub).write_text("raise SystemExit(0)\n")
         (self.root / ".gitignore").write_text("__pycache__/\n")
-        self.git("add", "ops", "bin", "hooks", ".gitignore")
+        self.git("add", "ops", "bin", "hooks", "security", ".gitignore")
         self.git("commit", "-qm", "real floor")
         self.git("update-ref", "refs/remotes/origin/main", self.git("rev-parse", "HEAD"))
         self.edit("README.md", "clean candidate\n")

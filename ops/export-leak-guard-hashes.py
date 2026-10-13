@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Read the record layer and write a hash-only repository scanning corpus."""
 import argparse
 import json

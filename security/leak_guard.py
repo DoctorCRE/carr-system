@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Repository-local leak gate. Diagnostics contain locations, never values."""
 import argparse
 import bisect
