@@ -5865,10 +5865,10 @@
       "number": 118,
       "version": "scac-mutation-registry.v118",
       "predecessor": "scac-mutation-registry.v117",
-      "digest": "sha256:d09d0129bb7c88d19f483211f01bc81e8fd755b98548f3aaad53322f1feed501",
-      "source_set_digest": "sha256:d813be47567c77f5fb8a30d0aede4ca6321631bcb37df0cd108ee0817e6c95b2",
-      "catalog_digest": "sha256:0eec16b4d1c5ff8e9c9e1d9fd6614ab639645831be8d0b18a11d3f0da2689e91",
-      "artifact_sha256": "cf4a60747797757435c1769de03cb8bc5d10889037d8124660a06c54e51a8629",
+      "digest": "sha256:c736b5a902254d353d77a6b80398da65db8360e330c1d3a512e5aa883877c442",
+      "source_set_digest": "sha256:784fcc5a8c32c19f273cf2e0638dc5c43aacd96e8a19d2fe1d03279cab69df1e",
+      "catalog_digest": "sha256:b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877",
+      "artifact_sha256": "f9ca69957b105d29d5e593c5381ba24c53fe449935cc6a0c6487edaf3f29b399",
       "path": "mcp-server/src/scac-mutation-registry.current.generated.js",
       "catalog": {
         "column_dml": {
@@ -5884,8 +5884,8 @@
           "digest": "sha256:93724fe71ed216afac9b4bf48eee500e693de057cae0b59f59ff8e68cc6a2bc0"
         },
         "secdef_execute": {
-          "count": 1266,
-          "digest": "sha256:be8989dbedbedd2ff215b375f55d340806a47a54ebf9bfd2075baaa09c23472a"
+          "count": 1267,
+          "digest": "sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa"
         },
         "job_definitions": {
           "count": 2,
@@ -5897,11 +5897,11 @@
           "digest": "sha256:cd7e5cff7db2ff2d98fb626c15d0109af9af9de91927b7b32e53a2d7147e9ee6"
         }
       },
-      "commit": "3e7054ad49877a333157158782ea897f173a68da",
-      "source_count": 1212,
-      "entry_count": 2814,
+      "commit": "55c30a1c9c0a0d6351ed940b3d98b781096e373c",
+      "source_count": 1213,
+      "entry_count": 2816,
       "migration": "migrations/0873_self_closing_records_scac_successor.sql",
-      "entry_set_digest": "sha256:b9b375fea4386645ac7d8f29bab346d16f4bc83810fc79abe60c4ee88089c3be",
+      "entry_set_digest": "sha256:2371b3fb4a79654de9c5ddda725e5a0ec245dfa6b79632af58108a16d197b3ea",
       "atomic_pair": [
         "0872_self_closing_records.sql",
         "0873_self_closing_records_scac_successor.sql"
@@ -5915,7 +5915,7 @@
         "include_current_entry_set": true,
         "catalog_function": "ops.scac_mutation_catalog_v118_current()"
       },
-      "migration_sha256": "66a384d4ef33c709855aae31f1f4fae6d16d23f7b2de7f3fa3d860a15204658d"
+      "migration_sha256": "cfdd54a9f8182826f529b2260cf62da955bdf0c3b8484eda86d33d3920d50587"
     }
   ],
   "atomic_groups": [
