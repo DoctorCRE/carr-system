@@ -75,7 +75,8 @@ class LeakGuardTest(unittest.TestCase):
         self.assertNotIn(value, result.stdout + hook.stdout + hook.stderr)
 
     def git(self, *args):
-        return subprocess.check_output(['git', '-C', str(self.root), *args]).decode().strip()
+        return subprocess.check_output(['git', '-C', str(self.root), '-c', 'user.name=Synthetic', '-c',
+                                        'user.email=synthetic@example.invalid', *args]).decode().strip()
 
     def test_merging_main_scans_only_what_the_branch_introduces(self):
         (self.root / 'sample.txt').write_text('safe\n')
@@ -92,8 +93,7 @@ class LeakGuardTest(unittest.TestCase):
         self.git('add', 'main-side.txt')
         main = self.commit()
         self.git('checkout', '-q', 'feature')
-        self.git('-c', 'user.name=Synthetic', '-c', 'user.email=synthetic@example.invalid',
-                 'merge', '-q', '--no-edit', 'main')
+        self.git('merge', '-q', '--no-edit', 'main')
         head = self.git('rev-parse', 'HEAD')
         result = self.run_guard('--range', main + '..' + head, '--generic-only')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
