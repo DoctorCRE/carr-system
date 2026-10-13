@@ -35,6 +35,7 @@ import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { claudeContinuityTools } from "./claude-continuity.js";
 import { incidentTools } from "./incident.js";
+import { defectResolutionTools } from "./defect-resolution.js";
 import { evidenceActivationTools } from "./evidence-activation.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
 import { invoiceAutomation } from "./invoice-automation.js";
@@ -1202,7 +1203,7 @@ async function resolveLoop(client, args, opts = {}) {
   if (args.loop_id) {
     const r = await client.query(
       `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-              li.close_outcome, lb.block_key as section
+              li.close_outcome, li.blocker_class, lb.block_key as section
          from loop_item li join loop_block lb on lb.id = li.block_id
         where li.id = $1`, [args.loop_id]);
     if (!r.rows.length) throw new ToolError({ error: "not_found", loop_id: args.loop_id });
@@ -1213,7 +1214,7 @@ async function resolveLoop(client, args, opts = {}) {
       hint: "pass loop_id, or number (plus kind when the number is shared across kinds)" });
   const r = await client.query(
     `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-            li.close_outcome, lb.block_key as section, lb.rel_path
+            li.close_outcome, li.blocker_class, lb.block_key as section, lb.rel_path
        from loop_item li join loop_block lb on lb.id = li.block_id
       where li.number = $1 and (${anyStatus ? "true" : "li.status = 'open'"})
         and ($2::text is null or li.kind = $2)`, [args.number, args.kind || null]);
@@ -2130,6 +2131,77 @@ const LOOP_KINDS = Object.freeze(["open_loop", "team_loop", "action_required", "
 const VAGUE_BLOCKER_RE =
   /\b(?:later|someday|some day|eventually|when (?:there(?:'s| is) )?(?:more )?time|when time (?:permits|allows)|time permitting|revisit|circle back|down the (?:road|line)|at some point|in (?:the )?future|future session|next session|tbd|to be determined|n\/?a|low priority|nice to have|opportunistically|as time allows|no rush|whenever)\b/i;
 
+// ── THE RESIDUE GATE (Joe 2026-10-12, decision cbe91287) ───────────────────
+// On 2026-10-12 the governance queue counted 150 loops labelled as waiting on
+// Joe, median age 53 days. 75 were filed human_only and 53 ruling, yet most
+// were internal engineering steps any session may take: nothing at filing time
+// asked what exactly only Joe can do, so the needs-Joe view had to exclude
+// them after the fact. Joe's ruling: only an act a provider or the OS reserves
+// to the account holder may wait on him. A write that claims a class which
+// waits on a person therefore names that act from this closed list, plus the
+// provider or host that reserves it.
+//
+// Internal work is system_decides: the session does it now, or files it under
+// a class that does not wait on Joe (other_lane, external_event, counterparty),
+// which the needs-Joe view already excludes. Rows filed before this gate are
+// not rewritten; the requirement binds when a write claims the class.
+const RESIDUE_KINDS = Object.freeze([
+  "provider_login",  // a login with two-factor that the provider reserves to the account holder
+  "os_password",     // an operating-system password or biometric prompt
+  "physical_act",    // a signature, a site visit, a device in hand
+  "money_movement",  // money is spent, paid or committed
+  "external_send",   // something leaves the house to a client, counterparty or the public
+  "joe_only_fact",   // a fact only Joe holds: what was said on a call, what he wants
+]);
+
+// The blocker classes that wait on a person. `credential` is not a stored
+// class: a credential block is filed as capability with residue_kind
+// provider_login or os_password.
+const RESIDUE_CLASSES = Object.freeze(["human_only", "ruling", "capability"]);
+
+const RESIDUE_FALLBACK_HINT =
+  "if no provider or OS reserves this act to the account holder, it is internal work and " +
+  "the system decides it (system_decides): do it now, or file it under a class that does " +
+  "not wait on Joe (other_lane, external_event, counterparty).";
+
+// Returns the residue a write must store for `blocker`, or null for a class
+// that carries none. Refuses a claimed class without a valid residue, and a
+// residue on a class that cannot carry one (stored-and-inert is a lie).
+function blockerResidue(blocker, args) {
+  const given = args.residue_kind !== undefined || args.residue_host !== undefined;
+  if (!RESIDUE_CLASSES.includes(blocker)) {
+    if (given)
+      throw new ToolError({ error: "residue_not_carried_by_class", blocker: blocker ?? null,
+        residue_classes: RESIDUE_CLASSES,
+        hint: `a residue names what still waits on Joe, so only ${RESIDUE_CLASSES.join(", ")} ` +
+              "carry one. Drop residue_kind and residue_host, or name the class it belongs to." });
+    return null;
+  }
+  if (args.residue_kind === undefined || args.residue_kind === null)
+    throw new ToolError({ error: "residue_required", blocker, residue_kinds: RESIDUE_KINDS,
+      hint: `blocker '${blocker}' says this waits on a person. Name the act a provider or the ` +
+            "OS reserves to the account holder in residue_kind, and who reserves it in " +
+            `residue_host. Otherwise ${RESIDUE_FALLBACK_HINT}` });
+  if (!RESIDUE_KINDS.includes(args.residue_kind))
+    throw new ToolError({ error: "unknown_residue_kind", got: args.residue_kind,
+      residue_kinds: RESIDUE_KINDS,
+      hint: `the list is closed. If none of these fits, ${RESIDUE_FALLBACK_HINT}` });
+  const host = typeof args.residue_host === "string" ? args.residue_host.trim() : "";
+  if (host.length < 2)
+    throw new ToolError({ error: "residue_host_required", got: host || null,
+      residue_kind: args.residue_kind,
+      hint: "name the provider or host that reserves the act: 'github.com', 'macOS on Joe's " +
+            "MacBook', 'Chase', 'Joe's call with Sanders'. A residue nobody can locate cannot be done." });
+  return { kind: args.residue_kind, host };
+}
+
+const RESIDUE_SCHEMA = {
+  residue_kind: { type: "string", enum: RESIDUE_KINDS,
+    description: "REQUIRED when blocker is human_only, ruling or capability: the act only the account holder can perform, from a closed list. provider_login = a login with two-factor the provider reserves · os_password = an OS password or biometric prompt · physical_act = a signature, site visit or device in hand · money_movement = money spent, paid or committed · external_send = something sent to a client, counterparty or the public · joe_only_fact = a fact only Joe holds. Internal work has no residue: the system decides it, so do it or file it under other_lane, external_event or counterparty." },
+  residue_host: { type: "string",
+    description: "REQUIRED with residue_kind: the provider or host that reserves the act, e.g. 'github.com', 'macOS on Joe's MacBook', 'Chase'." },
+};
+
 // ── THE OWNERSHIP GATE (Joe 2026-08-10) ────────────────────────────────────
 // Joe asked why the backlog never falls. The measured answer: intake is
 // autonomous and the drain is not. Audits, IT sweeps, council reviews and
@@ -2437,7 +2509,7 @@ export const TOOLS = {
 
   "read-v5-a02-rule-enforcement-coverage": {
     write: false,
-    description: "Read DoctorCRE V5-A02's server-derived coverage of every active rule. The record layer enumerates active rules and checks that every control its current exact approval names is installed and bound, with test verification that is not future-dated and still equals the value the approval captured, and an immutable fallback receipt written on Joe's authority database connection (the receipt proves which authority connection recorded it, not that a human chose it). Empty input only: caller evidence cannot make coverage green. Each uncovered rule is a named gap (amended after approval, control unmapped, an approved control not installed, tests missing, test evidence future-dated or changed since approval, fallback absent); zero active rules reads coverage_state `empty`, never complete; an unreadable or inconsistent record is a fail-closed unavailable result.",
+    description: "Read DoctorCRE V5-A02's server-derived coverage of every active rule. The record layer enumerates active rules and checks that every control its current exact approval names is installed and bound, with test verification that is not future-dated and still equals the value the approval captured, and an immutable fallback receipt written on Joe's authority database connection (the receipt proves which authority connection recorded it, not that a human chose it). Since migration 0876 that receipt is not required when the rule's current exact approval is machine_enforceable/hard_enforced and every control it names is transactional_schema or implemented only by hooks/*.py files. What that gives up: for those rules there is no receipt saying what the system does when the installed control is unavailable (a disabled hook, the Worker down, catalog drift). It is acceptable because the system already answers that by machine: hooks/gate-integrity.py runs at every session start, hashing every hook against the blessed baseline and comparing the live hook wiring, and the `machine config` row of run.sh health repeats the wiring check, so a missing, changed or disabled gate is named the next time any session boots; a transactional_schema refusal runs inside the write itself, so an unavailable database or Worker means no write (refuse closed); and catalog drift is a named gap in this read. Every other control kind (githook, CI or script checks, any implementation outside hooks/) keeps the receipt, because nothing names its unavailability at boot. Empty input only: caller evidence cannot make coverage green. Each uncovered rule is a named gap (amended after approval, control unmapped, an approved control not installed, tests missing, test evidence future-dated or changed since approval, fallback absent); zero active rules reads coverage_state `empty`, never complete; an unreadable or inconsistent record is a fail-closed unavailable result.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => readRuleEnforcementCoverage(c),
   },
@@ -5561,6 +5633,9 @@ export const TOOLS = {
   "confirm-merge": {
     write: true,
     humanOnly: true,
+    // A merge is irreversible and needs a human looking at both records, so
+    // no machine holds it, attended or unattended, however it is sponsored.
+    humanCallerOnly: true,
     description: "HUMAN-confirmed merge of two duplicate parties: sets merged_into on the loser so it becomes a pointer to the survivor. Only after a human has looked at both records — the Hovanian rule means nothing auto-merges, ever.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, survivor_party: { type: "string" }, merged_party: { type: "string" },
@@ -6037,7 +6112,7 @@ export const TOOLS = {
 
   "teach": {
     write: true,
-    description: "Write a rule from the human's own words (status: proposed — after exact enforcement is built and verified, one explicit human approve-rule act atomically activates the enforced policy). Capture the verbatim quote. Personal-scope rules (voice, format) set personal_to. WHEN TO CALL IT — the test is 'would the system have to ask this again?', NOT whether the partner phrased it as 'always X' or 'never Y'. Standing lessons arrive as ordinary sentences: a modeling ruling ('cadence studio is one national account'), a correction to a fact in the record, a choice between options you offered with the reasoning attached, a rejection of a draft. Capture on the spot, never at 'session close' — the same event-not-session-close rule protocol 27b already settles. Pass supersedes when this rule replaces an earlier one; the old rule is retired with an immutable receipt in the same transaction. Superseding an ACTIVE rule requires a human caller and the same authority connection as retire-rule. ENFORCEMENT-FIRST BIRTH (WR-000019 slice S10): every teach REQUIRES enforcement_home, one of 'gate' (a deny/stop control will carry it — name carrying_control), 'jit' (delivered just-in-time by pack/moment), 'core' (always-loaded), or 'judgment_advisory' (no mechanical control ever will — say why_no_machine in one line). This is a refusal, not a default: a rule captured with nobody having said where it will live is exactly how guidance debt piled up before this slice, and a silent default would be indistinguishable from a considered choice. THIS IS CLERICAL WORK, NOT SELF-MODIFICATION, AND IT IS NEVER REFUSED ON THAT GROUND. Joe's ruling 2026-08-10, verbatim: 'You didn't make your own rule. You applied my rule to the system.' A session INVENTING a standing rule for itself would be self-modification and would be gated. A session TRANSCRIBING what a partner just said is the entire purpose of this verb, and the gate is already built into it: the rule lands as PROPOSED, binds nobody, and takes effect through one human approve-rule act only when enforcement is ready. A session that declines to record a partner's instruction because writing rules 'feels like' changing itself has not been careful, it has lost the instruction — which is the one outcome this verb exists to prevent. Recorded because a session hit exactly this on the day the ruling was made and stopped three routes early.",
+    description: "Write a rule from the human's own words (status: proposed — after exact enforcement is built and verified, approve-rule atomically activates the enforced policy; under decision cbe91287 (Joe, 2026-10-12) that approval is a technical-check act the rule-approval worklist performs after a ready rule-admission preflight, with the partner's recorded quote as its authority, not a live human tap). Capture the verbatim quote. Personal-scope rules (voice, format) set personal_to. WHEN TO CALL IT — the test is 'would the system have to ask this again?', NOT whether the partner phrased it as 'always X' or 'never Y'. Standing lessons arrive as ordinary sentences: a modeling ruling ('cadence studio is one national account'), a correction to a fact in the record, a choice between options you offered with the reasoning attached, a rejection of a draft. Capture on the spot, never at 'session close' — the same event-not-session-close rule protocol 27b already settles. Pass supersedes when this rule replaces an earlier one; the old rule is retired with an immutable receipt in the same transaction. Superseding an ACTIVE rule requires a human caller and the same authority connection as retire-rule. ENFORCEMENT-FIRST BIRTH (WR-000019 slice S10): every teach REQUIRES enforcement_home, one of 'gate' (a deny/stop control will carry it — name carrying_control), 'jit' (delivered just-in-time by pack/moment), 'core' (always-loaded), or 'judgment_advisory' (no mechanical control ever will — say why_no_machine in one line). This is a refusal, not a default: a rule captured with nobody having said where it will live is exactly how guidance debt piled up before this slice, and a silent default would be indistinguishable from a considered choice. THIS IS CLERICAL WORK, NOT SELF-MODIFICATION, AND IT IS NEVER REFUSED ON THAT GROUND. Joe's ruling 2026-08-10, verbatim: 'You didn't make your own rule. You applied my rule to the system.' A session INVENTING a standing rule for itself would be self-modification and would be gated. A session TRANSCRIBING what a partner just said is the entire purpose of this verb, and the gate is already built into it: the rule lands as PROPOSED, binds nobody, and takes effect through approve-rule only when enforcement is built, verified and its preflight reads ready. A session that declines to record a partner's instruction because writing rules 'feels like' changing itself has not been careful, it has lost the instruction — which is the one outcome this verb exists to prevent. Recorded because a session hit exactly this on the day the ruling was made and stopped three routes early.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, statement: { type: "string" },
       human_quote: { type: "string" }, scope: { type: "object" },
@@ -6259,7 +6334,7 @@ export const TOOLS = {
 
   "approve-rule": {
     write: true, authorityOnly: true,
-    description: "Approve one captured system rule in a single Joe-authority act. Approval means the server atomically verifies exact registered enforcement, records the immutable authority receipt, and activates the rule in the same transaction. There is no approved-but-inactive or active-but-pending state. If enforcement is missing, approval refuses so the system must build and verify the control before carrying Joe's already-recorded approval. Dell retains teaching, review and optional participation capability but cannot replace Joe as the required system authority. Advisory guidance is not mislabeled as an unbreakable rule.",
+    description: "Approve one captured system rule as a technical-check act (decision cbe91287, Joe, 2026-10-12: his approval is removed from everything the system can do itself). The rule-approval worklist (./run.sh rule-approvals --apply) calls it on Joe's authority database connection only after ops/rule-admission-audit.py --preflight --rule-id reads the rule ready; Joe's recorded quote and ruling are the authority, not a live tap. Approval means the server atomically verifies exact registered enforcement, records the immutable authority receipt, and activates the rule in the same transaction. There is no approved-but-inactive or active-but-pending state. If enforcement is missing, approval refuses so the system must build and verify the control before carrying Joe's already-recorded approval. Dell retains teaching, review and optional participation capability but cannot replace Joe as the required system authority. Advisory guidance is not mislabeled as an unbreakable rule.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string", description: "Full UUID or the short id printed by standing-context." },
@@ -7004,9 +7079,10 @@ export const TOOLS = {
       number: { type: "string", description: "override the auto-assigned ref. Only pass this to reproduce a number that already exists somewhere; the files already contain collisions." },
       since: { type: "string", description: "YYYY-MM-DD; defaults to today" },
       blocker: { type: "string", enum: BLOCKER_CLASSES,
-        description: "REQUIRED on kind open_loop: why THIS session cannot do the work now. Every value is a state of the world outside the session, and the list is closed on purpose — there is no value meaning 'later'. human_only = needs Joe or Dell in person (a call, a signature, a site visit, a login only he holds) · counterparty = waiting on someone outside (name the landlord, broker, client or vendor) · ruling = needs Joe's decision (state the question) · external_event = a dated event must arrive first (name the date) · other_lane = depends on another lane's in-flight deliverable (name it) · capability = a credential, gate or verb this session cannot hold (name it). IF NONE OF THESE FIT, DO NOT FILE THE LOOP — do the work. Not asked for team_loop or action_required (the blocker is the other partner by construction) or for idea (parked by design)." },
+        description: "REQUIRED on kind open_loop: why THIS session cannot do the work now. Every value is a state of the world outside the session, and the list is closed on purpose — there is no value meaning 'later'. human_only = needs Joe or Dell in person (a call, a signature, a site visit, a login only he holds) · counterparty = waiting on someone outside (name the landlord, broker, client or vendor) · ruling = needs Joe's decision (state the question) · external_event = a dated event must arrive first (name the date) · other_lane = depends on another lane's in-flight deliverable (name it) · capability = a credential this session cannot hold (name it). human_only, ruling and capability also REQUIRE residue_kind and residue_host: only an act a provider or the OS reserves to the account holder may wait on Joe. IF NONE OF THESE FIT, DO NOT FILE THE LOOP — do the work. Not asked for team_loop or action_required (the blocker is the other partner by construction) or for idea (parked by design)." },
       blocker_detail: { type: "string",
-        description: "REQUIRED whenever `blocker` is set: the SPECIFIC thing, named. 'the landlord' is not a counterparty; 'Sanders, the listing broker on C-112' is. 'a ruling' is not a ruling; 'whether the 3% escalation cap applies to renewal years' is." } },
+        description: "REQUIRED whenever `blocker` is set: the SPECIFIC thing, named. 'the landlord' is not a counterparty; 'Sanders, the listing broker on C-112' is. 'a ruling' is not a ruling; 'whether the 3% escalation cap applies to renewal years' is." },
+      ...RESIDUE_SCHEMA },
       required: ["idempotency_key", "kind", "owner"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-loop", args, async () => {
       // kind decides EVERYTHING downstream — the deferral gate, the tier, and
@@ -7070,7 +7146,8 @@ export const TOOLS = {
       // (a write verb accepted a field and silently discarded it), found by the
       // sweep loop #476 asked for. Refuse instead: the caller either meant a
       // different kind or did not need the field.
-      if (!blockerGated && (args.blocker !== undefined || args.blocker_detail !== undefined))
+      if (!blockerGated && (args.blocker !== undefined || args.blocker_detail !== undefined
+          || args.residue_kind !== undefined || args.residue_host !== undefined))
         throw new ToolError({ error: "blocker_not_carried_by_kind",
           kind: args.kind, blocker: args.blocker || null,
           hint: "only an open_loop carries a blocker — on every other kind the field would be " +
@@ -7084,7 +7161,10 @@ export const TOOLS = {
         if (!BLOCKER_CLASSES.includes(args.blocker))
           throw new ToolError({ error: "unknown_blocker_class",
             got: args.blocker, classes: BLOCKER_CLASSES,
-            hint: "the list is closed — every entry is a state of the world outside this session" });
+            hint: args.blocker === "credential"
+              ? "a credential block is filed as blocker:'capability' with residue_kind " +
+                "'provider_login' or 'os_password' and the residue_host that holds it"
+              : "the list is closed — every entry is a state of the world outside this session" });
         const detail = (args.blocker_detail || "").trim();
         if (detail.length < 12)
           throw new ToolError({ error: "blocker_detail_required", got: detail || null,
@@ -7094,6 +7174,8 @@ export const TOOLS = {
           throw new ToolError({ error: "blocker_detail_vague", matched: vague[0],
             hint: `"${vague[0]}" names a feeling about time, not a blocker. Say who or what has to happen first — and if nothing has to, do the work now instead of filing this.` });
       }
+      // ── THE RESIDUE GATE ── see RESIDUE_KINDS above.
+      const residue = blockerGated ? blockerResidue(args.blocker, args) : null;
       // capability_no_decider and internal_decision_parked (bypass audit
       // C33/C34, ported from hooks/blocker-decider-gate.py and
       // hooks/escalation-gate.py) are enforced in this module's
@@ -7164,15 +7246,17 @@ export const TOOLS = {
         `insert into loop_item (kind, number, block_id, render_seq, title, body, owner,
            since_text, unblocks, source_note, marker, marker_literal, due_on,
            drift_critical, status, tier, personal_to, created_by, updated_by, domain,
-           blocker_class, blocker_detail)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open',$15,$16,$17,$17,$18,$19,$20)
+           blocker_class, blocker_detail, extra_cells)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open',$15,$16,$17,$17,$18,$19,$20,
+                 $21::jsonb)
          returning id`,
         [args.kind, num, block.id, seq, args.title || null, args.body || null, args.owner,
          args.since || new Date().toISOString().slice(0, 10), args.unblocks || null,
          args.source_note || null, marker, literal, args.due_on || null,
          args.drift_critical === true, tier, personal, actor.id, args.domain || null,
          blockerGated ? args.blocker : null,
-         blockerGated ? args.blocker_detail.trim() : null]);
+         blockerGated ? args.blocker_detail.trim() : null,
+         JSON.stringify(residue ? { blocker_residue: residue } : {})]);
 
       // The blocker goes on the EVENT as well as the row: an open_loop that was
       // filed under a blocker which later turns out to be false is a thing Joe
@@ -7182,11 +7266,13 @@ export const TOOLS = {
         { new: { number: num, kind: args.kind, section: wantKey, marker,
                  due_on: args.due_on || null, owner: args.owner, domain: args.domain || null,
                  blocker_class: blockerGated ? args.blocker : null,
-                 blocker_detail: blockerGated ? args.blocker_detail.trim() : null },
+                 blocker_detail: blockerGated ? args.blocker_detail.trim() : null,
+                 blocker_residue: residue },
           idempotency_key: args.idempotency_key });
       return { ok: true, loop_id: r.rows[0].id, number: num, kind: args.kind,
                section: wantKey, renders_into: block.rel_path,
-               blocker: blockerGated ? args.blocker : null };
+               blocker: blockerGated ? args.blocker : null,
+               ...(residue ? { residue } : {}) };
     }),
   },
 
@@ -7212,9 +7298,10 @@ export const TOOLS = {
         "the marker and is why a careful caller still walked into it — defect e34d2b88, 46 " +
         "writes lost on 2026-08-20." },
       drift_critical: { type: "boolean" },
-      blocker: { type: "string", enum: ["human_only","counterparty","ruling","external_event","other_lane","capability"],
-        description: "REVISE what the loop is waiting on. add-loop refuses a loop without a blocker, but until 2026-08-09 nothing could change one, so a blocker named on day one was permanent even after the real obstacle turned out to be different — found on loop #295, whose blocker read human_only until building it revealed the actual block was a missing corpus (other_lane). Changing this requires blocker_detail too: a reclassification with the old specifics attached is worse than the original, because it reads as current and is not." },
+      blocker: { type: "string", enum: BLOCKER_CLASSES,
+        description: "REVISE what the loop is waiting on. add-loop refuses a loop without a blocker, but until 2026-08-09 nothing could change one, so a blocker named on day one was permanent even after the real obstacle turned out to be different — found on loop #295, whose blocker read human_only until building it revealed the actual block was a missing corpus (other_lane). Changing this requires blocker_detail too: a reclassification with the old specifics attached is worse than the original, because it reads as current and is not. Reclassifying to human_only, ruling or capability also requires residue_kind and residue_host; reclassifying to any other class clears the stored residue." },
       blocker_detail: { type: "string", description: "the SPECIFIC thing, restated for the new class: which person, which ruling, which date, which prerequisite. Required whenever blocker changes; may also be passed alone to sharpen the detail without reclassifying." },
+      ...RESIDUE_SCHEMA,
       renumber_reason: { type: "string", description: "REQUIRED whenever number changes: why, and where the old number still appears. Rule 7105955b binds here — a renumbered row is not an abandoned one, and the note recording the change has to say so in its first words, because the old number lives on in other rows' prose and in every generated render." },
       last_surfaced: { type: "string", description: "IDEA ROWS ONLY: stamp the idea bank's 'Last surfaced' column, YYYY-MM-DD. This is what the monthly resurface writes when a parked idea is presented and KEPT — the column its own rotation reads to pick the oldest ideas next month. Blank or '—' means never surfaced, so leaving it unwritten is not neutral: it keeps re-presenting the same rows." },
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
@@ -7236,6 +7323,10 @@ export const TOOLS = {
       for (const f of ["title", "body", "owner", "unblocks", "source_note", "domain"])
         if (args[f] !== undefined) set(f, args[f]);
       if (args.drift_critical !== undefined) set("drift_critical", args.drift_critical === true);
+      // extra_cells is one jsonb column several fields merge into; each edit
+      // wraps this expression and it is assigned once, below.
+      const extraCellsBase = "coalesce(extra_cells,'{}'::jsonb)";
+      let extraCells = extraCellsBase;
 
       // A blocker may be REVISED, because what a loop is waiting on is a finding
       // and findings change. Reclassifying without restating the specifics is
@@ -7248,6 +7339,20 @@ export const TOOLS = {
           throw new ToolError({ error: "blocker_detail_required",
             hint: "changing the blocker class means restating the specific thing it is now waiting on. Pass blocker_detail in the same call." });
         set("blocker_class", args.blocker);
+      }
+      // THE RESIDUE GATE on the edit path, so a row cannot be filed clean and
+      // reclassified onto Joe without naming what only he can do. A residue
+      // passed alone (no reclassification) is checked against the row's
+      // current class: that is how a legacy human_only row gains one.
+      if (args.blocker !== undefined || args.residue_kind !== undefined
+          || args.residue_host !== undefined) {
+        const residue = blockerResidue(args.blocker !== undefined ? args.blocker : cur.blocker_class, args);
+        if (residue) {
+          vals.push(JSON.stringify(residue));
+          extraCells = `(${extraCells} || jsonb_build_object('blocker_residue', $${vals.length}::jsonb))`;
+        } else {
+          extraCells = `(${extraCells} - 'blocker_residue')`;
+        }
       }
       if (args.blocker_detail !== undefined) set("blocker_detail", args.blocker_detail);
 
@@ -7311,9 +7416,9 @@ export const TOOLS = {
             hint: "YYYY-MM-DD. The rotation sorts on this text, so a free-form date " +
                   "silently sorts wrong and the same ideas keep coming back." });
         vals.push(args.last_surfaced);
-        sets.push("extra_cells=coalesce(extra_cells,'{}'::jsonb) || " +
-                  `jsonb_build_object('last_surfaced', $${vals.length}::text)`);
+        extraCells = `(${extraCells} || jsonb_build_object('last_surfaced', $${vals.length}::text))`;
       }
+      if (extraCells !== extraCellsBase) sets.push(`extra_cells=${extraCells}`);
 
       if (args.marker !== undefined || args.due_on !== undefined) {
         const marker = args.marker !== undefined ? args.marker : cur.marker;
@@ -8782,6 +8887,30 @@ export async function assertRegisteredToolInput(name, tool, args = {}) {
   }
 }
 
+// THE UNATTENDED RUNNER'S AUTHORITY ALLOWLIST (PR #1727 review, finding 1).
+// Joe's 2026-10-12 ruling (decision cbe91287) takes his approval off the acts
+// the system can do itself: closing and adjudicating incidents, triage, lead
+// approvals and plan acceptance. It does not reach a rule that binds both
+// partners, a production schedule, a deal or lease fact, a guidance registry,
+// a consent, a share grant or an identity merge, so those stay with a session a
+// partner attends. An unattended runner ingests outside content (Model Room
+// desks, Hermes), so this is a closed list that fails shut: a humanOnly or
+// authorityOnly verb added later is refused to it until someone adds it here.
+// humanCallerOnly verbs never belong on it.
+export const UNATTENDED_AUTHORITY_VERBS = Object.freeze([
+  "close-incident", "adjudicate-incident",
+  "review-and-triage",
+  "approve-lead-move", "undo-lead-move", "approve-lead-draft",
+  "accept-ready-plan", "accept-ready-plan-amendment",
+]);
+const UNATTENDED_AUTHORITY_VERB_SET = new Set(UNATTENDED_AUTHORITY_VERBS);
+
+// Server-derived only: identity.js's unattended door is the one writer of both
+// fields, and either one is enough to treat the actor as unattended.
+function isUnattendedActor(actor) {
+  return actor?.unattended === true || actor?.via === "unattended-token";
+}
+
 export async function executeRegisteredTool(client, actor, name, args = {}) {
   const tool = TOOLS[name];
   if (!tool) throw new ToolError({ error: "unknown_tool", name });
@@ -8819,20 +8948,32 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // WR-000021 overcorrection: the ledger still keeps acting_actor_slug as the
   // actual machine actor while mcp.js separately records the verified sponsor.
   // The registry-wide test covers every present and future humanOnly verb.
+  //
+  // humanCallerOnly is the one carve-out (Joe's 2026-10-12 ruling, decision
+  // cbe91287): a verb carrying it requires the human caller even when a machine
+  // holds sponsor-scoped partner authority, attended or unattended. Every other
+  // humanOnly verb admits the sponsored native/local agent and the unattended
+  // runner alike.
   if (tool.humanOnly === true) {
     const actorClass = authorizationClassForActor(actor);
-    // Identity merges require the human caller even when a machine holds
-    // sponsor-scoped partner authority. Other partner-authority verbs retain
-    // their existing native/local agent route.
+    const humanCallerOnly = tool.humanCallerOnly === true;
     if (actorClass !== "verified_partner" &&
-        (name === "confirm-merge" || !canExercisePartnerAuthority(actor)))
+        (humanCallerOnly || !canExercisePartnerAuthority(actor)))
       throw new ToolError({ error: "human_only_verb_requires_verified_partner",
         verb: name, actor_class: actorClass,
-        hint: name === "confirm-merge" ? "confirm-merge requires a verified human partner; machine identities cannot confirm identity merges." :
+        hint: humanCallerOnly ? `${name} requires a verified human partner; machine identities cannot call it, however they are sponsored.` :
               "this verb records a partner-authority act and requires either the verified partner " +
               "or a server-verified native/local agent bound to that partner's sponsor-scoped " +
               "authority connection." });
   }
+  // The unattended runner holds partner authority only for the allowlisted
+  // verbs above; every other humanOnly/authorityOnly verb refuses it here, on
+  // every door, before schema validation or database access.
+  if ((tool.humanOnly === true || tool.authorityOnly === true) && isUnattendedActor(actor) &&
+      (tool.humanCallerOnly === true || !UNATTENDED_AUTHORITY_VERB_SET.has(name)))
+    throw new ToolError({ error: "unattended_runner_authority_not_admitted", verb: name,
+      hint: `${name} is not one of the partner-authority acts an unattended runner may perform; ` +
+            "leave it for a session a partner attends." });
   // ORACLE-SEAT-ONLY IS ENFORCED HERE, AND THIS IS THE ONLY PLACE THAT
   // ENFORCES IT (2026-09-13, DoctorCRE v5 slice V5-A02 Step B). It is a THIRD
   // authority shape beside humanOnly and the ordinary sponsored-agent surface,
@@ -8983,6 +9124,7 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "codex-continuity": "mcp-server/src/codex-continuity.js",
   "claude-continuity": "mcp-server/src/claude-continuity.js",
   "incident": "mcp-server/src/incident.js",
+  "defect-resolution": "mcp-server/src/defect-resolution.js",
   "engineering-runtime": "mcp-server/src/engineering-runtime.js",
   "work-portfolio": "mcp-server/src/work-portfolio.js",
   "tour-rights-projection": "mcp-server/src/tour-rights-projection.js",
@@ -10152,6 +10294,11 @@ registerTools(claudeContinuityTools({ withEnvelope, writeEvent, ToolError, asser
 // boundary into the grants and the verb surface should not be laxer than the
 // grants are. See migrations/0286 for the permission half.
 registerTools(incidentTools({ withEnvelope, writeEvent, ToolError, authorizationClassForActor }), "incident");
+
+// The defect log's close door (decision cbe91287). A close is an append-only
+// resolution receipt beside the defect, never a change to it: defects still
+// accumulate by class. See src/defect-resolution.js and migrations/0872.
+registerTools(defectResolutionTools({ withEnvelope, writeEvent, ToolError }), "defect-resolution");
 
 // Engineering Passport runtime: typed plan registration, server-derived
 // admission, and read-only closure projection over the canonical job ledger.

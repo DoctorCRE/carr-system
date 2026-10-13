@@ -30,6 +30,9 @@ def action(seat, layer):
               f'Repair {wrappers[seat]} and its completion contract.' if layer == 'runner_wrapper' else
               f'Restore network reachability from {wrappers[seat]}.' if layer == 'network' else
               f'Repair model selection or the response contract in {wrappers[seat]}.' if layer == 'model' else
+              f'Find why the daily probe for {seat} stopped producing rows on its live host '
+              f'(bin/nightly.sh step "daily AI seat health", out/seat-health-runs) and rerun '
+              f'ops/seat-health.py --seat {seat} --force.' if layer == 'stale' else
               f'Rerun {wrappers[seat]} through the daily probe if its evidence expires.')
     verification = ('e2e models openai must list gpt-6-luna' if seat == 'e2e-auth'
                     else 'this seat must return exactly 323 for 17 * 19')
@@ -266,7 +269,15 @@ def bounded_codex_usage(sessions, timeout):
         receive.close()
 
 
-def probe(seat, runtime, run_dir, timeout, e2e_cli):
+def local_sol_wrapper(runtime):
+    """The MacBook's own Codex wrapper: mac-sol-run.sh where installed, else sol-run.sh."""
+    orch = Path(runtime) / 'out/orch'
+    return orch / 'mac-sol-run.sh' if (orch / 'mac-sol-run.sh').exists() else orch / 'sol-run.sh'
+
+
+def probe(seat, runtime, run_dir, timeout, e2e_cli, here=False):
+    """Run one seat's exact-value probe. `here` runs sol-macbook on this Mac
+    (the MacBook itself) instead of over `ssh macbook` from the Studio."""
     import os
     import shlex
     import sys
@@ -279,9 +290,11 @@ def probe(seat, runtime, run_dir, timeout, e2e_cli):
     for key in ('GROK_RUN_FAKE_NDJSON', 'GROK_RUN_RECEIPT'):
         env.pop(key, None)
     usage = None
-    if seat in ('opus-studio', 'sol-studio'):
-        wrapper = 'opus-run.sh' if seat == 'opus-studio' else 'sol-run.sh'
-        argv = ['/bin/zsh', str(runtime / 'out/orch' / wrapper), str(run_dir), str(log), str(prompt)]
+    local_sol = seat == 'sol-macbook' and here
+    if seat in ('opus-studio', 'sol-studio') or local_sol:
+        wrapper = (local_sol_wrapper(runtime) if local_sol else
+                   runtime / 'out/orch' / ('opus-run.sh' if seat == 'opus-studio' else 'sol-run.sh'))
+        argv = ['/bin/zsh', str(wrapper), str(run_dir), str(log), str(prompt)]
     elif seat == 'sol-macbook':
         remote = ('umask 077; repo="$HOME/carr-system"; '
                   'probe="$repo/out/seat-health-runs/' + run_dir.name + '"; '
@@ -300,7 +313,7 @@ def probe(seat, runtime, run_dir, timeout, e2e_cli):
     output, diagnostics, code, latency = execute(argv, runtime, timeout, env)
     answer = output
     if seat in ('opus-studio', 'sol-studio', 'sol-macbook'):
-        raw = log.read_text() if seat != 'sol-macbook' and log.exists() else output
+        raw = log.read_text() if (seat != 'sol-macbook' or local_sol) and log.exists() else output
         terminal = 'OPUS' if seat == 'opus-studio' else 'CODEX'
         exits = re.findall(r'(?m)^' + terminal + r'_EXIT (\d+)\s*$', raw)
         completed = re.search(r'(?m)^' + terminal + r'_EXIT (\d+)\s*\Z', raw)
@@ -351,7 +364,7 @@ def probe(seat, runtime, run_dir, timeout, e2e_cli):
                 usage = numeric_usage(json.loads(receipt.read_text()))
             except ValueError:
                 pass
-    if seat == 'sol-studio':
+    if seat == 'sol-studio' or local_sol:
         usage, timed_out = bounded_codex_usage(Path.home() / '.codex/sessions', max(0, timeout - (time.monotonic() - started)))
         if timed_out:
             code, diagnostics = 124, 'runner timed out collecting telemetry'
@@ -392,14 +405,64 @@ def probe(seat, runtime, run_dir, timeout, e2e_cli):
     return assess(seat, answer, diagnostics, code, latency, usage=usage)
 
 
-def health_rows(report):
-    report = report if isinstance(report, dict) else {}
+def observed(row, now):
+    """(datetime, fresh) for a row's observed_at; (None, False) when unusable."""
+    try:
+        at = datetime.fromisoformat(row['observed_at'].replace('Z', '+00:00'))
+        if at.tzinfo is None:
+            return None, False
+        age = (now - at).total_seconds()
+        return at, 0 <= age <= 86400
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None, False
+
+
+# A seat with no fresh row is STALE, a warning. STALE is only a warning while
+# it is young: past this bound with the seat's host online or unknown, the
+# daily probe has silently stopped producing rows on a live Mac, and the row
+# escalates to STALE-RED, which feeds the ai_seat_health red. A seat whose host
+# the tailnet reports offline reads SKIP instead and never escalates here (the
+# host row carries that alarm). A seat with no parseable observation at all is
+# treated as past the bound: no timestamp cannot prove the gap is young.
+STALE_RED_AFTER_SECONDS = 72 * 3600
+RED_PREFIXES = ('FAIL ', 'STALE-RED ')
+
+
+def is_red(line):
+    """True for a health row that must turn the ai_seat_health check red."""
+    return isinstance(line, str) and line.startswith(RED_PREFIXES)
+
+
+def health_rows(report, *, offline=None, now=None):
+    """One row per seat: PASS, FAIL, STALE, STALE-RED or SKIP.
+
+    FAIL means the last probe RAN inside its 24-hour window and failed. A
+    missing, expired, future-dated or unreadable observation is STALE (a WARN:
+    the probe did not run, which says nothing about the wrapper), and a seat
+    whose host the tailnet reports offline is SKIP: the host row carries the
+    alarm. Until 2026-10-12 every one of these read FAIL layer=runner_wrapper,
+    which sent the reader to repair six wrappers while the Studio was off."""
+    now = now or datetime.now(timezone.utc)
+    offline = offline if isinstance(offline, dict) else {}
+    seats = local_seats(report)
     rows = []
     for seat in SEATS:
-        passed = dispatchable(report, seat)
-        seats = report.get('seats', {})
-        row = seats.get(seat, {}) if isinstance(seats, dict) else {}
+        row = seats.get(seat)
         row = row if isinstance(row, dict) else {}
+        if seat in offline:
+            rows.append(f"SKIP {seat}: host {offline[seat]} offline · {action(seat, None)}")
+            continue
+        at, fresh = observed(row, now)
+        if not fresh:
+            last = at.date().isoformat() if at else 'never'
+            if at is None or (now - at).total_seconds() > STALE_RED_AFTER_SECONDS:
+                rows.append(f"STALE-RED {seat} last={last} no probe row for over "
+                            f"{STALE_RED_AFTER_SECONDS // 3600}h while its host is online or unknown"
+                            f" · {action(seat, 'stale')}")
+            else:
+                rows.append(f"STALE {seat} last={last} · {action(seat, None)}")
+            continue
+        passed = dispatchable({'schema': 'carr-seat-health/v1', 'seats': {seat: row}}, seat, now=now)
         latency = row.get('latency_seconds')
         if type(latency) not in (int, float) or not math.isfinite(latency):
             latency = 'unknown'
@@ -409,3 +472,165 @@ def health_rows(report):
         rows.append(f"{'PASS' if passed else 'FAIL'} {seat} latency={latency}s "
                     f"layer={layer or 'none'} · {action(seat, layer)}")
     return rows
+
+
+# RECORD-LAYER SEAT STATUS (2026-10-12). The local report lives on whichever
+# Mac ran the probe, so a health run on the other Mac read "never" for every
+# seat. Each recorded run now also publishes its seats through
+# record-resource-observation into the dashboard's model_route slot (and host
+# liveness into local_compute), and readers merge the two sources: per seat,
+# the newest observation wins and the dashboard wins a tie. The dashboard keeps
+# only the latest row per provider, so a publish carries the MERGED seat map
+# (what the dashboard already held plus this run) and keeps any keys another
+# collector put beside it. The dashboard's 15-minute provider staleness does
+# not apply to seats: each seat row carries its own observed_at, and
+# health_rows applies the 24-hour seat window to that.
+SEAT_ROW_FIELDS = ('passed', 'dispatchable', 'failing_layer', 'reason',
+                   'latency_seconds', 'observed_at', 'model')
+
+
+def local_seats(report):
+    report = report if isinstance(report, dict) else {}
+    seats = report.get('seats') if report.get('schema') == 'carr-seat-health/v1' else None
+    return seats if isinstance(seats, dict) else {}
+
+
+def dashboard_provider(dashboard, provider):
+    providers = dashboard.get('providers') if isinstance(dashboard, dict) else None
+    for row in providers if isinstance(providers, list) else ():
+        if isinstance(row, dict) and row.get('provider') == provider:
+            return row
+    return {}
+
+
+def dashboard_seats(dashboard):
+    route = dashboard_provider(dashboard, 'model_route').get('model_route')
+    seats = route.get('seats') if isinstance(route, dict) else None
+    return {seat: row for seat, row in seats.items()
+            if seat in SEATS and isinstance(row, dict)} if isinstance(seats, dict) else {}
+
+
+def read_dashboard(door):
+    try:
+        value = door('read-resource-dashboard', {})
+    except (OSError, ValueError, TypeError):
+        return None
+    return value if isinstance(value, dict) and value.get('ok') is True else None
+
+
+def merge_seats(*sources):
+    """Per seat, the newest parseable observed_at wins; an earlier source wins a tie."""
+    merged, stamps = {}, {}
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    for source in sources:
+        for seat, row in (source.items() if isinstance(source, dict) else ()):
+            if seat not in SEATS or not isinstance(row, dict):
+                continue
+            at = observed(row, datetime.now(timezone.utc))[0] or floor
+            if seat not in merged or at > stamps[seat]:
+                merged[seat], stamps[seat] = row, at
+    return merged
+
+
+def combined_report(dashboard, local_report):
+    """A carr-seat-health/v1 report from the dashboard first and the local file second."""
+    return {'schema': 'carr-seat-health/v1',
+            'seats': merge_seats(dashboard_seats(dashboard), local_seats(local_report))}
+
+
+def current_report(repo, report_path=None):
+    """The one read every consumer uses (health-check, --show, dispatch): the
+    record layer through `repo`'s run.sh, then `report_path` (default: repo's
+    out/orch/budget/seat-health.json). Either source may be absent."""
+    repo = Path(repo)
+    try:
+        local = json.loads(Path(report_path or repo / 'out/orch/budget/seat-health.json').read_text())
+    except (OSError, ValueError):
+        local = {}
+    return combined_report(read_dashboard(lambda name, payload: verb_call(repo, name, payload)), local)
+
+
+def carried_forward(previous_row, field, own_keys):
+    """Another collector's keys inside `previous_row[field]`, kept with the
+    observed_at they were MEASURED at rather than this publish's stamp.
+
+    The dashboard holds one row per provider, so a publish that dropped them
+    would erase another collector's values, and one that copied them beside
+    its own keys would restamp old measurements as fresh under the
+    dashboard's 15-minute staleness rule. They travel instead under
+    `carried_forward` as {key: {'value': ..., 'observed_at': <original>}}; an
+    entry already carried keeps its first stamp."""
+    previous = previous_row.get(field) if isinstance(previous_row, dict) else None
+    if not isinstance(previous, dict):
+        return {}
+    stamp = previous_row.get('observed_at')
+    stamp = stamp if isinstance(stamp, str) else None
+    carried = previous.get('carried_forward')
+    carried = {key: entry for key, entry in carried.items()
+               if isinstance(entry, dict) and 'value' in entry} if isinstance(carried, dict) else {}
+    for key, value in previous.items():
+        if key not in own_keys and key != 'carried_forward':
+            carried[key] = {'value': value, 'observed_at': stamp}
+    return carried
+
+
+ROUTE_OWN_KEYS = ('seats', 'seat_source_host')
+COMPUTE_OWN_KEYS = ('hosts', 'tailnet_backend')
+
+
+def publish(seats, door, *, live=None, source_host=None, now=None):
+    """Write the merged seat map (model_route) and host liveness (local_compute).
+
+    Returns {provider: 'ok'|'error'}. Never raises: a refused publish leaves the
+    local report as the evidence, and the caller prints the result."""
+    import uuid
+    stamp = (now or datetime.now(timezone.utc)).isoformat()
+    dashboard = read_dashboard(door)
+    compact = {seat: {key: row[key] for key in SEAT_ROW_FIELDS if key in row}
+               for seat, row in merge_seats(seats, dashboard_seats(dashboard)).items()}
+    failing = sorted(seat for seat, row in compact.items() if row.get('passed') is not True)
+    route = {'seats': compact, 'seat_source_host': source_host}
+    carried = carried_forward(dashboard_provider(dashboard, 'model_route'), 'model_route', ROUTE_OWN_KEYS)
+    if carried:
+        route['carried_forward'] = carried
+    payloads = [{'provider': 'model_route', 'model_route': route,
+                 'state': 'partial' if failing else 'ok',
+                 'reason': 'seats not passing: ' + ', '.join(failing) if failing else None}]
+    if isinstance(live, dict) and isinstance(live.get('hosts'), dict):
+        compute = dashboard_provider(dashboard, 'local_compute')
+        backend = live.get('backend') if isinstance(live.get('backend'), str) else 'unreadable'
+        measured = {'hosts': {name: {'state': row.get('state'), 'last_seen': row.get('last_seen')}
+                              for name, row in live['hosts'].items() if isinstance(row, dict)},
+                    'tailnet_backend': backend}
+        carried = carried_forward(compute, 'measured_capacity', COMPUTE_OWN_KEYS)
+        if carried:
+            measured['carried_forward'] = carried
+        down = sorted(name for name, row in measured['hosts'].items() if row['state'] == 'offline')
+        unknown = sorted(name for name, row in measured['hosts'].items() if row['state'] not in ('online', 'offline'))
+        configured = compute.get('configured_capacity')
+        # The verb's state enum has no 'unknown'. An unread tailnet (or a host
+        # it does not report) is 'partial' with a reason that says unknown,
+        # never 'ok': no host was seen up.
+        if down:
+            state, reason = 'host_offline', 'host offline: ' + ', '.join(
+                f"{name} since {measured['hosts'][name]['last_seen'] or 'never'}" for name in down)
+        elif backend != 'Running':
+            state, reason = 'partial', f'host liveness unknown: tailnet not readable (backend {backend})'
+        elif unknown:
+            state, reason = 'partial', 'host liveness unknown: ' + ', '.join(unknown)
+        else:
+            state, reason = 'ok', None
+        payloads.append({'provider': 'local_compute', 'measured_capacity': measured,
+                         'configured_capacity': configured if isinstance(configured, dict) else None,
+                         'state': state, 'reason': reason})
+    results = {}
+    for payload in payloads:
+        payload.update(idempotency_key=str(uuid.uuid4()), source='ops/seat-health.py',
+                       observed_at=stamp)
+        try:
+            value = door('record-resource-observation', payload)
+        except (OSError, ValueError, TypeError):
+            value = None
+        results[payload['provider']] = ('ok' if isinstance(value, dict) and value.get('ok') is True
+                                        else 'error')
+    return results

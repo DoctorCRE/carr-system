@@ -7,9 +7,36 @@ import json
 from pathlib import Path
 import sys
 import uuid
-from seat_health import assess, SEATS, atomic_json, dispatchable, health_rows, probe, probe_jev, reconcile, verb_call
+from seat_health import (assess, SEATS, atomic_json, current_report, dispatchable, health_rows, is_red,
+                         probe, probe_jev, publish, reconcile, verb_call)
+import host_liveness
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def hosts():
+    """(config, liveness) — liveness is all-unknown when the tailnet cannot be read."""
+    config = host_liveness.load_config()
+    return config, host_liveness.observe(config=config)
+
+
+def placement(seat, config, live):
+    """('run', here) or ('skip', why). A seat runs where its host is: on the
+    MacBook only jev and sol-macbook (locally) can run; on the Studio every
+    seat can, sol-macbook over ssh. Unknown placement keeps the old behaviour."""
+    host = host_liveness.seat_host(seat, config)
+    if host is None:
+        return 'run', False
+    if live['hosts'].get(host, {}).get('state') == 'offline':
+        return 'skip', f'host {host} offline'
+    me = live.get('self')
+    if me is None:
+        return 'run', False
+    if host == me:
+        return 'run', seat == 'sol-macbook'
+    if seat == 'sol-macbook':
+        return 'run', False
+    return 'skip', f'runs on {host}, not this Mac'
 
 
 def read_report(path):
@@ -64,14 +91,13 @@ def main():
     args.runtime_repo = args.runtime_repo.resolve()
     output = args.output_root or args.runtime_repo / 'out/orch/budget'
     report_path = output / 'seat-health.json'
+    door = lambda name, payload: verb_call(args.runtime_repo, name, payload)  # noqa: E731
+    config, live = hosts()
     if args.show:
-        try:
-            report = json.loads(report_path.read_text())
-        except (OSError, ValueError):
-            report = {}
-        rows = health_rows(report)
+        rows = health_rows(current_report(args.runtime_repo, report_path),
+                           offline=host_liveness.offline_seats(live, config))
         print('\n'.join(rows))
-        return int(any(line.startswith('FAIL') for line in rows))
+        return int(any(is_red(line) for line in rows))
     output.mkdir(parents=True, exist_ok=True)
     with (output / 'seat-health.lock').open('a') as lock:
         try:
@@ -93,8 +119,15 @@ def main():
         recorded = True
         failed = False
         for seat in selected:
+            where, here = placement(seat, config, live)
+            if where == 'skip':
+                # Not probed, so not observed: no row, no loop, and the day's
+                # recording stays incomplete so a later run can still cover it.
+                recorded = False
+                print(f"SKIP {seat}: {here} · not probed; the host row carries the alarm")
+                continue
             try:
-                row = probe(seat, args.runtime_repo, run_dir.resolve(), args.timeout_seconds, args.e2e_cli)
+                row = probe(seat, args.runtime_repo, run_dir.resolve(), args.timeout_seconds, args.e2e_cli, here)
             except (ValueError, OSError, TypeError, AttributeError):
                 row = assess(seat, '', '', 4, 0, reason='invalid_probe_data')
             row['observed_at'] = datetime.now(timezone.utc).isoformat()
@@ -113,11 +146,24 @@ def main():
                 'recipient': 'orchestrator', 'seats': rows})
             print(f"{'PASS' if row['passed'] else 'FAIL'} {seat} latency={row['latency_seconds']}s "
                   f"layer={row['failing_layer'] or 'none'} record={row['record_action']} · {row['action']}")
+        published = True
+        if not args.no_record:
+            # Seats and host liveness reach the record layer so the OTHER Mac's
+            # health run and dispatch can read them (read-resource-dashboard).
+            try:
+                result = publish(rows, door, live=live, source_host=live.get('self'))
+            except (ValueError, OSError, TypeError, AttributeError):
+                result = {'model_route': 'error'}
+            published = all(value == 'ok' for value in result.values())
+            print('PUBLISH ' + ' '.join(f'{key}={value}' for key, value in sorted(result.items()))
+                  + ' · record-resource-observation; on breach: rerun with --force after the '
+                  'record layer answers')
         publish_receipt(ledger, {'run_id': run_id, 'day': now.date().isoformat(),
             'ended_at': datetime.now(timezone.utc).isoformat(), 'seats': selected,
-            'completed_recording': not args.no_record and set(selected) == set(SEATS) and recorded,
+            'completed_recording': not args.no_record and set(selected) == set(SEATS) and recorded
+                                   and published,
             'passed': not failed})
-        return int(failed)
+        return int(failed or not published)
 
 
 if __name__ == '__main__':

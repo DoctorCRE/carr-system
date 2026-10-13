@@ -453,8 +453,18 @@ class Queue:
                                   (repo, n, approved, note))
             if cur.rowcount:
                 self.event(repo, n, 'queued', f'Approved head {approved}', cur.lastrowid)
-        return self.db.execute('SELECT id FROM entries WHERE repo=? AND pr=? AND approved=?',
-                               (repo, n, approved)).fetchone()[0]
+        e = self.db.execute('SELECT * FROM entries WHERE repo=? AND pr=? AND approved=?',
+                            (repo, n, approved)).fetchone()
+        if e['phase'] in ('review', 'conflict') and self.approval(repo, n) == approved:
+            p = self.pr(repo, n)
+            if p['state'] == 'open' and not self.held(p) and self.covered(repo, approved, p['head']['sha']):
+                with self.db:
+                    cur = self.db.execute("UPDATE entries SET phase='pending',outcome='fresh_review_accepted' "
+                                          "WHERE id=? AND phase IN ('review','conflict')", (e['id'],))
+                    if cur.rowcount:
+                        self._clear_reads(e['id'])
+                        self.event(repo, n, 'fresh_review_accepted', f'Independent approval covers {p["head"]["sha"]}', e['id'])
+        return e['id']
 
     def event(self, repo, n, outcome, detail, entry_id=None):
         prev = self.db.execute('SELECT outcome,detail FROM events WHERE repo=? AND pr=? ORDER BY id DESC LIMIT 1', (repo, n)).fetchone()
@@ -915,20 +925,18 @@ class Queue:
                     approved = self.approval(repo, p['number'])
                     if not approved:
                         continue
+                    e = self.db.execute('SELECT * FROM entries WHERE repo=? AND pr=? AND approved=?',
+                                        (repo, p['number'], approved)).fetchone()
+                    if e is not None and e['auto_attempts'] >= AUTO_ENQUEUE_CAP:
+                        with self.db:
+                            self.event(repo, p['number'], 'auto_enqueue_exhausted', f'Automatic enqueue cap reached for {approved}', e['id'])
+                        continue
                     entry = self.enqueue(repo, p['number'], approved, 'auto-enqueued from independent review')
                     e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
                     self._github_entry = entry
-                    if e['auto_attempts'] >= AUTO_ENQUEUE_CAP:
-                        with self.db:
-                            self.event(repo, p['number'], 'auto_enqueue_exhausted', f'Automatic enqueue cap reached for {approved}', entry)
-                        continue
-                    if e['phase'] in ('review', 'conflict') and self.covered(repo, approved, p['head']['sha']):
+                    if e['phase'] == 'pending':
                         with self.db:
                             self.db.execute('UPDATE entries SET auto_attempts=auto_attempts+1 WHERE id=?', (entry,))
-                        self.report(e, 'fresh_review_accepted', f'Independent approval covers {p["head"]["sha"]}', 'pending')
-                    elif e['phase'] == 'pending' and e['auto_attempts'] == 0:
-                        with self.db:
-                            self.db.execute('UPDATE entries SET auto_attempts=1 WHERE id=?', (entry,))
                 except GitHubReadPaused as exc:
                     with self.db:
                         self.event(repo, p['number'], 'github_paused', str(exc), e['id'] if e else None)
@@ -1160,11 +1168,14 @@ class Queue:
 
     def rearm_reads(self, entry):
         with self.db:
-            self.db.execute('UPDATE entries SET transient_attempts=0,read_attempts=0,github_attempts=0 WHERE id=?', (entry,))
-            self.db.execute("DELETE FROM github_failures WHERE (scope='automatic' OR scope=?) AND is_read=1 AND entry_id=?",
-                            (f'automatic:entry:{entry}', entry))
-            self.db.execute('DELETE FROM github_failures WHERE scope=? AND stopped=1', (f'automatic:entry:{entry}',))
-            self.db.execute('DELETE FROM waits WHERE owner=?', (f'entry:{entry}',))
+            self._clear_reads(entry)
+
+    def _clear_reads(self, entry):
+        self.db.execute('UPDATE entries SET transient_attempts=0,read_attempts=0,github_attempts=0 WHERE id=?', (entry,))
+        self.db.execute("DELETE FROM github_failures WHERE (scope='automatic' OR scope=?) AND is_read=1 AND entry_id=?",
+                        (f'automatic:entry:{entry}', entry))
+        self.db.execute('DELETE FROM github_failures WHERE scope=? AND stopped=1', (f'automatic:entry:{entry}',))
+        self.db.execute('DELETE FROM waits WHERE owner=?', (f'entry:{entry}',))
 
     def reconcile_action(self, key, retry=False):
         with self.runner_lock(), self.github_scope('reconcile-action:' + hashlib.sha256(key.encode()).hexdigest()):
@@ -1331,6 +1342,13 @@ class Queue:
             signal.signal(signal.SIGINT, stop)
             next_discover = 0.0
             while not self.stopped:
+                if not discover and legacy is None and not self.children and not self.db.execute(
+                        "SELECT 1 FROM entries WHERE phase IN ('pending','merging','merge_rejected','refreshing') "
+                        "UNION ALL SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') LIMIT 1").fetchone():
+                    with (self.state / 'queue.log').open('a') as f:
+                        f.write(json.dumps({'outcome': 'idle',
+                                            'detail': 'No runnable entries or active conflict dispatches; discovery disabled'}) + '\n')
+                    return
                 try:
                     if legacy is not None and not self.db.execute("SELECT 1 FROM service_stops WHERE key='legacy_import'").fetchone():
                         try:

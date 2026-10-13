@@ -24,8 +24,11 @@ class PRDesignPolicyTests(unittest.TestCase):
     def test_canonical_policy_keeps_timing_and_both_required_skills(self):
         policy = (REPO / "AGENTS.md").read_text().split(POLICY_HEADING, 1)[1]
         self.assertIn("Before opening or updating any pull request", policy)
+        self.assertIn("`Design and debt pass` section", policy)
         for name in ("codebase-design", "zero-tech-debt"):
-            self.assertIn(f"~/.agents/skills/{name}/SKILL.md", policy)
+            skill = f".agents/skills/{name}/SKILL.md"
+            self.assertIn(f"`{skill}`", policy)
+            self.assertTrue((REPO / skill).is_file(), skill)
 
     def test_real_boot_stays_within_the_existing_budget(self):
         spec = importlib.util.spec_from_file_location(

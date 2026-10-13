@@ -213,7 +213,8 @@
       "a2e78f48",
       "b7ec8f3b",
       "ede4b241",
-      "8400cd3d"
+      "8400cd3d",
+      "19ebbeb3"
     ]
   },
   "categories": {
@@ -341,7 +342,8 @@
       "4402973a",
       "1d50a3bb",
       "d7f74c93",
-      "dcf98880"
+      "dcf98880",
+      "19ebbeb3"
     ],
     "session_task_rail": [
       "25fcddee",
@@ -625,6 +627,15 @@
         "command:python3 hooks/gate-integrity.py --selftest"
       ]
     },
+    "github-burst-guard": {
+      "failure_mode": "PreToolUse deny on Bash",
+      "implementation": [
+        "hooks/github-burst-guard.py"
+      ],
+      "test": [
+        "ops/github-burst-guard-selftest.py"
+      ]
+    },
     "glanceable_lead": {
       "failure_mode": "CI class failure",
       "implementation": [
@@ -659,7 +670,8 @@
         "hooks/ledger-sweep.py"
       ],
       "test": [
-        "external:ledger scope regressions"
+        "tools/test-ledger-sweep.py",
+        "tools/test-ledger-scope.py"
       ]
     },
     "loop_guard": {
@@ -669,7 +681,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "external:migration probes"
+        "ops/loop-guard-selftest.py"
       ]
     },
     "loop_successor": {
@@ -684,8 +696,7 @@
     "loose_work": {
       "failure_mode": "Stop block",
       "implementation": [
-        "hooks/loose-work-gate.py",
-        "hooks/staging-observation-tracker.py"
+        "hooks/loose-work-gate.py"
       ],
       "test": [
         "ops/loose-work-gate-selftest.py"
@@ -847,7 +858,8 @@
         "mcp-server/src/mcp.js"
       ],
       "test": [
-        "command:python3 hooks/gate-integrity.py --selftest"
+        "ops/session-brief-selftest.py",
+        "ops/machine-converge-selftest.py"
       ]
     },
     "settings_change": {
@@ -894,6 +906,15 @@
       ],
       "test": [
         "ops/trigger-grant-selftest.py"
+      ]
+    },
+    "unfiled_bug": {
+      "failure_mode": "Stop block",
+      "implementation": [
+        "hooks/unfiled-bug-stop-gate.py"
+      ],
+      "test": [
+        "ops/unfiled-bug-stop-gate-selftest.py"
       ]
     },
     "vault_salvage": {
@@ -1084,6 +1105,13 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Same as above."
+    },
+    "19ebbeb3": {
+      "binding_moment": "turn end, when the turn's own prose reports a defect the session observed",
+      "category": "post_action_verification",
+      "control": "unfiled_bug",
+      "enforcement_class": "stop_gate",
+      "exceptions": "the turn filed it (record-defect, report-problem or add-loop accepted by the record layer), the sentence's paragraph names its record or fixing PR, or the sentence is a relay, a hypothetical, a fix already in hand, the PR build loop or an environment fault"
     },
     "1b8e7f43": {
       "category": "judgment_advisory",
@@ -2426,6 +2454,11 @@
       "packs": [
         "joe-development"
       ]
+    },
+    "19ebbeb3": {
+      "load_layer": "control",
+      "packs": [],
+      "why": "An installed stop gate delivers this at its binding moment."
     },
     "1b8e7f43": {
       "load_layer": "layer0",

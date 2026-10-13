@@ -865,12 +865,19 @@ class QueueTests(unittest.TestCase):
         self.pr(state='behind')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
         original_sleep = module.time.sleep
+        waiting_on_update = []
         def cancel(seconds):
-            self.q.stopped = True
+            # Cancel only once the update-branch call is the one waiting for its slot.
+            # An earlier read can also wait on a reserved call slot; cancelling there
+            # ends the tick before the entry is planned and the actions row never exists.
+            if waiting_on_update:
+                self.q.stopped = True
             original_sleep(0)
         real_gh = self.q.gh
         def delay_update(*args, **kwargs):
-            if 'update-branch' in str(args): self.q.last_gh = time.monotonic() + 1
+            if 'update-branch' in str(args):
+                waiting_on_update.append(True)
+                self.q.last_gh = time.monotonic() + 1
             return real_gh(*args, **kwargs)
         with patch.object(self.q, 'gh', side_effect=delay_update), patch.object(module.time, 'sleep', side_effect=cancel):
             self.q.tick()
@@ -1424,6 +1431,146 @@ class QueueTests(unittest.TestCase):
         self.q.discover();self.q.tick()
         self.assertEqual(len(self.calls('merge')),1)
 
+    def test_enqueue_rearms_approved_review_and_conflict_without_discovery(self):
+        repo = module.REPOS[0]
+        for n, phase, head in ((1, 'review', self.approved), (2, 'conflict', self.approved),
+                               (3, 'review', self.updated), (4, 'conflict', self.updated)):
+            with self.subTest(phase=phase):
+                self.pr(n, head=head)
+                entry = self.q.enqueue(repo, n, self.approved)
+                with self.q.db:
+                    self.q.db.execute('UPDATE entries SET phase=? WHERE id=?', (phase, entry))
+                self.assertEqual(self.q.enqueue(repo, n, self.approved), entry)
+                row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                self.assertEqual(row['phase'], 'pending')
+                self.assertEqual(row['outcome'], 'fresh_review_accepted')
+                event = self.q.db.execute('SELECT * FROM events WHERE entry_id=? ORDER BY id DESC LIMIT 1',
+                                         (entry,)).fetchone()
+                self.assertEqual(event['outcome'], 'fresh_review_accepted')
+                self.assertIn(head, event['detail'])
+                events = self.q.db.execute('SELECT COUNT(*) FROM events').fetchone()[0]
+                self.q.enqueue(repo, n, self.approved)
+                self.assertEqual(self.q.db.execute('SELECT COUNT(*) FROM events').fetchone()[0], events)
+
+    def test_approved_enqueue_can_rearm_while_service_owns_runner_lock(self):
+        repo = module.REPOS[0]
+        self.pr()
+        entry = self.q.enqueue(repo, 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
+        operator = module.Queue(self.state, self.root, gap=0)
+        self.addCleanup(operator.db.close)
+        with self.q.runner_lock():
+            self.assertEqual(operator.enqueue(repo, 1, self.approved), entry)
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'pending')
+
+    def test_enqueue_does_not_rearm_a_merge_intent_that_changes_during_validation(self):
+        repo = module.REPOS[0]
+        self.pr()
+        entry = self.q.enqueue(repo, 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
+            self.q.db.execute('INSERT INTO waits(owner,kind,deadline) VALUES(?,?,?)',
+                              (f'entry:{entry}', 'entry', 0))
+        def covered(*args):
+            with self.q.db:
+                self.q.db.execute("UPDATE entries SET phase='merging',tested=? WHERE id=?", (self.approved, entry))
+            return True
+        with patch.object(self.q, 'covered', side_effect=covered):
+            self.q.enqueue(repo, 1, self.approved)
+        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        self.assertEqual(row['phase'], 'merging')
+        self.assertEqual(row['tested'], self.approved)
+        self.assertEqual(self.q.db.execute('SELECT deadline FROM waits WHERE owner=?',
+                                          (f'entry:{entry}',)).fetchone()[0], 0)
+        self.assertIsNone(self.q.db.execute("SELECT 1 FROM events WHERE outcome='fresh_review_accepted'").fetchone())
+
+    def test_enqueue_without_matching_independent_approval_stays_in_review(self):
+        repo = module.REPOS[0]
+        comments = (
+            [],
+            [{'body': 'REVIEW: BLOCKED', 'author_association': 'OWNER'}],
+            [{'body': f'APPROVE\nReviewed-SHA: {self.changed}', 'author_association': 'OWNER'}],
+            [{'body': f'APPROVE\nReviewed-SHA: {self.approved}\nOrchestrator: verified exact head',
+              'author_association': 'OWNER'}],
+        )
+        for n, verdicts in enumerate(comments, 1):
+            with self.subTest(verdicts=verdicts):
+                self.pr(n)
+                entry = self.q.enqueue(repo, n, self.approved)
+                with self.q.db:
+                    self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
+                self.data['comments'][f'{repo}#{n}'] = verdicts
+                self.save()
+                self.q.enqueue(repo, n, self.approved)
+                self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0],
+                                 'review')
+        self.assertIsNone(self.q.db.execute("SELECT 1 FROM events WHERE outcome='fresh_review_accepted'").fetchone())
+
+    def test_enqueue_rejects_approval_that_does_not_cover_current_head(self):
+        repo = module.REPOS[0]
+        self.pr(head=self.changed)
+        entry = self.q.enqueue(repo, 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
+        self.q.enqueue(repo, 1, self.approved)
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'review')
+
+    def test_fresh_review_restarts_expired_entry_deadline_for_enqueue_and_discovery(self):
+        repo = module.REPOS[0]
+        for n, method in ((1, 'enqueue'), (2, 'discover')):
+            with self.subTest(method=method):
+                self.load()
+                self.pr(n, head=self.updated)
+                entry = self.q.enqueue(repo, n, self.approved)
+                with self.q.db:
+                    self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
+                    self.q.db.execute('INSERT INTO waits(owner,kind,deadline) VALUES(?,?,?)',
+                                      (f'entry:{entry}', 'entry', time.time() - 1))
+                if method == 'enqueue':
+                    self.q.enqueue(repo, n, self.approved)
+                else:
+                    self.q.discover()
+                self.q.tick()
+                if n == 2:
+                    self.q.tick()
+                row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                self.assertEqual(row['phase'], 'merging')
+                self.assertNotEqual(row['outcome'], 'entry_timeout')
+        self.assertEqual(len(self.calls('merge')), 2)
+
+    def test_no_discover_idle_exits_with_reason_for_empty_and_parked_queue(self):
+        for phase in (None, 'review', 'conflict', 'blocked'):
+            with self.subTest(phase=phase):
+                if phase:
+                    entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+                    with self.q.db:
+                        self.q.db.execute('UPDATE entries SET phase=? WHERE id=?', (phase, entry))
+                with patch.object(module.time, 'sleep', side_effect=AssertionError('idle run waited for another poll')):
+                    self.q.run(poll=30, discover=False)
+                result = subprocess.run([sys.executable, str(ENTRY), '--state', str(self.state),
+                                         'run', '--no-discover', '--poll', '0.05'],
+                                        capture_output=True, text=True, env=self.env, timeout=2)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                log = [json.loads(line) for line in (self.state / 'queue.log').read_text().splitlines()]
+                self.assertEqual(log[-1]['outcome'], 'idle')
+                self.assertIn('discovery disabled', log[-1]['detail'])
+
+    def test_uncertain_merge_exhausts_without_reissuing_or_rearming_on_enqueue(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='merging',tested=?,merge_attempts=1 WHERE id=?",
+                              (self.approved, entry))
+        for _ in range(module.MAX_ATTEMPTS):
+            self.q.tick()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        self.assertEqual(row['phase'], 'blocked')
+        self.assertEqual(row['outcome'], 'merge_uncertain_exhausted')
+        self.assertEqual(row['merge_attempts'], 1)
+        self.assertEqual(self.calls('merge'), [])
+
     def test_legacy_queue_stamp_is_not_an_independent_review(self):
         self.pr()
         self.data['comments'][module.REPOS[0]+'#1']=[{'body':f'APPROVE\nReviewed-SHA: {self.approved}\nOrchestrator: verified exact head and green.', 'author_association':'OWNER'}]
@@ -1598,6 +1745,8 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(any('/pulls/2/update-branch' in str(a) for a in self.load()['calls']))
 
     def test_single_running_agent_owns_the_state(self):
+        self.pr(held=True)
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         p=subprocess.Popen([sys.executable,str(ENTRY),'--state',str(self.state),'run','--no-discover','--poll','0.05'])
         try:
             import time
@@ -1651,16 +1800,16 @@ class QueueTests(unittest.TestCase):
         self.assertNotIn('StartInterval',p)
         self.assertIn('run',p['ProgramArguments'])
 
-    def test_empty_queue_idles_without_exiting(self):
-        p = subprocess.Popen([sys.executable, str(ENTRY), '--state', str(self.state),
-                              'run', '--poll', '0.05', '--no-discover'])
-        try:
-            import time
-            time.sleep(.2)
-            self.assertIsNone(p.poll(), 'an empty queue must remain alive')
-        finally:
-            p.terminate()
-            p.wait(timeout=5)
+    def test_empty_discovery_service_idles_without_exiting(self):
+        sleeps = []
+        def sleep(seconds):
+            sleeps.append(seconds)
+            self.q.stopped = True
+        with patch.object(self.q, 'discover') as discover, patch.object(module.time, 'sleep', side_effect=sleep):
+            self.q.run(poll=.05)
+        discover.assert_called_once()
+        self.assertTrue(sleeps)
+
 
 if __name__ == '__main__':
     unittest.main()

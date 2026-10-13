@@ -31,6 +31,12 @@ def load(name: str, path: Path):
 
 
 rail = load("rule_pack_preuse_reselection", REPO / "hooks/rule-pack-preuse-reselection.py")
+# The route rail's dedupe store and the boot gate's arm state must never be the
+# developer's own: an earlier real session named like a fixture would make a
+# first delivery look like a repeat.
+_ISOLATED = tempfile.mkdtemp(prefix="preuse-selftest-")
+os.environ.setdefault("CARR_RULE_ROUTE_DEDUPE_DIR", os.path.join(_ISOLATED, "route-dedupe"))
+os.environ.setdefault("CARR_RULE_BOOT_STATE_DIR", os.path.join(_ISOLATED, "boot-state"))
 contract = load("rule_delivery_preuse_test", REPO / "lib/rule_delivery_preuse.py")
 drift = load("rule_pack_drift_preuse_test", REPO / "hooks/rule-pack-drift-gate.py")
 
@@ -192,16 +198,45 @@ check("receipt carries every dynamic member and full binding text",
 # sees the preview, while Stop telemetry may credit every scheduled rule.
 oversize_response = selector_result()
 oversize_response["shared_rules"][0]["statement"] = "binding scheduled rule " + "x" * 12_000
-oversize_output = rail.process(payload(), runner=Runner(oversize_response))
+big_id = oversize_response["shared_rules"][0]["id"]
+
+
+class SeqRunner(Runner):
+    """Answers each call with the next prepared result (scheduled, then fitted)."""
+
+    def __init__(self, results: list[dict]):
+        super().__init__(results[0])
+        self.results = list(results)
+
+    def __call__(self, *args, **kwargs):
+        self.result = self.results.pop(0) if len(self.results) > 1 else self.results[0]
+        return super().__call__(*args, **kwargs)
+
+
+# The fitted fallback is a route-rail door call, which declares the packs the
+# live map assigns these ids (route_result, defined further down, does the same).
+fitted_response = selector_result(declared=rail._route_packs(EXPECTED_IDS))
+fitted_response["shared_rules"][0]["statement"] = oversize_response["shared_rules"][0]["statement"]
+oversize_runner = SeqRunner([oversize_response, fitted_response])
+oversize_output = rail.process(payload(), runner=oversize_runner)
 oversize_text = context(oversize_output)
 check("oversize scheduled rail stays within the visible context budget",
       rail.rule_routes.within_cap(oversize_text), len(oversize_text))
-check("oversize scheduled rail names every undelivered rule without a receipt",
-      oversize_text.startswith("RULE PACK PREUSE DELIVERY TOO LARGE")
-      and "NOT delivered" in oversize_text
-      and all(short in oversize_text for short in EXPECTED_IDS)
-      and "rule-delivery-preuse-reselection/v1" not in oversize_text,
-      oversize_text[:160])
+try:
+    oversize_row = json.loads(oversize_text)
+except ValueError:
+    oversize_row = {}
+oversize_full = [r["id"] for r in oversize_row.get("rules") or []]
+oversize_over = [r["id"] for r in oversize_row.get("overflow") or []]
+check("an oversized scheduled pack is FITTED, not bounced: every rule arrives in full "
+      "or as a one-line entry, the giant one in overflow, and no second fetch is demanded",
+      oversize_row.get("schema") == rail.rule_routes.ROUTE_RECEIPT_SCHEMA
+      and sorted(oversize_full + oversize_over) == EXPECTED_IDS
+      and big_id in oversize_over and big_id not in oversize_full
+      and "TOO LARGE" not in oversize_text and "NOT delivered" not in oversize_text,
+      (oversize_row.get("schema"), oversize_full, oversize_over, oversize_text[:120]))
+check("the fitted fallback made exactly one more door call", len(oversize_runner.calls) == 2,
+      len(oversize_runner.calls))
 
 dell_output = rail.process(
     payload(), runner=Runner(selector_result(agent="dell-local", sponsor="dell")))
@@ -922,10 +957,17 @@ model_choice_row = next(row for row in TRIGGER_ROWS.values()
 check("model-choice trigger delivers only rule ede4b241 via delegation-council",
       model_choice_row["rule_ids"] == ["ede4b241"]
       and model_choice_row["packs"] == ["delegation-council"])
-check("matched_triggers finds the council and model-choice verb triggers for an Agent call",
+sizing_tool_row = next((row for row in TRIGGER_ROWS.values()
+                       if row["kind"] == "verb" and "8400cd3d" in row["rule_ids"]
+                       and re.search(row["pattern"], "Agent")), None)
+check("an Agent call has a compiled sizing verb trigger", sizing_tool_row is not None)
+if sizing_tool_row is None:
+    sizing_tool_row = council_row
+check("matched_triggers finds the council, model-choice and sizing verb triggers for an Agent call",
       sorted(r["trigger_id"] for r in rail.matched_triggers(agent_call))
-      == sorted([council_row["trigger_id"], model_choice_row["trigger_id"]]))
-agent_rows = [council_row, model_choice_row]
+      == sorted([council_row["trigger_id"], model_choice_row["trigger_id"],
+                 sizing_tool_row["trigger_id"]]))
+agent_rows = [council_row, model_choice_row, sizing_tool_row]
 agent_packs = sorted({p for r in agent_rows for p in r["packs"]})
 agent_ids = sorted({i for r in agent_rows for i in r["rule_ids"]})
 agent_trigger_ids = sorted(r["trigger_id"] for r in agent_rows)
@@ -973,14 +1015,19 @@ for dispatch_tool in ("mcp__Claude_Code_Remote__create_session",
     check(f"{dispatch_tool} hits the model-choice trigger",
           model_choice_row["trigger_id"]
           in [r["trigger_id"] for r in rail.matched_triggers(dispatch_call)])
-model_runner = Runner(gen_selector_result(packs=model_choice_row["packs"], ids=model_choice_row["rule_ids"]))
+# A cloud-session dispatch also starts new work, so the sizing trigger joins it.
+model_rows = [model_choice_row, sizing_tool_row]
+model_runner = Runner(gen_selector_result(
+    packs=sorted({p for r in model_rows for p in r["packs"]}),
+    ids=sorted({i for r in model_rows for i in r["rule_ids"]})))
 model_output = rail.process(
     gen_payload(tool="mcp__Claude_Code_Remote__create_session",
                 tool_input={"prompt": "fix the bug", "model": "sonnet"}), runner=model_runner)
 model_receipt = json.loads(context(model_output))
-check("a cloud-session dispatch delivers rule ede4b241 in one selector call",
-      len(model_runner.calls) == 1 and "ede4b241" in model_receipt["rule_ids"]
-      and model_receipt["trigger_ids"] == [model_choice_row["trigger_id"]], model_receipt)
+check("a cloud-session dispatch delivers rules ede4b241 and 8400cd3d in one selector call",
+      len(model_runner.calls) == 1 and model_receipt["rule_ids"] == ["8400cd3d", "ede4b241"]
+      and model_receipt["trigger_ids"] == sorted(r["trigger_id"] for r in model_rows),
+      model_receipt)
 for routine_tool, routine_input in (
         ("Read", {"file_path": "README.md"}), ("Grep", {"pattern": "model"}),
         ("Glob", {"pattern": "*.py"}), ("Bash", {"command": "git status"}),
@@ -991,6 +1038,35 @@ for routine_tool, routine_input in (
                     rail.matched_triggers(gen_payload(tool=routine_tool, tool_input=routine_input))]
     check(f"{routine_tool} stays silent for the model-choice trigger",
           model_choice_row["trigger_id"] not in routine_hits, routine_hits)
+# Rule 8400cd3d (size new work first) reaches every shape that starts or hands
+# off new work through the compiled table alone, independent of the route file.
+for sizing_tool, sizing_input in (
+        ("EnterPlanMode", {}),
+        ("Agent", {"description": "build the importer",
+                   "prompt": "Implement the CSV importer and open a PR."}),
+        ("RemoteTrigger", {"action": "create", "name": "builder",
+                           "prompt": "BUILDER job: add the export verb."}),
+        ("Workflow", {"script": "export const meta = {name: 'review'}"}),
+        ("mcp__Claude_Code_Remote__create_session", {"prompt": "BUILDER job: fix the gate."}),
+        ("Bash", {"command": 'python3 tools/room-bridge/dispatch.py send codex-desk '
+                             '--writes ops/x.py "fix the review"'}),
+        ("mcp__carr__write-work-shape", {"title": "new capability"}),
+        ("mcp__carr__report-problem", {"summary": "the export is missing"}),
+        ("mcp__CARR_Record_Layer__propose-ready-plan", {"scope_summary": "new capability"})):
+    sizing_hits = sorted({rid for row in rail.matched_triggers(
+        gen_payload(tool=sizing_tool, tool_input=sizing_input)) for rid in row["rule_ids"]})
+    check(f"{sizing_tool} starts new work and delivers the sizing rule",
+          "8400cd3d" in sizing_hits, sizing_hits)
+for routine_tool, routine_input in (
+        ("Bash", {"command": "git status"}),
+        ("Read", {"file_path": "tools/room-bridge/dispatch.py"}),
+        ("Bash", {"command": "python3 tools/room-bridge/dispatch.py desks"}),
+        ("mcp__carr__read-work-shape", {"id": "x"})):
+    sizing_hits = sorted({rid for row in rail.matched_triggers(
+        gen_payload(tool=routine_tool, tool_input=routine_input)) for rid in row["rule_ids"]})
+    check(f"{routine_tool} routine work does not deliver the sizing rule",
+          "8400cd3d" not in sizing_hits, sizing_hits)
+
 silent_runner = Runner()
 check("a routine Read delivers nothing and makes no selector call",
       rail.process(gen_payload(tool="Read", tool_input={"file_path": "README.md"}),
@@ -1249,7 +1325,7 @@ check("the original exact background shape still takes the original rail, not th
 
 check_failure_cases(
     "generalized rail", agent_call,
-    gen_selector_result(packs=council_row["packs"], ids=council_row["rule_ids"]),
+    gen_selector_result(packs=agent_packs, ids=agent_ids),
     "selector did not return every triggered rule", rail.GENERALIZED_FAILURE_CONTEXT)
 
 # Tampering with a generalized receipt's content fails validate_generalized_receipt.
@@ -1741,7 +1817,9 @@ with tempfile.TemporaryDirectory() as route_tmp:
         check("the same rules are not re-injected for the same tool within the window",
               rail.process(repeat, runner=repeat_runner) is None
               and repeat_runner.calls == [])
-        # A different tool re-delivers the rules both tools route.
+        # A different tool does NOT re-deliver what this context already holds
+        # (2026-10-12): the text arrived with the Agent call and sits in the same
+        # context whichever tool asks next. Only the ids new to the context go.
         other = gen_payload(tool="Bash",
                             tool_input={"command": "python3 tools/room-bridge/dispatch.py send claude-desk x"},
                             session="route-session", tool_use_id="route-3")
@@ -1749,11 +1827,14 @@ with tempfile.TemporaryDirectory() as route_tmp:
         shared = sorted(set(other_ids) & set(agent_ids))
         other_table = contract.merge_trigger_delivery(rail.matched_triggers(other))[2]
         other_union = sorted(set(other_ids) | set(other_table))
-        other_out = rail.process(other, runner=Runner(route_result(other_union)))
-        other_row = json.loads(context(other_out))
-        check("a different tool re-delivers rules already delivered to another tool",
-              bool(shared and set(shared) <= {r["id"] for r in other_row["rules"]}),
-              (shared, other_row.get("rule_ids")))
+        other_new = sorted(set(other_union) - set(union))
+        other_out = rail.process(other, runner=Runner(route_result(other_new or other_union)))
+        other_full = ({r["id"] for r in json.loads(context(other_out))["rules"]}
+                      if other_out is not None else set())
+        check("a different tool does not re-deliver rules this context already holds",
+              bool(shared) and not (set(shared) & other_full)
+              and (other_out is None) == (not other_new),
+              (shared, sorted(other_full), other_new))
         # A different session starts clean.
         fresh = copy.deepcopy(call)
         fresh["session_id"] = "route-session-2"
@@ -1763,6 +1844,49 @@ with tempfile.TemporaryDirectory() as route_tmp:
         later = routes_lib.fresh_ids("route-session", "Agent", union,
                                      now=_time.time() + routes_lib.DEDUPE_SECONDS + 1)
         check("after 30 minutes the same tool delivers the rules again", later == union)
+
+        # With a boot-gate arm (the normal case on a plumbed machine) the dedupe
+        # is scoped to the CONTEXT, not to a clock: nothing repeats inside one
+        # epoch however long it runs or which tool asks, and a SessionStart
+        # re-arm (compaction, resume, clear) rotates the epoch so a context that
+        # no longer holds the text gets it again.
+        boot_gate = load("rule_boot_gate_for_dedupe", REPO / "lib/rule_boot_gate.py")
+        epoch_session = "route-session-epoch"
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e1", "digest": "sha256:x"})
+        routes_lib.record_delivered(epoch_session, "Agent", union)
+        check("inside one context epoch a rule delivered to one tool is held for every tool",
+              routes_lib.fresh_ids(epoch_session, "Bash", union) == [])
+        check("inside one context epoch the clock does not re-deliver",
+              routes_lib.fresh_ids(epoch_session, "Agent", union,
+                                   now=_time.time() + routes_lib.DEDUPE_SECONDS + 1) == [])
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e2", "digest": "sha256:x"})
+        check("a re-armed context (new epoch) is given the rules again",
+              routes_lib.fresh_ids(epoch_session, "Agent", union) == union)
+        routes_lib.record_delivered(epoch_session, "Agent", union[:1])
+        check("recording under a new epoch forgets the old context's deliveries",
+              routes_lib.fresh_ids(epoch_session, "Bash", union) == union[1:])
+
+        # A subagent is its own context (reviewer finding on PR 1708): what the
+        # main conversation holds is not in the child's window and vice versa,
+        # siblings are separate, and the child's OWN epoch (rotated by its own
+        # compaction) scopes it, untouched by the main arm's rotations.
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e3", "digest": "sha256:x"})
+        boot_gate._write_agent_epoch(epoch_session, "child-1")
+        routes_lib.record_delivered(epoch_session, "Bash", union[:1], agent_id="child-1")
+        check("a child's delivery does not mark the main context",
+              routes_lib.fresh_ids(epoch_session, "Bash", union) == union)
+        routes_lib.record_delivered(epoch_session, "Bash", union)
+        check("the main context's delivery does not mark the child; the child's own does",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union[1:])
+        boot_gate._write_agent_epoch(epoch_session, "child-2")
+        check("sibling children are separate contexts",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-2") == union)
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e4", "digest": "sha256:x"})
+        check("the main arm's rotation does not forget a child's deliveries",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union[1:])
+        boot_gate._write_agent_epoch(epoch_session, "child-1")
+        check("a child's own re-arm (its compaction) gives that child the rules again",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union)
 
         # Overflow: more text than the cap. Rules not in the always-on file
         # come first; every rule that does not fit is listed with a summary.

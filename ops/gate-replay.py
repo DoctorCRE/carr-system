@@ -258,7 +258,9 @@ def config_wirings(hooks_config: Path = HOOKS_CONFIG,
                     if len(tail) == 2 and tail[1].strip():
                         names = [tail[1].strip().split()[0]]
                     env = ENV_TOKEN.search(command)
-                    for name in names[:1]:
+                    # A chain command (lib/hook_execution.py run_chain) wires
+                    # every gate it names; any other command wires its first.
+                    for name in (names if " --chain " in command else names[:1]):
                         found[wiring_key(name, event, matcher, env.group(1) if env else "")] = label
     return found
 
@@ -605,7 +607,13 @@ def payload(inv: Invocation, worker: Worker) -> Dict[str, Any]:
         data.update(tool_name=inv.record["tool_name"], tool_input=tool_input,
                     tool_use_id=f"toolu_replay_{inv.record['id']}")
         if inv.event == "PostToolUse":
-            data["tool_response"] = tool_response(inv.record["tool_name"], tool_input)
+            # A scenario may carry the response the tool gave (a failing test
+            # run's stdout), since the gates that read PostToolUse output can
+            # only reach their announce path through it. Real fixtures carry
+            # none and get the harness's empty-success shape.
+            data["tool_response"] = (substitute(inv.record["tool_response"], repo, home)
+                                     if isinstance(inv.record.get("tool_response"), dict)
+                                     else tool_response(inv.record["tool_name"], tool_input))
         elif inv.event == "PostToolUseFailure":
             data["error"] = "replayed tool failure"
     elif inv.event == "UserPromptSubmit":

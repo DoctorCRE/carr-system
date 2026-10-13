@@ -3297,9 +3297,11 @@ def static_contract_cases():
     stop = json.dumps(hooks.get("Stop", []))
     post = json.dumps(hooks.get("PostToolUse", []))
     compact = json.dumps(hooks.get("PreCompact", []))
-    check("Claude wiring has context gate on PostToolUse",
-          "context-handoff-gate.py" in post
-          and "CARR_CONTEXT_HOOK_EVENT=PostToolUse" in post, post)
+    # Retired 2026-10-12: 2,848 PostToolUse fires in seven days, 0 catches,
+    # ~212 ms each. The branch stays callable and is exercised above; the
+    # wiring must stay off every tool call.
+    check("Claude wiring keeps the context gate off PostToolUse",
+          "context-handoff-gate.py" not in post, post)
     check("Claude wiring has context gate on PreCompact",
           "context-handoff-gate.py" in compact
           and "CARR_CONTEXT_HOOK_EVENT=PreCompact" in compact, compact)

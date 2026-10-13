@@ -2789,6 +2789,123 @@ class FixForward(Base):
                 self.assertEqual(ff({"body": f"APPROVE\n{reviewed}\n{prefix}Fixes-Forward: #1342\n"}), set())
 
 
+class FixForwardDerivedDigest(Base):
+    """The app lane's contracts/e2e-staging-control-proofs.v1.json carries
+    application_source_sha256, a digest of the whole app tree that almost
+    every app PR recomputes. A later PR that changes ONLY that listed JSON
+    pointer must not undo an earlier fix-forward; any other difference still
+    does, and only the lane that lists the path gets the exception."""
+
+    PROOFS = "contracts/e2e-staging-control-proofs.v1.json"
+    # FixForward's scenario helpers, without re-running its tests
+    land, block, fix_approve = FixForward.land, FixForward.block, FixForward.fix_approve
+    tick, assert_held = FixForward.tick, FixForward.assert_held
+
+    def setUp(self):
+        super().setUp()
+        self.nums: dict[str, int] = {}
+
+    def proofs(self, digest, controls=("a",), raw=None):
+        return raw if raw is not None else json.dumps({
+            "schema": "doctorcre-staging-control-proofs.v1", "reviewed_source_commit": "c" * 40,
+            "application_source_sha256": digest, "carr_source_commit": "d" * 40,
+            "controls": list(controls)}, indent=2) + "\n"
+
+    def derived(self, lane):
+        return self.fx.config()[lane].get("fix_forward_derived_fields") or []
+
+    def present(self, fix, target, lane="app"):
+        ignored = []
+        ok = self.fx.pipeline(FakeRunner()).change_present(self.fx.repo, fix, target, self.derived(lane), ignored)
+        return ok, ignored
+
+    def carrier(self):
+        self.land({"src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
+        f, _ = self.land({"src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
+        return f
+
+    def test_config_lists_the_app_digest_and_nothing_for_the_worker(self):
+        self.assertEqual(self.derived("app"), [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}])
+        self.assertEqual(self.derived("worker"), [])
+
+    def test_a_later_recompute_of_only_the_listed_digest_keeps_the_carrier(self):   # (a)
+        f = self.carrier()
+        u, _ = self.land({"src/b.js": "later app PR", self.PROOFS: self.proofs("3" * 64)})
+        self.assertEqual(self.present(f, u),
+                         (True, [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}]))
+
+    def test_an_unchanged_carrier_records_no_ignored_field(self):
+        f = self.carrier()
+        u, _ = self.land({"src/b.js": "later app PR"})
+        self.assertEqual(self.present(f, u), (True, []))
+
+    def test_another_field_of_the_same_file_differing_is_not_present(self):   # (b)
+        f = self.carrier()
+        u, _ = self.land({self.PROOFS: self.proofs("3" * 64, controls=("a", "b"))})
+        self.assertEqual(self.present(f, u), (False, []))
+        # a type change the == operator would hide (true == 1) still differs
+        f2, _ = self.land({self.PROOFS: self.proofs("4" * 64, controls=(1,))})
+        u2, _ = self.land({self.PROOFS: self.proofs("5" * 64, controls=(True,))})
+        self.assertEqual(self.present(f2, u2), (False, []))
+
+    def test_an_unlisted_path_differing_is_not_present(self):   # (c)
+        self.land({"src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
+        f, _ = self.land({"src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
+        u, _ = self.land({"src/a.js": "rewritten", self.PROOFS: self.proofs("3" * 64)})
+        self.assertEqual(self.present(f, u), (False, []))
+        # the same pointer in an unlisted JSON file is not exempt either
+        self.land({"contracts/other.v1.json": self.proofs("1" * 64)})
+        f2, _ = self.land({"contracts/other.v1.json": self.proofs("2" * 64)})
+        u2, _ = self.land({"contracts/other.v1.json": self.proofs("3" * 64)})
+        self.assertEqual(self.present(f2, u2), (False, []))
+
+    def test_the_worker_lane_with_the_same_file_name_is_not_present(self):   # (d)
+        f = self.carrier()
+        u, _ = self.land({self.PROOFS: self.proofs("3" * 64)})
+        self.assertEqual(self.present(f, u, lane="worker"), (False, []))
+
+    def test_malformed_or_ambiguous_json_at_the_target_is_not_present(self):   # (e)
+        f = self.carrier()
+        good = self.proofs("3" * 64)
+        for raw in (good[:-5], "", "[]", good.replace('"schema"', '"schema": 1, "schema"', 1),
+                    good.replace('"application_source_sha256"', '"application_source_sha"', 1)):
+            with self.subTest(raw=raw[:40]):
+                u, _ = self.land({self.PROOFS: self.proofs("", raw=raw)})
+                self.assertEqual(self.present(f, u), (False, []))
+
+    def test_a_pointer_missing_at_the_fix_or_a_mode_change_is_not_present(self):
+        self.land({self.PROOFS: json.dumps({"controls": ["a"]})})
+        f, _ = self.land({self.PROOFS: json.dumps({"controls": ["b"]})})
+        u, _ = self.land({self.PROOFS: json.dumps({"controls": ["b"], "application_source_sha256": "x"})})
+        self.assertEqual(self.present(f, u), (False, []))
+        f2 = self.carrier()
+        self.land({self.PROOFS: self.proofs("3" * 64)})
+        (self.fx.repo / self.PROOFS).chmod(0o755)
+        git(self.fx.repo, "add", self.PROOFS)
+        git(self.fx.repo, "commit", "-q", "-m", "mode")
+        git(self.fx.repo, "push", "-q", "origin", "HEAD:main")
+        u2 = git(self.fx.repo, "rev-parse", "HEAD")
+        self.assertEqual(self.present(f2, u2), (False, []))
+
+    def test_the_run_record_names_the_ignored_derived_field(self):
+        b, nb = self.land({"mcp-server/src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
+        f, nf = self.land({"mcp-server/src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
+        u, nu = self.land({"mcp-server/src/b.js": "later", self.PROOFS: self.proofs("3" * 64)})
+        comments = {nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]}
+        runner, rec = self.tick(comments)   # the worker lane lists nothing: held
+        self.assert_held(runner, rec, nb)
+        cfg = self.fx.config()
+        cfg["worker"]["fix_forward_derived_fields"] = self.derived("app")
+        self.fx.config = lambda **_: cfg
+        runner, rec = self.tick(comments)
+        self.assertEqual(rec["status"], "shipped", rec)
+        self.assertEqual(rec["sha"], u)
+        [ff] = rec["fix_forwards"]
+        self.assertEqual(ff["fixing_pr"], nf)
+        self.assertEqual(ff["derived_fields_ignored"],
+                         [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}])
+
+
 class SquashGitHub(FakeGitHub):
     """FakeGitHub, except the squash commit `merged` maps to PR `number`
     whose real head is `head`, approved at `reviewed`."""
@@ -4493,6 +4610,103 @@ class DryRun(Base):
                        f"bin/deploy-worker.sh --upload-version --release-sha {sha}",
                        "--env staging --recovery-step forward_fix", "--promote-version", "./run.sh health"):
             self.assertIn(needle, text)
+
+
+class LostStagingCredentialRotation(Base):
+    """Joe's 2026-10-12 approval reaches the provisioner through ONE command:
+    `tick --lane worker --rotate-lost-staging-credential LABEL` forwards
+    --rotate-lost-credential LABEL to the staging-app-writer step and nowhere
+    else; without it the step's argv is exactly what it always was."""
+
+    def _app_writer_argv(self, runner):
+        return next(argv for name, argv in runner.calls if name == "staging-app-writer")
+
+    def test_the_flag_is_forwarded_to_the_staging_app_writer_step_only(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.rotate_lost_staging_credentials = ("writer", "gate_zero_producer")
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        argv = self._app_writer_argv(runner)
+        self.assertEqual(argv[argv.index("--apply"):], [
+            "--apply", "--rotate-lost-credential", "writer",
+            "--rotate-lost-credential", "gate_zero_producer"])
+        for name, other in runner.calls:
+            if name != "staging-app-writer":
+                self.assertNotIn("--rotate-lost-credential", other, name)
+
+    def test_without_the_flag_the_step_is_unchanged(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        argv = self._app_writer_argv(runner)
+        self.assertEqual(argv[-1], "--apply")
+        self.assertNotIn("--rotate-lost-credential", argv)
+
+    def test_dry_run_says_a_rotation_would_occur_and_runs_nothing(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        lines: list[str] = []
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, dry_run=True)
+        pipe.out = lines.append
+        pipe.rotate_lost_staging_credentials = ("writer",)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        text = "\n".join(lines)
+        self.assertIn("[dry-run] staging-app-writer will DELIBERATELY ROTATE "
+                      "the lost staging credential(s) writer", text)
+        self.assertIn("provision-staging-app-writer.py", text)
+        self.assertIn("--apply --rotate-lost-credential writer", text)
+
+    def test_main_forwards_the_labels_for_a_worker_tick_only(self):
+        built: list[dict] = []
+
+        class Recorder:
+            def __init__(self, cfg, **kwargs):
+                built.append(kwargs)
+
+            def tick(self, lanes):
+                built[-1]["lanes"] = lanes
+                return 0
+
+        with mock.patch.object(rp, "Pipeline", Recorder), \
+                mock.patch.object(rp, "load_config", return_value={}):
+            self.assertEqual(rp.main(["tick", "--lane", "worker", "--dry-run",
+                                      "--rotate-lost-staging-credential", "writer",
+                                      "--rotate-lost-staging-credential", "reader"]), 0)
+            self.assertEqual(built[-1]["rotate_lost_staging_credentials"], ("writer", "reader"))
+            self.assertEqual(built[-1]["lanes"], ["worker"])
+            self.assertTrue(built[-1]["dry_run"])
+            self.assertEqual(rp.main(["tick", "--lane", "worker"]), 0)
+            self.assertEqual(built[-1]["rotate_lost_staging_credentials"], ())
+            for bad in (["tick", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "app", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "worker", "--lane", "app",
+                         "--rotate-lost-staging-credential", "writer"],
+                        ["report", "--lane", "worker", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "worker", "--rotate-lost-staging-credential", "production"],
+                        ["tick", "--lane", "worker", "--rotate-lost-staging-credential", "writer",
+                         "--rotate-lost-staging-credential", "writer"]):
+                with self.subTest(bad=bad), mock.patch("sys.stderr"), \
+                        self.assertRaises(SystemExit) as raised:
+                    rp.main(bad)
+                self.assertEqual(raised.exception.code, 2)
+
+    def test_the_labels_are_exactly_the_provisioners_credential_profiles(self):
+        spec = importlib.util.spec_from_file_location(
+            "staging_database_credential_for_release_selftest",
+            HERE.parent / "tools/staging_database_credential.py")
+        assert spec is not None and spec.loader is not None
+        credential = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = credential
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(credential)
+        with self.assertRaises(credential.CredentialRefusal) as unknown:
+            credential.profile("__no_such_profile__", config_root=Path(self._tmp.name))
+        listed = str(unknown.exception).split(": ", 1)[1].split(", ")
+        self.assertEqual(sorted(rp.ROTATABLE_STAGING_CREDENTIALS), sorted(listed))
 
 
 class SchemaSnapshotGhRunner(FakeRunner):

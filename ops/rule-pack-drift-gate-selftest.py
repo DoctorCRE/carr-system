@@ -28,6 +28,8 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
+# Cursors written by this suite never land in the live out/ directory.
+setattr(gate, "CURSOR_DIR", tempfile.mkdtemp(prefix="drift-cursor-"))
 
 TRIGGERS, MEMBERS, MAP_DIGEST = gate.load_packs()
 FAILURES: list[str] = []
@@ -1000,24 +1002,23 @@ with tempfile.TemporaryDirectory() as directory:
     transcript = Path(directory) / "transcript.jsonl"
     secret = "postgresql://user:SUPER-SECRET@example.invalid/db"  # ci-secret-scan: allow
     transcript.write_text('{"type": "user"}\n', encoding="utf-8")
-    # A bad transcript LINE no longer reaches this path: lib/transcript_read.py
+    # A bad transcript LINE no longer reaches this path: read_records()
     # skips it (PR #1224's tamper fix), so the exception is forced here
     # instead, carrying the secret in its message, which must still never be
     # persisted.
     def _raise_with_secret(*_args, **_kwargs):
         raise RuntimeError("transcript read failed for " + secret)
     old_log, old_stdin = getattr(gate, "LOG"), sys.stdin
-    from lib.hook_runtime import Event
-    old_reader = Event.transcript
+    old_reader = gate.scan_transcript
     setattr(gate, "LOG", str(Path(directory) / "shadow.jsonl"))
-    setattr(Event, "transcript", _raise_with_secret)
+    setattr(gate, "scan_transcript", _raise_with_secret)
     sys.stdin = io.StringIO(json.dumps({"transcript_path": str(transcript),
                                         "session_id": "secret-test"}))
     try:
         gate.main()
     finally:
         setattr(gate, "LOG", old_log)
-        setattr(Event, "transcript", old_reader)
+        setattr(gate, "scan_transcript", old_reader)
         sys.stdin = old_stdin
     persisted = Path(directory, "shadow.jsonl").read_text()
     error_row = json.loads(persisted)
@@ -1054,6 +1055,427 @@ xcom = run([user("pull the metrics from x.com for last week"),
             assistant_tool("Bash", {"command": "grok x search"})])
 check("x.com fires the joe-comms pack despite the word boundary",
       "joe-comms" in xcom["needed"], str(xcom["needed"]))
+
+# ── the shell-invocation test is memoised, so a long transcript stays linear ──
+# 2026-10-12: delivery_state() asks "is this Bash command a standing-context
+# call?" once per (standing result x prior record). On the Orchestrator.macbook
+# transcript that was 209,805 shlex.split calls and 58 s against a 20 s Stop
+# timeout, so the gate failed open on every turn. Same string, one split.
+import shlex as _shlex
+_split_calls: list[str] = []
+_real_split = _shlex.split
+
+
+def _counting_split(s, *a, **k):
+    _split_calls.append(s)
+    return _real_split(s, *a, **k)
+
+
+_shlex.split = _counting_split
+try:
+    gate._SHELL_STANDING_CACHE.clear()
+    repeated = "cd /tmp && ./run.sh call standing-context '{\"detail\":\"boot\",\"page\":1}'"
+    answers = {gate._shell_standing_invocation(repeated) for _ in range(500)}
+    check("a standing-context Bash call is recognised", answers == {True}, str(answers))
+    check("500 asks of one command split it once", len(_split_calls) == 1, f"{len(_split_calls)} splits")
+    check("an ordinary command is not a standing-context call",
+          gate._shell_standing_invocation("ls -la") is False, "ls read as standing-context")
+finally:
+    _shlex.split = _real_split
+
+# ── the per-session cursor (2026-10-12) ─────────────────────────────────────
+# 437 Stop fires in seven days, p90 16.4 s, max 19.6 s: every Stop re-read the
+# whole transcript and re-walked every prior record per standing result. The
+# cursor carries the bookkeeping; the verdict must not move.
+
+
+def reference_delivery_state(records):
+    """delivery_state() exactly as it was before the cursor (origin/main
+    7978611f1): the quadratic original is the oracle the resumable one must
+    match."""
+    def reference_standing(record, prior):
+        calls = set()
+        for previous in prior:
+            native = previous.get("payload") or {}
+            if (previous.get("type") == "response_item" and native.get("type") in {'function_call', 'custom_tool_call'}
+                    and ("standing_context" in str(native.get("name", ""))
+                         or "standing-context" in str(native.get("name", ""))
+                         or gate._native_standing_invocation(native))):
+                calls.add(native.get("call_id"))
+            message = previous.get("message") or {}
+            content = message.get("content")
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                name = str(block.get("name", ""))
+                arguments = block.get('input') or {}
+                if "standing-context" in name or "standing_context" in name or (
+                        name == "Bash" and isinstance(arguments, dict)
+                        and gate._shell_standing_invocation(arguments.get('command', ''))):
+                    calls.add(block.get("id"))
+        return gate._standing_result(record, calls)
+
+    mode, declared, omit = None, set(), []
+    for index, record in enumerate(records):
+        found = gate.preuse_delivery(record, records[:index], repo=REPO)
+        if found is None:
+            if "rule_delivery" not in gate.serialized(record):
+                continue
+            found = reference_standing(record, records[:index])
+        if found:
+            mode, packs, omit = found
+            declared.update(packs)
+    return mode, sorted(declared), omit
+
+
+def reference_evaluate(records):
+    return gate.evaluate_turn(gate.current_turn(records), reference_delivery_state(records),
+                              TRIGGERS, MEMBERS)
+
+
+def with_uuids(records, prefix):
+    out = []
+    for number, record in enumerate(records):
+        record = json.loads(json.dumps(record))
+        record.setdefault("uuid", f"{prefix}-{number}")
+        out.append(record)
+    return out
+
+
+def write_jsonl(path: Path, records, mode="w"):
+    with open(path, mode, encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record) + "\n")
+
+
+def same_verdict(scan, records):
+    """The cursor's verdict equals both the new whole-file evaluation and the
+    pre-cursor reference."""
+    got = gate.evaluate_turn(scan.turn, scan.delivery, TRIGGERS, MEMBERS)
+    return got == run(records) == reference_evaluate(records), (got, run(records))
+
+
+turns = [
+    [user("clean up the loop board please"),
+     assistant_tool("mcp__carr__standing-context", {"packs": ["governance-rules"]}),
+     standing_context_result("shadow", ["governance-rules"], ["4a53ff82", "424ba0cc"])],
+    [user("now land the fix"),
+     assistant_tool("Bash", {"command": "git commit -m 'fix' && git push"})],
+    [synthetic_user("<task-notification>build finished</task-notification>", "task-notification"),
+     assistant_tool("Bash", {"command": "gh pr checks 12"})],
+    claude_skill_injection("update the hooks config") +
+    [assistant_tool("Edit", {"file_path": "/x/carr-system/ops/config/hooks.json"})],
+    [user("pull the metrics from x.com for last week"),
+     assistant_tool("Bash", {"command": "grok x search"}),
+     assistant_tool("Bash", {"command": "cd /tmp && ./run.sh call standing-context '{\"packs\":[\"joe-comms\"]}'"}),
+     standing_context_result("shadow", ["joe-comms"], [])],
+]
+flat = []
+with tempfile.TemporaryDirectory() as directory:
+    transcript = Path(directory) / "session.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    starts = []
+    for number, turn_records in enumerate(turns):
+        turn_records = with_uuids(turn_records, f"t{number}")
+        offset_before = transcript.stat().st_size
+        starts.append(offset_before)
+        write_jsonl(transcript, turn_records, "a")
+        flat.extend(turn_records)
+        scan = gate.scan_transcript(str(transcript), "cursor-test")
+        ok, detail = same_verdict(scan, flat)
+        check(f"cursor verdict equals the whole-file verdict after turn {number}", ok, str(detail))
+        check(f"turn {number} resumes at the saved offset, not byte 0",
+              number == 0 or (scan.reason == "resumed"
+                              and scan.read == (offset_before, transcript.stat().st_size)
+                              and (scan.reread is None or scan.reread == starts[2])),
+              f"{scan.reason} {scan.read} before={offset_before}")
+        if number == 3:
+            saved = json.loads(Path(gate.cursor_path("cursor-test", str(transcript))).read_text())
+            check("the skill body injected in turn 3 is not a turn boundary",
+                  saved["tracker"]["turn_start"] == starts[2],
+                  f'{saved["tracker"]["turn_start"]} != {starts[2]}')
+    # A Stop with nothing appended reads nothing new and keeps its verdict.
+    again = gate.scan_transcript(str(transcript), "cursor-test")
+    check("a repeat Stop resumes at end of file", again.reason == "resumed"
+          and again.read[1] == transcript.stat().st_size, str(again.read))
+    check("a repeat Stop keeps the verdict", same_verdict(again, flat)[0])
+
+    # REWRITTEN IN PLACE, same inode, longer than before: the bytes before the
+    # offset no longer match, so the cursor is dropped and byte 0 re-read.
+    inode = transcript.stat().st_ino
+    rewritten = with_uuids([user("a different session entirely"),
+                            assistant_tool("Bash", {"command": "git rebase origin/main"}),
+                            assistant_tool("Bash", {"command": "echo " + "x" * 16000})], "rw")
+    with open(transcript, "r+", encoding="utf-8") as handle:
+        handle.seek(0)
+        handle.truncate()
+        for record in rewritten:
+            handle.write(json.dumps(record) + "\n")
+    check("the rewrite kept the inode and grew (the case size and inode checks miss)",
+          transcript.stat().st_ino == inode
+          and transcript.stat().st_size > max(end for _, end in [again.read]))
+    scan = gate.scan_transcript(str(transcript), "cursor-test")
+    check("a rewritten transcript is rescanned from byte 0",
+          scan.reason == "rewritten" and scan.read[0] == 0, f"{scan.reason} {scan.read}")
+    check("and its verdict is the rewritten file's", same_verdict(scan, rewritten)[0],
+          str(same_verdict(scan, rewritten)[1]))
+    # SHRUNK: truncated below the offset.
+    write_jsonl(transcript, rewritten[:1])
+    scan = gate.scan_transcript(str(transcript), "cursor-test")
+    check("a shrunk transcript is rescanned from byte 0",
+          scan.reason == "shrunk" and scan.read[0] == 0, f"{scan.reason} {scan.read}")
+    # REPLACED: a new inode at the same path.
+    replacement = Path(directory) / "replacement.jsonl"
+    write_jsonl(replacement, flat)
+    replacement.replace(transcript)
+    scan = gate.scan_transcript(str(transcript), "cursor-test")
+    check("a replaced transcript (new inode) is rescanned from byte 0",
+          scan.reason == "inode" and scan.read[0] == 0 and same_verdict(scan, flat)[0],
+          f"{scan.reason} {scan.read}")
+    # A changed verdict input discards the cursor too.
+    real_fingerprint = gate.cursor_inputs_fingerprint
+    setattr(gate, "cursor_inputs_fingerprint", lambda repo=REPO: "changed")
+    try:
+        scan = gate.scan_transcript(str(transcript), "cursor-test")
+    finally:
+        setattr(gate, "cursor_inputs_fingerprint", real_fingerprint)
+    check("a changed verdict input rescans from byte 0",
+          scan.reason == "inputs" and scan.read[0] == 0, f"{scan.reason} {scan.read}")
+
+# THE CAP. A first look at a large transcript reads at most the cap per Stop,
+# says so, judges nothing, and resumes; once caught up the verdict is exact.
+with tempfile.TemporaryDirectory() as directory:
+    transcript = Path(directory) / "big.jsonl"
+    padding = [assistant_tool("Bash", {"command": f"echo {n} " + "y" * 300}) for n in range(40)]
+    big = with_uuids(turns[0] + padding + turns[1], "cap")
+    write_jsonl(transcript, big)
+    size = transcript.stat().st_size
+    cap = 4096
+    scans = []
+    for _ in range(40):
+        scan = gate.scan_transcript(str(transcript), "cap-test", cap=cap)
+        scans.append(scan)
+        if not scan.capped:
+            break
+    reads = [scan.read[1] - scan.read[0] for scan in scans[:-1]]
+    check("a transcript over the cap is read in cap-sized steps",
+          len(scans) > 2 and all(0 < r <= cap for r in reads), str(reads))
+    check("each capped step names what is unread", all("unread" in s.capped for s in scans[:-1]))
+    check("the steps resume where the last one stopped",
+          all(scans[i + 1].read[0] == scans[i].read[1] for i in range(len(scans) - 2)),
+          str([s.read for s in scans]))
+    check("once caught up the verdict is the whole-file verdict",
+          not scans[-1].capped and same_verdict(scans[-1], big)[0])
+    # A single turn larger than the cap is not judged, visibly.
+    long_turn = with_uuids([user("one long turn")] + padding, "long")
+    write_jsonl(transcript, long_turn, "a")
+    for _ in range(40):
+        scan = gate.scan_transcript(str(transcript), "cap-test", cap=cap)
+        if not (scan.capped and "unread" in scan.capped):
+            break
+    check("a turn over the cap is not judged and says why",
+          bool(scan.capped) and "turn spans" in scan.capped, str(scan.capped))
+    # The hook itself: a visible notice, a scan-capped ledger row, no block.
+    old_log, old_stdin, old_cap = gate.LOG, sys.stdin, gate.SCAN_CAP_BYTES
+    setattr(gate, "LOG", str(Path(directory) / "shadow.jsonl"))
+    setattr(gate, "SCAN_CAP_BYTES", cap)
+    fresh = Path(directory) / "fresh.jsonl"
+    write_jsonl(fresh, big)
+    sys.stdin = io.StringIO(json.dumps({"transcript_path": str(fresh), "session_id": "cap-hook",
+                                        "cwd": str(REPO)}))
+    buffer = io.StringIO()
+    old_stdout, sys.stdout = sys.stdout, buffer
+    try:
+        gate.main()
+    finally:
+        sys.stdout, sys.stdin = old_stdout, old_stdin
+        setattr(gate, "LOG", old_log)
+        setattr(gate, "SCAN_CAP_BYTES", old_cap)
+    printed = buffer.getvalue()
+    rows = [json.loads(line) for line in Path(directory, "shadow.jsonl").read_text().splitlines()]
+    check("a capped Stop prints a visible notice and does not block",
+          "did not check this turn" in printed and '"block"' not in printed, printed)
+    check("a capped Stop records a scan-capped row",
+          bool(rows) and rows[-1].get("error") == "scan-capped", str(rows[-1:]))
+
+# A DUPLICATED UUID could change an old boundary's meaning, so that transcript
+# goes to the original whole-file evaluation.
+with tempfile.TemporaryDirectory() as directory:
+    transcript = Path(directory) / "dup.jsonl"
+    records = with_uuids(turns[0] + turns[1], "dup")
+    write_jsonl(transcript, records)
+    gate.scan_transcript(str(transcript), "dup-test")
+    duplicate = dict(records[0])
+    write_jsonl(transcript, [duplicate], "a")
+    scan = gate.scan_transcript(str(transcript), "dup-test")
+    check("a duplicated uuid falls back to the whole-file evaluation",
+          scan.reason == "whole_file" and same_verdict(scan, records + [duplicate])[0],
+          f"{scan.reason}")
+    # The injected-skill chain arriving out of order does the same.
+    chain = with_uuids(claude_skill_injection("configure"), "late")
+    early = with_uuids([user("start")], "late-start") + [chain[2]]
+    transcript.write_text("", encoding="utf-8")
+    write_jsonl(transcript, early)
+    gate.scan_transcript(str(transcript), "late-test")
+    write_jsonl(transcript, chain[:2], "a")
+    scan = gate.scan_transcript(str(transcript), "late-test")
+    check("a chain parent arriving after its child falls back to the whole file",
+          scan.reason == "whole_file" and same_verdict(scan, early + chain[:2])[0], scan.reason)
+
+# Review round 1 of PR 1716, finding 4: whole_file is sticky, so a transcript
+# over the cap that trips it must still be judged, by reading the whole file in
+# cap-sized steps, not capped on every Stop forever.
+with tempfile.TemporaryDirectory() as directory:
+    transcript = Path(directory) / "dup-big.jsonl"
+    padding = [assistant_tool("Bash", {"command": f"echo {n} " + "z" * 300}) for n in range(20)]
+    records = with_uuids(turns[0] + padding + turns[1], "dupbig")
+    records = records + [dict(records[1])]  # one duplicated uuid
+    write_jsonl(transcript, records)
+    size = transcript.stat().st_size
+    cap = size // 2 + 1
+    check("the duplicate-uuid fixture is over the cap and within the whole-file steps",
+          cap < size <= cap * gate.WHOLE_FILE_STEPS, f"{size} vs cap {cap}")
+    scans = [gate.scan_transcript(str(transcript), "dup-big", cap=cap) for _ in range(6)]
+    judged = [s for s in scans if not s.capped]
+    check("an over-cap whole_file transcript is judged, not capped on every Stop",
+          len(judged) >= 4 and all(s.reason == "whole_file" for s in judged)
+          and all(same_verdict(s, records)[0] for s in judged),
+          str([(s.reason, s.capped) for s in scans]))
+    # Past the step budget it is capped, visibly, with the whole-file reason.
+    huge = Path(directory) / "dup-huge.jsonl"
+    filler = [assistant_tool("Bash", {"command": f"echo {n} " + "w" * 300}) for n in range(60)]
+    many = with_uuids(turns[0] + filler + turns[1], "duphuge")
+    write_jsonl(huge, [many[0], dict(many[0])] + many[1:])
+    check("the second fixture is past the whole-file steps",
+          huge.stat().st_size > cap * gate.WHOLE_FILE_STEPS, str(huge.stat().st_size))
+    last = [gate.scan_transcript(str(huge), "dup-huge", cap=cap) for _ in range(3)][-1]
+    check("past the whole-file steps the Stop is capped and says why",
+          bool(last.capped) and "whole-file read" in last.capped, str(last.capped))
+
+# Finding 5: every scheduled-task source scheduled_workflow_packs() could read
+# is a cursor input, including one added after the cursor was saved.
+on_disk = sorted(f"ops/scheduled-tasks/{p.name}" for p in (REPO / "ops/scheduled-tasks").iterdir()
+                 if p.name.endswith(".SKILL.md"))
+check("every ops/scheduled-tasks/*.SKILL.md is a cursor input",
+      bool(on_disk) and set(on_disk) <= set(gate.CURSOR_INPUTS),
+      str(sorted(set(on_disk) - set(gate.CURSOR_INPUTS))))
+with tempfile.TemporaryDirectory() as directory:
+    fake_repo = Path(directory)
+    (fake_repo / "ops/scheduled-tasks").mkdir(parents=True)
+    (fake_repo / "ops/scheduled-tasks/one.SKILL.md").write_text("a", encoding="utf-8")
+    before = gate.cursor_inputs_fingerprint(fake_repo)
+    (fake_repo / "ops/scheduled-tasks/third-workflow.SKILL.md").write_text("b", encoding="utf-8")
+    check("a scheduled task added later discards the cursor",
+          gate.cursor_inputs_fingerprint(fake_repo) != before)
+
+# The stub priors DeliveryState hands preuse_delivery() must answer the two
+# prior-dependent matchers exactly as the real prior records do.
+from lib.rule_delivery_preuse import matched_prompt, matched_tool_call, digest as receipt_digest  # noqa:E402
+background = {"command": "sleep 5", "run_in_background": True}
+prior = [
+    {"type": "user", "sessionId": "s1", "message": {"role": "user", "content": "first ask"}},
+    {"type": "assistant", "sessionId": "s1", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "bg-1", "name": "Bash", "input": background},
+        {"type": "tool_use", "id": "fg-1", "name": "Bash", "input": {"command": "ls"}}]}},
+    {"type": "user", "sessionId": "s1", "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "bg-1", "content": "ok"}]}},
+    {"type": "user", "sessionId": "s1", "message": {"role": "user", "content": [
+        {"type": "text", "text": "second "}, {"type": "text", "text": "ask"}]}},
+    {"type": "assistant", "sessionId": "s1", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "dup-1", "name": "Bash", "input": background}]}},
+    {"type": "assistant", "sessionId": "s2", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "dup-1", "name": "Bash", "input": background}]}},
+    {"type": "response_item", "payload": {
+        "type": "function_call", "name": "exec_command", "call_id": "cx-1",
+        "arguments": json.dumps(background),
+        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-9"}}},
+]
+state = gate.DeliveryState()
+for record in prior:
+    state.feed(record)
+state = gate.DeliveryState(json.loads(json.dumps(state.to_json())))  # survives the cursor file
+rows = [{"client": "claude", "session_id": session, "tool_use_id": tool_id, "tool_name": name,
+         "tool_input_sha256": receipt_digest(tool_input), "turn_id": None,
+         "prompt_sha256": receipt_digest(prompt)}
+        for session in ("s1", "s2")
+        for tool_id, name, tool_input in (("bg-1", "Bash", background), ("fg-1", "Bash", {"command": "ls"}),
+                                          ("dup-1", "Bash", background), ("missing", "Bash", background),
+                                          ("bg-1", "Read", background))
+        for prompt in ("second ask", "first ask")]
+rows += [{"client": "codex", "session_id": "s1", "tool_use_id": "cx-1", "tool_name": name,
+          "tool_input_sha256": receipt_digest(background), "turn_id": turn}
+         for name in ("functions.exec", "exec_command") for turn in ("turn-9", "turn-1")]
+agree = [(matched_tool_call(row, prior), matched_tool_call(row, state._prior(row)),
+          matched_prompt(row, prior), matched_prompt(row, state._prior(row))) for row in rows]
+check("stub priors answer matched_tool_call exactly as the real records",
+      all(a == b for a, b, _, _ in agree), str(agree))
+check("stub priors answer matched_prompt exactly as the real records",
+      all(c == d for _, _, c, d in agree), str(agree))
+check("the matcher cases include both answers",
+      {a for a, _, _, _ in agree} == {True, False} and {c for _, _, c, _ in agree} == {True, False},
+      str(agree))
+
+# And feed() really hands those priors to preuse_delivery(): with a receipt
+# reader that credits a pack only when the library matcher accepts its prior,
+# the resumable and the reference delivery states must agree, case by case.
+real_reader, real_preuse = gate.receipt_from_envelope, gate.preuse_delivery
+setattr(gate, "receipt_from_envelope", lambda record: record.get("fake_receipt"))
+
+
+def _fake_preuse(record, prior_records, *, repo):
+    row = record.get("fake_receipt")
+    if row is None:
+        return None
+    ok = (matched_tool_call(row, prior_records) if row.get("tool_use_id")
+          else matched_prompt(row, prior_records))
+    return ("shadow", [row["pack"]], []) if ok else None
+
+
+setattr(gate, "preuse_delivery", _fake_preuse)
+try:
+    for row in rows:
+        receipts = [{"type": "attachment", "fake_receipt": {**row, "pack": "engineering-git"}}]
+        semantic = {k: v for k, v in row.items() if k != "tool_use_id"}
+        receipts.append({"type": "attachment", "fake_receipt": {**semantic, "pack": "joe-comms"}})
+        records = prior + receipts
+        check(f"fed priors credit as the reference does: {row['tool_use_id']}/{row['session_id']}",
+              gate.delivery_state(records) == reference_delivery_state(records),
+              f"{gate.delivery_state(records)} != {reference_delivery_state(records)}")
+    credited = gate.delivery_state(prior + [{"type": "attachment", "fake_receipt": {
+        **rows[0], "pack": "engineering-git"}}])
+    check("a matching background receipt is credited through the stubs",
+          credited[1] == ["engineering-git"], str(credited))
+finally:
+    setattr(gate, "receipt_from_envelope", real_reader)
+    setattr(gate, "preuse_delivery", real_preuse)
+
+# Every file a whole-file evaluation opens is a cursor input, so changing it
+# discards the cursor.
+import builtins as _builtins  # noqa:E402
+_opened: set[str] = set()
+_real_open, _real_io_open = _builtins.open, io.open
+
+
+def _spy_open(file, *args, **kwargs):
+    try:
+        _opened.add(str(Path(file).resolve()))
+    except TypeError:
+        pass
+    return _real_open(file, *args, **kwargs)
+
+
+_builtins.open = io.open = _spy_open
+try:
+    for case_records in (flat, turns[0] + turns[1], [scheduled_user()]):
+        run(case_records)
+        reference_evaluate(case_records)
+finally:
+    _builtins.open, io.open = _real_open, _real_io_open
+inputs = {str((REPO / relative).resolve()) for relative in gate.CURSOR_INPUTS}
+outside = sorted(path for path in _opened
+                 if path.startswith(str(REPO)) and path not in inputs
+                 and "__pycache__" not in path)
+check("every repository file the verdict reads is a cursor input", not outside, str(outside))
 
 if FAILURES:
     print("rule-pack-drift-gate-selftest: FAIL", file=sys.stderr)

@@ -304,16 +304,54 @@ async function backdateOnlyReceipt(client, receiptId) {
     "alter table ops.v5_a05_cadence_receipt enable trigger v5_a05_cadence_receipt_immutable");
 }
 
-// A subject with no receipt reads no_receipt_on_record only until 14 days
-// after migration 0617 was applied, then missed (review finding 3). The
-// baseline schema stamps that date, so the expectation follows the database
-// rather than assuming the migration is young.
-async function neverReceiptedStatus(client) {
-  const { rows: [row] } = await client.query(
-    `select clock_timestamp() > applied_at + interval '14 days' as expired
-       from public.schema_migrations where filename = '0617_delivery_cadence_a05.sql'`);
-  return row?.expired ? "missed" : "no_receipt_on_record";
+const CADENCE_MIGRATION = "0617_delivery_cadence_a05.sql";
+
+async function withCadenceActivation(client, daysAgo, fn) {
+  const prior = (await client.query(
+    "select applied_at::text as applied_at from public.schema_migrations where filename=$1",
+    [CADENCE_MIGRATION])).rows[0];
+  assert.ok(prior, "the cadence activation migration must be seeded");
+  await client.query(
+    "update public.schema_migrations set applied_at=clock_timestamp() - $1::integer * interval '1 day' where filename=$2",
+    [daysAgo, CADENCE_MIGRATION]);
+  try {
+    return await fn();
+  } finally {
+    await client.query("update public.schema_migrations set applied_at=$1::timestamptz where filename=$2",
+      [prior.applied_at, CADENCE_MIGRATION]);
+  }
 }
+
+test("V5A05-ACTIVATION: no receipt is pending within the interval and missed after it; fixture dates are restored", async t => {
+  const pg = await skipUnlessDatabase(t);
+  if (!pg) return;
+  const client = await connect(pg);
+  t.after(() => client.end().catch(() => {}));
+  const { joe } = await joeAndDell(client);
+  const subject = { subject_type: "engineering_program", subject_ref: `v5a05-anchor-${randomUUID()}` };
+  const anchor = async () => (await client.query(
+    "select applied_at::text as applied_at from public.schema_migrations where filename=$1",
+    [CADENCE_MIGRATION])).rows[0].applied_at;
+  const prior = await anchor();
+  const read = () => onRoute(client, "writer_read_only", () =>
+    a05()["cadence-status"].handler(wrap(client), PARTNER_ACTOR(joe.id), subject));
+
+  for (const [daysAgo, status, reason, requiresReplan] of [
+    [1, "no_receipt_on_record", "no_cadence_receipt_on_record", false],
+    [20, "missed", "cadence_interval_exceeded_since_activation", true],
+  ]) {
+    const result = await withCadenceActivation(client, daysAgo, read);
+    assert.equal(result.status, status);
+    assert.equal(result.reason_id, reason);
+    assert.equal(result.requires_replan, requiresReplan);
+    assert.equal(result.last_receipt_issued_at, null);
+    assert.equal(await anchor(), prior, "fixture restores the exact snapshot timestamp");
+  }
+  const failure = new Error("fixture callback failed");
+  await assert.rejects(withCadenceActivation(client, 1, async () => { throw failure; }),
+    error => error === failure);
+  assert.equal(await anchor(), prior, "failed callbacks also restore the activation timestamp");
+});
 
 test("V5A05-READER-ROUTE-DB: cadence-status is refused on the carr_reader route and answers on the writer read-only route", async t => {
   const pg = await skipUnlessDatabase(t);
@@ -333,9 +371,9 @@ test("V5A05-READER-ROUTE-DB: cadence-status is refused on the carr_reader route 
   // The route it takes now.
   const route = connectionRouteForTool(TOOLS["cadence-status"]);
   assert.equal(route, "writer_read_only");
-  const status = await onRoute(client, route, () =>
-    verb.handler(wrap(client), SYSTEM_ACTOR(joe.id), subject));
-  assert.equal(status.status, await neverReceiptedStatus(client));
+  const status = await withCadenceActivation(client, 1, () => onRoute(client, route, () =>
+    verb.handler(wrap(client), SYSTEM_ACTOR(joe.id), subject)));
+  assert.equal(status.status, "no_receipt_on_record");
   assert.equal(status.interval_days, 14);
 });
 
@@ -351,7 +389,7 @@ test("V5A05-CADENCE-RECEIPT: record then read status current, then a backdated p
   const read = () => onRoute(client, "writer_read_only", () =>
     verbs["cadence-status"].handler(wrap(client), PARTNER_ACTOR(joe.id), subject));
 
-  assert.equal((await read()).status, await neverReceiptedStatus(client));
+  assert.equal((await withCadenceActivation(client, 1, read)).status, "no_receipt_on_record");
 
   const receiptArgs = { idempotency_key: randomUUID(), ...subject };
   const recorded = await dispatched(client, () =>

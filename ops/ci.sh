@@ -94,6 +94,11 @@ esac
 CI_SELFTEST_TIMEOUT_SECONDS=120
 CI_TIMEOUT_HELPER="$REPO/bin/with-timeout.py"
 
+if [ "${1:-}" = "--doc-drift" ]; then
+  shift
+  exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
+fi
+
 STRICT=0
 ONLY=""
 RESULT_FILE=""
@@ -627,7 +632,8 @@ PYEOF
   local eligible=""
   for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
            tools/room-bridge/test_*_unit.py \
-           tools/room-bridge/test_activation_reliability.py; do
+           tools/room-bridge/test_activation_reliability.py \
+           test/doc_drift/test_*.py test/doc_drift_product/test_*.py; do
     [ -f "$t" ] || continue
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"
@@ -841,6 +847,10 @@ PYEOF
   # db/schema.sql's ledger names every migration with its runner checksum, so the
   # reference schema cannot fall behind the migrations again. Static, no DB; the
   # migration class proves the snapshot by actually building it.
+  # door-reachability-check JOINED 2026-10-13 (WR-000284, defect 96b57c6c): every
+  # script under the audited trees and every repo SKILL.md is reached from a
+  # door, or is declared in ops/config/door-inventory.v1.json. Same kind:
+  # repository content only. ci-only and prose-only are printed, not failed.
   for inv in enforcement-coverage-check audit-queue-freshness-check map-row-evidence-check \
              rule-enforcement-map-check rule-load-layer-check rule-classification-parity-check \
              reachability-check selftest-git-isolation-check \
@@ -848,7 +858,7 @@ PYEOF
              mechanism-doctrine-gate scheduler-cutover-coverage-gate \
              boot-budget-check sync-core-rule-ids rule-route-coverage \
              sync-rule-boot-classes check-eval-receipt migration-order-gate \
-             migration-safety-gate check-jev-conformance; do
+             migration-safety-gate check-jev-conformance door-reachability-check; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
@@ -1397,9 +1407,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   for definer_pg_proof in \
     mcp-server/test/security-definer-search-path-postgres.sql \
     mcp-server/test/definer-temp-substitution-postgres.sql \
-    mcp-server/test/definer-hardening-catalog-postgres.sql \
-    mcp-server/test/completion-tenant-barriers-postgres.sql \
-    mcp-server/test/dot-security-definers-postgres.sql; do
+    mcp-server/test/completion-tenant-barriers-postgres.sql; do
     definer_pg_log="$LOGDIR/$(basename "$definer_pg_proof" .sql).log"
     if ! run_quiet "$definer_pg_log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -d "$dsn" -f "$definer_pg_proof"; then
@@ -1408,6 +1416,23 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       return
     fi
   done
+  # WR-000258: these two were nearly all of the 330 s that PR 1708's hosted run
+  # booked to the 'tour' step (measured on a loaded Mac: ~320 s and ~60 s of the
+  # ~385 s for the proofs between 'migrate' and 'tour'). The Dot proof hashes every public/ops row (the sealed SCAC
+  # registry alone is ~240k rows) before and after each of its reviewed calls, and the
+  # catalog proof re-validates all 116 registry seals; both roll back everything
+  # they write. ops/ci-migration-gates.py runs the Dot proof as $dot_proof_shards
+  # sessions (each owning the calls at its position modulo the count) and the
+  # catalog proof beside them, each on its own copy of this database, requires the
+  # shards to have executed every reviewed call exactly once, and prints
+  # sql-proof-timing with the one-after-another total so the saving is visible.
+  local dot_proof_shards="${CARR_DOT_PROOF_SHARDS:-3}"
+  if ! DATABASE_URL="$dsn" "$PY" ops/ci-migration-gates.py --logdir "$LOGDIR" --psql "$psql_bin" \
+       --sql-proof mcp-server/test/definer-hardening-catalog-postgres.sql \
+       --sql-proof "mcp-server/test/dot-security-definers-postgres.sql:$dot_proof_shards"; then
+    bad migration "SECURITY DEFINER PostgreSQL acceptance failed: definer-hardening-catalog or dot-security-definers (named above)"
+    return
+  fi
   if ! CARR_INVOICE_TEST_DATABASE_URL="$dsn" CARR_INVOICE_TEST_REQUIRED=1 \
        run_quiet "$LOGDIR/invoice-tracker-transaction.log" \
        node --test mcp-server/test/invoice-tracker-transaction.test.mjs; then
@@ -1616,7 +1641,10 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   # V5-RW02 joins it: the evidence store's replay projection, its typed
   # conflict and its write-time refusal of malformed or double-counted
   # readback evidence only exist on real rows as carr_writer.
-  for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres; do
+  # WR-000262 approve-rule legacy adoption joins it: binding, receipt and
+  # hard_enforced admission for an active legacy rule are one transaction on
+  # real rows as carr_authority_joe, and each refusal must write nothing.
+  for proof in cost-ledger-projection.v5 doc-conversation notifications session-identity dispatch-spine meeting-mode delivery-cadence-a05-tools amend-closed-loop-postgres action-class-successor-registry-postgres independent-review-cycle-postgres a02-rule-enforcement-postgres salesforce-reconciliation-rw02-postgres salesforce-read-run-store-rw02-postgres vendor-directory-postgres relationship-network-postgres approve-rule-legacy-adoption-postgres; do
     if [ -f "mcp-server/test/$proof.test.mjs" ]; then
       if ! DATABASE_URL="$dsn" CARR_COST_LEDGER_DB_REQUIRED=1 \
            CARR_DOC_CONVERSATION_DB_REQUIRED=1 CARR_R03_DB_REQUIRED=1 \
@@ -1626,6 +1654,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
            CARR_V5_A03_DB_REQUIRED=1 \
            CARR_A02_RULE_COVERAGE_DB_REQUIRED=1 \
            CARR_RW02_DB_REQUIRED=1 \
+           CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1 \
            CARR_VENDOR_DIRECTORY_DB_REQUIRED=1 CARR_RELATIONSHIP_DB_REQUIRED=1 \
            run_quiet "$LOGDIR/$proof-db.log" \
            node --test "mcp-server/test/$proof.test.mjs"; then

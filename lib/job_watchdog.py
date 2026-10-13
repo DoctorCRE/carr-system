@@ -96,6 +96,22 @@ def stamp(now=None):
     return datetime.fromtimestamp(time.time() if now is None else now, timezone.utc).isoformat()
 
 
+# What still waits on Joe for each needs_joe pattern class, in add-loop's
+# residue vocabulary (mcp-server/src/tools.js RESIDUE_KINDS). add-loop refuses
+# a capability or ruling loop that does not name one.
+NEEDS_JOE_RESIDUE = {"credentials": "provider_login", "money": "money_movement",
+                     "client-facing": "external_send"}
+
+
+def loop_blocker(f):
+    """add-loop blocker fields for a loop filed from finding ``f``."""
+    needs = f.get("needs_joe")
+    if not needs:
+        return {"blocker": "other_lane"}
+    return {"blocker": "capability" if needs == "credentials" else "ruling",
+            "residue_kind": NEEDS_JOE_RESIDUE[needs], "residue_host": f["subject"]}
+
+
 def loop_owner(f):
     """Record-layer owner for a loop filed from finding ``f``.
 
@@ -1030,7 +1046,7 @@ class Effects:
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") and f["needs_joe"] != "credentials" else "none",
-                       "blocker": "capability" if f.get("needs_joe") == "credentials" else "ruling" if f.get("needs_joe") else "other_lane",
+                       **loop_blocker(f),
                        "blocker_detail": ("Joe must restore authentication through the provider login; "
                                           "the watchdog cannot supply this credential. Evidence: " + f["reason"])
                        if f.get("needs_joe") == "credentials" else f["reason"] if f.get("needs_joe")
@@ -1056,7 +1072,7 @@ class Effects:
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") or f.get("board_status") == "question-for-orchestrator" else "none",
-                       "blocker": "capability" if f.get("needs_joe") == "credentials" else "ruling" if f.get("needs_joe") else "other_lane",
+                       **loop_blocker(f),
                        "blocker_detail": f["reason"] if f.get("needs_joe") else "Orchestrator's named executor or queue repair: " + f["subject"]}
         response = self._record("add-loop", payload)
         if response.get("ok") is not True or not response.get("loop_id"):

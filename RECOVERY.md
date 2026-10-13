@@ -114,7 +114,7 @@ only history that exists. There is no vendor safety net behind them.
 
 A plain PostgreSQL dump — SQL text. `CREATE TABLE`, `COPY`, thousands of rows.
 Nothing exotic: any Postgres can consume it, and restoring is piping it into an
-empty database. `restore-rehearse.sh` automates exactly that, plus the branch
+empty database. `bin/restore-rehearse.sh` automates exactly that, plus the branch
 creation, the row-count comparison and the teardown.
 
 That is worth knowing because it means the recovery does not depend on this

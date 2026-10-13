@@ -203,7 +203,10 @@ def auto_apply(staged: list[str], touched: list[str]) -> list[str]:
     rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                          capture_output=True, text=True).stdout.strip()
     data = dict(base)
-    data["blessed_by"] = who or "unknown"
+    # Same attribution form as hooks/gate-integrity.py --bless: a hashed actor,
+    # never the raw address. The raw form failed jev-supervisor-selftest's
+    # attribution test at pre-push on every auto-blessed commit (2026-10-12).
+    data["blessed_by"] = ("git-actor-sha256:" + hashlib.sha256(who.encode()).hexdigest()) if who else "unknown"
     data["blessed_at_rev"] = rev or "unknown"
     data["hashes"] = hashes
     data["contracts"] = contracts
