@@ -1118,7 +1118,10 @@ class StateTests(unittest.TestCase):
         self.assertEqual(accepted, {"joe", "dell", "claude"})
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         cases = (("pr_ci_red", None, "claude"), ("job_hang", "credentials", "joe"),
-                 ("pr_blocked_review", "ruling", "joe"))
+                 ("pr_blocked_review", "money", "joe"))
+        # add-loop refuses a capability or ruling loop without a residue, so
+        # every needs_joe class the config can produce must map to one.
+        self.assertEqual(set(c["needs_joe_patterns"]), set(w.NEEDS_JOE_RESIDUE))
         for kind, needs_joe, owner in cases:
             with self.subTest(kind=kind, needs_joe=needs_joe):
                 f = w.finding(kind, "subject-" + kind, "reason", c)
