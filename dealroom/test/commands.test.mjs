@@ -149,7 +149,6 @@ test("omitting idempotencyKey mints a different key per call — only an explici
   assert.notEqual(a.idempotencyKey, b.idempotencyKey);
 });
 
-// ------------------------------------------------------- buildDealContext
 
 test("buildDealContext defaults next_date to the deal's CURRENT value when the caller does not override it", () => {
   const deal = { id: "d1", name: "Acme", next_date: "2026-11-01" };
@@ -171,7 +170,6 @@ test("buildDealContext with no deal (nothing open) returns a context runCommand 
   assert.equal(context.nextDate, null);
 });
 
-// ------------------------------------------------------- real UI/Doc parity
 //
 // Blocker 2 from the review: a "parity" test that only proved two identical
 // fake-client calls produce identical receipts was fake parity — it could
