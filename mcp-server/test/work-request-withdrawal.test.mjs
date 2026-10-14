@@ -20,14 +20,18 @@ const ID = "20000000-0000-0000-0000-000000000032";
 async function rejected(fn) { try { await fn(); assert.fail("expected refusal"); } catch (e) { assert.ok(e instanceof ToolError); return e.payload; } }
 
 class WithdrawFake {
-  constructor() { this.calls = []; this.toolCalls = new Map(); this.state = "captured"; this.version = 1; }
+  constructor({ state = "captured", version = 1, requestTenant = "carr-internal",
+    successorTenant = "carr-internal", successorState = "captured" } = {}) {
+    this.calls = []; this.toolCalls = new Map(); this.state = state; this.version = version;
+    this.requestTenant = requestTenant; this.successorTenant = successorTenant; this.successorState = successorState;
+  }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim(); this.calls.push({ sql, params });
     if (sql.startsWith("select pg_advisory_xact_lock")) return { rows: [] };
     if (sql.startsWith("select request_hash, response")) { const row = this.toolCalls.get(params[0]); return { rows: row ? [row] : [] }; }
-    // The functions select "for update" on state='captured' and version=
-    // p_base_version and raise when nothing matches; a stale version reaching the
-    // handler as zero rows is the shape the handler has to turn into a conflict.
+    // The functions select "for update" on the allowed source state and version
+    // and raise when nothing matches; a stale version reaching the handler as
+    // zero rows is the shape the handler has to turn into a conflict.
     if (sql.includes("decline_sourced_work_request")) {
       if (params[1] !== 1) return { rows: [] };
       this.state = "declined"; this.version = 2;
@@ -35,10 +39,13 @@ class WithdrawFake {
         exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z" }] };
     }
     if (sql.includes("supersede_sourced_work_request")) {
-      if (params[1] !== 1) return { rows: [] };
-      this.state = "superseded"; this.version = 2;
+      if (!["captured", "triaged"].includes(this.state) || params[1] !== this.version) return { rows: [] };
+      if (this.successorTenant !== this.requestTenant || this.successorState === "superseded")
+        throw new Error("invalid successor");
+      const previousState = this.state;
+      this.state = "superseded"; this.version += 1;
       return { rows: [{ ref: "WR-000032", state: this.state, version: this.version,
-        exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z", superseded_by_ref: params[3] }] };
+        exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z", superseded_by_ref: params[3], previous_state: previousState }] };
     }
     if (sql.includes("work-request-intake:withdrawn-subject")) return { rows: [{ id: ID }] };
     if (sql.startsWith("insert into event")) return { rows: [] };
@@ -96,7 +103,38 @@ test("supersede carries the successor through to the result and the event", asyn
   const call = db.calls.find(x => x.sql.includes("supersede_sourced_work_request"));
   assert.equal(call.params[3], "WR-000034");
   const event = db.calls.find(x => x.sql.startsWith("insert into event"));
+  assert.deepEqual(JSON.parse(event.params[6]), { state: "captured", version: 1 });
   assert.equal(JSON.parse(event.params[7]).superseded_by_ref, "WR-000034");
+});
+
+test("triaged supersession preserves the prior state in its audit event", async () => {
+  const db = new WithdrawFake({ state: "triaged", version: 3 });
+  const out = await executeRegisteredTool(db, JOE, "supersede-work-request", {
+    ...structuredClone(SUPERSEDE), base_version: 3,
+  });
+  assert.equal(out.state, "superseded");
+  assert.equal(out.version, 4);
+  const event = db.calls.find(x => x.sql.startsWith("insert into event"));
+  assert.deepEqual(JSON.parse(event.params[6]), { state: "triaged", version: 3 });
+  assert.deepEqual(JSON.parse(event.params[7]), {
+    state: "superseded", version: 4, exit_reason: SUPERSEDE.exit_reason,
+    superseded_by_ref: SUPERSEDE.superseded_by,
+  });
+});
+
+test("ready and later states cannot be superseded", async () => {
+  for (const state of ["ready", "running", "declined", "superseded"]) {
+    const out = await rejected(() => executeRegisteredTool(new WithdrawFake({ state, version: 3 }),
+      JOE, "supersede-work-request", { ...structuredClone(SUPERSEDE), base_version: 3 }));
+    assert.equal(out.error, "version_conflict", state);
+  }
+});
+
+test("a supersession refuses a cross-tenant or withdrawn successor", async () => {
+  for (const options of [{ successorTenant: "other-tenant" }, { successorState: "superseded" }]) {
+    await assert.rejects(() => executeRegisteredTool(new WithdrawFake(options), JOE,
+      "supersede-work-request", structuredClone(SUPERSEDE)), /invalid successor/);
+  }
 });
 
 test("the acting actor's own slug is passed, not a flattened partner name", async () => {
@@ -115,6 +153,9 @@ test("a stale version is a question for a human, never a silent second withdrawa
     assert.equal(out.error, "version_conflict");
     assert.equal(out.human_ref, "WR-000032");
   }
+  const out = await rejected(() => executeRegisteredTool(new WithdrawFake({ state: "triaged", version: 3 }),
+    JOE, "supersede-work-request", { ...structuredClone(SUPERSEDE), base_version: 2 }));
+  assert.equal(out.error, "version_conflict");
 });
 
 test("an empty reason, an unknown field and a self-supersession refuse before any query", async () => {
@@ -148,6 +189,17 @@ test("a replayed key returns the stored withdrawal and makes no second transitio
   assert.equal(replay.replayed, true);
   assert.equal(replay.human_ref, first.human_ref);
   assert.equal(db.calls.filter(x => x.sql.includes("decline_sourced_work_request")).length, 1);
+});
+
+test("a replayed supersede key returns the stored result without another transition", async () => {
+  const db = new WithdrawFake({ state: "triaged", version: 3 });
+  const args = { ...structuredClone(SUPERSEDE), base_version: 3 };
+  const first = await executeRegisteredTool(db, JOE, "supersede-work-request", args);
+  const replay = await executeRegisteredTool(db, JOE, "supersede-work-request", args);
+  assert.equal(first.version, 4);
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.version, first.version);
+  assert.equal(db.calls.filter(x => x.sql.includes("supersede_sourced_work_request")).length, 1);
 });
 
 // ------------------------------------------------------------------- the card
