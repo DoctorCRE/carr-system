@@ -40,13 +40,6 @@ case "$payload" in
   *'"query":"CPA"'*)
     printf '%s\n' '{"result":"CPA"}'
     ;;
-  *'"query":"__smoke_graph_vendor_fixture_unset__"'*)
-    # SMOKE_GRAPH_VENDOR_QUERY is unset here (WR-000049, the double's fixture
-    # file carries only the ball-probe subject — see run_smoke), so
-    # smoke-reads.sh SKIPs this check rather than calling it; this case is
-    # dead but kept so a future canned run has something to match.
-    printf '%s\n' '{"result":"\"connections\""}'
-    ;;
   *'"target":"C-155"'*)
     printf '%s\n' '{"result":"Synthetic Twohop \"hops\":2"}'
     ;;
@@ -61,15 +54,6 @@ case "$payload" in
     ;;
   *'"query":"Qwertzuiop Vraxmandel"'*)
     printf '%s\n' '{"result":"\"parties\":[] \"organizations\":[]"}'
-    ;;
-  *'"query":"__smoke_merged_client_fixture_unset__"'*)
-    # This pattern cannot match anything a real fixture would ever query for
-    # (WR-000049: SMOKE_MERGED_CLIENT_QUERY is unset in this double — see the
-    # note above run_smoke — so smoke-reads.sh SKIPs the merged-record check
-    # rather than calling it). Kept only so a future real query still has a
-    # canned case to fall into, without hardcoding the real client name this
-    # double does not need.
-    printf '%s\n' '{"result":"C-046 C-036 \"merged\":true"}'
     ;;
   *'"name":"log-activity"'*|*'"name":"set-next-action"'*|*'"name":"complete-action"'*)
     printf '%s\n' '{"result":"\"ok\":true \"replayed\":true \"existing\":true"}'
