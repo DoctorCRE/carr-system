@@ -443,7 +443,9 @@ class Fixture:
         # process. Capture it at construction, before any simulated sync.
         loaded = {path: rp.git_blob((self.repo / path).read_bytes())
                   if (self.repo / path).is_file() else None for path in (
-                      "ops/release-pipeline.py", "lib/secret_redaction.py",
+                      "ops/release-pipeline.py", "lib/credential_file.py",
+                      "lib/github_reader.py", "lib/secret_redaction.py",
+                      "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
                       "ops/config/release-pipeline.v1.json")}
         if isinstance(cfg, rp.LoadedConfig):
             loaded["ops/config/release-pipeline.v1.json"] = cfg.source_blob
@@ -4122,7 +4124,7 @@ class ClearFailedRetirement(Base):
 
 
 class ControllerSourceCapture(Base):
-    def test_default_provenance_survives_disk_updates_before_construction(self):
+    def test_default_provenance_survives_disk_updates_after_loading(self):
         # Load real modules in a separate interpreter; fixture injection must
         # not conceal a constructor that re-reads already replaced source.
         files = {path: (HERE.parent / path).read_text() for path in (
@@ -4138,14 +4140,18 @@ from pathlib import Path
 repo = Path(sys.argv[1])
 module = runpy.run_path(str(repo / "ops/release-pipeline.py"))
 cfg = module["load_config"](repo / "ops/config/release-pipeline.v1.json")
-for path in ("ops/release-pipeline.py", "lib/secret_redaction.py",
-             "ops/config/release-pipeline.v1.json"):
+for path in ("ops/release-pipeline.py", "lib/credential_file.py",
+             "lib/github_reader.py", "lib/secret_redaction.py",
+             "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+             "ops/config/release-pipeline.v1.json", "mcp-server/package.json",
+             "mcp-server/package-lock.json"):
     with (repo / path).open("a") as stream:
         stream.write("\\nchanged after loading\\n")
 pipe = module["Pipeline"](cfg, repo=repo, out=lambda _: None)
-pipe.controller_current({})
-subprocess.run(["git", "add", "ops/release-pipeline.py", "lib/secret_redaction.py",
-                "ops/config/release-pipeline.v1.json"], cwd=repo, check=True)
+subprocess.run(["git", "add", "ops/release-pipeline.py", "lib/credential_file.py",
+                "lib/github_reader.py", "lib/secret_redaction.py", "ops/release-smoke.py",
+                "ops/doctorcre-production-smoke.py", "ops/config/release-pipeline.v1.json",
+                "mcp-server/package.json", "mcp-server/package-lock.json"], cwd=repo, check=True)
 subprocess.run(["git", "commit", "-qm", "updated disk"], cwd=repo, check=True)
 subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=repo, check=True)
 try:
@@ -4238,11 +4244,14 @@ class ControllerFreshness(Base):
         self.assertEqual(path.read_bytes(), before)
 
     def test_fast_forward_after_load_cannot_disguise_running_controller(self):
-        for path in ("ops/release-pipeline.py", "lib/secret_redaction.py",
+        for path in ("ops/release-pipeline.py", "lib/credential_file.py",
+                     "lib/github_reader.py", "lib/secret_redaction.py",
+                     "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
                      "ops/config/release-pipeline.v1.json"):
             with self.subTest(path=path):
                 cfg = self.fx.config()
                 cfg["app"]["enabled"] = True
+                prior_release = self.fx.state().get("app", {}).get("last_released_sha")
                 self.fx.commit({path: json.dumps(cfg) if path.endswith(".json") else "old source\n"})
                 runner = FakeRunner()
                 pipe = self.fx.pipeline(runner, cfg=rp.load_config(self.fx.repo / path)
@@ -4256,7 +4265,31 @@ class ControllerFreshness(Base):
                 self.assertEqual(pipe.tick(["app"]), 3)
                 self.assertEqual(runner.calls, [])
                 self.assertEqual(self.fx.records()[-1]["reason"], "controller_stale")
-                self.assertFalse(self.fx.state()["app"].get("failed_sha"))
+                state = self.fx.state().get("app", {})
+                self.assertFalse(state.get("failed_sha"))
+                self.assertEqual(state.get("last_released_sha"), prior_release)
+
+    def test_wrangler_package_inputs_must_match_main_before_any_release_step(self):
+        prior_release = self.fx.state()["worker"]["last_released_sha"]
+        sha = self.fx.commit({"mcp-server/src/a.js": "candidate"})
+        for package_file in rp.TOOLCHAIN_FILES:
+            with self.subTest(package_file=package_file):
+                path = self.fx.repo / "mcp-server" / package_file
+                original = path.read_bytes()
+                path.write_bytes(original + b"\n")
+                runner = FakeRunner(live={"sha": self.fx.base})
+                try:
+                    self.assertEqual(self.fx.pipeline(runner, live={"sha": self.fx.base}).tick(["worker"]), 3)
+                    self.assertEqual(runner.calls, [])
+                    record = self.fx.records()[-1]
+                    self.assertEqual((record["status"], record["reason"], record["sha"]),
+                                     ("blocked", "controller_stale", sha))
+                    self.assertIn("mcp-server/" + package_file, record["detail"])
+                    state = self.fx.state()["worker"]
+                    self.assertFalse(state.get("failed_sha"))
+                    self.assertEqual(state["last_released_sha"], prior_release)
+                finally:
+                    path.write_bytes(original)
 
     def test_a_checkout_behind_main_holds_without_burning_the_sha_then_ships_once_current(self):
         released = self.fx.state()["worker"]["last_released_sha"]

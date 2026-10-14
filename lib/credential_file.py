@@ -23,6 +23,8 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+SOURCE_BYTES = Path(__file__).read_bytes()
+
 _ASSIGNMENT = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 

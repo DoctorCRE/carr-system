@@ -97,13 +97,12 @@ Evidence: out/release-smoke/<sha>/<phase>-<invocation>/. Each lane must set
 
 CONTROLLER FRESHNESS. launchd runs this file from the canonical checkout,
 and fleet-sync fast-forwards that checkout only when it has no local changes.
-Before releasing either lane the tick compares its own source
-(CONTROLLER_PATHS) with origin/main; imported source and parsed configuration
-retain their load-time bytes, while subprocess helpers are checked on disk.
-Any difference holds every lane
-as `controller_stale` (nothing run, no SHA burned) and files one loop per stale
-episode. 2026-10-05: a checkout 8 commits behind ran app f04c9ab8 without the
-`app-build` step main already carried, and burned that SHA.
+Before releasing either lane the tick compares imported source bytes, current
+checkout bytes, and the Wrangler package inputs in CONTROLLER_PATHS with
+origin/main. Any difference holds every lane as `controller_stale` (nothing
+run, no SHA burned) and files one loop per stale episode. 2026-10-05: a
+checkout 8 commits behind ran app f04c9ab8 without the `app-build` step main
+already carried, and burned that SHA.
 
 BATCHING. Each lane releases the LATEST main SHA, never each merge separately.
 The last released SHA per lane lives in out/release-pipeline/state.json; when it
@@ -251,8 +250,8 @@ from typing import Any, Callable, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.credential_file import credential, read_env_file  # noqa: E402
-from lib.github_reader import GitHubReader, GitHubUnreadable  # noqa: E402
+from lib.credential_file import SOURCE_BYTES as CREDENTIAL_FILE_SOURCE_BYTES, credential, read_env_file  # noqa: E402
+from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHubReader, GitHubUnreadable  # noqa: E402
 from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
 CONTROLLER_SOURCE_BYTES = Path(__file__).read_bytes()
 CONFIG_PATH = REPO / "ops" / "config" / "release-pipeline.v1.json"
@@ -272,11 +271,12 @@ CLOUDFLARE_TOKEN_NAME = "CLOUDFLARE_API_TOKEN"
 CLOUDFLARE_TOKEN_FILE = "tokens.env"   # under credential_dir
 TOOLCHAIN_FILES = ("package.json", "package-lock.json")   # mcp-server files that key the token-check wrangler
 CREDENTIAL_INVENTORY_PATH = REPO / "ops/config/credential-inventory.v1.json"
-# The code and config this tick executes from the canonical checkout; each must
-# equal origin/main before any lane releases (see CONTROLLER FRESHNESS above).
+# Code this process loaded and disk inputs used by its subprocesses; all must
+# match origin/main before a lane can release (see CONTROLLER FRESHNESS above).
 CONTROLLER_PATHS = ("ops/release-pipeline.py", "ops/config/release-pipeline.v1.json",
-                    "lib/secret_redaction.py", "ops/release-smoke.py",
-                    "ops/doctorcre-production-smoke.py")
+                    "lib/credential_file.py", "lib/github_reader.py", "lib/secret_redaction.py",
+                    "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                    "mcp-server/package.json", "mcp-server/package-lock.json")
 CONTROLLER_STALE = "controller_stale"
 CONTROLLER_UNREADABLE = "controller_unreadable"
 
@@ -337,6 +337,8 @@ SMOKE_ALWAYS_ATTRIBUTED = frozenset({"release-identity", "verb-registry", "brows
 SMOKE_OUT = Path("out") / "release-smoke"
 _SMOKE = runpy.run_path(str(REPO / "ops/release-smoke.py"))
 SMOKE_LANE_JOURNEYS: dict[str, tuple[str, ...]] = _SMOKE["LANE_JOURNEYS"]
+SMOKE_SOURCE_BYTES: bytes = _SMOKE["SOURCE_BYTES"]
+DOCTOR_SMOKE_SOURCE_BYTES: bytes = _SMOKE["DOCTOR_SOURCE_BYTES"]
 served_version: Callable[[str, Any], str | None] = _SMOKE["served_version"]
 
 
@@ -946,7 +948,11 @@ class Pipeline:
         self.rotate_lost_staging_credentials = tuple(rotate_lost_staging_credentials)
         self.controller_blobs = dict(controller_blobs) if controller_blobs is not None else {
             "ops/release-pipeline.py": git_blob(CONTROLLER_SOURCE_BYTES),
+            "lib/credential_file.py": git_blob(CREDENTIAL_FILE_SOURCE_BYTES),
+            "lib/github_reader.py": git_blob(GITHUB_READER_SOURCE_BYTES),
             "lib/secret_redaction.py": git_blob(REDACTION_SOURCE_BYTES),
+            "ops/release-smoke.py": git_blob(SMOKE_SOURCE_BYTES),
+            "ops/doctorcre-production-smoke.py": git_blob(DOCTOR_SMOKE_SOURCE_BYTES),
             "ops/config/release-pipeline.v1.json": getattr(cfg, "source_blob", None),
         }
         self.runner = runner or Runner()
@@ -1890,9 +1896,9 @@ class Pipeline:
                               capability=name)
 
     def controller_current(self, state: dict) -> None:
-        """Compare loaded controller bytes and on-disk subprocess helpers to
-        immutable main. Unreadable evidence is a retryable hold, never a
-        deployment failure. Recovery state is only cleared in a real tick."""
+        """Compare loaded code and current on-disk inputs to immutable main.
+        Unreadable evidence is a retryable hold, never a deployment failure.
+        Recovery state is only cleared in a real tick."""
         try:
             remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main").split()
             if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
@@ -1903,11 +1909,9 @@ class Pipeline:
             for path in CONTROLLER_PATHS:
                 entry = self.git("ls-tree", main, "--", path)
                 committed = entry.split()[2] if entry else None
-                if path in self.controller_blobs:
-                    loaded = self.controller_blobs[path]
-                else:
-                    loaded = self.git("hash-object", "--", path) if (self.repo / path).is_file() else None
-                if loaded != committed:
+                loaded = self.controller_blobs.get(path, committed)
+                disk = self.git("hash-object", "--", path) if (self.repo / path).is_file() else None
+                if loaded != committed or disk != committed:
                     stale.append(path)
         except (StepFailed, OSError) as exc:
             raise Blocked(CONTROLLER_UNREADABLE, f"controller freshness read unavailable: {exc}") from exc
