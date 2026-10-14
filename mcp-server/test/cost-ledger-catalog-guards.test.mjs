@@ -1,7 +1,3 @@
-// V5-A04 — the catalog's three shipped-release acceptance clauses, expressed
-// against the existing public seams.  These tests are deliberately thin: the
-// detailed fixture suites remain the authority for each module, while this
-// file makes the slice-to-behaviour mapping executable and attributable.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -77,11 +73,6 @@ test("V5-A04 acceptance: qualification failure alone forces replan at negligible
     qualification_state: "qualification_failed",
   });
 
-  // A route that lost its qualification replans at one percent of budget just
-  // as it does at two hundred: the trigger list alone does not pin this down,
-  // because a directive computed some other way could still land on "replan"
-  // by coincidence at this ratio. The directive itself is the acceptance
-  // clause, so it is what this test asserts.
   assert.equal(directive.directive, "replan");
 });
 
@@ -91,9 +82,6 @@ test("V5-A04 acceptance: qualification failure outranks a merely-warning cost ra
     qualification_state: "qualification_failed",
   });
 
-  // At exactly 150 percent the cost ratio alone would only warn. Qualification
-  // failure must still win outright and replan, not settle for whichever of
-  // the two triggers looks the more severe by cost band.
   assert.equal(directive.directive, "replan");
 });
 
@@ -103,11 +91,6 @@ test("V5-A04 acceptance: the 150/200 floor boundaries hold at a non-round estima
     qualification_state: "qualified",
   });
 
-  // 20001 / 10001 is 199.99...%: short of 200 percent, so it must warn, not
-  // replan. 15001 / 10001 is 149.99...%: short of 150 percent, so it must
-  // continue, not warn. A ratio computed with Math.ceil instead of Math.floor
-  // rounds both of these up into the next band; this is the boundary that
-  // catches it where round numbers (100/149, 100/150) cannot.
   assert.equal(directive(20001).directive, "warn");
   assert.equal(directive(15001).directive, "continue");
 });
@@ -122,8 +105,6 @@ test("V5-A04 acceptance: a node exactly at its ceiling is not overdrawn", () => 
   assert.equal(projection.by_node[CHILD].overdrawn, false);
   assert.equal(projection.by_node[ROOT].overdrawn, false);
 
-  // Sitting exactly at the ceiling must not poison a sibling's reservations:
-  // if it did, that would mean "at" was silently treated as "past".
   const siblingReserve = reserve(atCeiling.ledger, reservation("sibling-at-ceiling", SIBLING, 1));
   assert.equal(siblingReserve.outcome.accepted, true);
   assertLedgerConservation(siblingReserve.ledger);
@@ -148,7 +129,6 @@ test("V5-A04 acceptance: overdrawn ancestors deny new reservation", () => {
 });
 
 test("V5-A04 acceptance: race/cancel/retry/vendor/late-actual/conversion conservation fixtures pass", () => {
-  // Race: two callers compute from one base; the cell admits one commit.
   const cell = openLedgerCell(fresh());
   const first = cell.prepare(reserveStep("race-a", 200));
   const second = cell.prepare(reserveStep("race-b", 200));
@@ -160,8 +140,6 @@ test("V5-A04 acceptance: race/cancel/retry/vendor/late-actual/conversion conserv
   assert.equal(conflict.outcome.reason_id, "version_conflict");
   assertLedgerConservation(cell.read());
 
-  // Cancel and retry: cancellation releases the intention, while replaying an
-  // operation appends nothing and returns the original outcome.
   let ledger = fresh();
   const initial = reserve(ledger, reservation("cancel"));
   const replay = reserve(initial.ledger, reservation("cancel"));
@@ -175,8 +153,6 @@ test("V5-A04 acceptance: race/cancel/retry/vendor/late-actual/conversion conserv
   assert.equal(projectLedger(ledger).by_node[SLICE].rolled_up.committed_units, 0);
   assertLedgerConservation(ledger);
 
-  // Vendor and late actual: a duplicate reference is refused, while a real
-  // over-ceiling charge is recorded in full and conserved through ancestors.
   ({ ledger } = postActual(ledger, {
     operation_id: "op:vendor-a",
     node_id: SLICE,
@@ -202,8 +178,6 @@ test("V5-A04 acceptance: race/cancel/retry/vendor/late-actual/conversion conserv
   assert.equal(projectLedger(ledger).by_node[ROOT].rolled_up.actual_units, 490);
   assertLedgerConservation(ledger);
 
-  // Conversion: one operation releases one reservation and books one actual;
-  // a second conversion cannot count the same intention twice.
   let conversionLedger = reserve(fresh(), reservation("convert")).ledger;
   ({ ledger: conversionLedger } = convertReservationToActual(conversionLedger, {
     operation_id: "op:convert-a",
