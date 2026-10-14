@@ -83,7 +83,8 @@ def load_private_plan(path: pathlib.Path, expected_app_sha: str, expected_carr_s
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() \
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
                 raise FixtureRefusal("invoice plan must be an owned private regular file")
             if info.st_size > MAX_PLAN_BYTES:
                 raise FixtureRefusal("invoice plan exceeds the bounded size")
@@ -321,7 +322,8 @@ def _read_private_existing_proof(directory_fd: int, name: str) -> bytes | None:
         raise FixtureRefusal("existing proof path is not a safe regular file") from exc
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600:
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() \
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
             raise FixtureRefusal("existing proof must be an owned private regular file")
         if info.st_size > MAX_PROOF_BYTES:
             raise FixtureRefusal("existing proof exceeds the bounded size")

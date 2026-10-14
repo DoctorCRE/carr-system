@@ -120,6 +120,32 @@ class PlanTests(unittest.TestCase):
             target.chmod(0o644)
             with self.assertRaises(fixture.FixtureRefusal): fixture.load_private_plan(target, APP_SHA, CARR_SHA)
 
+    def test_refuses_hardlinked_plan_before_provider_or_database_effects(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            path, alias = root / "plan.json", root / "plan-alias.json"
+            path.write_text(json.dumps(plan())); path.chmod(0o600)
+            os.link(path, alias)
+            proof_parent = root / "proofs"
+            proof_parent.mkdir(mode=0o700); proof_parent.chmod(0o700)
+            args = ["staging-fixtures.py", "--apply", "--invoice-plan", str(path),
+                    "--expected-app-sha", APP_SHA, "--expected-carr-sha", CARR_SHA,
+                    "--proof-file", str(proof_parent / "fixture.json")]
+            provider = Mock(side_effect=AssertionError("linked plan reached provider"))
+            connect = Mock(side_effect=AssertionError("linked plan reached database"))
+            stderr = io.StringIO()
+            environment = {"DATABASE_URL": "postgresql://neondb_owner:dummy@ep-test.neon.tech/neondb",
+                           "CARR_STAGING_REPLACEMENT_PROJECT_ID": "prj-test",
+                           "CARR_STAGING_REPLACEMENT_ENDPOINT_ID": "ep-test"}
+            with patch.object(sys, "argv", args), patch.object(sys, "stderr", stderr), \
+                    patch.dict(fixture.os.environ, environment, clear=True), \
+                    patch.object(fixture, "validate_provider_binding", provider), \
+                    patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=connect)}):
+                self.assertEqual(fixture.main(), 2)
+            self.assertEqual(provider.call_count, 0)
+            self.assertEqual(connect.call_count, 0)
+            self.assertIn("invoice plan", stderr.getvalue())
+
     def test_fifo_plan_refuses_without_blocking(self):
         with tempfile.TemporaryDirectory() as raw:
             path = pathlib.Path(raw) / "plan.fifo"
@@ -263,6 +289,21 @@ class PlanTests(unittest.TestCase):
             with self.assertRaises(fixture.FixtureRefusal):
                 fixture.publish_private_proof(path, {"schema": "different"})
             self.assertEqual(path.read_bytes(), before)
+
+    def test_linked_existing_proof_is_refused_and_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as raw:
+            parent = pathlib.Path(raw) / "proofs"
+            parent.mkdir(mode=0o700); parent.chmod(0o700)
+            path, alias = parent / "fixture.json", parent / "proof-alias.json"
+            proof = {"schema": fixture.PROOF_SCHEMA, "fixture_run": RUN}
+            self.assertEqual(fixture.publish_private_proof(path, proof), "created")
+            before = path.read_bytes()
+            os.link(path, alias)
+            with self.assertRaises(fixture.FixtureRefusal):
+                fixture.publish_private_proof(path, proof)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(alias.read_bytes(), before)
+            self.assertEqual(path.stat().st_ino, alias.stat().st_ino)
 
     def test_proof_refuses_unprivate_parent_symlink_and_oversized_content(self):
         with tempfile.TemporaryDirectory() as raw:
