@@ -85,9 +85,23 @@ def _run_record(args: dict, *, runner: Callable[..., Any] = subprocess.run) -> s
         raise RuntimeError("authenticated Codex continuity record failed")
     try:
         payload = json.loads(result.stdout)
-        event_id = payload["event"]["id"]
+        event = payload["event"]
     except (ValueError, KeyError, TypeError):
         raise RuntimeError("continuity record returned no event id") from None
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        raise RuntimeError("continuity record did not confirm success")
+    if not isinstance(event, dict):
+        raise RuntimeError("continuity record returned no event id")
+    expected = {
+        "native_task_id": args.get("native_task_id"),
+        "project_id": args.get("project_id"),
+        "cwd": args.get("cwd"),
+        "event_type": args.get("event_type"),
+        "cursor": args.get("cursor"),
+    }
+    if any(event.get(key) != value for key, value in expected.items()):
+        raise RuntimeError("continuity record returned an event with mismatched bindings")
+    event_id = event.get("id")
     if not isinstance(event_id, str) or not event_id.strip():
         raise RuntimeError("continuity record returned no event id")
     return event_id
