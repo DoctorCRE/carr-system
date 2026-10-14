@@ -333,8 +333,9 @@ def _classify_claude_cli_stream(stdout, returncode):
     `system/api_retry.error_status` and `.error`. This reads only those typed
     fields and the final `result` event, never free-form error text.
     """
-    result_texts = []
+    result_messages = []
     retry_events = []
+    rejected_rate_limit = False
     last_event_type = None
     lines = (stdout or "").splitlines()
     if not lines:
@@ -357,14 +358,32 @@ def _classify_claude_cli_stream(stdout, returncode):
                     or not isinstance(error, str) or error not in _CLAUDE_RETRY_ERRORS):
                 return ProbeResult("failed", "readback_failed")
             retry_events.append((status, error))
+        elif event.get("type") == "rate_limit_event":
+            info = event.get("rate_limit_info")
+            if not isinstance(info, dict) or info.get("status") not in {
+                    "allowed", "allowed_warning", "rejected"}:
+                return ProbeResult("failed", "readback_failed")
+            limit_type = info.get("rateLimitType")
+            if limit_type is not None and limit_type not in {
+                    "five_hour", "seven_day", "seven_day_opus",
+                    "seven_day_sonnet", "overage"}:
+                return ProbeResult("failed", "readback_failed")
+            overage_status = info.get("overageStatus")
+            if overage_status is not None and overage_status not in {
+                    "allowed", "allowed_warning", "rejected"}:
+                return ProbeResult("failed", "readback_failed")
+            rejected_rate_limit = rejected_rate_limit or info["status"] == "rejected"
         elif event.get("type") == "result":
             result_text = event.get("result")
-            if not isinstance(result_text, str):
+            is_error = event.get("is_error")
+            if not isinstance(result_text, str) or not isinstance(is_error, bool):
                 return ProbeResult("failed", "readback_failed")
-            result_texts.append(result_text)
+            result_messages.append((result_text, is_error))
 
-    if (returncode == 0 and last_event_type == "result" and result_texts
-            and result_texts[-1].strip() == "PONG"):
+    if rejected_rate_limit:
+        return ProbeResult("unknown", "rate_limited")
+    if (returncode == 0 and last_event_type == "result" and result_messages
+            and result_messages[-1] == ("PONG", False)):
         return ProbeResult("ok", "active")
 
     if any(error == "authentication_failed" or status == 401

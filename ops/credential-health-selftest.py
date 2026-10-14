@@ -661,7 +661,7 @@ def test_claude_token_active_readback_is_ok():
         ch.MINT_STATE = {}
         ch.WHICH = lambda name: "/usr/bin/claude"
         ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
-            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}), stderr="")
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}), stderr="")
         cred = _claude_cred(path=path)
         r = ch.evaluate_credential(cred)
         check("claude cli token: shaped + PONG readback -> ok", r.bucket == "ok", r.bucket)
@@ -673,7 +673,7 @@ def test_claude_token_missing_file_is_unknown():
     ch.MINT_STATE = {}
     ch.WHICH = lambda name: "/usr/bin/claude"
     ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
-        a, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}))
+        a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
     cred = _claude_cred(path="/nonexistent/tokens.env")
     r = ch.evaluate_credential(cred)
     check("claude cli token: file missing -> unknown (can't verify at all)",
@@ -700,7 +700,7 @@ def test_claude_token_malformed_shape_never_calls_cli():
     def spying_run(*a, **k):
         calls.append((a, k))
         return subprocess.CompletedProcess(
-            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}))
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td, value="sk-ant-oat-too-short")
         ch.MINT_STATE = {}
@@ -766,6 +766,33 @@ def test_claude_token_rate_limit_is_unknown_not_auth_failure():
               (r.bucket, r.detail))
 
 
+def test_claude_token_observed_rejected_seven_day_limit_is_unknown():
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_claude_tokens_file(td)
+        ch.MINT_STATE = {}
+        ch.WHICH = lambda name: "/usr/bin/claude"
+        stream = _claude_stream(
+            {"type": "rate_limit_event", "rate_limit_info": {
+                "status": "rejected", "rateLimitType": "seven_day",
+                "overageStatus": "rejected"}},
+            {"type": "result", "is_error": True, "api_error_status": 429,
+             "result": "[suppressed]"})
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 1, stdout=stream, stderr="")
+        r = ch.evaluate_credential(_claude_cred(path=path))
+        check("claude cli token: documented rejected rate-limit event -> unknown",
+              r.bucket == "unknown" and r.detail == "rate_limited",
+              (r.bucket, r.detail))
+
+
+def test_claude_token_error_marked_pong_cannot_pass():
+    result = ch._classify_claude_cli_stream(
+        _claude_stream({"type": "result", "result": "PONG", "is_error": True}), 0)
+    check("claude cli token: is_error PONG cannot prove authentication",
+          result.bucket == "failed" and result.detail == "readback_failed",
+          (result.bucket, result.detail))
+
+
 def test_claude_token_authentication_failure_remains_failed():
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td)
@@ -790,7 +817,7 @@ def test_claude_token_pong_in_non_result_event_cannot_pass():
             a, 0, stdout=_claude_stream(
                 {"type": "assistant", "message": {"content": [
                     {"type": "text", "text": "PONG"}]}},
-                {"type": "result", "result": "I could not verify the token."}), stderr="")
+                {"type": "result", "result": "I could not verify the token.", "is_error": False}), stderr="")
         r = ch.evaluate_credential(_claude_cred(path=path))
         check("claude cli token: PONG outside the final result cannot pass",
               r.bucket == "failed" and r.detail == "readback_failed",
@@ -844,7 +871,7 @@ def test_claude_token_readback_runs_with_only_the_one_env_var_from_a_temp_cwd():
     def spying_run(argv, cwd=None, env=None, **k):
         calls.append({"argv": argv, "cwd": cwd, "env": dict(env or {})})
         return subprocess.CompletedProcess(
-            argv, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}), stderr="")
+            argv, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}), stderr="")
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td)
         ch.MINT_STATE = {}
@@ -873,7 +900,7 @@ def test_claude_token_mint_date_recorded_on_first_sight():
         ch.MINT_STATE = {}
         ch.WHICH = lambda name: "/usr/bin/claude"
         ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
-            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}))
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         ch.evaluate_credential(cred)
         entry = ch.MINT_STATE.get(cred["name"])
@@ -892,7 +919,7 @@ def test_claude_token_mint_date_persists_and_ages_toward_expiring_soon():
         path = _write_claude_tokens_file(td)
         ch.WHICH = lambda name: "/usr/bin/claude"
         ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
-            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}))
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         fingerprint = ch._sha256_hex(CLAUDE_TOKEN_FIXTURE)
         old_mint = (datetime.now(timezone.utc) - timedelta(days=340)).date().isoformat()
@@ -913,7 +940,7 @@ def test_claude_token_rotation_resets_the_mint_clock():
         path = _write_claude_tokens_file(td)
         ch.WHICH = lambda name: "/usr/bin/claude"
         ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
-            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}))
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         stale_fingerprint = "0" * 64  # deliberately NOT this token's real fingerprint
         old_mint = (datetime.now(timezone.utc) - timedelta(days=400)).date().isoformat()
@@ -933,7 +960,7 @@ def test_claude_token_value_never_leaks():
         ch.MINT_STATE = {}
         ch.WHICH = lambda name: "/usr/bin/claude"
         ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
-            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG"}))
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         rows = ch.run_all([cred])
         check("claude cli token: the token value never reaches run_all()'s rows",
@@ -956,6 +983,8 @@ test_claude_token_malformed_shape_never_calls_cli()
 test_claude_token_cli_not_found_is_unknown()
 test_claude_token_readback_without_pong_is_failed()
 test_claude_token_rate_limit_is_unknown_not_auth_failure()
+test_claude_token_observed_rejected_seven_day_limit_is_unknown()
+test_claude_token_error_marked_pong_cannot_pass()
 test_claude_token_authentication_failure_remains_failed()
 test_claude_token_pong_in_non_result_event_cannot_pass()
 test_claude_token_missing_result_and_no_response_are_unknown_or_failed()
