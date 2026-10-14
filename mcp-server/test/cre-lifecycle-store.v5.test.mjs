@@ -1,30 +1,3 @@
-// V5-J102 — the persistence tail, proved case by case.
-//
-// Everything here is synthetic and nothing reaches a real database, provider,
-// network or filesystem. The store runs against a SCRIPTED FAKE HANDLE that
-// records every statement and every parameter in order, so these tests prove the
-// things a Node suite can actually prove about a persistence layer:
-//
-//   * which values are DERIVED and which are refused from the caller,
-//   * WHICH STATEMENTS RUN, IN WHAT ORDER — the replay-before-state ordering in
-//     particular, which is load-bearing rather than incidental,
-//   * that subjects and evidence are LOADED and that caller pins are CHECKED
-//     against the readback rather than believed,
-//   * that the compare-and-swap operands and the evidence recheck manifest
-//     actually travel to the database,
-//   * that a failing write ROLLS BACK and does not report success,
-//   * that a replay reports what LANDED rather than what a fresh evaluation
-//     would say now.
-//
-// NOTHING HERE MIRRORS A RETURN VALUE BACK AT ITSELF. Every assertion is either
-// about a statement the store issued, a parameter it bound, the order it did so
-// in, or a refusal it produced without issuing a write — never "the fake said X
-// and the store returned X".
-//
-// The things a fake cannot prove — real concurrency, real append-only refusal,
-// real direct-DML refusal, real evidence movement under a lock — are the SQL
-// fixture's job, and mcp-server/test/cre-lifecycle-postgres.sql asserts them
-// there instead of them being claimed twice here.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -82,7 +55,6 @@ import {
   v5J102ToolRegistrations,
 } from "../src/cre-lifecycle-store.v5.js";
 
-// --- synthetic fixtures ----------------------------------------------------
 
 const SERVER_NOW = "2026-09-09T12:00:00.000Z";
 const T = { early: "2026-09-01T09:00:00Z", mid: "2026-09-05T09:00:00Z", late: "2026-09-08T09:00:00Z" };
@@ -116,7 +88,6 @@ const dealState = (over = {}) => ({
   cancellation_reason: null, closing_date: null, ...over,
 });
 
-/** The shape ops.j102_subject returns: the state plus its recomputed digest. */
 const storedSubject = state => ({
   subject_kind: state.subject_kind,
   subject_id: state.subject_id,
@@ -128,7 +99,6 @@ const storedSubject = state => ({
   integrity: "recomputed_from_committed_row",
 });
 
-/** The shape ops.f01_read('document', ...) returns: a verified F01 envelope. */
 const storedDocument = (over = {}) => {
   const record = {
     schema_version: "doctorcre-v5-f01-stored-document-version.v1",
@@ -142,14 +112,6 @@ const storedDocument = (over = {}) => {
   return { body: { record, record_digest: digest(record), integrity: "recomputed_from_committed_row" } };
 };
 
-/**
- * The shape ops.j102_first_party_record returns.
- *
- * IT NAMES ITS SUBJECT. The binding lives on the stored row, not on the request
- * that later reads it, so these fixtures carry the subject each record kind is
- * about — and the adversarial cases below hand back a record about somebody
- * else's deal without changing anything else on it.
- */
 const FACT_SUBJECT = Object.freeze({
   assignment_mandate: { subject_kind: "assignment", subject_id: "asg-synthetic-1" },
   winning_property_commitment: { subject_kind: "assignment", subject_id: "asg-synthetic-1" },
@@ -168,7 +130,6 @@ const storedFact = (record_kind, over = {}) => {
   return { record, record_digest: digest(record), integrity: "recomputed_from_committed_row" };
 };
 
-/** The shape ops.j102_evidence_subject_link returns when the pin IS associated. */
 const storedLink = (over = {}) => {
   const record = {
     schema_version: "doctorcre-v5-j102-stored-evidence-subject-link.v1",
@@ -184,7 +145,6 @@ const storedLink = (over = {}) => {
   return { record, link_digest: digest(record), integrity: "recomputed_from_committed_row" };
 };
 
-// --- the scripted fake handle ---------------------------------------------
 
 class FakeDb {
   constructor(script = {}) {
@@ -198,7 +158,6 @@ class FakeDb {
 
   set(key, value) { this.script[key] = value; return this; }
 
-  /** The ordered list of logical statements, for the ordering assertions. */
   get sequence() {
     return this.calls.map(({ text }) => {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(text)) return text;
@@ -230,8 +189,6 @@ class FakeDb {
       return { rows: [{
         principal,
         server_now: this.script.server_now ?? SERVER_NOW,
-        // Ruling (c): what ops.j102_sponsoring_partner() derives — the partner
-        // itself, or (for every synthetic agent here) its sponsor, joe.
         sponsoring_partner: "sponsoring_partner" in this.script ? this.script.sponsoring_partner
           : principal.authorization_class === "verified_partner" ? principal.actor_slug : "joe",
       }] };
@@ -255,10 +212,6 @@ class FakeDb {
       const facts = this.script.facts ?? {};
       return { rows: [{ record: facts[record_kind] ?? null }] };
     }
-    // THE ASSOCIATION READER ASKS A YES/NO QUESTION, and the fake answers it the
-    // same way: keyed on the SUBJECT as well as the pin, so a script that
-    // associates a document with one deal answers null for every other deal
-    // rather than handing the association back with somebody else's subject on it.
     if (text.includes("ops.j102_evidence_subject_link(")) {
       const [evidence_source, evidence_ref, version_no, content_digest,
         subject_kind, subject_id] = params;
@@ -267,10 +220,6 @@ class FakeDb {
         subject_kind, subject_id].join("|");
       return { rows: [{ link: links[key] ?? null }] };
     }
-    // The read door answers PER KIND when a fixture scripts one, so a composed
-    // read that issues two different reads gets two different answers rather than
-    // the same blob twice — which is what makes the ownership assertions below
-    // about the store's composition rather than about the fake.
     if (text.includes("ops.j102_read(")) {
       const [kind] = params;
       const byKind = this.script.read_bodies ?? {};
@@ -280,7 +229,6 @@ class FakeDb {
       return { rows: [{ body: this.script.read_body ?? { body: null } }] };
     }
 
-    // Owner ruling (b): the store's census of live sibling negotiations.
     if (text.includes("SELECT subject_id FROM ops.j102_subject_current")) {
       return { rows: (this.script.active_negotiations ?? []).map(subject_id => ({ subject_id })) };
     }
@@ -298,17 +246,8 @@ class FakeDb {
     throw new Error(`unscripted statement: ${text}`);
   }
 
-  /**
-   * The outcome shape each writer builds, reconstructed FROM THE PARAMETERS the
-   * store actually bound. A fake that returned a canned blob would pass whatever
-   * the store sent, including nothing at all; reading the parameters is what
-   * makes these assertions about the store rather than about the fake.
-   */
   outcomeFor(fn, params) {
     const envelope = index => (params[index] == null ? null : JSON.parse(params[index]));
-    // The actor the SCRIPTED principal names, not a literal, so a fixture running
-    // as a sponsored agent gets an outcome attributed to that agent — which is
-    // what resultFromOutcome checks before it reports anything.
     const actor_slug = this.script.principal?.actor_slug ?? "joe";
     if (fn === "j102_apply_transition") {
       const subjects = envelope(2);
@@ -320,11 +259,6 @@ class FakeDb {
         outcome: "applied",
         actor_slug,
         transition_id: params[0],
-        // M-2, mirrored from the real writer's receipt rather than from the old
-        // one: the kernel's diagnostic reason arrives under its own name with its
-        // own scope, and the two derived fields arrive with the source label the
-        // database stamps on them. The fake is a stand-in for the shape, so it
-        // has to be the shape the writer actually returns.
         caller_reported_reason_id: diagnostics.reason_id,
         caller_reported_reason_id_scope:
           "kernel_result_diagnostic_asserted_by_the_caller_and_not_recomputed_here",
@@ -342,11 +276,6 @@ class FakeDb {
       };
     }
     if (fn === "j102_initialize_subject") {
-      // The initialization receipt, reconstructed from the parameters the store
-      // actually bound. Note what it does NOT carry: no transition_id, no coupled
-      // facts, no evidence recheck — because this writer performs no transition
-      // and re-reads no evidence, and a fake that invented those fields would let
-      // the store's own receipt reader claim properties nothing enforced.
       const subject = envelope(2);
       const event = envelope(3);
       const diagnostics = envelope(6);
@@ -369,11 +298,6 @@ class FakeDb {
         creation_shape_enforced: true,
         required_context_enforced: true,
         parent_subjects_locked_and_unmoved: true,
-        // The keys the writer says it actually consulted. Reconstructed from the
-        // operand map the store bound, minus the created key — which is what the
-        // real writer's `v_consulted_keys` amounts to on a well-formed call, and
-        // is the field that keeps the two booleans above from reading as a chain
-        // walk on a parentless creation.
         context_subjects_consulted: Object.keys(JSON.parse(params[1]))
           .filter(key => key !== `${subject.record.subject_kind}:${subject.record.subject_id}`)
           .sort(),
@@ -386,11 +310,6 @@ class FakeDb {
     }
     const record = envelope(0).record;
     if (fn === "j102_record_reconciliation_item") {
-      // The GOVERNED writer's receipt, reconstructed from the parameters the
-      // store actually bound. It now carries an operation, an actor, a committed
-      // instant and the properties it enforced at the write boundary — which is
-      // what lets this path go through resultFromOutcome like every sibling and
-      // report on replay what LANDED rather than what a fresh reading would say.
       const operands = JSON.parse(params[1]);
       const diagnostics = JSON.parse(params[4]);
       const item_digest = envelope(0).record_digest;
@@ -462,8 +381,6 @@ class FakeDb {
   }
 }
 
-// The evidence references a caller supplies. Note what is NOT here: no document
-// state, no signature, no closing date, no record kind.
 const documentRef = (evidence_kind, over = {}) => ({
   evidence_kind, document_id: "doc-synthetic-1",
   expected_version_no: 1, expected_content_digest: D(1), ...over,
@@ -472,11 +389,9 @@ const recordRef = (evidence_kind, over = {}) => ({
   evidence_kind, record_id: "rec-synthetic-1", ...over,
 });
 
-// --- registration surface --------------------------------------------------
 
 test("the registration description is a description, and it says what the parent still owes", () => {
   const registrations = v5J102ToolRegistrations();
-  // One verb per operation, plus the authority-routed door to the fact writer.
   assert.equal(registrations.length, V5_J102_OPERATIONS.length + 1);
   const partnerFact = registrations.find(e => e.name === "record-partner-lifecycle-fact");
   assert.equal(partnerFact.store_operation, "record-lifecycle-fact");
@@ -487,20 +402,12 @@ test("the registration description is a description, and it says what the parent
     assert.ok(V5_J102_OPERATIONS.includes(entry.store_operation));
     assert.ok(entry.role.length > 0, `${entry.name} states its role`);
     assert.ok(entry.handler.length > 0);
-    // Registered, sealed (v80) and migration-bound (0704); never accepted.
     assert.equal(entry.registered_in_scac, true);
     assert.equal(entry.registered_in_mutation_registry, true);
     assert.equal(entry.migration_bound, true);
     assert.equal(entry.accepted, false);
   }
   const schemas = v5J102StoreOperationSchemas();
-  // Four acts need partner authority: committing to a winner, closing a deal,
-  // cancelling one, and correcting the record. Everything else an authenticated
-  // sponsored agent may do, because the evidence is what decides.
-  // Five acts need partner authority: committing to a winner, closing a deal,
-  // cancelling one, correcting the record, and — H5's shape applied to BLOCK-2's
-  // producer — saying which transaction a document belongs to. Everything else an
-  // authenticated sponsored agent may do, because the evidence is what decides.
   const authorityOnly = V5_J102_OPERATIONS.filter(n => schemas[n].authorityOnly).sort();
   assert.deepEqual(authorityOnly,
     ["cancel-pending-deal", "commit-winning-property", "record-deal-closing",
@@ -535,7 +442,6 @@ test("an envelope hashes to its own claim, and the canonical bytes are reproduci
   assert.ok(V5_J102_STORE_RECORD_KINDS.includes("stored_reconciliation_item"));
 });
 
-// --- derived-field and authority guards ------------------------------------
 
 test("a caller cannot supply the tenant, the clock, the subject, the evidence or a state axis", async () => {
   const db = new FakeDb();
@@ -548,16 +454,12 @@ test("a caller cannot supply the tenant, the clock, the subject, the evidence or
   for (const field of ["tenant", "now", "subject", "evidence", "recorded_by",
     "deal_state", "closing_state", "closing_date", "state_digest",
     "relationship_state", "assignment_phase",
-    // BLOCK-2 and H5: which subject an authentic record is about, and in what
-    // capacity its author wrote it, are read off stored rows and are not a
-    // caller's to state on the request that consumes them.
     "subject_binding", "bound_by", "binding_digest", "link_digest",
     "bound_subject_kind", "bound_subject_id"]) {
     await assert.rejects(() => store.recordDealExecution({ ...base, [field]: "x" }, ctx(JOE)),
       e => e instanceof V5J102StoreError && e.code === "caller_derived_field_refused",
       `${field} must be refused as a derived field`);
   }
-  // And nothing was attempted against the database.
   assert.equal(db.calls.length, 0);
 });
 
@@ -570,9 +472,6 @@ test("a caller cannot assert the outcome or inject authority, and the refusal na
     evidence_refs: [documentRef("executed_lease")],
   };
   for (const field of ["is_signed", "already_executed", "counterparty_accepted",
-    // A state axis whose NAME contains an asserted fragment is caught by the
-    // asserted guard before the derived one. Both refuse; the reason differs,
-    // and the more specific one is the more useful thing to tell a caller.
     "execution_state"]) {
     await assert.rejects(() => store.recordDealExecution({ ...base, [field]: true }, ctx(JOE)),
       e => e instanceof V5J102StoreError && e.code === "caller_asserted_fact_refused",
@@ -606,9 +505,6 @@ test("an unauthenticated actor, an inadmissible class, and a non-partner on an a
   };
   await assert.rejects(() => store.recordDealClosing(payload, ctx({ slug: "nobody", human: true })),
     e => e instanceof V5J102StoreError && e.code === "unauthenticated_actor");
-  // identity.js knows classes this lifecycle does not admit; the boundary is
-  // drawn here by name rather than surfacing as an unknown-vocabulary throw
-  // from the kernel about a class that simply is not entitled to move a record.
   await assert.rejects(() => store.recordDealClosing(payload,
     ctx({ slug: "codex", human: false, probe: true })),
   e => e instanceof V5J102StoreError && e.code === "actor_class_not_admitted_for_lifecycle");
@@ -623,12 +519,9 @@ test("an unauthenticated actor, an inadmissible class, and a non-partner on an a
   assert.equal(db.calls.length, 0, "no authority failure reaches the database");
 });
 
-// --- ordering and bindings -------------------------------------------------
 
-/** The association a lease document needs before it can advance THIS deal. */
 const LEASE_LINK_KEY =
   ["f01_document", "doc-synthetic-1", 1, D(1), "deal", "deal-synthetic-1"].join("|");
-/** The same, for the engagement letter that establishes THIS client. */
 const ETL_LINK_KEY =
   ["f01_document", "doc-synthetic-1", 1, D(1), "relationship", "rel-synthetic-1"].join("|");
 
@@ -651,17 +544,12 @@ test("replay is claimed BEFORE any state is read, and the whole statement order 
     evidence_refs: [documentRef("executed_lease")],
   }, ctx(JOE));
   assert.equal(answer.decision, "allow");
-  // THE ORDER IS THE ASSERTION. A replay that ran after the compare-and-swap
-  // would refuse a request that had already succeeded, so the claim must come
-  // before the first subject read.
   assert.deepEqual(db.sequence, [
     "BEGIN",
     "f01_principal",
     "j102_replay_outcome",
     "j102_subject",
     "f01_read",
-    // BLOCK-2: the document is pinned AND its association with this deal is
-    // read, both before the writer is called at all.
     "j102_evidence_subject_link",
     "j102_apply_transition",
     "COMMIT",
@@ -683,17 +571,13 @@ test("the transition writer receives the CAS digests, the envelopes and the rech
   const [transition_id, casJson, subjectsJson, eventsJson, recheckJson, key, requestDigest,
     diagnosticsJson] = db.paramsFor("j102_apply_transition");
 
-  // The transition chosen from the STORED instrument kind, not from the caller.
   assert.equal(transition_id, "record-lease-execution");
   assert.ok(V5_J102_TRANSITION_IDS.includes(transition_id));
 
-  // The compare-and-swap operand is the digest of the LOADED state.
   const cas = JSON.parse(casJson);
   assert.deepEqual(Object.keys(cas), ["deal:deal-synthetic-1"]);
   assert.equal(cas["deal:deal-synthetic-1"], digest(dealState()));
 
-  // One subject envelope, carrying the SERVER's actor and instant, hashing to
-  // its own claim, and naming the digest it was decided against.
   const subjects = JSON.parse(subjectsJson);
   assert.equal(subjects.length, 1);
   assert.equal(subjects[0].record_kind, "stored_lifecycle_subject");
@@ -703,18 +587,12 @@ test("the transition writer receives the CAS digests, the envelopes and the rech
   assert.equal(subjects[0].record.prior_state_digest, digest(dealState()));
   assert.equal(subjects[0].record.state.execution_state, "executed");
   assert.equal(subjects[0].record_digest, digest(subjects[0].record));
-  // HIGH-5. The subject's own provenance is the transition that is actually being
-  // applied — the same string the writer compares it against and refuses on. It
-  // is the field ops.j102_subject reports as the row's provenance, so a store
-  // that stamped anything else would be building a receipt-shaped lie the
-  // database now refuses.
   assert.equal(subjects[0].record.established_by_transition, transition_id);
   assert.equal(subjects[0].record.schema_version, V5_J102_STORED_SUBJECT_SCHEMA_VERSION);
   assert.equal(subjects[0].record.tenant, ORGANIZATION_TENANT_ID);
   assert.deepEqual(Object.keys(subjects[0].record).sort(),
     [...admissionPolicy().stored_subject_record_keys].sort());
 
-  // One event envelope, naming the transition and the evidence it rested on.
   const events = JSON.parse(eventsJson);
   assert.equal(events.length, 1);
   assert.equal(events[0].record.event.event_kind, "lease_executed");
@@ -724,26 +602,13 @@ test("the transition writer receives the CAS digests, the envelopes and the rech
   assert.equal(events[0].record.event.schema_version, V5_J102_EVENT_SCHEMA_VERSION);
   assert.deepEqual(Object.keys(events[0].record).sort(),
     [...admissionPolicy().stored_event_record_keys].sort());
-  // THE CANONICAL EVIDENCE REFERENCE, and it is exactly the triple the database
-  // can independently rebuild from what its own readers returned: the kind, the
-  // source, and the reference — for a document, F01's own document_id. The
-  // writer compares this array element for element against
-  // ops.j102_recheck_evidence's answer, so a fourth key would be a key the
-  // comparison has to admit on a fact it already guarantees (every pin is proved
-  // bound to the one primary subject, which the receipt names).
   assert.deepEqual(events[0].record.evidence_references, [{
     evidence_kind: "executed_lease", source: "f01_document", reference: "doc-synthetic-1",
   }]);
-  // And the reference really is the DOCUMENT ID, which is what the SQL recheck
-  // reads back off F01 — not a label the store chose beside it.
   assert.equal(events[0].record.evidence_references[0].reference,
     JSON.parse(recheckJson)[0].selector.document_id);
   assert.equal(events[0].record_digest, digest(events[0].record));
 
-  // THE RECHECK MANIFEST, which is what lets the database re-read the exact pin
-  // AND the exact binding under its own lock. A manifest carrying only the
-  // document id would let a newer version satisfy it; one carrying no binding
-  // would let somebody else's lease satisfy it.
   const recheck = JSON.parse(recheckJson);
   assert.deepEqual(recheck, [{
     evidence_kind: "executed_lease", source: "f01_document",
@@ -781,7 +646,6 @@ test("the executed instrument is chosen from the stored deal, so a purchase cann
   const params = db.paramsFor("j102_apply_transition");
   assert.equal(params[0], "record-purchase-contract-execution");
   const subjects = JSON.parse(params[2]);
-  // Q094: executed on the execution axis, pending on the business axis.
   assert.equal(subjects[0].record.state.execution_state, "executed");
   assert.equal(subjects[0].record.state.deal_state, "pending");
   assert.equal(subjects[0].record.state.diligence_state, "in_progress");
@@ -826,12 +690,6 @@ test("an unregistered declared axis determines no transition and nothing is writ
 });
 
 test("the declared axis selects a verb HERE and never enters the kernel's declared contract", () => {
-  // The axis names which of the four orthogonal deal verbs is being asked for.
-  // It is this module's dispatch input, not a fact about a deal, and the
-  // kernel's `request.declared` is closed and does not carry it — so the store
-  // forwards the domain half and drops the selector. This asks the kernel
-  // DIRECTLY which keys it accepts, so the two halves cannot drift apart
-  // without the suite naming the key that moved.
   const probe = declared => {
     try {
       evaluateLifecycleTransition({
@@ -841,9 +699,6 @@ test("the declared axis selects a verb HERE and never enters the kernel's declar
         actor: { slug: "joe", human: true, authorization_class: "verified_partner",
           derived_by: "authenticated_handler_context" },
         declared,
-        // Deliberately empty: the declared surface is validated before the
-        // evidence array's length is, so the probe never has to build evidence
-        // to learn whether a key got past that surface.
         evidence: [],
         now: SERVER_NOW,
       });
@@ -887,41 +742,25 @@ test("a commitment loads the related negotiation and binds BOTH compare-and-swap
   assert.equal(answer.decision, "allow");
 
   const params = db.paramsFor("j102_apply_transition");
-  // BLOCK-1. EVERY subject the decision touches is a compare-and-swap operand:
-  // the ones that were READ, including the negotiation, and the one that is
-  // CREATED. A prerequisite that moved invalidates the decision exactly as a
-  // target that moved does, and a created id that is already taken must not be
-  // upserted over.
   const cas = JSON.parse(params[1]);
   assert.deepEqual(Object.keys(cas).sort(),
     ["assignment:asg-synthetic-1", "deal:deal-synthetic-1",
       "property_negotiation:neg-synthetic-1"]);
   assert.equal(cas["property_negotiation:neg-synthetic-1"], digest(neg));
-  // AN EXPLICIT null, present as a key. "This subject must be ABSENT" and "I
-  // have no opinion about this subject" used to be the same bytes — no key at
-  // all — and the writer could only read the second.
   assert.ok(Object.prototype.hasOwnProperty.call(cas, "deal:deal-synthetic-1"));
   assert.equal(cas["deal:deal-synthetic-1"], null);
 
-  // Three subjects land together: the negotiation, the assignment and the NEW
-  // pending deal. Q082's coupled facts, as parameters.
   const subjects = JSON.parse(params[2]);
   assert.deepEqual(subjects.map(e => e.record.subject_kind).sort(),
     ["assignment", "deal", "property_negotiation"]);
   const dealEnvelope = subjects.find(e => e.record.subject_kind === "deal");
   assert.equal(dealEnvelope.record.state.deal_state, "pending");
   assert.equal(dealEnvelope.record.state.execution_state, "unexecuted");
-  // A newly created subject declares a null prior digest, and it is the SAME
-  // null the operand carries — the writer refuses the pair if they disagree.
   assert.equal(dealEnvelope.record.prior_state_digest, null);
   assert.equal(JSON.parse(params[3]).length, 3, "three events accompany three facts");
 });
 
 test("BLOCK-1: a created subject id that is already taken refuses instead of overwriting", async () => {
-  // THE REPRODUCER, at the store. deal-A exists, closed, with its closing date,
-  // under its own assignment. A verified partner commits a winner on a DIFFERENT
-  // assignment and names deal-A as the new deal id. Every kernel check passes,
-  // because the kernel has no view of existing deals.
   const asg = assignmentState({ subject_id: "asg-synthetic-2",
     assignment_phase: "negotiation", open_negotiation_count: 1 });
   const neg = {
@@ -985,12 +824,9 @@ test("BLOCK-1: a valid new creation still lands, and its operand is an explicit 
   assert.equal(answer.decision, "allow");
   const cas = JSON.parse(db.paramsFor("j102_apply_transition")[1]);
   assert.equal(cas["deal:deal-synthetic-fresh"], null);
-  // The absence was CHECKED rather than assumed: the store asked for the id it
-  // was about to create.
   assert.ok(db.callsTo("j102_subject").some(c => c.params[1] === "deal-synthetic-fresh"));
 });
 
-// --- initialization: the creation door -------------------------------------
 
 const engagementState = (over = {}) => ({
   subject_kind: "engagement", subject_id: "eng-synthetic-1",
@@ -1001,7 +837,6 @@ const engagementState = (over = {}) => ({
 const clientState = (over = {}) =>
   relationshipState({ relationship_state: "client", active_engagement_count: 1, ...over });
 
-/** A database holding the client and the active engagement an assignment needs. */
 const engagedDb = (extra = {}) => new FakeDb({
   subjects: {
     "relationship:rel-synthetic-1": storedSubject(clientState()),
@@ -1027,15 +862,9 @@ test("an initialization claims its key BEFORE any state is read, and the stateme
   assert.equal(answer.decision, "allow");
   assert.deepEqual(db.sequence, [
     "BEGIN",
-    // The actor and the instant, derived from the server.
     "f01_principal",
-    // REPLAY FIRST. A settled key must return its stored result even though the
-    // world has moved, exactly as it must for a transition.
     "j102_replay_outcome",
-    // The parents, then the id being claimed.
     "j102_subject", "j102_subject", "j102_subject",
-    // And the one writer. Note what is NOT here: no evidence reader of any kind,
-    // because a creation rests on none.
     "j102_initialize_subject",
     "COMMIT",
   ]);
@@ -1050,8 +879,6 @@ test("the created subject carries an EXPLICIT NULL operand and every parent carr
   const params = db.paramsFor("j102_initialize_subject");
   assert.equal(params[0], "initialize-assignment");
   const operands = JSON.parse(params[1]);
-  // The created key is present and its operand is null — "this subject must be
-  // ABSENT" — while the parents carry the digests the decision was taken against.
   assert.ok(Object.prototype.hasOwnProperty.call(operands, "assignment:asg-synthetic-9"));
   assert.equal(operands["assignment:asg-synthetic-9"], null);
   assert.equal(operands["engagement:eng-synthetic-1"], digest(engagementState()));
@@ -1064,8 +891,6 @@ test("the created subject carries an EXPLICIT NULL operand and every parent carr
     "the row's provenance is the initialization, never a transition");
   assert.equal(envelope.record.updated_by, "joe");
   assert.equal(envelope.record.updated_at, SERVER_NOW, "the instant is the server's");
-  // THE CREATED STATE IS THE EARLIEST ONE OF ITS KIND, and the store composed
-  // none of it: the kernel did.
   assert.deepEqual(envelope.record.state, assertLifecycleSubject({
     subject_kind: "assignment", subject_id: "asg-synthetic-9",
     engagement_id: "eng-synthetic-1", assignment_phase: "research",
@@ -1074,8 +899,6 @@ test("the created subject carries an EXPLICIT NULL operand and every parent carr
     multi_target_exception_ref: null,
   }));
 
-  // THE HISTORY CITES NOTHING, and that is a positive statement rather than an
-  // omission: no evidence in this rail can bind to a subject that does not exist.
   const event = JSON.parse(params[3]);
   assert.equal(event.record_kind, "stored_lifecycle_event");
   assert.deepEqual(event.record.evidence_references, []);
@@ -1089,16 +912,11 @@ test("the receipt names the parents this creation actually consulted, not a bare
   const answer = await createCreLifecycleStore({ db }).initializeAssignment(
     assignmentInit(), ctx(JOE));
   assert.equal(answer.decision, "allow");
-  // BOTH HALVES. The booleans are the stable field a caller compares across
-  // kinds; the consulted list is what makes them checkable, and here it is the
-  // two rows the client gate actually rests on.
   assert.equal(answer.required_context_enforced, true);
   assert.equal(answer.parent_subjects_locked_and_unmoved, true);
   assert.deepEqual(answer.context_subjects_consulted,
     ["engagement:eng-synthetic-1", "relationship:rel-synthetic-1"]);
   assert.equal(answer.context_subjects_consulted_count, 2);
-  // And the kernel agrees about which kinds those were, from its own answer
-  // rather than from the receipt.
   const evaluated = evaluateLifecycleInitialization({
     tenant: ORGANIZATION_TENANT_ID,
     initialization_id: "initialize-assignment",
@@ -1134,14 +952,12 @@ test("an id that is already taken refuses, and nothing is written", async () => 
 });
 
 test("a parent that is absent, stale, or refused by the kernel stops the creation", async () => {
-  // Absent.
   const absent = new FakeDb({ subjects: {} });
   const missing = await createCreLifecycleStore({ db: absent }).initializeAssignment(
     assignmentInit(), ctx(JOE));
   assert.equal(missing.reason_id, "related_subject_not_found");
   assert.equal(absent.callsTo("j102_initialize_subject").length, 0);
 
-  // Stale: the caller decided against a version the database no longer holds.
   const stale = engagedDb();
   const moved = await createCreLifecycleStore({ db: stale }).initializeAssignment(
     assignmentInit({
@@ -1154,8 +970,6 @@ test("a parent that is absent, stale, or refused by the kernel stops the creatio
   assert.equal(moved.reason_id, "stale_related_subject_digest");
   assert.equal(stale.callsTo("j102_initialize_subject").length, 0);
 
-  // Q077's client gate, refused by the KERNEL and reported with its reason: an
-  // engagement that has lapsed, and a relationship that never became a client.
   for (const [subjects, reason_id] of [
     [{ "relationship:rel-synthetic-1": storedSubject(clientState()),
       "engagement:eng-synthetic-1": storedSubject(engagementState({
@@ -1187,16 +1001,12 @@ test("the initialization payload is closed: no evidence, no subject reference, n
     await assert.rejects(() => store.initializeAssignment(assignmentInit(extra), ctx(JOE)),
       e => e instanceof V5J102StoreError && e.code === "unknown_field");
   }
-  // A lifecycle axis is refused by name, as a derived field, wherever it is put.
   for (const field of ["assignment_phase", "relationship_state", "deal_state"]) {
     await assert.rejects(
       () => store.initializeAssignment(assignmentInit({ [field]: "committed" }), ctx(JOE)),
       e => e instanceof V5J102StoreError && e.code === "caller_derived_field_refused",
       `${field} must be refused on an initialization too`);
   }
-  // And inside `declared`, which is the closed vocabulary of IDENTIFIERS: a state
-  // axis there is refused as the derived field it is, and an unregistered
-  // identifier as an unknown one.
   await assert.rejects(() => store.initializeAssignment(assignmentInit({
     declared: { new_subject_id: "asg-synthetic-9", assignment_phase: "search" },
   }), ctx(JOE)),
@@ -1210,13 +1020,9 @@ test("the initialization payload is closed: no evidence, no subject reference, n
 test("the parent chain must be named in full, and a related subject nothing reads refuses", async () => {
   const db = engagedDb();
   const store = createCreLifecycleStore({ db });
-  // The engagement an assignment runs under is not optional; omitting it would be
-  // omitting the prerequisite rather than the reference.
   await assert.rejects(() => store.initializeAssignment(assignmentInit({
     related_refs: { relationship: { subject_kind: "relationship", subject_id: "rel-synthetic-1" } },
   }), ctx(JOE)), e => e instanceof V5J102StoreError && e.code === "missing_field");
-  // A prospect creation reads no parent at all, so naming one is a caller that
-  // has misunderstood which row it is creating.
   await assert.rejects(() => store.initializeProspectRelationship({
     idempotency_key: "j102-fixture-init-2",
     declared: { new_subject_id: "rel-synthetic-2" },
@@ -1257,14 +1063,9 @@ test("OWNER RULING (c): the row and event carry the sponsoring partner, and a di
 });
 
 test("a prospect and a negotiation are created by their own operations, with their own parents", async () => {
-  // AS A SPONSORED AGENT throughout, because creating an empty prospect, a
-  // negotiation draft or an assignment shell carries no evidence-bound fact and
-  // the class that may ADVANCE each of them is the class that may create it. The
-  // database's own principal says so too, or the write refuses before it starts.
   const AGENT_PRINCIPAL = {
     actor_slug: "codex", human: false, authorization_class: "sponsored_agent",
   };
-  // The prospect: no parent, no evidence, and it is NOT a client.
   const first = new FakeDb({ subjects: {}, principal: AGENT_PRINCIPAL });
   const prospect = await createCreLifecycleStore({ db: first })
     .initializeProspectRelationship({
@@ -1276,10 +1077,6 @@ test("a prospect and a negotiation are created by their own operations, with the
   assert.equal(prospect.advances_lifecycle_state, false);
   assert.equal(prospect.transition_applied, false);
   assert.equal(prospect.transition_prerequisites_bypassed, false);
-  // THE PARENTLESS RECEIPT SAYS SO. `required_context_enforced` and
-  // `parent_subjects_locked_and_unmoved` are unconditional trues in the writer,
-  // and on a prospect they describe the EMPTY SET — the consulted list is what
-  // stops the pair reading as a chain that was walked.
   assert.deepEqual(prospect.context_subjects_consulted, [],
     "a prospect creation consulted no parent, and the receipt reports which");
   assert.equal(prospect.context_subjects_consulted_count, 0);
@@ -1287,7 +1084,6 @@ test("a prospect and a negotiation are created by their own operations, with the
   assert.equal(created.record.state.relationship_state, "prospect");
   assert.equal(created.record.state.active_engagement_count, 0);
 
-  // The negotiation: under an OPEN assignment, as a draft.
   const second = new FakeDb({
     subjects: { "assignment:asg-synthetic-1": storedSubject(assignmentState()) },
     principal: AGENT_PRINCIPAL,
@@ -1303,7 +1099,6 @@ test("a prospect and a negotiation are created by their own operations, with the
   assert.equal(draftEnvelope.record.state.property_id, "prop-synthetic-2");
   assert.equal(draftEnvelope.record.state.assignment_id, "asg-synthetic-1");
 
-  // Q095's bound, through the store: a committed assignment takes no new draft.
   const third = new FakeDb({
     subjects: { "assignment:asg-synthetic-1": storedSubject(assignmentState({
       assignment_phase: "committed", selected_property_id: "prop-synthetic-1",
@@ -1345,17 +1140,11 @@ test("a failing creation rolls back, and a replayed one reports what LANDED", as
   assert.equal(answer.reason_id, "assignment_initialized_under_active_engagement");
   assert.equal(answer.created_subject_id, "asg-synthetic-9");
   assert.equal(answer.subject_created, true);
-  // A REPLAY READS NO STATE AND WRITES NOTHING. The world may have moved; the
-  // stored outcome is what happened.
   assert.deepEqual(replayed.sequence, ["BEGIN", "f01_principal", "j102_replay_outcome", "COMMIT"]);
 });
 
-// --- refusals that never reach a write -------------------------------------
 
 test("a stale subject digest the store cannot characterize files a VISIBLE reconciliation item and moves nothing", async () => {
-  // Q103. The row names no prior digest equal to the caller's base, so the
-  // movement is uncharacterized: it is not a merge, it is not a silent
-  // refusal either, it is a conflict a person can see.
   const db = leaseExecutionDb({ read_bodies: {
     subject: subjectReadback(dealState(), { established_by_transition: "commit-winning-property",
       prior_state_digest: null }),
@@ -1427,12 +1216,8 @@ test("an absent evidence reader fails closed with the missing fact named and no 
   assert.equal(answer.produced_by, "not_produced_by_this_slice");
   assert.equal(answer.fabricated_authority, false);
   assert.ok(answer.missing_fact_reason.length > 0);
-  // No approval reader is called and no write is attempted: the refusal is a
-  // policy answer, not a database error.
   assert.equal(db.callsTo("j102_typed_approval").length, 0);
   assert.equal(db.callsTo("j102_apply_transition").length, 0);
-  // And the ETL path through the SAME operation still works, so the fail-closed
-  // branch is narrow rather than a blanket outage.
   const working = new FakeDb({
     subjects: { "relationship:rel-synthetic-1": storedSubject(relationshipState()) },
     document: storedDocument({ document_class: "engagement_letter" }),
@@ -1466,7 +1251,6 @@ test("a first-party record that does not exist refuses and names who would produ
 
 test("a kernel refusal is reported with its reason and detail, and nothing is written", async () => {
   const db = new FakeDb({
-    // Already executed: the transition's own prerequisite refuses.
     subjects: { "deal:deal-synthetic-1": storedSubject(dealState({ execution_state: "executed" })) },
     document: storedDocument({ document_class: "lease" }),
     links: { [LEASE_LINK_KEY]: storedLink() },
@@ -1512,7 +1296,6 @@ test("a corrupt stored subject is refused rather than repaired", async () => {
   assert.equal(db.rolledBack, 1);
 });
 
-// --- rollback and replay ---------------------------------------------------
 
 test("a failing write rolls back, reports nothing as applied, and rethrows the original error", async () => {
   const failure = Object.assign(new Error("j102_stale_subject_digest"), { code: "40001" });
@@ -1547,8 +1330,6 @@ test("a replay reports what LANDED, and re-evaluates nothing", async () => {
     event_evidence_references_enforced: true,
     evidence_rechecked_under_lock: true, readback: { subjects: [] },
   };
-  // The stored deal is now CLOSED — a fresh evaluation would refuse. The replay
-  // must still return the outcome that was committed, which is the whole point.
   const db = leaseExecutionDb({
     replay_outcome: stored,
     subjects: { "deal:deal-synthetic-1": storedSubject(dealState({ deal_state: "closed" })) },
@@ -1564,10 +1345,6 @@ test("a replay reports what LANDED, and re-evaluates nothing", async () => {
   assert.equal(answer.transition_id, "record-lease-execution");
   assert.equal(answer.evidence_rechecked_under_lock, true);
   assert.equal(answer.partial_application, false);
-  // M-2. WHICH OF THESE THE DATABASE VOUCHES FOR is carried back, not inferred:
-  // the coupled facts and the decision refs are labelled as derived from the
-  // admission contract, and the kernel's diagnostic reason is labelled as the
-  // caller's own assertion. A reader of a replayed receipt sees the difference.
   assert.equal(answer.coupled_facts_committed_source, "derived_from_the_admission_contract");
   assert.equal(answer.decision_refs_source, "derived_from_the_admission_contract");
   assert.deepEqual(answer.decision_refs,
@@ -1575,11 +1352,9 @@ test("a replay reports what LANDED, and re-evaluates nothing", async () => {
   assert.equal(answer.caller_reported_reason_id, "lease_execution_marks_executed_lease");
   assert.equal(answer.caller_reported_reason_id_scope,
     "kernel_result_diagnostic_asserted_by_the_caller_and_not_recomputed_here");
-  // HIGH-5/HIGH-6, reported: what the write actually enforced about the history.
   assert.equal(answer.subject_provenance_bound_to_transition, true);
   assert.equal(answer.event_payloads_enforced, true);
   assert.equal(answer.event_evidence_references_enforced, true);
-  // No state was read and no write was attempted after the replay hit.
   assert.deepEqual(db.sequence, ["BEGIN", "f01_principal", "j102_replay_outcome", "COMMIT"]);
 });
 
@@ -1596,7 +1371,6 @@ test("a stored outcome attributed to another actor is refused rather than replay
   }, ctx(JOE)), e => e instanceof V5J102StoreError && e.code === "invalid_stored_outcome");
 });
 
-// --- the non-transition writers --------------------------------------------
 
 const dealSubjectDb = (extra = {}) => new FakeDb({
   subjects: { "deal:deal-synthetic-1": storedSubject(dealState()) }, ...extra,
@@ -1617,16 +1391,12 @@ test("a first-party fact is appended with the server's actor, instant, binding a
   assert.equal(envelope.record.recorded_by, "joe");
   assert.equal(envelope.record.recorded_at, SERVER_NOW);
   assert.equal(envelope.record.closing_date, T.late);
-  // BLOCK-2: the record says which deal it is about, once, at authoring time.
   assert.equal(envelope.record.subject_kind, "deal");
   assert.equal(envelope.record.subject_id, "deal-synthetic-1");
-  // H5: and who — in what capacity — wrote it, derived rather than supplied.
   assert.equal(envelope.record.recorded_by_authorization_class, "verified_partner");
   assert.equal(envelope.record.advances_lifecycle_state, false);
   assert.equal(envelope.record_digest, digest(envelope.record));
 
-  // A record about a subject nobody holds is a fact waiting for whatever later
-  // takes that id.
   const dangling = new FakeDb({ subjects: {} });
   const answer2 = await createCreLifecycleStore({ db: dangling }).recordLifecycleFact({
     idempotency_key: "j102-fixture-2",
@@ -1658,8 +1428,6 @@ test("H5: a sponsored agent cannot AUTHOR a partner-only business record", async
   }
   assert.equal(db.calls.length, 0, "no partner-only authoring attempt reaches the database");
 
-  // The agent-recordable kinds are untouched, so this is the four and not a
-  // blanket suspicion of agents.
   const agentDb = dealSubjectDb({
     principal: { actor_slug: "codex", human: false, authorization_class: "sponsored_agent" },
   });
@@ -1670,8 +1438,6 @@ test("H5: a sponsored agent cannot AUTHOR a partner-only business record", async
   }, ctx(AGENT));
   assert.equal(ok.decision, "allow");
   const envelope = JSON.parse(agentDb.paramsFor("j102_record_first_party_fact")[0]);
-  // The class is DERIVED from the principal that wrote the row, so the record
-  // itself carries the fact a later transition checks.
   assert.equal(envelope.record.recorded_by_authorization_class, "sponsored_agent");
 });
 
@@ -1683,8 +1449,6 @@ test("M1: the typed fact fields are validated BEFORE the durable write", async (
   const base = { record_id: "rec-synthetic-1", subject_kind: "deal",
     subject_id: "deal-synthetic-1" };
 
-  // A non-string reason used to store durably and then make the record
-  // UNREADABLE as evidence, at which point the kernel THREW instead of refusing.
   await bad({ ...base, record_kind: "deal_failure", reason: { text: "no" } }, "invalid_shape");
   await bad({ ...base, record_kind: "invoice", detail: 17 }, "invalid_shape");
   await bad({ ...base, record_kind: "closing_settlement", closing_date: "2026-02-31T00:00:00Z" },
@@ -1693,11 +1457,8 @@ test("M1: the typed fact fields are validated BEFORE the durable write", async (
     "invalid_timestamp");
   await bad({ ...base, record_kind: "invoice", supporting_document_id: "not a document id" },
     "invalid_identifier");
-  // The two mandatory fields, taken from the evidence contracts rather than
-  // restated: a dateless closing and a reasonless failure.
   await bad({ ...base, record_kind: "closing_settlement" }, "missing_field");
   await bad({ ...base, record_kind: "deal_failure" }, "missing_field");
-  // And the binding must be the kind the record's own evidence contract names.
   await bad({ ...base, record_kind: "winning_property_commitment", subject_kind: "deal" },
     "first_party_record_subject_kind_mismatch");
 });
@@ -1714,8 +1475,6 @@ test("a first-party record kind no evidence contract consumes is refused", async
 });
 
 test("BLOCK-2: an unbound document, and one bound to another subject, both refuse", async () => {
-  // NO ASSOCIATION AT ALL. The document is authentic, current, fully executed and
-  // pinned exactly; nothing says it is this deal's lease.
   const unbound = new FakeDb({
     subjects: { "deal:deal-synthetic-1": storedSubject(dealState()) },
     document: storedDocument({ document_class: "lease" }),
@@ -1732,8 +1491,6 @@ test("BLOCK-2: an unbound document, and one bound to another subject, both refus
   assert.equal(answer.produced_by, "j102_record_evidence_subject_link");
   assert.equal(unbound.callsTo("j102_apply_transition").length, 0);
 
-  // ASSOCIATED WITH SOMEBODY ELSE'S DEAL. The reader is asked about THIS deal and
-  // answers null, so a lease executed for one client cannot mark another's.
   const elsewhere = new FakeDb({
     subjects: { "deal:deal-synthetic-1": storedSubject(dealState()) },
     document: storedDocument({ document_class: "lease" }),
@@ -1766,8 +1523,6 @@ test("BLOCK-2: a stored record bound to a different deal cannot close this one",
   assert.equal(answer.missing_fact, "first_party_record_bound_to_a_different_subject");
   assert.equal(db.callsTo("j102_apply_transition").length, 0);
 
-  // A record predating the binding is refused rather than read as binding to
-  // whatever it is asked about.
   const legacy = storedFact("closing_settlement", { closing_date: T.late });
   delete legacy.record.subject_id;
   legacy.record_digest = digest(legacy.record);
@@ -1824,7 +1579,6 @@ test("the association producer checks BOTH ends and is partner-only", async () =
   assert.equal(envelope.record.associated_at, SERVER_NOW);
   assert.equal(envelope.record_digest, digest(envelope.record));
 
-  // A pin F01 does not hold cannot be associated with anything.
   const movedPin = new FakeDb({
     subjects: { "deal:deal-synthetic-1": storedSubject(dealState()) },
     document: storedDocument({ document_class: "lease",
@@ -1839,7 +1593,6 @@ test("the association producer checks BOTH ends and is partner-only", async () =
   assert.equal(answer2.reason_id, "evidence_pin_not_held");
   assert.equal(movedPin.callsTo("j102_record_evidence_subject_link").length, 0);
 
-  // A subject this rail does not hold cannot be associated with anything either.
   const noSubject = new FakeDb({ subjects: {}, document: storedDocument() });
   const answer3 = await createCreLifecycleStore({ db: noSubject }).recordEvidenceSubjectLink({
     idempotency_key: "j102-fixture-3",
@@ -1849,7 +1602,6 @@ test("the association producer checks BOTH ends and is partner-only", async () =
   }, ctx(JOE));
   assert.equal(answer3.reason_id, "subject_not_found");
 
-  // And an agent may not say which transaction a document belongs to.
   await assert.rejects(() => store.recordEvidenceSubjectLink({
     idempotency_key: "j102-fixture-4",
     link: { evidence_source: "f01_document", document_id: "doc-synthetic-1",
@@ -1861,10 +1613,6 @@ test("the association producer checks BOTH ends and is partner-only", async () =
 
 test("H1/H3: what remains unwired is two FACTS, not two callers, and each names its remedy", async () => {
   const named = V5_J102_UNWIRED_CAPABILITIES.map(c => c.capability).sort();
-  // THE LIST CHANGED SHAPE BECAUSE THE CALLERS WERE BUILT. Q103's reconciliation
-  // caller and its ownership read both exist now; what is left is two facts no
-  // relation in this record layer holds, so no caller of any shape could report
-  // them honestly. Each entry must name the exact minimal change.
   assert.deepEqual(named, [
     "active_automation_registry",
     "subject_ownership_authority",
@@ -1873,8 +1621,6 @@ test("H1/H3: what remains unwired is two FACTS, not two callers, and each names 
     assert.ok(entry.exact_minimal_change.length > 0,
       `${entry.capability} names the change that would produce it`);
   }
-  // AND THE TWO THAT LANDED ARE RECORDED WITH THEIR RESIDUALS, including the one
-  // claim this module must not make: neither is registered at runtime.
   assert.deepEqual(
     V5_J102_WIRED_CONCURRENCY_CAPABILITIES.map(c => c.capability).sort(),
     ["ownership_and_freshness_exposure", "reconciliation_runtime_integration"]);
@@ -1884,9 +1630,6 @@ test("H1/H3: what remains unwired is two FACTS, not two callers, and each names 
     assert.ok(entry.residual.length > 0, `${entry.capability} states what it still does not do`);
     assert.ok(V5_J102_OPERATIONS.includes(entry.operation));
   }
-  // AND NOTHING QUIETLY DROPPED OFF THE LIST. The three initialization entries
-  // and the bootstrap entry are gone because operations exist for them, so the
-  // wired registry must account for each subject kind they used to name.
   assert.deepEqual(
     V5_J102_WIRED_INITIALIZATION_CAPABILITIES.map(c => c.creates_subject_kind).sort(),
     ["assignment", "property_negotiation", "relationship"]);
@@ -1895,9 +1638,6 @@ test("H1/H3: what remains unwired is two FACTS, not two callers, and each names 
     assert.equal(entry.requires_evidence, false);
     assert.ok(entry.why.length > 0);
   }
-  // And the registration surface says the same thing per operation, so a reader
-  // of `capabilities()` learns where a subject of each kind comes from rather
-  // than only that one is required.
   const schemas = v5J102StoreOperationSchemas();
   for (const entry of v5J102ToolRegistrations()) {
     if (!entry.write || schemas[entry.store_operation].transition === null) continue;
@@ -1911,10 +1651,6 @@ test("H1/H3: what remains unwired is two FACTS, not two callers, and each names 
     assert.ok(entry.why.length > 0);
   }
 
-  // AND THE REMAINING PREREQUISITE IS STILL REAL, asserted against behaviour
-  // rather than against the list: a transition against a subject that has not
-  // been initialized still refuses `subject_not_found` and creates nothing. The
-  // initialization operations create; the transition operations never do.
   for (const [handler, subject_kind, subject_id] of [
     ["openCreAssignment", "assignment", "asg-nonexistent"],
     ["recordLoiSubmission", "property_negotiation", "neg-nonexistent"],
@@ -1931,10 +1667,6 @@ test("H1/H3: what remains unwired is two FACTS, not two callers, and each names 
     assert.equal(db.callsTo("j102_apply_transition").length, 0);
   }
 
-  // THE KERNEL IS STILL NOT RE-EXPORTED. The store CALLS evaluateConcurrentEdit
-  // and projectOwnershipAndFreshness; it does not hand a caller a pure evaluator
-  // to drive with facts of its own, which would be the caller-invented ownership
-  // this whole read exists to refuse.
   const store = createCreLifecycleStore({ db: new FakeDb() });
   assert.equal(typeof store.evaluateConcurrentEdit, "undefined");
   assert.equal(typeof store.projectOwnershipAndFreshness, "undefined");
@@ -1958,12 +1690,6 @@ test("the owner questions: rulings are recorded as ruled, and the one still open
     assert.ok(entry.today.length > 0, "each says what the rail does with no answer");
     assert.ok(entry.why_unsettled.length > 0, "and why the thirteen do not settle it");
   }
-  // THE MANDATE-BEFORE-LOI QUESTION IS OPEN AND UNENCODED, and the behaviour is
-  // the one an unanswered question leaves: a created assignment sits at
-  // `research`, and `record-loi-submission` admits `research`. Encoding the
-  // answer would mean dropping `research` from the negotiation's admitted parent
-  // phases — this asserts it has NOT been dropped, so the test fails the day
-  // somebody encodes a ruling nobody gave.
   const mandate = V5_J102_OPEN_OWNER_QUESTIONS.find(q => q.question.includes("mandate record"));
   assert.ok(mandate, "the mandate-before-LOI question is recorded");
   assert.equal(mandate.status, "unsettled_pending_owner_ruling");
@@ -1980,7 +1706,6 @@ test("the owner questions: rulings are recorded as ruled, and the one still open
     v5J102InitializationContract("initialize-assignment").initial_state.assignment_phase,
     "research",
     "the created assignment is at research, so open-assignment is not forced by the phase alone");
-  // The actor-class parity is now the owner's ruling (c), not an assumption.
   const parity = V5_J102_OPEN_OWNER_QUESTIONS.find(q => q.question.includes("SPONSORED AGENT"));
   assert.equal(parity.status, "ruled_by_owner");
   assert.deepEqual(
@@ -2009,8 +1734,6 @@ test("a Salesforce reference keeps its own labels, requires a real link target, 
   assert.equal(envelope.record.opportunity_name, "Synthetic Medical Group - New Location");
   assert.equal(envelope.record.phase_label_is_doctorcre_state, false);
 
-  // A link to a subject nobody holds is a dangling reference wearing the shape
-  // of provenance.
   const dangling = new FakeDb({ subjects: {} });
   const answer2 = await createCreLifecycleStore({ db: dangling }).linkSalesforceReference({
     idempotency_key: "j102-fixture-2",
@@ -2045,7 +1768,6 @@ test("a correction binds the prior state digest and refuses without a durable co
   assert.equal(envelope.record.corrected_by, "joe");
   assert.equal(envelope.record.derived_from_assistant_text, false);
 
-  // No durable record: an approval that lives only in a transcript is not one.
   const withoutRecord = new FakeDb({
     subjects: { "deal:deal-synthetic-1": storedSubject(dealState()) },
   });
@@ -2061,14 +1783,7 @@ test("a correction binds the prior state digest and refuses without a durable co
   assert.equal(withoutRecord.callsTo("j102_record_correction").length, 0);
 });
 
-// --- Q103: ownership, freshness and visible reconciliation ------------------
-//
-// THESE RUN THE REAL STORE PATH INTO THE REAL KERNEL. Nothing below hands the
-// kernel a fact a caller made up: the state digest, the freshness pair and the
-// current version all come out of scripted READBACKS, and the assertions are
-// about what the store composed from them.
 
-/** One verified event readback, as ops.j102_read('subject_events') returns it. */
 const storedEvent = (over = {}) => {
   const record = {
     schema_version: V5_J102_STORED_EVENT_SCHEMA_VERSION,
@@ -2083,7 +1798,6 @@ const storedEvent = (over = {}) => {
   return { record, record_digest: digest(record), integrity: "recomputed_from_committed_row" };
 };
 
-/** The shape ops.j102_read('subject') returns: the verified row plus provenance. */
 const subjectReadback = (state, over = {}) => ({
   subject_kind: state.subject_kind, subject_id: state.subject_id,
   state, state_digest: digest(state),
@@ -2109,30 +1823,21 @@ test("Q103: the ownership read projects freshness from the HISTORY and names wha
   assert.equal(answer.decision, "allow");
   assert.equal(answer.reason_id, "ownership_and_freshness_projected_from_committed_rows");
 
-  // IT IS COMPOSED FROM TWO EXISTING SQL READS, and never asks the database for a
-  // read kind it does not have — which is why this landed without a SQL change.
   assert.deepEqual(db.sequence, ["BEGIN", "f01_principal", "j102_read", "j102_read", "COMMIT"]);
   assert.deepEqual(db.callsTo("j102_read").map(c => c.params[0]), ["subject", "subject_events"]);
 
   const projection = answer.readback;
-  // FRESHNESS IS DERIVED, and from the append-only history rather than the row.
   assert.equal(projection.last_material_change_at, T.late);
   assert.equal(projection.last_material_change_by, "joe");
   assert.equal(projection.freshness_known, true);
   assert.equal(projection.freshness_age_seconds,
     Math.floor((Date.parse(SERVER_NOW) - Date.parse(T.late)) / 1000));
-  // THE DIGEST IS THE STORED ONE, recomputed here from the state the database
-  // returned rather than echoed from a caller.
   assert.equal(projection.state_digest, digest(assignmentState()));
-  // AND THE TWO FACTS NOBODY HOLDS ARE UNKNOWN, not empty. "Nothing is running"
-  // and "nobody asked" are different answers and the kernel makes the difference.
   assert.equal(projection.owner_slug, null);
   assert.equal(projection.owner_known, false);
   assert.equal(projection.active_automation, null);
   assert.equal(projection.active_automation_known, false);
   assert.deepEqual(projection.inferred_fields, []);
-  // The read says WHERE each field came from, and names both missing facts from
-  // the registry rather than restating them.
   assert.equal(answer.derived_from.state_digest, "ops.j102_read.subject");
   assert.equal(answer.derived_from.last_material_change, "ops.j102_read.subject_events");
   assert.equal(answer.derived_from.owner_slug, "not_produced_by_this_record_layer");
@@ -2151,9 +1856,6 @@ test("Q103: a subject with NO history reports freshness unknown rather than fall
   } });
   const answer = await createCreLifecycleStore({ db }).readCreLifecycle(ownershipRead, ctx(JOE));
   assert.equal(answer.decision, "allow");
-  // The row's own updated_at is RIGHT THERE and is deliberately not used: the
-  // question is when the subject last materially changed, and only the history
-  // answers that.
   assert.equal(answer.readback.last_material_change_at, null);
   assert.equal(answer.readback.last_material_change_by, null);
   assert.equal(answer.readback.freshness_known, false);
@@ -2164,9 +1866,6 @@ test("Q103: a subject with NO history reports freshness unknown rather than fall
 });
 
 test("Q103: a history row that disagrees with the current row refuses rather than picking one", async () => {
-  // Every writer in this rail stamps the subject and its event from ONE instant
-  // in ONE transaction, so a disagreement is a record layer that cannot say when
-  // it last changed — and answering anyway is the confident wrong answer.
   for (const [drift, label] of [
     [{ recorded_by: "dell" }, "a different actor"],
     [{ recorded_at: T.mid }, "a different instant"],
@@ -2188,8 +1887,6 @@ test("Q103: the ownership read refuses a missing subject, a corrupt row and an u
     .readCreLifecycle(ownershipRead, ctx(JOE));
   assert.equal(gone.reason_id, "subject_not_found");
   assert.equal(gone.readback, null);
-  // A row whose stored digest no longer describes its own bytes is refused, not
-  // repaired and not reported as an ownership fact.
   const corrupt = new FakeDb({ read_bodies: {
     subject: subjectReadback(assignmentState(), { state_digest: D(9) }),
     subject_events: [storedEvent()],
@@ -2197,8 +1894,6 @@ test("Q103: the ownership read refuses a missing subject, a corrupt row and an u
   await assert.rejects(
     () => createCreLifecycleStore({ db: corrupt }).readCreLifecycle(ownershipRead, ctx(JOE)),
     e => e instanceof V5J102StoreError && e.code === "corrupt_stored_subject");
-  // And a readback that does not claim to have been recomputed inside PostgreSQL
-  // is not evidence of anything.
   const trusted = new FakeDb({ read_bodies: {
     subject: subjectReadback(assignmentState(), { integrity: "trusted" }),
     subject_events: [storedEvent()],
@@ -2211,16 +1906,6 @@ test("Q103: the ownership read refuses a missing subject, a corrupt row and an u
 test("Q103: ownership, freshness and automation cannot be supplied by the caller", async () => {
   const db = ownershipDb();
   const store = createCreLifecycleStore({ db });
-  // The selector is closed, so there is nowhere to put them; and at the payload
-  // level each is refused BY NAME.
-  //
-  // WHICH GUARD FIRES IS PART OF THE ASSERTION, and `owner_slug` is the one that
-  // proves the point. It sits in the AUTHORITY-injection fragment list — the list
-  // this slice imports from F01 rather than copying — so it is refused one guard
-  // earlier than the rest, as an authority claim rather than as a derived value.
-  // That is the stronger refusal and the earlier one, and an assertion that
-  // demanded `caller_derived_field_refused` here would have been asking for the
-  // guard to be weakened to satisfy it.
   for (const [field, code] of [
     ["owner_slug", "caller_authority_field_refused"],
     ["last_material_change_at", "caller_derived_field_refused"],
@@ -2239,15 +1924,12 @@ test("Q103: ownership, freshness and automation cannot be supplied by the caller
     selector: { ...ownershipRead.selector, owner_slug: "joe" },
   }, ctx(JOE)), e => e instanceof V5J102StoreError &&
     e.code === "caller_authority_field_refused");
-  // The subject is not optional for this kind: an ownership projection with no
-  // subject is a question about nothing.
   await assert.rejects(() => store.readCreLifecycle({
     selector: { kind: "ownership_and_freshness" },
   }, ctx(JOE)), e => e instanceof V5J102StoreError && e.code === "missing_field");
   assert.equal(db.callsTo("j102_record_reconciliation_item").length, 0);
 });
 
-// --- Q103: the reconciliation writer ---------------------------------------
 
 const reconcileDb = (extra = {}) => new FakeDb({
   read_bodies: {
@@ -2271,7 +1953,6 @@ test("Q103: an UNMOVED subject reconciles nothing, writes nothing, and merges no
   const answer = await createCreLifecycleStore({ db }).recordLifecycleReconciliation(
     reconcilePayload({
       subject_ref: { subject_kind: "assignment", subject_id: "asg-synthetic-1",
-        // The version the caller decided against IS the one the database holds.
         expected_state_digest: digest(assignmentState()) },
     }), ctx(JOE));
   assert.equal(answer.decision, "allow");
@@ -2301,13 +1982,6 @@ test("Q103: a MOVED subject writes ONE visible item carrying both versions and t
   assert.equal(answer.resolved_by_machine, false);
   assert.equal(answer.advances_lifecycle_state, false);
   assert.equal(answer.item_seq, 1);
-  // THE FIELD CLASS IS THE KERNEL'S, from its own registry. `assignment_phase` is
-  // lifecycle and classified; `client_phone_number` is a customer-facing field
-  // this module does not classify, and it is reported as unclassified rather than
-  // guessed routine — which is the difference between reconciling and merging.
-  // AND IT IS DERIVED FROM THE STORED ITEM, not from a fresh reading: the class
-  // was hashed into the record when the kernel judged it, so a replay of this
-  // call reports the same split.
   assert.deepEqual(answer.unclassified_fields, ["client_phone_number"]);
   assert.deepEqual(answer.material_incoming_fields, ["assignment_phase"]);
   assert.deepEqual(answer.incoming_fields, ["assignment_phase", "client_phone_number"]);
@@ -2315,14 +1989,10 @@ test("Q103: a MOVED subject writes ONE visible item carrying both versions and t
   const envelope = JSON.parse(db.paramsFor("j102_record_reconciliation_item")[0]);
   assert.equal(envelope.record_kind, "stored_reconciliation_item");
   const item = envelope.record;
-  // THE IDENTITY THE RELATION REQUIRES AND THE KERNEL DOES NOT CARRY.
   assert.equal(item.subject_kind, "assignment");
   assert.equal(item.subject_id, "asg-synthetic-1");
-  // THE TWO VERSIONS, the caller's from its own pin and the current from the row.
   assert.equal(item.base_version_digest, D(7));
   assert.equal(item.current_version_digest, digest(assignmentState()));
-  // THE INCOMING EDITS, STAMPED. The caller said which field and what the value
-  // hashes to; who and when are the derived actor and the server clock.
   assert.deepEqual(item.incoming_edits.map(e => e.field),
     ["assignment_phase", "client_phone_number"]);
   for (const edit of item.incoming_edits) {
@@ -2331,8 +2001,6 @@ test("Q103: a MOVED subject writes ONE visible item carrying both versions and t
   }
   assert.equal(item.incoming_edits[0].field_class, "lifecycle",
     "and the class is derived by the kernel, not supplied");
-  // THE OTHER SIDE, as far as this layer can honestly show it: not an invented
-  // edit list, but the committed state and the history that produced it.
   assert.deepEqual(item.concurrent_edits, []);
   assert.equal(item.concurrent_change_evidence.characterized, false);
   assert.deepEqual(item.concurrent_change_evidence.current_state, assignmentState());
@@ -2342,23 +2010,17 @@ test("Q103: a MOVED subject writes ONE visible item carrying both versions and t
   assert.equal(item.concurrent_change_evidence.history_tail_is_complete, false);
   assert.ok(item.concurrent_change_evidence.why.includes("prior_state_digest"),
     "and it names the exact reader gap that stops it being characterized");
-  // THE THREE PROPERTIES A REVIEWER NEEDS, which the relation also CHECK-binds.
   assert.equal(item.visible, true);
   assert.equal(item.applied, false);
   assert.equal(item.resolved_by_machine, false);
   assert.equal(item.proposed_by, "joe");
   assert.equal(envelope.record_digest, digest(item));
-  // THE OPERAND IS BOUND AND SENT, so the writer can re-read the subject under
-  // its own lock and refuse a row that moved between this read and that write.
   const operands = JSON.parse(db.paramsFor("j102_record_reconciliation_item")[1]);
   assert.deepEqual(operands,
     { "assignment:asg-synthetic-1": digest(assignmentState()) });
   assert.equal(answer.current_version_bound_to_committed_row, true);
   assert.equal(answer.state_evidence_bound_to_committed_row, true);
   assert.equal(answer.history_evidence_bound_to_committed_history, true);
-  // AND THE PATH IS GOVERNED LIKE EVERY SIBLING: the key is claimed before any
-  // state is read, and the receipt distinguishes the caller's intent digest from
-  // what the database recomputed.
   assert.deepEqual(db.sequence, ["BEGIN", "f01_principal", "j102_replay_outcome",
     "j102_read", "j102_read", "j102_record_reconciliation_item", "COMMIT"]);
   assert.equal(answer.request_digest_scope,
@@ -2379,8 +2041,6 @@ test("Q103: the CURRENT version comes from the stored row, and the edit's author
       e => e instanceof V5J102StoreError && e.code === "caller_derived_field_refused",
       `${field} must be refused as a derived field`);
   }
-  // And inside an edit: who made it, when, and — the one the kernel removed —
-  // what class it is.
   for (const field of ["edited_by", "edited_at", "field_class"]) {
     await assert.rejects(() => store.recordLifecycleReconciliation(reconcilePayload({
       edits: [{ field: "assignment_phase", value_digest: D(3), [field]: "x" }],
@@ -2393,9 +2053,6 @@ test("Q103: the CURRENT version comes from the stored row, and the edit's author
 test("Q103: the base version is required, and a subject that does not exist refuses", async () => {
   const db = reconcileDb();
   const store = createCreLifecycleStore({ db });
-  // A concurrent-edit question with no version to have decided against is not a
-  // question; defaulting it to the stored digest would answer "no conflict" to
-  // every caller that forgot to say.
   await assert.rejects(() => store.recordLifecycleReconciliation(reconcilePayload({
     subject_ref: { subject_kind: "assignment", subject_id: "asg-synthetic-1" },
   }), ctx(JOE)), e => e instanceof V5J102StoreError && e.code === "missing_field");
@@ -2411,9 +2068,6 @@ test("Q103: the base version is required, and a subject that does not exist refu
 });
 
 test("Q103: a RETRY replays what landed, and reads no state to decide it", async () => {
-  // The stored outcome the writer settled under this key. A replay must report
-  // the conflict that WAS filed — including the versions it was filed about —
-  // even though the subject has moved on since.
   const settled = {
     operation: "record-lifecycle-reconciliation", decision: "reconcile",
     outcome: "recorded", actor_slug: "joe",
@@ -2438,11 +2092,8 @@ test("Q103: a RETRY replays what landed, and reads no state to decide it", async
   assert.equal(answer.reason_id, "concurrent_change_not_characterized");
   assert.equal(answer.item_seq, 4);
   assert.equal(answer.item_digest, D(5));
-  // The versions are the ones that were FILED, not the ones a fresh reading of
-  // the subject would produce now.
   assert.equal(answer.current_version_digest, D(6));
   assert.deepEqual(answer.material_incoming_fields, ["assignment_phase"]);
-  // A REPLAY READS NO STATE AND WRITES NOTHING.
   assert.deepEqual(db.sequence, ["BEGIN", "f01_principal", "j102_replay_outcome", "COMMIT"]);
   assert.equal(db.callsTo("j102_record_reconciliation_item").length, 0);
   assert.equal(db.callsTo("j102_read").length, 0);
@@ -2460,10 +2111,6 @@ test("Q103: a stored outcome attributed to another actor is not replayed to this
 });
 
 test("Q103: the same key over DIFFERENT bytes refuses, and the store does not swallow it", async () => {
-  // The refusal itself is the database's: ops.j102_claim_idempotency raises
-  // j102_idempotency_payload_mismatch inside the writer, which is where it can be
-  // atomic. What this proves is that the store propagates it rather than turning
-  // a substituted conflict into a success — the SQL fixture drives the raise.
   const db = reconcileDb({
     writeError: Object.assign(new Error(
       "j102_idempotency_payload_mismatch: key j102-fixture-reconcile-1 already binds a different payload"),
@@ -2478,11 +2125,6 @@ test("Q103: the same key over DIFFERENT bytes refuses, and the store does not sw
 });
 
 test("Q103: DISTINCT proposals against the same two versions both land, and are not collapsed", async () => {
-  // Two callers — or one caller twice — proposing DIFFERENT edits against the
-  // same base and the same current have raised TWO real conflicts. The earlier
-  // read-before-write check collapsed them on the version pair, which is the
-  // wrong answer and was not atomic either; idempotency is keyed on the REQUEST,
-  // which covers the edits, so both are visible.
   const db = reconcileDb();
   const store = createCreLifecycleStore({ db });
   const first = await store.recordLifecycleReconciliation(reconcilePayload({
@@ -2505,11 +2147,8 @@ test("Q103: DISTINCT proposals against the same two versions both land, and are 
     "and they are different items, because the edits differ");
   assert.equal(a.record.base_version_digest, b.record.base_version_digest);
   assert.equal(a.record.current_version_digest, b.record.current_version_digest);
-  // NOTHING IS READ TO DECIDE THIS. The store no longer inspects existing items
-  // at all, so there is no read-before-write claim left to be wrong about.
   assert.equal(db.callsTo("j102_read").filter(c => c.params[0] === "reconciliation_items").length,
     0, "the store makes no duplicate-suppression readback");
-  // The two idempotency keys are bound to two different request digests.
   assert.notEqual(writes[0].params[3], writes[1].params[3]);
 });
 
@@ -2525,8 +2164,6 @@ test("Q103: an unauthenticated or inadmissible actor cannot raise a conflict at 
     e => e instanceof V5J102StoreError && e.code === "actor_class_not_admitted_for_lifecycle");
   assert.equal(db.calls.length, 0, "no authority failure reaches the database");
 
-  // A SPONSORED AGENT MAY RAISE ONE. Noticing that two writers disagree is not an
-  // exercise of authority, and the item resolves nothing.
   const agentDb = reconcileDb({
     principal: { actor_slug: "codex", human: false, authorization_class: "sponsored_agent" },
   });
@@ -2538,7 +2175,6 @@ test("Q103: an unauthenticated or inadmissible actor cannot raise a conflict at 
     JSON.parse(agentDb.paramsFor("j102_record_reconciliation_item")[0]).record.proposed_by,
     "codex");
 
-  // AND THE DATABASE'S OWN ACTOR MUST BE THE HANDLER'S, on this path too.
   const mismatched = reconcileDb({
     principal: { actor_slug: "dell", human: true, authorization_class: "verified_partner" },
   });
@@ -2558,7 +2194,6 @@ test("Q103: a failing reconciliation write rolls back and reports nothing as lan
   assert.equal(db.committed, 0);
 });
 
-// --- reads -----------------------------------------------------------------
 
 test("a read names its kind, recomputes integrity, and refuses an unregistered kind", async () => {
   const db = new FakeDb({ read_body: { kind: "subject", body: { state: dealState() } } });
@@ -2603,41 +2238,17 @@ test("the store requires an injected handle and opens no connection of its own",
     e => e instanceof V5J102StoreError && e.code === "database_handle_required");
 });
 
-// ---------------------------------------------------------------------------
-// THE SQL ADMISSION PARITY SUITE.
-//
-// ops.j102_apply_transition is granted to carr_writer as well as carr_authority,
-// and carr_writer always resolves to a sponsored agent. Everything the kernel and
-// this store decide about WHO may perform a transition, WHICH subjects and fields
-// it may write and WHICH evidence it requires is therefore a control on this
-// caller and on no other, so ops/cre-lifecycle.candidate.sql carries the same
-// contracts in ops.j102_admission_policy().
-//
-// TWO COPIES WITH NOTHING BETWEEN THEM ARE A FUTURE CONTRADICTION. These tests
-// are the thing between them: they read the map out of the candidate SQL as data
-// and assert it EQUALS the kernel's exports, contract by contract and field by
-// field, and then assert that the writer actually calls the checks the map exists
-// to feed. A map that is correct and unused would pass the first half and fail
-// the second.
-//
-// NOTHING HERE EXECUTES SQL. These assertions are about the reviewed source's
-// bytes; the live suite and the db-gate execute it as migration 0704.
-// ---------------------------------------------------------------------------
 
 const CANDIDATE_SQL = readFileSync(
   new URL("../../ops/cre-lifecycle.candidate.sql", import.meta.url), "utf8");
 
 test("migration 0704 IS the reviewed candidate, byte for byte", () => {
-  // Everything this suite proves about the candidate is only a proof about what
-  // runs if the numbered migration is the same bytes. A hand edit to either one
-  // alone fails here.
   const migration = readFileSync(
     new URL("../../migrations/0704_cre_lifecycle.sql", import.meta.url), "utf8");
   assert.equal(migration, CANDIDATE_SQL);
   assert.match(CANDIDATE_SQL, /NUMBERED AS migrations\/0704_cre_lifecycle\.sql, byte for byte/);
 });
 
-/** The admission map, read out of the candidate SQL's dollar-quoted JSON. */
 function admissionPolicy() {
   const open = CANDIDATE_SQL.indexOf("$policy$");
   assert.ok(open > 0, "the candidate SQL carries a $policy$-quoted admission map");
@@ -2648,23 +2259,6 @@ function admissionPolicy() {
   return JSON.parse(CANDIDATE_SQL.slice(open + "$policy$".length, close));
 }
 
-/**
- * One chunk of SQL with its COMMENTS AND STRING LITERALS removed, leaving the
- * text that actually executes.
- *
- * WHY THIS EXISTS. A test that asks "does this writer call that one" cannot be a
- * search of the source, because a writer legitimately NAMES another one inside
- * the refusal it raises — and a search would then either fail on correct code or
- * be satisfied by rewording the refusal, which is a control weakened to quiet a
- * test. Stripping first makes the question the one that was meant: is the call
- * in the code, rather than in something the code prints.
- *
- * IT IS DELIBERATELY SMALL AND CONSERVATIVE. It understands the two things this
- * file uses — `--` line comments and single-quoted literals with `''` escapes —
- * and the caller controls it in both directions: that real calls survive it, and
- * that real code is not eaten by it. The one shape it cannot see through is
- * dynamic SQL, so the caller asserts separately that the body builds none.
- */
 function executableSql(source) {
   let out = "";
   let i = 0;
@@ -2700,16 +2294,6 @@ function executableSql(source) {
   return out;
 }
 
-/**
- * One chunk of SQL with its COMMENTS removed and its literals LEFT IN PLACE.
- *
- * executableSql() above answers "does this code call that function", and to do it
- * safely it also removes the literals — which makes it the wrong tool for the
- * other question this file asks: "does this code compare THAT key against THAT
- * value". A jsonb key is a single-quoted literal, so stripping literals erases
- * the very thing under test, and asserting against the raw body instead would let
- * a comment satisfy the check.
- */
 function sqlWithoutComments(source) {
   let out = "";
   let i = 0;
@@ -2746,7 +2330,6 @@ function sqlWithoutComments(source) {
   return out;
 }
 
-/** Which transitions each write operation may perform, from the store's own tables. */
 function operationsForTransition() {
   const schemas = v5J102StoreOperationSchemas();
   const byTransition = new Map(V5_J102_TRANSITION_IDS.map(id => [id, []]));
@@ -2785,23 +2368,10 @@ test("SQL parity: the admission map's transitions ARE the kernel's transition co
       contract.required_evidence_alternatives, `${id} required evidence`);
     assert.deepEqual(admitted.coupled_facts, contract.coupled_facts, `${id} coupled_facts`);
     assert.equal(admitted.creates_deal, contract.creates_deal, `${id} creates_deal`);
-    // The operation pairing, from the store's own schemas and dispatch tables
-    // rather than restated here, so the SQL map cannot pair an operation with a
-    // transition this module would never route to it.
     assert.deepEqual([...admitted.operations].sort(), operations.get(id).sort(),
       `${id} is performed by exactly the operations this store routes to it`);
     assert.ok(admitted.operations.length > 0, `${id} is reachable from some operation`);
-    // M-2. The receipt now DERIVES coupled_facts_committed and decision_refs
-    // from this map instead of echoing the caller's diagnostics, so both have to
-    // be the kernel's own, transition by transition, rather than only the one
-    // that was already checked.
     assert.deepEqual(admitted.decision_refs, contract.decision_refs, `${id} decision_refs`);
-    // M-1. requires_active_engagement, for EVERY transition rather than for the
-    // one that happens to carry it. The flag is on the kernel's contract; the SQL
-    // spends it as `required_context`, so the two must agree in BOTH directions
-    // — a second transition gaining the flag with no context entry, or a context
-    // entry appearing on a transition the kernel does not hold to an engagement,
-    // are the same defect from opposite sides.
     assert.equal(admitted.requires_active_engagement, contract.requires_active_engagement,
       `${id} requires_active_engagement`);
     const engagementContext = (admitted.required_context ?? []).some(entry =>
@@ -2811,34 +2381,22 @@ test("SQL parity: the admission map's transitions ARE the kernel's transition co
     assert.equal(engagementContext, contract.requires_active_engagement,
       `${id} spends requires_active_engagement as an active-engagement required_context, or declares neither`);
   }
-  // And the flag is not vacuous: exactly one transition carries it today, and a
-  // second arriving without its context entry fails the loop above rather than
-  // passing unnoticed.
   assert.deepEqual(
     V5_J102_TRANSITION_IDS.filter(id => v5J102TransitionContract(id).requires_active_engagement),
     ["open-assignment"]);
 });
 
 test("SQL parity: the map's stored-record constants ARE the store's and the kernel's", () => {
-  // HIGH-5. The writer refuses any subject or event envelope whose schema version
-  // or tenant is not these, and it reads them off the map rather than restating
-  // them, so this is the one comparison that keeps the map's copies honest. A
-  // drift here would turn a bounded validation into a blanket refusal of every
-  // legitimate call, which is exactly why it is asserted rather than assumed.
   const policy = admissionPolicy();
   assert.equal(policy.stored_subject_schema_version, V5_J102_STORED_SUBJECT_SCHEMA_VERSION);
   assert.equal(policy.stored_event_schema_version, V5_J102_STORED_EVENT_SCHEMA_VERSION);
   assert.equal(policy.event_schema_version, V5_J102_EVENT_SCHEMA_VERSION);
-  // The relations restate all three as CHECK constraints, so a row carrying a
-  // foreign schema cannot exist even if a future writer forgets to ask.
   for (const literal of [V5_J102_STORED_SUBJECT_SCHEMA_VERSION,
     V5_J102_STORED_EVENT_SCHEMA_VERSION, V5_J102_EVENT_SCHEMA_VERSION]) {
     assert.ok(CANDIDATE_SQL.includes(`'${literal}'`),
       `the relations bind ${literal} structurally as well as in the writer`);
   }
 
-  // The record key sets the writer holds envelopes to are the shapes the store
-  // actually builds — read off the store's own builders, not restated here.
   const subjectRecord = storedSubjectRecord({
     subject: dealState(), transition_id: "record-completion",
     prior_state_digest: D(1), updated_by: "joe", updated_at: SERVER_NOW,
@@ -2852,17 +2410,10 @@ test("SQL parity: the map's stored-record constants ARE the store's and the kern
     recorded_by: "joe", recorded_at: SERVER_NOW,
   });
   assert.deepEqual([...policy.stored_event_record_keys].sort(), Object.keys(eventRecord).sort());
-  // The four keys lifecycleEvent() always writes, which are the ones the writer
-  // skips when it walks an event's detail.
-  // Both sides sorted, so this compares the SET rather than the order. The map
-  // lists these in the order lifecycleEvent() writes them; the assertion is
-  // about which four keys they are.
   assert.deepEqual([...policy.event_identity_keys].sort(),
     ["event_kind", "schema_version", "subject_id", "subject_kind"].sort());
   assert.deepEqual([...policy.evidence_reference_keys].sort(),
     ["evidence_kind", "reference", "source"]);
-  // M-4: no derived event kind survives anywhere — not in the map, not in the
-  // interpreter, and not in the prose that described one as intentional.
   assert.equal(policy.derived_event_kinds, false);
   assert.equal(CANDIDATE_SQL.includes("event_kind_from"), false,
     "the derived-kind branch and its rule are gone from the SQL, not merely unused");
@@ -2870,9 +2421,6 @@ test("SQL parity: the map's stored-record constants ARE the store's and the kern
 
 test("SQL parity: `writes` is DERIVED from the coupled facts, plus three named derived fields", () => {
   const policy = admissionPolicy();
-  // The escape hatch is exactly three fields wide, and every one of them is a
-  // counter or a mirror the kernel moves and does not list as a coupled fact. If
-  // it ever grows, this line is what makes that visible.
   assert.deepEqual([...policy.derived_fields].sort(), [
     "assignment.active_lease_draft_target_id",
     "assignment.open_negotiation_count",
@@ -2888,9 +2436,6 @@ test("SQL parity: `writes` is DERIVED from the coupled facts, plus three named d
   for (const id of V5_J102_TRANSITION_IDS) {
     const contract = v5J102TransitionContract(id);
     const admitted = policy.transitions[id];
-    // WHICH SUBJECTS: exactly the primary one plus the prefixes of the coupled
-    // facts. Nothing else may be written by this transition, which is what stops
-    // an allowed operation carrying an unrelated row beside its real one.
     const expectedKinds = [...new Set([
       contract.subject_kind,
       ...contract.coupled_facts.map(fact => fact.split(".")[0]),
@@ -2931,16 +2476,9 @@ test("SQL parity: the admission map's evidence table IS the kernel's evidence co
       `${kind} requires_closing_date`);
     assert.deepEqual(admitted.permitted_actor_classes, [...contract.permitted_actor_classes],
       `${kind} permitted_actor_classes`);
-    // THE DOCUMENT'S STATE AXES. The pin proves the document has not moved and
-    // says nothing about whether it is signed, delivered, effective or current --
-    // so a lease that is authentically pinned, correctly associated and NOT
-    // EXECUTED would have marked a deal executed on a direct call. Q077's active
-    // signed ETL and Q078's lease signing are exactly these axes.
     assert.deepEqual(admitted.document_states ?? null, contract.document_states ?? null,
       `${kind} document_states`);
   }
-  // And the four document-backed kinds really do carry axes, so the check above
-  // is not vacuously satisfied by a table of nulls.
   const withStates = Object.keys(policy.evidence)
     .filter(kind => policy.evidence[kind].document_states != null).sort();
   assert.deepEqual(withStates, ["commission_agreement", "executed_lease",
@@ -2951,8 +2489,6 @@ test("SQL parity: the parent-reference fields cover every kind and close every c
   const policy = admissionPolicy();
   assert.deepEqual(Object.keys(policy.parent_reference_fields).sort(),
     [...V5_J102_SUBJECT_KINDS].sort());
-  // Every transition that writes more than one subject must be EXPRESSIBLE as a
-  // chain, or the writer's chain check would refuse a legitimate walk.
   for (const id of V5_J102_TRANSITION_IDS) {
     const contract = v5J102TransitionContract(id);
     const kinds = Object.keys(policy.transitions[id].writes);
@@ -2978,8 +2514,6 @@ test("BLOCK-1: the three partner-only transitions are partner-only in the SQL ma
   for (const id of partnerOnly) {
     assert.deepEqual(policy.transitions[id].permitted_actor_classes, ["verified_partner"],
       `${id} is partner-only where a direct caller reaches it`);
-    // And every operation that could name it is authorityOnly here, so the two
-    // layers agree rather than one covering for the other.
     for (const operation of policy.transitions[id].operations) {
       assert.equal(schemas[operation].authorityOnly, true,
         `${operation} performs ${id} and must be authorityOnly in this store`);
@@ -2988,24 +2522,18 @@ test("BLOCK-1: the three partner-only transitions are partner-only in the SQL ma
 });
 
 test("BLOCK-1/BLOCK-2/HIGH-1: the writer actually USES the map, refusal by refusal", () => {
-  // A correct map that nothing consults would pass every assertion above. These
-  // are the call sites, named by the exact refusal each one raises.
   const writer = CANDIDATE_SQL.slice(
     CANDIDATE_SQL.indexOf("create or replace function ops.j102_apply_transition("));
   assert.ok(writer.length > 0, "the transition writer is in the candidate");
   for (const required of [
-    // BLOCK-1: the class is DERIVED, and the three admission questions are asked.
     "ops.f01_principal() ->> 'authorization_class'",
     "j102_unknown_transition",
     "j102_operation_transition_mismatch",
     "j102_actor_class_not_permitted",
-    // ROOT BLOCKER 1: the primary subject is loaded, never created, and only the
-    // two coupled subjects the kernel creates may be created at all.
     "j102_primary_subject_creation_refused",
     "j102_subject_creation_not_permitted",
     "j102_primary_subject_not_found",
     "j102_coupled_subject_not_found",
-    // BLOCK-2: which subjects, which fields, which chain, which prerequisites.
     "j102_subject_kind_not_written_by_transition",
     "j102_duplicate_proposed_subject_kind",
     "j102_primary_subject_not_proposed",
@@ -3013,8 +2541,6 @@ test("BLOCK-1/BLOCK-2/HIGH-1: the writer actually USES the map, refusal by refus
     "j102_prerequisite_not_met",
     "j102_instrument_kind_not_permitted",
     "j102_field_not_movable_by_transition",
-    // ROOT BLOCKER 2: the whole coupled set, the evaluator's own prior
-    // conditions, the exact target of every moved field, and the exact event set.
     "j102_required_subject_not_proposed",
     "j102_prior_condition_not_met",
     "j102_transition_effect_not_canonical",
@@ -3025,12 +2551,9 @@ test("BLOCK-1/BLOCK-2/HIGH-1: the writer actually USES the map, refusal by refus
     "j102_event_set_mismatch",
     "j102_event_missing_or_wrong",
     "j102_event_not_produced_by_transition",
-    // HIGH-1: the event's own claim and the subject it names.
     "j102_event_digest_mismatch",
     "j102_event_transition_mismatch",
     "j102_event_subject_not_advanced",
-    // HIGH-5: the subject's own provenance, its schema, its tenant and its shape.
-    // The forged established_by_transition is the one this list exists for.
     "j102_subject_provenance_mismatch",
     "j102_subject_schema_version_mismatch",
     "j102_subject_tenant_mismatch",
@@ -3038,7 +2561,6 @@ test("BLOCK-1/BLOCK-2/HIGH-1: the writer actually USES the map, refusal by refus
     "j102_subject_record_shape_unrecognised",
     "j102_subject_header_state_mismatch",
     "j102_subject_envelope_not_an_object",
-    // HIGH-6: the whole event payload, and the evidence the history cites.
     "j102_event_schema_version_mismatch",
     "j102_event_payload_schema_version_mismatch",
     "j102_event_tenant_mismatch",
@@ -3052,19 +2574,13 @@ test("BLOCK-1/BLOCK-2/HIGH-1: the writer actually USES the map, refusal by refus
     "j102_event_evidence_references_not_rechecked",
     "j102_event_evidence_reference_not_rechecked",
     "j102_event_evidence_reference_duplicated",
-    // M-3: the operand map's own type, named before anything indexes into it.
     "j102_expected_state_digests_not_an_object",
   ]) {
     assert.ok(writer.includes(required), `the writer raises or derives ${required}`);
   }
-  // HIGH-6: the canonical reference set is built from the RECHECK's answer, and
-  // the event's citations are compared against that rather than against the
-  // manifest or the diagnostics.
   assert.match(writer,
     /into v_canonical_refs\s*\n\s*from jsonb_array_elements\(v_checked\)/,
     "the citations are compared against what the recheck re-read, not against the request");
-  // M-2: the two derived receipt fields come off the admission contract, and the
-  // caller's diagnostic reason is carried under its own name with its own scope.
   assert.ok(writer.includes("'coupled_facts_committed', coalesce(v_contract -> 'coupled_facts'"));
   assert.ok(writer.includes("'decision_refs', coalesce(v_contract -> 'decision_refs'"));
   assert.ok(writer.includes("'caller_reported_reason_id', p_diagnostics ->> 'reason_id'"),
@@ -3075,20 +2591,14 @@ test("BLOCK-1/BLOCK-2/HIGH-1: the writer actually USES the map, refusal by refus
     "M-2: coupled_facts_committed is derived, never echoed");
   assert.equal(/'decision_refs',\s*coalesce\(p_diagnostics/.test(writer), false,
     "M-2: decision_refs is derived, never echoed");
-  // The effect interpreter is CALLED, in all three places the map declares a
-  // value: a creation's shape, a prior condition's comparand, and a moved field.
   assert.ok(writer.split("ops.j102_expected_value(").length - 1 >= 4,
     "the writer computes its expected values rather than carrying a second opinion");
-  // And the receipt no longer reports a bypass as a caveat.
   assert.ok(writer.includes("'primary_subject_created', false"));
   assert.ok(writer.includes("'prerequisites_checked', true"));
   assert.ok(writer.includes("'transition_effects_enforced', true"));
   assert.ok(writer.includes("'required_event_set_enforced', true"));
-  // The recheck is handed the primary subject rather than left to check the
-  // manifest against itself. This is the whole of BLOCKER-2's close.
   assert.match(writer,
     /ops\.j102_recheck_evidence\(\s*p_evidence_recheck,\s*p_transition_id,\s*v_primary_kind,\s*v_primary_id\)/);
-  // And the receipt no longer claims more than the code enforces.
   assert.ok(writer.includes("'evidence_bound_to_primary_subject', true"));
   assert.ok(writer.includes("'request_digest_scope', 'caller_supplied_intent_digest_not_recomputed_here'"),
     "M-b: the caller's intent digest is named as caller-supplied, not as a database proof");
@@ -3109,42 +2619,29 @@ test("BLOCK-2: the evidence recheck binds to the primary subject and closes the 
     "j102_actor_class_not_permitted_for_evidence",
     "j102_evidence_binding_required",
     "j102_evidence_bound_to_wrong_subject_kind",
-    // Membership in the lock set is NOT the check; identity with the advancing
-    // subject is. This is the refusal that stops "add deal B to the CAS map and
-    // propose deal A".
     "j102_evidence_not_bound_to_primary_subject",
     "j102_evidence_record_kind_mismatch",
     "j102_evidence_author_class_not_permitted",
     "j102_evidence_alternative_not_satisfied",
     "j102_closing_date_in_the_future",
-    // The document's own state axes, which the pin does not cover.
     "j102_document_state_not_met",
   ]) {
     assert.ok(recheck.includes(required), `the recheck raises ${required}`);
   }
-  // The one-argument form is gone, so nothing can establish "the evidence was
-  // exact" without being told which subject it was exact FOR.
   assert.ok(CANDIDATE_SQL.includes("drop function if exists ops.j102_recheck_evidence(jsonb);"));
   assert.equal(CANDIDATE_SQL.includes("ops.j102_recheck_evidence(p_recheck jsonb)\n"), false);
 });
 
 test("HIGH-2: the candidate refuses an incompatible existing shape and alters nothing", () => {
-  // No ALTER, no backfill, no ordinal. The remedy the file names is a fresh
-  // database or an already-exact one, and it says so instead of no-opping.
   assert.equal(/\balter\s+table\b/i.test(CANDIDATE_SQL), false,
     "the candidate contains no ALTER TABLE; it is source, not a migration");
   assert.equal(/\bdrop\s+table\b/i.test(CANDIDATE_SQL), false,
     "and it drops no relation, so nothing it may be applied beside loses data");
-  // The only UPDATE anywhere is the idempotency settle and the upsert's own
-  // ON CONFLICT clause. Neither touches a lifecycle row that was already there,
-  // which is what "no backfill program" means concretely.
   const updates = CANDIDATE_SQL.match(/\bupdate\s+ops\.j102_[a-z_]+/gi) ?? [];
   assert.deepEqual([...new Set(updates.map(u => u.toLowerCase().replace(/\s+/g, " ")))],
     ["update ops.j102_idempotency"]);
   assert.ok(CANDIDATE_SQL.includes("j102_incompatible_existing_schema"));
   for (const column of ["bound_subject_kind", "bound_subject_id", "recorded_by_class"]) {
-    // The three columns the corrections added are exactly the ones an earlier
-    // candidate's table would be missing, so they must be in the preflight list.
     const preflight = CANDIDATE_SQL.slice(0, CANDIDATE_SQL.indexOf("-- Guards."));
     assert.ok(preflight.includes(`'${column}'`),
       `the preflight names ${column}, which an earlier candidate's table would lack`);
@@ -3167,15 +2664,9 @@ test("SQL parity: the map's INITIALIZATIONS are the kernel's initialization cont
       `${id} parent_subject_kind`);
     assert.deepEqual(admitted.declared_identifiers, contract.declared_identifiers,
       `${id} declared_identifiers`);
-    // The operation pairing, from the store's own schemas rather than restated.
     const operations = V5_J102_OPERATIONS.filter(name => schemas[name].initialization === id);
     assert.deepEqual([...admitted.operations].sort(), operations.sort(),
       `${id} is performed by exactly the operation this store routes to it`);
-    // THE CREATION SHAPE COVERS EXACTLY THE CREATED ROW, key for key — its own
-    // identity, the parent reference where there is one, the declared
-    // identifiers, and the kernel's fixed initial state. A key the map does not
-    // name is a key the writer refuses; a key it names that the kernel does not
-    // write is a field the writer would demand and never get.
     assert.deepEqual(Object.keys(admitted.creation_shape).sort(), [...new Set([
       "subject_kind", "subject_id",
       ...(contract.parent_reference_field === null ? [] : [contract.parent_reference_field]),
@@ -3194,20 +2685,14 @@ test("SQL parity: the map's INITIALIZATIONS are the kernel's initialization cont
         `${id}.${field} is a constant, not something a caller may choose`);
       assert.deepEqual(effect.value, value, `${id}.${field} is exactly the kernel's value`);
     }
-    // The context conditions, in both directions.
     assert.deepEqual(
       (admitted.required_context ?? []).map(rule => rule.subject),
       contract.required_context.map(rule => rule.subject), `${id} required_context subjects`);
-    // The event: one, of the kernel's kind, on the created subject, with the
-    // kernel's own detail fields and nothing else.
     assert.equal(admitted.event.event_kind, contract.event_kind, `${id} event_kind`);
     assert.equal(admitted.event.subject, contract.subject_kind, `${id} event subject`);
     assert.deepEqual(Object.keys(admitted.event.detail).sort(),
       [...contract.event_detail_fields].sort(), `${id} event detail fields`);
   }
-  // AND THE TWO COUPLED CREATIONS ARE NOT REACHABLE THROUGH THIS DOOR. An
-  // engagement or a deal created outside its transition would be client status
-  // with no coupled change, or the overruled Q078 rule back again.
   for (const admitted of Object.values(policy.initializations)) {
     assert.ok(!["engagement", "deal"].includes(admitted.subject_kind));
   }
@@ -3217,44 +2702,22 @@ test("SQL parity: the map's INITIALIZATIONS are the kernel's initialization cont
 });
 
 test("ANTI-BYPASS: the creation door is a separate writer and apply_transition still refuses a primary", () => {
-  // The refusal that must survive the arrival of a creation door, and the note
-  // that says why it is separate rather than a flag on one writer.
   assert.ok(CANDIDATE_SQL.includes("j102_primary_subject_creation_refused"),
     "the transition writer still refuses to create the subject it advances");
   assert.equal(admissionPolicy().subject_creation,
     "coupled_only_never_the_primary_subject",
     "and the map still says creation inside a transition is coupled-only");
-  // Every transition's own primary subject is still update-only in the map.
   const policy = admissionPolicy();
   for (const id of V5_J102_TRANSITION_IDS) {
     const contract = v5J102TransitionContract(id);
     assert.equal(policy.transitions[id].subjects[contract.subject_kind].mode, "update",
       `${id} still advances a ${contract.subject_kind} that already exists`);
   }
-  // The initialization writer exists, is its own function, and does not reach the
-  // transition writer.
   const start = CANDIDATE_SQL.indexOf("create or replace function ops.j102_initialize_subject(");
   assert.ok(start > 0, "the candidate carries a separate initialization writer");
   const body = CANDIDATE_SQL.slice(start,
     CANDIDATE_SQL.indexOf("comment on function ops.j102_initialize_subject", start));
 
-  // ===========================================================================
-  // "IT NEVER CALLS THE TRANSITION WRITER" IS A CLAIM ABOUT CODE, NOT ABOUT TEXT.
-  //
-  // The first version of this assertion required the writer's SOURCE to contain
-  // no "ops.j102_apply_transition" anywhere, and that tested nothing worth
-  // testing: the writer NAMES the transition writer inside the refusal it raises
-  // when a caller offers a transition id to the creation door, so the string is
-  // legitimately present and the assertion failed against correct code. The two
-  // ways to "fix" that are both wrong — deleting the guard removes a control, and
-  // rewording the refusal keeps the control while making it unsayable.
-  //
-  // So the check is made against the EXECUTABLE text: string literals and
-  // comments are removed and what remains is what actually runs. A real
-  // `perform ops.j102_apply_transition(...)` survives that and fails the
-  // assertion; a refusal message does not. Both directions are then controlled
-  // below, because a stripper that removed too much would make this vacuous.
-  // ===========================================================================
   assert.ok(body.includes("j102_transition_is_not_an_initialization"),
     "the creation door refuses a transition id by name");
   assert.ok(body.includes("ops.j102_apply_transition"),
@@ -3263,21 +2726,15 @@ test("ANTI-BYPASS: the creation door is a separate writer and apply_transition s
   const executable = executableSql(body);
   assert.equal(executable.includes("j102_apply_transition"), false,
     "the initialization writer never invokes the transition writer");
-  // The one route by which a call could hide inside a literal the stripper
-  // removes is dynamic SQL, and this writer builds none.
   assert.equal(/\bexecute\b/i.test(executable), false,
     "and it composes no dynamic SQL, so no call can hide in a string it executes");
 
-  // CONTROL ONE — THE STRIPPER KEEPS THE CODE. If it removed too much, the
-  // assertion above would pass against anything at all.
   for (const call of ["ops.j102_claim_idempotency(", "ops.j102_expected_value(",
     "ops.j102_settle_idempotency(", "ops.j102_subject(", "pg_advisory_xact_lock(",
     "insert into ops.j102_subject_current", "insert into ops.j102_subject_event"]) {
     assert.ok(executable.includes(call),
       `the executable text still carries ${call}, so the stripper took comments and literals and not code`);
   }
-  // CONTROL TWO — A REAL CALL WOULD FAIL THIS TEST. The invocation is spliced
-  // into a COPY of the writer's source; nothing on disk is touched, no SQL runs.
   const mutated = body.replace(
     "v_replay := ops.j102_claim_idempotency(",
     "perform ops.j102_apply_transition('open-assignment', p_expected_state_digests,\n"
@@ -3286,8 +2743,6 @@ test("ANTI-BYPASS: the creation door is a separate writer and apply_transition s
   assert.notEqual(mutated, body, "the control mutation actually applied");
   assert.equal(executableSql(mutated).includes("j102_apply_transition"), true,
     "a real invocation survives the stripping, so this assertion would fail on one");
-  // And the mutation is a CALL rather than more prose: the raw text of both
-  // carries the name, and only the executable text tells them apart.
   assert.equal(body.includes("ops.j102_apply_transition"),
     mutated.includes("ops.j102_apply_transition"),
     "the raw text cannot distinguish the refusal message from a call, which is the point");
@@ -3301,19 +2756,11 @@ test("ANTI-BYPASS: the creation door is a separate writer and apply_transition s
   ]) {
     assert.ok(body.includes(refusal), `the initialization writer carries ${refusal}`);
   }
-  // THE OPERAND SET IS CLOSED BY IDENTITY, NOT BY KIND, and it can only be closed
-  // AFTER the context loop has resolved which parent id this call actually reads.
-  // Closing it by kind alone leaves `assignment:somebody-elses-id` locked,
-  // compare-and-swapped, never consulted, and reported in the receipt's
-  // `expected_state_digests` beside `required_context_enforced: true`.
   const identityCheck = body.indexOf("v_consulted_keys @> jsonb_build_array(to_jsonb(v_key))");
   const contextLoop = body.indexOf("j102_required_context_not_met");
   assert.ok(identityCheck > 0, "the writer closes the operand set by identity");
   assert.ok(identityCheck > contextLoop,
     "and it does so AFTER resolving the parents, which is the only point at which the identities exist");
-  // AND THE RECEIPT REPORTS THAT SET. Two unconditional booleans describe the
-  // empty set on a parentless creation; the consulted list is what makes them
-  // checkable rather than decorative.
   assert.ok(body.includes("'context_subjects_consulted', v_consulted_keys"),
     "the receipt names which parents were consulted");
   assert.ok(body.includes("v_consulted_keys := v_consulted_keys"),
@@ -3332,8 +2779,6 @@ test("ANTI-BYPASS: the creation door is a separate writer and apply_transition s
   }
   assert.equal(CANDIDATE_SQL.includes("refuses rather than overwriting it"), false,
     "and the unconditional wording it replaced is gone rather than sitting beside the qualified one");
-  // The three initialization ids are the ONLY history rows admitted to cite no
-  // evidence, and the relation says so structurally rather than the writer alone.
   for (const id of V5_J102_INITIALIZATION_IDS) {
     assert.ok(CANDIDATE_SQL.includes(`'${id}'`),
       `the event relation's empty-citation carve-out names ${id}`);
@@ -3361,8 +2806,6 @@ test("Q103: the reconciliation writer is governed, and the ungoverned overload i
   assert.ok(CANDIDATE_SQL.includes(
     "create or replace function ops.j102_record_reconciliation_item(\n  p_envelope jsonb, p_expected_state_digests jsonb,\n  p_idempotency_key text, p_request_digest text, p_diagnostics jsonb)"),
   "and the governed form takes the operand map, the key, the request digest and the diagnostics");
-  // No stale signature survives in a grant, a revoke or the shadow assertion —
-  // any one of them would fail at apply time against the dropped function.
   const stale = CANDIDATE_SQL.split("\n")
     .filter(line => line.includes("j102_record_reconciliation_item"))
     .filter(line => /record_reconciliation_item\(jsonb\)/.test(line));
@@ -3375,18 +2818,14 @@ test("Q103: the reconciliation writer is governed, and the ungoverned overload i
   const body = CANDIDATE_SQL.slice(start,
     CANDIDATE_SQL.indexOf("comment on function ops.j102_record_reconciliation_item", start));
   const executable = executableSql(body);
-  // IT CLAIMS BEFORE IT READS, and settles what it wrote — the same governance
-  // every sibling writer carries.
   assert.ok(executable.includes("ops.j102_claim_idempotency("));
   assert.ok(executable.includes("ops.j102_settle_idempotency("));
   assert.ok(executable.indexOf("ops.j102_claim_idempotency(") <
     executable.indexOf("ops.j102_subject_current"),
   "the key is claimed before any state is read");
-  // IT TAKES THE ESTABLISHED TIER-2 LOCK before the compare-and-swap.
   assert.ok(executable.indexOf("pg_advisory_xact_lock") <
     executable.indexOf("ops.f01_digest_jsonb(v_stored_state)"),
   "the subject is locked before its digest is compared");
-  // AND THE THREE STALENESS BINDINGS ARE IN THE CODE, not in a comment.
   for (const refusal of ["j102_reconciliation_current_version_not_current",
     "j102_reconciliation_state_evidence_stale",
     "j102_reconciliation_history_evidence_stale",
@@ -3395,25 +2834,15 @@ test("Q103: the reconciliation writer is governed, and the ungoverned overload i
     "j102_item_conflict_kind_unregistered", "j102_item_field_class_mismatch"]) {
     assert.ok(body.includes(refusal), `the writer carries ${refusal}`);
   }
-  // THE TWO LABEL CHECKS READ THE MAP, rather than restating the vocabulary in a
-  // second place that nothing compares. A literal list here would pass the
-  // refusal-code assertion above and drift from the kernel silently.
   assert.ok(executable.includes("ops.j102_admission_policy()"),
     "the writer's vocabulary is the admission map's, not its own copy");
-  // The rest are comparisons against particular jsonb KEYS, which are literals —
-  // so they are asserted against the body with its comments removed and its
-  // literals kept, and a prose mention of either cannot satisfy them.
   const code = sqlWithoutComments(body);
   assert.ok(code.includes("v_recon -> 'conflict_kinds'"),
     "conflict_kind is checked against the map's registered kinds");
   assert.ok(code.includes("v_recon -> 'field_class_registry' -> v_field"),
     "and every edit's class is checked against the map's registry entry for THAT field");
-  // BOTH SIDES. A lying concurrent_edits label misleads the person resolving the
-  // conflict exactly as much as a lying incoming one.
   assert.ok(code.includes("array['incoming_edits', 'concurrent_edits']"),
     "the field-class check walks both preserved sides");
-  // AND THE RESOLUTION FLAGS ARE JSON BOOLEANS at both the writer and the
-  // relation, so the string "false" is not accepted where the boolean is meant.
   for (const [field, value] of [["resolved_by_machine", "false"], ["visible", "true"],
     ["applied", "false"]]) {
     assert.ok(code.includes(`(v_record -> '${field}') is distinct from '${value}'::jsonb`),
@@ -3434,22 +2863,16 @@ test("Q103: the reconciliation writer is governed, and the ungoverned overload i
     assert.ok(relation.includes(`'${kind}'`),
       `and its subject_kind CHECK carries the same five kinds j102_subject_current does (${kind})`);
   }
-  // The replay door admits the operation, or the key could never be claimed.
   const replay = CANDIDATE_SQL.slice(
     CANDIDATE_SQL.indexOf("create or replace function ops.j102_replay_outcome("),
     CANDIDATE_SQL.indexOf("create or replace function ops.j102_claim_idempotency("));
   assert.ok(replay.includes("'record-lifecycle-reconciliation'"),
     "the closed write-operation vocabulary admits the reconciliation operation");
-  // AND NO UNIQUE INDEX COLLAPSES DISTINCT PROPOSALS on the version pair.
   assert.equal(/create\s+unique\s+index[^;]*j102_reconciliation_item/i.test(CANDIDATE_SQL), false,
     "two different proposals against one version pair are two conflicts, and both stay visible");
 });
 
 test("SQL parity: the admission map's reconciliation vocabulary IS the kernel's", () => {
-  // THE POINT OF THE TRANSCRIPTION IS THAT IT IS ONE CONTRACT WITH TWO READERS.
-  // The writer refuses a conflict_kind and a field_class against the map, so a map
-  // that has drifted from the kernel would refuse real kernel answers at the
-  // database, or admit labels the kernel never files. Both are failures here.
   const recon = admissionPolicy().reconciliation;
   assert.deepEqual(recon.conflict_kinds, [...V5_J102_CONFLICT_KINDS]);
   assert.deepEqual(recon.field_classes, [...V5_J102_FIELD_CLASSES]);
@@ -3457,25 +2880,16 @@ test("SQL parity: the admission map's reconciliation vocabulary IS the kernel's"
   assert.equal(recon.caller_supplied_field_class_admitted, false);
   assert.equal(recon.writer, "ops.j102_record_reconciliation_item");
 
-  // FIELD BY FIELD, IN BOTH DIRECTIONS. A missing entry would let a real edit be
-  // refused as mislabelled; an extra one would let an unregistered field carry a
-  // class — and `routine` is the class that would matter.
   assert.deepEqual(Object.keys(recon.field_class_registry).sort(),
     Object.keys(V5_J102_FIELD_CLASS_REGISTRY).sort());
   for (const [field, cls] of Object.entries(V5_J102_FIELD_CLASS_REGISTRY)) {
     assert.equal(recon.field_class_registry[field], cls, `${field} is classified ${cls}`);
   }
-  // The registry's own statement about itself travels with it, so a routine entry
-  // added on one side is visible on the other.
   assert.equal(recon.routine_fields_registered,
     V5_J102_UNCLASSIFIED_FIELD_POLICY.routine_fields_registered);
   assert.equal(Object.values(recon.field_class_registry).includes("routine"), false);
-  // An unregistered field's class is JSON null in both places, which is what the
-  // writer compares an edit against.
   assert.equal(recon.unregistered_field_class, null);
 
-  // AND THE KINDS ARE THE ONES THE EVALUATOR ACTUALLY FILES, driven rather than
-  // restated — the same check the kernel suite makes, made here against the SQL.
   const edit = (field) => ({
     field, value_digest: `sha256:${"7".repeat(64)}`, edited_by: "joe", edited_at: T.mid,
   });
@@ -3513,9 +2927,6 @@ test("M-a: capabilities report the association prerequisite that actually binds"
   const registrations = v5J102ToolRegistrations();
   const byName = Object.fromEntries(registrations.map(entry => [entry.name, entry]));
 
-  // The document-backed transitions: `authorityOnly: false` and yet not completable
-  // by an agent alone, because the association their evidence needs is
-  // partner-written. Saying only the first was the misreport.
   for (const name of ["record-representation-agreement", "record-deal-execution",
     "record-loi-submission", "record-loi-acceptance"]) {
     const entry = byName[name];
@@ -3531,20 +2942,16 @@ test("M-a: capabilities report the association prerequisite that actually binds"
     assert.equal(v5J102StoreOperationSchemas()["record-evidence-subject-link"].authorityOnly,
       true, "and the operation that writes one really is authorityOnly");
   }
-  // The record-backed ones need no association at all: a first-party record
-  // carries its own typed binding.
   for (const name of ["open-cre-assignment", "record-diligence-outcome",
     "record-deal-closing", "cancel-pending-deal"]) {
     assert.equal(byName[name].requires_partner_written_evidence_association, false,
       `${name} rests on first-party records, which bind themselves`);
     assert.equal(byName[name].association_prerequisite, null);
   }
-  // Nothing was widened: the authorityOnly set is unchanged.
   const schemas = v5J102StoreOperationSchemas();
   assert.deepEqual(V5_J102_OPERATIONS.filter(n => schemas[n].authorityOnly).sort(),
     ["cancel-pending-deal", "commit-winning-property", "record-deal-closing",
       "record-evidence-subject-link", "record-lifecycle-correction"]);
-  // A dispatching operation reports BOTH of the transitions it can reach.
   assert.deepEqual(byName["record-deal-execution"].dispatched_transitions,
     ["record-lease-execution", "record-purchase-contract-execution"]);
   assert.deepEqual(byName["record-deal-axis"].dispatched_transitions,
@@ -3561,31 +2968,15 @@ test("the SQL fixture stays UNEXECUTED source, and rolls every synthetic row bac
     "the fixture never commits");
   assert.ok(fixture.includes("THIS FILE HAS NOT BEEN EXECUTED"),
     "the fixture says plainly that it is source and not a result");
-  // The adversarial groups, named so a future edit that drops one is visible
-  // here rather than only in a diff.
   for (const group of ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10",
-    // HIGH-5's forged provenance and M-3's untyped operand map. Both refuse
-    // BEFORE any state is read, so unlike U1/U2 they really fire in a file with
-    // no committed subject.
     "A11", "A12"]) {
     assert.ok(fixture.includes(`=== ${group}:`), `the fixture carries adversarial group ${group}`);
   }
-  // U1 AND U2 NOW RUN AGAINST A COMMITTED ROW. They were unreachable while
-  // nothing could create an assignment, and reported themselves UNPROVEN with a
-  // reason the creation door made false. They have MOVED into the walk rather
-  // than been relabelled: each now asserts the check it is aimed at, and the old
-  // reason is gone rather than reworded.
   for (const group of ["U1", "U2"]) {
     assert.ok(fixture.includes(`=== ${group}:`), `the fixture carries group ${group}`);
     assert.ok(fixture.includes(`${group}a PROVED`),
       `${group} proves the check it is aimed at rather than reporting a compare-and-swap refusal`);
   }
-  // THE RETIRED LABEL IS NO LONGER A REASON ANYWHERE. It meant two different
-  // propositions — "no transition creates its own primary subject" (still true)
-  // and "this fixture cannot obtain a committed assignment" (now false) — and a
-  // notice giving it as the reason for a skip would be giving a reason that no
-  // longer holds. It survives only in the note recording its retirement, which is
-  // what a reader of the diff needs.
   const staleLabelInOutput = fixture.split("\n")
     .filter(line => line.includes("j102_fixture_bootstrap_absent"))
     .filter(line => /\braise\b/.test(line) || /^\s*'/.test(line));
@@ -3596,9 +2987,6 @@ test("the SQL fixture stays UNEXECUTED source, and rolls every synthetic row bac
     "and it appears exactly once, in the note that retires it");
   assert.ok(fixture.includes("=== J4:"),
     "and the negative context cases the walk makes reachable are carried");
-  // Q103's conflict writer, structurally and behaviourally. The behavioural group
-  // needs a committed subject, so it lives inside the walk for the same reason
-  // U1 and U2 do.
   assert.ok(fixture.includes("=== S9:"),
     "the fixture asserts the reconciliation writer is governed and the old one is gone");
   assert.ok(fixture.includes("=== R:"),
@@ -3608,15 +2996,9 @@ test("the SQL fixture stays UNEXECUTED source, and rolls every synthetic row bac
     "j102_reconciliation_state_evidence_stale",
     "j102_reconciliation_history_evidence_stale",
     "j102_reconciliation_without_conflict",
-    // And the two label refusals, which are what stop the queue a person reads
-    // from carrying a category nothing files or a lifecycle field called routine.
     "j102_item_conflict_kind_unregistered", "j102_item_field_class_mismatch"]) {
     assert.ok(fixture.includes(refusal), `the conflict group drives ${refusal}`);
   }
-  // THE CLOSING NOTICES MUST ACCOUNT FOR BOTH NEW GROUPS, or a skipped walk reads
-  // as a run that proved the conflict writer. S9 is structural and runs always; R
-  // lives INSIDE the walk and runs only when J does, which is exactly the
-  // distinction the two lines have to carry.
   const notices = fixture.split("\n").filter(line => line.includes("RUNNABLE GROUPS PASSED")
     || line.includes("PARTIAL RUN"));
   assert.equal(notices.length, 2, "there are exactly two closing notices to keep honest");
@@ -3632,45 +3014,29 @@ test("the SQL fixture stays UNEXECUTED source, and rolls every synthetic row bac
     "and says what that costs the reader rather than only naming the group");
   assert.ok(partial.includes("S9 ran and is structural only"),
     "and does not let a structural group stand in for the behavioural one");
-  // THE ONE ARM THAT IS STILL UNREACHABLE HERE IS NAMED, not left to be inferred
-  // from the cases that happen to be present.
   assert.ok(fixture.includes("UNPROVEN IN THIS FILE -- j102_required_context_not_met"),
     "the fixture names the context arm no shipped door can drive");
-  // AND A SKIPPED WALK CANNOT READ AS A GREEN ONE. The row counts compare against
-  // counters the walk increments, so they pass identically when it stops early;
-  // the closing notice is what distinguishes the two runs.
   assert.ok(fixture.includes("PARTIAL RUN"),
     "a run that skipped the walk says so at the end rather than reporting all groups passed");
   assert.ok(fixture.includes("Do not read this as a green J"),
     "and it says plainly what a green exit status would otherwise imply");
   assert.ok(fixture.includes("=== S7:"),
     "the fixture asserts the provenance and citation bindings structurally too");
-  // THE CREATION DOOR, STRUCTURALLY AND BEHAVIOURALLY, AND THE WALK IT MAKES
-  // POSSIBLE.
   assert.ok(fixture.includes("=== S8:"),
     "the fixture asserts the initialization half of the admission map structurally");
   assert.ok(fixture.includes("=== I1:"),
     "the fixture carries the creation door's own refusal matrix");
   assert.ok(fixture.includes("=== J:"),
     "the fixture carries the positive walk from a legitimate first row");
-  // AND THE ANTI-BYPASS GROUP SURVIVES THE ARRIVAL OF THAT DOOR. P0 is the case
-  // that must keep refusing: a transition may not create the subject it advances,
-  // whatever else can now create one.
   assert.ok(fixture.includes("=== P0:"),
     "the fixture still proves the transition writer creates no primary subject");
   assert.ok(fixture.includes("j102_primary_subject_creation_refused"),
     "and it names that refusal by the writer's own word for it");
-  // The walk skips rather than fabricates when a real prerequisite is absent, and
-  // each skip names WHICH prerequisite rather than a generic miss.
   assert.ok(fixture.includes("J3 SKIPPED -- UNMET PREREQUISITE"),
     "the walk names why it stopped rather than inventing a document or a role");
   assert.equal(/create\s+role/i.test(fixture), false,
     "and it still creates no role, so no identity is minted to get past a gate");
 
-  // THE CURRENT F01 DOCUMENT WRITER IS THE SIX-ARGUMENT ONE. domain.sql drops its
-  // four-argument form the moment the document-source hunk is present, so a
-  // fixture gated on that overload alone always skipped on exactly the
-  // configuration that hunk targets. Both are probed by exact signature.
   assert.ok(fixture.includes("ops.f01_record_document(jsonb,jsonb,jsonb,text,text,text)"),
     "the walk reaches the CURRENT six-argument F01 document writer");
   assert.ok(fixture.includes("ops.f01_record_document(jsonb,text,text,text)"),
@@ -3681,41 +3047,12 @@ test("the SQL fixture stays UNEXECUTED source, and rolls every synthetic row bac
     "and it carries the basis a non-derived statement is required to state");
   assert.equal(fixture.includes("derived_from_stored_artifact"), false,
     "no derivative coverage is invented to get a document written");
-  // AND AN F01 REFUSAL IS A FAILURE, NOT A SKIP. The earlier revision wrapped the
-  // call in `exception when others` → notice, so a wrong envelope shape reported
-  // as a missing prerequisite.
   const j3 = fixture.slice(fixture.indexOf("=== J3:"), fixture.indexOf("if v_walk_ok then"));
   assert.ok(j3.length > 0, "the J3 leg is locatable");
   assert.equal(/exception\s+when\s+others/i.test(j3), false,
     "the F01 call is not wrapped in a catch-all that turns a refusal into a skip");
 });
 
-// ---------------------------------------------------------------------------
-// THE TRANSITION-EFFECT PARITY SUITE.
-//
-// The map above says which FIELDS a transition may move. That is not the same
-// question as what it moves them TO, and the difference is the whole of the
-// second root correction: a routine `open-assignment` may write
-// `assignment_phase`, and `assignment_phase: "committed"` is a commitment
-// performed without any of a commitment's evidence.
-//
-// So `subjects` and `events` in the admission map carry the EXACT result, and
-// these tests prove the transcription by running the kernel and requiring the
-// map to PREDICT its answer:
-//
-//   1. the kernel evaluates a real transition and returns proposed_state/events,
-//   2. the map's own rules are interpreted against the same inputs,
-//   3. the two must agree field by field and event by event.
-//
-// NOTHING HERE MIRRORS THE MAP AT ITSELF. The oracle is the kernel's evaluator,
-// which knows nothing about the SQL; a map that drifts from it fails here.
-//
-// WHAT THIS CANNOT PROVE, said plainly: the interpreter below is a
-// TRANSCRIPTION of ops.j102_expected_value and of the writer's comparison loop,
-// written in JavaScript because no database is reachable from this suite. It
-// proves the MAP is right. That the PL/pgSQL implementation of the same
-// algorithm behaves identically is unexecuted, and is the SQL fixture's job.
-// ---------------------------------------------------------------------------
 
 const MISSING = Symbol("missing");
 const at = (object, field) =>
@@ -3724,7 +3061,6 @@ const at = (object, field) =>
 const orNull = value => (value === MISSING ? null : value);
 const show = value => (value === MISSING ? "absent" : JSON.stringify(value));
 
-/** ops.j102_expected_value, transcribed. Same three answer shapes. */
 function expectedValue(effect, ctx) {
   const from = source =>
     source === "prior" ? ctx.prior : source === "proposed" ? ctx.proposed : ctx.context;
@@ -3733,13 +3069,6 @@ function expectedValue(effect, ctx) {
       return { kind: "exact", value: orNull(at(effect, "value")) };
     case "unbound":
       return { kind: "unbound" };
-    // THE ONE ANSWER SHAPE THE SQL CANNOT BIND TO A VALUE, and the seam is real
-    // rather than a gap: the store sends the writer a proposed state, never the
-    // caller's `declared` object, so SQL can hold the property a new negotiation
-    // concerns to the IDENTIFIER SHAPE and no further. The KERNEL binds the value
-    // — it composes the created state from `declared` itself — so the parity
-    // comparison below asks SQL for the shape and the kernel for the value, and
-    // says which layer answers which.
     case "declared_identifier":
       return { kind: "declared_identifier", field: effect.field };
     case "optional_declared_identifier":
@@ -3806,7 +3135,6 @@ function expectedValue(effect, ctx) {
   }
 }
 
-/** The writer's comparison loop, transcribed. Returns every complaint it makes. */
 function complaintsAgainstPolicy(policy, transition_id, proposed_state, ctx) {
   const rules = policy.transitions[transition_id].subjects;
   const complaints = [];
@@ -3895,22 +3223,6 @@ function complaintsAgainstPolicy(policy, transition_id, proposed_state, ctx) {
   return complaints;
 }
 
-/**
- * The writer's event checks, transcribed. THREE questions, not one:
- *
- *   1. the SET — which kinds, on which subjects, exactly and pairwise;
- *   2. the PAYLOAD — every non-identity key of the nested event, against the
- *      map's `detail` template, evaluated by the same interpreter the state
- *      targets use. This is the class root named: `event_kind` and `subject`
- *      can both be right while `closing_date`, `cancellation_reason`,
- *      `evidence_reference` or an axis value inside the event is a lie;
- *   3. the EVIDENCE REFERENCES the stored event record cites, against the
- *      canonical set the recheck re-read.
- *
- * `events` is the kernel's own event array. `references` is what the store
- * stamps on every one of them; a caller passing something else is exercising
- * question 3.
- */
 const EVENT_IDENTITY_KEYS = ["schema_version", "event_kind", "subject_kind", "subject_id"];
 
 function eventComplaints(policy, transition_id, events, ctx, references = ctx.references) {
@@ -3945,8 +3257,6 @@ function eventComplaints(policy, transition_id, events, ctx, references = ctx.re
   for (const event of events) {
     const spec = specs.find(entry =>
       entry.event_kind === event.event_kind && entry.subject === event.subject_kind);
-    // An event with no spec is already complained about above as a wrong or
-    // extra one; there is nothing to compare its payload to.
     if (spec === undefined) continue;
     if (event.schema_version !== V5_J102_EVENT_SCHEMA_VERSION) {
       complaints.push(
@@ -3977,9 +3287,6 @@ function eventComplaints(policy, transition_id, events, ctx, references = ctx.re
     }
   }
 
-  // The evidence references the stored event record carries, against what the
-  // recheck actually re-read. Absent `references` means the caller is only
-  // exercising the set and payload halves.
   if (references !== undefined) {
     const canonical = new Map(ctx.canonical_references.map(ref => [ref.evidence_kind, ref]));
     for (const event of events) {
@@ -4005,9 +3312,6 @@ function eventComplaints(policy, transition_id, events, ctx, references = ctx.re
           continue;
         }
         seen.add(ref.evidence_kind);
-        // Whole-object equality, exactly as the SQL compares jsonb: an extra
-        // key, a missing key or a changed value is not the element the recheck
-        // built.
         if (canonicalJson(ref) !== canonicalJson(want)) {
           complaints.push(
             `j102_event_evidence_reference_not_rechecked: ${event.event_kind} cites ${JSON.stringify(ref)}, re-read as ${JSON.stringify(want)}`);
@@ -4018,10 +3322,7 @@ function eventComplaints(policy, transition_id, events, ctx, references = ctx.re
   return complaints;
 }
 
-// --- the walks the kernel is actually run through --------------------------
 
-// The kernel's own actor shape, which is not the store's caller context: this is
-// what evaluateLifecycleTransition takes, server-derived class and all.
 const KERNEL_PARTNER = Object.freeze({
   slug: "joe", human: true, authorization_class: "verified_partner",
   derived_by: "authenticated_handler_context",
@@ -4071,18 +3372,6 @@ const kernelRecord = (evidence_kind, record_kind, bound, over = {}) => ({
   provenance: provenance("ops.j102_first_party_record"),
 });
 
-/**
- * The facts the SQL recheck returns for one evidence item, from the same row.
- *
- * `reference` is built the way ops.j102_recheck_evidence builds it: off the
- * READER's own answer for that source — F01's document_id, the stored artifact's
- * digest, the record_id on the committed first-party row — and never off the
- * selector the caller wrote. The assertion below that this equals the kernel
- * evidence item's own `reference` is what ties the two together: the store sets
- * that field from the same three identifiers, so a map that predicts the
- * kernel's `evidence_reference` from these facts predicts what the SQL will
- * compare the history against.
- */
 const referenceFor = item =>
   item.source === "first_party_record" ? item.record.record_id
     : item.source === "f01_document" ? item.document.document_id
@@ -4091,10 +3380,6 @@ const referenceFor = item =>
 const factsFor = evidence => {
   const facts = {};
   for (const item of evidence) {
-    // The store's own `reference` on the loaded evidence IS the reader's
-    // identifier for that pin. If that ever stops being true, the SQL's
-    // recomputed reference and the kernel's event field diverge, and this is
-    // where it surfaces rather than in an unexecuted PL/pgSQL comparison.
     assert.equal(item.reference, referenceFor(item),
       `${item.evidence_kind}: the evidence reference must be the identifier its own reader returns`);
     if (item.source === "first_party_record") {
@@ -4121,11 +3406,6 @@ const factsFor = evidence => {
   return facts;
 };
 
-/**
- * ops.j102_recheck_evidence's canonical reference set, transcribed: exactly the
- * triple the writer rebuilds from what it re-read, and exactly what the store
- * stamps into every event's `evidence_references`.
- */
 const canonicalReferences = evidence =>
   evidence.map(item => ({
     evidence_kind: item.evidence_kind, source: item.source, reference: referenceFor(item),
@@ -4156,15 +3436,6 @@ const assignmentBinding = { subject_kind: "assignment", subject_id: "j102-asg-1"
 const negotiationBinding = { subject_kind: "property_negotiation", subject_id: "j102-neg-1" };
 const dealBinding = { subject_kind: "deal", subject_id: "j102-deal-1" };
 
-/**
- * One walk per transition the kernel can be driven through here.
- *
- * `approved_representation_equivalent` has no walk on purpose: no producer
- * writes the typed approval it rests on, ops.j102_typed_approval is granted to
- * nobody and always raises, and the store refuses the path with the missing fact
- * named. Manufacturing one here to widen the table would be inventing exactly
- * the authority that record is supposed to carry.
- */
 const WALKS = [
   { transition_id: "establish-client-and-engagement", actor: KERNEL_PARTNER,
     subject: REL, related: {}, declared: { new_subject_id: "j102-eng-1" },
@@ -4271,8 +3542,6 @@ function runWalk(walk) {
     prior: walk.prior, proposed: answer.proposed_state, context: walk.context,
     ids, facts: factsFor(walk.evidence),
     canonical_references,
-    // What the store stamps on every event of this call — the same array, which
-    // is why the writer requires it identically on each of them.
     references: canonical_references,
   };
   return { answer, ctx };
@@ -4284,8 +3553,6 @@ test("SQL parity: every transition the map declares has a subject rule set and a
   for (const id of V5_J102_TRANSITION_IDS) {
     const contract = v5J102TransitionContract(id);
     const admitted = policy.transitions[id];
-    // The subject rules cover EXACTLY the subjects `writes` covers, which the
-    // test above has already tied to the kernel's coupled facts.
     assert.deepEqual(Object.keys(admitted.subjects).sort(), Object.keys(admitted.writes).sort(),
       `${id} declares a rule for every subject it writes`);
     assert.equal(admitted.subjects[contract.subject_kind].role, "primary",
@@ -4297,9 +3564,6 @@ test("SQL parity: every transition the map declares has a subject rule set and a
       assert.equal(rule.role, "coupled");
       assert.ok(["update", "create"].includes(rule.mode));
     }
-    // Every field `writes` names is a field with a declared TARGET, and every
-    // field with a target is a field `writes` names. One is the permission, the
-    // other is the value; neither may exist without the other.
     for (const [kind, fields] of Object.entries(admitted.writes)) {
       const rule = admitted.subjects[kind];
       if (rule.mode === "create") continue;
@@ -4307,9 +3571,6 @@ test("SQL parity: every transition the map declares has a subject rule set and a
         `${id} moves exactly the ${kind} fields it declares, to declared values`);
     }
     assert.ok(admitted.events.length >= 1, `${id} appends at least one event`);
-    // Every event declares its whole nested payload, and no two events of one
-    // transition share a (kind, subject) — which is what lets the writer find the
-    // spec for a supplied event after the set check has matched it.
     const seen = new Set();
     for (const spec of admitted.events) {
       assert.equal(typeof spec.event_kind, "string",
@@ -4324,7 +3585,6 @@ test("SQL parity: every transition the map declares has a subject rule set and a
         `${id}'s ${spec.event_kind} names a subject this transition advances`);
     }
   }
-  // The two created subjects, and there are exactly two.
   const creating = V5_J102_TRANSITION_IDS.flatMap(id =>
     Object.entries(policy.transitions[id].subjects)
       .filter(([, rule]) => rule.mode === "create")
@@ -4337,9 +3597,6 @@ test("SQL parity: every transition the map declares has a subject rule set and a
 
 test("SQL parity: a created subject's shape IS the kernel's declared shape for that kind", () => {
   const policy = admissionPolicy();
-  // Read off the kernel rather than restated: assertLifecycleSubject returns
-  // every declared key for a kind, null where absent, so its output keys are the
-  // canonical shape a creation must carry exactly.
   const canonicalKeys = subject => Object.keys(assertLifecycleSubject(subject)).sort();
   assert.deepEqual(
     Object.keys(policy.transitions["establish-client-and-engagement"].subjects.engagement
@@ -4360,14 +3617,9 @@ test("SQL parity: the map PREDICTS the kernel's proposed state and events, walk 
       [], `${walk.transition_id}: the admission map admits the kernel's own answer`);
     assert.deepEqual(eventComplaints(policy, walk.transition_id, answer.events, ctx),
       [], `${walk.transition_id}: the admission map admits the kernel's own events`);
-    // And the coupled subject set is the same set, in both directions.
     assert.deepEqual(Object.keys(answer.proposed_state).sort(),
       Object.keys(policy.transitions[walk.transition_id].subjects).sort(),
       `${walk.transition_id}: the required subject set is the set the kernel writes`);
-    // WHICH SUBJECTS THE KERNEL CREATES, read off its own answer: a proposed kind
-    // that was not among the loaded ones is a creation. The map's create-mode
-    // subjects must be exactly those, and so must the store's description of
-    // them -- so neither can drift from the evaluator.
     const created = Object.keys(answer.proposed_state)
       .filter(kind => walk.prior[kind] === undefined).sort();
     assert.deepEqual(created,
@@ -4383,8 +3635,6 @@ test("SQL parity: the map PREDICTS the kernel's proposed state and events, walk 
     assert.equal(registration.requires_existing_primary_subject, true,
       `${operation} advances a subject that must already exist`);
   }
-  // EVERY transition in the table is walked. A map checked against twelve of
-  // fourteen would leave the two unchecked ones free to say anything.
   const unwalked = V5_J102_TRANSITION_IDS.filter(id => !covered.has(id));
   assert.deepEqual(unwalked, [],
     "every transition in the table is walked at least once");
@@ -4397,11 +3647,6 @@ test("SQL parity: the required context IS the context the kernel refuses without
     ["engagement.engagement_state", "relationship.relationship_state"]);
   assert.deepEqual(declared.map(entry => entry.conditions[0].equals), ["active", "client"]);
 
-  // AND THE KERNEL REALLY DOES REFUSE WITHOUT THEM, which is what makes the two
-  // entries a transcription rather than a policy this map invented. The SQL reads
-  // both subjects out of the compare-and-swap operand set, so they are locked and
-  // digest-checked; a direct caller cannot open an assignment under a lapsed
-  // engagement by declining to mention it.
   const walk = WALKS.find(entry => entry.transition_id === "open-assignment");
   const refusal = (related, reason) => {
     const answer = evaluateLifecycleTransition({
@@ -4435,37 +3680,24 @@ test("ROOT BLOCKER 2: the map REFUSES a permitted field carrying an unpermitted 
       `${id} must refuse this payload with ${fragment}; it said ${JSON.stringify(complaints)}`);
   };
 
-  // THE ROUTINE CALL THAT COMMITS AN ASSIGNMENT. `assignment_phase` is a field
-  // open-assignment moves; `committed` is not a value it moves it to.
   complains("open-assignment", p => { p.assignment.assignment_phase = "committed"; },
     "j102_transition_effect_not_canonical");
-  // The same field, DELETED. A key that is not there is not the value either.
   complains("open-assignment", p => { delete p.assignment.assignment_phase; },
     "j102_transition_effect_missing");
-  // A pending deal id invented on a permitted subject through an unpermitted field.
   complains("open-assignment", p => { p.assignment.pending_deal_id = "j102-deal-9"; },
     "j102_field_not_movable_by_transition");
-  // A counter set to an arbitrary number rather than to its derived successor.
   complains("record-loi-submission", p => { p.assignment.open_negotiation_count = 40; },
     "j102_transition_effect_not_canonical");
-  // THE MISSING COUPLED SUBJECT: the deal is cancelled and the assignment is not
-  // returned, which is the subset of a coupled write Q082 refuses.
   complains("cancel-pending-deal", p => { delete p.assignment; },
     "j102_required_subject_not_proposed");
-  // The cleared references, kept instead of cleared.
   complains("cancel-pending-deal", p => { p.assignment.pending_deal_id = "j102-deal-1"; },
     "j102_transition_effect_not_canonical");
   complains("cancel-pending-deal", p => { p.assignment.selected_property_id = "j102-prop-1"; },
     "j102_transition_effect_not_canonical");
-  // A reason that is not the reason the stored failure record gives.
   complains("cancel-pending-deal", p => { p.deal.cancellation_reason = "a reason nobody recorded"; },
     "j102_transition_effect_not_canonical");
-  // A closing date that is not the settlement's date -- BLOCK-2's original
-  // consequence, now refused on the VALUE as well as on the binding.
   complains("record-deal-closing", p => { p.deal.closing_date = "2027-01-01T00:00:00.000Z"; },
     "j102_transition_effect_not_canonical");
-  // A deal born closed, a deal born under another assignment, a deal missing an
-  // axis, and a deal carrying a field the kernel never creates.
   complains("commit-winning-property", p => { p.deal.deal_state = "closed"; },
     "j102_created_subject_field_not_canonical");
   complains("commit-winning-property", p => { p.deal.assignment_id = "j102-asg-9"; },
@@ -4474,14 +3706,10 @@ test("ROOT BLOCKER 2: the map REFUSES a permitted field carrying an unpermitted 
     "j102_created_subject_shape_mismatch");
   complains("commit-winning-property", p => { p.deal.smuggled_field = "anything"; },
     "j102_created_subject_shape_mismatch");
-  // The assignment pointing at a deal this call did not create.
   complains("commit-winning-property", p => { p.assignment.pending_deal_id = "j102-deal-9"; },
     "j102_transition_effect_not_canonical");
-  // An unrelated subject travelling beside a legitimate request.
   complains("record-completion", p => { p.relationship = { ...CLIENT }; },
     "j102_subject_kind_not_written_by_transition");
-  // Q072's payment level that would not change the state: prior is
-  // partially_paid, so `partially_paid` is not among the values on THIS path.
   complains("record-payment", p => { p.deal.payment_state = "partially_paid"; },
     "j102_transition_effect_not_canonical");
 });
@@ -4498,39 +3726,20 @@ test("ROOT BLOCKER 2: the map REFUSES a wrong, missing or extra event", () => {
       `${id} must refuse this history with ${fragment}; it said ${JSON.stringify(complaints)}`);
   };
 
-  // THE EMPTY ARRAY. A transition that appends nothing is a state change nobody
-  // can audit; "at least one event" would have caught this one and none of the
-  // three below.
   complainsAbout("record-completion", () => [], "j102_event_set_mismatch");
-  // ONE OF TWO. The deal is cancelled in the history and the assignment never
-  // came back to the market.
   complainsAbout("cancel-pending-deal", events => events.slice(0, 1),
     "j102_event_set_mismatch");
-  // A PLAUSIBLE WRONG KIND on a correctly bound subject -- the residual the
-  // previous correction acknowledged and left open.
   complainsAbout("record-lease-execution", events => { events[0].event_kind = "deal_closed"; },
     "j102_event_missing_or_wrong");
-  // AN EXTRA EVENT for a subject this call does advance, which the subject check
-  // alone would not catch.
   complainsAbout("record-completion", events => [...events, { ...events[0] }],
     "j102_event_set_mismatch");
-  // AN EVENT FOR AN UNRELATED SUBJECT.
   complainsAbout("record-completion",
     events => [{ ...events[0], subject_id: "j102-deal-c" }], "j102_event_missing_or_wrong");
-  // THE KIND THE KERNEL DOES NOT SPELL. `payment_${level}` is record-payment's
-  // REASON_ID; the event kind beside it is the constant `payment_recorded`, and
-  // an event calling itself `payment_partially_paid` is a kind this transition
-  // never appends rather than a derived kind that disagrees with its level.
   complainsAbout("record-payment",
     events => { events[0].event_kind = "payment_partially_paid"; }, "j102_event_missing_or_wrong");
 });
 
 test("ROOT residual: the map REFUSES a lying nested event fact, on a right kind and subject", () => {
-  // The class the event-SET check cannot reach. Every payload below carries the
-  // correct event kind, on the correct subject, in the correct number, beside a
-  // state row the map admits — and says something inside the event that the
-  // transition did not produce. The event is what a reviewer reads history from,
-  // so a lie here is a lie on the review surface itself.
   const policy = admissionPolicy();
   const walkFor = id => WALKS.find(walk => walk.transition_id === id);
   const complainsAbout = (id, change, fragment) => {
@@ -4542,35 +3751,24 @@ test("ROOT residual: the map REFUSES a lying nested event fact, on a right kind 
       `${id} must refuse this event payload with ${fragment}; it said ${JSON.stringify(complaints)}`);
   };
 
-  // Q094's date, INSIDE the event. The state row closes on the settlement's own
-  // date and the history says a different one; both are durable, and they
-  // disagree about the single fact Q094 is about.
   complainsAbout("record-deal-closing",
     events => { events[0].closing_date = "2027-01-01T00:00:00.000Z"; },
     "j102_event_detail_not_canonical");
-  // Q096's reason, INSIDE the event: a reason nobody recorded, on a cancellation
-  // whose state row carries the recorded one.
   complainsAbout("cancel-pending-deal",
     events => { events[0].cancellation_reason = "a reason nobody recorded"; },
     "j102_event_detail_not_canonical");
-  // THE EVIDENCE REFERENCE THE EVENT NAMES, pointed at another document.
   complainsAbout("record-lease-execution",
     events => { events[0].evidence_reference = "j102-doc-9"; },
     "j102_event_detail_not_canonical");
-  // The axis value inside an axis event, disagreeing with the axis the same call
-  // writes.
   complainsAbout("record-payment",
     events => { events[0].payment_state = "partially_paid"; },
     "j102_event_detail_not_canonical");
   complainsAbout("record-diligence-outcome",
     events => { events[0].diligence_state = "waived"; },
     "j102_event_detail_not_canonical");
-  // The coupled event's own phase, on the assignment a cancelled deal returns.
   complainsAbout("cancel-pending-deal",
     events => { events[1].assignment_phase = "committed"; },
     "j102_event_detail_not_canonical");
-  // Identity fields inside a coupled event: the property a winner selection
-  // names, and the deal an assignment commitment points at.
   complainsAbout("commit-winning-property",
     events => { events[0].property_id = "j102-prop-9"; },
     "j102_event_detail_not_canonical");
@@ -4583,22 +3781,16 @@ test("ROOT residual: the map REFUSES a lying nested event fact, on a right kind 
   complainsAbout("record-loi-submission",
     events => { events[0].assignment_id = "j102-asg-9"; },
     "j102_event_detail_not_canonical");
-  // A key the kernel never puts on an event, hashed into the history's bytes.
   complainsAbout("record-completion",
     events => { events[0].approved_by = "somebody"; },
     "j102_event_detail_not_produced_by_transition");
-  // A key the kernel always puts there, deleted.
   complainsAbout("record-invoice-issued",
     events => { delete events[0].evidence_reference; },
     "j102_event_detail_missing");
-  // The kernel's own event schema version, restamped.
   complainsAbout("record-completion",
     events => { events[0].schema_version = "doctorcre-v5-j102-lifecycle-event.v0"; },
     "j102_event_payload_schema_version_mismatch");
 
-  // AND THE THREE COUPLED EVENTS THAT CARRY NO EVIDENCE REFERENCE AT ALL are the
-  // kernel's own shape, not an omission to be filled in. A caller ADDING one is
-  // adding a fact the kernel never wrote.
   for (const [id, index] of [["commit-winning-property", 0], ["commit-winning-property", 1],
     ["cancel-pending-deal", 1]]) {
     const { answer } = runWalk(walkFor(id));
@@ -4621,8 +3813,6 @@ test("HIGH-6: the event's evidence_references must be the set the recheck re-rea
   };
   const truth = id => canonicalReferences(walkFor(id).evidence);
 
-  // THE HONEST CASE FIRST, so the refusals below mean something: the array the
-  // store actually stamps is admitted, on every event of every walk.
   for (const walk of WALKS) {
     const { answer, ctx } = runWalk(walk);
     assert.deepEqual(
@@ -4631,42 +3821,30 @@ test("HIGH-6: the event's evidence_references must be the set the recheck re-rea
       [], `${walk.transition_id}: the references the store stamps are the ones re-read`);
   }
 
-  // AN EMPTY ARRAY. The history says the transition rested on nothing.
   cites("record-lease-execution", [], "j102_event_evidence_references_not_rechecked");
-  // A DOCUMENT THE TRANSITION NEVER RESTED ON, with an otherwise perfect call.
   cites("record-lease-execution",
     [{ ...truth("record-lease-execution")[0], reference: "j102-doc-9" }],
     "j102_event_evidence_reference_not_rechecked");
-  // THE RIGHT REFERENCE UNDER THE WRONG KIND, and under the wrong source.
   cites("record-lease-execution",
     [{ ...truth("record-lease-execution")[0], evidence_kind: "signed_purchase_contract" }],
     "j102_event_evidence_reference_not_rechecked");
   cites("record-lease-execution",
     [{ ...truth("record-lease-execution")[0], source: "first_party_record" }],
     "j102_event_evidence_reference_not_rechecked");
-  // THE SAME PIN TWICE: one record counted as two.
   cites("record-lease-execution",
     [truth("record-lease-execution")[0], { ...truth("record-lease-execution")[0] }],
     "j102_event_evidence_reference_duplicated");
-  // AN EXTRA PIN riding beside the real one.
   cites("record-lease-execution",
     [...truth("record-lease-execution"),
       { evidence_kind: "invoice_issued", source: "first_party_record", reference: "j102-record-1" }],
     "j102_event_evidence_references_not_rechecked");
-  // A FOURTH KEY. The canonical element is exactly the triple the database can
-  // rebuild from what it read; anything else is not that element.
   cites("record-lease-execution",
     [{ ...truth("record-lease-execution")[0], subject_binding: { subject_kind: "deal" } }],
     "j102_event_evidence_reference_not_rechecked");
-  // AND NOT AN ARRAY AT ALL.
   cites("record-lease-execution", "j102-doc-1", "j102_event_evidence_references_missing");
 });
 
 test("SQL parity: the effect vocabulary in the map is exactly the one the SQL implements", () => {
-  // The interpreter above is a transcription, so the two could drift by one op
-  // and nothing else would notice. This reads the ops the PL/pgSQL function
-  // branches on, and the ops the map actually uses, and requires both to sit
-  // inside what this suite can evaluate.
   const start = CANDIDATE_SQL.indexOf("create or replace function ops.j102_expected_value(");
   assert.ok(start > 0, "the candidate carries the effect interpreter");
   const source = CANDIDATE_SQL.slice(start,
@@ -4688,10 +3866,6 @@ test("SQL parity: the effect vocabulary in the map is exactly the one the SQL im
     Object.values(node).forEach(walk);
   };
   walk(policy.transitions);
-  // `declared_identifier` IS THE ONE OP NO TRANSITION MAY USE, and the transition
-  // writer refuses the answer shape it produces. A transition target is always
-  // derivable from the committed row, the coupled subjects or the re-read
-  // evidence, so an unenumerable caller-chosen value there would be a hole.
   assert.equal(used.has("declared_identifier"), false,
     "no transition target is a caller-declared identifier");
   assert.ok(CANDIDATE_SQL.includes("j102_expected_value_kind_unsupported"),
@@ -4707,16 +3881,10 @@ test("SQL parity: the effect vocabulary in the map is exactly the one the SQL im
   for (const op of [...used, ...initializationOps]) {
     assert.ok(readable.includes(op), `the map uses the effect op ${op}, which the SQL implements`);
   }
-  // And the creation shapes reach for nothing that reads stored EVIDENCE, which
-  // there is none of at creation time.
   for (const op of initializationOps) {
     assert.equal(["evidence_fact", "case_on_evidence", "supplied_evidence_kind"].includes(op),
       false, `an initialization computes ${op}, which would read evidence it cannot have`);
   }
-  // The ONE unbound value in the whole map, named here so a second one cannot
-  // arrive quietly. It sits on the approved-representation-equivalence branch,
-  // which no manifest can reach because the typed approval reader is private and
-  // always raises.
   const unbound = [];
   const findUnbound = (node, path) => {
     if (Array.isArray(node)) { node.forEach((item, i) => findUnbound(item, `${path}[${i}]`)); return; }
@@ -4734,31 +3902,9 @@ test("SQL parity: the effect vocabulary in the map is exactly the one the SQL im
     "and that branch is unreachable because its reader does not exist");
 });
 
-// ---------------------------------------------------------------------------
-// THE INITIALIZATION-EFFECT PARITY SUITE.
-//
-// The structural test above compares the map's initialization half to the
-// kernel's contracts key by key. That is not the same question as "does the map
-// PREDICT what the kernel does", and the difference is where a real divergence
-// would live: change `"relationship_state": "client"` to `"prospect"` in the
-// map's required_context, or point an `identified_by` at `subject_id` instead of
-// `relationship_id`, and every structural assertion still passes while the
-// DATABASE would admit an assignment under a prospect that the kernel refuses.
-//
-// So these tests RUN `evaluateLifecycleInitialization` and require the map to
-// reproduce its answer: every created field, every event detail, the
-// non-constant effects, the identified_by chain and every required-context
-// condition. Then they mutate the map, one thing at a time, and require each
-// mutation to be CAUGHT — because a comparison that cannot fail proves nothing.
-// ---------------------------------------------------------------------------
 
 const IDENT_SHAPE = /^[A-Za-z0-9][A-Za-z0-9._:/@!+=-]{0,127}$/;
 
-/**
- * One walk per initialization, with the parent rows in the state the kernel
- * requires. These are the same synthetic subjects the transition walks use, so a
- * created assignment really is the one the transition suite then advances.
- */
 const INIT_WALKS = [
   {
     initialization_id: "initialize-prospect-relationship",
@@ -4791,13 +3937,6 @@ const runInitWalk = walk => evaluateLifecycleInitialization({
     ? { active_negotiations_for_property: walk.active_negotiations_for_property ?? [] } : {}),
 });
 
-/**
- * The proposed created state a caller would send for one walk, composed from the
- * kernel's own contract. The writer receives a proposal and holds it to the map;
- * this is that proposal, and it is what the map's `identified_by: {source:
- * "created"}` resolves the first parent from — so it exists for the REFUSAL
- * walks too, where the kernel produces no created state at all.
- */
 function proposedFor(walk) {
   const contract = v5J102InitializationContract(walk.initialization_id);
   const parent = contract.parent_subject_kind === null
@@ -4814,14 +3953,6 @@ function proposedFor(walk) {
   };
 }
 
-/**
- * THE CONTEXT HALF OF THE WRITER, transcribed: resolve each required-context rule
- * the way `ops.j102_initialize_subject` resolves it and check its conditions
- * against the loaded row. `source: "created"` reads the proposed row's own parent
- * reference; `source: "context"` reads a field on the hop before it, which is the
- * whole of "the engagement→relationship link is verified, not assumed" on the SQL
- * side. Returns the complaints, so an EMPTY list means the map would admit.
- */
 function mapContext(policy, initialization_id, proposed, related) {
   const admitted = policy.initializations[initialization_id];
   const complaints = [];
@@ -4863,12 +3994,6 @@ function mapContext(policy, initialization_id, proposed, related) {
   return { complaints, context, consulted };
 }
 
-/**
- * The rest of the writer's comparison loop: predict the created shape and the
- * event from the map and compare them to what the kernel actually produced.
- * Returns every complaint, so a divergence is a list rather than a thrown
- * assertion and the negative arm can require one.
- */
 function initializationComplaints(policy, walk, answer) {
   const admitted = policy.initializations[walk.initialization_id];
   if (admitted === undefined) return ["j102_unknown_initialization"];
@@ -4888,8 +4013,6 @@ function initializationComplaints(policy, walk, answer) {
   const compare = (label, effect, actual) => {
     const expected = expectedValue(effect, ctx);
     if (expected.kind === "optional_declared_identifier") {
-      // Null when the caller named nothing; otherwise the same identifier rule,
-      // bound to the declared value. (The writer also binds it to a real party.)
       const declaredValue = walk.declared[expected.field] ?? null;
       if (actual !== declaredValue) {
         complaints.push(`${label}: the kernel bound ${show(actual)} and the caller declared ${show(declaredValue)}`);
@@ -4900,8 +4023,6 @@ function initializationComplaints(policy, walk, answer) {
       return;
     }
     if (expected.kind === "declared_identifier") {
-      // SQL holds the SHAPE; the kernel binds the VALUE. Both halves are asserted
-      // here, and neither is asserted as the other.
       if (typeof actual !== "string" || !IDENT_SHAPE.test(actual)) {
         complaints.push(`${label}: ${show(actual)} is not a permitted identifier`);
       }
@@ -4926,9 +4047,6 @@ function initializationComplaints(policy, walk, answer) {
     complaints.push(`${label}: the map computes an answer shape this writer does not compare`);
   };
 
-  // 3. THE CREATED SHAPE, key set and every value — including the NON-CONSTANT
-  //    ones the structural test cannot reach: the subject id, the parent
-  //    reference resolved through the context, and the declared property.
   const shapeKeys = Object.keys(admitted.creation_shape ?? {}).sort();
   const createdKeys = Object.keys(created).sort();
   if (JSON.stringify(shapeKeys) !== JSON.stringify(createdKeys)) {
@@ -4940,7 +4058,6 @@ function initializationComplaints(policy, walk, answer) {
     compare(`created.${field}`, admitted.creation_shape[field], created[field]);
   }
 
-  // 4. THE EVENT: its kind, its subject, and every non-identity detail.
   const event = answer.events[0];
   const spec = admitted.event ?? {};
   if (spec.event_kind !== event.event_kind) {
@@ -4963,8 +4080,6 @@ function initializationComplaints(policy, walk, answer) {
     compare(`event.${field}`, spec.detail[field], orNull(at(event, field)));
   }
 
-  // 5. AND THE SET THE WRITER SAYS IT CONSULTED, which is what the receipt
-  //    reports beside its two unconditional booleans.
   if (JSON.stringify(consulted.sort()) !==
       JSON.stringify([...(answer.context_verified ?? [])]
         .map(kind => `${kind}:${walk.related[kind]?.subject_id}`).sort())) {
@@ -4974,16 +4089,6 @@ function initializationComplaints(policy, walk, answer) {
   return complaints;
 }
 
-/**
- * THE WALKS THE KERNEL REFUSES, and why the positive ones are not enough.
- *
- * A positive walk can only catch a map that predicts the WRONG ANSWER. It cannot
- * catch a map that is merely MORE PERMISSIVE — drop `relationship_state: client`
- * from the required context, or widen the negotiation's phase set, and every
- * positive prediction still matches while the database admits calls the kernel
- * refuses. That is the exact drift the review found, so each refusal below is a
- * case the kernel turns down and the map must turn down too.
- */
 const INIT_REFUSAL_WALKS = [
   { initialization_id: "initialize-assignment", actor: KERNEL_PARTNER,
     related: { engagement: ENG, relationship: REL },
@@ -5013,10 +4118,6 @@ const INIT_REFUSAL_WALKS = [
     why: "a concluded assignment takes no new drafts" },
 ];
 
-/**
- * Every disagreement between the kernel and the map, over both arms. Empty means
- * the two agree on what they produce AND on what they refuse.
- */
 function initializationDrift(policy) {
   const drift = [];
   for (const walk of INIT_WALKS) {
@@ -5036,9 +4137,6 @@ function initializationDrift(policy) {
         `${walk.initialization_id}: the kernel answered ${answer.decision}/${answer.reason_id} where ${walk.reason_id} was expected`);
       continue;
     }
-    // The map is handed the SAME proposal a caller would send, and must refuse it
-    // for a reason of its own. An empty complaint list is the map admitting what
-    // the kernel turned down.
     const { complaints } = mapContext(policy, walk.initialization_id,
       proposedFor(walk), walk.related);
     if (complaints.length === 0) {
@@ -5074,9 +4172,6 @@ test("SQL parity: the map REFUSES every call the kernel refuses, on the same con
     assert.ok(complaints.length > 0,
       `the SQL map must also refuse ${walk.initialization_id} here — ${walk.why}`);
   }
-  // AND THE CLIENT GATE IS NOT VACUOUS at the kernel: the same call with the
-  // chain intact is allowed, so the refusals above are the conditions biting
-  // rather than a walk that could never work.
   const allowed = runInitWalk(INIT_WALKS.find(w => w.initialization_id === "initialize-assignment"));
   assert.equal(allowed.decision, "allow");
   assert.deepEqual(allowed.context_verified, ["engagement", "relationship"]);
@@ -5086,60 +4181,42 @@ test("SQL parity: a drifted initialization map is CAUGHT, mutation by mutation",
   const base = admissionPolicy();
   const clone = () => JSON.parse(JSON.stringify(base));
 
-  // Each entry mutates ONE thing in the map and must be caught by one of the two
-  // arms. Without this test the comparison above could be vacuous — a predictor
-  // that agreed with everything would pass it just as well — and each mutation
-  // here is a shape a plausible edit or "simplification" actually takes.
   const mutations = [
-    // The condition the whole client gate rests on, flipped to admit a prospect.
     ["initialize-assignment", "the relationship condition admits a prospect", policy => {
       policy.initializations["initialize-assignment"]
         .required_context[1].conditions[0].equals = "prospect";
     }],
-    // The engagement condition, flipped to admit a lapsed engagement.
     ["initialize-assignment", "the engagement condition admits an expired engagement", policy => {
       policy.initializations["initialize-assignment"]
         .required_context[0].conditions[0].equals = "expired";
     }],
-    // The conditions dropped entirely, which is the shape a "simplification"
-    // takes: the map would then admit anything the kernel refuses.
     ["initialize-assignment", "the relationship conditions are dropped", policy => {
       policy.initializations["initialize-assignment"].required_context[1].conditions = [];
     }],
-    // THE CHAIN ITSELF. `relationship_id` → `subject_id` resolves the second hop
-    // to the engagement's own id, so the row the map reads is not the one the
-    // kernel verified — this is the whole of "the link is verified, not assumed"
-    // on the SQL side.
     ["initialize-assignment", "the chained identified_by points at the wrong field", policy => {
       policy.initializations["initialize-assignment"]
         .required_context[1].identified_by.field = "subject_id";
     }],
-    // The FIRST hop's identifier, read off the created row.
     ["initialize-assignment", "the first identified_by reads the wrong created field", policy => {
       policy.initializations["initialize-assignment"]
         .required_context[0].identified_by.field = "subject_id";
     }],
-    // The created phase, moved past the earliest declared one.
     ["initialize-assignment", "the created assignment is born in search", policy => {
       policy.initializations["initialize-assignment"]
         .creation_shape.assignment_phase.value = "search";
     }],
-    // A NON-CONSTANT effect: the parent reference, blanked.
     ["initialize-assignment", "the parent reference is blanked", policy => {
       policy.initializations["initialize-assignment"].creation_shape.engagement_id =
         { op: "const", value: null };
     }],
-    // The created id, which no structural assertion covers.
     ["initialize-prospect-relationship", "the created id is a constant", policy => {
       policy.initializations["initialize-prospect-relationship"]
         .creation_shape.subject_id = { op: "const", value: "j102-rel-other" };
     }],
-    // A relationship born a client.
     ["initialize-prospect-relationship", "the created relationship is born a client", policy => {
       policy.initializations["initialize-prospect-relationship"]
         .creation_shape.relationship_state.value = "client";
     }],
-    // An extra key in the creation shape, and a missing one.
     ["initialize-prospect-relationship", "the creation shape gains a key", policy => {
       policy.initializations["initialize-prospect-relationship"]
         .creation_shape.invented_field = { op: "const", value: null };
@@ -5148,8 +4225,6 @@ test("SQL parity: a drifted initialization map is CAUGHT, mutation by mutation",
       delete policy.initializations["initialize-prospect-relationship"]
         .creation_shape.active_engagement_count;
     }],
-    // THE DECLARED IDENTIFIER, in both directions: pinned to a constant, and
-    // pointed at the wrong declared field.
     ["initialize-property-negotiation", "the declared property becomes a constant", policy => {
       policy.initializations["initialize-property-negotiation"]
         .creation_shape.property_id = { op: "const", value: "j102-prop-other" };
@@ -5158,12 +4233,10 @@ test("SQL parity: a drifted initialization map is CAUGHT, mutation by mutation",
       policy.initializations["initialize-property-negotiation"]
         .creation_shape.property_id.field = "new_subject_id";
     }],
-    // The negotiation's phase set, widened to admit a committed assignment.
     ["initialize-property-negotiation", "the assignment phase set is widened", policy => {
       policy.initializations["initialize-property-negotiation"]
         .required_context[0].conditions[0].in = ["committed"];
     }],
-    // THE EVENT, in all three of its halves: kind, subject and nested detail.
     ["initialize-property-negotiation", "the event kind drifts", policy => {
       policy.initializations["initialize-property-negotiation"].event.event_kind = "loi_submitted";
     }],
@@ -5181,16 +4254,12 @@ test("SQL parity: a drifted initialization map is CAUGHT, mutation by mutation",
     ["initialize-property-negotiation", "the event loses a detail field", policy => {
       delete policy.initializations["initialize-property-negotiation"].event.detail.property_id;
     }],
-    // A parent dropped from required_context entirely: the map would then consult
-    // one row where the kernel verified two.
     ["initialize-assignment", "the relationship hop is removed", policy => {
       policy.initializations["initialize-assignment"].required_context =
         [policy.initializations["initialize-assignment"].required_context[0]];
     }],
   ];
 
-  // THE UNMUTATED MAP IS CLEAN FIRST, so what follows is measuring drift rather
-  // than a detector that complains about everything.
   assert.deepEqual(initializationDrift(base), [],
     "the shipped map and the kernel agree on both what they produce and what they refuse");
 
@@ -5201,8 +4270,6 @@ test("SQL parity: a drifted initialization map is CAUGHT, mutation by mutation",
     assert.ok(drift.length > 0,
       `DRIFT NOT CAUGHT — ${id}: ${label}. The map and the kernel disagree and both arms said nothing.`);
   }
-  // Every mutation is a real change to the map, so a typo in a path above would
-  // otherwise "pass" by mutating nothing at all.
   for (const [, label, mutate] of mutations) {
     const policy = clone();
     mutate(policy);
@@ -5221,11 +4288,7 @@ test("SQL parity: the map's context conditions and identified_by ARE the kernel'
     rules.forEach((rule, i) => {
       const declared = contract.required_context[i];
       assert.equal(rule.subject, declared.subject, `${id} context[${i}] subject`);
-      // THE CONDITIONS, compared rather than counted. This is the assertion whose
-      // absence let `relationship_state: client` become `prospect` silently.
       assert.deepEqual(rule.conditions, declared.conditions, `${id} context[${i}] conditions`);
-      // AND THE RESOLUTION. The first hop reads the created row's own parent
-      // reference; a later hop reads the field the kernel's `chained_from` names.
       if (declared.chained_from === null) {
         assert.deepEqual(rule.identified_by,
           { source: "created", field: contract.parent_reference_field },
@@ -5240,14 +4303,8 @@ test("SQL parity: the map's context conditions and identified_by ARE the kernel'
   }
 });
 
-// ---------------------------------------------------------------------------
-// Q103 for typed transitions: evaluateConcurrentTransition and its write sets.
-// ---------------------------------------------------------------------------
 
 test("SQL parity: the kernel's transition write sets are a SUPERSET of the admission map's `writes`", () => {
-  // A merge is decided on these sets, so an under-reported write could merge
-  // over another partner's field. Over-reporting only turns a merge into a
-  // visible reconciliation.
   const policy = admissionPolicy();
   assert.deepEqual([...V5_J102_DERIVED_FIELDS].sort(), [...policy.derived_fields].sort(),
     "the kernel and the SQL name the same derived counters and mirrors");
@@ -5290,7 +4347,6 @@ test("Q103: an overlapping intervening transition reconciles, naming the shared 
   assert.equal(v.conflict_kind, "overlapping_field_edit");
   assert.deepEqual(v.overlapping_fields, ["payment_state"]);
   assert.equal(v.merged, false);
-  // Closing and cancellation both write deal_state.
   const w = evaluateConcurrentTransition(CT({ transition_id: "record-deal-closing",
     current_established_by_transition: "cancel-pending-deal" }));
   assert.equal(w.decision, "reconcile");
@@ -5299,9 +4355,9 @@ test("Q103: an overlapping intervening transition reconciles, naming the shared 
 
 test("Q103: anything not ONE declared transition away is uncharacterized and reconciles", () => {
   for (const over of [
-    { current_prior_state_digest: D(9) },          // more than one write between
-    { current_prior_state_digest: null },          // a created row / no anchor
-    { current_established_by_transition: "record-lifecycle-correction" }, // not a transition
+    { current_prior_state_digest: D(9) },
+    { current_prior_state_digest: null },
+    { current_established_by_transition: "record-lifecycle-correction" },
     { current_established_by_transition: null },
   ]) {
     const v = evaluateConcurrentTransition(CT(over));
@@ -5320,15 +4376,10 @@ test("Q103: no movement is the ordinary optimistic path, and no merge is claimed
 });
 
 test("Q103: the coupled subject is judged on ITS write sets, not the primary's", () => {
-  // An LOI submission writes the assignment's phase and counters; a concurrent
-  // commitment wrote the same assignment fields, so the related assignment
-  // reconciles even though the primary negotiation might not.
   const v = evaluateConcurrentTransition(CT({ transition_id: "record-loi-submission",
     subject_kind: "assignment", current_established_by_transition: "commit-winning-property" }));
   assert.equal(v.decision, "reconcile");
   assert.ok(v.overlapping_fields.includes("assignment_phase"));
-  // A read-only related subject (the engagement an open-assignment reads) has
-  // no write set, so any characterized change to it merges and is re-admitted.
   const e = evaluateConcurrentTransition(CT({ transition_id: "open-assignment",
     subject_kind: "engagement", current_established_by_transition: "establish-client-and-engagement" }));
   assert.equal(e.decision, "allow");
@@ -5352,8 +4403,6 @@ test("Q103: a characterized stale subject on the TRANSITION path merges, is re-j
   assert.equal(answer.decision, "allow", JSON.stringify(answer).slice(0, 500));
   assert.equal(answer.auto_merged, true);
   assert.equal(answer.concurrent_merges[0].concurrent_transition_id, "record-commission-agreement");
-  // THE WRITE IS DECIDED AGAINST THE CURRENT ROW: its operand is the current
-  // digest, never the caller's stale base.
   const cas = JSON.parse(db.paramsFor("j102_apply_transition")[1]);
   assert.equal(cas["deal:deal-synthetic-1"], digest(current));
   const subjects = JSON.parse(db.paramsFor("j102_apply_transition")[2]);

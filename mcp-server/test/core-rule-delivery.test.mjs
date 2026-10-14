@@ -1,4 +1,3 @@
-// Scoped rule delivery keeps Layer 0 concise and retrieves full binding text on demand.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { executeRegisteredTool } from "../src/tools.js";
@@ -84,10 +83,6 @@ function client({ mode = "shadow", plan = PLAN, packIndex = PACK_INDEX } = {}) {
 const call = (c, args = {}) => executeRegisteredTool(c, ACTOR, "standing-context", args);
 
 test("1fddcffb and 4a53ff82 really are CORE ids in the shipped triage", () => {
-  // Sanity check on the fixture itself, not the verb: if the S7 triage ever
-  // drops either id from `home: "core"`, this whole file stops testing what
-  // it claims to and should fail loudly here rather than pass for the wrong
-  // reason everywhere else.
   assert.ok(CORE_RULE_IDS.includes("1fddcffb"));
   assert.ok(CORE_RULE_IDS.includes("4a53ff82"));
   assert.equal(CORE_RULE_IDS.includes("347a9ca6"), false,
@@ -157,16 +152,9 @@ test("core_preview is a shadow-only field", async () => {
 });
 
 test("a stale triage id absent from the rule table is reported, not silently dropped", async () => {
-  // Simulate the real triage carrying an id retired from the rule table since:
-  // the preview must say so rather than just under-count with no explanation.
   const c = client({ mode: "shadow" });
   const out = await call(c);
   const anyMissing = out.core_preview.missing_core_ids;
-  // In THIS fixture every real core id present in the live triage is either
-  // absent from the tiny row set (expected -- only two of twenty are stocked)
-  // so most core ids are legitimately "missing" here; assert the field exists
-  // and is shaped as documented rather than asserting a specific count, which
-  // depends on how many real core ids this fixture happens to stock.
   assert.ok(Array.isArray(anyMissing));
   assert.ok(out.core_preview.core_rules_found + anyMissing.length === CORE_RULE_IDS.length);
 });
