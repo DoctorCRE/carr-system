@@ -2491,14 +2491,41 @@ class ReleaseReviewProducer(unittest.TestCase):
     def test_record_uses_fixed_authenticated_profile_without_actor_argument(self):
         seen = {}
         class Result:
-            returncode, stdout = 0, '{"event":{"id":"server-event"}}'
+            returncode, stdout = 0, ""
         def runner(argv, **kwargs):
             seen.update(argv=argv, **kwargs)
+            request = json.loads(argv[-1])
+            Result.stdout = json.dumps({"ok": True, "event": {
+                "id": "server-event", "native_task_id": request["native_task_id"],
+                "project_id": request["project_id"], "cwd": request["cwd"],
+                "event_type": request["event_type"], "cursor": request["cursor"]}})
             return Result()
-        event_id = producer._run_record({"event_type": "release_review"}, runner=runner)
+        request = {"event_type": "release_review", "native_task_id": "task-1",
+                   "project_id": "project-1", "cwd": "/repo", "cursor": {"head": "a" * 40}}
+        event_id = producer._run_record(request, runner=runner)
         self.assertEqual(event_id, "server-event")
         self.assertEqual(seen["env"]["CARR_MCP_CLIENT_PROFILE"], "codex-continuity")
         self.assertNotIn("reviewer", json.loads(seen["argv"][-1]))
+
+    def test_record_rejects_unconfirmed_or_mismatched_worker_response(self):
+        request = {"event_type": "release_review", "native_task_id": "task-1",
+                   "project_id": "project-1", "cwd": "/repo", "cursor": {"head": "a" * 40}}
+        event = {"id": "server-event", **request}
+        bad_responses = [
+            {"ok": False, "event": event},
+            {"ok": True, "event": {**event, "native_task_id": "other-task"}},
+            {"ok": True, "event": {**event, "project_id": "other-project"}},
+            {"ok": True, "event": {**event, "cwd": "/other"}},
+            {"ok": True, "event": {**event, "event_type": "other-event"}},
+            {"ok": True, "event": {**event, "cursor": {"head": "b" * 40}}},
+        ]
+        for payload in bad_responses:
+            with self.subTest(payload=payload):
+                class Result:
+                    returncode = 0
+                    stdout = json.dumps(payload)
+                with self.assertRaisesRegex(RuntimeError, "continuity record"):
+                    producer._run_record(request, runner=lambda *_args, **_kwargs: Result())
 
     def test_local_append_retry_is_idempotent_and_conflicting_reuse_refuses(self):
         with tempfile.TemporaryDirectory() as tmp:
