@@ -419,7 +419,9 @@ def test_claude_save_health_shape_parity():
     inventory = json.loads((REPO / "ops/config/credential-inventory.v1.json").read_text())
     cred = next(c for c in inventory["credentials"] if c["probe"]["type"] == "claude_cli_token_age")
     health.WHICH = lambda _: "synthetic-claude"
-    health.SUBPROCESS_RUN = lambda *a, **k: __import__("subprocess").CompletedProcess(a, 0, stdout="PONG")
+    result_event = json.dumps({"type": "result", "result": "PONG", "is_error": False})
+    health.SUBPROCESS_RUN = lambda *a, **k: __import__("subprocess").CompletedProcess(
+        a, 0, stdout=result_event + "\n")
     for value, expected in (("sk-ant-oat" + "x" * 98, True),
                             ("sk-ant-oat01-" + "x" * 95, True),
                             ("sk-ant-oat" + "x" * 97, False),

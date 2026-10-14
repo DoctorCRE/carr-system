@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
@@ -194,7 +194,10 @@ async function main() {
     assert.ok(db, "ephemeral PostgreSQL did not become ready");
     try {
       await db.query(fixture);
-      const migration = readFileSync(resolve(root, "migrations/0881_allow_triaged_work_request_supersession.sql"), "utf8");
+      const migrationName = readdirSync(resolve(root, "migrations")).find((name) =>
+        /^\d{4}_allow_triaged_work_request_supersession\.sql$/.test(name));
+      assert.ok(migrationName, "the supersession migration must exist in its allocated slot");
+      const migration = readFileSync(resolve(root, "migrations", migrationName), "utf8");
       await db.query(migration);
 
       const gate = "select pg_advisory_xact_lock(hashtextextended($1,0))";
@@ -226,9 +229,11 @@ async function main() {
       await assert.rejects(() => edge(db, 33, 30), /supersession cycle/i);
       await verifyAcyclic(db);
 
-      // Legacy rows may carry cross-tenant successor links. The attempted
-      // same-tenant edge 34→35 would close 34→35→36→34; traversal must cross
-      // tenant 36 and report the cycle before the normal dead-successor refusal.
+      // Invalid-state resilience only, not a claim about valid legacy data:
+      // migration 0174 pins sourced rows to carr-internal and the old supersede
+      // function required a sourced target. The attempted edge 34→35 would
+      // close a deliberately corrupted 34→35→36→34 chain, so traversal must
+      // still cross tenant 36 and refuse the cycle before the dead-target check.
       await db.query("begin");
       await db.query("set local session_replication_role=replica");
       // The current row-shape constraint pins sourced rows to carr-internal.
@@ -254,7 +259,7 @@ async function main() {
       console.log(JSON.stringify({ database: "disposable PostgreSQL 18; synthetic data only",
         opposing_supersession: opposing, disjoint_pair_long_cycle: longer,
         legacy_chain_closure: "recursive check refused a cycle through three existing links",
-        legacy_cross_tenant_chain: "recursive check crossed the tenant boundary and refused 34→35→36→34",
+        invalid_state_cross_tenant_fixture: "recursive check crossed the tenant boundary and refused synthetic invalid 34→35→36→34",
         supersede_vs_successor_decline: decline, persisted_graph: "acyclic after each race" }, null, 2));
     } finally { await db.end(); }
   } finally { docker(["rm", "--force", container]); }
