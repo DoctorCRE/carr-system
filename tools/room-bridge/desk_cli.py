@@ -69,12 +69,6 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
         return 2
     entry = entries[args.name]
     if args.cwd and entry.get("kind") in ("claude-desktop", "codex-session", "codex-live", "grok-cli"):
-        # desks.Registry.register() always starts a codex-session entry with
-        # thread_id=None (untouched, on purpose — see desks.py). Re-pointing a
-        # stale cwd through it therefore also drops any old thread_id, which is
-        # the right call here: a thread bound to a cwd that no longer exists
-        # (e.g. a deleted worktree) cannot be resumed anyway, and the next
-        # dispatch starts a fresh thread in the corrected directory.
         entry = reg.register(
             args.name, entry["kind"], socket=entry.get("socket"), model=entry.get("model"),
             family=entry.get("family"), effort=entry.get("effort"), cwd=args.cwd, sandbox=entry.get("sandbox"),
@@ -92,7 +86,7 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
     try:
         live = True
         if entry.get("kind") in ("claude-session", "codex-live"):
-            reg.resolve(args.name)  # raises DeskError if the socket is dead
+            reg.resolve(args.name)
             live = True
     except DeskError as e:
         registry_ext.stamp_heartbeat(args.name, live=False, path=reg.path)

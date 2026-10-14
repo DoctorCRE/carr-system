@@ -347,7 +347,7 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
             light = _capture(cdp, url, 1024, dark=False)
             dark = _capture(cdp, url, 1024, dark=True)
             reduced = _capture(cdp, url, 1024, reduced=True)
-        except Exception as exc:  # truthful unavailable report is more useful than an aborted review
+        except Exception as exc:
             return _unavailable_report(kernel, args, "browser_measurement_failed:" + re.sub(r"[^a-z0-9_-]+", "_", str(exc).lower())[:80])
         finally:
             if cdp is not None:
