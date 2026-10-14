@@ -176,6 +176,9 @@ def inspect_session(
     if not isinstance(rows, list):
         raise ClaudeDesktopError("background_status_invalid", "Claude agent status was not a list")
     matches = [item for item in rows if isinstance(item, dict) and item.get("sessionId") == sid]
+    # Once Claude Desktop (or a terminal) opens the session, the supervisor
+    # lists that client as a second ``kind: interactive`` row with the same
+    # sessionId and no ``state``.  The task's lifecycle is the background row.
     row = next(
         (item for item in matches if str(item.get("kind") or "background") == "background"),
         matches[0] if matches else None,
@@ -279,6 +282,8 @@ DESKTOP_ERRORS = (
     b"thedesktopappisrequiredfor/desktop",
     b"downloadnow?(y/n)",
 )
+# ``claude attach`` refuses a session another client already holds, which is
+# exactly the state /desktop produces: Claude Desktop is showing it.
 ALREADY_OPEN = b"thissessionisrunninginanotherterminal"
 
 
