@@ -25,6 +25,7 @@ What is pinned, one test class each:
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -47,6 +48,10 @@ assert _SPEC is not None and _SPEC.loader is not None
 rp = importlib.util.module_from_spec(_SPEC)
 sys.modules["release_pipeline"] = rp
 _SPEC.loader.exec_module(rp)
+_PRODUCER_SPEC = importlib.util.spec_from_file_location("record_release_review", HERE / "record-release-review.py")
+assert _PRODUCER_SPEC is not None and _PRODUCER_SPEC.loader is not None
+producer = importlib.util.module_from_spec(_PRODUCER_SPEC)
+_PRODUCER_SPEC.loader.exec_module(producer)
 
 FIXTURE_ENV = fixture_env()
 VERSION = "0f1e2d3c-4b5a-4968-8776-655443322110"
@@ -354,15 +359,40 @@ class Fixture:
 
     def pipeline(self, runner, *, cfg=None, github=None, live=None, dry_run=False, verbs=None,
                  slice_marker=None):
+        cfg = cfg or self.config()
         live = live if live is not None else {"sha": self.base}
         verbs = verbs if verbs is not None else []
         # Step 10 never spawns the real marker here: every run records the
         # (release_key, sha) it would have marked in self.slice_marks.
         if slice_marker is None:
             slice_marker = lambda key, sha: (self.slice_marks.append((key, sha)) or {"rc": 0})  # noqa: E731
+        # The fixture models the existing local merge-event producer. The
+        # pipeline still independently checks the live PR/comment evidence.
+        head_sha = git(self.repo, "rev-parse", "HEAD")
+        events = []
+        for lane_name in ("worker", "app"):
+            lane_cfg = cfg[lane_name]
+            if lane_name == "app" and not lane_cfg.get("enabled"):
+                continue
+            pr_number = FakeGitHub().pr_number(head_sha)
+            source_gh = github or FakeGitHub()
+            source_comments = source_gh.comments(pr_number)
+            deciding = rp.deciding_verdict(source_comments, lane_cfg) or {}
+            fake_comment_id = int(deciding.get("id") or 900 + pr_number)
+            events.append({"schema": "carr-release-merge-event.v1",
+                           "provenance_source": "codex-record-event", "continuity_event_id": "fixture-event",
+                           "reviewer": "codex", "repository": lane_cfg["github_repo"],
+                           "pull_number": pr_number, "head_sha": pr_head(pr_number),
+                           "reviewed_sha": pr_head(pr_number), "review_comment_id": fake_comment_id,
+                           "merge_sha": head_sha, "reviewer_task_ref": "review-task-1",
+                           "maker_task_ref": "maker-task-1", "task_refs_verified": False,
+                           "builder_evidence_refs": ["github:jbookout/carr-system/pull/1"]})
+        event_path = self.repo / cfg.get("merge_event_file", "out/merge-events.jsonl")
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        event_path.write_text("".join(json.dumps(event) + "\n" for event in events))
         env = rp.child_env(FIXTURE_ENV)
         env.update({k: FIXTURE_ENV[k] for k in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")})
-        pipe = rp.Pipeline(cfg or self.config(), repo=self.repo, runner=runner,
+        pipe = rp.Pipeline(cfg, repo=self.repo, runner=runner,
                            github=lambda _r: github or FakeGitHub(),
                            http=lambda _u: {"git_sha": {"value": live["sha"]},
                                             "worker_version": {"id": live.get("version", PRIOR)}},
@@ -2299,11 +2329,24 @@ class Lock(Base):
 class VerifierIsNotMaker(unittest.TestCase):
     cfg = json.loads((HERE / "config" / "release-pipeline.v1.json").read_text())["worker"]
 
-    def test_default_is_the_review_agent(self):
-        self.assertEqual(rp.choose_verifier(self.cfg, {}), "claude-review-agent")
+    @staticmethod
+    def event(**overrides):
+        event = {"schema": "carr-release-merge-event.v1", "provenance_source": "codex-record-event",
+                 "continuity_event_id": "event-1", "reviewer": "codex",
+                 "reviewer_task_ref": "review-task-1", "maker_task_ref": "maker-task-1",
+                 "task_refs_verified": False, "builder_evidence_refs": ["github:builder/1"]}
+        event.update(overrides)
+        return event
 
-    def test_only_the_merge_event_names_the_reviewer(self):
-        self.assertEqual(rp.choose_verifier(self.cfg, {"reviewer": "Sonnet-Review"}), "sonnet-review")
+    def test_missing_provenance_has_no_configured_actor_fallback(self):
+        with self.assertRaises(rp.Blocked) as caught:
+            rp.choose_verifier(self.cfg, {})
+        self.assertEqual(caught.exception.reason, "verifier_provenance_missing")
+
+    def test_only_the_authenticated_event_names_codex_reviewer(self):
+        self.assertEqual(rp.choose_verifier(self.cfg, self.event()), "codex")
+        with self.assertRaisesRegex(rp.Blocked, "authenticated native Codex"):
+            rp.choose_verifier(self.cfg, self.event(reviewer="claude-review-agent"))
 
     def test_comment_text_cannot_name_the_verifier(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2315,14 +2358,19 @@ class VerifierIsNotMaker(unittest.TestCase):
             runner = FakeRunner(live=live)
             fx.pipeline(runner, github=gh, live=live).tick(["worker"])
             up = next(a for name, a in runner.calls if name == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "claude-review-agent")
+            self.assertEqual(up[up.index("--verifier") + 1], "codex")
 
     def test_maker_humans_pipeline_and_author_are_refused(self):
         for bad in ("carr_jobs", "joe", "Dell", "release-pipeline", "jbookout"):
             with self.assertRaises(rp.Blocked, msg=bad):
-                rp.choose_verifier(self.cfg, {"reviewer": bad})
+                rp.choose_verifier(self.cfg, self.event(reviewer=bad))
         with self.assertRaises(rp.Blocked):
-            rp.choose_verifier(self.cfg, {"reviewer": "claude-a", "author_actor": "claude-a"})
+            rp.choose_verifier(self.cfg, self.event(reviewer="codex", author_actor="codex"))
+        with self.assertRaises(rp.Blocked) as caught:
+            rp.choose_verifier(self.cfg, self.event(maker_task_ref="review-task-1"))
+        self.assertEqual(caught.exception.reason, "verifier_job_evidence_invalid")
+        with self.assertRaises(rp.Blocked):
+            rp.choose_verifier(self.cfg, self.event(task_refs_verified=True))
 
     def test_upload_binds_the_verifier_and_its_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2332,7 +2380,7 @@ class VerifierIsNotMaker(unittest.TestCase):
             runner = FakeRunner(live=live)
             fx.pipeline(runner, live=live).tick(["worker"])
             up = next(a for n, a in runner.calls if n == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "claude-review-agent")
+            self.assertEqual(up[up.index("--verifier") + 1], "codex")
             self.assertRegex(up[up.index("--verifier-evidence") + 1], r"^github:o/r/pull/\d+#issuecomment-\d+$")
             self.assertRegex(up[up.index("--test-evidence") + 1],
                              r"^github-actions:jbookout/carr-system/runs/\d+#ops-ci-strict$")
@@ -2346,6 +2394,111 @@ class VerifierIsNotMaker(unittest.TestCase):
             self.assertEqual(runner.calls, [])
             self.assertEqual(fx.records()[-1]["reason"], "no_independent_review")
             self.assertNotIn("failed_sha", fx.state().get("worker", {}))
+
+    def test_missing_or_mismatched_local_event_holds_before_deploy(self):
+        for mutation, expected in (("missing", "verifier_provenance_missing"),
+                                   ("stale_head", "verifier_provenance_mismatch")):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                fx.commit({"mcp-server/src/a.js": "1"})
+                runner = FakeRunner()
+                pipe = fx.pipeline(runner)
+                event_path = fx.repo / "out/merge-events.jsonl"
+                if mutation == "missing":
+                    event_path.write_text("")
+                else:
+                    event = json.loads(event_path.read_text().splitlines()[0])
+                    event["head_sha"] = "c" * 40
+                    event_path.write_text(json.dumps(event) + "\n")
+                self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(fx.records()[-1]["reason"], expected)
+
+
+class ReleaseReviewProducer(unittest.TestCase):
+    class GitHub:
+        def __init__(self, *, head="a" * 40, merged=True):
+            self.head, self.merged = head, merged
+        def api(self, path, *, paginate=False):
+            if path.endswith("/pulls/17"):
+                return {"state": "closed", "merged_at": "2026-10-01T00:00:00Z" if self.merged else None,
+                        "merge_commit_sha": "b" * 40,
+                        "head": {"sha": self.head}, "base": {"ref": "main"},
+                        "user": {"login": "jbookout"}}
+            return [{"id": 917, "body": f"APPROVE\nReviewed-SHA: {self.head}\n",
+                     "created_at": "2026-10-01T00:00:00Z", "author_association": "OWNER",
+                     "user": {"login": "jbookout"},
+                     "html_url": "https://github.com/jbookout/carr-system/pull/17#issuecomment-917"}]
+
+    def args(self, head="a" * 40):
+        return argparse.Namespace(repository="jbookout/carr-system", pull_number=17, head_sha=head,
+            native_task_id="01a13766-5922-7aa1-ac61-beeb0e1e0a02", project_id="git:/Users/booko/carr-system/.git",
+            cwd="/Users/booko/carr-system", reviewer_task_ref="01a13766-5922-7aa1-ac61-beeb0e1e0a02",
+            maker_task_ref="01b13766-5922-7aa1-ac61-beeb0e1e0a02",
+            builder_evidence=["github:jbookout/carr-system/pull/1753"])
+
+    def test_exact_merged_approval_records_server_event_before_local_append(self):
+        with mock.patch.object(producer, "_append_event") as append:
+            calls = []
+            event = producer.record(self.args(), gh=self.GitHub(),
+                                    record_event=lambda args: (calls.append(args) or "continuity-1"))
+        self.assertEqual(event["schema"], "carr-release-merge-event.v1")
+        self.assertEqual(event["reviewer"], "codex")
+        self.assertEqual(event["continuity_event_id"], "continuity-1")
+        self.assertIs(event["task_refs_verified"], False)
+        self.assertEqual(calls[0]["event_type"], "release_review")
+        self.assertNotIn("reviewer", calls[0]["cursor"])
+        append.assert_called_once()
+
+    def test_stale_head_unmerged_pr_and_failed_continuity_never_append(self):
+        with mock.patch.object(producer, "_append_event") as append:
+            with self.assertRaisesRegex(ValueError, "exact head"):
+                producer.record(self.args(), gh=self.GitHub(head="c" * 40), record_event=lambda _args: "x")
+            with self.assertRaisesRegex(ValueError, "not merged"):
+                producer.record(self.args(), gh=self.GitHub(merged=False), record_event=lambda _args: "x")
+            with self.assertRaisesRegex(RuntimeError, "record failed"):
+                producer.record(self.args(), gh=self.GitHub(),
+                                record_event=lambda _args: (_ for _ in ()).throw(RuntimeError("record failed")))
+        append.assert_not_called()
+
+    def test_record_uses_fixed_authenticated_profile_without_actor_argument(self):
+        seen = {}
+        class Result:
+            returncode, stdout = 0, '{"event":{"id":"server-event"}}'
+        def runner(argv, **kwargs):
+            seen.update(argv=argv, **kwargs)
+            return Result()
+        event_id = producer._run_record({"event_type": "release_review"}, runner=runner)
+        self.assertEqual(event_id, "server-event")
+        self.assertEqual(seen["env"]["CARR_MCP_CLIENT_PROFILE"], "codex-continuity")
+        self.assertNotIn("reviewer", json.loads(seen["argv"][-1]))
+
+    def test_local_append_retry_is_idempotent_and_conflicting_reuse_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out/merge-events.jsonl"
+            event = {"repository": "jbookout/carr-system", "merge_sha": "b" * 40}
+            producer._append_event(path, event)
+            producer._append_event(path, event)
+            self.assertEqual(len(path.read_text().splitlines()), 1)
+            with self.assertRaisesRegex(RuntimeError, "different merge event"):
+                producer._append_event(path, {**event, "reviewer": "not-codex"})
+
+
+class GitHubBudgetEnvironment(unittest.TestCase):
+    def test_configured_cache_path_reaches_github_reader_without_credentials(self):
+        budget_path = "/tmp/github-read-budget.json"
+        env = rp.child_env({
+            "HOME": "/tmp/home",
+            "CARR_GITHUB_READ_BUDGET": budget_path,
+            "DATABASE_URL": "fixture-dsn",
+            "CARR_DB_PASSWORD": "fixture-password",
+            "GH_TOKEN": "fixture-token",
+        })
+
+        self.assertEqual(rp.GitHub("o/r", env).reader.budget.path, Path(budget_path))
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("CARR_DB_PASSWORD", env)
+        self.assertNotIn("GH_TOKEN", env)
 
 
 class ReviewGate(Base):
