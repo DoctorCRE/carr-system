@@ -30,8 +30,8 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 spec = importlib.util.spec_from_file_location("release_pipeline", ROOT / "ops/release-pipeline.py")
+assert spec is not None and spec.loader is not None
 rp = importlib.util.module_from_spec(spec)
-assert spec and spec.loader
 sys.modules[spec.name] = rp
 spec.loader.exec_module(rp)
 
