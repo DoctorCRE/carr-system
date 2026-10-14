@@ -439,12 +439,21 @@ class Fixture:
         event_path.write_text("".join(json.dumps(event) + "\n" for event in events))
         env = rp.child_env(FIXTURE_ENV)
         env.update({k: FIXTURE_ENV[k] for k in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")})
-        pipe = rp.Pipeline(cfg, repo=self.repo, runner=runner,
+        # Fixture source stands in for the modules loaded by a production
+        # process. Capture it at construction, before any simulated sync.
+        loaded = {path: rp.git_blob((self.repo / path).read_bytes())
+                  if (self.repo / path).is_file() else None for path in (
+                      "ops/release-pipeline.py", "lib/secret_redaction.py",
+                      "ops/config/release-pipeline.v1.json")}
+        if isinstance(cfg, rp.LoadedConfig):
+            loaded["ops/config/release-pipeline.v1.json"] = cfg.source_blob
+        pipe = rp.Pipeline(cfg or self.config(), repo=self.repo, runner=runner,
                            github=lambda _r: github or FakeGitHub(),
                            http=lambda _u: {"git_sha": {"value": live["sha"]},
                                             "worker_version": {"id": live.get("version", PRIOR)}},
                            call_verb=lambda verb, args: (verbs.append((verb, args)) or (True, {"ok": True})),
-                           slice_marker=slice_marker, dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
+                           slice_marker=slice_marker, controller_blobs=loaded,
+                           dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
         pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}}
         pipe.sleep = lambda _seconds: None
         return pipe
@@ -4112,6 +4121,46 @@ class ClearFailedRetirement(Base):
         self.assert_retry_available()
 
 
+class ControllerSourceCapture(Base):
+    def test_default_provenance_survives_disk_updates_before_construction(self):
+        # Load real modules in a separate interpreter; fixture injection must
+        # not conceal a constructor that re-reads already replaced source.
+        files = {path: (HERE.parent / path).read_text() for path in (
+            "ops/release-pipeline.py", "lib/secret_redaction.py",
+            "lib/credential_file.py", "lib/github_reader.py")}
+        files["ops/config/release-pipeline.v1.json"] = json.dumps(self.fx.config())
+        for helper in ("ops/release-smoke.py", "ops/doctorcre-production-smoke.py"):
+            files[helper] = (HERE.parent / helper).read_text()
+        self.fx.commit(files)
+        script = '''
+import json, runpy, subprocess, sys
+from pathlib import Path
+repo = Path(sys.argv[1])
+module = runpy.run_path(str(repo / "ops/release-pipeline.py"))
+cfg = module["load_config"](repo / "ops/config/release-pipeline.v1.json")
+for path in ("ops/release-pipeline.py", "lib/secret_redaction.py",
+             "ops/config/release-pipeline.v1.json"):
+    with (repo / path).open("a") as stream:
+        stream.write("\\nchanged after loading\\n")
+pipe = module["Pipeline"](cfg, repo=repo, out=lambda _: None)
+pipe.controller_current({})
+subprocess.run(["git", "add", "ops/release-pipeline.py", "lib/secret_redaction.py",
+                "ops/config/release-pipeline.v1.json"], cwd=repo, check=True)
+subprocess.run(["git", "commit", "-qm", "updated disk"], cwd=repo, check=True)
+subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=repo, check=True)
+try:
+    pipe.controller_current({})
+except module["Blocked"] as exc:
+    print(exc.reason)
+else:
+    raise AssertionError("loaded controller passed after main changed")
+'''
+        result = subprocess.run([sys.executable, "-c", script, str(self.fx.repo)],
+                                env=FIXTURE_ENV, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "controller_stale")
+
+
 class ControllerFreshness(Base):
     """The tick runs from the canonical checkout. When that checkout lags
     origin/main (fleet-sync refuses to fast-forward over local changes), the
@@ -4152,6 +4201,62 @@ class ControllerFreshness(Base):
         git(other, "commit", "-q", "-m", "c")
         git(other, "push", "-q", "origin", "HEAD:main")
         return git(other, "rev-parse", "HEAD")
+
+    def test_freshness_read_failures_hold_then_retry_the_same_sha(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1", "ops/release-smoke.py": "helper\n"})
+        for command in ("ls-remote", "fetch", "ls-tree", "hash-object"):
+            with self.subTest(command=command):
+                runner, verbs = FakeRunner(), []
+                pipe = self.fx.pipeline(runner, verbs=verbs)
+                original = pipe.git
+                counts = {}
+
+                def read(*args, **kwargs):
+                    counts[args[0]] = counts.get(args[0], 0) + 1
+                    occurrence = 2 if command in ("ls-remote", "fetch") else 1
+                    if args[0] == command and counts[command] == occurrence:
+                        raise rp.StepFailed("git " + command, 128, "", "fixture read unavailable")
+                    return original(*args, **kwargs)
+
+                pipe.git = read
+                pipe.tick(["worker"])
+                self.assertEqual(runner.calls, [])
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(verbs, [])
+                self.assertEqual(self.fx.records()[-1]["reason"], "controller_unreadable")
+        live = {"sha": self.fx.base}
+        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+
+    def test_recovered_dry_run_preserves_populated_state_bytes(self):
+        self.push_from_elsewhere({"ops/release-pipeline.py": "v2\n", "mcp-server/src/a.js": "1"})
+        self.assertEqual(self.fx.pipeline(FakeRunner()).tick(["worker"]), 3)
+        git(self.fx.repo, "pull", "-q", "--ff-only", "origin", "main")
+        path = self.fx.repo / "out/release-pipeline/state.json"
+        before = path.read_bytes()
+        self.assertEqual(self.fx.pipeline(FakeRunner(), dry_run=True).tick(["worker"]), 0)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_fast_forward_after_load_cannot_disguise_running_controller(self):
+        for path in ("ops/release-pipeline.py", "lib/secret_redaction.py",
+                     "ops/config/release-pipeline.v1.json"):
+            with self.subTest(path=path):
+                cfg = self.fx.config()
+                cfg["app"]["enabled"] = True
+                self.fx.commit({path: json.dumps(cfg) if path.endswith(".json") else "old source\n"})
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner, cfg=rp.load_config(self.fx.repo / path)
+                                        if path.endswith(".json") else cfg)
+                pipe.http = lambda _url: {"source_commit": self.fx.base, "environment": "production"}
+                updated = json.loads(json.dumps(cfg))
+                updated["app"]["enabled"] = False
+                self.push_from_elsewhere({path: json.dumps(updated) if path.endswith(".json") else "new source\n",
+                                          "src/app.js": path})
+                git(self.fx.repo, "pull", "-q", "--ff-only", "origin", "main")
+                self.assertEqual(pipe.tick(["app"]), 3)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.records()[-1]["reason"], "controller_stale")
+                self.assertFalse(self.fx.state()["app"].get("failed_sha"))
 
     def test_a_checkout_behind_main_holds_without_burning_the_sha_then_ships_once_current(self):
         released = self.fx.state()["worker"]["last_released_sha"]
