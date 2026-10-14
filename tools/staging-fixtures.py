@@ -128,7 +128,7 @@ def invoice_commission_values(plan: Mapping[str, Any]) -> tuple[Any, ...]:
 
 
 def install_invoice_fixture(conn: Any, plan: Mapping[str, Any]) -> int:
-    """Seed one deterministic synthetic invoice commission and verify its UI projection."""
+    """Seed and verify a synthetic invoice. Provenance is system attribution plus DB readback, not an MCP event/receipt."""
     values = invoice_commission_values(plan)
     commission_id, deal_id, gross, invoiced_on, _ = values
     try:

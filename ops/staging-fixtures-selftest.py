@@ -10,7 +10,8 @@ import sys
 import tempfile
 import unittest
 import uuid
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("staging_fixtures", ROOT / "tools/staging-fixtures.py")
@@ -124,6 +125,27 @@ class PlanTests(unittest.TestCase):
                     patch.object(fixture, "validate_provider_binding", side_effect=AssertionError("dry run called provider")):
                 self.assertEqual(fixture.main(), 0)
             self.assertEqual(output.getvalue(), "staging-fixtures: PLAN invoice_rows=1 mutated=false\n")
+
+    def test_production_target_refuses_before_provider_or_database_connect(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.json"
+            path.write_text(json.dumps(plan())); path.chmod(0o600)
+            args = ["staging-fixtures.py", "--apply", "--invoice-plan", str(path),
+                    "--expected-app-sha", APP_SHA, "--expected-carr-sha", CARR_SHA]
+            environment = {
+                "DATABASE_URL": "postgresql://neondb_owner:dummy@ep-prod.neon.tech/neondb",
+                "CARR_STAGING_REPLACEMENT_PROJECT_ID": fixture.PRODUCTION_PROJECT_ID,
+                "CARR_STAGING_REPLACEMENT_ENDPOINT_ID": "ep-prod",
+            }
+            connect = Mock(side_effect=AssertionError("production target reached database connect"))
+            stderr = io.StringIO()
+            with patch.object(sys, "argv", args), patch.dict(fixture.os.environ, environment, clear=True), \
+                    patch.object(sys, "stderr", stderr), \
+                    patch.object(fixture, "validate_provider_binding", side_effect=AssertionError("production target reached provider")), \
+                    patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=connect)}):
+                self.assertEqual(fixture.main(), 2)
+            self.assertEqual(connect.call_count, 0)
+            self.assertIn("replacement project identity is absent or forbidden", stderr.getvalue())
 
     def test_insert_is_exact_idempotent_and_tracker_readback_is_required(self):
         value = plan()
