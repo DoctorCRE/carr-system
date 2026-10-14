@@ -2,9 +2,9 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:de71f8deee7e8681fedb2b903c6811bb7a2ef7c14332749e5efaafac7f54cd75",
+    "configuration_fingerprint": "sha256:ae97ec0789846dd0bfd91e8d2609ce483dfa69946945d78bbe20aeede428098c",
     "harness_id": "evals/rule-delivery/run_eval.py",
-    "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
+    "harness_version": "b0200e7c8fb589171bc8ac1bd74708745aef9c2c3a3d0068f34483535ccb26e8",
     "model_id": "deterministic-no-model",
     "native_session_ref": "01a12901-c908-7513-b43b-21aa1c012fea",
     "provider_id": "none",
@@ -20,7 +20,7 @@
     "total": 338,
     "train": 212
   },
-  "change": "Deliver sizing rule 8400cd3d through executed verb and bash_family trigger rows at the shapes that start or hand off new work, replacing its content_regex row that no longer runs.",
+  "change": "Version h-pos-gmail-send expectations against active c66dc739 and the pinned system-sender recipient policy; preserve frozen v1 labels, input and split.",
   "cost": {
     "baseline_usd_per_case": 0.0,
     "candidate_usd_per_case": 0.0
@@ -83,15 +83,15 @@
         "score": 0.39375
       },
       "candidate": {
-        "ci_high": 0.49295774647887325,
-        "ci_low": 0.273224043715847,
-        "score": 0.3875
+        "ci_high": 0.4970414201183432,
+        "ci_low": 0.2810810810810811,
+        "score": 0.39375
       },
       "critical": true,
       "delta": {
         "ci_high": 0.0,
-        "ci_low": -0.021897810218978075,
-        "value": -0.006249999999999978
+        "ci_low": 0.0,
+        "value": 0.0
       },
       "dimension_id": "human-required-recall",
       "direction_vs_baseline": "equivalent",
@@ -103,20 +103,20 @@
     },
     {
       "baseline": {
-        "ci_high": 0.3223684210526316,
-        "ci_low": 0.20306513409961685,
-        "score": 0.260989010989011
+        "ci_high": 0.31543624161073824,
+        "ci_low": 0.19143576826196473,
+        "score": 0.25
       },
       "candidate": {
-        "ci_high": 0.3552941176470588,
-        "ci_low": 0.22739018087855298,
-        "score": 0.29023746701846964
+        "ci_high": 0.35023041474654376,
+        "ci_low": 0.21727748691099477,
+        "score": 0.28232189973614774
       },
       "critical": true,
       "delta": {
-        "ci_high": 0.040687812245846444,
-        "ci_low": 0.015807962529273994,
-        "value": 0.029248456029458636
+        "ci_high": 0.04226735980849278,
+        "ci_low": 0.020448179271708694,
+        "value": 0.03232189973614774
       },
       "dimension_id": "human-delivery-precision",
       "direction_vs_baseline": "improved",
@@ -194,9 +194,9 @@
       "tools/judge/interface.py": "2e0440cc85660f83f4456829006f3f00a956e414c4c72e8217ab1a22622f3ed2"
     },
     "expectations": {
-      "path": "evals/rule-delivery/expectations.v1.json",
-      "sha256": "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa",
-      "version": "rule-delivery-expectations/v1"
+      "path": "evals/rule-delivery/expectations.v2.json",
+      "sha256": "902d00912e9be3b50cd7dfb072b1b7903f2a417ac9825010261e153e496b597c",
+      "version": "rule-delivery-expectations/v2"
     },
     "scorer": {
       "function": "score_receipt",
@@ -204,7 +204,7 @@
     },
     "source": {
       "evals/rule-delivery/make_report.py": "868f75651f7b80d6303d293a77ea151f4a8b69ed3ca49122cc474ac03ce86b26",
-      "evals/rule-delivery/run_eval.py": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6"
+      "evals/rule-delivery/run_eval.py": "b0200e7c8fb589171bc8ac1bd74708745aef9c2c3a3d0068f34483535ccb26e8"
     }
   },
   "grader": {
@@ -217,7 +217,7 @@
       "result": "pass"
     }
   },
-  "measured_on": "2026-10-13",
+  "measured_on": "2026-10-14",
   "min_useful_gain": 0.7,
   "noise_floor": 0.3,
   "notes": [
@@ -266,7 +266,7 @@
         "e"
       ]
     },
-    "decision": "ship",
-    "statement": "full-text-availability retains every class B/C gold occurrence. Joe accepted the remaining class D/E full-text drop in decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01. The critical flag remains true; only that measured D/E loss is accepted, with B/C gaps retained until their routes are fixed. Other dimensions remain unchanged."
+    "decision": "do_not_merge",
+    "statement": "Do not merge: full-text-availability remains below baseline under the accepted D/E tradeoff, and the receipt validator still enforces frozen h-pos-gmail-send required label 9b081605 despite expectations v2 requiring current c66dc739."
   }
 }

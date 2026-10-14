@@ -20,7 +20,7 @@ nothing to production logs or caches (log_path=os.devnull, no session id).
 GRADER (programmatic, expected rule ids per case):
   expected  = gold - disputed - boot-delivered rules, restricted to rules the
               trigger layer owes (a trigger/path route, or pack-layer member).
-              Frozen per case in expectations.v1.json (--freeze-expectations)
+              Frozen per case in the current expectations file (--freeze-expectations)
               and graded from there, so a change to the routes cannot move its
               own denominator; a drift from the live derivation needs a new
               expectations version.
@@ -58,8 +58,8 @@ sys.path.insert(0, REPO)
 
 V2_CASES = os.path.join(REPO, "ops", "fixtures", "rule-delivery-eval", "cases.v2.json")
 HARD_CASES = os.path.join(HERE, "hard_cases.v1.json")
-EXPECTATIONS = os.path.join(HERE, "expectations.v1.json")
-EXPECTATIONS_VERSION = "rule-delivery-expectations/v1"
+EXPECTATIONS = os.path.join(HERE, "expectations.v2.json")
+EXPECTATIONS_VERSION = "rule-delivery-expectations/v2"
 RUNS = os.path.join(HERE, "runs")
 CHARS_PER_TOKEN = 4.0
 METRIC_IDS = ("recall", "false_deliveries", "tokens")
@@ -206,6 +206,7 @@ class World:
         self.envelope = _load(os.path.join(REPO, "ops", "machine_envelope.py"),
                               "rde_envelope").is_machine_envelope
         self.pinned = (expectations or {}).get("cases", {})
+        self.case_relabels = (expectations or {}).get("case_relabels", {})
         self.labelled = (set(expectations["labelled"]) if expectations
                          else set(self.statements))
 
@@ -215,11 +216,30 @@ class World:
             expected = sorted(case["required"])
         else:
             expected = sorted((set(case["gold"]) - set(case["disputed"])) & self.owed)
-        return {"split": case.get("split"), "input_sha256": case.get("input_sha256"),
+        derived = {"split": case.get("split"), "input_sha256": case.get("input_sha256"),
                 "cohort": "envelope" if self.envelope(case["prompt"]) else "human",
                 "expected": expected,
                 "allowed": sorted(set(case["gold"]) | set(case["disputed"])),
                 "should_not_fire": not expected}
+        relabel = self.case_relabels.get(case["id"])
+        if relabel:
+            if sorted(case.get("required", [])) != relabel["replaces_required"]:
+                raise ValueError(f"{case['id']} no longer has the required source labels for its relabel")
+            replacement = relabel["expected"]
+            if not set(replacement) <= set(self.statements):
+                raise ValueError(f"{case['id']} relabel names an unknown active rule")
+            basis = relabel["basis"]
+            policy_path = os.path.join(REPO, basis["recipient_policy_path"])
+            with open(policy_path, "rb") as handle:
+                policy_sha = hashlib.sha256(handle.read()).hexdigest()
+            if (basis["active_rule_id"] not in replacement
+                    or basis["sender_guard"] != "lib/system_sender.py#Sender._allow_mail"
+                    or policy_sha != basis["recipient_policy_sha256"]):
+                raise ValueError(f"{case['id']} relabel no longer binds the current sender policy")
+            derived["expected"] = replacement
+            derived["allowed"] = relabel["allowed"]
+            derived["should_not_fire"] = not replacement
+        return derived
 
     def label(self, case):
         return self.pinned.get(case["id"]) or self.derive(case)
@@ -395,13 +415,17 @@ def write_run(out_dir, variant, rows):
 
 def freeze_expectations(world, cases):
     """The grading labels for every case, as the live tree derives them now."""
-    return {"schema": "rule-delivery-expectations", "version": EXPECTATIONS_VERSION,
+    doc = {"schema": "rule-delivery-expectations", "version": EXPECTATIONS_VERSION,
             "rule": ("expected = gold - disputed - boot-delivered, restricted to rules the trigger layer "
-                     "owes; hand cases use their required list. allowed = gold + disputed. cohort = "
+                     "owes; hand cases use their required list except explicit, versioned case relabels. "
+                     "allowed = gold + disputed unless a versioned case relabel says otherwise. cohort = "
                      "envelope when ops/machine_envelope classifies the prompt, else human. labelled = "
                      "every rule in the selection corpus; only those count as false deliveries."),
             "labelled": sorted(world.labelled),
             "cases": {c["id"]: world.derive(c) for c in sorted(cases, key=lambda c: c["id"])}}
+    if world.case_relabels:
+        doc["case_relabels"] = world.case_relabels
+    return doc
 
 
 def load_expectations(path=EXPECTATIONS):

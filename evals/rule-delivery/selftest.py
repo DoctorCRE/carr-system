@@ -9,12 +9,16 @@ import importlib.util
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import run_eval as R  # noqa: E402
 import make_report as M  # noqa: E402
+from lib import system_sender as sender_policy  # noqa: E402
+from lib.record_call import VerbResult  # noqa: E402
 
 GUARDED = ("rule-trigger-delivery.jsonl", "rule-prompt-delivered.json", "jev-judge.jsonl",
            "jev-rule-select.jsonl", "jev-calls.jsonl")
@@ -36,6 +40,34 @@ def check(name, ok, detail=""):
         raise SystemExit(1)
     if not name.startswith(("hard ", "real-replay bash")):
         print("PASS " + name + (f"  {detail}" if detail else ""))
+
+
+def refuses_unlisted_mail_recipients():
+    calls, transports = [], []
+
+    def verb(name, args):
+        calls.append(name)
+        if name == "next-signals":
+            return VerbResult(name, "ok", reply={"ok": True, "count": 0, "signals": []})
+        if name == "get-call-context":
+            return VerbResult(name, "ok", reply={"deals": [{
+                "id": "synthetic-deal", "participants": []}]})
+        return VerbResult(name, "ok", reply={"ok": True})
+
+    with tempfile.TemporaryDirectory(prefix="rule-delivery-sender-policy-") as scratch:
+        sender = sender_policy.Sender(
+            config=sender_policy.load_config(), root=Path(REPO),
+            state_dir=scratch, verb=verb, lint=lambda *_: (True, "clean"),
+            outlook=lambda *args: transports.append(args) or "SENT")
+        without_deal = sender.send_mail(to=["outside@example.invalid"], subject="Status", body="Check")
+        with_deal = sender.send_mail(
+            to=["outside@example.invalid"], subject="Status", body="Check",
+            deal_id="synthetic-deal", follow_up={"next_on": "2026-10-20", "next_step": "Check"})
+    return ((without_deal.outcome, without_deal.reason) ==
+            (sender_policy.REFUSED, "recipient_not_allowed")
+            and (with_deal.outcome, with_deal.reason) ==
+            (sender_policy.REFUSED, "recipient_not_allowed")
+            and not transports and "get-call-context" in calls)
 
 
 def main():
@@ -68,10 +100,46 @@ def main():
     gate = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gate)
     errs = gate.validate_receipt(receipt, M.SURFACE, __import__("pathlib").Path(REPO))
-    check("checked-in receipt passes the eval-receipt gate, recomputed from its evidence", not errs, "; ".join(errs[:3]))
     check("receipt binds the harness on disk", receipt["evidence"]["source"] == M.manifest(M.SOURCE))
     expectations = R.load_expectations()
     cohorts = {arm: M.read_jsonl(os.path.join(REPO, M.COHORTS[arm])) for arm in M.COHORTS}
+    v1_path = R.EXPECTATIONS.replace("expectations.v2.json", "expectations.v1.json")
+    with open(v1_path, encoding="utf-8") as handle:
+        frozen_v1 = json.load(handle)
+    current_v2 = expectations
+    current_world = R.World(current_v2)
+    relabels = current_v2.get("case_relabels", {})
+    old_hpos = frozen_v1["cases"]["h-pos-gmail-send"]
+    new_hpos = current_v2["cases"]["h-pos-gmail-send"]
+    hpos_relabel = relabels.get("h-pos-gmail-send", {})
+    basis = hpos_relabel.get("basis", {})
+    policy_path = os.path.join(REPO, "ops/config/system-sender.v1.json")
+    with open(policy_path, "rb") as handle:
+        policy_sha = hashlib.sha256(handle.read()).hexdigest()
+    with open(v1_path, "rb") as handle:
+        v1_sha = hashlib.sha256(handle.read()).hexdigest()
+    check("frozen v1 expectation bytes remain unchanged",
+          v1_sha == "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa")
+    check("v2 preserves every frozen case except the explicit h-pos relabel",
+          set(frozen_v1["cases"]) == set(current_v2["cases"])
+          and all(frozen_v1["cases"][cid] == current_v2["cases"][cid]
+                  for cid in frozen_v1["cases"] if cid != "h-pos-gmail-send"))
+    check("h-pos v2 preserves input, split and positive status while requiring active c66",
+          new_hpos["input_sha256"] == old_hpos["input_sha256"]
+          and new_hpos["split"] == old_hpos["split"] == "test"
+          and new_hpos["should_not_fire"] is False
+          and new_hpos["expected"] == new_hpos["allowed"] == ["c66dc739"]
+          and hpos_relabel.get("replaces_required") == ["9b081605"]
+          and hpos_relabel.get("expected") == ["c66dc739"])
+    check("h-pos relabel pins the active system-sender recipient policy",
+          basis.get("active_rule_id") == "c66dc739"
+          and basis.get("recipient_policy_path") == "ops/config/system-sender.v1.json"
+          and basis.get("recipient_policy_sha256") == policy_sha
+          and basis.get("sender_guard") == "lib/system_sender.py#Sender._allow_mail"
+          and "c66dc739" in current_world.statements)
+    check("current sender policy refuses arbitrary recipients with or without a named deal",
+          refuses_unlisted_mail_recipients())
+    check("checked-in receipt passes the eval-receipt gate, recomputed from its evidence", not errs, "; ".join(errs[:3]))
     rebuilt = M.assemble_receipt(receipt, expectations, cohorts["baseline"], cohorts["candidate"],
                                  receipt["evidence"]["source"], receipt["evidence"]["dependencies"],
                                  measured_on=receipt["measured_on"],
@@ -96,6 +164,8 @@ def main():
     check("frozen expectations match the live labels", not R.expectation_drift(world, cases, expectations))
     fresh = [R.observe(c, R.replay(world, c)) for c in sorted(cases, key=lambda c: c["id"])]
     check("candidate cohort is a fresh replay of this tree", fresh == cohorts["candidate"])
+    hpos_observation = next(row for row in fresh if row["case_id"] == "h-pos-gmail-send")
+    check("candidate replay delivers the active h-pos rule", "c66dc739" in hpos_observation["delivered"])
     review_case = {"id": "surface-review-read", "prompt": "",
                    "tool_calls": [{"tool_name": "Read", "tool_input": {
                        "file_path": os.path.join(REPO, "dealroom", "public", "index.html")}}],
@@ -125,8 +195,10 @@ def main():
         hard = json.load(handle)["cases"]
     live = set(world.statements)
     for row in hard:
-        check(f"hard {row['id']}: ids are live rules",
-              set(row["required"]) | set(row["acceptable"]) <= live)
+        retired = set(relabels.get(row["id"], {}).get("replaces_required", []))
+        check(f"hard {row['id']}: live labels or explicit versioned retirement",
+              (set(row["required"]) - retired) | set(row["acceptable"]) <= live
+              and retired <= set(row["required"]))
         check(f"hard {row['id']}: has a one-sentence reason", row["why"].strip().endswith(".")
               and row["why"].count(". ") == 0)
         if row["kind"] in ("should_not_fire", "near_miss"):

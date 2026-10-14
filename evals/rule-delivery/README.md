@@ -29,10 +29,13 @@ Nothing is written to production logs or caches. `selftest.py` checks that.
    misses (trigger vocabulary without the action), 13 positives.
 
 `split.json` freezes every case id to train or test before any edit;
-`selftest.py` fails if it moves. `expectations.v1.json` freezes each case's
-grading labels (expected and allowed rules, envelope or human cohort, input
-hash). A change to the routes cannot move its own denominator: grading reads
-the frozen labels, and a relabel is a new expectations version.
+`selftest.py` fails if it moves. `hard_cases.v1.json` and
+`expectations.v1.json` remain frozen. `expectations.v2.json` carries current
+labels, including an explicit current-rule relabel for the protected Gmail send
+case. It preserves that case's input, split and positive classification without
+claiming the current sender policy is identical to the retired rule. A change
+to routes cannot move its own denominator: grading reads the frozen labels, and
+a relabel is a new expectations version.
 
 ## Grader (programmatic)
 
@@ -63,7 +66,7 @@ python3 evals/rule-delivery/run_eval.py --freeze-expectations # only for a new e
 `make_report.py receipt` replays every case through the working tree
 (candidate) and through the tree at `--baseline-ref` (baseline) with the same
 harness, and writes the raw observations to `evidence/{baseline,candidate}.jsonl`.
-`run_eval.score_receipt` grades both against `expectations.v1.json` and
+`run_eval.score_receipt` grades both against the current expectations version and
 computes each dimension on the test split of its cohort: per-arm case
 bootstrap intervals and a paired-bootstrap delta over identical cohorts.
 `receipt.json` binds the harness, every tracked file the candidate replay
