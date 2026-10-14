@@ -124483,6 +124483,29 @@
           "classification_authorizing": false
         },
         {
+          "ingress_key": "script-entrypoint:mcp-server/run-tests.mjs",
+          "ingress_kind": "script_entrypoint",
+          "operation": "mcp-server/run-tests.mjs",
+          "effect_class": "administrative_mutation",
+          "source_locator": "mcp-server/run-tests.mjs",
+          "schema_digest": "220a2d362e7d2ff79e1d4edeec4a434017c9574c6ab864f8673c0132224a6388",
+          "handler_digest": "220a2d362e7d2ff79e1d4edeec4a434017c9574c6ab864f8673c0132224a6388",
+          "write": true,
+          "human_only": false,
+          "authority_only": true,
+          "principal_mode": "existing_script_specific_credential_boundary",
+          "mutation_kind": "scac.mutation.admin",
+          "target_surface": "scac.surface.runtime",
+          "delegates_to": [],
+          "request_shape": "fixed_script_cli_contract",
+          "idempotency_mode": "script_specific_registered_current_control",
+          "rollback_class": "forward_fix_only",
+          "admission_class": "registered_inventory_only",
+          "owner_package": "11",
+          "implementation_state": "inventoried_not_atomically_mediated",
+          "classification_authorizing": false
+        },
+        {
           "ingress_key": "script-entrypoint:ops/ci-dep-check.py",
           "ingress_kind": "script_entrypoint",
           "operation": "ops/ci-dep-check.py",
@@ -124695,8 +124718,8 @@
           "operation": "ops/work-request-supersession-concurrency-proof.mjs",
           "effect_class": "administrative_mutation",
           "source_locator": "ops/work-request-supersession-concurrency-proof.mjs",
-          "schema_digest": "ac7ecfbb7434bcd1f6cee1dd62ed35d62c71f16ff26b972b0fe8c0d29754ec09",
-          "handler_digest": "ac7ecfbb7434bcd1f6cee1dd62ed35d62c71f16ff26b972b0fe8c0d29754ec09",
+          "schema_digest": "e52ff0953444a287e9bb31690d1e99711755de36be74aede637c3a0448406945",
+          "handler_digest": "e52ff0953444a287e9bb31690d1e99711755de36be74aede637c3a0448406945",
           "write": true,
           "human_only": false,
           "authority_only": true,
@@ -124898,7 +124921,7 @@
         }
       ],
       "expected_count": 1221,
-      "expected_sha256": "181a3b053a5cf19f700ef80bb986e1a7f683bb20eb6255cdf764be8abb300298"
+      "expected_sha256": "1ba05b0943ad0d5319b8dc06824a3c2cae8416504e0c4aa6c714536eceee9868"
     }
   ],
   "current_source_review": {

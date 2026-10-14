@@ -5921,10 +5921,10 @@
       "number": 119,
       "version": "scac-mutation-registry.v119",
       "predecessor": "scac-mutation-registry.v118",
-      "digest": "sha256:fe89135997dd7205b9a6b936eceeb985b3e60dcfc34dcfee288d9b9d4dbdfa14",
-      "source_set_digest": "sha256:43b30d4bd473777782143c0e17dbd7af47b96cb3d14589946b50cb5446957e70",
+      "digest": "sha256:f858fba9513b6ad4f1029370efa8c1dcbcb12ba71fe9f721466de19f5af91ae2",
+      "source_set_digest": "sha256:03fa4e778584b52e25279781fb7e00cf4c490951bf0723d654fa62f0bb61ceee",
       "catalog_digest": "sha256:7b72d8ce773217bc2fe841f92598f064cba20bfdc949fd3b6dfe2b246d20de21",
-      "artifact_sha256": "80e1f0c3d99f1b6f37d0b461476b5acc5d70cc6aeab3e5e6a0eee05539ca4e7e",
+      "artifact_sha256": "51c936f16d74a96a5bf5143c74b017f203bb38fddb1b12d600a46bf70e29ed07",
       "path": "mcp-server/src/scac-mutation-registry.current.generated.js",
       "catalog": {
         "column_dml": {
@@ -5953,25 +5953,25 @@
           "digest": "sha256:cd7e5cff7db2ff2d98fb626c15d0109af9af9de91927b7b32e53a2d7147e9ee6"
         }
       },
-      "commit": "2b83f0ce297daac9994f6c5ab059b364c4fb53ae",
+      "commit": "61cb8797e03edbadae71ff9b32b9529895fe0504",
       "source_count": 1221,
       "entry_count": 2828,
-      "migration": "migrations/0881_wr221_supersession_scac_successor.sql",
-      "entry_set_digest": "sha256:178d0b33fba92f3b94c97848c8632f92d901919c2dc1631f69abf03d5a108d92",
+      "migration": "migrations/0882_wr221_supersession_scac_successor.sql",
+      "entry_set_digest": "sha256:1936de6e80f295a13891bc16ec6a7e5cc9088c555f581194ca0509e8afa1a8c7",
       "atomic_pair": [
-        "0880_allow_triaged_work_request_supersession.sql",
-        "0881_wr221_supersession_scac_successor.sql"
+        "0881_allow_triaged_work_request_supersession.sql",
+        "0882_wr221_supersession_scac_successor.sql"
       ],
       "strict_atomic": true,
       "dependencies": [
         "0873_self_closing_records_scac_successor.sql",
-        "0880_allow_triaged_work_request_supersession.sql"
+        "0881_allow_triaged_work_request_supersession.sql"
       ],
       "snapshot": {
         "include_current_entry_set": true,
         "catalog_function": "ops.scac_mutation_catalog_v119_current()"
       },
-      "migration_sha256": "79a696f53673edf10dc39ba876ccc70fcff0d10e1d0a0e58da0203ca5b942d87"
+      "migration_sha256": "3778d529a0a2b3298e8764cc724b5301e1eeb5a6b249801ac6b2e8cdde4ee3e9"
     }
   ],
   "atomic_groups": [
@@ -6203,8 +6203,8 @@
       "0873_self_closing_records_scac_successor.sql"
     ],
     [
-      "0880_allow_triaged_work_request_supersession.sql",
-      "0881_wr221_supersession_scac_successor.sql"
+      "0881_allow_triaged_work_request_supersession.sql",
+      "0882_wr221_supersession_scac_successor.sql"
     ]
   ],
   "strict_atomic_groups": [
@@ -6387,8 +6387,8 @@
       "0873_self_closing_records_scac_successor.sql"
     ],
     [
-      "0880_allow_triaged_work_request_supersession.sql",
-      "0881_wr221_supersession_scac_successor.sql"
+      "0881_allow_triaged_work_request_supersession.sql",
+      "0882_wr221_supersession_scac_successor.sql"
     ]
   ],
   "inactive_atomic_groups": [
