@@ -4,8 +4,6 @@
 -- lock-review: validating the replacement shape constraint scans ops.work_request; no table rewrite, existing row shapes remain valid.
 -- WR-000221 supersede-triaged repair. No actual request rows are touched.
 
-begin;
-
 -- Permit a superseded triaged row to retain its recorded triage fields.
 alter table ops.work_request drop constraint work_request_sourced_capture_shape;
 alter table ops.work_request add constraint work_request_sourced_capture_shape check (
@@ -277,5 +275,3 @@ $fn$;
 
 revoke all on function ops.supersede_sourced_work_request(text,integer,text,text,text,uuid) from public;
 grant execute on function ops.supersede_sourced_work_request(text,integer,text,text,text,uuid) to carr_writer;
-
-commit;
