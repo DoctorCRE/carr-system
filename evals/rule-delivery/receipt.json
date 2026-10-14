@@ -2,9 +2,9 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:ae97ec0789846dd0bfd91e8d2609ce483dfa69946945d78bbe20aeede428098c",
+    "configuration_fingerprint": "sha256:e9f191fbaa1f9fd8d23131d71a04085a75766ca9f324d1677fd18b825ee85e37",
     "harness_id": "evals/rule-delivery/run_eval.py",
-    "harness_version": "b0200e7c8fb589171bc8ac1bd74708745aef9c2c3a3d0068f34483535ccb26e8",
+    "harness_version": "09c4ebfc1134d7cb779f1ad07be777d9e02ae9ff7b604a1096fc0b2e2cf2efdb",
     "model_id": "deterministic-no-model",
     "native_session_ref": "01a12901-c908-7513-b43b-21aa1c012fea",
     "provider_id": "none",
@@ -20,7 +20,7 @@
     "total": 338,
     "train": 212
   },
-  "change": "Version h-pos-gmail-send expectations against active c66dc739 and the pinned system-sender recipient policy; preserve frozen v1 labels, input and split.",
+  "change": "Version h-pos-gmail-send against the live c66dc739 canonical UUID, v3 statement hash, active rule map and pinned system-sender recipient policy; preserve frozen v1 inputs, split and labels elsewhere.",
   "cost": {
     "baseline_usd_per_case": 0.0,
     "candidate_usd_per_case": 0.0
@@ -165,7 +165,7 @@
       },
       "candidate": {
         "path": "evals/rule-delivery/evidence/candidate.jsonl",
-        "sha256": "8a0e34f9315e0e1a0dde202b44697573bdeb0ce50ba4eed9484b69b9c866f448"
+        "sha256": "c1e75e700b8b343f18f60bf8c1d04fb53b8ac1bb1a91cb3712ec8a3a471db1fd"
       }
     },
     "dependencies": {
@@ -182,7 +182,7 @@
       "ops/config/rule-jev-triggers.v1.json": "facb30252ec1790d45bffc25dbfae62d95122b34a87718a21bd671497f04b631",
       "ops/config/rule-jit-triggers.v1.json": "3766e39e276066c9cbb56dbbb43965247ae660cd6dc43e0923b1a6435cd1e350",
       "ops/config/rule-routes.v1.json": "936a564d1c490620debc1b3dffb5bd1005a7bb0a5ef8f3f2d17695f5dea02e02",
-      "ops/config/rule-selection-corpus.v1.json": "22949b641b0e44a2ce99e95fb63a9a763c5376acade2b1f91e45de4e347b4ed4",
+      "ops/config/rule-selection-corpus.v1.json": "cf4a802ac1b3294235dfe8dacda0d29147151d811c87afce309343be0c5a8c09",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
       "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
       "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
@@ -194,9 +194,9 @@
       "tools/judge/interface.py": "2e0440cc85660f83f4456829006f3f00a956e414c4c72e8217ab1a22622f3ed2"
     },
     "expectations": {
-      "path": "evals/rule-delivery/expectations.v2.json",
-      "sha256": "902d00912e9be3b50cd7dfb072b1b7903f2a417ac9825010261e153e496b597c",
-      "version": "rule-delivery-expectations/v2"
+      "path": "evals/rule-delivery/expectations.v3.json",
+      "sha256": "6f001e8a9b895addfe907fa6bbd761efd3f771fd50b15e1faa19e9e778d23b87",
+      "version": "rule-delivery-expectations/v3"
     },
     "scorer": {
       "function": "score_receipt",
@@ -204,7 +204,7 @@
     },
     "source": {
       "evals/rule-delivery/make_report.py": "868f75651f7b80d6303d293a77ea151f4a8b69ed3ca49122cc474ac03ce86b26",
-      "evals/rule-delivery/run_eval.py": "b0200e7c8fb589171bc8ac1bd74708745aef9c2c3a3d0068f34483535ccb26e8"
+      "evals/rule-delivery/run_eval.py": "09c4ebfc1134d7cb779f1ad07be777d9e02ae9ff7b604a1096fc0b2e2cf2efdb"
     }
   },
   "grader": {
@@ -267,6 +267,6 @@
       ]
     },
     "decision": "do_not_merge",
-    "statement": "Do not merge: full-text-availability remains below baseline under the accepted D/E tradeoff, and the receipt validator still enforces frozen h-pos-gmail-send required label 9b081605 despite expectations v2 requiring current c66dc739."
+    "statement": "Do not merge: full-text-availability has a critical negative delta against baseline (\u22120.3236; 95% interval \u22120.3567 to \u22120.2907). The protected-gold relabel is now bound to the live c66dc739 revision; this does not change the measured quality regression."
   }
 }

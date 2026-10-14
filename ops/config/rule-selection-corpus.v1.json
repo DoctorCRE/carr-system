@@ -1,6 +1,6 @@
 {
  "schema": "rule-selection-corpus.v1",
- "note": "Full active rule statements for judged rule selection, keyed by the record layer short id. Refreshed from live standing-context on 2026-09-23; the five retired rules were removed and three newly active rules added. Scope and active-state authority remain in the record layer. 2026-09-29: rule ede4b241 (cloud model choice) added ahead of its approval so its delivery route can be verified; it is proposed in the record layer until one approve-rule act by Joe. 2026-10-08: rule 8400cd3d (new-work sizing) added ahead of approval so its planning-moment delivery route can be verified; it remains proposed in the record layer. 2026-10-13 (loop 1304, WR-000284): the 14 rules approved since the August review added from live standing-context (661d7757, f673326b, a3da3d39, 76fcbed6, 08c4eda2, 4a77c35d, 67e48aaf, a9fc3f0e, ac0a6579, 578fdd91, 486584d6, 07dde434, cfe6b5c6, c363bd8b); retired 9b081605 and 5697071b removed. ede4b241 and 8400cd3d stay while proposed, per the notes above.",
+ "note": "Full active rule statements for judged rule selection, keyed by the record layer short id. Refreshed from live standing-context on 2026-09-23; the five retired rules were removed and three newly active rules added. Scope and active-state authority remain in the record layer. 2026-09-29: rule ede4b241 (cloud model choice) added ahead of its approval so its delivery route can be verified; it is proposed in the record layer until one approve-rule act by Joe. 2026-10-08: rule 8400cd3d (new-work sizing) added ahead of approval so its planning-moment delivery route can be verified; it remains proposed in the record layer. 2026-10-13 (loop 1304, WR-000284): the 14 rules approved since the August review added from live standing-context (661d7757, f673326b, a3da3d39, 76fcbed6, 08c4eda2, 4a77c35d, 67e48aaf, a9fc3f0e, ac0a6579, 578fdd91, 486584d6, 07dde434, cfe6b5c6, c363bd8b); retired 9b081605 and 5697071b removed. ede4b241 and 8400cd3d stay while proposed, per the notes above. 2026-10-14: c66dc739 refreshed from live standing-context full text (canonical UUID c66dc739-394e-498d-ba87-0b16afd284a0, version 3); per-rule source binding accompanies that row.",
  "rules": [
   {
    "id": "015183f5",
@@ -1413,9 +1413,12 @@
   },
   {
    "id": "c66dc739",
-   "gist": "Mail capture on Joe's side reads the LOCAL mail stores on his Mac \u2014 never a Gmail API integration, and never",
-   "statement": "Mail capture on Joe's side reads the LOCAL mail stores on his Mac \u2014 never a Gmail API integration, and never ask him for Gmail auth (app-password or OAuth) again. The confirmed local route is New Outlook's HxStore for the carr.us mailbox (the reviewed parser at ~/carr-local/hxstore-decode, derived-facts-only); Joe states Apple Mail's local store is also available on his machine \u2014 verify its accounts once at build time, then treat local stores as the one mail-read mechanism. This supersedes the ORDER 12 wave2 design's \"Gmail + Google Calendar pull\" lane on the mail half; the calendar half already runs locally via the calendar-fetch feeds. Sending is untouched: drafts only, the one human gate, the existing outlook-draft and gmail-handover paths.",
-   "scope": {}
+   "gist": "LOCAL mail stores remain the read path; sending follows the policy-checked system sender autonomy ruling.",
+   "statement": "Mail capture on Joe's side reads the LOCAL mail stores on his Mac \u2014 never a Gmail API integration, and never ask him for Gmail auth (app-password or OAuth) again. The confirmed local route is New Outlook's HxStore for the carr.us mailbox (the reviewed parser at ~/carr-local/hxstore-decode, derived-facts-only); Joe states Apple Mail's local store is also available on his machine \u2014 verify its accounts once at build time, then treat local stores as the one mail-read mechanism. This supersedes the ORDER 12 wave2 design's \"Gmail + Google Calendar pull\" lane on the mail half; the calendar half already runs locally via the calendar-fetch feeds. Sending is no longer a human gate: under Joe's autonomy ruling (decision cbe91287-10a2-48d0-bda7-3b1784b4bb93, 2026-10-12) the system sends on its own through the policy-checked system sender once that sender ships; until it does, the outlook-draft and gmail-handover paths carry the drafts, and no send waits for Joe's hand.",
+   "scope": {},
+   "canonical_id": "c66dc739-394e-498d-ba87-0b16afd284a0",
+   "version": 3,
+   "statement_sha256": "3aa8ff551fb576b9f576452b963624073c6b9d442d8e21fa160b53bd7ef71761"
   },
   {
    "id": "c6f69dee",

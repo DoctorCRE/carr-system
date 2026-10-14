@@ -30,12 +30,12 @@ Nothing is written to production logs or caches. `selftest.py` checks that.
 
 `split.json` freezes every case id to train or test before any edit;
 `selftest.py` fails if it moves. `hard_cases.v1.json` and
-`expectations.v1.json` remain frozen. `expectations.v2.json` carries current
-labels, including an explicit current-rule relabel for the protected Gmail send
-case. It preserves that case's input, split and positive classification without
-claiming the current sender policy is identical to the retired rule. A change
-to routes cannot move its own denominator: grading reads the frozen labels, and
-a relabel is a new expectations version.
+`expectations.v1.json` and `expectations.v2.json` remain frozen. `expectations.v3.json`
+carries the protected Gmail-send relabel and binds it to the live CARR rule's
+canonical UUID, version, exact statement hash, source corpus, and recipient
+policy. It preserves the case's input, split and positive classification. A
+change to routes cannot move its own denominator: grading reads frozen labels,
+and a relabel is a new expectations version.
 
 ## Grader (programmatic)
 

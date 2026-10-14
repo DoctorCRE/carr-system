@@ -237,10 +237,11 @@ def mirror(receipt: dict, dest: Path) -> None:
               ev['expectations']['path']: ev['expectations']['sha256'],
               **{c['path']: c['sha256'] for c in ev['cohorts'].values()}}
     successor_inputs = set()
-    if receipt.get("surface") == "rule-delivery" and ev.get("expectations", {}).get("path") == "evals/rule-delivery/expectations.v2.json":
+    if receipt.get("surface") == "rule-delivery" and ev.get("expectations", {}).get("path") == "evals/rule-delivery/expectations.v3.json":
         # The accepted protected-gold successor also reads these fixed historical/current pins.
         successor_inputs = {"evals/rule-delivery/expectations.v1.json",
                             "evals/rule-delivery/expectations.v2.json",
+                            "evals/rule-delivery/expectations.v3.json",
                             "ops/config/system-sender.v1.json"}
         for rel in successor_inputs:
             hashes.setdefault(rel, hashlib.sha256((ROOT / rel).read_bytes()).hexdigest())
@@ -520,8 +521,8 @@ class AcceptedRuleBootTradeoff(unittest.TestCase):
         gold = {c["id"]: set(c["gold"]) for c in cases["cases"]}
         hard = json.loads((ROOT / "evals/rule-delivery/hard_cases.v1.json").read_text())
         gold.update({c["id"]: set(c["required"]) for c in hard["cases"]})
-        expectation_v2 = json.loads((ROOT / "evals/rule-delivery/expectations.v2.json").read_text())
-        gold["h-pos-gmail-send"] = set(expectation_v2["case_relabels"]["h-pos-gmail-send"]["expected"])
+        expectation_v3 = json.loads((ROOT / "evals/rule-delivery/expectations.v3.json").read_text())
+        gold["h-pos-gmail-send"] = set(expectation_v3["case_relabels"]["h-pos-gmail-send"]["expected"])
         rels = {"ops/config/rule-classes.v1.json": classes,
                 "ops/fixtures/rule-delivery-eval/cases.v2.json": cases,
                 "evals/rule-delivery/hard_cases.v1.json": hard,
@@ -533,6 +534,7 @@ class AcceptedRuleBootTradeoff(unittest.TestCase):
             path.write_bytes((ROOT / rel).read_bytes())
             receipt["evidence"]["dependencies"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
         for rel in ("evals/rule-delivery/expectations.v1.json", "evals/rule-delivery/expectations.v2.json",
+                    "evals/rule-delivery/expectations.v3.json",
                     "ops/config/system-sender.v1.json"):
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -615,7 +617,7 @@ class AcceptedRuleBootTradeoff(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             receipt = self.receipt(root)
-            rel = "evals/rule-delivery/expectations.v2.json"
+            rel = "evals/rule-delivery/expectations.v3.json"
             path = root / rel
             doc = json.loads(path.read_text())
             doc["cases"]["h-pos-gmail-send"]["expected"] = ["ffffffff"]
@@ -628,7 +630,7 @@ class AcceptedRuleBootTradeoff(unittest.TestCase):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 receipt = self.receipt(root)
-                rel = "evals/rule-delivery/expectations.v2.json"
+                rel = "evals/rule-delivery/expectations.v3.json"
                 path = root / rel
                 doc = json.loads(path.read_text())
                 if field == "policy_digest":
@@ -650,6 +652,22 @@ class AcceptedRuleBootTradeoff(unittest.TestCase):
             path.write_text(json.dumps(doc))
             receipt["evidence"]["dependencies"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertFalse(cer.accepted_rule_boot_tradeoff(receipt, root))
+
+    def test_stale_rule_body_or_revision_cannot_be_rebound(self):
+        for field, value in (("statement", "Mail capture on Joe's side reads the LOCAL mail stores. Sending is untouched: drafts only, the one human gate."),
+                             ("version", 2)):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                receipt = self.receipt(root)
+                rel = "ops/config/rule-selection-corpus.v1.json"
+                path = root / rel
+                corpus = json.loads(path.read_text())
+                row = next(item for item in corpus["rules"] if item["id"] == "c66dc739")
+                row[field] = value
+                row["statement_sha256"] = hashlib.sha256(row["statement"].encode("utf-8")).hexdigest()
+                path.write_text(json.dumps(corpus, indent=1) + "\n")
+                receipt["evidence"]["dependencies"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+                self.assertFalse(cer.accepted_rule_boot_tradeoff(receipt, root))
 
     def test_only_the_named_de_drop_is_accepted_with_critical_flag_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:

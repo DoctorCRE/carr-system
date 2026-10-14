@@ -103,14 +103,14 @@ def main():
     check("receipt binds the harness on disk", receipt["evidence"]["source"] == M.manifest(M.SOURCE))
     expectations = R.load_expectations()
     cohorts = {arm: M.read_jsonl(os.path.join(REPO, M.COHORTS[arm])) for arm in M.COHORTS}
-    v1_path = R.EXPECTATIONS.replace("expectations.v2.json", "expectations.v1.json")
+    v1_path = R.EXPECTATIONS.replace("expectations.v3.json", "expectations.v1.json")
     with open(v1_path, encoding="utf-8") as handle:
         frozen_v1 = json.load(handle)
-    current_v2 = expectations
-    current_world = R.World(current_v2)
-    relabels = current_v2.get("case_relabels", {})
+    current_v3 = expectations
+    current_world = R.World(current_v3)
+    relabels = current_v3.get("case_relabels", {})
     old_hpos = frozen_v1["cases"]["h-pos-gmail-send"]
-    new_hpos = current_v2["cases"]["h-pos-gmail-send"]
+    new_hpos = current_v3["cases"]["h-pos-gmail-send"]
     hpos_relabel = relabels.get("h-pos-gmail-send", {})
     basis = hpos_relabel.get("basis", {})
     policy_path = os.path.join(REPO, "ops/config/system-sender.v1.json")
@@ -120,11 +120,11 @@ def main():
         v1_sha = hashlib.sha256(handle.read()).hexdigest()
     check("frozen v1 expectation bytes remain unchanged",
           v1_sha == "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa")
-    check("v2 preserves every frozen case except the explicit h-pos relabel",
-          set(frozen_v1["cases"]) == set(current_v2["cases"])
-          and all(frozen_v1["cases"][cid] == current_v2["cases"][cid]
+    check("v3 preserves every frozen case except the explicit h-pos relabel",
+          set(frozen_v1["cases"]) == set(current_v3["cases"])
+          and all(frozen_v1["cases"][cid] == current_v3["cases"][cid]
                   for cid in frozen_v1["cases"] if cid != "h-pos-gmail-send"))
-    check("h-pos v2 preserves input, split and positive status while requiring active c66",
+    check("h-pos v3 preserves input, split and positive status while requiring active c66",
           new_hpos["input_sha256"] == old_hpos["input_sha256"]
           and new_hpos["split"] == old_hpos["split"] == "test"
           and new_hpos["should_not_fire"] is False
@@ -136,7 +136,11 @@ def main():
           and basis.get("recipient_policy_path") == "ops/config/system-sender.v1.json"
           and basis.get("recipient_policy_sha256") == policy_sha
           and basis.get("sender_guard") == "lib/system_sender.py#Sender._allow_mail"
-          and "c66dc739" in current_world.statements)
+          and basis.get("canonical_rule_id") == "c66dc739-394e-498d-ba87-0b16afd284a0"
+          and basis.get("canonical_rule_version") == 3
+          and basis.get("canonical_rule_source") == "ops/config/rule-selection-corpus.v1.json"
+          and basis.get("canonical_rule_sha256") == hashlib.sha256(
+              current_world.statements["c66dc739"].encode("utf-8")).hexdigest())
     check("current sender policy refuses arbitrary recipients with or without a named deal",
           refuses_unlisted_mail_recipients())
     check("checked-in receipt passes the eval-receipt gate, recomputed from its evidence", not errs, "; ".join(errs[:3]))

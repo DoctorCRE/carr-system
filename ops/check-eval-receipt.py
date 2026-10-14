@@ -233,23 +233,26 @@ def _direction(delta: dict) -> str:
 _GMAIL_SEND_CASE = "h-pos-gmail-send"
 _RETIRED_GMAIL_SEND_RULE = "9b081605"
 _CURRENT_GMAIL_SEND_RULE = "c66dc739"
+_CURRENT_GMAIL_SEND_RULE_UUID = "c66dc739-394e-498d-ba87-0b16afd284a0"
+_CURRENT_GMAIL_SEND_RULE_VERSION = 3
+_CURRENT_GMAIL_SEND_RULE_SHA256 = "3aa8ff551fb576b9f576452b963624073c6b9d442d8e21fa160b53bd7ef71761"
 _EXPECTATIONS_V1_SHA256 = "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa"
-_EXPECTATIONS_V2_SHA256 = "902d00912e9be3b50cd7dfb072b1b7903f2a417ac9825010261e153e496b597c"
+_EXPECTATIONS_V3_SHA256 = "6f001e8a9b895addfe907fa6bbd761efd3f771fd50b15e1faa19e9e778d23b87"
 _HARD_CASES_V1_SHA256 = "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff"
 _RULE_CLASSES_V1_SHA256 = "fec56bcff6575c469466c4758b42b8cbf42d7de2daf0de75dc131ded1950401a"
 _RULE_MAP_SHA256 = "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac"
-_RULE_CORPUS_SHA256 = "22949b641b0e44a2ce99e95fb63a9a763c5376acade2b1f91e45de4e347b4ed4"
+_RULE_CORPUS_SHA256 = "cf4a802ac1b3294235dfe8dacda0d29147151d811c87afce309343be0c5a8c09"
 _SYSTEM_SENDER_SHA256 = "786b9b548a517b9ae2dcb7de984c98c228e8fa85b1385d14417cb2ca41d36fb0"
 
 
 def _validated_rule_delivery_expectations(receipt: dict, root: Path, errors: list[str]) -> dict | None:
-    """Accept only the audited v1→v2 Gmail-send relabel; receipt hashes alone are not authority."""
+    """Accept only the audited v1→v3 relabel bound to the live canonical rule."""
     evidence = receipt.get("evidence", {})
     block = evidence.get("expectations", {})
-    if block != {"path": "evals/rule-delivery/expectations.v2.json",
-                 "version": "rule-delivery-expectations/v2",
-                 "sha256": _EXPECTATIONS_V2_SHA256}:
-        errors.append("accepted tradeoff requires the audited rule-delivery expectations v2 binding")
+    if block != {"path": "evals/rule-delivery/expectations.v3.json",
+                 "version": "rule-delivery-expectations/v3",
+                 "sha256": _EXPECTATIONS_V3_SHA256}:
+        errors.append("accepted tradeoff requires the audited rule-delivery expectations v3 binding")
         return None
     data = _bound_bytes(root, block["path"], block["sha256"], "accepted tradeoff expectations",
                         errors, under="evals/rule-delivery")
@@ -283,6 +286,10 @@ def _validated_rule_delivery_expectations(receipt: dict, root: Path, errors: lis
                 "allowed": [_CURRENT_GMAIL_SEND_RULE],
                 "basis": {
                     "active_rule_id": _CURRENT_GMAIL_SEND_RULE,
+                    "canonical_rule_id": _CURRENT_GMAIL_SEND_RULE_UUID,
+                    "canonical_rule_version": _CURRENT_GMAIL_SEND_RULE_VERSION,
+                    "canonical_rule_sha256": _CURRENT_GMAIL_SEND_RULE_SHA256,
+                    "canonical_rule_source": "ops/config/rule-selection-corpus.v1.json",
                     "recipient_policy_path": policy_rel,
                     "recipient_policy_sha256": _SYSTEM_SENDER_SHA256,
                     "sender_guard": "lib/system_sender.py#Sender._allow_mail",
@@ -314,10 +321,17 @@ def _validated_rule_delivery_expectations(receipt: dict, root: Path, errors: lis
         active_map = json.loads(active_map_bytes)
         corpus = json.loads(corpus_bytes)
         canonical_rule = next((r for r in corpus["rules"] if r.get("id") == _CURRENT_GMAIL_SEND_RULE), None)
+        statement = canonical_rule.get("statement", "") if canonical_rule else ""
         if (_CURRENT_GMAIL_SEND_RULE not in active_map["active_rule_ids"].get("joe", [])
                 or canonical_rule is None
-                or "LOCAL mail stores" not in canonical_rule.get("statement", "")):
-            raise ValueError("c66dc739 is not present as Joe's active canonical mail rule")
+                or canonical_rule.get("canonical_id") != _CURRENT_GMAIL_SEND_RULE_UUID
+                or canonical_rule.get("version") != _CURRENT_GMAIL_SEND_RULE_VERSION
+                or canonical_rule.get("statement_sha256") != _CURRENT_GMAIL_SEND_RULE_SHA256
+                or hashlib.sha256(statement.encode("utf-8")).hexdigest() != _CURRENT_GMAIL_SEND_RULE_SHA256
+                or "Sending is no longer a human gate" not in statement
+                or "policy-checked system sender" not in statement
+                or "drafts only, the one human gate" in statement):
+            raise ValueError("c66dc739 is not bound to Joe's current active canonical rule revision and body")
         return current
     except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
         errors.append(f"accepted tradeoff expectations are not a valid audited successor: {exc}")
