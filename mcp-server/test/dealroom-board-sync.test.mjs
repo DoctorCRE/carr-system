@@ -851,6 +851,8 @@ test("app.js sends one cell change under one key, and never mints a second one p
 test("app.js answers a modal inside the modal, and never paints a replayed answer over newer state", async () => {
   const app = await file("dealroom/js/app.js");
 
+  // 1. A control pressed inside #dealDialog is answered inside #dealDialog: a
+  // showModal() dialog is in the top layer, so the toast is behind its backdrop.
   const notice = app.slice(app.indexOf("function showDealDialogNotice"), app.indexOf("/**\n * Say what happened to a change"));
   assert.match(notice, /if \(!dialog\?\.open\) return false;/, "and degrades to the ordinary surface when none is open");
   assert.match(notice, /\$\('\.deal-content', dialog\)/, "placed in the dialog's own content, above the fold");
