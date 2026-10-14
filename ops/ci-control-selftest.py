@@ -44,9 +44,9 @@ def expression(value, github):
 class Controls(unittest.TestCase):
     def test_events(self):
         wf = workflow()
-        def event(action, sha='a', base='main', changes=None, run=1):
+        def event(action, sha='a', base='main', run=1):
             return {'workflow':'CI','event_name':'pull_request','run_id':run,
-                    'event':{'action':action,'pull_request':{'number':1665,'head':{'sha':sha},'base':{'ref':base}},'changes':changes or {}}}
+                    'event':{'action':action,'pull_request':{'number':1665,'head':{'sha':sha},'base':{'ref':base}}}}
         def state(e):
             return (expression(wf['concurrency']['group'], e),
                     expression(wf['concurrency']['cancel-in-progress'], e),
@@ -55,17 +55,36 @@ class Controls(unittest.TestCase):
         old = state(event('opened'))
         new = state(event('synchronize',sha='b',run=2))
         self.assertEqual(old[0],new[0]); self.assertTrue(new[1])
-        for changes in ({'title':{'from':'old'}},{'body':{'from':'old'}},{}):
-            edit = state(event('edited',changes=changes,run=3))
-            self.assertNotEqual(edit[0],old[0])
-            self.assertEqual(edit[1:],(False,False,False))
-            self.assertNotEqual(expression(wf['jobs']['checks']['name'],event('edited',changes=changes,run=3)), 'ops/ci.sh --strict')
-        changed = state(event('edited',base='release',changes={'base':{'ref':{'from':'main'}}},run=4))
-        self.assertNotEqual(changed[0],old[0]); self.assertEqual(changed[1:],(False,True,True))
+        for action in ('opened', 'synchronize', 'reopened'):
+            self.assertEqual(state(event(action))[2:], (True, True))
+        changed = state(event('synchronize',base='release',run=4))
+        self.assertNotEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,True,True))
         for name in ('schedule','workflow_dispatch'):
             a={'workflow':'CI','event_name':name,'event':{},'run_id':10}
             b={**a,'run_id':11}
             self.assertNotEqual(state(a)[0],state(b)[0]); self.assertEqual(state(a)[1:],(False,True,True))
+
+    def test_metadata_events_preserve_the_prior_required_context(self):
+        # Run 38104667722 created a new skipped check suite on a passing head.
+        # Reject metadata at the trigger so it cannot replace that suite.
+        wf = workflow()
+        triggers = wf['on']['pull_request']['types']
+        self.assertEqual(set(triggers), {'opened', 'synchronize', 'reopened'})
+        for action in ('ready_for_review', 'edited', 'labeled'):
+            with self.subTest(action=action):
+                self.assertNotIn(action, triggers)
+        self.assertFalse(set(wf['on']['pull_request']) - {'types'})
+
+    def test_required_context_reports_even_after_a_failed_class(self):
+        wf = workflow()
+        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
+        self.assertEqual(wf['jobs']['checks']['if'], '${{ always() }}')
+        self.assertNotIn('if', wf['jobs']['classes'])
+        self.assertEqual(wf['jobs']['checks']['needs'], 'classes')
+        steps = wf['jobs']['checks']['steps']
+        verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
+        self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])
+        self.assertIn('exit 1', verdict['run'])
 
     def test_verdict(self):
         mod = load('ci-evidence')
