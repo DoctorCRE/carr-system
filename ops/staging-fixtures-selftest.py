@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import io
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,8 +17,8 @@ from unittest.mock import Mock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("staging_fixtures", ROOT / "tools/staging-fixtures.py")
-fixture = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
+fixture = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(fixture)
 
 APP_SHA = "57df4bf973c598f39765c3eefa7eb6bde758e59f"
@@ -106,6 +108,20 @@ class PlanTests(unittest.TestCase):
             target.chmod(0o644)
             with self.assertRaises(fixture.FixtureRefusal): fixture.load_private_plan(target, APP_SHA, CARR_SHA)
 
+    def test_fifo_plan_refuses_without_blocking(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.fifo"
+            os.mkfifo(path, 0o600)
+            command = [sys.executable, str(ROOT / "tools/staging-fixtures.py"),
+                       "--invoice-plan", str(path), "--expected-app-sha", APP_SHA,
+                       "--expected-carr-sha", CARR_SHA]
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=2)
+            except subprocess.TimeoutExpired as exc:
+                self.fail(f"opening a private FIFO blocked instead of refusing: {exc}")
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("invoice plan must be an owned private regular file", result.stderr)
+
     def test_refuses_stale_pins_partial_plan_and_bad_run_id(self):
         for changes in ({"release": {"source_commit": APP_SHA, "carr_source_commit": "c06bdf2788fb69daefb59364ea4fd798fa94f9a4"}},
                         {"state": "pending"}, {"inflight": {"name": "x"}}, {"run": "bad/run"},
@@ -183,6 +199,52 @@ class PlanTests(unittest.TestCase):
             db = Conn(deal=deal)
             with self.assertRaises(fixture.FixtureRefusal): fixture.install_invoice_fixture(db, plan())
             self.assertEqual(db.insert_count, 0)
+
+
+class TargetTests(unittest.TestCase):
+    dsn = "postgresql://neondb_owner:dummy@ep-staging.neon.tech/neondb"
+    project = "replacement-project"
+    endpoint = "ep-staging"
+
+    def test_preserves_ssl_and_auth_uri_parameters(self):
+        fixture.validate_target(self.dsn + "?sslmode=verify-full&channel_binding=require",
+                                self.project, self.endpoint)
+
+    def test_rejects_libpq_uri_routing_overrides(self):
+        for query in ("host=/tmp/pr1767-pg-socket", "hostaddr=127.0.0.1",
+                      "service=local", "servicefile=%2Ftmp%2Fpg_service.conf",
+                      "port=6543", "dbname=postgres"):
+            with self.subTest(query=query), self.assertRaises(fixture.FixtureRefusal):
+                fixture.validate_target(f"{self.dsn}?{query}", self.project, self.endpoint)
+
+    def test_rejects_ambient_libpq_target_overrides(self):
+        for name in ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE"):
+            with self.subTest(name=name), patch.dict(os.environ, {name: "/tmp/pr1767-pg-socket"}, clear=True), \
+                    self.assertRaises(fixture.FixtureRefusal):
+                fixture.validate_target(self.dsn, self.project, self.endpoint)
+
+    def test_query_host_override_refuses_before_provider_or_connect(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.json"
+            path.write_text(json.dumps(plan())); path.chmod(0o600)
+            args = ["staging-fixtures.py", "--apply", "--invoice-plan", str(path),
+                    "--expected-app-sha", APP_SHA, "--expected-carr-sha", CARR_SHA]
+            environment = {
+                "DATABASE_URL": self.dsn + "?host=/tmp/pr1767-pg-socket",
+                "CARR_STAGING_REPLACEMENT_PROJECT_ID": self.project,
+                "CARR_STAGING_REPLACEMENT_ENDPOINT_ID": self.endpoint,
+                "NEON_API_KEY": "dummy",
+            }
+            connect = Mock(side_effect=AssertionError("redirected target reached database connect"))
+            provider = Mock(side_effect=AssertionError("redirected target reached provider lookup"))
+            stderr = io.StringIO()
+            with patch.object(sys, "argv", args), patch.dict(os.environ, environment, clear=True), \
+                    patch.object(sys, "stderr", stderr), patch.object(fixture, "validate_provider_binding", provider), \
+                    patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=connect)}):
+                self.assertEqual(fixture.main(), 2)
+            self.assertEqual(connect.call_count, 0)
+            self.assertEqual(provider.call_count, 0)
+            self.assertIn("libpq target override", stderr.getvalue())
 
 
 if __name__ == "__main__":

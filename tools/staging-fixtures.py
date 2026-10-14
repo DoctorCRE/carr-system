@@ -18,7 +18,7 @@ import sys
 import uuid
 from decimal import Decimal
 from typing import Any, Callable, Mapping
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 FIXTURE_ID = uuid.uuid5(uuid.UUID("80d943c3-53af-4a13-9200-f3d8581a459a"),
                         "carr-clean-staging-replacement-party-v1")
@@ -60,9 +60,9 @@ def load_private_plan(path: pathlib.Path, expected_app_sha: str, expected_carr_s
         raise FixtureRefusal("invoice mode requires explicit full source pins")
     path = _private_plan_path(path)
     try:
-        if not hasattr(os, "O_NOFOLLOW"):
-            raise FixtureRefusal("platform cannot safely open a no-follow invoice plan")
-        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_NONBLOCK"):
+            raise FixtureRefusal("platform cannot safely open a no-follow nonblocking invoice plan")
+        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0) | os.O_NONBLOCK
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as stream:
             info = os.fstat(stream.fileno())
@@ -191,9 +191,20 @@ def install_invoice_fixture(conn: Any, plan: Mapping[str, Any]) -> int:
         raise
 
 
-def validate_target(dsn: str, project_id: str, endpoint_id: str) -> None:
+def validate_target(dsn: str, project_id: str, endpoint_id: str, *,
+                    environ: Mapping[str, str] = os.environ) -> None:
     parsed = urlsplit(dsn)
     host = (parsed.hostname or "").lower().rstrip(".")
+    # libpq permits URI query parameters and PG* environment defaults to
+    # select a different socket, address, port, service or database than the
+    # endpoint host/path this installer reviewed. Reject routing inputs before
+    # provider verification or opening a database connection; SSL and auth
+    # parameters remain available.
+    routing_options = {"host", "hostaddr", "service", "servicefile", "port", "dbname"}
+    query_keys = {key.lower() for key, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+    routing_environment = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE")
+    if query_keys & routing_options or any(environ.get(name) for name in routing_environment):
+        raise FixtureRefusal("owner DSN uses an unsupported libpq target override")
     if project_id in {"", PRODUCTION_PROJECT_ID}:
         raise FixtureRefusal("replacement project identity is absent or forbidden")
     if not endpoint_id.startswith("ep-") or not host.startswith(endpoint_id + ".") \
