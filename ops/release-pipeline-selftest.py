@@ -369,31 +369,36 @@ class Fixture:
         # The fixture models the existing local merge-event producer. The
         # pipeline still independently checks the live PR/comment evidence.
         # The pipeline evaluates origin/main, which can be ahead of this
-        # checkout in update-branch/squash fixtures. Bind the local event to
-        # the same candidate SHA the pipeline will inspect.
-        remote_main = git(self.repo, "ls-remote", "origin", "refs/heads/main")
-        head_sha = remote_main.split()[0]
+        # checkout in update-branch/squash fixtures. Generate one local event
+        # for each merged commit in the batch: the controller may release an
+        # older green commit while newer commits are still pending.
+        git(self.repo, "fetch", "-q", "origin", "main")
+        remote_main = git(self.repo, "rev-parse", "FETCH_HEAD")
+        commits = git(self.repo, "rev-list", "--reverse", remote_main, f"^{self.base}").splitlines()
         events = []
-        for lane_name in ("worker", "app"):
-            lane_cfg = cfg[lane_name]
-            if lane_name == "app" and not lane_cfg.get("enabled"):
-                continue
-            source_gh = github or FakeGitHub()
-            pr = source_gh.pr_for_commit(head_sha)
-            pr_number = int(pr["number"])
-            reviewed_head = str(pr["head"]["sha"])
-            source_comments = source_gh.comments(pr_number)
-            deciding = rp.deciding_verdict(source_comments, lane_cfg) or {}
-            fake_comment_id = int(deciding.get("id") or 900 + pr_number)
-            reviewed_sha = rp.reviewed_header_sha(str(deciding.get("body") or "")) or reviewed_head
-            events.append({"schema": "carr-release-merge-event.v1",
-                           "provenance_source": "codex-record-event", "continuity_event_id": "fixture-event",
-                           "reviewer": "codex", "repository": lane_cfg["github_repo"],
-                           "pull_number": pr_number, "head_sha": reviewed_head,
-                           "reviewed_sha": reviewed_sha, "review_comment_id": fake_comment_id,
-                           "merge_sha": head_sha, "reviewer_task_ref": "review-task-1",
-                           "maker_task_ref": "maker-task-1", "task_refs_verified": False,
-                           "builder_evidence_refs": ["github:jbookout/carr-system/pull/1"]})
+        lane_names = [name for name in ("worker", "app")
+                      if name == "worker" or cfg[name].get("enabled")]
+        for merge_sha in commits:
+            for lane_name in lane_names:
+                lane_cfg = cfg[lane_name]
+                source_gh = github or FakeGitHub()
+                pr = source_gh.pr_for_commit(merge_sha)
+                if pr is None:
+                    continue
+                pr_number = int(pr["number"])
+                reviewed_head = str(pr["head"]["sha"])
+                source_comments = source_gh.comments(pr_number)
+                deciding = rp.deciding_verdict(source_comments, lane_cfg) or {}
+                fake_comment_id = int(deciding.get("id") or 900 + pr_number)
+                reviewed_sha = rp.reviewed_header_sha(str(deciding.get("body") or "")) or reviewed_head
+                events.append({"schema": "carr-release-merge-event.v1",
+                               "provenance_source": "codex-record-event", "continuity_event_id": "fixture-event",
+                               "reviewer": "codex", "repository": lane_cfg["github_repo"],
+                               "pull_number": pr_number, "head_sha": reviewed_head,
+                               "reviewed_sha": reviewed_sha, "review_comment_id": fake_comment_id,
+                               "merge_sha": merge_sha, "reviewer_task_ref": "review-task-1",
+                               "maker_task_ref": "maker-task-1", "task_refs_verified": False,
+                               "builder_evidence_refs": ["github:jbookout/carr-system/pull/1"]})
         event_path = self.repo / cfg.get("merge_event_file", "out/merge-events.jsonl")
         event_path.parent.mkdir(parents=True, exist_ok=True)
         event_path.write_text("".join(json.dumps(event) + "\n" for event in events))
