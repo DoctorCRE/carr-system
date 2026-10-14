@@ -44,8 +44,12 @@ def load_lane(repo: str) -> dict:
     raise ValueError("repository is not a configured release lane")
 
 
+def load_pipeline_config() -> dict:
+    return json.loads((ROOT / "ops/config/release-pipeline.v1.json").read_text())
+
+
 def verify_source(gh: Any, repo: str, number: int, expected_head: str,
-                  cfg: dict) -> tuple[dict, dict, str]:
+                  cfg: dict) -> tuple[dict, dict, str, str]:
     pr = gh.api(f"repos/{repo}/pulls/{number}")
     if not isinstance(pr, dict):
         raise ValueError("GitHub returned no pull request object")
@@ -56,15 +60,16 @@ def verify_source(gh: Any, repo: str, number: int, expected_head: str,
             not SHA_RE.fullmatch(merge_sha)):
         raise ValueError("PR is not merged to main at the requested exact head")
     comments = gh.api(f"repos/{repo}/issues/{number}/comments", paginate=True)
-    approval, rule, reviewed_sha = rp.approval_of(comments, cfg, head)
-    if rule != "exact" or reviewed_sha != head:
-        raise ValueError("approval does not cover the exact merged PR head")
+    pipeline = rp.Pipeline(load_pipeline_config(), repo=ROOT, env=rp.child_env(os.environ))
+    approval, _rule, reviewed_sha = rp.approval_of(
+        comments, cfg, head,
+        covers=lambda reviewed: pipeline.main_merge_only(ROOT, number, reviewed, head, merge_sha))
     comment_id = approval.get("id")
     if type(comment_id) is not int or comment_id < 1:
         raise ValueError("deciding approval has no stable GitHub comment id")
     if approval.get("html_url") != f"https://github.com/{repo}/pull/{number}#issuecomment-{comment_id}":
         raise ValueError("deciding approval URL does not bind the configured repository and comment")
-    return pr, approval, merge_sha
+    return pr, approval, merge_sha, reviewed_sha
 
 
 def _run_record(args: dict, *, runner: Callable[..., Any] = subprocess.run) -> str:
@@ -131,12 +136,12 @@ def record(args: argparse.Namespace, *, gh: Any | None = None,
     repo = args.repository
     lane = load_lane(repo)
     gh = gh or GitHubReader(cwd=str(ROOT))
-    pr, approval, merge_sha = verify_source(gh, repo, args.pull_number, args.head_sha, lane)
+    pr, approval, merge_sha, reviewed_sha = verify_source(gh, repo, args.pull_number, args.head_sha, lane)
     comment_id = int(approval["id"])
     cursor = {
         "schema": "carr-release-review-event.v1",
         "repository": repo, "pull_number": args.pull_number,
-        "head_sha": args.head_sha, "reviewed_sha": args.head_sha,
+        "head_sha": args.head_sha, "reviewed_sha": reviewed_sha,
         "review_comment_id": comment_id, "merge_sha": merge_sha,
         "reviewer_task_ref": args.reviewer_task_ref,
         "maker_task_ref": args.maker_task_ref,

@@ -368,22 +368,29 @@ class Fixture:
             slice_marker = lambda key, sha: (self.slice_marks.append((key, sha)) or {"rc": 0})  # noqa: E731
         # The fixture models the existing local merge-event producer. The
         # pipeline still independently checks the live PR/comment evidence.
-        head_sha = git(self.repo, "rev-parse", "HEAD")
+        # The pipeline evaluates origin/main, which can be ahead of this
+        # checkout in update-branch/squash fixtures. Bind the local event to
+        # the same candidate SHA the pipeline will inspect.
+        remote_main = git(self.repo, "ls-remote", "origin", "refs/heads/main")
+        head_sha = remote_main.split()[0]
         events = []
         for lane_name in ("worker", "app"):
             lane_cfg = cfg[lane_name]
             if lane_name == "app" and not lane_cfg.get("enabled"):
                 continue
-            pr_number = FakeGitHub().pr_number(head_sha)
             source_gh = github or FakeGitHub()
+            pr = source_gh.pr_for_commit(head_sha)
+            pr_number = int(pr["number"])
+            reviewed_head = str(pr["head"]["sha"])
             source_comments = source_gh.comments(pr_number)
             deciding = rp.deciding_verdict(source_comments, lane_cfg) or {}
             fake_comment_id = int(deciding.get("id") or 900 + pr_number)
+            reviewed_sha = rp.reviewed_header_sha(str(deciding.get("body") or "")) or reviewed_head
             events.append({"schema": "carr-release-merge-event.v1",
                            "provenance_source": "codex-record-event", "continuity_event_id": "fixture-event",
                            "reviewer": "codex", "repository": lane_cfg["github_repo"],
-                           "pull_number": pr_number, "head_sha": pr_head(pr_number),
-                           "reviewed_sha": pr_head(pr_number), "review_comment_id": fake_comment_id,
+                           "pull_number": pr_number, "head_sha": reviewed_head,
+                           "reviewed_sha": reviewed_sha, "review_comment_id": fake_comment_id,
                            "merge_sha": head_sha, "reviewer_task_ref": "review-task-1",
                            "maker_task_ref": "maker-task-1", "task_refs_verified": False,
                            "builder_evidence_refs": ["github:jbookout/carr-system/pull/1"]})
@@ -2417,15 +2424,16 @@ class VerifierIsNotMaker(unittest.TestCase):
 
 class ReleaseReviewProducer(unittest.TestCase):
     class GitHub:
-        def __init__(self, *, head="a" * 40, merged=True):
+        def __init__(self, *, head="a" * 40, merged=True, reviewed=None):
             self.head, self.merged = head, merged
+            self.reviewed = reviewed or head
         def api(self, path, *, paginate=False):
             if path.endswith("/pulls/17"):
                 return {"state": "closed", "merged_at": "2026-10-01T00:00:00Z" if self.merged else None,
                         "merge_commit_sha": "b" * 40,
                         "head": {"sha": self.head}, "base": {"ref": "main"},
                         "user": {"login": "jbookout"}}
-            return [{"id": 917, "body": f"APPROVE\nReviewed-SHA: {self.head}\n",
+            return [{"id": 917, "body": f"APPROVE\nReviewed-SHA: {self.reviewed}\n",
                      "created_at": "2026-10-01T00:00:00Z", "author_association": "OWNER",
                      "user": {"login": "jbookout"},
                      "html_url": "https://github.com/jbookout/carr-system/pull/17#issuecomment-917"}]
@@ -2460,6 +2468,14 @@ class ReleaseReviewProducer(unittest.TestCase):
                 producer.record(self.args(), gh=self.GitHub(),
                                 record_event=lambda _args: (_ for _ in ()).throw(RuntimeError("record failed")))
         append.assert_not_called()
+
+    def test_accepted_update_branch_review_records_the_covered_sha(self):
+        reviewed = "f" * 40
+        with mock.patch.object(producer.rp.Pipeline, "main_merge_only", return_value=None):
+            with mock.patch.object(producer, "_append_event"):
+                event = producer.record(self.args(), gh=self.GitHub(reviewed=reviewed),
+                                        record_event=lambda _args: "continuity-1")
+        self.assertEqual(event["reviewed_sha"], reviewed)
 
     def test_record_uses_fixed_authenticated_profile_without_actor_argument(self):
         seen = {}
