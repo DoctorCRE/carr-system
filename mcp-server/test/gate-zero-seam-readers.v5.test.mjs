@@ -4770,12 +4770,16 @@ test("CHECK NAME: a newline, a path separator and three hundred characters are e
 });
 
 test("CHECK NAME: ignored metadata names cannot supply validation evidence", async () => {
+  // CI no longer subscribes to metadata edits, so no job name is an expression;
+  // a skipped placeholder must still never stand in for the required verdict.
   const source = readFileSync(join(WORKFLOWS, "ci.yml"), "utf8");
-  const named = /^ {4}name: (\$\{\{ github\.event_name[^\n]+)\n/m.exec(source);
-  assert.ok(named, "CI no longer separates metadata edits from its required check name");
+  assert.equal(/^ {4}name: \$\{\{ github\.event_name/m.test(source), false,
+    "a dynamic CI job name is back; skipped jobs report it unexpanded");
+  const retired = "${{ github.event_name == 'pull_request' && github.event.action == 'edited' && "
+    + "!github.event.changes.base.ref && 'CI metadata edit ignored' || 'ops/ci.sh --strict' }}";
   const ruled = await stagedReaders({ storeFile: FIXTURE_STORE_FILE });
   // GitHub reports skipped expressions literally, with their delimiters removed.
-  for (const checkName of ["CI metadata edit ignored", named[1], named[1].slice(3, -2).trim()]) {
+  for (const checkName of ["CI metadata edit ignored", retired, retired.slice(3, -2).trim()]) {
     const answer = await ruled.readGateConclusionEvidence({
       headSha: fixtureStores.FIXTURE_COMMIT_SHA, checkName,
     });
