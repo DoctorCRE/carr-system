@@ -191,7 +191,7 @@ MARKER_RE = re.compile(r"^(🔔|❓|🗓\S*)(\s+)(.*)$", re.DOTALL)
 
 
 def parse_marker(cell):
-    """-> (marker, marker_literal, remainder). Non-destructive: verified by caller."""
+    """-> (marker, marker_literal, remainder). Non-destructive."""
     m = MARKER_RE.match(cell)
     if not m:
         return "none", None, cell
