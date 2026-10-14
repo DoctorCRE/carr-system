@@ -57,8 +57,6 @@ test("store contract exposes the bounded record/read workflow and no generic ver
 });
 
 test("the store exports no JavaScript mirror of a database gate", () => {
-  // Separation, batch completeness and the round bound live only in 0719's
-  // SECURITY DEFINER functions; an unwired JS copy would be a second authority.
   assert.deepEqual(Object.keys(store).sort(), ["V5_A03_STORE_SCHEMA_VERSION", "completeSetReviewA03StoreTools"]);
 });
 

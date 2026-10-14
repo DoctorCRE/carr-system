@@ -48,7 +48,6 @@ def public_url(value) -> bool:
                 or any(c.isspace() or ord(c) < 32 for c in value) or "%" in host
                 or host == "localhost" or host.endswith((".localhost", ".local", ".internal"))):
             return False
-        # Validate malformed ports even when no caller uses the port.
         _ = url.port
         try:
             if not ipaddress.ip_address(host).is_global:
@@ -143,7 +142,6 @@ def retrieval_result(text: str, urls: list[str]) -> dict:
         "status": "partial" if unresolved or record["status"] == "partial" else "complete"}
     result = json.dumps({"retrieval": retrieval})
     if marker:
-        # The queue's existing task/capability validator owns this protocol.
         result += marker + terminal
     return {"status": "completed", "code": 0, "result": result, "retrieval": retrieval}
 
@@ -216,9 +214,6 @@ def parse_stream(lines, returncode: int = 0) -> dict:
                 break
             chunks.append(event["data"])
         elif event.get("type") == "usage":
-            # A response boundary saves its chunks, including an explicitly
-            # identified empty response. Older streams omit messageId, so text
-            # also establishes a boundary. Accounting alone cannot erase it.
             if chunks or event.get("messageId"):
                 if chunks:
                     responses.append("".join(chunks))
@@ -269,8 +264,6 @@ def parse_result(stdout: str, returncode: int, *, urls: list[str] | None = None,
     result = parsed["text"].strip()
     if not result and not urls and require_identity:
         return {"status": "failed", "code": 4, "detail": "grok_empty_result", "receipt": receipt}
-    # Select metadata explicitly: tool arguments, diagnostics, credentials and
-    # arbitrary future envelope fields never enter the dispatch receipt.
     usage = end["modelUsage"][PROVIDER_MODEL]
     metadata = {"requested_model": MODEL, "actual_model": PROVIDER_MODEL,
                 "effort": effort, "request_id": end.get("requestId"),

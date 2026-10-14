@@ -31,9 +31,6 @@ ENVELOPE_FIELDS = {
     "server_binding", "handoff",
 }
 ENVELOPE_OPTIONAL_FIELDS = {
-    # Additive v1 activation/reliability bindings.  Legacy envelopes remain
-    # readable and are explicitly treated as not activated by the receipt
-    # posture helper; new server-issued envelopes populate these fields.
     "activation_binding", "reliability_policy_binding", "context_activation_ref",
     "runtime_profile", "execution_topology", "evaluation_plan",
 }
@@ -136,8 +133,6 @@ OUTCOMES = {"success", "failure", "timeout", "cancellation", "partial", "unknown
 VERIFICATION_STATES = {"verified_success", "verified_failure", "partial", "unknown", "not_attempted"}
 SURFACES = {"claude_desktop", "codex_desktop", "hermes_desktop", "grok_x_native"}
 
-# A request arrives without identity or routing selectors. These values are rejected
-# even if a future caller adds them to the request schema by mistake.
 FORBIDDEN_CLIENT_SELECTORS = {
     "organization_tenant_id", "tenant_id", "sponsoring_human_id", "agent_principal_id",
     "runtime_principal", "environment", "risk_class", "capability_profile", "capability_grant_ref",
@@ -331,7 +326,6 @@ def _validate_evaluation_context(value: Any) -> dict[str, Any]:
 
 
 def _validate_versioned_metadata(value: Any, label: str) -> dict[str, Any]:
-    """Validate a server-issued metadata binding without accepting secrets."""
     extra = RUNTIME_METADATA_OPTIONAL_FIELDS if label == "execution runtime_profile" else (TOPOLOGY_METADATA_FIELDS if label == "execution execution_topology" else (EVALUATION_METADATA_FIELDS if label == "execution evaluation_plan" else set()))
     allowed = VERSIONED_METADATA_FIELDS | extra
     if not isinstance(value, dict) or set(value) - allowed:
@@ -423,8 +417,6 @@ def validate_execution_envelope(envelope: Any) -> dict[str, Any]:
         for field in runtime_fields:
             _validate_versioned_metadata(envelope[field], f"execution {field}")
     if "activation_binding" in envelope or "reliability_policy_binding" in envelope:
-        # Import lazily: activation_reliability imports this module's strict
-        # primitives, so a module-level import would create a cycle.
         import activation_reliability
         activation_reliability.validate_envelope_bindings(envelope)
         if not all(field in envelope for field in runtime_fields):
@@ -519,7 +511,6 @@ def _validate_negative_knowledge(value: Any) -> list[dict[str, Any]]:
 
 
 def _validate_visual_artifacts(value: Any, envelope: dict[str, Any], attempt_id: str) -> list[dict[str, Any]]:
-    """Validate optional visual projections as derived, stale-visible artifacts."""
     if not isinstance(value, list):
         raise ContractError("receipt visual_artifacts must be a list")
     for row in value:
@@ -557,7 +548,6 @@ def _validate_visual_artifacts(value: Any, envelope: dict[str, Any], attempt_id:
 
 
 def _validate_observation(value: Any) -> dict[str, Any]:
-    """Validate redacted declared-versus-observed evidence without overclaiming."""
     observation = _expect_exact(value, OBSERVATION_FIELDS, "receipt observation")
     if observation["progress_state"] not in {
         "active", "quiet", "stale", "blocked", "failed", "unknown", "verified_complete",
@@ -597,14 +587,9 @@ def validate_attempt_receipt(receipt: Any, envelope: Any | None = None, context_
     value = _expect_exact({key: receipt[key] for key in RECEIPT_FIELDS}, RECEIPT_FIELDS, "attempt receipt")
     if value["schema_version"] != "attempt-receipt.v1":
         raise ContractError("unsupported attempt receipt schema_version")
-    # This projection carries only refs, enums, and bounded metrics.  Reject
-    # raw model/tool material recursively even when it is nested under an
-    # otherwise recognized receipt field.
     raw_keys = {"raw_prompt", "raw_transcript", "tool_payload", "raw_output", "prompt", "transcript", "expected_output", "expected_answer", "held_out_expected_output", "held_out_answer"}
     def contains_raw(value: Any) -> bool:
         if isinstance(value, str):
-            # Receipt strings are references, enums, timestamps, or digests;
-            # no arbitrary prose body belongs in this durable projection.
             return len(value) > 127 or bool(re.search(r"\s", value))
         if isinstance(value, list):
             return any(contains_raw(item) for item in value)
@@ -857,13 +842,9 @@ def job_passport_wire_receipt(kind: str, payload: Any) -> dict[str, Any]:
         "attempt_receipt": validate_attempt_receipt,
         "observatory_projection": validate_observatory_projection,
     }
-    # Import lazily: the portfolio reuses the contract's strict primitives,
-    # while the core envelope seam remains usable without an eval consumer.
     if kind in {"evaluation_kernel", "eval_portfolio"}:
         from evaluation_kernel import validate_evaluation_kernel
         validators["evaluation_kernel"] = validate_evaluation_kernel
-        # Deprecated read-only wire alias; it validates the canonical shared
-        # record and cannot revive a Job-Passport-owned contract.
         validators["eval_portfolio"] = validate_evaluation_kernel
     if kind == "spatial_surface":
         from spatial_surface import validate_spatial_surface
@@ -978,8 +959,6 @@ def receipt_from_dispatch_row(envelope: Any, row: dict[str, Any], *, attempt_id:
     stamp = row.get("dispatched_at")
     _timestamp(stamp, "dispatch row dispatched_at")
     native_ref = row.get("thread_id") or row.get("msg_id") or "native-dispatch-unknown"
-    # The envelope itself is the server-selected adapter identity. A transport-returned
-    # thread ID is evidence only; it cannot replace that selection in the receipt.
     result_class = "ok" if mapped[0] == "succeeded" else mapped[0]
     if result_class == "succeeded":
         result_class = "ok"
