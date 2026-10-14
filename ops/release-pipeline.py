@@ -610,7 +610,12 @@ def read_merge_events(path: Path) -> dict[str, dict[str, dict]]:
         sha = str(ev.get("merge_sha") or ev.get("merge_commit_sha") or ev.get("sha") or "").lower()
         repo = str(ev.get("repository") or "")
         if SHA_RE.fullmatch(sha) and repo:
-            events.setdefault(sha, {})[repo] = ev
+            by_repo = events.setdefault(sha, {})
+            prior = by_repo.get(repo)
+            if prior is not None and prior != ev:
+                by_repo[repo] = {"event_conflict": True}
+            elif prior is None:
+                by_repo[repo] = ev
     return events
 
 
