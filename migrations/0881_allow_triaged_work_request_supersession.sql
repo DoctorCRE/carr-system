@@ -1,6 +1,6 @@
 -- 0881_allow_triaged_work_request_supersession.sql
 -- rollback: forward-only — withdrawing this backward transition would invalidate recorded successor history.
--- expand-contract: expand — preserves captured behavior and adds only the triaged supersede path.
+-- expand-contract: expand — preserves captured behavior and rejects new successor lineage cycles.
 -- lock-review: validating the replacement shape constraint scans ops.work_request; no table rewrite, existing row shapes remain valid.
 -- WR-000221 supersede-triaged repair. No actual request rows are touched.
 
@@ -119,6 +119,15 @@ begin
     return new;
   end if;
 
+  -- Do not strand an existing predecessor by declining its successor.
+  -- Supersession locks both rows before changing the source, so this check sees
+  -- either the committed incoming edge or the successor's earlier decline.
+  if old.state = 'captured' and new.state = 'declined'
+     and exists (select 1 from ops.work_request predecessor
+                  where predecessor.superseded_by = old.id) then
+    raise exception 'a Work Request already named as a successor cannot be declined';
+  end if;
+
   -- Captured rows may be declined or superseded; triaged rows may be
   -- superseded while preserving their triage and shape evidence.
   if ((old.state = 'captured' and new.state in ('declined','superseded'))
@@ -158,6 +167,9 @@ declare
   v_succ_tenant text;
   v_previous_state text;
   v_request_tenant text;
+  v_locked_tenant text;
+  v_locked_version integer;
+  v_has_cycle boolean;
   v_actor uuid;
   v_now timestamp with time zone := now();
 begin
@@ -169,23 +181,47 @@ begin
     raise exception 'unknown actor %', p_actor_slug;
   end if;
 
-  select w.id, w.state, w.organization_tenant_id
-    into v_id, v_previous_state, v_request_tenant
+  -- Identify the tenant without taking a row lock, then serialize graph edits
+  -- for that tenant before taking any row locks. A write-volume-independent lock
+  -- is needed because disjoint endpoint pairs can still complete a longer cycle.
+  select w.id, w.organization_tenant_id into v_id, v_request_tenant
     from ops.work_request w
-   where w.ref = p_work_request and w.capture_idempotency_key is not null
-     and w.state in ('captured','triaged') and w.version = p_base_version
-   for update;
+   where w.ref = p_work_request and w.capture_idempotency_key is not null;
   if v_id is null then
-    raise exception 'no captured or triaged sourced Work Request % at version %', p_work_request, p_base_version;
+    raise exception 'no sourced Work Request %', p_work_request;
   end if;
+  perform pg_advisory_xact_lock(hashtextextended(
+    'ops.work_request_supersession_graph:' || v_request_tenant, 0));
 
-  select w.id, w.state, (w.capture_idempotency_key is not null), w.organization_tenant_id
-    into v_succ, v_succ_state, v_succ_sourced, v_succ_tenant
-    from ops.work_request w where w.ref = p_superseded_by;
+  select w.id into v_succ from ops.work_request w where w.ref = p_superseded_by;
   if v_succ is null then
     raise exception 'no Work Request % to supersede it', p_superseded_by;
   end if;
-  -- The four refusals the foreign key does not give.
+
+  -- Lock both endpoints in a stable UUID order. This also serializes a target's
+  -- concurrent decline; the trigger refuses that decline if this edge commits.
+  perform 1 from ops.work_request w
+   where w.id in (v_id, v_succ)
+   order by w.id
+   for update;
+
+  -- Recheck source CAS and target properties only after both locks are held.
+  select w.state, w.version, w.organization_tenant_id
+    into v_previous_state, v_locked_version, v_locked_tenant
+    from ops.work_request w where w.id = v_id;
+  if v_previous_state not in ('captured','triaged')
+     or v_locked_version is distinct from p_base_version
+     or v_locked_tenant is distinct from v_request_tenant then
+    raise exception 'no captured or triaged sourced Work Request % at version %', p_work_request, p_base_version;
+  end if;
+
+  select w.state, (w.capture_idempotency_key is not null), w.organization_tenant_id
+    into v_succ_state, v_succ_sourced, v_succ_tenant
+    from ops.work_request w where w.id = v_succ;
+  if v_succ_state is null then
+    raise exception 'no Work Request % to supersede it', p_superseded_by;
+  end if;
+  -- Successor guards the foreign key does not give.
   if v_succ = v_id then
     raise exception 'a Work Request cannot supersede itself';
   end if;
@@ -198,9 +234,25 @@ begin
   if not v_succ_sourced then
     raise exception 'the successor % is not a sourced Work Request', p_superseded_by;
   end if;
-  if exists (select 1 from ops.work_request w
-              where w.id = v_succ and w.superseded_by = v_id) then
-    raise exception 'that would make a two-row supersession cycle';
+
+  -- The superseded_by relation is a lineage graph, so adding an edge must not
+  -- create a cycle of any length. The tenant advisory lock makes this traversal
+  -- stable against other supersede operations in the graph.
+  with recursive successor_chain(id, successor_id, path, cycle) as (
+    select w.id, w.superseded_by, array[w.id], false
+      from ops.work_request w where w.id = v_succ
+    union all
+    select next.id, next.superseded_by, chain.path || next.id,
+           next.id = any(chain.path)
+      from successor_chain chain
+      join ops.work_request next on next.id = chain.successor_id
+     where chain.successor_id is not null and not chain.cycle
+       and next.organization_tenant_id = v_request_tenant
+  )
+  select exists (select 1 from successor_chain where id = v_id or cycle)
+    into v_has_cycle;
+  if v_has_cycle then
+    raise exception 'that would make a supersession cycle';
   end if;
 
   insert into ops.work_request_withdrawal_receipt
