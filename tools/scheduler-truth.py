@@ -173,11 +173,6 @@ def wrapped(pl: dict[str, Any]) -> bool:
     return any("run-scheduled.sh" in str(a) for a in pl.get("ProgramArguments", []))
 
 
-# bin/run-scheduled.sh's own optional flags (Program 4 follow-up), each
-# consuming exactly one value. Kept in sync with that script's flag-parsing
-# loop by hand — there being only two of them and both single-value is what
-# makes hand-sync tolerable; a third flag should make this a shared table
-# instead of two copies.
 WRAPPER_FLAGS_WITH_VALUE = {"--heartbeat-interval", "--also-heartbeat"}
 
 
