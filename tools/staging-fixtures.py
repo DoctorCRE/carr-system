@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import pathlib
@@ -16,6 +17,7 @@ import stat
 import subprocess
 import sys
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Callable, Mapping
 from urllib.parse import parse_qsl, unquote, urlsplit
@@ -26,6 +28,10 @@ INVOICE_NAMESPACE = uuid.UUID("4acbfa5b-1f38-47af-aac0-1c4688cfc479")
 PLAN_SCHEMA = "doctorcre-staging-records-plan.v1"
 STAGING_ORIGIN = "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
 MAX_PLAN_BYTES = 1_048_576
+MAX_PROOF_BYTES = 65_536
+PROOF_SCHEMA = "doctorcre-staging-fixture-proof.v1"
+AGED_INVOICE_DAYS_BEFORE_OBSERVATION = 45
+AGED_DUE_DAYS_BEFORE_OBSERVATION = 15
 PRODUCTION_PROJECT_ID = "steep-field-48688294"
 REPO = pathlib.Path(__file__).resolve().parents[1]
 NEONCTL = REPO / "mcp-server/node_modules/.bin/neonctl"
@@ -35,6 +41,17 @@ Run = Callable[..., subprocess.CompletedProcess]
 
 class FixtureRefusal(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class InvoiceValues:
+    commission_id: uuid.UUID
+    deal_id: uuid.UUID
+    gross_amount: Decimal
+    status: str
+    invoiced_on: dt.date
+    due_on: dt.date | None
+    observation_date: dt.date
 
 
 def _private_plan_path(path: pathlib.Path) -> pathlib.Path:
@@ -117,20 +134,24 @@ def load_private_plan(path: pathlib.Path, expected_app_sha: str, expected_carr_s
     return value
 
 
-def invoice_commission_values(plan: Mapping[str, Any]) -> tuple[Any, ...]:
+def invoice_commission_values(plan: Mapping[str, Any], *, aged: bool = False) -> InvoiceValues:
     run = plan["run"]
     deal_id = uuid.UUID(plan["records"]["invoice"]["deal_id"])
     commission_id = uuid.uuid5(INVOICE_NAMESPACE, f"staging-invoice-commission:{run}")
-    invoice_date = plan.get("_invoice_date")
-    if invoice_date is None:
-        invoice_date = dt.datetime.strptime(plan["observed_at"], "%Y-%m-%dT%H:%M:%S.%fZ").date()
-    return commission_id, deal_id, Decimal("1.00"), invoice_date, None
+    observation_date = plan.get("_invoice_date")
+    if observation_date is None:
+        observation_date = dt.datetime.strptime(plan["observed_at"], "%Y-%m-%dT%H:%M:%S.%fZ").date()
+    invoice_date = observation_date - dt.timedelta(days=AGED_INVOICE_DAYS_BEFORE_OBSERVATION) if aged else observation_date
+    due_on = observation_date - dt.timedelta(days=AGED_DUE_DAYS_BEFORE_OBSERVATION) if aged else None
+    return InvoiceValues(commission_id, deal_id, Decimal("1.00"), "invoiced", invoice_date, due_on,
+                         observation_date)
 
 
-def install_invoice_fixture(conn: Any, plan: Mapping[str, Any]) -> int:
+def install_invoice_fixture(conn: Any, plan: Mapping[str, Any], *, aged: bool = False) -> int:
     """Seed and verify a synthetic invoice. Provenance is system attribution plus DB readback, not an MCP event/receipt."""
-    values = invoice_commission_values(plan)
-    commission_id, deal_id, gross, invoiced_on, _ = values
+    values = invoice_commission_values(plan, aged=aged)
+    commission_id, deal_id = values.commission_id, values.deal_id
+    gross, status, invoiced_on, due_on = values.gross_amount, values.status, values.invoiced_on, values.due_on
     try:
         with conn.cursor() as cur:
             cur.execute("select session_user,current_user")
@@ -142,7 +163,8 @@ def install_invoice_fixture(conn: Any, plan: Mapping[str, Any]) -> int:
                 raise FixtureRefusal("exact schema seed lacks system actor")
             cur.execute("select current_date")
             today = cur.fetchone()
-            if not today or invoiced_on > today[0]:
+            if not today or values.observation_date > today[0] or invoiced_on > today[0] \
+                    or (due_on is not None and due_on > today[0]):
                 raise FixtureRefusal("recorded invoice observation date is after database current date")
             cur.execute("""select d.id::text,d.name,d.phase,d.outcome,d.owner,cl.id::text,cl.merged_into,
                        p.id::text,p.name,p.deleted_at,p.merged_into
@@ -156,39 +178,257 @@ def install_invoice_fixture(conn: Any, plan: Mapping[str, Any]) -> int:
                         str(uuid.UUID(plan["records"]["client"]["id"])), None, str(FIXTURE_ID),
                         "Synthetic Staging Fixture", None, None):
                 raise FixtureRefusal("app-owned closed QA deal and active fixture-party lineage did not read back exactly")
-            cur.execute("""select id,deal_id,gross_amount,status,invoiced_on,received_on,version,created_by
+            cur.execute("""select id,deal_id,gross_amount,status,invoiced_on,received_on,version,created_by,due_on
                            from public.commission where deal_id=%s for update""", (deal_id,))
             existing = cur.fetchall()
-            expected_without_actor = (commission_id, deal_id, gross, "invoiced", invoiced_on, None, 1)
+            expected_without_actor = (commission_id, deal_id, gross, status, invoiced_on, None, 1, due_on)
             if len(existing) > 1:
                 raise FixtureRefusal("QA deal has ambiguous existing commission rows")
             if existing:
                 row = tuple(existing[0])
-                if row[:7] != expected_without_actor or row[7] != actor[0]:
+                if row[:7] != expected_without_actor[:7] or row[7] != actor[0] or row[8] != due_on:
                     raise FixtureRefusal("existing commission differs from the exact unpaid synthetic invoice; no row was changed")
                 inserted = 0
             else:
                 cur.execute("""insert into public.commission
-                    (id,deal_id,gross_amount,status,invoiced_on,received_on,version,created_by)
-                    values (%s,%s,%s,'invoiced',%s,null,1,%s) on conflict (id) do nothing returning id""",
-                    (commission_id, deal_id, gross, invoiced_on, actor[0]))
+                    (id,deal_id,gross_amount,status,invoiced_on,received_on,version,created_by,due_on)
+                    values (%s,%s,%s,%s,%s,null,1,%s,%s) on conflict (id) do nothing returning id""",
+                    (commission_id, deal_id, gross, status, invoiced_on, actor[0], due_on))
                 inserted = int(cur.fetchone() is not None)
-                cur.execute("""select id,deal_id,gross_amount,status,invoiced_on,received_on,version,created_by
+                cur.execute("""select id,deal_id,gross_amount,status,invoiced_on,received_on,version,created_by,due_on
                                from public.commission where id=%s""", (commission_id,))
                 row = cur.fetchone()
-                if not row or tuple(row) != (*expected_without_actor, actor[0]):
+                if not row or tuple(row) != (*expected_without_actor[:7], actor[0], due_on):
                     raise FixtureRefusal("deterministic invoice commission collision or readback mismatch")
-            cur.execute("""select deal_id,commission_id,gross_amount,status,commission_invoiced_on,received_on
+            cur.execute("""select deal_id,commission_id,gross_amount,status,commission_invoiced_on,received_on,due_on
                            from public.v_invoice_tracker where deal_id=%s and commission_id=%s""",
                         (deal_id, commission_id))
             tracker = cur.fetchone()
-            if not tracker or tuple(tracker) != (deal_id, commission_id, gross, "invoiced", invoiced_on, None):
+            if not tracker or tuple(tracker) != (deal_id, commission_id, gross, status, invoiced_on, None, due_on):
                 raise FixtureRefusal("invoice tracker projection did not read back the exact unpaid fixture")
         conn.commit()
         return inserted
     except Exception:
         conn.rollback()
         raise
+
+
+def read_invoice_fixture(conn: Any, plan: Mapping[str, Any], *, aged: bool = False) -> dict[str, Any]:
+    """Read committed invoice state on a separate connection without writing."""
+    values = invoice_commission_values(plan, aged=aged)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("set transaction read only")
+            cur.execute("select session_user,current_user,current_database()")
+            if tuple(cur.fetchone() or ()) != ("neondb_owner", "neondb_owner", "neondb"):
+                raise FixtureRefusal("independent fixture readback reached an unexpected database identity")
+            cur.execute("select id from public.actor where slug='system'")
+            actor = cur.fetchone()
+            if actor is None:
+                raise FixtureRefusal("exact schema seed lacks system actor")
+            cur.execute("""select d.id::text,d.name,d.phase,d.outcome,d.owner,cl.id::text,cl.merged_into,
+                       p.id::text,p.name,p.deleted_at,p.merged_into
+                  from public.deal d join public.client cl on cl.id=d.client_id
+                  join public.party p on p.id=cl.party_id
+                 where d.id=%s""", (values.deal_id,))
+            deal = cur.fetchone()
+            expected_deal = (str(values.deal_id), plan["records"]["invoice"]["name"], "closed",
+                             "joe", plan["records"]["client"]["id"], None, str(FIXTURE_ID),
+                             "Synthetic Staging Fixture", None, None)
+            if not deal or tuple(deal[:3]) != expected_deal[:3] or deal[3] not in (None, "won") \
+                    or tuple(deal[4:]) != expected_deal[3:]:
+                raise FixtureRefusal("independent app-owned deal and fixture-party readback did not match")
+            cur.execute("""select id,deal_id,gross_amount,status,invoiced_on,received_on,version,created_by,due_on
+                           from public.commission where id=%s""", (values.commission_id,))
+            commission = cur.fetchone()
+            expected_commission = (values.commission_id, values.deal_id, values.gross_amount, values.status,
+                                   values.invoiced_on, None, 1, actor[0], values.due_on)
+            if not commission or tuple(commission) != expected_commission:
+                raise FixtureRefusal("independent committed commission readback did not match the fixture")
+            cur.execute("""select deal_id,commission_id,gross_amount,status,commission_invoiced_on,received_on,due_on
+                           from public.v_invoice_tracker where deal_id=%s and commission_id=%s""",
+                        (values.deal_id, values.commission_id))
+            tracker = cur.fetchone()
+            expected_tracker = (values.deal_id, values.commission_id, values.gross_amount, values.status,
+                                values.invoiced_on, None, values.due_on)
+            if not tracker or tuple(tracker) != expected_tracker:
+                raise FixtureRefusal("independent invoice tracker readback did not match the fixture")
+        conn.rollback()
+        return {
+            "party": {"id": str(FIXTURE_ID), "name": "Synthetic Staging Fixture"},
+            "deal": {"id": str(deal[0]), "name": deal[1], "phase": deal[2], "outcome": deal[3],
+                     "owner": deal[4], "client_id": deal[5]},
+            "commission": {"id": str(commission[0]), "deal_id": str(commission[1]),
+                           "gross_amount": str(commission[2]), "status": commission[3],
+                           "invoiced_on": commission[4].isoformat(),
+                           "received_on": commission[5].isoformat() if commission[5] else None,
+                           "base_version": commission[6],
+                           "due_on": commission[8].isoformat() if commission[8] else None},
+            "tracker": {"deal_id": str(tracker[0]), "commission_id": str(tracker[1]),
+                        "gross_amount": str(tracker[2]), "status": tracker[3],
+                        "invoiced_on": tracker[4].isoformat(),
+                        "received_on": tracker[5].isoformat() if tracker[5] else None,
+                        "due_on": tracker[6].isoformat() if tracker[6] else None},
+        }
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _private_proof_destination(path: pathlib.Path) -> tuple[pathlib.Path, str, int]:
+    if ".." in pathlib.Path(path).parts:
+        raise FixtureRefusal("proof path contains parent traversal")
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise FixtureRefusal("platform cannot safely open a private proof directory")
+    path = pathlib.Path(os.path.abspath(path))
+    parent = path.parent
+    try:
+        cursor = pathlib.Path(path.anchor)
+        for part in path.parts[1:-1]:
+            cursor /= part
+            info = cursor.lstat()
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise FixtureRefusal("proof path has an unsafe ancestor")
+            if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not info.st_mode & stat.S_ISVTX:
+                raise FixtureRefusal("proof path has an untrusted writable ancestor")
+        parent_info = parent.lstat()
+        if stat.S_ISLNK(parent_info.st_mode) or not stat.S_ISDIR(parent_info.st_mode) \
+                or parent_info.st_uid != os.geteuid() or stat.S_IMODE(parent_info.st_mode) != 0o700:
+            raise FixtureRefusal("proof parent must be an owned private 0700 directory")
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        directory_fd = os.open(parent, flags)
+        opened_info = os.fstat(directory_fd)
+        if (opened_info.st_dev, opened_info.st_ino) != (parent_info.st_dev, parent_info.st_ino):
+            os.close(directory_fd)
+            raise FixtureRefusal("proof parent changed during validation")
+        if opened_info.st_uid != os.geteuid() or stat.S_IMODE(opened_info.st_mode) != 0o700:
+            os.close(directory_fd)
+            raise FixtureRefusal("proof parent must remain an owned private 0700 directory")
+    except FixtureRefusal:
+        raise
+    except OSError as exc:
+        raise FixtureRefusal("proof parent is unavailable or unsafe") from exc
+    return path, path.name, directory_fd
+
+
+def _read_private_existing_proof(directory_fd: int, name: str) -> bytes | None:
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0),
+                     dir_fd=directory_fd)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise FixtureRefusal("existing proof path is not a safe regular file") from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600:
+            raise FixtureRefusal("existing proof must be an owned private regular file")
+        if info.st_size > MAX_PROOF_BYTES:
+            raise FixtureRefusal("existing proof exceeds the bounded size")
+        chunks: list[bytes] = []
+        remaining = MAX_PROOF_BYTES + 1
+        while remaining:
+            chunk = os.read(fd, min(remaining, 8192))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        value = b"".join(chunks)
+        if len(value) > MAX_PROOF_BYTES:
+            raise FixtureRefusal("existing proof exceeds the bounded size")
+        return value
+    finally:
+        os.close(fd)
+
+
+def validate_proof_destination(path: pathlib.Path) -> None:
+    """Check output directory and any existing file before opening the database."""
+    _, name, directory_fd = _private_proof_destination(path)
+    try:
+        _read_private_existing_proof(directory_fd, name)
+    finally:
+        os.close(directory_fd)
+
+
+def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
+    """Atomically create a bounded 0600 proof; exact reruns validate but never replace it."""
+    encoded = (json.dumps(proof, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
+    if len(encoded) > MAX_PROOF_BYTES:
+        raise FixtureRefusal("proof exceeds the bounded size")
+    path, name, directory_fd = _private_proof_destination(path)
+    temp_name = f".{name}.{uuid.uuid4().hex}.tmp"
+    try:
+        existing = _read_private_existing_proof(directory_fd, name)
+        if existing is not None:
+            if existing == encoded:
+                return "already-exact"
+            raise FixtureRefusal("existing proof does not exactly match this fixture readback")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(temp_name, flags, 0o600, dir_fd=directory_fd)
+        except OSError as exc:
+            raise FixtureRefusal("could not safely create proof temporary file") from exc
+        try:
+            os.fchmod(fd, 0o600)
+            view = memoryview(encoded)
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    raise FixtureRefusal("proof write did not complete")
+                view = view[written:]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            os.link(temp_name, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd, follow_symlinks=False)
+        except FileExistsError:
+            existing = _read_private_existing_proof(directory_fd, name)
+            if existing == encoded:
+                return "already-exact"
+            raise FixtureRefusal("existing proof does not exactly match this fixture readback")
+        except OSError as exc:
+            raise FixtureRefusal("could not atomically publish proof without overwrite") from exc
+        os.unlink(temp_name, dir_fd=directory_fd)
+        os.fsync(directory_fd)
+        return "created"
+    finally:
+        try:
+            os.unlink(temp_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        os.close(directory_fd)
+
+
+def build_fixture_proof(plan: Mapping[str, Any], target: Mapping[str, Any],
+                        readback: Mapping[str, Any], *, aged: bool) -> dict[str, Any]:
+    values = invoice_commission_values(plan, aged=aged)
+    tool_sha = hashlib.sha256(pathlib.Path(__file__).resolve().read_bytes()).hexdigest()
+    return {
+        "schema": PROOF_SCHEMA,
+        "provenance": {"kind": "raw-sql-fixture"},
+        "fixture_run": plan["run"],
+        "source_pair": {
+            "source_commit": plan["release"]["source_commit"],
+            "carr_source_commit": plan["release"]["carr_source_commit"],
+        },
+        "recorded_plan_observed_at": plan["observed_at"],
+        "verified_target": dict(target),
+        "tool_source_sha256": tool_sha,
+        "fixture": {
+            "mode": "aged-invoice" if aged else "invoice",
+            "date_offsets_days": ({
+                "invoiced_on_before_observation": AGED_INVOICE_DAYS_BEFORE_OBSERVATION,
+                "due_on_before_observation": AGED_DUE_DAYS_BEFORE_OBSERVATION,
+            } if aged else {"invoiced_on_before_observation": 0, "due_on_before_observation": None}),
+            "observation_date": values.observation_date.isoformat(),
+            "party": readback["party"],
+            "deal": readback["deal"],
+            "commission_id": str(values.commission_id),
+            "base_version": readback["commission"]["base_version"],
+            "commission_readback": readback["commission"],
+            "tracker_readback": readback["tracker"],
+        },
+    }
 
 
 def validate_target(dsn: str, project_id: str, endpoint_id: str, *,
@@ -217,7 +457,7 @@ def validate_target(dsn: str, project_id: str, endpoint_id: str, *,
 
 def validate_provider_binding(dsn: str, project_id: str, endpoint_id: str, *,
                               run: Run = subprocess.run,
-                              environ: Mapping[str, str] = os.environ) -> None:
+                              environ: Mapping[str, str] = os.environ) -> dict[str, Any]:
     """Bind caller declarations to the provider before any fixture write."""
     source_env = dict(environ)
     if not source_env.get("NEON_API_KEY"):
@@ -262,6 +502,17 @@ def validate_provider_binding(dsn: str, project_id: str, endpoint_id: str, *,
     host = (urlsplit(dsn).hostname or "").lower().rstrip(".")
     if len(endpoints) != 1 or str(endpoints[0].get("host") or "").lower().rstrip(".") != host:
         raise FixtureRefusal("provider endpoint does not own the supplied DSN")
+    database = unquote(urlsplit(dsn).path.lstrip("/"))
+    project_name = str(matches[0]["name"])
+    if len(project_id) > 128 or len(project_name) > 256 or len(branch_id) > 128 \
+            or len(endpoint_id) > 128 or len(host) > 253 or database != "neondb":
+        raise FixtureRefusal("verified staging target fields exceed the supported proof shape")
+    return {
+        "project": {"id": project_id, "name": project_name},
+        "branch": {"id": branch_id, "name": "main"},
+        "endpoint": {"id": endpoint_id, "host": host},
+        "database": database,
+    }
 
 
 def install(conn: Any) -> int:
@@ -293,25 +544,39 @@ def main() -> int:
     parser.add_argument("--invoice-plan", type=pathlib.Path)
     parser.add_argument("--expected-app-sha")
     parser.add_argument("--expected-carr-sha")
+    parser.add_argument("--proof-file", type=pathlib.Path)
+    parser.add_argument("--aged-invoice", action="store_true")
     args = parser.parse_args()
     invoice_args = (args.expected_app_sha, args.expected_carr_sha)
     if bool(args.invoice_plan) != all(invoice_args) or (any(invoice_args) and not args.invoice_plan):
         parser.error("invoice mode requires --invoice-plan and both explicit full source pins")
+    if args.invoice_plan and args.apply and not args.proof_file:
+        parser.error("invoice apply requires --proof-file for durable fixture evidence")
+    if args.proof_file and (not args.invoice_plan or not args.apply):
+        parser.error("--proof-file is valid only with invoice-plan apply")
+    if args.aged_invoice and not args.invoice_plan:
+        parser.error("--aged-invoice is valid only with invoice-plan")
     if args.invoice_plan:
         try:
             plan = load_private_plan(args.invoice_plan, args.expected_app_sha, args.expected_carr_sha)
             if not args.apply:
-                print("staging-fixtures: PLAN invoice_rows=1 mutated=false")
+                mode = " aged=true" if args.aged_invoice else ""
+                print(f"staging-fixtures: PLAN invoice_rows=1 mutated=false{mode}")
                 return 0
+            validate_proof_destination(args.proof_file)
             dsn = os.environ.get("DATABASE_URL", "")
             project = os.environ.get("CARR_STAGING_REPLACEMENT_PROJECT_ID", "")
             endpoint = os.environ.get("CARR_STAGING_REPLACEMENT_ENDPOINT_ID", "")
             validate_target(dsn, project, endpoint)
-            validate_provider_binding(dsn, project, endpoint)
+            target = validate_provider_binding(dsn, project, endpoint)
             import psycopg
             with psycopg.connect(dsn) as conn:
-                count = install_invoice_fixture(conn, plan)
-            print(f"staging-fixtures: PASS invoice_rows={count}")
+                count = install_invoice_fixture(conn, plan, aged=args.aged_invoice)
+            with psycopg.connect(dsn) as conn:
+                readback = read_invoice_fixture(conn, plan, aged=args.aged_invoice)
+            proof = build_fixture_proof(plan, target, readback, aged=args.aged_invoice)
+            proof_state = publish_private_proof(args.proof_file, proof)
+            print(f"staging-fixtures: PASS invoice_rows={count} proof={proof_state}")
             return 0
         except (FixtureRefusal, ImportError) as exc:
             print(f"staging-fixtures: REFUSED — {exc}", file=sys.stderr)
