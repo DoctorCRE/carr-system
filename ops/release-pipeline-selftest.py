@@ -372,9 +372,10 @@ class Fixture:
         # checkout in update-branch/squash fixtures. Generate one local event
         # for each merged commit in the batch: the controller may release an
         # older green commit while newer commits are still pending.
-        git(self.repo, "fetch", "-q", "origin", "main")
-        remote_main = git(self.repo, "rev-parse", "FETCH_HEAD")
-        commits = git(self.repo, "rev-list", "--reverse", remote_main, f"^{self.base}").splitlines()
+        remote_main = git(self.repo, "ls-remote", "origin", "refs/heads/main").split()[0]
+        commits = git(self.repo, "rev-list", "--reverse", "HEAD", f"^{self.base}").splitlines()
+        if remote_main not in commits:
+            commits.append(remote_main)
         events = []
         lane_names = [name for name in ("worker", "app")
                       if name == "worker" or cfg[name].get("enabled")]
