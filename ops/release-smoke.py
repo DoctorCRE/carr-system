@@ -72,6 +72,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parents[1]
+SOURCE_BYTES = Path(__file__).read_bytes()
 
 # The identity and redirect reader is the production smoke's own (GET, no
 # redirects, HTTP errors returned as replies), not a second copy of it.
@@ -81,6 +82,7 @@ assert _SPEC is not None and _SPEC.loader is not None
 _prod = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _prod   # its dataclass resolves its own module by name
 _SPEC.loader.exec_module(_prod)
+DOCTOR_SOURCE_BYTES = _prod.SOURCE_BYTES
 Reply: Any = _prod.Reply
 read = _prod.read
 

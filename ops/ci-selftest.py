@@ -1376,7 +1376,7 @@ def test_hosted_ci_runs_classes_in_parallel_behind_one_required_context():
     """
     wf = _hosted_workflow()
     jobs = wf.get("jobs") or {}
-    gates = [k for k, v in jobs.items() if v.get("name") == "ops/ci.sh --strict" or str(v.get("name", "")).endswith("|| 'ops/ci.sh --strict' }}")]
+    gates = [k for k, v in jobs.items() if v.get("name") == "ops/ci.sh --strict"]
     check("exactly one job carries the required context name", len(gates) == 1, gates)
     if len(gates) != 1:
         return
