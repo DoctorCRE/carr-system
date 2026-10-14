@@ -36,12 +36,11 @@
     "test_evidence_label": "ops-ci-strict",
     "security_evidence_label": "ci-secret-class",
     "review_required_after": "2026-09-25T00:00:00Z",
-    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch always needs its own approving comment: that is the verifier the database binds.",
+    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch needs its own exact-head approval and an authenticated Codex continuity event in out/merge-events.jsonl.",
     "review_markers": [
       "independent review: pass",
       "approve"
     ],
-    "default_verifier": "claude-review-agent",
     "forbidden_verifiers": [
       "carr_jobs",
       "joe",
@@ -71,7 +70,7 @@
     ],
     "review_logins": [],
     "canary_lookback": 50,
-    "_review_evidence": "Public repositories: only a comment from an OWNER/MEMBER/COLLABORATOR (or a login in review_logins) carries a verdict; the LATEST verdict decides and must be an APPROVE carrying `Reviewed-SHA: <exact PR head SHA>`. Every session posts as the OWNER account, so the verifier identity comes from the merge event (or default_verifier), never from comment text or authorship.",
+    "_review_evidence": "Public repositories: only a comment from an OWNER/MEMBER/COLLABORATOR (or a login in review_logins) carries a verdict; the LATEST verdict decides and must be an APPROVE carrying `Reviewed-SHA: <exact PR head SHA>`. The local release-review producer appends an event only after the exact PR is merged and the deployed Worker accepts codex-record-event through the dedicated native Codex profile. Task references are caller-reported context, never server-verified identity. Missing provenance blocks release; no configured actor fallback is permitted.",
     "canary_ignored_globs": [
       "corpus/**",
       "audits/**",
@@ -108,8 +107,7 @@
     ],
     "review_logins": [],
     "review_required_after": "2026-09-25T00:00:00Z",
-    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch always needs its own approving comment: that is the verifier the database binds.",
-    "default_verifier": "claude-review-agent",
+    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch needs its own exact-head approval and an authenticated Codex continuity event in out/merge-events.jsonl.",
     "forbidden_verifiers": [
       "carr_jobs",
       "joe",

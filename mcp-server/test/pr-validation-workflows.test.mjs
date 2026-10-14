@@ -91,24 +91,18 @@ test("DB shard aggregate is default-off, collects failed-trial diagnostics, and 
   assert.throws(() => expression("inputs.unknown", context()), /unsupported expression/);
 });
 
-test("DB acceptance ignores metadata edits; CI edits validate only base changes", () => {
-  assert.equal(policy(read("db-acceptance.yml"), context("pull_request", "edited")).triggers, false);
-  const ci = read("ci.yml"), edited = policy(ci, context("pull_request", "edited"));
-  assert.equal(edited.triggers, true);
-  assert.deepEqual(edited.runnable, []);
-  assert.equal(edited.cancel, false);
-  assert.notEqual(edited.group, policy(ci, context()).group);
-  const base = context("pull_request", "edited");
-  base.event.changes = { base: { ref: { from: "release" } } };
-  assert.deepEqual(policy(ci, base).runnable, edited.jobs);
-  assert.notEqual(expression(ci.jobs.checks.name, context("pull_request", "edited")), "ops/ci.sh --strict",
-    "skipped metadata edits must not replace the required verdict");
-  assert.ok(ci.jobs.classes.strategy.matrix.classes.includes("gates"));
+test("metadata edits start neither workflow, so no skipped suite replaces the required verdict", () => {
+  for (const file of files) {
+    const edited = policy(read(file), context("pull_request", "edited"));
+    assert.equal(edited.triggers, false, `${file}: an edit must start no workflow`);
+    assert.deepEqual(edited.runnable, []);
+  }
+  assert.ok(read("ci.yml").jobs.classes.strategy.matrix.classes.includes("gates"));
 });
 
 test("strict aggregate runs after failed classes and accepts only success", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
-  assert.equal(expression(gate.name, context()), "ops/ci.sh --strict");
+  assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
   assert.equal(gate.needs, "classes");
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
   const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");

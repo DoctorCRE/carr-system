@@ -102,8 +102,6 @@ for s in SHOTS:
             clicks += [t + r["delay"] for r in s["rows"]]
             clicks.append(t + s["net"]["delay"])
     t += s["dur"]
-sweeps.append(endcard_at - 0.12)  # into the end card the riser+impact take over; keep sweep out
-sweeps = sweeps[:-1]
 
 inputs = [FF, "-y", "-nostdin", "-i", str(RAW), "-i", str(MUSIC)]
 filters = [f"[1:a]atrim=0:{total},loudnorm=I=-23:TP=-3:LRA=7,"
