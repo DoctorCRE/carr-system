@@ -73,14 +73,13 @@ begin
      and (to_jsonb(new) - array['shape_disposition','shape_fixed_surface_ref','shape_rationale','shape_decided_by_actor_id','shape_decided_at','version','updated_at'])
            is not distinct from
          (to_jsonb(old) - array['shape_disposition','shape_fixed_surface_ref','shape_rationale','shape_decided_by_actor_id','shape_decided_at','version','updated_at'])
-     and exists (
-       select 1 from ops.sourced_work_request_shape_disposition_receipt r
-        where r.work_request_id = old.id and r.base_version = old.version and r.result_version = new.version
-          and (new.shape_disposition,new.shape_fixed_surface_ref,new.shape_rationale,new.shape_decided_by_actor_id,new.shape_decided_at)
-             is not distinct from
-             (r.disposition,r.fixed_surface_ref,r.rationale,r.decided_by_actor_id,r.decided_at)
-     ) then
-    return new;
+  then
+    if exists (
+       select 1 from ops.effective_sourced_work_request_shape_disposition(new) e
+        where e.base_version = old.version and e.result_version = new.version
+    ) then
+      return new;
+    end if;
   end if;
 
   if old.state = 'triaged'
