@@ -5,9 +5,11 @@
 
 WHY (decisions 17ef11fa and b729859d, 2026-09-24). Joe: CARR runs itself, and
 "even the review, merge, and release steps can be triggered by scripts too".
-A separate pipeline reviews and merges and appends a merge event (one JSON line)
-to out/merge-events.jsonl. This file is the RELEASE step that consumes merges to
-main. It is ticked by launchd (ops/launchd/com.carr.release-pipeline.plist,
+A separate local source step appends a review event (one JSON line) to
+out/merge-events.jsonl after an exact-head approved PR is merged and
+codex-record-event accepts the authenticated native Codex continuity receipt.
+This file is the RELEASE step that consumes merges to main. It is ticked by
+launchd (ops/launchd/com.carr.release-pipeline.plist,
 whose header carries the three install commands; installing it is a deliberate
 human act) through bin/run-scheduled.sh, like every other local job.
 
@@ -185,18 +187,22 @@ name that target.
 
 THE TRUST BOUNDARY, stated plainly. Every CARR session posts to GitHub as
 jbookout, which GitHub reports as OWNER. Comment authorship therefore proves only
-"posted from inside CARR", NOT which agent reviewed. Maker ≠ verifier is
-enforced by (1) the reviewer identity in the merge event the local
-review-and-merge pipeline writes, which must differ from its author, and (2) the
-database, which refuses a verifier slug equal to the maker (carr_jobs). The
-comment is evidence of the verdict and the reviewed SHA, not of identity. App lane: the named required checks (`test`) are present
-and green; an empty check list is a hold.
+"posted from inside CARR", NOT which agent reviewed. The local release-review
+producer records reviewer `codex` only after the deployed Worker accepts a
+`codex-record-event` request through the dedicated continuity profile. Its
+native task reference is caller-reported; the Worker authenticates the Codex
+actor and validates the task binding, but does not prove that reference is a
+review outcome. The event binds the exact PR, approval comment, reviewed head
+and merge SHA. The comment is evidence of the verdict and reviewed SHA, not of
+identity. The database also refuses a verifier slug equal to the maker
+(`carr_jobs`). App lane: the named required checks (`test`) are present and
+green; an empty check list is a hold.
 
 VERIFIER ≠ MAKER. The database derives the release maker from the filing login
 (carr_jobs) and refuses a verifier equal to it (ops.approve_program5_release,
-ops.record_program5_release_readiness). The verifier slug comes ONLY from the
-merge event (`reviewer`) the local review-and-merge pipeline wrote, else the
-configured default (`claude-review-agent`) — never from comment text. It is
+ops.record_program5_release_readiness). The verifier slug comes only from the
+event written after the authenticated continuity record — never from comment
+text and never from a configured fallback. It is
 refused if it names the maker, a human partner (the review was not a human's and
 must never be booked as one), this pipeline, the GitHub account comments are
 posted through, or the merge event's author.
@@ -249,13 +255,12 @@ from lib.secret_redaction import redact_text, sensitive_env_values  # noqa: E402
 CONFIG_PATH = REPO / "ops" / "config" / "release-pipeline.v1.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-SLUG_RE = re.compile(r"^[a-z][a-z0-9._:-]{1,63}$")
 ROOM_NAMESPACE = uuid.UUID("3d0e3c55-6a51-4c3e-9b8f-2b6c1f0a7e41")
 BREW_PATH = ("/opt/homebrew/opt/node@22/bin:/usr/local/opt/node@22/bin:/opt/homebrew/bin:"
              "/opt/homebrew/sbin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin:"
              "/usr/sbin:/sbin")
 CHILD_ENV_NAMES = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL",
-                   "SSL_CERT_FILE", "SSL_CERT_DIR")
+                   "SSL_CERT_FILE", "SSL_CERT_DIR", "CARR_GITHUB_READ_BUDGET")
 
 # The Workers deploy credential. Loaded from its file into the environment of
 # the wrangler-running steps ONLY (never child_env, never argv, never a log
@@ -587,11 +592,10 @@ def single_run_lock(root: Path):
         fh.close()
 
 
-def read_merge_events(path: Path) -> dict[str, dict]:
-    """Index the merge-event file by merge SHA. The format belongs to the
-    review-and-merge pipeline; this reads it tolerantly and only takes review
-    evidence from it — main's SHA, not this file, is what decides a release."""
-    events: dict[str, dict] = {}
+def read_merge_events(path: Path) -> dict[str, dict[str, dict]]:
+    """Index local review events by merge SHA and repository. Main's SHA, not
+    this coordination file, is what decides a release."""
+    events: dict[str, dict[str, dict]] = {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -604,8 +608,9 @@ def read_merge_events(path: Path) -> dict[str, dict]:
         if not isinstance(ev, dict):
             continue
         sha = str(ev.get("merge_sha") or ev.get("merge_commit_sha") or ev.get("sha") or "").lower()
-        if SHA_RE.fullmatch(sha):
-            events[sha] = ev
+        repo = str(ev.get("repository") or "")
+        if SHA_RE.fullmatch(sha) and repo:
+            events.setdefault(sha, {})[repo] = ev
     return events
 
 
@@ -665,15 +670,26 @@ def classify(paths: Iterable[str], lane_cfg: dict) -> tuple[bool, list[str]]:
 def choose_verifier(cfg: dict, event: dict | None) -> str:
     """The independent reviewer's slug, or Blocked. Never the maker.
 
-    Taken ONLY from the merge event the review-and-merge pipeline wrote on this
-    machine, else the configured default. Never from comment text: the
-    repositories are public, so a comment is not a place an identity can be
-    asserted from."""
+    Taken only from a local event written after the deployed Worker accepted a
+    native Codex continuity record. Task references are caller-reported audit
+    context; the public comment never asserts reviewer identity."""
     event = event or {}
-    raw = str(event.get("reviewer") or event.get("verifier_actor") or cfg.get("default_verifier") or "")
+    if (event.get("schema") != "carr-release-merge-event.v1" or
+            event.get("provenance_source") != "codex-record-event" or
+            not event.get("continuity_event_id")):
+        raise Blocked("verifier_provenance_missing", "the exact merged PR approval has no authenticated Codex continuity event")
+    reviewer_job = str(event.get("reviewer_task_ref") or "").strip()
+    maker_job = str(event.get("maker_task_ref") or "").strip()
+    builder_refs = event.get("builder_evidence_refs")
+    if (not reviewer_job or not maker_job or reviewer_job == maker_job or
+            event.get("task_refs_verified") is not False or
+            not isinstance(builder_refs, list) or not builder_refs or
+            any(not isinstance(ref, str) or not ref.strip() for ref in builder_refs)):
+        raise Blocked("verifier_job_evidence_invalid", "distinct caller-reported reviewer/maker jobs and builder evidence are required")
+    raw = str(event.get("reviewer") or "")
     slug = raw.strip().lower()
-    if not SLUG_RE.fullmatch(slug):
-        raise Blocked("verifier_invalid", f"verifier {raw!r} is not a lowercase actor slug")
+    if slug != "codex":
+        raise Blocked("verifier_invalid", "reviewer must be the authenticated native Codex actor")
     forbidden = {str(x).lower() for x in cfg.get("forbidden_verifiers") or []}
     makers = {str(event.get(k) or "").strip().lower()
               for k in ("author_actor", "maker_actor", "author", "maker")} - {""}
@@ -1341,11 +1357,25 @@ class Pipeline:
                 release_prs.append({"pr": number, "head_sha": head_sha})
             if commit == sha and approval is not None:
                 head = {"pr": number, "head_sha": head_sha, "url": str(approval.get("html_url") or ""),
-                        "event": events.get(commit) or {}, "rule": rule, "reviewed_sha": reviewed_sha}
+                        "review_comment_id": int(approval.get("id") or 0),
+                        "event": events.get(commit.lower(), {}).get(lane_cfg["github_repo"]) or {},
+                        "rule": rule, "reviewed_sha": reviewed_sha}
         fix_forwards = self.resolve_fix_forwards(repo_dir, sha, blocked, fixers,
                                                  lane_cfg.get("fix_forward_derived_fields") or [])
         if head is None:
             raise Blocked("no_independent_review", f"the head commit {sha[:12]} has no approval")
+        event = head["event"]
+        if (event.get("schema") != "carr-release-merge-event.v1" or
+                event.get("provenance_source") != "codex-record-event" or
+                not event.get("continuity_event_id")):
+            raise Blocked("verifier_provenance_missing", "the exact merged PR approval has no authenticated Codex continuity event")
+        if (event.get("repository") != lane_cfg["github_repo"] or
+                str(event.get("merge_sha") or "").lower() != sha.lower() or
+                str(event.get("head_sha") or "").lower() != head["head_sha"].lower() or
+                event.get("pull_number") != head["pr"] or
+                str(event.get("reviewed_sha") or "").lower() != head["reviewed_sha"].lower() or
+                event.get("review_comment_id") != head["review_comment_id"]):
+            raise Blocked("verifier_provenance_mismatch", "local review event does not bind this exact merged PR approval")
         return {"head": head, "prs": reviewed, "pre_pipeline_prs": pre_pipeline, "release_prs": release_prs,
                 "reviews": reviews, "fix_forwards": fix_forwards,
                 "verifier": choose_verifier(lane_cfg, head["event"]),
