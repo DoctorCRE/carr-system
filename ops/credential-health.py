@@ -329,9 +329,9 @@ _CLAUDE_RETRY_ERRORS = {
 def _classify_claude_cli_stream(stdout, returncode):
     """Classify a Claude stream using only its documented typed fields.
 
-    Claude Code documents newline-delimited `stream-json` events, including
-    `system/api_retry.error_status` and `.error`. This reads only those typed
-    fields and the final `result` event, never free-form error text.
+    Claude Code documents NDJSON `system/api_retry` events; the Agent SDK
+    documents `rate_limit_event` and `ResultMessage.is_error`. These external
+    event contracts determine which outcomes this probe can classify.
     """
     result_messages = []
     retry_events = []
@@ -380,8 +380,6 @@ def _classify_claude_cli_stream(stdout, returncode):
                 return ProbeResult("failed", "readback_failed")
             result_messages.append((result_text, is_error))
 
-    if rejected_rate_limit:
-        return ProbeResult("unknown", "rate_limited")
     if (returncode == 0 and last_event_type == "result" and result_messages
             and result_messages[-1] == ("PONG", False)):
         return ProbeResult("ok", "active")
@@ -394,6 +392,8 @@ def _classify_claude_cli_stream(stdout, returncode):
         return ProbeResult("failed", "credential_access_denied")
     if any(error == "cloud_credential_error" for _status, error in retry_events):
         return ProbeResult("failed", "credential_error")
+    if rejected_rate_limit:
+        return ProbeResult("unknown", "rate_limited")
     last_status, last_error = retry_events[-1] if retry_events else (0, None)
     if last_status is None:
         return ProbeResult("unknown", "probe_network_error")

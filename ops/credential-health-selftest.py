@@ -785,6 +785,26 @@ def test_claude_token_observed_rejected_seven_day_limit_is_unknown():
               (r.bucket, r.detail))
 
 
+def test_claude_token_auth_failure_dominates_rejected_rate_limit():
+    cases = (
+        (401, "authentication_failed", "authentication_failed"),
+        (403, "oauth_org_not_allowed", "credential_access_denied"),
+    )
+    for status, error, expected_detail in cases:
+        stream = _claude_stream(
+            {"type": "rate_limit_event", "rate_limit_info": {
+                "status": "rejected", "rateLimitType": "seven_day",
+                "overageStatus": "rejected"}},
+            {"type": "system", "subtype": "api_retry", "error_status": status,
+             "error": error},
+            {"type": "result", "is_error": True, "api_error_status": status,
+             "result": "[suppressed]"})
+        result = ch._classify_claude_cli_stream(stream, 1)
+        check(f"claude cli token: HTTP {status} auth rejection dominates quota event",
+              result.bucket == "failed" and result.detail == expected_detail,
+              (result.bucket, result.detail))
+
+
 def test_claude_token_error_marked_pong_cannot_pass():
     result = ch._classify_claude_cli_stream(
         _claude_stream({"type": "result", "result": "PONG", "is_error": True}), 0)
@@ -984,6 +1004,7 @@ test_claude_token_cli_not_found_is_unknown()
 test_claude_token_readback_without_pong_is_failed()
 test_claude_token_rate_limit_is_unknown_not_auth_failure()
 test_claude_token_observed_rejected_seven_day_limit_is_unknown()
+test_claude_token_auth_failure_dominates_rejected_rate_limit()
 test_claude_token_error_marked_pong_cannot_pass()
 test_claude_token_authentication_failure_remains_failed()
 test_claude_token_pong_in_non_result_event_cannot_pass()
