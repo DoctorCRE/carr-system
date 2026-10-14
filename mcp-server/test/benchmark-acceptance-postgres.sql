@@ -469,6 +469,12 @@ begin
     raise exception 'an independent passing review was not recorded';
   end if;
 
+  -- AND THE COMMIT-TIME CHECK ADMITS IT, which is what keeps the refusals above
+  -- from being a blanket refusal that would make every one of them vacuous. The
+  -- pass/attestation trigger is DEFERRED -- the attestation row references the
+  -- review row and cannot exist before it -- so in a rollback-only fixture it
+  -- would otherwise never fire at all. Forcing it immediate here fires it
+  -- against the one review that should survive it.
   set constraints all immediate;
   set constraints all deferred;
 
