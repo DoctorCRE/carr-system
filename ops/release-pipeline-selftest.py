@@ -383,7 +383,12 @@ class Fixture:
             for lane_name in lane_names:
                 lane_cfg = cfg[lane_name]
                 source_gh = github or FakeGitHub()
-                pr = source_gh.pr_for_commit(merge_sha)
+                try:
+                    pr = source_gh.pr_for_commit(merge_sha)
+                except ValueError:
+                    # A fixture may deliberately make GitHub unreadable so
+                    # the pipeline's own refusal path can be exercised.
+                    continue
                 if pr is None:
                     continue
                 pr_number = int(pr["number"])
