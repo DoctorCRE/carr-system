@@ -38,8 +38,6 @@ ANSI_ESCAPE = re.compile(
     rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[@-_])"
 )
 ACTIVE_STATES = {"starting", "running", "working", "idle"}
-# Current Claude Code reports a finished ``--bg`` agent as ``state: done``.
-# Keep ``completed`` for compatibility with older supervisor payloads.
 COMPLETED_STATES = {"completed", "done"}
 FAILED_STATES = {"failed", "stopped", "killed"}
 NEEDS_INPUT_STATES = {"needs_input", "needs-input", "blocked"}
@@ -84,10 +82,6 @@ def launch_background(
     argv = [
         claude_bin,
         "--bg",
-        # Claude's background supervisor owns the session UUID and explicitly
-        # ignores --session-id.  The request UUID names this dispatch; the
-        # genuine session UUID is resolved from the supervisor immediately
-        # after launch and is the only ref persisted by the bridge.
         "--name", f"model-room-{request[:8]}",
         "--model", model,
         "--effort", effort,
@@ -109,8 +103,6 @@ def launch_background(
     except subprocess.TimeoutExpired as exc:
         raise ClaudeDesktopError("background_launch_timeout", "claude --bg did not return") from exc
     if proc.returncode != 0:
-        # Provider output can contain task context.  Keep the bridge receipt a
-        # bounded error class and leave diagnostics in Claude's own state.
         raise ClaudeDesktopError(
             "background_launch_failed", f"claude --bg exited {proc.returncode}"
         )
@@ -139,9 +131,6 @@ def launch_background(
     ) if isinstance(rows, list) else None
     sid = str((row or {}).get("sessionId") or "").lower()
     if not UUID.fullmatch(sid):
-        # This exact short id came from the launch above. Stop it rather than
-        # leave untracked model work running when the durable identity proof
-        # cannot be established.
         try:
             run([claude_bin, "stop", short_id], capture_output=True, text=True,
                 timeout=timeout_s, stdin=subprocess.DEVNULL)
@@ -187,9 +176,6 @@ def inspect_session(
     if not isinstance(rows, list):
         raise ClaudeDesktopError("background_status_invalid", "Claude agent status was not a list")
     matches = [item for item in rows if isinstance(item, dict) and item.get("sessionId") == sid]
-    # Once Claude Desktop (or a terminal) opens the session, the supervisor
-    # lists that client as a second ``kind: interactive`` row with the same
-    # sessionId and no ``state``.  The task's lifecycle is the background row.
     row = next(
         (item for item in matches if str(item.get("kind") or "background") == "background"),
         matches[0] if matches else None,
@@ -277,8 +263,6 @@ def read_final_text(
 # 2.1.281 CLI: ``Checking\x1b[16Gfor Claude Desktop…``.  Stripping that escape
 # glues the words together; treating it as a gap keeps them readable.
 CURSOR_MOVE = re.compile(rb"\x1b\[[0-9;]*[ABCDEFGHfd]")
-# Charset designation (ESC ( B) and cursor save/restore (ESC 7 / ESC 8), which
-# ANSI_ESCAPE leaves half-stripped.
 TERMINAL_CONTROL = re.compile(rb"\x1b[()*+][0-9A-Za-z]|\x1b[78=>]|[\x00-\x08\x0e-\x1a\x1c-\x1f]")
 DESKTOP_PROGRESS = (
     b"checkingforclaudedesktop",
@@ -287,8 +271,6 @@ DESKTOP_PROGRESS = (
     b"openinginclaudedesktop",
     b"sessiontransferredtoclaudedesktop",
 )
-# The /desktop command's own failure copy (Claude Code 2.1.281).  An error
-# state repaints a fresh dialog, so these arrive whole rather than as diffs.
 DESKTOP_ERRORS = (
     b"couldn'topenclaudedesktop",
     b"claudedesktopisnotinstalled",
@@ -297,17 +279,10 @@ DESKTOP_ERRORS = (
     b"thedesktopappisrequiredfor/desktop",
     b"downloadnow?(y/n)",
 )
-# ``claude attach`` refuses a session another client already holds, which is
-# exactly the state /desktop produces: Claude Desktop is showing it.
 ALREADY_OPEN = b"thissessionisrunninginanotherterminal"
 
 
 def _screen_text(raw: bytes) -> bytes:
-    """Collapse raw PTY bytes to lowercase text with no whitespace.
-
-    Matching whitespace-free text makes detection independent of whether the
-    renderer drew a space as a space byte or as a cursor move.
-    """
     text = CURSOR_MOVE.sub(b" ", raw)
     text = TERMINAL_CONTROL.sub(b"", text)
     text = ANSI_ESCAPE.sub(b"", text)
@@ -327,13 +302,6 @@ def _list_sessions(claude_bin: str, timeout_s: float = 15.0) -> list | None:
 
 
 def _session_holders(rows: list | None, sid: str) -> dict | None:
-    """Summarise who holds ``sid`` according to Claude's own supervisor.
-
-    ``background_pid`` is the live supervisor-hosted process, if any.
-    ``interactive`` is true when another client (Claude Desktop's embedded
-    Claude Code, or a terminal) has the same session open with a live pid;
-    the supervisor lists that client as a separate ``kind: interactive`` row.
-    """
     if rows is None:
         return None
     background_pid = None
@@ -393,8 +361,6 @@ def handoff_to_desktop(
     before = _session_holders(lister(), sid)
     if before is not None and before["interactive"]:
         return {"status": "already_open", "session_id": sid}
-    # ``claude agents --json`` exposes both the durable UUID and the eight-char
-    # agent id, but ``claude attach`` accepts only the latter.
     attach_id = sid[:8]
     master, slave = pty.openpty()
     try:
@@ -425,9 +391,6 @@ def handoff_to_desktop(
                     del buffer[:-262144]
             return bool(chunk)
 
-        # A completed agent is briefly woken before the attached prompt accepts
-        # input. Wait for the initial transcript repaint to settle; sending the
-        # slash command on the first byte loses it during that wake-up.
         attach_output = bytearray()
         ready_deadline = time.monotonic() + ready_timeout_s
         painted = False
@@ -475,18 +438,12 @@ def handoff_to_desktop(
                     outcome = "opened"
                     break
                 if progress and (holders is None or woken_pid is None):
-                    # No supervisor pid to watch: fall back to the CLI's own
-                    # progress copy, matched space-insensitively.
                     outcome = "opened"
                     break
             if proc.poll() is not None:
                 outcome = "opened" if proc.returncode == 0 else "exited"
                 break
         if outcome == "opened":
-            # /desktop moves the attached client on (agent view, or a fresh
-            # prompt in its cwd) instead of exiting. Give the app launch a
-            # moment, then close only this attached client; the durable
-            # conversation remains intact and is now held by Claude Desktop.
             time.sleep(settle_s)
             try:
                 os.write(master, b"\x03")
