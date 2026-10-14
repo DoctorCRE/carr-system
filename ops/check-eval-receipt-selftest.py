@@ -236,7 +236,15 @@ def mirror(receipt: dict, dest: Path) -> None:
     hashes = {**ev['source'], **ev['dependencies'],
               ev['expectations']['path']: ev['expectations']['sha256'],
               **{c['path']: c['sha256'] for c in ev['cohorts'].values()}}
-    for rel in evidence_paths(receipt) | {"evals/surfaces.json"}:
+    successor_inputs = set()
+    if receipt.get("surface") == "rule-delivery" and ev.get("expectations", {}).get("path") == "evals/rule-delivery/expectations.v2.json":
+        # The accepted protected-gold successor also reads these fixed historical/current pins.
+        successor_inputs = {"evals/rule-delivery/expectations.v1.json",
+                            "evals/rule-delivery/expectations.v2.json",
+                            "ops/config/system-sender.v1.json"}
+        for rel in successor_inputs:
+            hashes.setdefault(rel, hashlib.sha256((ROOT / rel).read_bytes()).hexdigest())
+    for rel in evidence_paths(receipt) | {"evals/surfaces.json"} | successor_inputs:
         (dest / rel).parent.mkdir(parents=True, exist_ok=True)
         data = (ROOT / rel).read_bytes()
         expected = hashes.get(rel)
@@ -512,14 +520,23 @@ class AcceptedRuleBootTradeoff(unittest.TestCase):
         gold = {c["id"]: set(c["gold"]) for c in cases["cases"]}
         hard = json.loads((ROOT / "evals/rule-delivery/hard_cases.v1.json").read_text())
         gold.update({c["id"]: set(c["required"]) for c in hard["cases"]})
+        expectation_v2 = json.loads((ROOT / "evals/rule-delivery/expectations.v2.json").read_text())
+        gold["h-pos-gmail-send"] = set(expectation_v2["case_relabels"]["h-pos-gmail-send"]["expected"])
         rels = {"ops/config/rule-classes.v1.json": classes,
                 "ops/fixtures/rule-delivery-eval/cases.v2.json": cases,
-                "evals/rule-delivery/hard_cases.v1.json": hard}
+                "evals/rule-delivery/hard_cases.v1.json": hard,
+                "ops/config/rule-enforcement-map.json": json.loads((ROOT / "ops/config/rule-enforcement-map.json").read_text()),
+                "ops/config/rule-selection-corpus.v1.json": json.loads((ROOT / "ops/config/rule-selection-corpus.v1.json").read_text())}
         for rel, doc in rels.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(doc))
+            path.write_bytes((ROOT / rel).read_bytes())
             receipt["evidence"]["dependencies"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+        for rel in ("evals/rule-delivery/expectations.v1.json", "evals/rule-delivery/expectations.v2.json",
+                    "ops/config/system-sender.v1.json"):
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((ROOT / rel).read_bytes())
         for arm in ("baseline", "candidate"):
             rows = read_jsonl(ROOT / receipt["evidence"]["cohorts"][arm]["path"])
             for row in rows:
@@ -582,6 +599,56 @@ class AcceptedRuleBootTradeoff(unittest.TestCase):
             root = Path(tmp)
             receipt = self.receipt(root)
             receipt["evidence"]["dependencies"]["evals/rule-delivery/hard_cases.v1.json"] = "0" * 64
+            self.assertFalse(cer.accepted_rule_boot_tradeoff(receipt, root))
+
+    def test_current_gmail_send_rule_must_reach_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            receipt = self.receipt(root)
+            block = receipt["evidence"]["cohorts"]["candidate"]
+            rows = read_jsonl(root / block["path"])
+            next(row for row in rows if row["case_id"] == "h-pos-gmail-send")["available"].remove("c66dc739")
+            block["sha256"] = write_jsonl(root / block["path"], rows)
+            self.assertFalse(cer.accepted_rule_boot_tradeoff(receipt, root))
+
+    def test_rebound_arbitrary_expectation_label_is_not_authority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            receipt = self.receipt(root)
+            rel = "evals/rule-delivery/expectations.v2.json"
+            path = root / rel
+            doc = json.loads(path.read_text())
+            doc["cases"]["h-pos-gmail-send"]["expected"] = ["ffffffff"]
+            path.write_text(json.dumps(doc))
+            receipt["evidence"]["expectations"]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.assertFalse(cer.accepted_rule_boot_tradeoff(receipt, root))
+
+    def test_successor_cannot_be_relabelled_to_another_case_or_policy(self):
+        for field, value in (("h-pos-agent-brief", None), ("policy_digest", "0" * 64)):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                receipt = self.receipt(root)
+                rel = "evals/rule-delivery/expectations.v2.json"
+                path = root / rel
+                doc = json.loads(path.read_text())
+                if field == "policy_digest":
+                    doc["case_relabels"]["h-pos-gmail-send"]["basis"]["recipient_policy_sha256"] = value
+                else:
+                    doc["case_relabels"][field] = doc["case_relabels"].pop("h-pos-gmail-send")
+                path.write_text(json.dumps(doc))
+                receipt["evidence"]["expectations"]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+                self.assertFalse(cer.accepted_rule_boot_tradeoff(receipt, root))
+
+    def test_active_rule_pin_cannot_be_rebound_with_a_new_receipt_hash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            receipt = self.receipt(root)
+            rel = "ops/config/rule-enforcement-map.json"
+            path = root / rel
+            doc = json.loads(path.read_text())
+            doc["active_rule_ids"]["joe"].remove("c66dc739")
+            path.write_text(json.dumps(doc))
+            receipt["evidence"]["dependencies"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertFalse(cer.accepted_rule_boot_tradeoff(receipt, root))
 
     def test_only_the_named_de_drop_is_accepted_with_critical_flag_preserved(self):
@@ -1221,8 +1288,9 @@ class RuleDeliveryEvidenceChain(unittest.TestCase):
         self.exp.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
         self.r["evidence"]["expectations"]["sha256"] = sha_file(self.exp)
         # Summary left as it was: the recompute disagrees.
-        self.assertTrue(any("recomputed" in e for e in self.errors()), self.errors())
-        # Summary rewritten to match the smaller denominator: the version still binds the old labels.
+        self.assertTrue(any("audited rule-delivery expectations v2 binding" in e
+                            or "recomputed" in e for e in self.errors()), self.errors())
+        # Even a self-consistent receipt cannot rebind the reviewed v2 label bytes.
         scorer = load_scorer(self.root, self.r)
         measured = scorer(doc, read_jsonl(self.root / self.r["evidence"]["cohorts"]["baseline"]["path"]),
                           read_jsonl(self.cand))
@@ -1230,7 +1298,8 @@ class RuleDeliveryEvidenceChain(unittest.TestCase):
             m = measured["dimensions"][d["dimension_id"]]
             d.update(baseline=m["baseline"], candidate=m["candidate"], delta=m["delta"],
                      direction_vs_baseline=cer._direction(m["delta"]))
-        self.assertEqual(self.errors(), [], "the shrunk chain is internally consistent")
+        self.assertTrue(any("audited rule-delivery expectations v2 binding" in e for e in self.errors()),
+                        "a changed v2 label file must fail its fixed successor binding")
         repo = self.root
         env = fixture_env()
 
@@ -1249,7 +1318,9 @@ class RuleDeliveryEvidenceChain(unittest.TestCase):
                               "--base", "base", "--pr-body-file", str(body)],
                              cwd=repo, env=env, capture_output=True, text=True)
         self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
-        self.assertIn("without a new version", out.stderr)
+        self.assertTrue("without a new version" in out.stderr
+                        or "audited rule-delivery expectations v2 binding" in out.stderr,
+                        out.stderr)
 
     def test_changing_result_bytes_fails(self):
         self.assertEqual(self.errors(), [])
@@ -1317,7 +1388,7 @@ class RuleDeliveryEvidenceChain(unittest.TestCase):
         deps = self.r["evidence"]["dependencies"]
         for path, digest in {
             "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
-            "ops/fixtures/rule-delivery-eval/cases.v2.json": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
+            "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
             "ops/rule_trigger_compile.py": "26e0595e793aaba54df070f206edfa9d72f33d861f77741e0f3947bf7dbccdce",
         }.items():
             self.assertEqual(deps.get(path), digest, path)

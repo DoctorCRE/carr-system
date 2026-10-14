@@ -230,6 +230,100 @@ def _direction(delta: dict) -> str:
     return "equivalent"
 
 
+_GMAIL_SEND_CASE = "h-pos-gmail-send"
+_RETIRED_GMAIL_SEND_RULE = "9b081605"
+_CURRENT_GMAIL_SEND_RULE = "c66dc739"
+_EXPECTATIONS_V1_SHA256 = "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa"
+_EXPECTATIONS_V2_SHA256 = "902d00912e9be3b50cd7dfb072b1b7903f2a417ac9825010261e153e496b597c"
+_HARD_CASES_V1_SHA256 = "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff"
+_RULE_CLASSES_V1_SHA256 = "fec56bcff6575c469466c4758b42b8cbf42d7de2daf0de75dc131ded1950401a"
+_RULE_MAP_SHA256 = "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac"
+_RULE_CORPUS_SHA256 = "22949b641b0e44a2ce99e95fb63a9a763c5376acade2b1f91e45de4e347b4ed4"
+_SYSTEM_SENDER_SHA256 = "786b9b548a517b9ae2dcb7de984c98c228e8fa85b1385d14417cb2ca41d36fb0"
+
+
+def _validated_rule_delivery_expectations(receipt: dict, root: Path, errors: list[str]) -> dict | None:
+    """Accept only the audited v1→v2 Gmail-send relabel; receipt hashes alone are not authority."""
+    evidence = receipt.get("evidence", {})
+    block = evidence.get("expectations", {})
+    if block != {"path": "evals/rule-delivery/expectations.v2.json",
+                 "version": "rule-delivery-expectations/v2",
+                 "sha256": _EXPECTATIONS_V2_SHA256}:
+        errors.append("accepted tradeoff requires the audited rule-delivery expectations v2 binding")
+        return None
+    data = _bound_bytes(root, block["path"], block["sha256"], "accepted tradeoff expectations",
+                        errors, under="evals/rule-delivery")
+    old_data = _bound_bytes(root, "evals/rule-delivery/expectations.v1.json", _EXPECTATIONS_V1_SHA256,
+                            "accepted tradeoff frozen v1 expectations", errors,
+                            under="evals/rule-delivery")
+    if data is None or old_data is None:
+        return None
+    try:
+        current, old = json.loads(data), json.loads(old_data)
+        if current.get("version") != block["version"] or old.get("version") != "rule-delivery-expectations/v1":
+            raise ValueError("version mismatch")
+        old_cases, current_cases = old["cases"], current["cases"]
+        if set(old_cases) != set(current_cases):
+            raise ValueError("case set changed")
+        for case_id in old_cases:
+            before, after = old_cases[case_id], current_cases[case_id]
+            for field in ("cohort", "input_sha256", "should_not_fire", "split"):
+                if before.get(field) != after.get(field):
+                    raise ValueError(f"{case_id} changed frozen {field}")
+            if case_id != _GMAIL_SEND_CASE and before.get("expected") != after.get("expected"):
+                raise ValueError(f"{case_id} changed expected labels")
+        before, after = old_cases[_GMAIL_SEND_CASE], current_cases[_GMAIL_SEND_CASE]
+        if (before.get("expected") != [_RETIRED_GMAIL_SEND_RULE]
+                or after.get("expected") != [_CURRENT_GMAIL_SEND_RULE]):
+            raise ValueError("Gmail-send expectation is not the exact retired-to-current rule transition")
+        policy_rel = "ops/config/system-sender.v1.json"
+        relabel = current.get("case_relabels")
+        expected_relabel = {
+            _GMAIL_SEND_CASE: {
+                "allowed": [_CURRENT_GMAIL_SEND_RULE],
+                "basis": {
+                    "active_rule_id": _CURRENT_GMAIL_SEND_RULE,
+                    "recipient_policy_path": policy_rel,
+                    "recipient_policy_sha256": _SYSTEM_SENDER_SHA256,
+                    "sender_guard": "lib/system_sender.py#Sender._allow_mail",
+                },
+                "expected": [_CURRENT_GMAIL_SEND_RULE],
+                "replaces_required": [_RETIRED_GMAIL_SEND_RULE],
+            }
+        }
+        if relabel != expected_relabel:
+            raise ValueError("case_relabels do not match the reviewed current-rule and recipient-policy binding")
+        policy = _bound_bytes(root, policy_rel, _SYSTEM_SENDER_SHA256,
+                              "accepted tradeoff recipient policy", errors)
+        if policy is None:
+            return None
+
+        # The rule must still be active for Joe and present in the receipt-bound canonical corpus.
+        dependencies = evidence.get("dependencies", {})
+        active_map_rel = "ops/config/rule-enforcement-map.json"
+        corpus_rel = "ops/config/rule-selection-corpus.v1.json"
+        if (dependencies.get(active_map_rel) != _RULE_MAP_SHA256
+                or dependencies.get(corpus_rel) != _RULE_CORPUS_SHA256):
+            raise ValueError("active map or canonical rule corpus is not the reviewed current binding")
+        active_map_bytes = _bound_bytes(root, active_map_rel, dependencies.get(active_map_rel),
+                                        "accepted tradeoff active rules", errors)
+        corpus_bytes = _bound_bytes(root, corpus_rel, dependencies.get(corpus_rel),
+                                    "accepted tradeoff canonical rule corpus", errors)
+        if active_map_bytes is None or corpus_bytes is None:
+            return None
+        active_map = json.loads(active_map_bytes)
+        corpus = json.loads(corpus_bytes)
+        canonical_rule = next((r for r in corpus["rules"] if r.get("id") == _CURRENT_GMAIL_SEND_RULE), None)
+        if (_CURRENT_GMAIL_SEND_RULE not in active_map["active_rule_ids"].get("joe", [])
+                or canonical_rule is None
+                or "LOCAL mail stores" not in canonical_rule.get("statement", "")):
+            raise ValueError("c66dc739 is not present as Joe's active canonical mail rule")
+        return current
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
+        errors.append(f"accepted tradeoff expectations are not a valid audited successor: {exc}")
+        return None
+
+
 def accepted_rule_boot_tradeoff(receipt: dict, root: Path, errors: list[str] | None = None) -> bool:
     """Joe accepted only new D/E full-text losses; protected gold must be preserved."""
     if receipt.get("surface") != "rule-delivery":
@@ -245,6 +339,15 @@ def accepted_rule_boot_tradeoff(receipt: dict, root: Path, errors: list[str] | N
     errors = [] if errors is None else errors
     evidence = receipt.get("evidence", {})
     dependencies = evidence.get("dependencies", {})
+    if dependencies.get("evals/rule-delivery/hard_cases.v1.json") != _HARD_CASES_V1_SHA256:
+        errors.append("accepted tradeoff requires the frozen hard_cases.v1 fixture digest")
+        return False
+    if dependencies.get("ops/config/rule-classes.v1.json") != _RULE_CLASSES_V1_SHA256:
+        errors.append("accepted tradeoff requires the reviewed rule-class binding")
+        return False
+    expectations = _validated_rule_delivery_expectations(receipt, root, errors)
+    if expectations is None:
+        return False
     try:
         docs = {}
         for rel in ("ops/config/rule-classes.v1.json", "ops/fixtures/rule-delivery-eval/cases.v2.json",
@@ -254,10 +357,20 @@ def accepted_rule_boot_tradeoff(receipt: dict, root: Path, errors: list[str] | N
                 return False
             docs[rel] = json.loads(raw)
         classes = docs["ops/config/rule-classes.v1.json"]["rules"]
+        if classes.get(_CURRENT_GMAIL_SEND_RULE, {}).get("class") != "b":
+            errors.append("accepted tradeoff current Gmail-send rule is not in its protected class")
+            return False
         cases = [(c["id"], set(c["gold"]), False)
                  for c in docs["ops/fixtures/rule-delivery-eval/cases.v2.json"]["cases"]]
-        cases += [(c["id"], set(c["required"]), True)
-                  for c in docs["evals/rule-delivery/hard_cases.v1.json"]["cases"]]
+        hard_cases = docs["evals/rule-delivery/hard_cases.v1.json"]["cases"]
+        for case in hard_cases:
+            required = set(case["required"])
+            if case["id"] == _GMAIL_SEND_CASE:
+                if required != {_RETIRED_GMAIL_SEND_RULE}:
+                    errors.append("frozen Gmail-send fixture no longer requires the retired v1 rule")
+                    return False
+                required = set(expectations["case_relabels"][_GMAIL_SEND_CASE]["expected"])
+            cases.append((case["id"], required, True))
         arms = {}
         for arm in ("baseline", "candidate"):
             block = evidence["cohorts"][arm]
@@ -278,6 +391,9 @@ def accepted_rule_boot_tradeoff(receipt: dict, root: Path, errors: list[str] | N
             # Pre-existing hard-case gaps are not candidate losses.
             # Only required hard labels participate; acceptable-only labels are excluded.
             missing = baseline_gold - arms["candidate"][case_id]
+            if case_id == _GMAIL_SEND_CASE and not gold.issubset(arms["candidate"][case_id]):
+                errors.append("accepted tradeoff candidate is missing current Gmail-send rule c66dc739")
+                return False
             protected = sorted(rid for rid in missing
                                if classes.get(rid, {}).get("class") not in {"d", "e"})
             if protected:
