@@ -2483,6 +2483,15 @@ class ReleaseReviewProducer(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "different merge event"):
                 producer._append_event(path, {**event, "reviewer": "not-codex"})
 
+    def test_release_reader_marks_conflicting_events_ambiguous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "merge-events.jsonl"
+            first = {"merge_sha": "b" * 40, "repository": "jbookout/carr-system", "reviewer": "codex"}
+            second = {**first, "reviewer": "claude-review-agent"}
+            path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
+            self.assertEqual(rp.read_merge_events(path)["b" * 40]["jbookout/carr-system"],
+                             {"event_conflict": True})
+
 
 class GitHubBudgetEnvironment(unittest.TestCase):
     def test_configured_cache_path_reaches_github_reader_without_credentials(self):
