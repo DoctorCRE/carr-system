@@ -267,6 +267,7 @@ CHILD_ENV_NAMES = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL
 # line), so no step can fall back to wrangler's interactive OAuth login.
 CLOUDFLARE_TOKEN_NAME = "CLOUDFLARE_API_TOKEN"
 CLOUDFLARE_TOKEN_FILE = "tokens.env"   # under credential_dir
+TOOLCHAIN_FILES = ("package.json", "package-lock.json")   # mcp-server files that key the token-check wrangler
 CREDENTIAL_INVENTORY_PATH = REPO / "ops/config/credential-inventory.v1.json"
 # The code and config this tick executes from the canonical checkout; each must
 # equal origin/main before any lane releases (see CONTROLLER FRESHNESS above).
@@ -473,6 +474,15 @@ def smoke_enabled(lane_cfg: dict) -> bool:
         raise Blocked("config_invalid", "the lane's post_release_smoke must be true or false in "
                       "ops/config/release-pipeline.v1.json")
     return value
+
+
+def wrangler_toolchain(repo: Path, store_root: Path) -> Path:
+    """Where Pipeline.auth_wrangler installs wrangler for `repo`'s current
+    mcp-server lockfile."""
+    digest = hashlib.sha256()
+    for name in TOOLCHAIN_FILES:
+        digest.update((repo / "mcp-server" / name).read_bytes())
+    return store_root / "toolchain" / f"mcp-server-{digest.hexdigest()[:16]}"
 
 
 def expand(p: str) -> Path:
@@ -1741,13 +1751,49 @@ class Pipeline:
         env[CLOUDFLARE_TOKEN_NAME] = token
         return env
 
-    def wrangler_auth(self, wrangler: Path, cwd: Path) -> None:
+    def auth_wrangler(self) -> Path:
+        """The wrangler binary that checks the deploy token: the pipeline's
+        own install under <store>/toolchain, keyed by this checkout's
+        mcp-server package.json + package-lock.json and reused until they
+        change. Never this checkout's mcp-server/node_modules: any session
+        running `npm ci` there can leave it empty, and on 2026-10-05 one did,
+        so `wrangler whoami` exited 127 on both lanes. Installed into a
+        `.partial` sibling and renamed into place, so an existing directory
+        is always a finished install."""
+        home = wrangler_toolchain(self.repo, self.store.root)
+        wrangler = home / "node_modules/.bin/wrangler"
+        if wrangler.exists():
+            return wrangler
+        if self.dry_run:
+            self.out(f"  [dry-run] would install the token-check wrangler into {home}")
+            return wrangler
+        partial = home.with_name(home.name + ".partial")
+        shutil.rmtree(partial, ignore_errors=True)
+        partial.mkdir(parents=True)
+        for name in TOOLCHAIN_FILES:
+            shutil.copy2(self.repo / "mcp-server" / name, partial / name)
+        res = self.step("wrangler-install", ["npm", "ci", "--no-audit", "--no-fund"], partial, timeout=1800)
+        if not (partial / "node_modules/.bin/wrangler").exists():
+            raise StepFailed("wrangler-install", 127, res.log,
+                             f"npm ci in {partial} finished without installing node_modules/.bin/wrangler")
+        shutil.rmtree(home, ignore_errors=True)
+        partial.rename(home)
+        for stale in home.parent.iterdir():
+            if stale != home:
+                shutil.rmtree(stale, ignore_errors=True)
+        return wrangler
+
+    def wrangler_auth(self) -> None:
         """Before any worktree exists: the deploy token must be present and
         accepted. Either failure stops the lane and dispatches; neither is a
-        silent hold, because a missing token never heals itself."""
+        silent hold, because a missing token never heals itself. The token is
+        read before the token-check wrangler is installed, so a missing token
+        still fails with no subprocess run at all."""
+        env = self.deploy_env()
+        wrangler = self.auth_wrangler()
         try:
-            who = self.step("wrangler-auth", [str(wrangler), "whoami"], cwd, timeout=120,
-                            env=self.deploy_env())
+            who = self.step("wrangler-auth", [str(wrangler), "whoami"], self.repo / "mcp-server",
+                            timeout=120, env=env)
         except StepFailed as failure:
             if failure.step != "wrangler-auth":
                 raise
@@ -2411,7 +2457,7 @@ class Pipeline:
         # before the release worktree for that failure to stay a clean,
         # zero-subprocess failure (existing DeployCredential selftests pin
         # `runner.calls == []` for it).
-        self.wrangler_auth(self.repo / "mcp-server/node_modules/.bin/wrangler", self.repo / "mcp-server")
+        self.wrangler_auth()
 
         # 1. the release worktree at exactly S, venv-linked, `npm ci`'d — a
         # checkout and install only, no --apply yet, created BEFORE the
@@ -2716,7 +2762,7 @@ class Pipeline:
         rev = self.dry_tolerant("app review", lambda: self.review_evidence(gh, lane_cfg, repo_dir, base, sha),
                                 {"prs": [], "pre_pipeline_prs": [], "verifier_evidence": "<approval>"})
         self.out(f"  evidence: PRs {rev['prs']} approved; head approval {rev['verifier_evidence']}")
-        self.wrangler_auth(self.repo / "mcp-server/node_modules/.bin/wrangler", self.repo / "mcp-server")
+        self.wrangler_auth()
         wt = self.store.release_worktree("app", sha, self.run_id)
         self.add_worktree("app-worktree", repo_dir, wt, sha)
         self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800)

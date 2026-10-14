@@ -203,6 +203,28 @@ class FakeRunner:
         return [n for n, _ in self.calls]
 
 
+def install_toolchain_wrangler(repo: Path) -> Path:
+    """Write a stub wrangler where Pipeline.auth_wrangler looks for it."""
+    wrangler = (rp.wrangler_toolchain(repo, repo / "out/release-pipeline")
+                / "node_modules/.bin/wrangler")
+    wrangler.parent.mkdir(parents=True, exist_ok=True)
+    wrangler.write_text("#!/bin/sh\nexit 0\n")
+    wrangler.chmod(0o755)
+    return wrangler
+
+
+class InstallingRunner(FakeRunner):
+    """FakeRunner whose `wrangler-install` step writes the binary, as npm ci does."""
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        if log.stem.endswith("wrangler-install") and res.rc == 0:
+            bin_ = Path(cwd) / "node_modules/.bin/wrangler"
+            bin_.parent.mkdir(parents=True, exist_ok=True)
+            bin_.write_text("#!/bin/sh\nexit 0\n")
+        return res
+
+
 HEAD_DATE = "2026-09-29T00:00:00Z"
 
 
@@ -298,7 +320,10 @@ class Fixture:
             git(repo, "config", "user.email", "t@example.invalid")
             git(repo, "config", "user.name", "t")
             (repo / "README.md").write_text("x")
-            git(repo, "add", "README.md")
+            (repo / "mcp-server").mkdir()
+            (repo / "mcp-server" / "package.json").write_text('{"name": "mcp-server"}\n')
+            (repo / "mcp-server" / "package-lock.json").write_text('{"lockfileVersion": 3}\n')
+            git(repo, "add", "README.md", "mcp-server")
             git(repo, "commit", "-q", "-m", "c")
             git(repo, "push", "-q", "origin", "HEAD:main")
             cls._base_sha = git(repo, "rev-parse", "HEAD")
@@ -337,6 +362,10 @@ class Fixture:
         venv_python.parent.mkdir(parents=True, exist_ok=True)
         venv_python.write_text("#!/bin/sh\nexit 0\n")
         venv_python.chmod(0o755)
+        # The token-check wrangler already installed, as on every tick after
+        # the first; TokenCheckWrangler removes it to test the install.
+        self.wrangler = install_toolchain_wrangler(self.repo)
+
 
     def commit(self, files: dict[str, str]) -> str:
         for rel, text in files.items():
@@ -4570,6 +4599,7 @@ class DeployCredential(unittest.TestCase):
         self.assertTrue(any("credential missing" in line for line in self.lines))
 
     def test_missing_file_fails_loudly_and_dispatches(self):
+        shutil.rmtree(self.fx.repo / "out/release-pipeline/toolchain")
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         verbs: list = []
         runner = FakeRunner()
@@ -5157,6 +5187,88 @@ class GitHubDiagnosticPersistence(Base):
             self.assertNotIn(token, diagnostic)
             self.assertIn("[REDACTED]", diagnostic)
             self.assertIn("HTTP 401", diagnostic)
+
+
+class TokenCheckWrangler(Base):
+    """wrangler-auth runs the pipeline's own wrangler install, never the
+    pipeline checkout's mcp-server/node_modules (emptied 2026-10-05, which
+    made `wrangler whoami` exit 127 on both lanes)."""
+
+    def toolchain(self) -> Path:
+        return self.fx.repo / "out/release-pipeline/toolchain"
+
+    def test_whoami_uses_the_installed_toolchain_not_the_checkout(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(runner.names()[0], "wrangler-auth")
+        self.assertNotIn("wrangler-install", runner.names())
+        whoami = dict(runner.calls)["wrangler-auth"]
+        self.assertEqual(whoami, [str(self.fx.wrangler), "whoami"])
+        self.assertEqual(runner.cwds["wrangler-auth"], str(self.fx.repo / "mcp-server"))
+
+    def test_missing_toolchain_is_installed_before_whoami_and_kept(self):
+        shutil.rmtree(self.toolchain())
+        stale = self.toolchain() / "mcp-server-0000000000000000"
+        stale.mkdir(parents=True)
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = InstallingRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual(runner.names()[:3], ["wrangler-install", "wrangler-auth", "worktree"])
+        install = dict(runner.calls)["wrangler-install"]
+        self.assertEqual(install, ["npm", "ci", "--no-audit", "--no-fund"])
+        home = self.fx.wrangler.parents[2]
+        self.assertEqual(runner.cwds["wrangler-install"], str(home) + ".partial")
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", runner.envs["wrangler-install"])
+        self.assertEqual(dict(runner.calls)["wrangler-auth"][0], str(self.fx.wrangler))
+        self.assertTrue(self.fx.wrangler.exists())
+        self.assertEqual(sorted(p.name for p in self.toolchain().iterdir()), [home.name])
+        for name in rp.TOOLCHAIN_FILES:
+            self.assertEqual((home / name).read_bytes(), (self.fx.repo / "mcp-server" / name).read_bytes())
+
+        # The next tick reuses the install.
+        self.fx.commit({"mcp-server/src/a.js": "2"})
+        again = InstallingRunner(live=live)
+        self.assertEqual(self.fx.pipeline(again, live=live).tick(["worker"]), 0)
+        self.assertNotIn("wrangler-install", again.names())
+
+    def test_lockfile_change_selects_a_new_install(self):
+        old = self.fx.wrangler
+        (self.fx.repo / "mcp-server/package-lock.json").write_text('{"lockfileVersion": 3, "x": 1}\n')
+        new = rp.wrangler_toolchain(self.fx.repo, self.fx.repo / "out/release-pipeline")
+        self.assertNotEqual(new, old.parents[2])
+
+    def test_install_without_a_binary_fails_at_wrangler_install(self):
+        shutil.rmtree(self.toolchain())
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
+        self.assertEqual(runner.names(), ["wrangler-install"])
+        rec = self.fx.records()[-1]
+        self.assertEqual((rec["status"], rec["step"], rec["sha"]), ("failed", "wrangler-install", sha))
+        self.assertFalse(self.fx.wrangler.parents[2].exists())
+
+    def test_failed_npm_ci_stops_before_whoami(self):
+        shutil.rmtree(self.toolchain())
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = InstallingRunner(live=live, fail_at="wrangler-install")
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
+        self.assertEqual(runner.names(), ["wrangler-install"])
+        self.assertEqual(self.fx.records()[-1]["step"], "wrangler-install")
+
+    def test_dry_run_installs_nothing(self):
+        shutil.rmtree(self.toolchain())
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.fx.pipeline(runner, live=live, dry_run=True).tick(["worker"])
+        self.assertEqual(runner.calls, [])
+        self.assertFalse(self.toolchain().exists())
 
 
 class Report(Base):
