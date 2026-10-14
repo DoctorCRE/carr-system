@@ -318,6 +318,74 @@ def _record_mint_date_if_new(cred_name, token_sha256, state, today_iso):
     return today_iso
 
 
+_CLAUDE_RETRY_ERRORS = {
+    "authentication_failed", "oauth_org_not_allowed", "account_on_hold",
+    "billing_error", "rate_limit", "overloaded", "invalid_request",
+    "model_not_found", "server_error", "max_output_tokens",
+    "cloud_credential_error", "unknown",
+}
+
+
+def _classify_claude_cli_stream(stdout, returncode):
+    """Classify a Claude stream using only its documented typed fields.
+
+    Claude Code documents newline-delimited `stream-json` events, including
+    `system/api_retry.error_status` and `.error`. This reads only those typed
+    fields and the final `result` event, never free-form error text.
+    """
+    result_texts = []
+    retry_events = []
+    last_event_type = None
+    lines = (stdout or "").splitlines()
+    if not lines:
+        return ProbeResult("failed", "readback_failed")
+
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            return ProbeResult("failed", "readback_failed")
+        if not isinstance(event, dict):
+            return ProbeResult("failed", "readback_failed")
+        last_event_type = event.get("type")
+        if event.get("type") == "system" and event.get("subtype") == "api_retry":
+            status = event.get("error_status")
+            error = event.get("error")
+            if ("error_status" not in event or "error" not in event
+                    or (status is not None
+                        and (not isinstance(status, int) or isinstance(status, bool)))
+                    or not isinstance(error, str) or error not in _CLAUDE_RETRY_ERRORS):
+                return ProbeResult("failed", "readback_failed")
+            retry_events.append((status, error))
+        elif event.get("type") == "result":
+            result_text = event.get("result")
+            if not isinstance(result_text, str):
+                return ProbeResult("failed", "readback_failed")
+            result_texts.append(result_text)
+
+    if (returncode == 0 and last_event_type == "result" and result_texts
+            and result_texts[-1].strip() == "PONG"):
+        return ProbeResult("ok", "active")
+
+    if any(error == "authentication_failed" or status == 401
+           for status, error in retry_events):
+        return ProbeResult("failed", "authentication_failed")
+    if any(error == "oauth_org_not_allowed" or status == 403
+           for status, error in retry_events):
+        return ProbeResult("failed", "credential_access_denied")
+    if any(error == "cloud_credential_error" for _status, error in retry_events):
+        return ProbeResult("failed", "credential_error")
+    last_status, last_error = retry_events[-1] if retry_events else (0, None)
+    if last_status is None:
+        return ProbeResult("unknown", "probe_network_error")
+    if last_status == 429 or last_error == "rate_limit":
+        return ProbeResult("unknown", "rate_limited")
+    if ((last_status is not None and last_status >= 500)
+            or last_error in {"overloaded", "server_error"}):
+        return ProbeResult("unknown", "probe_service_error")
+    return ProbeResult("failed", "readback_failed")
+
+
 def _probe_claude_cli_token_age(cred, timeout_s):
     """CLAUDE_CODE_OAUTH_TOKEN, the long-lived token `claude setup-token`
     mints to replace an interactive Claude Code CLI login. Three checks, per
@@ -326,13 +394,12 @@ def _probe_claude_cli_token_age(cred, timeout_s):
     1. PRESENT AND CORRECTLY SHAPED — read from its dotenv file (never
        printed), checked against the complete inventory-owned token syntax.
     2. A CHEAP AUTH READBACK — `claude -p "Reply with exactly: PONG"
-       --max-turns 1`, run from a throwaway temp cwd with ONLY
+       --max-turns 1 --output-format stream-json --verbose`, run from a throwaway temp cwd with ONLY
        CLAUDE_CODE_OAUTH_TOKEN in its environment (no ambient PATH, no
-       inherited keychain login) so a PONG reply proves the TOKEN authenticated,
-       not some other credential already sitting on the machine. Only the
-       three-letter word PONG is ever looked for in the reply; the rest of
-       whatever the CLI printed is discarded exactly like every other probe's
-       stdout in this file.
+       inherited keychain login) so a PONG result proves the TOKEN authenticated,
+       not some other credential already sitting on the machine. The final
+       result event must equal PONG; documented API retry status and category
+       distinguish authentication failure from throttling or no response.
     3. AN EXPIRY WARNING FROM A RECORDED MINT DATE — this token carries no
        expiry Cloudflare-style; `claude setup-token` documents roughly a
        year of validity from when it was minted, and nothing this lane can
@@ -361,7 +428,8 @@ def _probe_claude_cli_token_age(cred, timeout_s):
     tmpdir = tempfile.mkdtemp(prefix="credential-health-claude-probe-")
     try:
         p = SUBPROCESS_RUN(
-            [claude_bin, "-p", "Reply with exactly: PONG", "--max-turns", "1"],
+            [claude_bin, "-p", "Reply with exactly: PONG", "--max-turns", "1",
+             "--output-format", "stream-json", "--verbose"],
             cwd=tmpdir, env={"CLAUDE_CODE_OAUTH_TOKEN": token},
             capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
@@ -375,10 +443,9 @@ def _probe_claude_cli_token_age(cred, timeout_s):
 
     token_sha256 = _sha256_hex(token)
     token = None
-    # Scanned only for the fixed word this probe itself asked for — never
-    # stored, never printed beyond this boolean.
-    if "PONG" not in (p.stdout or ""):
-        return ProbeResult("failed", "readback_failed")
+    outcome = _classify_claude_cli_stream(p.stdout, p.returncode)
+    if outcome.bucket != "ok":
+        return outcome
 
     minted_at = _record_mint_date_if_new(
         cred["name"], token_sha256, MINT_STATE,
