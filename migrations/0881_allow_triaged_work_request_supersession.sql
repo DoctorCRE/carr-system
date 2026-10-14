@@ -33,7 +33,7 @@ alter table ops.work_request add constraint work_request_sourced_capture_shape c
 
 CREATE OR REPLACE FUNCTION ops.sourced_work_request_is_immutable() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 begin
   -- INSERT WAS NEVER COVERED. This trigger was BEFORE UPDATE only, so a sourced
@@ -156,7 +156,7 @@ create function ops.supersede_sourced_work_request(
 returns table(ref text, state text, version integer, exit_reason text,
               closed_at timestamp with time zone, superseded_by_ref text, previous_state text)
 language plpgsql security definer
-set search_path to 'pg_catalog', 'ops' as $fn$
+set search_path to 'pg_catalog', 'ops', 'public', 'pg_temp' as $fn$
 declare
   v_id uuid;
   v_succ uuid;
@@ -179,9 +179,9 @@ begin
     raise exception 'unknown actor %', p_actor_slug;
   end if;
 
-  -- Identify the tenant without taking a row lock, then serialize graph edits
-  -- for that tenant before taking any row locks. A write-volume-independent lock
-  -- is needed because disjoint endpoint pairs can still complete a longer cycle.
+  -- Identify the tenant without taking a row lock, then serialize every graph
+  -- edit globally before taking row locks. Legacy successor chains may cross
+  -- tenant boundaries, so tenant-scoped locks cannot protect full-lineage checks.
   select w.id, w.organization_tenant_id into v_id, v_request_tenant
     from ops.work_request w
    where w.ref = p_work_request and w.capture_idempotency_key is not null;
@@ -189,7 +189,7 @@ begin
     raise exception 'no sourced Work Request %', p_work_request;
   end if;
   perform pg_advisory_xact_lock(hashtextextended(
-    'ops.work_request_supersession_graph:' || v_request_tenant, 0));
+    'ops.work_request_supersession_graph', 0));
 
   select w.id into v_succ from ops.work_request w where w.ref = p_superseded_by;
   if v_succ is null then
@@ -223,9 +223,6 @@ begin
   if v_succ = v_id then
     raise exception 'a Work Request cannot supersede itself';
   end if;
-  if v_succ_state in ('declined','superseded') then
-    raise exception 'the successor % is itself withdrawn; superseding into a dead row loses the trail', p_superseded_by;
-  end if;
   if v_succ_tenant is distinct from v_request_tenant then
     raise exception 'the successor % is not in the same organization tenant', p_superseded_by;
   end if;
@@ -234,8 +231,8 @@ begin
   end if;
 
   -- The superseded_by relation is a lineage graph, so adding an edge must not
-  -- create a cycle of any length. The tenant advisory lock makes this traversal
-  -- stable against other supersede operations in the graph.
+  -- create a cycle of any length, including legacy links across tenants. The
+  -- global advisory lock makes this traversal stable against every graph edit.
   with recursive successor_chain(id, successor_id, path, cycle) as (
     select w.id, w.superseded_by, array[w.id], false
       from ops.work_request w where w.id = v_succ
@@ -245,12 +242,14 @@ begin
       from successor_chain chain
       join ops.work_request next on next.id = chain.successor_id
      where chain.successor_id is not null and not chain.cycle
-       and next.organization_tenant_id = v_request_tenant
   )
   select exists (select 1 from successor_chain where id = v_id or cycle)
     into v_has_cycle;
   if v_has_cycle then
     raise exception 'that would make a supersession cycle';
+  end if;
+  if v_succ_state in ('declined','superseded') then
+    raise exception 'the successor % is itself withdrawn; superseding into a dead row loses the trail', p_superseded_by;
   end if;
 
   insert into ops.work_request_withdrawal_receipt

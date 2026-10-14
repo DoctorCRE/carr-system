@@ -14,7 +14,7 @@ const require = createRequire(resolve(root, "mcp-server/package.json"));
 const { Client } = require("pg");
 const container = `wr-supersession-proof-${process.pid}`;
 const password = "synthetic-only-retirement-proof";
-const graphLock = "ops.work_request_supersession_graph:carr-internal";
+const graphLock = "ops.work_request_supersession_graph";
 
 function docker(args) {
   const r = spawnSync("docker", args, { encoding: "utf8", timeout: 120_000 });
@@ -226,6 +226,26 @@ async function main() {
       await assert.rejects(() => edge(db, 33, 30), /supersession cycle/i);
       await verifyAcyclic(db);
 
+      // Legacy rows may carry cross-tenant successor links. The attempted
+      // same-tenant edge 34→35 would close 34→35→36→34; traversal must cross
+      // tenant 36 and report the cycle before the normal dead-successor refusal.
+      await db.query("begin");
+      await db.query("set local session_replication_role=replica");
+      // The current row-shape constraint pins sourced rows to carr-internal.
+      // Drop it only in this disposable fixture to model legacy cross-tenant
+      // rows that predate that constraint; the migration/function stay intact.
+      await db.query("alter table ops.work_request drop constraint work_request_sourced_capture_shape");
+      await db.query(`update ops.work_request source
+         set organization_tenant_id='synthetic-other-tenant',state='superseded',
+             exit_reason='legacy synthetic edge',closed_at=now(),superseded_by=target.id
+        from ops.work_request target where source.ref=$1 and target.ref=$2`, [ref(36), ref(34)]);
+      await db.query(`update ops.work_request source
+         set state='superseded',exit_reason='legacy synthetic edge',closed_at=now(),superseded_by=target.id
+        from ops.work_request target where source.ref=$1 and target.ref=$2`, [ref(35), ref(36)]);
+      await db.query("commit");
+      await assert.rejects(() => edge(db, 34, 35), /supersession cycle/i);
+      await verifyAcyclic(db);
+
       const decline = await race(port, [[ref(20), ref(21)], [ref(21), null, true]],
         "select id from ops.work_request where id=$1::uuid for update", [uuid(21)]);
       assert.equal(decline.filter(x => x.ok).length, 1, JSON.stringify(decline));
@@ -234,6 +254,7 @@ async function main() {
       console.log(JSON.stringify({ database: "disposable PostgreSQL 18; synthetic data only",
         opposing_supersession: opposing, disjoint_pair_long_cycle: longer,
         legacy_chain_closure: "recursive check refused a cycle through three existing links",
+        legacy_cross_tenant_chain: "recursive check crossed the tenant boundary and refused 34→35→36→34",
         supersede_vs_successor_decline: decline, persisted_graph: "acyclic after each race" }, null, 2));
     } finally { await db.end(); }
   } finally { docker(["rm", "--force", container]); }
