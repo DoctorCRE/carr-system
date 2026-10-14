@@ -62,7 +62,6 @@ ENDCARD: dict[str, Any] = {"dur": 4.5, "name": "Joe Bookout", "title": "HEALTHCA
 total = sum(s["dur"] for s in SHOTS) + ENDCARD["dur"]
 endcard_at = sum(s["dur"] for s in SHOTS)
 
-# ---------- job + AE ----------
 job = {"compName": "CARR_OperatoryMath", "width": W, "height": H, "fps": 29.97,
        "shots": SHOTS, "endCard": ENDCARD, "outPath": str(RAW)}
 (PIPE / "Scripts/stockclip-job.json").write_text(json.dumps(job, indent=2))
