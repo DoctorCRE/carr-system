@@ -40,8 +40,8 @@ PII = {
     'pii-email': re.compile(r'(?<![A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+'),
     'pii-phone': re.compile(r'(?<![\w])(?:\+?1[ .-]?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[ .-]?[2-9]\d{2}[ .-]?\d{4}(?![\w])'),
     # A capitalized street word counts after any number. A street word in any case counts
-    # after a house number that stands alone when a word of the name is capitalized
-    # ("843 Isle of Fiction avenue"); prose has none ("we are 2 blocks from the street").
+    # after a house number that stands alone when a word of the name between them is
+    # capitalized, function words included; prose between a count and a street word has none.
     'pii-address': re.compile(r'\b\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,6}(?:' + '|'.join(
         word + '|' + word.upper() for word in STREET_WORDS) + r')\b'
                               r'|(?<![\w.:/-])\d{1,6}\s+(?P<between>(?:[A-Za-z0-9.-]+\s+){1,4})'
