@@ -58,6 +58,17 @@ MAX_PHRASES = 10
 MAX_QUOTED = 8
 MAX_HISTORY = 10
 MAX_NEAR_MISS = 8
+# One Jev request carries every question for a rule: a Noul per candidate, a
+# Noul per near-miss probe and two rule-level Nouls. The Worker's request
+# contract caps the questions; a rule whose pack keywords alone overflow it
+# (67e48aaf, 58 candidates + 8 probes + 2 = 68 on 2026-10-13) was refused as
+# question_count_invalid before anything was sent, so the candidate list is
+# bounded to what the contract admits. Candidates are ordered by evidence
+# strength (statement words, phrases, quotes, verbs, commands, paths, tools,
+# history, then pack keywords), so the overflow drops the most generic cues.
+RULE_LEVEL_QUESTIONS = 2
+with open(os.path.join(REPO, "mcp-server", "src", "jev-request-contract.v1.json"), encoding="utf-8") as _fh:
+    MAX_QUESTIONS = int(json.load(_fh)["max_questions"])
 
 # Decision floors. Surfacing is biased toward delivery on purpose: a false
 # positive costs one paragraph a session already has room for, a false
@@ -275,6 +286,8 @@ def questions_for(rule, cands, near, client):
                       "packs": rule["packs"]},
              "candidates": {}, "near_miss_probes": {}}
     questions, index = {}, {}
+    room = MAX_QUESTIONS - len(near) - RULE_LEVEL_QUESTIONS
+    cands = list(cands)[:max(room, 0)]
     for i, (kind, value, origin) in enumerate(cands):
         qid = f"c{i:02d}"
         state["candidates"][qid] = {"kind": kind, "value": value}

@@ -276,6 +276,11 @@ with tempfile.TemporaryDirectory() as tmp:
     rtc.compile_rule(RULES[0], **args)
     check("compile is cached and pinned", len(calls)==1 and calls[0][2]["model"]=="jev-1.13.0")
     check("compile requires review before deterministic promotion", proposed["mode"]=="review_required")
+# A rule whose cues overflow the Worker's request contract still fits one request.
+_wide = dict(RULES[0], id="ffffffff", statement=" ".join(f"cueword{i}" for i in range(90)))
+_q, _s, _i = rtc.questions_for(_wide, rtc.candidates(_wide, all_rules=RULES, pack_keywords={"p": [f"packcue{i}" for i in range(80)]}, verbs=set(), history={})[0],
+                               ["near one", "near two"], Client)
+check("request stays within the Jev question contract", len(_q) <= rtc.MAX_QUESTIONS and "always_on" in _q and "no_cue" in _q)
 committed=rtc.load_compiled()
 check("committed triggers cover current rules", rtc.coverage_problems(committed,rtc.pack_rules())==[])
 # Mutation probes keep teeth on the exact deterministic safety checks.

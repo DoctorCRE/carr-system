@@ -20,7 +20,7 @@ nothing to production logs or caches (log_path=os.devnull, no session id).
 GRADER (programmatic, expected rule ids per case):
   expected  = gold - disputed - boot-delivered rules, restricted to rules the
               trigger layer owes (a trigger/path route, or pack-layer member).
-              Frozen per case in expectations.v1.json (--freeze-expectations)
+              Frozen per case in expectations.v2.json (--freeze-expectations)
               and graded from there, so a change to the routes cannot move its
               own denominator; a drift from the live derivation needs a new
               expectations version.
@@ -58,8 +58,8 @@ sys.path.insert(0, REPO)
 
 V2_CASES = os.path.join(REPO, "ops", "fixtures", "rule-delivery-eval", "cases.v2.json")
 HARD_CASES = os.path.join(HERE, "hard_cases.v1.json")
-EXPECTATIONS = os.path.join(HERE, "expectations.v1.json")
-EXPECTATIONS_VERSION = "rule-delivery-expectations/v1"
+EXPECTATIONS = os.path.join(HERE, "expectations.v2.json")
+EXPECTATIONS_VERSION = "rule-delivery-expectations/v2"
 RUNS = os.path.join(HERE, "runs")
 CHARS_PER_TOKEN = 4.0
 METRIC_IDS = ("recall", "false_deliveries", "tokens")
