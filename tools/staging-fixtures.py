@@ -62,6 +62,7 @@ class ExcludedTourValues:
     tour_id: uuid.UUID
     name: str
     client_id: uuid.UUID
+    creation_key: str
     property_id: uuid.UUID
     stop_id: uuid.UUID
 
@@ -79,12 +80,13 @@ def excluded_tour_values(plan: Mapping[str, Any]) -> ExcludedTourValues:
     try:
         tour_id = uuid.UUID(tour["id"])
         client_id = uuid.UUID(client["id"])
-        uuid.UUID(keys["tour"])
+        creation_key = keys["tour"]
+        uuid.UUID(creation_key)
     except (KeyError, ValueError, TypeError, AttributeError) as exc:
         raise FixtureRefusal("tour plan has an invalid Tour, client, or creation key") from exc
     property_id = uuid.uuid5(EXCLUDED_TOUR_NAMESPACE, f"property:{plan['run']}:{tour_id}")
     stop_id = uuid.uuid5(EXCLUDED_TOUR_NAMESPACE, f"excluded-stop:{plan['run']}:{tour_id}")
-    return ExcludedTourValues(tour_id, expected_name, client_id, property_id, stop_id)
+    return ExcludedTourValues(tour_id, expected_name, client_id, creation_key, property_id, stop_id)
 
 
 def load_private_tour_plan(path: pathlib.Path, expected_app_sha: str,
@@ -329,6 +331,14 @@ def _checked_tour_state(cur: Any, values: ExcludedTourValues, *, lock: bool) -> 
     cur.execute("select slug from public.actor where slug in ('joe','system') and active order by slug")
     if [row[0] for row in cur.fetchall()] != ["joe", "system"]:
         raise FixtureRefusal("Tour fixture requires active Joe and system actors")
+    cur.execute("""select 1 from public.tool_call tc join public.actor a on a.id=tc.actor_id
+                    where tc.idempotency_key=%s and tc.verb='create-tour-domain'
+                      and tc.organization_tenant_id=%s and a.slug='joe' and a.kind='human' and a.active
+                      and tc.response=jsonb_build_object('ok',true,'tour_id',%s::text)"""
+                + (" for share of tc,a" if lock else ""),
+                (values.creation_key, TOUR_TENANT, str(values.tour_id)))
+    if cur.fetchone() != (1,):
+        raise FixtureRefusal("Tour creation key lacks Joe's exact successful canonical tool call")
     cur.execute("""select cl.id::text,cl.status,cl.merged_into,p.id::text,p.name,p.deleted_at,p.merged_into
                      from public.client cl join public.party p on p.id=cl.party_id
                     where cl.id=%s""" + suffix + (" of cl,p" if lock else ""), (values.client_id,))

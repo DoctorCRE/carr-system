@@ -554,8 +554,11 @@ class TourFixtureTests(unittest.TestCase):
         self.assertEqual(str(tour.tour_id), value["records"]["tour"]["id"])
         self.assertEqual(tour.name, value["names"]["tour"])
         self.assertEqual(str(tour.client_id), value["records"]["client"]["id"])
+        self.assertEqual(tour.creation_key, value["keys"]["tour"])
         self.assertEqual(tour.property_id, fixture.excluded_tour_values(value).property_id)
         self.assertEqual(tour.stop_id, fixture.excluded_tour_values(value).stop_id)
+        value["keys"]["tour"] = value["keys"]["tour"].upper()
+        self.assertEqual(fixture.excluded_tour_values(value).creation_key, value["keys"]["tour"])
 
     def test_tour_plan_rejects_missing_key_and_mismatched_name(self):
         for change in ("missing_key", "wrong_name", "wrong_id"):
@@ -611,6 +614,12 @@ class TourFixtureTests(unittest.TestCase):
                 elif low.startswith("select session_user,current_user,current_database()"):
                     self.result = ("neondb_owner", "neondb_owner", "neondb")
                 elif "from public.actor" in low: self.result = [("joe",), ("system",)]
+                elif "from public.tool_call" in low:
+                    key, tenant, tour_id = args
+                    self.result = ((1,) if any(
+                        row == (key, "create-tour-domain", "joe", tenant,
+                                {"ok": True, "tour_id": tour_id})
+                        for row in self.db.tool_calls) else None)
                 elif "from public.client cl" in low:
                     self.result = (str(expected.client_id), "engaged", None, str(fixture.FIXTURE_ID),
                                    "Synthetic Staging Fixture", None, None)
@@ -645,12 +654,35 @@ class TourFixtureTests(unittest.TestCase):
                 self.property_exists = self.stop_exists = self.fail_stop = False
                 self.property_status, self.stop_state = "unknown", "excluded"
                 self.tour_status, self.route_actor = "draft", "joe"
+                self.tool_calls = [(value["keys"]["tour"], "create-tour-domain", "joe",
+                                    fixture.TOUR_TENANT,
+                                    {"ok": True, "tour_id": str(expected.tour_id)})]
                 self.commits = self.rollbacks = 0
                 self.sql = []
             def cursor(self): return TourCursor(self)
             def commit(self): self.commits += 1
             def rollback(self): self.rollbacks += 1
 
+        for rows in ([],
+                     [(str(uuid.uuid4()), "create-tour-domain", "joe", fixture.TOUR_TENANT,
+                       {"ok": True, "tour_id": str(expected.tour_id)})],
+                     [(value["keys"]["tour"], "create-tour-domain", "dell", fixture.TOUR_TENANT,
+                       {"ok": True, "tour_id": str(expected.tour_id)})],
+                     [(value["keys"]["tour"], "create-tour-domain", "joe", "other-tenant",
+                       {"ok": True, "tour_id": str(expected.tour_id)})],
+                     [(value["keys"]["tour"], "other-verb", "joe", fixture.TOUR_TENANT,
+                       {"ok": True, "tour_id": str(expected.tour_id)})],
+                     [(value["keys"]["tour"], "create-tour-domain", "joe", fixture.TOUR_TENANT,
+                       {"ok": True, "tour_id": str(uuid.uuid4())})],
+                     [(value["keys"]["tour"], "create-tour-domain", "joe", fixture.TOUR_TENANT,
+                       {"ok": False, "tour_id": str(expected.tour_id)})]):
+            with self.subTest(tool_calls=rows):
+                missing = TourConn()
+                missing.tool_calls = rows
+                with self.assertRaises(fixture.FixtureRefusal):
+                    fixture.install_excluded_tour_fixture(missing, value)
+                self.assertFalse(any("insert into ops.tour_property" in sql for sql in missing.sql))
+                self.assertEqual(missing.commits, 0)
         db = TourConn()
         self.assertEqual(fixture.install_excluded_tour_fixture(db, value), 1)
         self.assertEqual(fixture.install_excluded_tour_fixture(db, value), 0)
@@ -660,6 +692,11 @@ class TourFixtureTests(unittest.TestCase):
         proof = fixture.read_excluded_tour_fixture(db, value)
         self.assertEqual((proof["active_stop_count"], proof["excluded_stop_count"]), (0, 1))
         self.assertIn("set transaction read only", db.sql)
+        canonical_call = db.tool_calls
+        db.tool_calls = []
+        with self.assertRaises(fixture.FixtureRefusal):
+            fixture.read_excluded_tour_fixture(db, value)
+        db.tool_calls = canonical_call
         for field, changed in (("tour_status", "active"), ("route_actor", "dell"),
                                ("stop_state", "active"), ("property_status", "active")):
             with self.subTest(field=field):
