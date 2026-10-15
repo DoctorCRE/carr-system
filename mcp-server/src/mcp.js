@@ -1021,8 +1021,8 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
           throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug });
         jevAsk = jevAskBinding(env, fetch, {
           countPaidAttemptsToday: () => countPaidJevAttemptsToday(client),
-          reserveAttempt: async () => {
-            return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs);
+          reserveAttempt: async dailyCap => {
+            return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs, dailyCap);
           } });
         jevPrefetched = await prefetchJevAnswer(jevArgs, jevAsk, judgeWorkClass);
         client.jevPrefetched = jevPrefetched;

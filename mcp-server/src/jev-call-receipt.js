@@ -68,9 +68,10 @@ const READ_LIMIT_MAX = 500;
 // ops/config/jev-call-sites.v1.json live on the calling machine; a valid
 // admission proves a caller reserved there, not that the day is affordable.
 // This counts the attempt ledger's paid rows for the UTC day, whoever asked,
-// before any reservation. JEV_WORKER_DAILY_CAP overrides it; a value that is
-// not a whole number keeps this default. Two attempts racing at the boundary
-// can each read count = cap - 1, so the overshoot is bounded by concurrency.
+// before any reservation, and counts again inside the reservation transaction
+// under one advisory lock, so concurrent callers at the boundary cannot both
+// reserve. JEV_WORKER_DAILY_CAP overrides it; a value that is not a whole
+// number keeps this default.
 const WORKER_DAILY_CAP_DEFAULT = 300;
 
 export const JEV_PURPOSES = Object.freeze(["call", "build_advisory"]);
@@ -303,8 +304,11 @@ export function jevAskBinding(env, fetchImpl = fetch, options = {}) {
       throw new LeafToolError({ error: "jev_worker_daily_cap", cap: dailyCap, count: paidToday,
         resets_at: nextUtcMidnight(now()) });
     let reservedAttempt;
-    try { reservedAttempt = await reserveAttempt(); }
+    try { reservedAttempt = await reserveAttempt(dailyCap); }
     catch { throw new LeafToolError({ error: "jev_receipt_store_unavailable" }); }
+    if (reservedAttempt?.capped === true)
+      throw new LeafToolError({ error: "jev_worker_daily_cap", cap: dailyCap, count: reservedAttempt.count,
+        resets_at: nextUtcMidnight(now()) });
     if (typeof reservedAttempt?.key !== "string" || !reservedAttempt.key ||
         typeof reservedAttempt?.receipt_id !== "string" || !reservedAttempt.receipt_id)
       throw new LeafToolError({ error: "jev_receipt_store_unavailable" });
@@ -370,11 +374,23 @@ export function jevAskBinding(env, fetchImpl = fetch, options = {}) {
 
 // Reserve the receipt and its pending ledger partner atomically before fetch.
 // Vendor failure leaves linked unknown spend, never an orphan or credited answer.
-export async function reserveJevCallAttempt(client, actor, args) {
+// With dailyCap, the day's count and the reservation share one transaction
+// behind one advisory lock; at the ceiling it reserves nothing and returns
+// { capped: true, count }.
+export async function reserveJevCallAttempt(client, actor, args, dailyCap) {
   const { stateJson, questions, facets, model } = validateAskJevArgs(args);
   const key = `jev-attempt:${args.idempotency_key}`;
   await client.query("begin");
   try {
+    if (dailyCap !== undefined) {
+      await client.query("select pg_advisory_xact_lock(hashtext('jev-worker-daily-cap'))");
+      const count = await countPaidJevAttemptsToday(client);
+      if (!Number.isInteger(count) || count < 0) throw new Error("jev_attempt_count_invalid");
+      if (count >= dailyCap) {
+        await client.query("rollback");
+        return { capped: true, count };
+      }
+    }
     const row = (await client.query(
       `select r.receipt_id from ops.record_jev_call_receipt($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) r`,
       [args.session_id, "call", Object.keys(questions).sort(compareCodePoints), facets,

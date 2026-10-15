@@ -221,6 +221,53 @@ test("the attempt ledger's own rows bring the Worker to its ceiling", async () =
   assert.equal(client.toolCalls.size, 1);
 });
 
+// Two connections share one ledger; the advisory lock admits one holder until
+// its transaction ends, as Postgres does.
+function lockingConnections(store) {
+  let holder = null; const waiting = [];
+  const connection = id => ({ async query(text, params) {
+    const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.startsWith("select pg_advisory_xact_lock")) {
+      while (holder !== null && holder !== id) await new Promise(resolve => waiting.push(resolve));
+      holder = id;
+    }
+    const out = await store.query(text, params);
+    if ((sql === "commit" || sql === "rollback") && holder === id) {
+      holder = null; waiting.splice(0).forEach(resolve => resolve());
+    }
+    return out;
+  } });
+  return [connection("a"), connection("b")];
+}
+
+test("concurrent callers at cap minus one: exactly one reserves and reaches the vendor", async () => {
+  const store = new JevReceiptFake();
+  for (let i = 0; i < 299; i++)
+    store.toolCalls.set(`seed-${i}`, { verb: "ask-jev-attempt", actor_id: AGENT.id, request_hash: "h",
+      response: { receipt_id: `seed-${i}`, cache_hit: false } });
+  const fetchImpl = fakeFetch([jsonResponse(200, { model: "m", answers: ANSWERS }),
+    jsonResponse(200, { model: "m", answers: ANSWERS })]);
+  let arrived = 0, release;
+  const barrier = new Promise(resolve => { release = resolve; });
+  const outcomes = await Promise.all(lockingConnections(store).map(async connection => {
+    const args = askArgs({ transport_mode: "paid_once" });
+    const ask = jevAskBinding({ TYPESAFE_API_KEY: KEY }, fetchImpl, { cache: null, now: () => CAP_NOW,
+      countPaidAttemptsToday: async () => {
+        const count = await countPaidJevAttemptsToday(connection);
+        if (++arrived === 2) release();
+        await barrier;
+        return count;
+      },
+      reserveAttempt: dailyCap => reserveJevCallAttempt(connection, AGENT, args, dailyCap) });
+    return prefetchJevAnswer(args, ask);
+  }));
+  assert.equal(outcomes.filter(out => out.ok === true).length, 1);
+  assert.deepEqual(outcomes.find(out => out.ok !== true).error, { error: "jev_worker_daily_cap", cap: 300,
+    count: 300, resets_at: "2026-10-16T00:00:00.000Z" });
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.equal([...store.toolCalls.values()].filter(call => call.verb === "ask-jev-attempt").length, 300);
+});
+
 test("cache-only probes and cache hits are neither counted nor refused at the ceiling", async () => {
   const fetchImpl = fakeFetch([]);
   const miss = cappedAsk({}, { count: () => 300, fetchImpl, cache: { match: async () => null } });
