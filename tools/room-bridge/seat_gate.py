@@ -1,10 +1,4 @@
-"""Dispatch refuses a seat that is offline or just failed (2026-10-12).
-
-`dispatch.py send` asked one question before this: is the desk registered? It
-never asked whether the Mac the work would run on was up, or whether that
-seat's last exact-value probe had failed. With the Mac Studio offline for days,
-a send to a Studio desk would have waited out its SSH timeout and recorded a
-failure that blamed the desk.
+"""Dispatch refuses a seat that is offline or just failed.
 
 Two refusals, both with the reason in the message:
 
@@ -28,7 +22,6 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 if str(REPO / "ops") not in sys.path:
-    # Appended, never prepended: ops/ must not shadow a room-bridge module.
     sys.path.append(str(REPO / "ops"))
 
 import codex_models  # noqa: E402
@@ -83,14 +76,6 @@ def refusal(entry: dict, config: dict, live: dict, report_fn, *, now=None):
 
 
 class SendReads:
-    """The two slow reads, each made at most once per send.
-
-    The tailnet read (`Tailscale status --json`, host_liveness.read_status) is
-    bounded at 15 s; the seat evidence (`read-resource-dashboard` through
-    ./run.sh call, seat_health.verb_call) at 35 s. The dashboard read happens
-    only when the desk maps to a seat whose host is not offline, so a send
-    costs at most 15 s + 35 s = 50 s of gate time, and a live local session
-    or an offline host costs the tailnet read alone."""
 
     def __init__(self, config: dict):
         self.config = config
