@@ -5,6 +5,7 @@ import importlib.util
 import os
 import pathlib
 import subprocess
+import time
 import unittest
 from unittest.mock import patch
 import uuid
@@ -638,6 +639,71 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr[-2000:])
         self.assertEqual(subprocess.check_output(['git', '-C', str(victim), 'rev-parse', 'HEAD']), before)
         self.assertEqual(subprocess.check_output(['git', '-C', str(victim), 'status', '--porcelain']), b'')
+
+    def test_only_whole_placeholder_passwords_are_exempt(self):
+        password = self.credential_password()
+        scheme = 'postgresql:' + '//user:'
+        real = [prefix + password for prefix in ('%21', '$', '*', '[', '(')]
+        placeholders = ['${DB_PASSWORD}', '$DB_PASSWORD', '%(password)s', '{password}', '********', 'changeme']
+        lines = [scheme + secret + '@127.0.0.1:5432/production' for secret in real + placeholders]
+        (self.root / 'settings.txt').write_text('\n'.join(lines) + '\n')
+        self.git('add', 'settings.txt')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.stdout, ''.join(f'settings.txt:{n} credential-url\n' for n in range(1, len(real) + 1)))
+        self.assertNotIn(password, result.stdout + result.stderr)
+        self.git('rm', '-q', '--cached', 'settings.txt')
+        base = self.write_commit('db.txt', 'safe\n')
+        self.write_commit('db.txt', lines[0] + '\n')
+        head = self.write_commit('db.txt', 'safe\n')
+        result = self.run_guard('--range', base + '..' + head, '--remote', 'none', '--generic-only')
+        self.assertEqual(result.stdout, 'db.txt:1 credential-url\n')
+
+    def test_prefixed_and_multiline_literals_are_joined(self):
+        value = self.secret()
+        cut = len(value) // 2
+        first, second = value[:cut], value[cut:]
+        forms = {'bytes': 'token = b"' + first + '" + b"' + second + '"',
+                 'raw': "token = r'" + first + "' r'" + second + "'",
+                 'parenthesized': 'token = (\n    "' + first + '"\n    "' + second + '"\n)',
+                 'continued': 'token = "' + first + '" + \\\n    "' + second + '"'}
+        for name, source in forms.items():
+            with self.subTest(name):
+                (self.root / 'sample.py').write_text('# synthetic\n' + source + '\n')
+                self.git('add', 'sample.py')
+                result = self.run_guard('--staged', '--generic-only')
+                self.assertEqual(result.returncode, 1, result.stderr)
+                # The finding is reported on the line where the joined value starts.
+                line = 3 if name == 'parenthesized' else 2
+                self.assertEqual(result.stdout, f'sample.py:{line} github-pat\n')
+                self.assertNotIn(first, result.stdout + result.stderr)
+        # Only the second half is new: the joined finding still spans the added line.
+        base = self.write_commit('split.py', 'token = (\n    "' + first + '"\n    "placeholder"\n)\n')
+        head = self.write_commit('split.py', 'token = (\n    "' + first + '"\n    "' + second + '"\n)\n')
+        result = self.run_guard('--range', base + '..' + head, '--remote', 'none', '--generic-only')
+        self.assertEqual(result.stdout, 'split.py:2 github-pat\n')
+
+    def test_lowercase_addresses_with_every_suffix(self):
+        flagged = ['843 Imaginary ' + suffix for suffix in ('drive', 'rd', 'court', 'way', 'place', 'st')]
+        flagged.append('2000 Imaginary' + ' avenue')
+        ignored = ['it takes 10 minutes to ' + 'drive', 'step 3 is the best ' + 'way', 'in 2026 we took the ' + 'road',
+                   'about 5 miles down the ' + 'road', 'we met 2 people at the ' + 'court']
+        (self.root / 'sample.txt').write_text('\n'.join(flagged + ignored) + '\n')
+        self.git('add', 'sample.txt')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.stdout, ''.join(f'sample.txt:{n} pii-address\n' for n in range(1, len(flagged) + 1)))
+
+    def test_escaped_quotes_complete_in_linear_time(self):
+        line = json.dumps({'text': '"' * 20000})
+        started = time.monotonic()
+        guard.executable_form(line)
+        guard.executable_form('\\"' * 20000)
+        guard.executable_form('"\\' * 20000 + "'" * 20000)
+        self.assertLess(time.monotonic() - started, 1)
+        (self.root / 'data.json').write_text(line + '\n')
+        self.git('add', 'data.json')
+        result = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--staged', '--generic-only'],
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == '__main__':
     unittest.main()

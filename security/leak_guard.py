@@ -33,26 +33,35 @@ ARCHIVES = {
     'linux_x64': '79a3ab579b53f71efd634f3aaf7e04a0fa0cf206b7ed434638d1547a2470a66e',
     'linux_arm64': 'b4cbbb6ddf7d1b2a603088cd03a4e3f7ce48ee7fd449b51f7de6ee2906f5fa2f',
 }
+STREET_WORDS = ('Street', 'St', 'Avenue', 'Ave', 'Road', 'Rd', 'Drive', 'Dr', 'Lane',
+                'Ln', 'Boulevard', 'Blvd', 'Court', 'Ct', 'Way', 'Place', 'Pl',
+                'Parkway', 'Pkwy')
+# Function words and units that put a number and a street word in prose, not an address.
+PROSE_WORDS = frozenset('''a an the to of in on at by for from with into onto and or but is are was were be been
+    we i you he she it they me us them my our your his her its their this that these those as than then so
+    about over down up per one more less best took take takes went go goes get got met people times
+    minute minutes hour hours day days week weeks mile miles km step steps'''.split())
 PII = {
     'pii-email': re.compile(r'(?<![A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+'),
     'pii-phone': re.compile(r'(?<![\w])(?:\+?1[ .-]?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[ .-]?[2-9]\d{2}[ .-]?\d{4}(?![\w])'),
-    # A capitalized street word counts after any number. A lowercase one counts only
-    # for words prose rarely ends on ("street", not "way" or "place"), after a house
-    # number that stands alone and is not a year: "in 2026 we took the road" is prose.
+    # A capitalized street word counts after any number. A street word in any case counts
+    # after a house number that stands alone, unless the words between them are prose
+    # ("10 minutes to drive", "in 2026 we took the road"): see address_shaped.
     'pii-address': re.compile(r'\b\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,6}(?:' + '|'.join(
-        word + '|' + word.upper() for word in ('Street', 'St', 'Avenue', 'Ave', 'Road', 'Rd', 'Drive', 'Dr', 'Lane',
-                                               'Ln', 'Boulevard', 'Blvd', 'Court', 'Ct', 'Way', 'Place', 'Pl',
-                                               'Parkway', 'Pkwy')) + r')\b'
-                              r'|(?<![\w.:/-])(?!(?:19|20)\d\d\b)\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,4}'
-                              r'(?i:street|avenue|road|boulevard|parkway|lane|ave|blvd|pkwy)\b'),
+        word + '|' + word.upper() for word in STREET_WORDS) + r')\b'
+                              r'|(?<![\w.:/-])\d{1,6}\s+(?P<between>(?:[A-Za-z0-9.-]+\s+){1,4})'
+                              r'(?i:' + '|'.join(STREET_WORDS) + r')\b'),
     'pii-ssn': re.compile(r'(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)'),
     # scheme://user:password@host at any host, a loopback IP or a one-word name included.
     'credential-url': re.compile(r'(?<![\w+.-])[A-Za-z][A-Za-z0-9+.-]{1,30}://[^\s:/@\'"<>]+:'
                                  r'(?P<secret>[^\s@/\'"<>]+)@[^\s/\'"<>]'),
 }
-# A credential URL whose password is a variable, a template or a stock word is documentation.
+# A credential URL whose whole password is a variable, a template, a mask or a stock word
+# is documentation. A real password that merely starts with $, % or * is not.
 PLACEHOLDER_PASSWORDS = {'password', 'passwd', 'pass', 'secret', 'changeme', 'example', 'placeholder',
                          'redacted', 'postgres', 'username', 'user', 'pw', 'pwd'}
+PLACEHOLDER_SYNTAX = re.compile(r'\$\{[A-Za-z_][A-Za-z0-9_]*(?:[:?+-][^}]*)?\}|\$[A-Z_][A-Z0-9_]*'
+                                r'|%\([A-Za-z_][A-Za-z0-9_]*\)s|\{\{?\s*[A-Za-z_][A-Za-z0-9_.]*\s*\}?\}|\*+|x+|X+')
 # Mail at a reserved domain (RFC 2606/6761), an IP literal or GitHub's public
 # noreply identity reaches no person, so it is not contact data.
 RESERVED_MAIL = re.compile(r'(?:^|\.)(?:example|invalid|test|localhost)$|^example\.(?:com|net|org)$'
@@ -91,31 +100,116 @@ def tokens(text):
 
 
 def real_password(secret):
-    return not (len(secret) < 6 or secret[0] in '$<{%[(*' or len(set(secret)) < 4
-                or secret.lower() in PLACEHOLDER_PASSWORDS)
+    # Under six characters is a fixture word, the same floor as ops/ci-secret-scan.py's dsn rule.
+    return not (len(secret) < 6 or PLACEHOLDER_SYNTAX.fullmatch(secret) or secret.lower() in PLACEHOLDER_PASSWORDS)
 
 
-# A string literal, and a run of literals that a program joins: 'a' 'b', "a" + "b",
-# "a" . "b" (PHP, Perl), "a" .. "b" (Lua) or "a", "b" (an array join).
-LITERAL = r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\''
-LITERAL_RUN = re.compile('(?:' + LITERAL + r')(?:\s*(?:(?:\+|\.\.?|,)\s*)?(?:' + LITERAL + '))+')
+def address_shaped(match):
+    between = match['between']
+    return between is None or not PROSE_WORDS.intersection(between.lower().split())
+
+
+# A run of literals that a program joins: 'a' 'b', "a" + "b", "a" . "b" (PHP, Perl),
+# "a" .. "b" (Lua) or "a", "b" (an array join). A literal may carry a prefix: b"", r'', f"".
+LITERAL_GAP = re.compile(r'\s*(?:(?:\+|\.\.?|,)\s*)?')
+# A line continues onto the next when it ends in a literal (and a +, ., .. or backslash) and
+# the next starts with one: implicit concatenation inside brackets, or an explicit join.
+CONTINUED_HEAD = re.compile(r'\s*(?:(?:\+|\.\.?)\s*)?(?:[rRbBuUfF]{1,2})?["\']')
+MAX_CONTINUED_LINES = 16
 # \xNN, \uNNNN, \UNNNNNNNN, or a one-to-three digit octal \NNN no greater than 255.
 BYTE_ESCAPE = re.compile(r'\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|([0-3][0-7]{2}|[0-7]{1,2}))')
 
 
+def literals(line):
+    """(start, end, body) for each complete quoted literal, read left to right in one pass.
+
+    A quote that finds no closing quote on the line opens nothing; no later quote of the
+    same kind can close either, so that kind is not tried again and the read stays linear.
+    """
+    found, index, unclosed = [], 0, set()
+    while index < len(line):
+        quote = line[index]
+        if quote in '"\'' and quote not in unclosed:
+            end = index + 1
+            while end < len(line) and line[end] != quote:
+                end += 2 if line[end] == '\\' else 1
+            if end < len(line):
+                start = index
+                while start > index - 2 and start > 0 and line[start - 1] in 'rRbBuUfF':
+                    start -= 1
+                if start > 0 and (line[start - 1].isalnum() or line[start - 1] == '_'):
+                    start = index  # part of an identifier, not a prefix
+                found.append((start, end + 1, line[index + 1:end]))
+                index = end + 1
+                continue
+            unclosed.add(quote)
+        index += 1
+    return found
+
+
+def joined_literals(line):
+    """The line with each run of joined literals replaced by one literal of their bodies."""
+    pieces, position, run = [], 0, []
+    for start, end, body in literals(line) + [(len(line) + 1, len(line) + 1, None)]:
+        if run and body is not None and LITERAL_GAP.fullmatch(line, run[-1][1], start):
+            run.append((start, end, body))
+            continue
+        if len(run) > 1:
+            pieces.append(line[position:run[0][0]] + '"' + ''.join(piece[2] for piece in run) + '"')
+            position = run[-1][1]
+        run = [(start, end, body)]
+    return ''.join(pieces) + line[position:]
+
+
 def executable_form(line):
-    """The line as a program would build it: adjacent literals joined, hex, octal and unicode escapes decoded.
+    """The line as a program would build it: joined literals, hex, octal and unicode escapes decoded.
 
     A control character decodes to a space, so the result keeps the line's place.
     """
-    line = LITERAL_RUN.sub(lambda run: '"' + ''.join(literal[1:-1] for literal in re.findall(LITERAL, run[0])) + '"',
-                           line)
-
     def decoded(match):
         hexadecimal = match[1] or match[2] or match[3]
         point = int(hexadecimal, 16) if hexadecimal else int(match[4], 8)
         return chr(point) if 0x20 <= point <= 0x10ffff and not 0xd800 <= point <= 0xdfff else ' '
-    return BYTE_ESCAPE.sub(decoded, line)
+    return BYTE_ESCAPE.sub(decoded, joined_literals(line))
+
+
+def built_lines(lines):
+    """(text, last line index) for each line as a program builds it.
+
+    A statement continued across lines is built on its first line, and that line's
+    findings span every line it took; the lines it absorbed read as empty.
+    """
+    built, index = [], 0
+    while index < len(lines):
+        last = index
+        while (last + 1 < len(lines) and last - index + 1 < MAX_CONTINUED_LINES
+               and CONTINUED_HEAD.match(lines[last + 1]) and continues(lines[last])):
+            last += 1
+        if last == index:
+            built.append((executable_form(lines[index]), index))
+        else:
+            parts = [without_continuation(lines[n]) if n < last else lines[n] for n in range(index, last + 1)]
+            built.append((executable_form(' '.join(part.strip() for part in parts)), last))
+            built.extend(('', last) for _ in range(index + 1, last + 1))
+        index = last + 1
+    return built
+
+
+def without_continuation(line):
+    """The line without a trailing backslash and a trailing +, . or .. join operator."""
+    line = line.rstrip()
+    if line.endswith('\\'):
+        line = line[:-1].rstrip()
+    for operator in ('..', '+', '.'):
+        if line.endswith(operator):
+            return line[:-len(operator)].rstrip()
+    return line
+
+
+def continues(line):
+    tail = without_continuation(line)
+    found = literals(tail)
+    return bool(found) and found[-1][1] == len(tail)
 
 
 def decode_source(text):
@@ -183,7 +277,8 @@ def pii_findings(text, corpus):
             # ordinary code would turn every split synthetic fixture into contact data.
             forms = (source, executable_form(line)) if rule == 'credential-url' else (source,)
             if any(not RESERVED_MAIL.search(match[0].rpartition('@')[2]) if rule == 'pii-email'
-                   else real_password(match['secret']) if rule == 'credential-url' else True
+                   else real_password(match['secret']) if rule == 'credential-url'
+                   else address_shaped(match) if rule == 'pii-address' else True
                    for form in forms for match in regex.finditer(form)):
                 yield number, number, rule, ''
         normalized = tokens(source)
@@ -461,7 +556,8 @@ def scan(root, source, corpus, allowed, report_path=None):
     findings, sensitive_paths, pii_cache = set(), set(), {}
     if corpus:
         corpus = prepare_corpus(corpus)
-    chunks, changes, starts, digests, hits = [], [], [], [], []
+    # ends maps a built entry's line to the last blob line it took; None for the blob itself.
+    chunks, changes, starts, digests, hits, ends = [], [], [], [], [], []
     line, batch_bytes = 1, 0
 
     def flush():
@@ -480,7 +576,10 @@ def scan(root, source, corpus, allowed, report_path=None):
             offset = hit['line'] - starts[index]
             if offset == 0:
                 sensitive_paths.add(changes[index].path)
-            hits.append((index, offset, offset + hit['end'] - hit['line'], hit['rule'], ''))
+            last = offset + hit['end'] - hit['line']
+            if ends[index] is not None:
+                last = ends[index][min(last, len(ends[index]) - 1)]
+            hits.append((index, offset, last, hit['rule'], ''))
             secret_count += 1
         if (result.returncode == 1) != bool(secret_count):
             raise ValueError('gitleaks verdict/report disagreement')
@@ -493,6 +592,7 @@ def scan(root, source, corpus, allowed, report_path=None):
         starts.clear()
         digests.clear()
         hits.clear()
+        ends.clear()
 
     for change in source:
         path, raw = change.path, change.raw
@@ -502,13 +602,15 @@ def scan(root, source, corpus, allowed, report_path=None):
         # Uninspectable binary content is refused as a whole, never silently skipped.
         text = '' if opaque else raw.decode('utf-16' if utf16 else 'utf-8', errors='replace')
         filename_line = path.replace('\r', ' ').replace('\n', ' ')
-        inputs = [filename_line.encode('utf-8', 'surrogateescape') + b'\n' + text.encode('utf-8') + b'\n']
-        # gitleaks also reads the text as a program would build it, line for line, as a
-        # second entry for the same change whose filename line is empty.
-        built = '\n'.join(executable_form(source_line) for source_line in text.split('\n'))
-        if built != text:
-            inputs.append(b'\n' + built.encode('utf-8') + b'\n')
-        size = sum(map(len, inputs))
+        inputs = [(filename_line.encode('utf-8', 'surrogateescape') + b'\n' + text.encode('utf-8') + b'\n', None)]
+        # gitleaks also reads the text as a program would build it, as a second entry for
+        # the same change whose filename line is empty; a finding there spans the blob
+        # lines its built line took.
+        built = built_lines(text.split('\n'))
+        built_text = '\n'.join(form for form, _ in built)
+        if built_text != text:
+            inputs.append((b'\n' + built_text.encode('utf-8') + b'\n', [0] + [last + 1 for _, last in built] + [0]))
+        size = sum(len(secret_input) for secret_input, _ in inputs)
         if chunks and batch_bytes + size > 8 * 1048576:
             flush()
             line, batch_bytes = 1, 0
@@ -520,10 +622,11 @@ def scan(root, source, corpus, allowed, report_path=None):
                 pii_cache[digest] = list(pii_findings(text, corpus))
             hits.extend((index, *hit) for hit in pii_cache[digest])
         hits.extend((index, 0, 0, rule, fingerprint) for _, _, rule, fingerprint in pii_findings(path, corpus))
-        for secret_input in inputs:
+        for secret_input, span in inputs:
             starts.append(line)
             changes.append(change)
             digests.append(digest)
+            ends.append(span)
             chunks.append(secret_input)
             line += secret_input.count(b'\n')
         batch_bytes += size
