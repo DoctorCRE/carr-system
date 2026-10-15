@@ -382,10 +382,92 @@ class TestReaper(unittest.TestCase):
         self.dispatch(p)
         self.kept(p, 'uncommitted')
 
+    def test_registered_sibling_outside_configured_locations_stays_keep(self):
+        p = self.base / 'outside-configured-locations'
+        self.git(self.root, 'worktree', 'add', '-qb', 'outside', str(p))
+        self.age(p)
+        report = self.run_reaper()
+        self.assertEqual(self.row(report, p)['action'], 'keep')
+        self.assertIn('outside configured locations', self.row(report, p)['reason'])
+        self.assertTrue(p.exists())
+        info = reaper.inventory(p)
+        with self.assertRaisesRegex(RuntimeError, 'outside configured locations'):
+            self.engine().remove(reaper.Candidate(p, 'worktree'), info)
+        self.assertTrue(p.exists())
+
+    def test_location_symlink_escape_and_final_recheck(self):
+        p = self.clone()
+        engine = self.engine()
+        info = reaper.inventory(p)
+        self.config['locations'] = []
+        with self.assertRaisesRegex(RuntimeError, 'outside configured locations'):
+            engine.remove(reaper.Candidate(p, 'scratch'), info)
+        self.assertTrue(p.exists())
+        outside = self.base / 'escaped-worktree'
+        self.git(self.root, 'worktree', 'add', '-qb', 'escaped', str(outside))
+        self.age(outside)
+        alias = self.scratch / 'alias'
+        alias.symlink_to(self.base, target_is_directory=True)
+        self.config['locations'] = [{'pattern': str(self.scratch / '*/*'), 'kind': 'scratch'}]
+        with self.assertRaisesRegex(ValueError, 'scratch directory'):
+            engine.register([alias / outside.name], 'one')
+        report = engine.run()
+        self.assertEqual(self.row(report, outside)['action'], 'keep')
+        self.assertIn('outside configured locations', self.row(report, outside)['reason'])
+        self.assertTrue(outside.exists())
+
+    def test_session_hook_registration_obeys_narrow_config(self):
+        outside = self.root / 'out/previously-hardcoded'
+        outside.mkdir(parents=True)
+        allowed = self.scratch / 'allowed'
+        allowed.mkdir()
+        cfg = self.base / 'config.json'
+        cfg.write_text(json.dumps(self.config))
+        args = ['--root', str(self.root), '--config', str(cfg), '--session', 'one']
+        for p in (outside, allowed):
+            hook.main(args + ['--register', str(p)], event={})
+        registry = self.engine().registry()
+        self.assertNotIn(str(outside), registry)
+        self.assertEqual(registry[str(allowed)]['session'], 'one')
+
+    def test_old_open_pr_always_kept_closed_merged_and_absent_follow_safety(self):
+        p = self.scratch / 'wt'
+        self.git(self.root, 'worktree', 'add', '-qb', 'feature', str(p))
+        self.config['locations'][0]['kind'] = 'worktree'
+        self.age(p)
+        for state, merged, expected in [('open', None, 'keep'),
+                ('closed', None, 'would_remove'), ('closed', '2020-01-01T00:00:00Z', 'would_remove')]:
+            with self.subTest(state=state, merged=merged):
+                self.pulls.rows = [dict(branch='feature', state=state, merged_at=merged,
+                                       updated_at='2020-01-01T00:00:00Z')]
+                self.assertEqual(self.row(self.run_reaper(), p)['action'], expected)
+        self.pulls.rows = []
+        self.assertEqual(self.row(self.run_reaper(), p)['action'], 'would_remove')
+        (p / 'file').write_text('uncommitted')
+        self.kept(p, 'uncommitted')
+
+    def test_denied_native_ps_keeps_every_candidate(self):
+        paths = [self.clone('one'), self.clone('two')]
+        engine = self.engine()
+        engine.processes = reaper.Processes()
+        original = reaper.command
+        def denied(argv, **kwargs):
+            if argv[0] == 'ps':
+                raise PermissionError('Operation not permitted: ps')
+            return original(argv, **kwargs)
+        with patch.object(reaper, 'command', side_effect=denied):
+            report = engine.run(execute=True)
+        self.assertEqual(report['would_free_bytes'], 0)
+        self.assertEqual(report['freed_bytes'], 0)
+        for p in paths:
+            self.assertTrue(p.exists())
+            self.assertEqual(self.row(report, p)['action'], 'keep')
+            self.assertIn('ps', self.row(report, p)['reason'])
+
     def test_recent_open_pr_and_unknown_pr(self):
         p = self.clone()
         self.pulls.rows = [dict(branch='main', state='open', updated_at='2099-01-01T00:00:00Z')]
-        self.kept(p, 'open PR updated')
+        self.kept(p, 'open PR')
         self.pulls.rows = []
         self.pulls.failed = True
         self.kept(p, 'PR evidence unavailable')
@@ -551,10 +633,8 @@ class TestReaper(unittest.TestCase):
         p = self.clone()
         other = self.clone('other-session')
         engine = self.engine()
-        # Fixture scratch roots deliberately differ from the production roots.
-        with patch.object(engine, 'scratch_location', return_value=True):
-            engine.register([p], 'one')
-            engine.register([other], 'two')
+        engine.register([p], 'one')
+        engine.register([other], 'two')
         result = engine.run(execute=True, session='one')
         self.assertFalse(p.exists(), result)
         self.assertTrue(other.exists(), result)
@@ -566,7 +646,7 @@ class TestReaper(unittest.TestCase):
         self.assertTrue(other.exists(), result)
 
     def test_session_hook_register_and_stop_same_engine(self):
-        p = self.root / 'out/scratch-one'
+        p = self.scratch / 'scratch-one'
         p.mkdir(parents=True)
         cfg = self.base / 'config.json'
         cfg.write_text(json.dumps(self.config))
