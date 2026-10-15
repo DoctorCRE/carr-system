@@ -69,12 +69,6 @@
       "evidence": "ops/doctorcre-sibling-manifest.py docstring (added 7c75c878, #853, defect b7936d5d)"
     },
     {
-      "path": "ops/export-leak-guard-hashes.py",
-      "class": "hand_tool",
-      "reason": "A person with record-layer database access runs it to refresh security/client-hashes.json, the salted-hash corpus the leak guard reads; CI has no database credential, so no door can run it.",
-      "evidence": "39778c41 (#1590); its docstring and the read-only export queries in main()"
-    },
-    {
       "path": "ops/guidance-registry-check.py",
       "class": "inert",
       "reason": "Validator for the typed Guidance Registry proposal; nothing runs it because the registry has never been activated.",
