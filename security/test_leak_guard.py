@@ -517,8 +517,11 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(hook.returncode, 0, hook.stdout + hook.stderr)
         self.assertNotIn(value, hook.stdout + hook.stderr)
 
+    def credential_password(self):
+        return base64.b64encode(bytes(range(40, 58))).decode().rstrip('=').replace('/', 'Q').replace('+', 'R')
+
     def test_credential_urls_are_blocked_in_history(self):
-        password = base64.b64encode(bytes(range(40, 58))).decode().rstrip('=').replace('/', 'Q').replace('+', 'R')
+        password = self.credential_password()
         lines = ['url = "postgresql://user:' + password + '@127.0.0.1:5432/production"',
                  'MONGO=mongodb://app:' + password + '@db/app',
                  'DATABASE_URL=postgresql:' + '//user:${DB_PASSWORD}@db/app',
@@ -550,6 +553,58 @@ class LeakGuardTest(unittest.TestCase):
             self.assertEqual(result.returncode, 1, lines[number - 1][:12] + result.stderr)
             self.assertEqual(result.stdout, 'sample.py:2 github-pat\n')
             self.assertNotIn(value[:cut], result.stdout + result.stderr)
+
+    def test_other_escapes_and_literal_separators(self):
+        value = self.secret()
+        rest = value[len('ghp_'):]
+        forms = {'encoding=' + encoding: 'token = "' + ''.join(encoding % ord(char) for char in value) + '"'
+                 for encoding in ('\\%03o', '\\u%04x', '\\U%08x')}
+        forms.update({'separator=' + separator: 'token = "ghp_"' + separator + '"' + rest + '"'
+                      for separator in (' . ', ' .. ', ' , ')})
+        for name, line in forms.items():
+            with self.subTest(name):
+                (self.root / 'sample.py').write_text('# synthetic\n' + line + '\n')
+                self.git('add', 'sample.py')
+                result = self.run_guard('--staged', '--generic-only')
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn('sample.py:2 github-pat', result.stdout)
+                for shown in (value, rest, line):
+                    self.assertNotIn(shown, result.stdout + result.stderr)
+
+    def test_normalized_credential_url_is_scanned(self):
+        password = self.credential_password()
+        url = 'postgresql:' + '//user:' + password + '@127.0.0.1:5432/production'
+        lines = {'escaped': 'url = "' + ''.join('\\x%02x' % byte for byte in url.encode()) + '"',
+                 'concatenated': 'url = "postgresql:' + '//user:" + "' + password + '@127.0.0.1:5432/production"'}
+        for name, line in lines.items():
+            with self.subTest(name):
+                (self.root / 'sample.py').write_text(line + '\n')
+                self.git('add', 'sample.py')
+                result = self.run_guard('--staged', '--generic-only')
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn('sample.py:1 credential-url', result.stdout)
+                for shown in (password, line):
+                    self.assertNotIn(shown, result.stdout + result.stderr)
+
+    def test_credential_url_schemes_hosts_and_allowlist(self):
+        password = self.credential_password()
+        lines = ['mongodb+srv:' + '//user:' + password + '@db/production',
+                 'custom.1-2:' + '//user:' + password + '@[::1]/production',
+                 'https:' + '//user:' + password + '@localhost/production']
+        raw = ('\n'.join(lines) + '\n').encode()
+        (self.root / 'sample.txt').write_bytes(raw)
+        self.git('add', 'sample.txt')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        for number in range(1, 4):
+            self.assertIn(f'sample.txt:{number} credential-url', result.stdout)
+        self.assertNotIn(password, result.stdout + result.stderr)
+        allow = self.root / 'allow.json'
+        allow.write_text(json.dumps({'schema': 'leak-guard-allowlist.v1', 'entries': [{
+            'path': 'sample.txt', 'sha256': hashlib.sha256(raw).hexdigest(), 'rule': 'credential-url',
+            'reason': 'Synthetic credential URL qualification fixture.'}]}))
+        result = self.run_guard('--staged', '--generic-only', '--allowlist', str(allow))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_gitlink_filename_is_scanned(self):
         value = self.secret()

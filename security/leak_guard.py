@@ -95,14 +95,16 @@ def real_password(secret):
                 or secret.lower() in PLACEHOLDER_PASSWORDS)
 
 
-# A string literal, and a run of literals that a compiler joins: 'a' 'b' or "a" + "b".
+# A string literal, and a run of literals that a program joins: 'a' 'b', "a" + "b",
+# "a" . "b" (PHP, Perl), "a" .. "b" (Lua) or "a", "b" (an array join).
 LITERAL = r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\''
-LITERAL_RUN = re.compile('(?:' + LITERAL + r')(?:\s*\+?\s*(?:' + LITERAL + '))+')
-BYTE_ESCAPE = re.compile(r'\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8}))')
+LITERAL_RUN = re.compile('(?:' + LITERAL + r')(?:\s*(?:(?:\+|\.\.?|,)\s*)?(?:' + LITERAL + '))+')
+# \xNN, \uNNNN, \UNNNNNNNN, or a one-to-three digit octal \NNN no greater than 255.
+BYTE_ESCAPE = re.compile(r'\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|([0-3][0-7]{2}|[0-7]{1,2}))')
 
 
 def executable_form(line):
-    """The line as a program would build it: adjacent literals joined, hex and unicode escapes decoded.
+    """The line as a program would build it: adjacent literals joined, hex, octal and unicode escapes decoded.
 
     A control character decodes to a space, so the result keeps the line's place.
     """
@@ -110,7 +112,8 @@ def executable_form(line):
                            line)
 
     def decoded(match):
-        point = int(next(group for group in match.groups() if group), 16)
+        hexadecimal = match[1] or match[2] or match[3]
+        point = int(hexadecimal, 16) if hexadecimal else int(match[4], 8)
         return chr(point) if 0x20 <= point <= 0x10ffff and not 0xd800 <= point <= 0xdfff else ' '
     return BYTE_ESCAPE.sub(decoded, line)
 
@@ -173,13 +176,14 @@ def prepare_corpus(corpus):
 def pii_findings(text, corpus):
     words, numbers = [], []
     for number, line in enumerate(text.split('\n'), 1):
-        line = decode_source(line)
+        # The shaped rules also read the line as a program builds it; the client-data window reads the source.
+        forms = (decode_source(line), executable_form(line))
         for rule, regex in PII.items():
             if any(not RESERVED_MAIL.search(match[0].rpartition('@')[2]) if rule == 'pii-email'
                    else real_password(match['secret']) if rule == 'credential-url' else True
-                   for match in regex.finditer(line)):
+                   for form in forms for match in regex.finditer(form)):
                 yield number, number, rule, ''
-        normalized = tokens(line)
+        normalized = tokens(forms[0])
         words.extend(normalized)
         numbers.extend([number] * len(normalized))
     if corpus and corpus['_lengths']:
