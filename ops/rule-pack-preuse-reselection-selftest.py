@@ -1579,10 +1579,31 @@ with tempfile.TemporaryDirectory() as dispatch_tmp:
         os.environ.update(saved_env)
 
 
-# The Bash route (production route rail) fires on every supported cloud launch
-# form, wherever the flag sits among the options, and not on a local session.
+# Rule ede4b241 (cloud model choice) is still PROPOSED, so since 2026-10-15
+# (loop 1304, 2aca9c7) rule-routes.v1.json carries no route for it and the
+# production route rail delivers it nowhere. Its reviewed cloud-launch route is
+# kept here verbatim from the row that left, so the launch-form coverage below
+# still runs against the real matcher. On approval the row returns to
+# rule-routes.v1.json and these checks go back to the production rail.
+PROPOSED_CLOUD_ROUTE = {
+    "kind": "trigger",
+    "tools": ["Agent", "mcp__*__create_session", "mcp__*__create_trigger"],
+    "verbs": [],
+    "bash_patterns": [
+        "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*"
+        "--(?:remote|cloud)(?=[\\s=;&|)<>]|$)",
+        "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*"
+        "--environment(?:[ \\t]+|=)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)",
+    ],
+}
+check("the production route file carries no route for proposed ede4b241",
+      "ede4b241" not in ROUTES["rules"])
+
+
+# The proposed route fires on every supported cloud launch form, wherever the
+# flag sits among the options, and not on a local session.
 def _cli_routed(command):
-    return "ede4b241" in routed_for("Bash", {"command": command})
+    return routes_lib.route_matches(PROPOSED_CLOUD_ROUTE, "Bash", {"command": command})
 
 
 for cloud_command in (
@@ -1658,8 +1679,10 @@ with tempfile.TemporaryDirectory() as route_tmp:
         check("a neutral Bash command routes nothing",
               routed_for("Bash", {"command": "ls -la"}) == [])
 
-        # Model-choice advice follows cloud CLI arguments through the production
-        # route rail, including options before the dispatch flag.
+        # Model-choice advice follows cloud CLI arguments, including options
+        # before the dispatch flag. While ede4b241 is proposed the route is the
+        # in-test PROPOSED_CLOUD_ROUTE and the production rail must not deliver
+        # it; on approval this goes back to one validated receipt naming it.
         for command in (
                 'claude --remote "fix the bug"',
                 'claude --model sonnet --remote "fix the bug"',
@@ -1674,17 +1697,10 @@ with tempfile.TemporaryDirectory() as route_tmp:
             cloud_call = gen_payload(tool="Bash", tool_input={"command": command},
                                      session="cloud-cli-" + command, tool_use_id="cloud-cli")
             cloud_ids = rail.routed_rule_ids(cloud_call)
-            check("cloud CLI routes model-choice advice: " + command,
-                  "ede4b241" in cloud_ids, cloud_ids)
-            cloud_union = sorted(set(cloud_ids) | set(
-                contract.merge_trigger_delivery(rail.matched_triggers(cloud_call))[2]))
-            cloud_runner = Runner(route_result(cloud_union))
-            cloud_output = rail.process(cloud_call, runner=cloud_runner)
-            cloud_receipt = json.loads(context(cloud_output)) if cloud_output else {}
-            check("cloud CLI delivers model-choice advice in one validated receipt: " + command,
-                  len(cloud_runner.calls) == 1
-                  and "ede4b241" in cloud_receipt.get("rule_ids", [])
-                  and routes_lib.validate_route_receipt(cloud_receipt, repo=REPO))
+            check("cloud CLI matches the proposed model-choice route: " + command,
+                  _cli_routed(command))
+            check("cloud CLI delivers no proposed rule through the production rail: " + command,
+                  "ede4b241" not in cloud_ids, cloud_ids)
         for command in (
                 'claude --remote-control',
                 'claude --model sonnet --remote-control "local session"',
@@ -1698,7 +1714,7 @@ with tempfile.TemporaryDirectory() as route_tmp:
                 'claude --model sonnet && echo --remote',
                 'my-claude --cloud "fix the bug"'):
             check("local CLI or flag prefix stays silent for model choice: " + command,
-                  "ede4b241" not in routed_for("Bash", {"command": command}))
+                  not _cli_routed(command))
 
         # Path globs, and the path_rule kind carries them.
         hook_ids = set(routed_for("Write", {"file_path": str(REPO / "hooks/x-gate.py"),
