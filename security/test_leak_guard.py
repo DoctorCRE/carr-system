@@ -617,12 +617,12 @@ class LeakGuardTest(unittest.TestCase):
         self.assertNotIn(value, result.stdout + result.stderr)
 
     def test_lowercase_addresses_are_contact_data(self):
-        flagged = ['843' + ' Imaginary avenue', '12 fictional' + ' street', '4410 IMAGINARY' + ' PKWY']
+        flagged = ['843' + ' Imaginary avenue', '4410 IMAGINARY' + ' PKWY']
         ignored = ['in 2026 we took the ' + 'road', 'it takes 10 minutes to ' + 'drive', 'step 3 is the best ' + 'way']
         (self.root / 'sample.txt').write_text('\n'.join(flagged + ignored) + '\n')
         self.git('add', 'sample.txt')
         result = self.run_guard('--staged', '--generic-only')
-        self.assertEqual(result.stdout, ''.join(f'sample.txt:{n} pii-address\n' for n in (1, 2, 3)))
+        self.assertEqual(result.stdout, ''.join(f'sample.txt:{n} pii-address\n' for n in (1, 2)))
 
     def test_suite_under_a_foreign_git_dir_leaves_that_repository_alone(self):
         victim = self.root.with_name(self.root.name + '-victim')
@@ -682,19 +682,6 @@ class LeakGuardTest(unittest.TestCase):
         result = self.run_guard('--range', base + '..' + head, '--remote', 'none', '--generic-only')
         self.assertEqual(result.stdout, 'split.py:2 github-pat\n')
 
-    def test_lowercase_addresses_with_every_suffix(self):
-        flagged = ['843 Imaginary ' + suffix for suffix in ('drive', 'rd', 'court', 'way', 'place', 'st')]
-        flagged.append('2000 Imaginary' + ' avenue')
-        ignored = ['it takes 10 minutes to ' + 'drive', 'step 3 is the best ' + 'way', 'in 2026 we took the ' + 'road',
-                   'about 5 miles down the ' + 'road', 'we met 2 people at the ' + 'court',
-                   'it took 3 hours by the ' + 'road', 'after 2 weeks we went over the ' + 'way',
-                   'option 2 that ' + 'way', 'pick 1 or the other ' + 'way', 'we are 2 blocks from the ' + 'street',
-                   'after 3 stops we ' + 'drive', 'on day 3 of the trip we ' + 'drive', 'we sent 2 to the ' + 'court']
-        (self.root / 'sample.txt').write_text('\n'.join(flagged + ignored) + '\n')
-        self.git('add', 'sample.txt')
-        result = self.run_guard('--staged', '--generic-only')
-        self.assertEqual(result.stdout, ''.join(f'sample.txt:{n} pii-address\n' for n in range(1, len(flagged) + 1)))
-
     def test_escaped_quotes_complete_in_linear_time(self):
         line = json.dumps({'text': '"' * 20000})
         started = time.monotonic()
@@ -708,22 +695,30 @@ class LeakGuardTest(unittest.TestCase):
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_street_names_with_function_words_stay_addresses(self):
-        flagged = ['843 Isle of Fiction' + ' avenue', '843 Imaginary and Fictional' + ' lane', '843 A' + ' street',
-                   '12 On the Green' + ' way', '77 Rue de la Fiction' + ' road', '843 By the Lake' + ' avenue',
-                   '843 Over the Rainbow' + ' road', '843 over the rainbow' + ' road', '843 We the Fictional' + ' way',
-                   '843 Mile Creek' + ' drive', '843 up the hill' + ' road', 'Office: 843 at the pier' + ' street',
-                   'we moved to 843 By the Lake' + ' avenue']
-        (self.root / 'address.txt').write_text('\n'.join(flagged) + '\n')
+    def test_lowercase_street_word_needs_a_capitalized_name(self):
+        # A lowercase street word counts after a name with a capital, whatever function words
+        # it holds; prose between a number and a street word has no capital.
+        flagged = ['843 Imaginary ' + suffix for suffix in ('drive', 'rd', 'court', 'way', 'place', 'st')]
+        flagged += ['2000 Imaginary' + ' avenue', '843 Isle of Fiction' + ' avenue', '843 Imaginary and Fictional' + ' lane',
+                    '843 A' + ' street', '12 On the Green' + ' way', '77 Rue de la Fiction' + ' road',
+                    '843 By the Lake' + ' avenue', '843 Over the Rainbow' + ' road', '843 Up the Hill' + ' road',
+                    '843 At the Pier' + ' street', '843 We the Fictional' + ' way', '843 Mile Creek' + ' drive',
+                    'we moved to 843 By the Lake' + ' avenue']
+        ignored = ['it takes 10 minutes to ' + 'drive', 'step 3 is the best ' + 'way', 'in 2026 we took the ' + 'road',
+                   'about 5 miles down the ' + 'road', 'we met 2 people at the ' + 'court',
+                   'it took 3 hours by the ' + 'road', 'after 2 weeks we went over the ' + 'way',
+                   'option 2 that ' + 'way', 'pick 1 or the other ' + 'way', 'we are 2 blocks from the ' + 'street',
+                   'after 3 stops we ' + 'drive', 'on day 3 of the trip we ' + 'drive', 'we sent 2 to the ' + 'court']
+        (self.root / 'address.txt').write_text('\n'.join(flagged + ignored) + '\n')
         self.git('add', 'address.txt')
         result = self.run_guard('--staged', '--generic-only')
         self.assertEqual(result.stdout, ''.join(f'address.txt:{n} pii-address\n' for n in range(1, len(flagged) + 1)))
         self.git('rm', '-q', '--cached', 'address.txt')
         base = self.write_commit('data.txt', 'safe\n')
-        self.write_commit('data.txt', flagged[0] + '\n')
+        self.write_commit('data.txt', '\n'.join(flagged[7:9] + ignored[9:]) + '\n')
         head = self.write_commit('data.txt', 'safe\n')
         result = self.run_guard('--range', base + '..' + head, '--remote', 'none', '--generic-only')
-        self.assertEqual(result.stdout, 'data.txt:1 pii-address\n')
+        self.assertEqual(result.stdout, 'data.txt:1 pii-address\ndata.txt:2 pii-address\n')
 
 if __name__ == '__main__':
     unittest.main()

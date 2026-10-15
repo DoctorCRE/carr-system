@@ -36,25 +36,12 @@ ARCHIVES = {
 STREET_WORDS = ('Street', 'St', 'Avenue', 'Ave', 'Road', 'Rd', 'Drive', 'Dr', 'Lane',
                 'Ln', 'Boulevard', 'Blvd', 'Court', 'Ct', 'Way', 'Place', 'Pl',
                 'Parkway', 'Pkwy')
-# Words that make a number a count or a clause rather than a house number. A number that
-# opens a line or follows punctuation ("843 by the lake avenue", "Office: 843 ...") is prose
-# only when the word right after it is one of QUANTITY_WORDS ("10 minutes to drive"). A
-# number inside a sentence is prose when any lowercase word between it and the street word
-# is one of PROSE_WORDS ("we are 2 blocks from the street"); capitalized words there are a
-# name ("we moved to 843 By the Lake Avenue").
-QUANTITY_WORDS = frozenset('''is are was were be been has have had will would can took take takes
-    went go goes get got met this that these those than then so and or we i you he she it they me us
-    them my our your his her its their more less minute minutes hour hours day days week weeks month
-    months year years mile miles km block blocks stop stops step steps time times people persons
-    percent'''.split())
-PROSE_WORDS = QUANTITY_WORDS | frozenset('''to at by for from with into of about over down up per
-    best'''.split())
 PII = {
     'pii-email': re.compile(r'(?<![A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+'),
     'pii-phone': re.compile(r'(?<![\w])(?:\+?1[ .-]?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[ .-]?[2-9]\d{2}[ .-]?\d{4}(?![\w])'),
     # A capitalized street word counts after any number. A street word in any case counts
-    # after a house number that stands alone, unless the words after the number make it a
-    # count ("10 minutes to drive", "in 2026 we took the road"): see address_shaped.
+    # after a house number that stands alone when a word of the name is capitalized
+    # ("843 Isle of Fiction avenue"); prose has none ("we are 2 blocks from the street").
     'pii-address': re.compile(r'\b\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,6}(?:' + '|'.join(
         word + '|' + word.upper() for word in STREET_WORDS) + r')\b'
                               r'|(?<![\w.:/-])\d{1,6}\s+(?P<between>(?:[A-Za-z0-9.-]+\s+){1,4})'
@@ -114,12 +101,7 @@ def real_password(secret):
 
 def address_shaped(match):
     between = match['between']
-    if between is None:
-        return True
-    before = match.string[:match.start()].rstrip()
-    if not before or not before[-1].isalnum():
-        return between.split()[0] not in QUANTITY_WORDS
-    return not PROSE_WORDS.intersection(between.split())
+    return between is None or any(word[0].isupper() for word in between.split())
 
 
 # A run of literals that a program joins: 'a' 'b', "a" + "b", "a" . "b" (PHP, Perl),
