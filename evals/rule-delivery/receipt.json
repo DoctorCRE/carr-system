@@ -2,16 +2,16 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:fc1a607ccf61fba3a1e6ffc1c3da1264aa0313f7b2839d4d2b5a256983d474d8",
+    "configuration_fingerprint": "sha256:f173d85112e77e211ea2ba5134452d6bcf15a68bf37222dfb625fde8097d7ad8",
     "harness_id": "evals/rule-delivery/run_eval.py",
-    "harness_version": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6",
+    "harness_version": "2cf72d99d6f98e402758ce4a45c8e41179fdb784950bf20ece6ef362efc42cfe",
     "model_id": "deterministic-no-model",
     "native_session_ref": "01a12901-c908-7513-b43b-21aa1c012fea",
     "provider_id": "none",
     "surface": "offline_programmatic"
   },
   "cases": {
-    "should_not_fire": 146,
+    "should_not_fire": 86,
     "sources": [
       "production_trace",
       "human_judged_hard_case"
@@ -20,7 +20,7 @@
     "total": 338,
     "train": 212
   },
-  "change": "Deliver sizing rule 8400cd3d through executed verb and bash_family trigger rows at the shapes that start or hand off new work, replacing its content_regex row that no longer runs.",
+  "change": "Guidance Registry inputs follow the live rule inventory (loop 1304, PR 1750): 14 approved judgment rules enter the reviewed map, manifest, classes, triage and trigger tables; 4 retired or still-proposed rules leave them, and the still-proposed cloud-model-choice rule ede4b241 leaves the route file and selection corpus until admitted. The 14 rules' Jev-compiled trigger proposals went to an independent reviewer: 2 promoted to cue delivery, 12 rejected as imprecise and left residual (pack fallback, judged at run time). Expectations v3: hard case h-pos-gmail-send relabelled should_not_fire (its rule 9b081605 retired 2026-08-01) and rules admitted after the gold was labelled (pending_gold.v1.json) are ungraded rather than charged as false deliveries.",
   "cost": {
     "baseline_usd_per_case": 0.0,
     "candidate_usd_per_case": 0.0
@@ -78,14 +78,14 @@
     },
     {
       "baseline": {
-        "ci_high": 0.4970414201183432,
-        "ci_low": 0.2810810810810811,
-        "score": 0.39375
+        "ci_high": 0.30346820809248554,
+        "ci_low": 0.1452513966480447,
+        "score": 0.2215568862275449
       },
       "candidate": {
-        "ci_high": 0.4970414201183432,
-        "ci_low": 0.2810810810810811,
-        "score": 0.39375
+        "ci_high": 0.30346820809248554,
+        "ci_low": 0.1452513966480447,
+        "score": 0.2215568862275449
       },
       "critical": true,
       "delta": {
@@ -103,20 +103,20 @@
     },
     {
       "baseline": {
-        "ci_high": 0.3223684210526316,
-        "ci_low": 0.20306513409961685,
-        "score": 0.260989010989011
+        "ci_high": 0.34256055363321797,
+        "ci_low": 0.2028985507246377,
+        "score": 0.2692307692307692
       },
       "candidate": {
-        "ci_high": 0.34080717488789236,
-        "ci_low": 0.21467391304347827,
-        "score": 0.2768817204301075
+        "ci_high": 0.3585746102449889,
+        "ci_low": 0.2161290322580645,
+        "score": 0.2857142857142857
       },
       "critical": true,
       "delta": {
-        "ci_high": 0.02344319533438205,
-        "ci_low": 0.007773335871565451,
-        "value": 0.015892709441096498
+        "ci_high": 0.027739186811151256,
+        "ci_low": 0.0053191489361702204,
+        "value": 0.01648351648351648
       },
       "dimension_id": "human-delivery-precision",
       "direction_vs_baseline": "improved",
@@ -165,11 +165,12 @@
       },
       "candidate": {
         "path": "evals/rule-delivery/evidence/candidate.jsonl",
-        "sha256": "4f2e87b3da6d2fc43d15c850e9733417958499f6e8fa760be56504e0a27116f8"
+        "sha256": "965094c8e226eb69fd68be208952bfd0d37127951965c33a7d228ff0956b13f9"
       }
     },
     "dependencies": {
-      "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
+      "evals/rule-delivery/hard_cases.v1.json": "00e0060a82b58aacec8ae4861d50460d97c155413bd39fadc39ceedde6681078",
+      "evals/rule-delivery/pending_gold.v1.json": "698b893cada71a48f413b1b5893de28d6e253c1c2dd20b42ceb6daa7dc6ad82a",
       "hooks/rule-pack-preuse-reselection.py": "c05412a674990f701adecb8b4ee43e6ff6dd28429c097d2ccf5ec4a9c7b3ecae",
       "lib/hook_runtime.py": "924ebbdf3a4af705e08250950c298fadb257025f0abb9a80c5666fdcfee643d6",
       "lib/rule_delivery_preuse.py": "144dba02f5555287b65d0eb0da050cd6a2cba6fd2ad5b8a9dbe8f920947b6914",
@@ -177,26 +178,26 @@
       "lib/rule_routes.py": "0e9a3db2afe77ca8c5de1279cf2934fd4de51c01dc841a830e3ab7a8d382d924",
       "mcp-server/src/jev-request-contract.v1.json": "0687a4cda641c5f08bb856de5b9f234f7e8a097e21e92762b5ed3f582ddca185",
       "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
-      "ops/config/rule-classes.v1.json": "65562d20e111656855175e9ee6fb6401e74f5b030aefc11a1e64c38abcf341a9",
-      "ops/config/rule-enforcement-map.json": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
-      "ops/config/rule-jev-triggers.v1.json": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
-      "ops/config/rule-jit-triggers.v1.json": "e1dc7cf4b5f48008d43c3ced64b9746f76a31fe2ce69048dbdf2f2da1d6c448a",
-      "ops/config/rule-routes.v1.json": "a7d07fd53511114bb4b380074f27628ff945f133be01ead9b46c7ad2f1baac75",
-      "ops/config/rule-selection-corpus.v1.json": "9d9aa0d84329fa29790ee36825caf22924b33717ee152f15c02e81d6872a7454",
+      "ops/config/rule-classes.v1.json": "fec56bcff6575c469466c4758b42b8cbf42d7de2daf0de75dc131ded1950401a",
+      "ops/config/rule-enforcement-map.json": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
+      "ops/config/rule-jev-triggers.v1.json": "f26d16ebdf35072ee9eee6eee07c4614a6d7131a379a917dbb40667afe87a62f",
+      "ops/config/rule-jit-triggers.v1.json": "ec7267a362f34c8e857dc72dfe538b882972e1cd8c230b53502e2e9de89a3fb8",
+      "ops/config/rule-routes.v1.json": "909287379da24360a6c9b6e846d24f88ce97b0d458b62d70e915974241a5d5f2",
+      "ops/config/rule-selection-corpus.v1.json": "71fb2e258fd8428af1f5bc2ec1ed68285aa0eba2fc966f49e01eab1d763f9845",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
       "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
-      "ops/fixtures/rule-delivery-eval/cases.v2.json": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
+      "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
       "ops/machine_envelope.py": "749970f4dfb838af4e6cd1e6537988a278fc0006a02b32f665dfd0f943266c3f",
       "ops/rule_delivery_eval.py": "10723a68d807fc54538c5e25cd6eb92f8006abeb0e8741e4249fce26768660f0",
-      "ops/rule_trigger_compile.py": "26e0595e793aaba54df070f206edfa9d72f33d861f77741e0f3947bf7dbccdce",
+      "ops/rule_trigger_compile.py": "ff27baed857313205eae990ac5b02b9edaab7ff900e7eb0eb67ed0ca6fcbf1c5",
       "ops/rule_trigger_delivery.py": "b50ec3b9fc2b81d0bdf3ac8512818ffb4c9d46d460ad2024d4ccfa8774c48777",
       "ops/typesafe_client.py": "91acd006df639e545a5fe6890712507652219fadb3d972b03b1fed42f1fa086d",
       "tools/judge/interface.py": "2e0440cc85660f83f4456829006f3f00a956e414c4c72e8217ab1a22622f3ed2"
     },
     "expectations": {
-      "path": "evals/rule-delivery/expectations.v1.json",
-      "sha256": "e1a843ae09d271e8a1390209bd0519ecef9db771aa51ef20b570283f36ed2aaa",
-      "version": "rule-delivery-expectations/v1"
+      "path": "evals/rule-delivery/expectations.v3.json",
+      "sha256": "95f5aa5ab29ac117829afd9dd6b9a5beecdd029a8c8c82860b31b59e9e7d19f7",
+      "version": "rule-delivery-expectations/v3"
     },
     "scorer": {
       "function": "score_receipt",
@@ -204,7 +205,7 @@
     },
     "source": {
       "evals/rule-delivery/make_report.py": "868f75651f7b80d6303d293a77ea151f4a8b69ed3ca49122cc474ac03ce86b26",
-      "evals/rule-delivery/run_eval.py": "3f049576a98b237d34ae4a664a287f8b1b13508d635838d06d9270e69ad2f4a6"
+      "evals/rule-delivery/run_eval.py": "2cf72d99d6f98e402758ce4a45c8e41179fdb784950bf20ece6ef362efc42cfe"
     }
   },
   "grader": {
@@ -217,7 +218,7 @@
       "result": "pass"
     }
   },
-  "measured_on": "2026-10-13",
+  "measured_on": "2026-10-14",
   "min_useful_gain": 0.7,
   "noise_floor": 0.3,
   "notes": [
@@ -267,6 +268,6 @@
       ]
     },
     "decision": "ship",
-    "statement": "full-text-availability retains every class B/C gold occurrence. Joe accepted the remaining class D/E full-text drop in decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01. The critical flag remains true; only that measured D/E loss is accepted, with B/C gaps retained until their routes are fixed. Other dimensions remain unchanged."
+    "statement": "human-delivery-precision improved (0.2692 -> 0.2857, CI [+0.0053, +0.0277]): the route file no longer delivers the proposed rule ede4b241 and the two reviewed cue sets deliver only where their rules bind; human-required-recall and envelope-prompt-clean-delivery are unchanged. full-text-availability 1.0 -> 0.6764 is the accepted D/E boot tradeoff (decision 1616f64c), unchanged by this branch. Both arms are graded under expectations v3, which leaves the 14 newly admitted rules ungraded until the gold covers them; their deliveries are therefore neither credited nor charged here, and the Work Request to extend the gold is filed. Cost at parity (no provider spend either arm)."
   }
 }

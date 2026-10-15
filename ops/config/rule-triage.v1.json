@@ -1,9 +1,9 @@
 {
   "counts": {
     "core": 20,
-    "gate": 61,
+    "gate": 60,
     "gone": 0,
-    "jit": 131
+    "jit": 142
   },
   "fallback_narrowing": {
     "delegation-council": {
@@ -27,7 +27,7 @@
       ]
     }
   },
-  "generated_note": "Triage of the 219 active rules into gate/jit/core/gone homes. Classification and tooling only per S7 scope boundary; no rule was retired, amended, or taught by producing this file. Source data: standing-context (205 rules, full text) + ops/config/rule-enforcement-map.json rule_controls (all 219, including the 14 vendor-intros-pack rules that standing-context does not surface to this session -- see defect ad4e25bd-3c98-4334-a7d3-f53c8158711f). ROWS PRUNED 2026-08-27 (WR-000019 rule-retirement batch): Joe accepted and executed the batch this slice's 11 GONE rows named (each already carrying its merge_target in this file); the 11 rows are removed from `rules` and `counts.gone` moves 11 -> 0, keeping this file in exact id-for-id parity with the now-208-row ops/config/rule-enforcement-map.json rule_controls, per ops/rule-triage-selftest.py's coverage checks. The 219/205 figures above describe the file as generated at S7 time and are left as historical record. LIVE PARITY REPAIRED 2026-09-23: removed five retired ids and added three active rules (204391be, a2e78f48, b7ec8f3b) with their existing production pack memberships; current map and triage each carry 209 active rules. 2026-09-29: rule ede4b241 (cloud model choice) added as a JIT row with a delegation-council dispatch detector; current map and triage each carry 210 active rules. 2026-10-08: rule 8400cd3d (new-work sizing) added as a JIT row with planning-entry detectors; map and triage remain in id-for-id parity. 2026-10-12: rule 19ebbeb3 (a detected bug is recorded and addressed in the same session) added as a GATE row carried by the new unfiled_bug Stop gate (hooks/unfiled-bug-stop-gate.py); map and triage remain in id-for-id parity.",
+  "generated_note": "Triage of the 219 active rules into gate/jit/core/gone homes. Classification and tooling only per S7 scope boundary; no rule was retired, amended, or taught by producing this file. Source data: standing-context (205 rules, full text) + ops/config/rule-enforcement-map.json rule_controls (all 219, including the 14 vendor-intros-pack rules that standing-context does not surface to this session -- see defect ad4e25bd-3c98-4334-a7d3-f53c8158711f). ROWS PRUNED 2026-08-27 (WR-000019 rule-retirement batch): Joe accepted and executed the batch this slice's 11 GONE rows named (each already carrying its merge_target in this file); the 11 rows are removed from `rules` and `counts.gone` moves 11 -> 0, keeping this file in exact id-for-id parity with the now-208-row ops/config/rule-enforcement-map.json rule_controls, per ops/rule-triage-selftest.py's coverage checks. The 219/205 figures above describe the file as generated at S7 time and are left as historical record. LIVE PARITY REPAIRED 2026-09-23: removed five retired ids and added three active rules (204391be, a2e78f48, b7ec8f3b) with their existing production pack memberships; current map and triage each carry 209 active rules. 2026-09-29: rule ede4b241 (cloud model choice) added as a JIT row with a delegation-council dispatch detector; current map and triage each carry 210 active rules. 2026-10-08: rule 8400cd3d (new-work sizing) added as a JIT row with planning-entry detectors; map and triage remain in id-for-id parity. 2026-10-12: rule 19ebbeb3 (a detected bug is recorded and addressed in the same session) added as a GATE row carried by the new unfiled_bug Stop gate (hooks/unfiled-bug-stop-gate.py); map and triage remain in id-for-id parity. 2026-10-13 (loop 1304, WR-000284): the 14 rules approved since the August review added as JIT rows delivered by their reviewed packs (661d7757, f673326b, a3da3d39, 76fcbed6, 08c4eda2, 4a77c35d, 67e48aaf, a9fc3f0e, ac0a6579, 578fdd91, 486584d6, 07dde434, cfe6b5c6, c363bd8b); retired 9b081605 and 5697071b and still-proposed ede4b241 and 8400cd3d removed with the map; map and triage remain in id-for-id parity.",
   "rules": [
     {
       "home": "jit",
@@ -49,6 +49,20 @@
       "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Cheapest-window timing: present structural changes as window math",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "Cheapest-window timing: present structural changes as window math"
+    },
+    {
+      "home": "jit",
+      "id": "07dde434",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires when a session designs or reviews anything a prospect or client will use.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "AI FEEDS CONVERSATIONS WITH JOE AND DELL; IT NEVER REPLACES THEM"
+    },
+    {
+      "home": "jit",
+      "id": "08c4eda2",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires when a session assigns, works or represents an Alabama lead or deal.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "ALABAMA LEADS ARE NO LONGER DELL-ONLY"
     },
     {
       "home": "jit",
@@ -483,6 +497,13 @@
       "title_gist": "DISCOVERY BEFORE SOLVING, IN EVERY CLIENT AND PROSPECT MEETING"
     },
     {
+      "home": "jit",
+      "id": "486584d6",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires when work needs a web console Joe is already signed into in Chrome on the MacBook.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A DASHBOARD STEP IN JOE'S SIGNED-IN BROWSER IS THE SESSION'S JOB, NOT A HANDOFF"
+    },
+    {
       "detector": {
         "kind": "verb",
         "pattern": "__(send_message|reply|forward|create_draft|update_draft)$"
@@ -506,6 +527,13 @@
       "id": "4a53ff82",
       "reason": "Worktree-per-session is the default; the canonical tree is the integration lane only. The baseline discipline for where a session is even allowed to write code.",
       "title_gist": "WORKTREE-PER-SESSION IS THE DEFAULT; THE CANONICAL TREE IS THE INTEGRATION LANE ONLY"
+    },
+    {
+      "home": "jit",
+      "id": "4a77c35d",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session fills or orders the Dot's work queue.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "THE DOT WORKS REAL TASKS THAT SAVE PAID CLAUDE TOKENS FIRST"
     },
     {
       "home": "jit",
@@ -585,15 +613,11 @@
       "title_gist": "WHEN JOE POSTS A LINK, THE QUOTED POST INSIDE IT IS PART OF THE SOURCE, NOT A FOOTNOTE"
     },
     {
-      "detector": {
-        "kind": "verb",
-        "pattern": "__(prepare-document|compare-lease-terms|record-executed-lease)$"
-      },
       "home": "jit",
-      "id": "5697071b",
-      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT",
+      "id": "578fdd91",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires when contact enrichment finds a wrong or blank field on a vendor, client, lead or party.",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
-      "title_gist": "LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT"
+      "title_gist": "ENRICHMENT APPLIES ITS CORRECTIONS; IT DOES NOT PARK THEM AS PROPOSALS"
     },
     {
       "detector": {
@@ -738,10 +762,24 @@
     },
     {
       "home": "jit",
+      "id": "661d7757",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session wants an independent review judgment on code, CI, a pull request, product or a CARR record.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Jev is available for all review work across coding, CI, pull requests, product, and CARR records"
+    },
+    {
+      "home": "jit",
       "id": "67580c28",
       "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE\u2026",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE - a board, the Deal"
+    },
+    {
+      "home": "jit",
+      "id": "67e48aaf",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git, scheduled-automation \u2014 fires when Joe pastes a token or credential into chat or shows one in a screenshot.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "No transcript-exposure warning for a credential Joe chose to paste"
     },
     {
       "home": "jit",
@@ -856,6 +894,13 @@
       "title_gist": "A BLOCKED MARKDOWN WRITE IS NOT REDIRECTED, IT IS RE-ROUTED THROUGH THE VERBS"
     },
     {
+      "home": "jit",
+      "id": "76fcbed6",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires when Joe sends a link, article, repo, video or other source.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "EVERY SOURCE JOE SENDS GETS ITS OWN FULL STUDY, STARTED WHEN IT ARRIVES"
+    },
+    {
       "detector": {
         "kind": "verb",
         "pattern": "__(who-do-we-know|counterparty-history)$"
@@ -901,27 +946,6 @@
       "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: A RED TEAM ASSIGNS DISTINCT LENSES, NEVER REDUNDANT VOTES \u2014 and one seat re-runs the\u2026",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "A RED TEAM ASSIGNS DISTINCT LENSES, NEVER REDUNDANT VOTES \u2014 and one seat re-runs the evidence instead of"
-    },
-    {
-      "detectors": [
-        {
-          "kind": "verb",
-          "pattern": "^(?:EnterPlanMode|Agent|RemoteTrigger|Workflow|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$"
-        },
-        {
-          "kind": "verb",
-          "pattern": "__(?:write-work-shape|report-problem|propose-ready-plan)$"
-        },
-        {
-          "kind": "bash_family",
-          "pattern": "\\bdispatch\\.py\\s+send\\b"
-        }
-      ],
-      "home": "jit",
-      "id": "8400cd3d",
-      "jit_trigger_hint": "Delivered by governance-rules when a session starts or hands off new work: EnterPlanMode, an Agent subagent, a RemoteTrigger or cloud-session builder, a Workflow, a dispatch.py send to a Codex desk, or the write-work-shape, report-problem and propose-ready-plan verbs.",
-      "reason": "Sizing belongs at the first planning action for new work. The trigger can detect that moment, while the session must judge whether the work is tiny, medium-large, or beyond one session.",
-      "title_gist": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP"
     },
     {
       "detector": {
@@ -1072,13 +1096,6 @@
       "title_gist": "Index upkeep: any multi-folder category gets a short INDEX.md, updated same session as changes"
     },
     {
-      "carrying_control": "no_send_worker",
-      "home": "gate",
-      "id": "9b081605",
-      "reason": "Already machine-enforced via control 'no_send_worker' (mcp-server/src/mcp.js); binds before outbound send. Failure mode on violation: capability absent",
-      "title_gist": "Email handover: drafts for Joe's action are emailed from the AI Gmail TO joe.bookout@carr.us"
-    },
-    {
       "detector": {
         "kind": "verb",
         "pattern": "__(new-deal|update-deal|patch-deal-field|reassign-deal|revert-deal-field)$"
@@ -1116,6 +1133,13 @@
       "jit_trigger_hint": "Deliver with engineering-git when a known defect is found and its repair is available.",
       "reason": "Autonomous repair binds when engineering work finds a known fix; the existing production load tag names engineering-git.",
       "title_gist": "AUTONOMOUS REPAIR OF KNOWN ISSUES"
+    },
+    {
+      "home": "jit",
+      "id": "a3da3d39",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires when a taught rule, decision or retirement is left waiting on Joe's approval.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "ASK JOE DIRECTLY FOR EVERY APPROVAL, IN THE SAME TURN, WITH AN INTERVIEW BOX"
     },
     {
       "home": "jit",
@@ -1158,10 +1182,24 @@
       "title_gist": "A CHECK MUST COMPARE THE ARTIFACT AGAINST WHAT IT SHOULD BE, AND A SUCCESS SIGNAL MUST BE DERIVED FROM"
     },
     {
+      "home": "jit",
+      "id": "a9fc3f0e",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake, source-study \u2014 fires when a session runs research or a fact-check.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "RESEARCH USES THE WHOLE INTERNET, AND THE RESEARCH-SITE INDEX IS A MEMORY, NOT A FENCE"
+    },
+    {
       "home": "core",
       "id": "ab814a26",
       "reason": "A rule ships with its enforcement, decided at creation; recitation is not enforcement. The meta-law this entire S7 triage exists to satisfy \u2014 every session authoring or reviewing a rule needs it.",
       "title_gist": "A RULE SHIPS WITH ITS ENFORCEMENT, DECIDED AT CREATION \u2014 RECITATION IS NOT ENFORCEMENT"
+    },
+    {
+      "home": "jit",
+      "id": "ac0a6579",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires when a session builds, reviews or recommends access for a client share-site page.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "CLIENT SHARE-SITE PASSWORDS STAY SIMPLE"
     },
     {
       "home": "jit",
@@ -1319,6 +1357,13 @@
     },
     {
       "home": "jit",
+      "id": "c363bd8b",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires when the orchestrator prepares to merge open PRs.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "BATCH PRS THAT TOUCH THE SAME FILES; NEVER REMERGE THEM ONE AT A TIME"
+    },
+    {
+      "home": "jit",
       "id": "c4a284b2",
       "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires on: FOR A QUESTION PRACTITIONERS HAVE ALREADY SOLVED AT SCALE, START FROM THE OBSERVED\u2026",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
@@ -1400,6 +1445,13 @@
       "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
       "reason": "A positioning rule about how a draft opens; no predicate can tell whether a draft actually led with the no-conflict framing. (No planned_control named; this is a drafting-quality judgment, not a checkable field.)",
       "title_gist": "Lead with the no-conflict framing when a counterparty could self-perform"
+    },
+    {
+      "home": "jit",
+      "id": "cfe6b5c6",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires when a session designs or reviews a new mechanism that defaults to shadow, dry-run or record-only.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "AN OBVIOUS IMPROVEMENT SHIPS LIVE, NOT IN SHADOW MODE"
     },
     {
       "carrying_control": "record_research",
@@ -1564,17 +1616,6 @@
       "title_gist": "CONSTRAINT, binding at the moment a session is about to say it HANDED OFF, SENT, DELIVERED, NOTIFIED or"
     },
     {
-      "detector": {
-        "kind": "verb",
-        "pattern": "^(?:Agent|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$"
-      },
-      "home": "jit",
-      "id": "ede4b241",
-      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session dispatches work to another model or launches a Claude Code cloud session (the Agent tool, or create_session / create_trigger on the Claude Code Remote server).",
-      "reason": "Fires on an occasion, not at every boot: the choice of model for a dispatched job is made at the moment of dispatch, so the rule is delivered by pack and moment. No gate can judge whether a job is well-scoped with a checkable done-condition; the delivery puts the routing rule in front of the session at that decision.",
-      "title_gist": "CLOUD MODEL CHOICE: pick the model by the work's shape; Sonnet 5.5 for well-scoped checkable work, Opus 5.5 for design, gates, eval design and reviews"
-    },
-    {
       "home": "jit",
       "id": "ede4c735",
       "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: WRITING-RULES BINDS PROSPECT-VISIBLE SURFACES ONLY",
@@ -1651,6 +1692,13 @@
       "id": "f5d97b4a",
       "reason": "Already machine-enforced via control 'costar_lane' (hooks/costar-lane-gate.py); binds a Chrome-extension tool call whose target host is costar.com. Failure mode on violation: PreToolUse deny",
       "title_gist": "CoStar is driven ONLY in the Claude desktop app's own Browser pane"
+    },
+    {
+      "home": "jit",
+      "id": "f673326b",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session grants or briefs an agent's access to CARR knowledge, records or tools.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Do not add access restrictions, data fences or protective steps Joe did not ask for"
     },
     {
       "carrying_control": "client_asset_packet",

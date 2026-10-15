@@ -633,6 +633,24 @@ class UnusableResponseTests(unittest.TestCase):
             self.ask("next call")
         self.assertEqual(self.worker_calls.count("paid_once"), 1)
 
+    def test_worker_daily_cap_is_not_retried_and_holds_every_paid_route_until_reset(self):
+        self.use_worker('local-verb identity -> fixture\nTOOL ERROR {"error": "jev_worker_daily_cap", '
+                        '"cap": 300, "count": 300, "resets_at": "2026-10-16T00:00:00.000Z"}\n')
+        with self.assertRaises(client.JevCallRefused) as caught:
+            self.ask("past the worker ceiling")
+        self.assertEqual(caught.exception.code, "jev_worker_daily_cap")
+        resets_at = "2026-10-03T00:00:00Z"  # the fixture clock's next UTC midnight
+        self.assertEqual(caught.exception.resets_at, resets_at)
+        self.assertEqual(self.requests, [], "no direct call past the Worker's ceiling")
+        [row] = self.rows()
+        self.assertEqual(row["server_error"], "worker_daily_cap")
+        with self.assertRaises(client.JevCallRefused) as caught:
+            self.ask("the next question")
+        self.assertEqual(caught.exception.code, "jev_worker_daily_cap")
+        self.assertEqual(self.worker_calls.count("paid_once"), 1, "the held route is not asked again")
+        self.assertEqual(self.requests, [])
+        self.assertEqual(client.active_pause(), {"scope": "jev_worker_daily_cap", "resets_at": resets_at})
+
     def test_worker_throttle_gets_one_bounded_direct_retry(self):
         self.use_worker(worker_vendor_failure(429, "http_status"))
         result = self.ask("throttled at the worker")

@@ -1569,9 +1569,11 @@ def _with_root_home(td, value=ROOT_FIXTURE, mode=0o600):
 
 
 def test_root_grant_probes():
-    from datetime import date, timedelta as _td
+    from datetime import datetime, timedelta as _td, timezone
     old_home = os.environ.get("HOME")
-    today = date.today()
+    # UTC, like the checker's first-sight and expiry stamps; a local date fails
+    # every evening after 19:00 Central when the two calendars disagree.
+    today = datetime.now(timezone.utc).date()
     try:
         inventory = json.loads((REPO / "ops" / "config" / "credential-inventory.v1.json").read_text())
         grants = json.loads((REPO / "ops" / "config" / "credential-root-grants.v1.json").read_text())
@@ -1649,8 +1651,10 @@ def test_root_grant_probes():
 def test_mint_lane_expiry_window():
     """A child with no provider-side expiry goes amber, then red, when the
     mint lane stops rotating it (PR #1725 review, low finding)."""
-    from datetime import date, timedelta as _td
-    today = date.today()
+    from datetime import datetime, timedelta as _td, timezone
+    # UTC, like the checker's first-sight and expiry stamps; a local date fails
+    # every evening after 19:00 Central when the two calendars disagree.
+    today = datetime.now(timezone.utc).date()
     real = ch.MINT_LANE_STATE_PATH
     ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, b"", b"")
     cred = _cred("neon-api-key", "shell_exit_status",

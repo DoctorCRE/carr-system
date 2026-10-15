@@ -771,7 +771,7 @@ let text = ""; for await (const chunk of process.stdin) text += chunk;
 const request = JSON.parse(text); let calls = 0, consumed = false;
 const ask = jevAskBinding({ TYPESAFE_API_KEY: "vendor-fixture", JEV_ADMISSION_SECRET: "offline-admission" },
   async () => { calls++; return new Response(JSON.stringify({model:"m",answers:{q:{noul:0.8}}})); },
-  {cache:null, reserveAttempt:async () => {
+  {cache:null, countPaidAttemptsToday:async () => 0, reserveAttempt:async () => {
     if(consumed) throw Error("already consumed"); consumed = true;
     return {key:"fixture",receipt_id:"fixture"};
   }});
@@ -940,6 +940,16 @@ class RegistryCoverageTests(unittest.TestCase):
         for entry in registry["sites"].values():
             self.assertLessEqual(entry["daily_budget"], client.JEV_COST_CONFIG["daily_paid_call_cap"],
                                  "each site limit sits beneath the shared admission cap")
+
+    def test_worker_ceiling_is_one_number_in_registry_worker_and_wrangler(self):
+        cap = json.loads(REGISTRY_PATH.read_text())["worker_daily_paid_call_cap"]
+        self.assertIs(type(cap), int)
+        self.assertGreater(cap, 0)
+        worker = (REPO / "mcp-server" / "src" / "jev-call-receipt.js").read_text()
+        self.assertEqual(re.findall(r"^const WORKER_DAILY_CAP_DEFAULT = (\d+);$", worker, re.M), [str(cap)])
+        wrangler = (REPO / "mcp-server" / "wrangler.toml").read_text()
+        self.assertEqual(re.findall(r'^JEV_WORKER_DAILY_CAP = "(\d+)"$', wrangler, re.M), [str(cap)] * 2,
+                         "[vars] and [env.staging.vars] each declare the ceiling")
 
     def test_every_paid_call_source_is_registered(self):
         registry = client.load_call_sites(REGISTRY_PATH)

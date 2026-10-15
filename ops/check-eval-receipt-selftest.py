@@ -1313,12 +1313,20 @@ class RuleDeliveryEvidenceChain(unittest.TestCase):
             self.assertIn("hooks/rule-pack-preuse-reselection.py", manifests[1])
 
     def test_verified_input_hashes_carry_forward(self):
-        """Frozen labels and unchanged compiler inputs retain their verified bytes."""
+        """Frozen labels and compiler inputs retain their verified bytes.
+
+        Pins move only with a named reason. 2026-10-15 (PR 1750): the hard
+        case h-pos-gmail-send was relabelled under expectations v2 (rule
+        9b081605 retired); retired rule 5697071b left cases.v2.json's
+        guidance_deferred group; rule_trigger_compile.py bounds candidates to
+        the Jev request contract's question cap and gained the reviewed
+        promote and apply-review doors.
+        """
         deps = self.r["evidence"]["dependencies"]
         for path, digest in {
-            "evals/rule-delivery/hard_cases.v1.json": "abc3a372b4ea3c25bd2b1db10850b3ebf1d5239049711ab3a015df378cd844ff",
-            "ops/fixtures/rule-delivery-eval/cases.v2.json": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
-            "ops/rule_trigger_compile.py": "26e0595e793aaba54df070f206edfa9d72f33d861f77741e0f3947bf7dbccdce",
+            "evals/rule-delivery/hard_cases.v1.json": "00e0060a82b58aacec8ae4861d50460d97c155413bd39fadc39ceedde6681078",
+            "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
+            "ops/rule_trigger_compile.py": "ff27baed857313205eae990ac5b02b9edaab7ff900e7eb0eb67ed0ca6fcbf1c5",
         }.items():
             self.assertEqual(deps.get(path), digest, path)
 

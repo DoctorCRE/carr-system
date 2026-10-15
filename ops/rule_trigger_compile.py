@@ -58,6 +58,17 @@ MAX_PHRASES = 10
 MAX_QUOTED = 8
 MAX_HISTORY = 10
 MAX_NEAR_MISS = 8
+# One Jev request carries every question for a rule: a Noul per candidate, a
+# Noul per near-miss probe and two rule-level Nouls. The Worker's request
+# contract caps the questions; a rule whose pack keywords alone overflow it
+# (67e48aaf, 58 candidates + 8 probes + 2 = 68 on 2026-10-13) was refused as
+# question_count_invalid before anything was sent, so the candidate list is
+# bounded to what the contract admits. Candidates are ordered by evidence
+# strength (statement words, phrases, quotes, verbs, commands, paths, tools,
+# history, then pack keywords), so the overflow drops the most generic cues.
+RULE_LEVEL_QUESTIONS = 2
+with open(os.path.join(REPO, "mcp-server", "src", "jev-request-contract.v1.json"), encoding="utf-8") as _fh:
+    MAX_QUESTIONS = int(json.load(_fh)["max_questions"])
 
 # Decision floors. Surfacing is biased toward delivery on purpose: a false
 # positive costs one paragraph a session already has room for, a false
@@ -275,6 +286,8 @@ def questions_for(rule, cands, near, client):
                       "packs": rule["packs"]},
              "candidates": {}, "near_miss_probes": {}}
     questions, index = {}, {}
+    room = MAX_QUESTIONS - len(near) - RULE_LEVEL_QUESTIONS
+    cands = list(cands)[:max(room, 0)]
     for i, (kind, value, origin) in enumerate(cands):
         qid = f"c{i:02d}"
         state["candidates"][qid] = {"kind": kind, "value": value}
@@ -394,6 +407,77 @@ def document(entries):
         "rules": rules,
         "proposals": proposals,
     }
+
+
+PROMOTABLE_MODES = {"triggered", "residual", "always_on"}
+
+
+def promote_proposals(doc, rule_ids, *, reviewer, note, reviewed_at):
+    """Move reviewed proposals into the delivered rules. The compiler files
+    every Jev result as a proposal (mode review_required); nothing delivers it
+    until a reviewer who did not run the compile attests to it here. The
+    promoted entry keeps the mode the compile proposed and records who
+    reviewed it, when, and why. Refuses an empty reviewer, an unknown id, and a
+    proposal whose proposed mode is not deliverable."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("proposals"), dict):
+        raise ValueError("no compiled document with proposals to promote")
+    reviewer = (reviewer or "").strip()
+    note = (note or "").strip()
+    if not reviewer or len(note.split()) < 6:
+        raise ValueError("promotion needs --reviewer and a --review-note of at least six words")
+    proposals, rules = dict(doc["proposals"]), dict(doc.get("rules") or {})
+    for rid in rule_ids:
+        entry = proposals.get(rid)
+        if entry is None:
+            raise ValueError(f"{rid}: not a pending proposal")
+        mode = entry.get("proposed_mode")
+        if mode not in PROMOTABLE_MODES:
+            raise ValueError(f"{rid}: proposed mode {mode!r} is not deliverable")
+        promoted = {k: v for k, v in entry.items() if k != "proposed_mode"}
+        promoted.update(mode=mode, reviewed_by=reviewer, reviewed_at=reviewed_at, review_note=note)
+        rules[rid] = promoted
+        del proposals[rid]
+    return document(list(rules.values()) + list(proposals.values()))
+
+
+def apply_review(doc, verdicts, *, reviewer, reviewed_at):
+    """Apply an independent reviewer's verdict file to the pending proposals.
+
+    `verdicts` maps rule id -> {"decision": "approve"|"reject", "reason": str}.
+    An approved proposal is promoted (see promote_proposals). A rejected one
+    becomes a `residual` rule: compiled against its current statement, judged
+    at run time, no deterministic trigger, with the rejection reason kept on
+    the entry so the next compile and the next reviewer see why. Refuses an
+    unknown id, an unknown decision, a reason under six words, and an empty
+    reviewer. Returns the new document and the (approved, rejected) id lists."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("proposals"), dict):
+        raise ValueError("no compiled document with proposals to review")
+    reviewer = (reviewer or "").strip()
+    if not reviewer:
+        raise ValueError("a review needs a reviewer who did not run the compile")
+    approved, rejected = [], []
+    for rid, verdict in sorted((verdicts or {}).items()):
+        decision = (verdict or {}).get("decision")
+        reason = ((verdict or {}).get("reason") or "").strip()
+        if rid not in doc["proposals"]:
+            raise ValueError(f"{rid}: not a pending proposal")
+        if decision not in ("approve", "reject"):
+            raise ValueError(f"{rid}: decision must be approve or reject, not {decision!r}")
+        if len(reason.split()) < 6:
+            raise ValueError(f"{rid}: the review reason needs at least six words")
+        (approved if decision == "approve" else rejected).append(rid)
+    out = doc
+    for rid in approved:
+        out = promote_proposals(out, [rid], reviewer=reviewer, note=verdicts[rid]["reason"].strip(),
+                                reviewed_at=reviewed_at)
+    proposals, rules = dict(out["proposals"]), dict(out.get("rules") or {})
+    for rid in rejected:
+        entry = proposals.pop(rid)
+        rules[rid] = {k: v for k, v in entry.items() if k not in ("proposed_mode", "triggers", "negatives")}
+        rules[rid].update(mode="residual", triggers={"keywords": {}, "verbs": {}, "commands": {}, "paths": {}, "tools": {}},
+                          negatives={}, reviewed_by=reviewer, reviewed_at=reviewed_at,
+                          review_note=verdicts[rid]["reason"].strip(), rejected_proposed_mode=entry.get("proposed_mode"))
+    return document(list(rules.values()) + list(proposals.values())), approved, rejected
 
 
 def canonical_bytes(doc):

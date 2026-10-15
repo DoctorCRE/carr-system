@@ -209,7 +209,13 @@ class PublicSourceGuardTests(unittest.TestCase):
         base = json.loads(subprocess.check_output([
             "git", "show", "0e1ca6525af547e829dba5286111f2aa21c3dcd6:ops/config/rule-jev-triggers.v1.json"], cwd=REPO))
         current = json.loads((REPO / "ops/config/rule-jev-triggers.v1.json").read_text())
+        admitted = set(json.loads((REPO / "ops/config/rule-admission-export.v1.json").read_text())["rules"])
         for key, row in base["rules"].items():
+            if key not in current["rules"]:
+                # A rule leaves the table only when it leaves admission (retired);
+                # a dropped row for a rule still admitted is a lost cue.
+                self.assertNotIn(key, admitted, (key, "dropped from the trigger table while still admitted"))
+                continue
             candidate = current["rules"][key]
             for field in ["always_on_probability", "negatives", "no_cue_probability"]:
                 self.assertEqual(row[field], candidate[field], (key, field))

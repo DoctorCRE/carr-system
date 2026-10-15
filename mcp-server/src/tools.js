@@ -2265,7 +2265,7 @@ async function latestFieldConflict(c, dealId, field, baseEventId) {
   let base = null;
   if (baseEventId !== null && baseEventId !== undefined) {
     const found = await c.query(
-      `select recorded_at, id from event
+      `select id from event
         where id=$1 and subject_type='deal' and subject_id=$2 and field=$3
         /* dealroom:base-event */`,
       [baseEventId, dealId, field],
@@ -2275,14 +2275,17 @@ async function latestFieldConflict(c, dealId, field, baseEventId) {
     base = found.rows[0];
   }
 
+  // The base's recorded_at stays inside SQL: read back through node-pg it is a
+  // millisecond Date, and the base event would then sort after its own bound.
   const newer = await c.query(
     `select e.id as event_id, e.actor_id, a.slug as actor, e.new_value -> $2 as value
        from event e join actor a on a.id=e.actor_id
       where e.subject_type='deal' and e.subject_id=$1 and e.field=$2
-        and ($3::timestamptz is null or (e.recorded_at, e.id) > ($3::timestamptz, $4::uuid))
+        and ($3::uuid is null or (e.recorded_at, e.id) >
+             (select b.recorded_at, b.id from event b where b.id=$3::uuid))
       order by e.recorded_at desc, e.id desc limit 1
       /* dealroom:latest-field-event */`,
-    [dealId, field, base?.recorded_at || null, base?.id || null],
+    [dealId, field, base?.id || null],
   );
   return newer.rows[0] || null;
 }

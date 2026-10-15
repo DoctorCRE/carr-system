@@ -48,6 +48,7 @@ def cmd_register(reg: desks.Registry, args) -> int:
         args.name, args.kind, socket=args.socket, model=args.model, cwd=args.cwd,
         family=getattr(args, "family", None), effort=getattr(args, "effort", None), sandbox=args.sandbox, add_dirs=args.add_dirs,
         permission_mode=getattr(args, "permission_mode", None),
+        network_access=getattr(args, "network_access", False),
     )
     if args.seat:
         entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)
@@ -148,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model", default=None)
     r.add_argument("--family", choices=codex_models.FAMILIES)
     r.add_argument("--effort", default=None, choices=list(desks.EFFORT_CHOICES))
+    r.add_argument("--network-access", action="store_true",
+                   help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--cwd", default=None)
     r.add_argument("--permission-mode", default=None,
                    help="dispatched desks use dontAsk only; other modes are refused and "
