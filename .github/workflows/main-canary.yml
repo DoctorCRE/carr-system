@@ -56,14 +56,14 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17
+        image: public.ecr.aws/docker/library/postgres:17
         env:
           POSTGRES_USER: carr_ci
           POSTGRES_PASSWORD: carr_ci
           POSTGRES_DB: carr_ci
         ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U carr_ci -d carr_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -169,6 +169,10 @@ jobs:
                  create role neondb_owner;
                end if;
              end \$\$;"
+
+      - name: Verify edge incident delivery
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-noise-incident-test.py
 
       - name: Run this group's check classes
         env:

@@ -17,9 +17,8 @@
 # capture-poll, a stopped rules-refresh, a Mac that is up but not working: every
 # dead-man check keeps pinging green, because the chain is fine.
 #
-# THE ALERT PATH IS THE FAILED WORKFLOW ITSELF. GitHub emails Joe when a
-# scheduled workflow fails, which is a channel with no dependency on the machine
-# being reported on. No new secret, no new service, no pager to configure.
+# Incident delivery uses one issue. The probe result remains in its run artifact.
+# Updating the body is silent; a recurrence reopens the recovered issue.
 #
 # READ-ONLY, AND THE SAME CREDENTIAL THE CLOUD BACKUP ALREADY USES.
 # BACKUP_DATABASE_URL connects as carr_backup (migrations/0119_backup_role.sql):
@@ -64,6 +63,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   liveness:
@@ -80,33 +80,16 @@ jobs:
       - name: Install the one dependency this needs
         run: pip install --disable-pip-version-check "psycopg[binary]"
 
-      # NEUTRAL WHEN UNCONFIGURED, following backup-nightly.yml's asymmetry: a
-      # SCHEDULED run with no credential exits clean and says so, so merging
-      # this file can never start emailing Joe about a secret that was never
-      # provisioned. edge-liveness.py returns 78 (EX_CONFIG) for that case, the
-      # same convention bin/nightly.sh and bin/run-scheduled.sh already use, and
-      # 78 is translated to success HERE rather than inside the script, so a
-      # human running it by hand still sees the honest code.
-      - name: Read the ledger from outside the machine it reports on
+      - name: Read the ledger and deliver the incident
         env:
           BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
-        run: |
-          set +e
-          python ops/edge-liveness.py
-          rc=$?
-          set -e
-          # 78 covers both "no credential here" and "the ledger is unreachable".
-          # Neither is a service going quiet, so neither may fail this workflow
-          # and send Joe an alert whose text would be false. A WARNING rather
-          # than a notice, because an unreachable ledger that persists is worth
-          # seeing in the actions list — it means this watchdog has been blind,
-          # and a blind watchdog reporting nothing looks exactly like a healthy
-          # system. ops/degraded-mode-exercise.py is what caught this.
-          if [ "$rc" -eq 78 ]; then
-            echo "::warning::The ledger could not be read, so nothing was checked this run. This is NOT an all-clear — see the log for which case applied."
-            exit 0
-          fi
-          if [ "$rc" -ne 0 ]; then
-            echo "::error::A registered service has gone quiet. The failure of this workflow IS the alert; the log above names which."
-          fi
-          exit $rc
+          GH_TOKEN: ${{ github.token }}
+        run: python ops/ci-noise-incident.py
+      - name: Retain the probe verdict independently of incident delivery
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: edge-liveness-probe-${{ github.run_id }}
+          path: edge-liveness-probe.json
+          if-no-files-found: error
+          retention-days: 14
