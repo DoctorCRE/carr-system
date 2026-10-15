@@ -1,0 +1,8 @@
+{
+  "models": [
+    "claude-haiku-4-5-20251001"
+  ],
+  "first_session": "b3664669-5dd5-474f-871f-b4fa883bc0ec",
+  "repeats": 5,
+  "cli": "2.1.287 (Claude Code)"
+}

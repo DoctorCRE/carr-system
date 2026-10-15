@@ -1,0 +1,181 @@
+{
+  "schema_version": 2,
+  "surface": "session-instructions",
+  "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and says the map-architecture Stop gate only announces a skip, so the session enforces the route itself.",
+  "measured_on": "2026-10-15",
+  "rung": "regression",
+  "adapter": {
+    "surface": "claude_code_cli",
+    "adapter_id": "claude-p-single-turn-no-tools",
+    "adapter_version": "1",
+    "harness_id": "evals/session-instructions/run_eval.py",
+    "harness_version": "5b5376f180593ed7fef3bf2fb1c967c3d52a107341139dd5e688e0ebeea1c864",
+    "provider_id": "anthropic",
+    "model_id": "claude-haiku-4-5-20251001",
+    "native_session_ref": "b3664669-5dd5-474f-871f-b4fa883bc0ec",
+    "configuration_fingerprint": "sha256:7582b033df9c080b4ea6273378935a73d82a075d268060d5c91bafbe94894c35"
+  },
+  "cases": {
+    "total": 60,
+    "train": 30,
+    "test": 30,
+    "should_not_fire": 20,
+    "sources": [
+      "hand_written",
+      "human_judged_hard_case"
+    ]
+  },
+  "split": {
+    "method": "random, stratified by case kind (first tag), half of each kind to test",
+    "seed": 20261015,
+    "sealed_test": true
+  },
+  "repeats": 5,
+  "grader": {
+    "kind": "programmatic",
+    "validation": {
+      "graded_twice": true,
+      "result": "pass",
+      "agreement": 1.0,
+      "oracle_pass_rate": 1.0,
+      "null_pass_rate": 0.0
+    }
+  },
+  "noise_floor": 0.1291,
+  "min_useful_gain": 0.25,
+  "primary_dimension": "store-unreachable-stops",
+  "dimensions": [
+    {
+      "dimension_id": "store-unreachable-stops",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "improved",
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ],
+      "baseline": {
+        "score": 0.85,
+        "ci_low": 0.7333333333333334,
+        "ci_high": 0.9500000000000001
+      },
+      "candidate": {
+        "score": 0.9666666666666667,
+        "ci_low": 0.9166666666666666,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": 0.1166666666666667,
+        "ci_low": 0.033333333333333326,
+        "ci_high": 0.23333333333333317
+      }
+    },
+    {
+      "dimension_id": "map-front-door-called",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "equivalent",
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ],
+      "baseline": {
+        "score": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "candidate": {
+        "score": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0
+      }
+    },
+    {
+      "dimension_id": "quiet-when-not-applicable",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "equivalent",
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ],
+      "baseline": {
+        "score": 0.9800000000000001,
+        "ci_low": 0.9400000000000001,
+        "ci_high": 1.0
+      },
+      "candidate": {
+        "score": 0.86,
+        "ci_low": 0.6599999999999999,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": -0.1200000000000001,
+        "ci_low": -0.28000000000000014,
+        "ci_high": 0.0
+      }
+    }
+  ],
+  "stage_results": [
+    {
+      "stage_id": "session-start-and-map-routing",
+      "status": "passed",
+      "dimension_ids": [
+        "store-unreachable-stops",
+        "map-front-door-called",
+        "quiet-when-not-applicable"
+      ],
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ]
+    }
+  ],
+  "cost": {
+    "baseline_usd_per_case": 0.00718,
+    "candidate_usd_per_case": 0.007115
+  },
+  "verdict": {
+    "decision": "inconclusive",
+    "statement": "Test split, haiku (claude-haiku-4-5-20251001), 5 repeats per case: store-unreachable-stops 0.85 -> 0.97 (delta +0.12, 95% [+0.03, +0.23]); map-front-door-called 1.00 -> 1.00 (delta +0.00, 95% [+0.00, +0.00]); quiet-when-not-applicable 0.98 -> 0.86 (delta -0.12, 95% [-0.28, +0.00]). The measurement cannot see the claimed win."
+  },
+  "notes": [
+    "Single-turn, tool-less simulation of the session log: it measures what the model says it would do next, not live tool behaviour. Production session transcripts were not read (access refused as a PII boundary); map prompts come from the map gate's regression fixtures, store-down and quiet cases are hand-written seeds over fixture task text.",
+    "Disclosure: after the first scoring pass the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. The one test case whose aggregate failure pattern was inspected is no_map-04 (candidate called map-architecture on a historical mention in 5 of 5 repeats, baseline 1 of 5); no test transcripts were read.",
+    "Finding: the new 'the session enforces this route itself' wording made haiku call map-architecture on a mere mention of a tour map, where the old wording mostly did not. The store-down stop improved (failed repeats fell from 9 of 60 to 2 of 60 on the test split), but the gain is smaller than the pre-declared useful gain.",
+    "The Stop-gate half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."
+  ],
+  "evidence": {
+    "scorer": {
+      "path": "evals/session-instructions/score.py",
+      "function": "score"
+    },
+    "source": {
+      "evals/session-instructions/score.py": "46a6deeff6a60c7210909a96e9fdafda903cc74b7b2127a2a95b22681ab1c43e",
+      "evals/session-instructions/run_eval.py": "5b5376f180593ed7fef3bf2fb1c967c3d52a107341139dd5e688e0ebeea1c864"
+    },
+    "dependencies": {
+      "AGENTS.md": "6f6cd5e155a4204173b9d49d1e12ea10cd23b469e88e9a70f62e58066f5c65b1"
+    },
+    "expectations": {
+      "path": "evals/session-instructions/expectations.v1.json",
+      "version": "session-instructions-expectations/v1",
+      "sha256": "a157bd1c9444a3806598b614e8286ab190bcc607bc8225f7a661c5b53cc035e5"
+    },
+    "cohorts": {
+      "baseline": {
+        "path": "evals/session-instructions/evidence/baseline.jsonl",
+        "sha256": "052625d1e5b5c1b7eb8a9cb9a61220be56bba032bbec9149ea4e9a35bc255fed"
+      },
+      "candidate": {
+        "path": "evals/session-instructions/evidence/candidate.jsonl",
+        "sha256": "7d05a80206f8afa55ab964aa0e1129963031b8498afaf7e7025b5bbe726ca768"
+      }
+    }
+  }
+}
