@@ -60,9 +60,14 @@ TWO TIERS, matching ops/scheduled-run-record-selftest.py:
   exactly what broke this tier between 2026-08-16 and 2026-08-18.
 
 RUN IT:
+    python3 ops/run-scheduled-selftest.py --parser-only
     python3 ops/run-scheduled-selftest.py
     tools/db-tap.py --project staging run ops/run-scheduled-selftest.py
+
+Parser-only checks the observer's actual AST and the wrapper's option prefix.
+It exits before recorder import or spool allocation and never runs a job.
 """
+import ast
 import hashlib
 import json
 import os
@@ -77,6 +82,167 @@ import uuid
 from typing import Any, Optional
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def observer_parser(source: str) -> tuple[Any, set[str]]:
+    tree = ast.parse(source)
+    selected: list[ast.stmt] = [node for node in tree.body if
+                isinstance(node, ast.FunctionDef) and node.name == "wrapper_service"
+                or isinstance(node, ast.Assign) and any(
+                    isinstance(target, ast.Name) and
+                    target.id == "WRAPPER_FLAGS_WITH_VALUE" for target in node.targets)]
+    if len(selected) != 2:
+        raise ValueError("observer must have exactly one flag table and parser")
+    table = next(node for node in selected if isinstance(node, ast.Assign))
+    flags = ast.literal_eval(table.value)
+    if not isinstance(flags, set) or not all(isinstance(flag, str) for flag in flags):
+        raise ValueError("observer flag table must be a literal string set")
+    function = next(node for node in selected if isinstance(node, ast.FunctionDef))
+    if function.decorator_list or function.args.defaults or function.args.kw_defaults:
+        raise ValueError("observer parser has unsupported definition-time execution")
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal)):
+            raise ValueError("observer parser has unsupported statements")
+        if isinstance(node, ast.Attribute) and not (
+                isinstance(node.value, ast.Name) and node.value.id == "pl"
+                and node.attr == "get"):
+            raise ValueError("observer parser has unsupported attribute access")
+        if isinstance(node, ast.Call) and not (
+                isinstance(node.func, ast.Name) and node.func.id in {"str", "len", "enumerate"}
+                or isinstance(node.func, ast.Attribute) and node.func.attr == "get"):
+            raise ValueError("observer parser has unsupported call")
+    namespace: dict[str, Any] = {
+        "__builtins__": {"str": str, "len": len, "enumerate": enumerate,
+                         "dict": dict, "list": list}, "Any": Any}
+    exec(compile(ast.Module(body=selected, type_ignores=[]),
+                 "scheduler-truth.py:parser", "exec"), namespace)
+    return namespace["wrapper_service"], flags
+
+
+def shell_parser(source: str) -> tuple[str, set[str]]:
+    start = "set -u\n"
+    end = '\nREPO="${0:A:h:h}"'
+    if source.count(start) != 1 or source.count(end) != 1:
+        raise ValueError("wrapper parser boundaries changed")
+    prefix = source.split(start, 1)[1].split(end, 1)[0]
+    prefix = start + prefix
+    if prefix.count('SERVICE="$1"; shift') != 1 or prefix.count('RUN_KEY="$1"; shift') != 1:
+        raise ValueError("wrapper positional assignments changed")
+    if not prefix.rstrip().endswith('RUN_KEY="$1"; shift'):
+        raise ValueError("wrapper parser does not end at the run key")
+    allowed = {
+        "", "set -u", "EX_USAGE=64", "HEARTBEAT_INTERVAL=0", 'ALSO_HEARTBEAT=""',
+        'while [ "$#" -gt 0 ]; do', 'case "$1" in',
+        'if [ "$#" -lt 2 ]; then', "exit $EX_USAGE", "fi",
+        'HEARTBEAT_INTERVAL="$2"; shift 2 ;;', 'ALSO_HEARTBEAT="$2"; shift 2 ;;',
+        "--) shift; break ;;", "*) break ;;", "esac", "done",
+        "if [ $# -lt 3 ]; then", 'SERVICE="$1"; shift', 'RUN_KEY="$1"; shift',
+    }
+    flags: set[str] = set()
+    for line in prefix.splitlines():
+        line = line.strip()
+        arm = re.fullmatch(r"(--[a-z][a-z-]*)\)", line)
+        if arm:
+            if arm[1] in flags:
+                raise ValueError("duplicate wrapper option arm")
+            flags.add(arm[1])
+        elif line not in allowed and not re.fullmatch(r'print -ru2 -- "[^"\\`$]*"', line):
+            raise ValueError(f"unsupported wrapper parser statement: {line!r}")
+    return prefix, flags
+
+
+def drive_parser(prefix: str, args: list[str]) -> tuple[int, list[str]]:
+    with tempfile.TemporaryDirectory(prefix="carr-parser-parity-") as work:
+        script = os.path.join(work, "parser.zsh")
+        with open(script, "w") as fh:
+            fh.write(prefix + '\nprintf "%s\\0" "$SERVICE" "$RUN_KEY" '
+                     '"$HEARTBEAT_INTERVAL" "$ALSO_HEARTBEAT" "$@"\n')
+        proc = subprocess.run(
+            ["/bin/zsh", "-f", script, *args], capture_output=True, timeout=5,
+            cwd=work, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"})
+    values = proc.stdout.decode().split("\0")
+    if values[-1] != "":
+        raise ValueError("parser output must be NUL-terminated")
+    return proc.returncode, values[:-1]
+
+
+def parser_parity() -> bool:
+    with open(os.path.join(REPO, "tools", "scheduler-truth.py")) as fh:
+        observer_source = fh.read()
+    with open(os.path.join(REPO, "bin", "run-scheduled.sh")) as fh:
+        shell_source = fh.read()
+    observer, observer_flags = observer_parser(observer_source)
+    prefix, shell_flags = shell_parser(shell_source)
+    command = ["probe-service", "probe-key", "parser-command-must-not-run", "arg with spaces", ""]
+    cases = [
+        ("plain", command, ["probe-service", "probe-key", "0", ""]),
+        ("interval", ["--heartbeat-interval", "1800", *command], ["probe-service", "probe-key", "1800", ""]),
+        ("heartbeat", ["--also-heartbeat", "probe-heartbeat", *command], ["probe-service", "probe-key", "0", "probe-heartbeat"]),
+        ("both", ["--heartbeat-interval", "1800", "--also-heartbeat", "probe-heartbeat", *command], ["probe-service", "probe-key", "1800", "probe-heartbeat"]),
+        ("both reversed", ["--also-heartbeat", "probe-heartbeat", "--heartbeat-interval", "1800", *command], ["probe-service", "probe-key", "1800", "probe-heartbeat"]),
+        ("repeated interval", ["--heartbeat-interval", "60", "--heartbeat-interval", "1800", *command], ["probe-service", "probe-key", "1800", ""]),
+        ("repeated heartbeat", ["--also-heartbeat", "first", "--also-heartbeat", "second", *command], ["probe-service", "probe-key", "0", "second"]),
+        ("delimiter", ["--", *command], ["probe-service", "probe-key", "0", ""]),
+        ("flag-looking service", ["--", "--heartbeat-interval", *command[1:]], ["--heartbeat-interval", "probe-key", "0", ""]),
+        ("flags then delimiter", ["--heartbeat-interval", "1800", "--", *command], ["probe-service", "probe-key", "1800", ""]),
+        ("empty interval", ["--heartbeat-interval", "", *command], ["probe-service", "probe-key", "", ""]),
+        ("flag consumed as value", ["--heartbeat-interval", "--also-heartbeat", *command], ["probe-service", "probe-key", "--also-heartbeat", ""]),
+    ]
+    passed = True
+
+    def verify(label: str, condition: bool) -> None:
+        nonlocal passed
+        print(f"  {'ok' if condition else 'FAIL'}    parser: {label}")
+        passed = passed and condition
+
+    covered_flags = {args[0] for _, args, _ in cases if args[0] in observer_flags}
+    verify("option arms match observer table and exercised cases",
+           shell_flags == observer_flags == covered_flags)
+    for label, args, expected in cases:
+        rc, values = drive_parser(prefix, args)
+        service = observer({"ProgramArguments": ["/isolated/run-scheduled.sh", *args]})
+        verify(label, rc == 0 and values == [*expected, *command[2:]]
+               and service == expected[0])
+    for label, args in (("absent interval value", ["--heartbeat-interval"]),
+                        ("absent heartbeat value", ["--also-heartbeat"]),
+                        ("empty arguments", []), ("delimiter only", ["--"])):
+        rc, values = drive_parser(prefix, args)
+        verify(label, rc == 64 and not values and
+               observer({"ProgramArguments": ["/isolated/run-scheduled.sh", *args]}) == "")
+    rc, values = drive_parser(prefix, ["probe-service"])
+    verify("service-only refusal preserves observer domain distinction",
+           rc == 64 and not values and observer({
+               "ProgramArguments": ["/isolated/run-scheduled.sh", "probe-service"]}) == "probe-service")
+    missing_observer, missing_flags = observer_parser(observer_source.replace(
+        '{"--heartbeat-interval", "--also-heartbeat"}', '{"--heartbeat-interval"}', 1))
+    missing_args = ["--also-heartbeat", "probe-heartbeat", *command]
+    rc, values = drive_parser(prefix, missing_args)
+    verify("removed observer option mutant is detected",
+           missing_flags != shell_flags and rc == 0 and values[0] != missing_observer({
+               "ProgramArguments": ["/isolated/run-scheduled.sh", *missing_args]}))
+    future_source = shell_source.replace('    --heartbeat-interval)',
+        '    --future-flag)\n      HEARTBEAT_INTERVAL="$2"; shift 2 ;;\n'
+        '    --heartbeat-interval)', 1)
+    future_prefix, future_flags = shell_parser(future_source)
+    future_baseline = True
+    for _, args, expected in cases:
+        rc, values = drive_parser(future_prefix, args)
+        future_baseline = future_baseline and rc == 0 and values == [*expected, *command[2:]]
+    verify("future option preserves all original accepted cases", future_baseline)
+    future_args = ["--future-flag", "123", *command]
+    rc, values = drive_parser(future_prefix, future_args)
+    verify("future shell option mutant is detected",
+           future_flags != observer_flags and rc == 0 and values[0] != observer({
+               "ProgramArguments": ["/isolated/run-scheduled.sh", *future_args]}))
+    return passed
+
+
+if __name__ == "__main__" and sys.argv[1:] == ["--parser-only"]:
+    sys.exit(0 if parser_parity() else 1)
+if __name__ == "__main__" and "--parser-only" in sys.argv[1:]:
+    print("usage: run-scheduled-selftest.py --parser-only", file=sys.stderr)
+    sys.exit(64)
+
 sys.path.insert(0, REPO)
 
 from lib.loadpy import load_module_from_path  # noqa: E402
@@ -1628,6 +1794,7 @@ def tier1_receipt_mint() -> None:
 def main() -> int:
     print("run-scheduled-selftest — bin/run-scheduled.sh must never change what "
           "a job does, prints, or returns")
+    check("shell and observer parser parity", parser_parity())
     tier1()
     tier1_receipt_mint()
     tier1_throttle()

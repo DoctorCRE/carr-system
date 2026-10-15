@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Real standalone Git clones with mocked Codex turns, without sandbox changes."""
 import contextlib
 import io
 import json

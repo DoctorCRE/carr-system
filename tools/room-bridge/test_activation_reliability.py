@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Acceptance tests for the two sections embedded in the existing passport."""
 
 from __future__ import annotations
 
@@ -106,11 +105,8 @@ def test_bundle_is_bounded_and_deterministic():
     first = bundle()
     shuffled = copy.deepcopy(first)
     shuffled["items"] = list(reversed(shuffled["items"]))
-    # Item order is part of the immutable preimage; reordering cannot forge the digest.
     expect_refusal(lambda: ar.validate_context_bundle(shuffled), "does not bind")
     assert first["bundle_digest"] == ar.validate_context_bundle(first)["bundle_digest"]
-    # Issuance is server-owned runtime metadata. It cannot make the accepted
-    # compiler output drift or silently rewrite the frozen binding.
     reissued = copy.deepcopy(first)
     reissued["header"]["issued_at"] = "2026-08-25T12:00:00Z"
     assert ar.validate_context_bundle(reissued)["bundle_digest"] == first["bundle_digest"]
@@ -185,7 +181,6 @@ def test_environment_receipt_must_bind_exact_provider_and_cleanup_evidence():
 
 
 def test_legacy_receipt_posture_is_not_activated():
-    # Existing receipts remain readable, but callers must not infer activation.
     receipt = json.loads((FIXTURES / "codex_desktop.attempt-receipt.v1.json").read_text())
     assert ar.legacy_activation_state(receipt) == "not_activated"
 

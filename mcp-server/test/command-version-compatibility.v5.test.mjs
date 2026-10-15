@@ -1,16 +1,3 @@
-// V5-F07 phase 1 — the four-axis compatibility comparator, proved case by case.
-//
-// Every deployment observation in this suite comes from the REAL buildRelease()
-// running against a fake `sql`, not from a hand-written payload, so a change to
-// /release that breaks the comparison breaks this suite rather than production.
-//
-// The positive case comes first on purpose: a rule that only ever refuses cannot
-// be told apart from a broken one. It is built from an honest trusted fixture —
-// a policy-epoch status in policy-epoch.js's own shape, explicitly labelled as an
-// operator-supplied trusted report — because /release cannot answer that axis and
-// nothing here invents an answer for it.
-//
-//   node --test mcp-server/test/command-version-compatibility.v5.test.mjs
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -53,7 +40,6 @@ const POLICY_REGISTRY_VERSION = "scac-policy-registry.v3";
 const POLICY_REGISTRY_DIGEST = "sha256:" + "9".repeat(64);
 const POLICY_ENTRY_DIGEST = "sha256:" + "8".repeat(64);
 
-/** A stand-in for neon()'s tagged-template `sql`, routed by query substring. */
 function fakeSql({ ledger = { applied_count: 120, highest_applied_migration: MIGRATION, ledger_sha256: LEDGER_SHA256 },
   generation = 359 } = {}) {
   return async (strings) => {
@@ -81,7 +67,6 @@ async function release({ env = {}, sql = fakeSql(), verbCount = 105 } = {}) {
   });
 }
 
-/** A policy-epoch status in policy-epoch.js's exact shape. */
 function policyStatus(overrides = {}) {
   return {
     epoch_state: "current",
@@ -97,9 +82,6 @@ function policyStatus(overrides = {}) {
   };
 }
 
-// The honest fixture binds every dimension the release payload reports — an
-// epoch report that names neither environment nor worker version has not shown
-// it describes THIS deployment — and names the tenant /release cannot report.
 function trustedPolicyObservation(overrides = {}) {
   return {
     source: V5_TRUSTED_POLICY_EPOCH_SOURCES[0],
@@ -111,7 +93,6 @@ function trustedPolicyObservation(overrides = {}) {
   };
 }
 
-/** The declaration of a client built from exactly the deployment above. */
 function matchingClient(overrides = {}) {
   const { axes: axisOverrides = {}, ...rest } = overrides;
   return normalizeClientVersionDeclaration({
@@ -143,7 +124,6 @@ function boundaryError(code) {
   return error => error instanceof V5BoundaryError && error.code === code;
 }
 
-// --- the positive: exactly four known axes, and nothing wider ---------------
 
 test("all four axes known and matched allows, and admits nothing", async () => {
   const { result, payload } = await compare();
@@ -157,13 +137,10 @@ test("all four axes known and matched allows, and admits nothing", async () => {
   assert.equal(result.scope.state, "bound");
   assert.equal(result.scope.deployment_environment, "production");
 
-  // The command-contract axis is the real shipped registry identity, read out of
-  // the real payload rather than a literal written into this test.
   assert.equal(payload.command_contract.registry_digest, SCAC_MUTATION_REGISTRY_DIGEST);
   assert.equal(result.axis_states.command_contract.deployment.digest, SCAC_MUTATION_REGISTRY_DIGEST);
   assert.equal(result.axis_states.policy.deployment.epoch_state, "current");
 
-  // An allow is a version fact. It is not authentication and admits no caller.
   assert.equal(result.authenticated, false);
   assert.equal(result.authorizes_command_dispatch, false);
   assert.equal(result.runtime_admission_granted, false);
@@ -172,7 +149,6 @@ test("all four axes known and matched allows, and admits nothing", async () => {
   assert.equal(result.policy_version, V5_COMMAND_VERSION_POLICY_VERSION);
 });
 
-// --- the four axes, each unobservable on its own ---------------------------
 
 test("a current release with no trusted policy observation refuses: policy is unobservable", async () => {
   const { result, payload } = await compare({ observation: null });
@@ -181,8 +157,6 @@ test("a current release with no trusted policy observation refuses: policy is un
   assert.equal(result.reason_id, "deployment_axis_unobservable");
   assert.deepEqual(result.blocking_axes, ["policy"]);
   assert.equal(result.axis_states.policy.state, "deployment_unobservable");
-  // doctrine_generation is present and healthy in this payload, and it is still
-  // not a policy epoch. That is the whole point of the refusal.
   assert.equal(payload.doctrine_generation.value, 359);
   assert.match(result.axis_states.policy.deployment.reason, /doctrine_generation is a doctrine row counter/);
   assert.match(result.axis_states.policy.deployment.reason, new RegExp(V5_POLICY_OBSERVATION_SEAM));
@@ -202,7 +176,6 @@ test("an older release with no command_contract field refuses, visibly, on that 
   assert.deepEqual(result.blocking_axes, ["command_contract"]);
   assert.match(result.axis_states.command_contract.deployment.reason,
     /predates command-contract reporting/);
-  // The client declared it; the deployment simply cannot answer.
   assert.equal(result.axis_states.command_contract.client.declared, true);
 });
 
@@ -237,15 +210,14 @@ test("each undeclared client axis refuses, naming that axis", async () => {
   }
 });
 
-// --- the four mismatches. A label is never a substitute for a digest --------
 
 test("the same registry version with a different digest refuses", async () => {
   const { result } = await compare({
     client: matchingClient({
       axes: {
         command_contract: {
-          label: SCAC_MUTATION_REGISTRY_VERSION, // identical label
-          digest: "0".repeat(64), // rebuilt registry
+          label: SCAC_MUTATION_REGISTRY_VERSION,
+          digest: "0".repeat(64),
         },
       },
     }),
@@ -309,7 +281,6 @@ test("a rolled-back or stale policy epoch refuses, whatever the digests say", as
   }
 });
 
-// --- untrusted, unknown and cross-environment evidence ----------------------
 
 test("an untrusted policy source observes nothing; the axis stays unknown and blocks", async () => {
   const { result } = await compare({
@@ -334,14 +305,12 @@ test("a malformed policy status surfaces PolicyEpochRefusal unchanged, not a loc
 test("a staging report is never answered as production", async () => {
   const { result } = await compare({
     releaseOptions: { env: { CARR_ENV: "staging" } },
-    // Evidence honestly bound to the staging deployment it describes.
     observation: trustedPolicyObservation({ environment: "staging" }),
   });
 
   assert.equal(result.decision, "refuse");
   assert.equal(result.reason_id, "evidence_scope_mismatch");
   assert.match(result.scope.reason, /environment "production" is not the observed deployment's environment "staging"/);
-  // The digests all match; the evidence is simply about a different deployment.
   assert.deepEqual(result.blocking_axes, []);
 });
 
@@ -373,7 +342,6 @@ test("a client asking about a different worker version refuses", async () => {
   assert.match(result.scope.reason, /deployment_ref/);
 });
 
-// --- the closed shape: nothing can narrow, defer or outvote the test --------
 
 test("a caller cannot name which axes count, or argue distance and ancestry", async () => {
   const client = matchingClient();
@@ -440,7 +408,6 @@ test("hand-built reports are refused; only this module's normalizers produce inp
     () => evaluateCommandVersionCompatibility({ client: matchingClient(), deployment: { ...deployment, report_kind: "client_declaration" } }),
     boundaryError("unnormalized_report"),
   );
-  // Copying the marker does not skip the digest validation the normalizer does.
   assert.throws(
     () => evaluateCommandVersionCompatibility({
       client: { ...forged, schema_version: V5_COMMAND_VERSION_SCHEMA_VERSION,
@@ -451,17 +418,14 @@ test("hand-built reports are refused; only this module's normalizers produce inp
   );
 });
 
-// --- policy evidence scope: kept, bound, and compared ----------------------
 
 test("policy evidence for another TENANT refuses, though /release reports no tenant", async () => {
   const { deployment, result } = await compare({
     observation: trustedPolicyObservation({ tenant: "different-tenant" }),
   });
 
-  // The payload cannot contradict this: it has no tenant field at all.
   assert.equal(deployment.tenant, null);
   assert.equal(deployment.axes.policy.state, "observed");
-  // So the evidence's own tenant is kept and compared against the client's.
   assert.equal(deployment.axes.policy.evidence_scope.tenant, "different-tenant");
   assert.equal(result.decision, "refuse");
   assert.equal(result.reason_id, "evidence_scope_mismatch");
@@ -498,7 +462,6 @@ test("policy evidence naming another worker version observes nothing", async () 
 test("policy evidence naming NO tenant observes nothing — the payload has no tenant to fall back on", async () => {
   for (const observation of [
     trustedPolicyObservation({ tenant: null }),
-    // The same absence, written as an omission rather than a null.
     {
       source: V5_TRUSTED_POLICY_EPOCH_SOURCES[0], status: policyStatus(),
       environment: "production", deployment_ref: WORKER_VERSION_ID,
@@ -510,13 +473,11 @@ test("policy evidence naming NO tenant observes nothing — the payload has no t
     assert.equal(result.reason_id, "deployment_axis_unobservable");
     assert.deepEqual(result.blocking_axes, ["policy"]);
     assert.match(result.axis_states.policy.deployment.reason, /names no tenant/);
-    // Unbound is not the same as agreeing with whatever the client declared.
     assert.equal(deployment.tenant, null, "the release tenant stays visibly unknown");
     assert.notEqual(result.decision, "allow");
   }
 });
 
-// --- normalized reports are revalidated, not recognized by their marker -----
 
 test("an honest JSON round-trip of a normalized report still compares the same", async () => {
   const client = matchingClient();
@@ -532,7 +493,7 @@ test("a tampered epoch_state cannot ride an observed policy axis into an allow",
   const deployment = deploymentVersionReportFromRelease(await release(),
     { policy_observation: trustedPolicyObservation() });
   const tampered = JSON.parse(JSON.stringify(deployment));
-  tampered.axes.policy.epoch_state = "rolled_back"; // state stays "observed"
+  tampered.axes.policy.epoch_state = "rolled_back";
 
   assert.throws(
     () => evaluateCommandVersionCompatibility({ client, deployment: tampered }),
@@ -541,8 +502,6 @@ test("a tampered epoch_state cannot ride an observed policy axis into an allow",
 });
 
 test("policy evidence naming the unlabelled sentinel refuses legibly, and is not unreadable", async () => {
-  // The refusal has to survive the trip back through the evaluator: this module
-  // produced the report, so rejecting it as unreadable would hide its own answer.
   for (const [label, source] of [
     ["trusted", V5_TRUSTED_POLICY_EPOCH_SOURCES[0]],
     ["untrusted", "release_doctrine_generation"],
@@ -554,7 +513,6 @@ test("policy evidence naming the unlabelled sentinel refuses legibly, and is not
       },
     });
 
-    // The deployment itself is labelled; only the evidence is not.
     assert.equal(deployment.environment, "production", label);
     assert.equal(deployment.axes.policy.state, "unobservable", label);
     assert.equal(deployment.axes.policy.evidence_scope.environment,
@@ -572,7 +530,7 @@ test("a normalized report cannot report an epoch whose evidence names no tenant"
   const deployment = deploymentVersionReportFromRelease(await release(),
     { policy_observation: trustedPolicyObservation() });
   const tampered = JSON.parse(JSON.stringify(deployment));
-  tampered.axes.policy.evidence_scope.tenant = null; // state stays "observed"
+  tampered.axes.policy.evidence_scope.tenant = null;
 
   assert.throws(
     () => evaluateCommandVersionCompatibility({ client, deployment: tampered }),
@@ -581,7 +539,6 @@ test("a normalized report cannot report an epoch whose evidence names no tenant"
 });
 
 test(`"${V5_UNKNOWN_ENVIRONMENT_SENTINEL}" never counts as a known environment, on any surface`, async () => {
-  // A client cannot declare the absence of an environment as an environment.
   assert.throws(
     () => normalizeClientVersionDeclaration({
       tenant: "carr-internal", environment: V5_UNKNOWN_ENVIRONMENT_SENTINEL,
@@ -590,14 +547,11 @@ test(`"${V5_UNKNOWN_ENVIRONMENT_SENTINEL}" never counts as a known environment, 
     boundaryError("unknown_environment_sentinel"),
   );
 
-  // The adapter normalizes the payload's sentinel to a visibly unknown environment.
   const unlabelled = deploymentVersionReportFromRelease(
     await release({ env: { CARR_ENV: undefined } }), { policy_observation: trustedPolicyObservation() });
   assert.equal(unlabelled.environment, null);
   assert.match(unlabelled.environment_reason, /never assumed to be production/);
 
-  // And a report handed straight to the evaluator cannot smuggle it back in —
-  // including two sides that would otherwise "agree" on being unknown.
   const client = matchingClient();
   const deployment = deploymentVersionReportFromRelease(await release(),
     { policy_observation: trustedPolicyObservation() });
@@ -666,10 +620,8 @@ test("every tampered shape refuses rather than turning into compatibility", asyn
     );
   }
 
-  // The same discipline on the client side: an undeclared axis cannot smuggle a
-  // version back in, and a declared one cannot skip its digest.
   const clientCopy = JSON.parse(JSON.stringify(matchingClient({ axes: { policy: null } })));
-  clientCopy.axes.policy.digest = POLICY_REGISTRY_DIGEST; // still declared:false
+  clientCopy.axes.policy.digest = POLICY_REGISTRY_DIGEST;
   assert.throws(
     () => evaluateCommandVersionCompatibility({ client: clientCopy, deployment }),
     boundaryError("unnormalized_report"),
@@ -688,7 +640,6 @@ test("results are frozen and the inputs are not touched", async () => {
   assert.ok(Object.isFrozen(client.axes.code));
   assert.throws(() => { result.decision = "allow"; }, TypeError);
   assert.throws(() => { result.blocking_axes.push("code"); }, TypeError);
-  // Reading the payload does not rewrite it.
   assert.deepEqual(payload.command_contract.registry_version, SCAC_MUTATION_REGISTRY_VERSION);
 });
 
@@ -716,8 +667,6 @@ test("the policy preimage is closed to Q058's four axes and hashes deterministic
   assert.equal(preimage.accepts_declared_ancestry, false);
   assert.equal(preimage.authenticates, false);
 
-  // Re-hashed here by hand rather than compared against a copy of the module's
-  // own answer, so the digest is checked instead of merely echoed.
   const expected = "sha256:" + createHash("sha256")
     .update(v5CommandVersionPolicyCanonicalBytes()).digest("hex");
   assert.equal(v5CommandVersionPolicyDigest(), expected);

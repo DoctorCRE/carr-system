@@ -1,21 +1,3 @@
-// a02-rule-enforcement-postgres.test.mjs — V5-A02 rule-enforcement coverage
-// and its fallback writer on REAL PostgreSQL.
-//
-// WHY THIS FILE EXISTS. The first version of this slice shipped a stub FakeDb
-// suite plus greps of the migration text. No test ever executed
-// ops.v5_a02_rule_enforcement_coverage() or ops.record_rule_enforcement_fallback,
-// so a planted bug in either one survived every test. This suite seeds real
-// rule, approval, enforcement-point, catalog, binding and fallback rows into a
-// disposable copy of the migrated database, calls the two functions (and the
-// two MCP verbs over them) as the real database principals, and asserts the
-// exact per-rule reason for every leg of the guard. Each scenario below names
-// the planted SQL mutant it exists to kill.
-//
-// Skips in the unit class. The migration class supplies DATABASE_URL and sets
-// CARR_A02_RULE_COVERAGE_DB_REQUIRED=1, which turns a silent skip into a
-// failure. It commits only into a template copy it creates and drops.
-//
-// EVERY RECORD IS SYNTHETIC.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,30 +12,24 @@ const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost
 
 const sha = text => createHash("sha256").update(text, "utf8").digest("hex");
 
-// One rule per leg of the guard. Ids are fixed: the copy is fresh per run.
 const R = Object.freeze({
   covered:            "a0200001-0000-4000-8000-000000000000",
   unmapped:           "a0200002-0000-4000-8000-000000000000",
-  bindingStale:       "a0200003-0000-4000-8000-000000000000", // S9
-  amendedVersion:     "a0200004-0000-4000-8000-000000000000", // S4, ruling 5a
-  amendedStatement:   "a0200005-0000-4000-8000-000000000000", // ruling 5a
-  testsMissing:       "a0200006-0000-4000-8000-000000000000", // S5
-  futureDated:        "a0200007-0000-4000-8000-000000000000", // item 3
-  changedSinceApproval: "a0200008-0000-4000-8000-000000000000", // correction 1
-  fallbackAbsent:     "a0200009-0000-4000-8000-000000000000", // S10
-  fallbackOldVersion: "a020000a-0000-4000-8000-000000000000", // S2
-  fallbackOldHash:    "a020000b-0000-4000-8000-000000000000", // S3
-  proposed:           "a020000c-0000-4000-8000-000000000000", // S6
-  writerTarget:       "a020000d-0000-4000-8000-000000000000", // S1, S8, writer paths
-  oneOfTwoInstalled:  "a020000e-0000-4000-8000-000000000000", // probe E, S20
-  oneOfTwoUnverified: "a020000f-0000-4000-8000-000000000000", // N7
-  oneOfTwoChanged:    "a0200010-0000-4000-8000-000000000000", // N8
-  catalogMovedEarlier: "a0200011-0000-4000-8000-000000000000", // "changed" means either direction
-  // 0876: a current exact machine_enforceable/hard_enforced approval whose
-  // controls all hold AND all report their own unavailability (hooks/*.py
-  // only, or transactional_schema) is covered WITHOUT a fallback receipt; the
-  // fallback rung binds human_only rules (the four fallback cases above are
-  // human_only) and hard_enforced rules on any other kind of control.
+  bindingStale:       "a0200003-0000-4000-8000-000000000000",
+  amendedVersion:     "a0200004-0000-4000-8000-000000000000",
+  amendedStatement:   "a0200005-0000-4000-8000-000000000000",
+  testsMissing:       "a0200006-0000-4000-8000-000000000000",
+  futureDated:        "a0200007-0000-4000-8000-000000000000",
+  changedSinceApproval: "a0200008-0000-4000-8000-000000000000",
+  fallbackAbsent:     "a0200009-0000-4000-8000-000000000000",
+  fallbackOldVersion: "a020000a-0000-4000-8000-000000000000",
+  fallbackOldHash:    "a020000b-0000-4000-8000-000000000000",
+  proposed:           "a020000c-0000-4000-8000-000000000000",
+  writerTarget:       "a020000d-0000-4000-8000-000000000000",
+  oneOfTwoInstalled:  "a020000e-0000-4000-8000-000000000000",
+  oneOfTwoUnverified: "a020000f-0000-4000-8000-000000000000",
+  oneOfTwoChanged:    "a0200010-0000-4000-8000-000000000000",
+  catalogMovedEarlier: "a0200011-0000-4000-8000-000000000000",
   hardEnforcedNoFallback: "a0200012-0000-4000-8000-000000000000",
   hardEnforcedTransactional: "a0200013-0000-4000-8000-000000000000",
   hardEnforcedNonHook: "a0200014-0000-4000-8000-000000000000",
@@ -96,7 +72,6 @@ async function clientFor(pg, database, role = null) {
   return client;
 }
 
-/** Seed one rule and whichever legs of its evidence the scenario names. */
 async function seedRule(db, ctx, id, spec) {
   const statement = spec.statement ?? `a02 synthetic rule ${id}`;
   const version = spec.version ?? 1;
@@ -118,10 +93,6 @@ async function seedRule(db, ctx, id, spec) {
     [control, spec.implementationRef ?? "synthetic/impl", spec.controlClass ?? "deny_gate"]);
   const controls = [control];
   if (spec.second) {
-    // Two approved controls; the first is fully good, the second carries the
-    // one defect the scenario names, so only an "every control" check sees it.
-    // uninstalled: probe E. pointVerifiedNull: installed but unverified (N7).
-    // catalogVerifiedAt: installed and verified, but changed since approval (N8).
     const second = `${control}_b`;
     const installed = !spec.second.uninstalled;
     controls.push(second);
@@ -194,8 +165,6 @@ async function refusedWithCode(promise, code) {
   });
 }
 
-/** One verb call exactly as mcp.js runs it: its own transaction on the
- * principal's own connection, acting actor set transaction-locally. */
 async function callVerb(pg, database, role, actor, verb, args) {
   const client = await clientFor(pg, database, role);
   try {
@@ -243,8 +212,6 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       "select 1 from public.schema_migrations where filename = '0721_a02_rule_enforcement_coverage.sql'");
     assert.equal(applied.rows.length, 1, "migration 0721 is applied as the numbered file");
 
-    // Isolation: whatever active rules the snapshot carries are retired in
-    // this copy, so every count below is exact.
     await db.query("begin");
     await db.query("set local session_replication_role = replica");
     await db.query("update public.rule set status = 'retired' where status = 'active'");
@@ -273,8 +240,6 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
 
     await db.query("begin");
     await db.query("set local session_replication_role = replica");
-    // Correction 1: evidence verified long BEFORE the approval (what 0228's
-    // copy of the catalog value produces) is current, not a gap.
     await seedRule(db, ctx, R.covered, { verifiedAt: "now() - interval '3 days'" });
     await seedRule(db, ctx, R.unmapped, { approval: false });
     await seedRule(db, ctx, R.bindingStale, { staleBinding: true });
@@ -284,18 +249,12 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       approvedStatement: "a02 original statement A" });
     await seedRule(db, ctx, R.testsMissing, { pointVerifiedNull: true });
     await seedRule(db, ctx, R.futureDated, { verifiedAt: "now() + interval '1 day'" });
-    // The approval captured one verified_at on the enforcement point; the
-    // catalog control now carries a different one.
     await seedRule(db, ctx, R.changedSinceApproval, {
       verifiedAt: "now() - interval '3 days'", catalogVerifiedAt: "now() - interval '1 hour'" });
     await seedRule(db, ctx, R.oneOfTwoInstalled, { second: { uninstalled: true } });
     await seedRule(db, ctx, R.oneOfTwoUnverified, { second: { pointVerifiedNull: true } });
     await seedRule(db, ctx, R.oneOfTwoChanged, {
       second: { catalogVerifiedAt: "now() - interval '10 minutes'" } });
-    // The catalog now carries an EARLIER verified_at than the approval
-    // captured. Every other "changed" case moves it later, so a check that
-    // only asked "is the catalog newer?" would pass them all; this one is
-    // the case that pins "distinct from", in either direction.
     await seedRule(db, ctx, R.catalogMovedEarlier, {
       verifiedAt: "now() - interval '1 hour'", catalogVerifiedAt: "now() - interval '5 days'" });
     const HUMAN = { policyKind: "human_only" };
@@ -305,7 +264,6 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       statement: "a02 current statement B", fallbackStatement: "a02 earlier statement A" });
     await seedRule(db, ctx, R.proposed, { status: "proposed" });
     await seedRule(db, ctx, R.writerTarget, { ...HUMAN, fallback: false });
-    // 0876: the exemption follows the CONTROL's kind, read from the catalog.
     await seedRule(db, ctx, R.hardEnforcedNoFallback, { fallback: false,
       implementationRef: "hooks/a02-synthetic-gate.py; hooks/a02_synthetic_helper.py" });
     await seedRule(db, ctx, R.hardEnforcedTransactional, { fallback: false,
@@ -320,12 +278,9 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       const record = await coverage(db);
       assert.equal(record.schema_version, "doctorcre-v5-a02-rule-enforcement-coverage.v2");
       assert.deepEqual(gapsByRule(record), EXPECTED_GAPS);
-      // S6: the proposed rule is never counted, covered or not.
       assert.equal(record.active_rule_count, 20);
       assert.equal(record.covered_rule_count, 3);
       assert.equal(record.gap_count, 17);
-      // 0876: hard_enforced on hook-only or transactional_schema controls
-      // needs no fallback; a control with any file outside hooks/ still does.
       assert.equal(gapsByRule(record)[R.hardEnforcedNoFallback], undefined);
       assert.equal(gapsByRule(record)[R.hardEnforcedTransactional], undefined);
       assert.equal(record.coverage_state, "gaps");

@@ -103,7 +103,6 @@ trap 'cleanup 129' HUP
 trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 
-# --- plan the choreography ----------------------------------------------------
 python3 "$PLANNER" "$LAYERDIR" "$LOG" --name "$NAME" --out-path "$RAW" \
   --json-out "$JOB" --plan-out "$PLAN" "${PLANARGS[@]}" "${RECOVERY_ARGS[@]}"
 source "$PLAN"
@@ -116,7 +115,6 @@ if [ "$DRY" -eq 1 ]; then
 fi
 [ -f "$SFX_FILE" ] || { echo "landing SFX missing: $SFX_FILE" >&2; exit 1; }
 
-# --- AE build + lossless render ----------------------------------------------
 : > "$AELOG"
 rm -f "$RAW"
 JOB_URI="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$JOB")"

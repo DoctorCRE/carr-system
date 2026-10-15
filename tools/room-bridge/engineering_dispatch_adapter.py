@@ -28,9 +28,6 @@ import engineering_passport  # noqa: E402
 
 ENGINEERING_DESK = "engineering-codex"
 DESK_SPEC_PATH = REPO / "ops" / "config" / "engineering-codex-desk.v1.json"
-# The Engineering controller does not inherit the general router's optional
-# registry-location override.  This fixed per-user registry is part of the
-# local adapter identity, just like the fixed desk name below.
 DEDICATED_REGISTRY_PATH = Path.home() / ".config" / "carr" / "hermes-desks.json"
 DISPATCH_MINIMUM_RUNWAY = timedelta(seconds=930)
 EXECUTOR_TIMEOUT_SECONDS = 900
@@ -118,9 +115,6 @@ text(JSON.stringify({
 }));'''.replace(
     "__STANDING_CONTEXT_STORE_KEY_JSON__", json.dumps(STANDING_CONTEXT_STORE_KEY),
 ).replace("__RULE_CHUNK_SIZE__", str(STANDING_CONTEXT_RULE_CHUNK_SIZE))
-# The immutable packet deliberately projects no accepted plan caps or runbook.
-# The child hydrates them itself from the two existing read-only verbs, bound
-# to the controller plan; a mismatch refuses before any repository work.
 SOURCE_MERGE_TOKEN = re.compile(r"source[_-]merge", re.IGNORECASE)
 RUNBOOK_STORE_KEY = "carr_engineering_runbook_body_v1"
 RUNBOOK_CHUNK_CHARS = 4000
@@ -128,18 +122,6 @@ ENGINEERING_SOURCE_HELPER_PATH = HERE / "engineering_source_projection.js"
 ENGINEERING_SOURCE_HELPER_SHA256 = "3cd0cd7f1ef18940dd5232bd3a72611618b0137b398e86ffc974777bc64294a4"
 ENGINEERING_SOURCE_HELPER_BYTE_LENGTH = 17068
 def _engineering_source_helper_interpreter() -> str:
-    """Resolve the interpreter the reader command runs under, on any checkout.
-
-    The dedicated desk runs on Joe's machine, where the repository venv always
-    exists, and that interpreter stays the first choice.  It cannot be the ONLY
-    choice: a hosted runner installs requirements.lock into setup-python and
-    never builds a repository venv, and Dell's machine has no venv before its
-    migration runs.  ops/ci.sh already resolves exactly this pair for the same
-    reason.  Pinning the venv unconditionally made the shipped reader command
-    exit 127 everywhere the venv is absent -- a real portability break that a
-    Mac could never see.  sys.executable keeps the fallback an absolute path,
-    which is what the child's exec_command needs when PATH is minimal.
-    """
     venv = REPO / ".venv" / "bin" / "python"
     if os.access(venv, os.X_OK):
         return str(venv)
@@ -236,9 +218,6 @@ text(JSON.stringify({
 }));'''.replace(
     "__RUNBOOK_STORE_KEY_JSON__", json.dumps(RUNBOOK_STORE_KEY),
 ).replace("__RUNBOOK_CHUNK_CHARS__", str(RUNBOOK_CHUNK_CHARS))
-# Facts only the fresh child can truthfully observe.  Each placeholder is a
-# null the existing receipt validator rejects, so an unfilled template can
-# never persist as evidence.
 RECEIPT_TEMPLATE_PLACEHOLDER_PATHS = (
     "source_evidence.worktree_ref",
     "source_evidence.branch_ref",
@@ -246,12 +225,7 @@ RECEIPT_TEMPLATE_PLACEHOLDER_PATHS = (
     "reset_reconstruction.reconstruction_free",
     "executor_claim.claimed_at",
 )
-# The prompt task binding keeps the exact eight keys the rule-pack drift gate
-# parses; controller-only fields ride in the hydration binding instead.
 PROMPT_TASK_EXCLUDED_KEYS = frozenset({"claim_lease_expires_at", "work_request_ref"})
-# The independently qualified GitHub route: per-command overrides only, so no
-# Git configuration changes, no credential ever printed or stored by the
-# child, no interactive prompt, and no hook bypass.
 GITHUB_GIT_COMMAND_PREFIX = (
     "git -c url.https://github.com/.insteadOf=git@github.com: -c credential.helper= "
     "-c 'credential.helper=!gh auth git-credential' -c credential.interactive=never "
@@ -259,16 +233,12 @@ GITHUB_GIT_COMMAND_PREFIX = (
 )
 
 
-# A pointer to operator-authored restrictions, not a caller-selected authority.
-# The live revision must bind the exact envelope before the child may use it.
 R09_ASSIGNMENT = {
     "section_id": "4b671fec-bc0b-4dad-a91d-2f154e0b6f7b",
     "scope_section_id": "dcc241e4-9454-49a4-8e62-839d25a0c449",
     "scope_sha256": "3e854d36d91f5bba3540274417f45838682d1d149ba6d856de9f683d74ceaa6e",
     "packet_section_id": "5845e7b4-3b51-431a-835f-51d21c06977d",
     "packet_sha256": "4a34daafdbce5fa95dbcdb0bc12e40e255ed7ca328afe4bf528a322b789faeda",
-    # Return constraints derived from that pinned scope; native hydration
-    # cross-checks them against the current record before any repository work.
     "expected_worktree_ref": "worktree:sha256:4fdd7e2e37d820d398d38225de2960380b715527f5e962f1d1e6dbad3cdf3b1b",
     "expected_branch_ref": "branch:sha256:88653a24843986c51ca26c9025a1466463f4e5c9717a07ba84c76afd13995449",
 }
@@ -395,7 +365,6 @@ def build_engineering_slice_receipt_template(packet: dict, task: dict, envelope:
 
 
 def _git_common_dir() -> Path:
-    """Resolve the shared Git metadata root without trusting a child process."""
     dotgit = REPO / ".git"
     if dotgit.is_dir():
         common = dotgit.resolve()
@@ -430,7 +399,6 @@ def _git_common_dir() -> Path:
 
 
 def _dedicated_writable_roots() -> list[str]:
-    """The exact two shared lock roots authorized for repository-write slices."""
     common = _git_common_dir()
     shared_out = (common.parent / "out").resolve()
     if not shared_out.is_dir():
@@ -442,7 +410,6 @@ def _dedicated_writable_roots() -> list[str]:
 
 
 def _canonical_utc_second(value: object) -> datetime:
-    """Accept only the exact server timestamp representation in an envelope."""
     if not isinstance(value, str):
         raise DispatchRefusal("engineering envelope authority expiry is malformed")
     try:
@@ -455,7 +422,6 @@ def _canonical_utc_second(value: object) -> datetime:
 
 
 def _require_dispatch_runway(envelope: dict, claim_lease_expires_at: object) -> None:
-    """Refuse unless every authority can outlive the fixed 900s timeout."""
     if not isinstance(envelope, dict):
         raise DispatchRefusal("engineering envelope is malformed")
     expiry = _canonical_utc_second(envelope.get("expires_at"))
@@ -473,7 +439,6 @@ def _require_dispatch_runway(envelope: dict, claim_lease_expires_at: object) -> 
 
 
 def _safe_child_env() -> dict[str, str]:
-    """Give Codex its local runtime, never the controller's DB capability."""
     allowed = ("HOME", "PATH", "LANG", "LC_ALL", "TMPDIR", "TERM")
     return {key: os.environ[key] for key in allowed if os.environ.get(key)}
 
@@ -496,7 +461,6 @@ def _read_request() -> dict:
 
 def _prompt(packet: dict, task: dict, source_loader_js: str, receipt_template: dict,
             source_merge_required: bool, source_envelope: dict) -> str:
-    """One exact execution request.  The executor cannot select authority."""
     source_merge_note = (
         "The accepted slice names source_merge: the projection carries the exact accepted "
         "authorized_paths, and they are the only paths this slice may change."
@@ -658,19 +622,13 @@ def install_dedicated_codex_desk(registry: desks.Registry) -> dict:
 
 
 def _dedicated_codex_desk(registry: desks.Registry) -> dict:
-    """Resolve the one reviewed local adapter before it sees an envelope."""
     try:
         entry = registry.resolve(ENGINEERING_DESK)
     except desks.DeskError as exc:
         raise DispatchRefusal("dedicated Engineering Codex desk is unavailable") from exc
-    # A corrupted local registry must fail before a Passport packet reaches a
-    # different model, a Claude socket, or a desk with unspecified execution
-    # characteristics.  The fixed desk itself is the local native surface.
     spec = _desk_spec()
     allowed_fields = {
         "name", "kind", "family", "effort", "cwd", "sandbox", "add_dirs", "room_seat", "thread_id", "registered_at",
-        # These are bridge-owned liveness/auth observations, never execution
-        # choices. They are allowed to change without widening the desk.
         "last_seen", "last_live", "last_auth", "last_auth_at",
     }
     if set(entry) - allowed_fields:
@@ -700,8 +658,6 @@ def run(request: dict, *, dispatch_fn=dispatch.dispatch, registry: desks.Registr
     envelope = request["envelope"]
     if envelope.get("server_binding", {}).get("adapter", {}).get("surface") != "codex_desktop":
         raise DispatchRefusal("engineering envelope does not select the Codex desktop adapter")
-    # Reject malformed authority before contract parsing, and repeat the same
-    # check directly beside dispatch below as the final launch boundary.
     _require_dispatch_runway(envelope, task.get("claim_lease_expires_at"))
     if not isinstance(slice_row, dict) or not isinstance(task.get("slice_ref"), str):
         raise DispatchRefusal("engineering controller task has no exact slice")
@@ -716,10 +672,6 @@ def run(request: dict, *, dispatch_fn=dispatch.dispatch, registry: desks.Registr
     receipt_template = build_engineering_slice_receipt_template(
         packet, task, envelope, slice_row, request["executor_slug"])
     _require_dispatch_runway(envelope, task.get("claim_lease_expires_at"))
-    # The database lease deadline is controller authority, not model input; it
-    # must be checked at launch but excluded from the packet/task digest.  The
-    # canonical Work Request ref rides in the hydration binding, keeping the
-    # task binding exactly the shape the rule-pack drift gate verifies.
     prompt_task = {key: value for key, value in task.items() if key not in PROMPT_TASK_EXCLUDED_KEYS}
     row = dispatch_fn(
         request["desk"],
@@ -746,10 +698,6 @@ def run(request: dict, *, dispatch_fn=dispatch.dispatch, registry: desks.Registr
         "session_ref": envelope.get("agent_session", {}).get("id"),
         "adapter_ref": adapter_binding.get("adapter_id"),
     }
-    # Receipt attribution is evidence of the envelope the executor saw, not a
-    # second opportunity for a model or local caller to name a principal or
-    # native session.  The full envelope validator above establishes shape;
-    # this equality establishes the controller boundary.
     if attribution != expected_attribution:
         raise DispatchRefusal("engineering receipt attribution does not match the server binding")
     claim = receipt.get("executor_claim")
@@ -772,8 +720,6 @@ def main() -> int:
             try:
                 result = validate_receipt_document(value)
             except (DispatchRefusal, engineering_passport.EngineeringContractError) as exc:
-                # This read-only mode receives no credentials. Diagnostics may
-                # include field names or slice refs from the caller's own input.
                 print(json.dumps({"ok": False, "error": type(exc).__name__,
                                   "detail": str(exc)}, separators=(",", ":")), file=sys.stderr)
                 return 1

@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from pathlib import Path
+
+# Retain import-time provenance; a later checkout update does not reload code.
+SOURCE_BYTES = Path(__file__).read_bytes()
 
 MASK = "[REDACTED]"
 

@@ -17,6 +17,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+SOURCE_BYTES = Path(__file__).read_bytes()
+
 DEFAULT_API = "https://api.doctorcre.com"
 DEFAULT_APP = "https://app.doctorcre.com"
 DEFAULT_LEGACY = "https://dealroom.doctorcre.com"

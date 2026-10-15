@@ -25,6 +25,7 @@ What is pinned, one test class each:
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -47,6 +48,10 @@ assert _SPEC is not None and _SPEC.loader is not None
 rp = importlib.util.module_from_spec(_SPEC)
 sys.modules["release_pipeline"] = rp
 _SPEC.loader.exec_module(rp)
+_PRODUCER_SPEC = importlib.util.spec_from_file_location("record_release_review", HERE / "record-release-review.py")
+assert _PRODUCER_SPEC is not None and _PRODUCER_SPEC.loader is not None
+producer = importlib.util.module_from_spec(_PRODUCER_SPEC)
+_PRODUCER_SPEC.loader.exec_module(producer)
 
 FIXTURE_ENV = fixture_env()
 VERSION = "0f1e2d3c-4b5a-4968-8776-655443322110"
@@ -145,6 +150,12 @@ class FakeRunner:
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text(failed_out, encoding="utf-8")
             return rp.Result(7, failed_out)
+        is_app_worktree = name == "app-worktree"
+        is_app_worktree_cleanup = (name == "worktree-cleanup" and argv[:5] == [
+            "git", "-C", str(cwd), "worktree", "remove"] and "/app-" in argv[-1])
+        if is_app_worktree or name == "app-main-ref-refresh" or is_app_worktree_cleanup:
+            proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
+            return rp.Result(proc.returncode, proc.stdout + proc.stderr)
         if name == "release-key":
             key = argv[argv.index("--key") + 1]
             return rp.Result(0 if key.endswith("-01") else 2, "")
@@ -196,6 +207,28 @@ class FakeRunner:
 
     def names(self) -> list[str]:
         return [n for n, _ in self.calls]
+
+
+def install_toolchain_wrangler(repo: Path) -> Path:
+    """Write a stub wrangler where Pipeline.auth_wrangler looks for it."""
+    wrangler = (rp.wrangler_toolchain(repo, repo / "out/release-pipeline")
+                / "node_modules/.bin/wrangler")
+    wrangler.parent.mkdir(parents=True, exist_ok=True)
+    wrangler.write_text("#!/bin/sh\nexit 0\n")
+    wrangler.chmod(0o755)
+    return wrangler
+
+
+class InstallingRunner(FakeRunner):
+    """FakeRunner whose `wrangler-install` step writes the binary, as npm ci does."""
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        if log.stem.endswith("wrangler-install") and res.rc == 0:
+            bin_ = Path(cwd) / "node_modules/.bin/wrangler"
+            bin_.parent.mkdir(parents=True, exist_ok=True)
+            bin_.write_text("#!/bin/sh\nexit 0\n")
+        return res
 
 
 HEAD_DATE = "2026-09-29T00:00:00Z"
@@ -293,7 +326,10 @@ class Fixture:
             git(repo, "config", "user.email", "t@example.invalid")
             git(repo, "config", "user.name", "t")
             (repo / "README.md").write_text("x")
-            git(repo, "add", "README.md")
+            (repo / "mcp-server").mkdir()
+            (repo / "mcp-server" / "package.json").write_text('{"name": "mcp-server"}\n')
+            (repo / "mcp-server" / "package-lock.json").write_text('{"lockfileVersion": 3}\n')
+            git(repo, "add", "README.md", "mcp-server")
             git(repo, "commit", "-q", "-m", "c")
             git(repo, "push", "-q", "origin", "HEAD:main")
             cls._base_sha = git(repo, "rev-parse", "HEAD")
@@ -332,6 +368,10 @@ class Fixture:
         venv_python.parent.mkdir(parents=True, exist_ok=True)
         venv_python.write_text("#!/bin/sh\nexit 0\n")
         venv_python.chmod(0o755)
+        # The token-check wrangler already installed, as on every tick after
+        # the first; TokenCheckWrangler removes it to test the install.
+        self.wrangler = install_toolchain_wrangler(self.repo)
+
 
     def commit(self, files: dict[str, str]) -> str:
         for rel, text in files.items():
@@ -354,20 +394,74 @@ class Fixture:
 
     def pipeline(self, runner, *, cfg=None, github=None, live=None, dry_run=False, verbs=None,
                  slice_marker=None):
+        cfg = cfg or self.config()
         live = live if live is not None else {"sha": self.base}
         verbs = verbs if verbs is not None else []
         # Step 10 never spawns the real marker here: every run records the
         # (release_key, sha) it would have marked in self.slice_marks.
         if slice_marker is None:
             slice_marker = lambda key, sha: (self.slice_marks.append((key, sha)) or {"rc": 0})  # noqa: E731
+        # The fixture models the existing local merge-event producer. The
+        # pipeline still independently checks the live PR/comment evidence.
+        # The pipeline evaluates origin/main, which can be ahead of this
+        # checkout in update-branch/squash fixtures. Generate one local event
+        # for each merged commit in the batch: the controller may release an
+        # older green commit while newer commits are still pending.
+        remote_main = git(self.repo, "ls-remote", "origin", "refs/heads/main").split()[0]
+        commits = git(self.repo, "rev-list", "--reverse", "HEAD", f"^{self.base}").splitlines()
+        if remote_main not in commits:
+            commits.append(remote_main)
+        events = []
+        lane_names = [name for name in ("worker", "app")
+                      if name == "worker" or cfg[name].get("enabled")]
+        for merge_sha in commits:
+            for lane_name in lane_names:
+                lane_cfg = cfg[lane_name]
+                source_gh = github or FakeGitHub()
+                try:
+                    pr = source_gh.pr_for_commit(merge_sha)
+                except ValueError:
+                    # A fixture may deliberately make GitHub unreadable so
+                    # the pipeline's own refusal path can be exercised.
+                    continue
+                if pr is None:
+                    continue
+                pr_number = int(pr["number"])
+                reviewed_head = str(pr["head"]["sha"])
+                source_comments = source_gh.comments(pr_number)
+                deciding = rp.deciding_verdict(source_comments, lane_cfg) or {}
+                fake_comment_id = int(deciding.get("id") or 900 + pr_number)
+                reviewed_sha = rp.reviewed_header_sha(str(deciding.get("body") or "")) or reviewed_head
+                events.append({"schema": "carr-release-merge-event.v1",
+                               "provenance_source": "codex-record-event", "continuity_event_id": "fixture-event",
+                               "reviewer": "codex", "repository": lane_cfg["github_repo"],
+                               "pull_number": pr_number, "head_sha": reviewed_head,
+                               "reviewed_sha": reviewed_sha, "review_comment_id": fake_comment_id,
+                               "merge_sha": merge_sha, "reviewer_task_ref": "review-task-1",
+                               "maker_task_ref": "maker-task-1", "task_refs_verified": False,
+                               "builder_evidence_refs": ["github:jbookout/carr-system/pull/1"]})
+        event_path = self.repo / cfg.get("merge_event_file", "out/merge-events.jsonl")
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        event_path.write_text("".join(json.dumps(event) + "\n" for event in events))
         env = rp.child_env(FIXTURE_ENV)
         env.update({k: FIXTURE_ENV[k] for k in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")})
+        # Fixture source stands in for the modules loaded by a production
+        # process. Capture it at construction, before any simulated sync.
+        loaded = {path: rp.git_blob((self.repo / path).read_bytes())
+                  if (self.repo / path).is_file() else None for path in (
+                      "ops/release-pipeline.py", "lib/credential_file.py",
+                      "lib/github_reader.py", "lib/secret_redaction.py",
+                      "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                      "ops/config/release-pipeline.v1.json")}
+        if isinstance(cfg, rp.LoadedConfig):
+            loaded["ops/config/release-pipeline.v1.json"] = cfg.source_blob
         pipe = rp.Pipeline(cfg or self.config(), repo=self.repo, runner=runner,
                            github=lambda _r: github or FakeGitHub(),
                            http=lambda _u: {"git_sha": {"value": live["sha"]},
                                             "worker_version": {"id": live.get("version", PRIOR)}},
                            call_verb=lambda verb, args: (verbs.append((verb, args)) or (True, {"ok": True})),
-                           slice_marker=slice_marker, dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
+                           slice_marker=slice_marker, controller_blobs=loaded,
+                           dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
         pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}}
         pipe.sleep = lambda _seconds: None
         return pipe
@@ -2299,11 +2393,24 @@ class Lock(Base):
 class VerifierIsNotMaker(unittest.TestCase):
     cfg = json.loads((HERE / "config" / "release-pipeline.v1.json").read_text())["worker"]
 
-    def test_default_is_the_review_agent(self):
-        self.assertEqual(rp.choose_verifier(self.cfg, {}), "claude-review-agent")
+    @staticmethod
+    def event(**overrides):
+        event = {"schema": "carr-release-merge-event.v1", "provenance_source": "codex-record-event",
+                 "continuity_event_id": "event-1", "reviewer": "codex",
+                 "reviewer_task_ref": "review-task-1", "maker_task_ref": "maker-task-1",
+                 "task_refs_verified": False, "builder_evidence_refs": ["github:builder/1"]}
+        event.update(overrides)
+        return event
 
-    def test_only_the_merge_event_names_the_reviewer(self):
-        self.assertEqual(rp.choose_verifier(self.cfg, {"reviewer": "Sonnet-Review"}), "sonnet-review")
+    def test_missing_provenance_has_no_configured_actor_fallback(self):
+        with self.assertRaises(rp.Blocked) as caught:
+            rp.choose_verifier(self.cfg, {})
+        self.assertEqual(caught.exception.reason, "verifier_provenance_missing")
+
+    def test_only_the_authenticated_event_names_codex_reviewer(self):
+        self.assertEqual(rp.choose_verifier(self.cfg, self.event()), "codex")
+        with self.assertRaisesRegex(rp.Blocked, "authenticated native Codex"):
+            rp.choose_verifier(self.cfg, self.event(reviewer="claude-review-agent"))
 
     def test_comment_text_cannot_name_the_verifier(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2315,14 +2422,19 @@ class VerifierIsNotMaker(unittest.TestCase):
             runner = FakeRunner(live=live)
             fx.pipeline(runner, github=gh, live=live).tick(["worker"])
             up = next(a for name, a in runner.calls if name == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "claude-review-agent")
+            self.assertEqual(up[up.index("--verifier") + 1], "codex")
 
     def test_maker_humans_pipeline_and_author_are_refused(self):
         for bad in ("carr_jobs", "joe", "Dell", "release-pipeline", "jbookout"):
             with self.assertRaises(rp.Blocked, msg=bad):
-                rp.choose_verifier(self.cfg, {"reviewer": bad})
+                rp.choose_verifier(self.cfg, self.event(reviewer=bad))
         with self.assertRaises(rp.Blocked):
-            rp.choose_verifier(self.cfg, {"reviewer": "claude-a", "author_actor": "claude-a"})
+            rp.choose_verifier(self.cfg, self.event(reviewer="codex", author_actor="codex"))
+        with self.assertRaises(rp.Blocked) as caught:
+            rp.choose_verifier(self.cfg, self.event(maker_task_ref="review-task-1"))
+        self.assertEqual(caught.exception.reason, "verifier_job_evidence_invalid")
+        with self.assertRaises(rp.Blocked):
+            rp.choose_verifier(self.cfg, self.event(task_refs_verified=True))
 
     def test_upload_binds_the_verifier_and_its_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2332,7 +2444,7 @@ class VerifierIsNotMaker(unittest.TestCase):
             runner = FakeRunner(live=live)
             fx.pipeline(runner, live=live).tick(["worker"])
             up = next(a for n, a in runner.calls if n == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "claude-review-agent")
+            self.assertEqual(up[up.index("--verifier") + 1], "codex")
             self.assertRegex(up[up.index("--verifier-evidence") + 1], r"^github:o/r/pull/\d+#issuecomment-\d+$")
             self.assertRegex(up[up.index("--test-evidence") + 1],
                              r"^github-actions:jbookout/carr-system/runs/\d+#ops-ci-strict$")
@@ -2346,6 +2458,156 @@ class VerifierIsNotMaker(unittest.TestCase):
             self.assertEqual(runner.calls, [])
             self.assertEqual(fx.records()[-1]["reason"], "no_independent_review")
             self.assertNotIn("failed_sha", fx.state().get("worker", {}))
+
+    def test_missing_or_mismatched_local_event_holds_before_deploy(self):
+        for mutation, expected in (("missing", "verifier_provenance_missing"),
+                                   ("stale_head", "verifier_provenance_mismatch")):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                fx.commit({"mcp-server/src/a.js": "1"})
+                runner = FakeRunner()
+                pipe = fx.pipeline(runner)
+                event_path = fx.repo / "out/merge-events.jsonl"
+                if mutation == "missing":
+                    event_path.write_text("")
+                else:
+                    event = json.loads(event_path.read_text().splitlines()[0])
+                    event["head_sha"] = "c" * 40
+                    event_path.write_text(json.dumps(event) + "\n")
+                self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(fx.records()[-1]["reason"], expected)
+
+
+class ReleaseReviewProducer(unittest.TestCase):
+    class GitHub:
+        def __init__(self, *, head="a" * 40, merged=True, reviewed=None):
+            self.head, self.merged = head, merged
+            self.reviewed = reviewed or head
+        def api(self, path, *, paginate=False):
+            if path.endswith("/pulls/17"):
+                return {"state": "closed", "merged_at": "2026-10-01T00:00:00Z" if self.merged else None,
+                        "merge_commit_sha": "b" * 40,
+                        "head": {"sha": self.head}, "base": {"ref": "main"},
+                        "user": {"login": "jbookout"}}
+            return [{"id": 917, "body": f"APPROVE\nReviewed-SHA: {self.reviewed}\n",
+                     "created_at": "2026-10-01T00:00:00Z", "author_association": "OWNER",
+                     "user": {"login": "jbookout"},
+                     "html_url": "https://github.com/jbookout/carr-system/pull/17#issuecomment-917"}]
+
+    def args(self, head="a" * 40):
+        return argparse.Namespace(repository="jbookout/carr-system", pull_number=17, head_sha=head,
+            native_task_id="01a13766-5922-7aa1-ac61-beeb0e1e0a02", project_id="git:/Users/booko/carr-system/.git",
+            cwd="/Users/booko/carr-system", reviewer_task_ref="01a13766-5922-7aa1-ac61-beeb0e1e0a02",
+            maker_task_ref="01b13766-5922-7aa1-ac61-beeb0e1e0a02",
+            builder_evidence=["github:jbookout/carr-system/pull/1753"])
+
+    def test_exact_merged_approval_records_server_event_before_local_append(self):
+        with mock.patch.object(producer, "_append_event") as append:
+            calls = []
+            event = producer.record(self.args(), gh=self.GitHub(),
+                                    record_event=lambda args: (calls.append(args) or "continuity-1"))
+        self.assertEqual(event["schema"], "carr-release-merge-event.v1")
+        self.assertEqual(event["reviewer"], "codex")
+        self.assertEqual(event["continuity_event_id"], "continuity-1")
+        self.assertIs(event["task_refs_verified"], False)
+        self.assertEqual(calls[0]["event_type"], "release_review")
+        self.assertNotIn("reviewer", calls[0]["cursor"])
+        append.assert_called_once()
+
+    def test_stale_head_unmerged_pr_and_failed_continuity_never_append(self):
+        with mock.patch.object(producer, "_append_event") as append:
+            with self.assertRaisesRegex(ValueError, "exact head"):
+                producer.record(self.args(), gh=self.GitHub(head="c" * 40), record_event=lambda _args: "x")
+            with self.assertRaisesRegex(ValueError, "not merged"):
+                producer.record(self.args(), gh=self.GitHub(merged=False), record_event=lambda _args: "x")
+            with self.assertRaisesRegex(RuntimeError, "record failed"):
+                producer.record(self.args(), gh=self.GitHub(),
+                                record_event=lambda _args: (_ for _ in ()).throw(RuntimeError("record failed")))
+        append.assert_not_called()
+
+    def test_accepted_update_branch_review_records_the_covered_sha(self):
+        reviewed = "f" * 40
+        with mock.patch.object(producer.rp.Pipeline, "main_merge_only", return_value=None):
+            with mock.patch.object(producer, "_append_event"):
+                event = producer.record(self.args(), gh=self.GitHub(reviewed=reviewed),
+                                        record_event=lambda _args: "continuity-1")
+        self.assertEqual(event["reviewed_sha"], reviewed)
+
+    def test_record_uses_fixed_authenticated_profile_without_actor_argument(self):
+        seen = {}
+        class Result:
+            returncode, stdout = 0, ""
+        def runner(argv, **kwargs):
+            seen.update(argv=argv, **kwargs)
+            request = json.loads(argv[-1])
+            Result.stdout = json.dumps({"ok": True, "event": {
+                "id": "server-event", "native_task_id": request["native_task_id"],
+                "project_id": request["project_id"], "cwd": request["cwd"],
+                "event_type": request["event_type"], "cursor": request["cursor"]}})
+            return Result()
+        request = {"event_type": "release_review", "native_task_id": "task-1",
+                   "project_id": "project-1", "cwd": "/repo", "cursor": {"head": "a" * 40}}
+        event_id = producer._run_record(request, runner=runner)
+        self.assertEqual(event_id, "server-event")
+        self.assertEqual(seen["env"]["CARR_MCP_CLIENT_PROFILE"], "codex-continuity")
+        self.assertNotIn("reviewer", json.loads(seen["argv"][-1]))
+
+    def test_record_rejects_unconfirmed_or_mismatched_worker_response(self):
+        request = {"event_type": "release_review", "native_task_id": "task-1",
+                   "project_id": "project-1", "cwd": "/repo", "cursor": {"head": "a" * 40}}
+        event = {"id": "server-event", **request}
+        bad_responses = [
+            {"ok": False, "event": event},
+            {"ok": True, "event": {**event, "native_task_id": "other-task"}},
+            {"ok": True, "event": {**event, "project_id": "other-project"}},
+            {"ok": True, "event": {**event, "cwd": "/other"}},
+            {"ok": True, "event": {**event, "event_type": "other-event"}},
+            {"ok": True, "event": {**event, "cursor": {"head": "b" * 40}}},
+        ]
+        for payload in bad_responses:
+            with self.subTest(payload=payload):
+                class Result:
+                    returncode = 0
+                    stdout = json.dumps(payload)
+                with self.assertRaisesRegex(RuntimeError, "continuity record"):
+                    producer._run_record(request, runner=lambda *_args, **_kwargs: Result())
+
+    def test_local_append_retry_is_idempotent_and_conflicting_reuse_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out/merge-events.jsonl"
+            event = {"repository": "jbookout/carr-system", "merge_sha": "b" * 40}
+            producer._append_event(path, event)
+            producer._append_event(path, event)
+            self.assertEqual(len(path.read_text().splitlines()), 1)
+            with self.assertRaisesRegex(RuntimeError, "different merge event"):
+                producer._append_event(path, {**event, "reviewer": "not-codex"})
+
+    def test_release_reader_marks_conflicting_events_ambiguous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "merge-events.jsonl"
+            first = {"merge_sha": "b" * 40, "repository": "jbookout/carr-system", "reviewer": "codex"}
+            second = {**first, "reviewer": "claude-review-agent"}
+            path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
+            self.assertEqual(rp.read_merge_events(path)["b" * 40]["jbookout/carr-system"],
+                             {"event_conflict": True})
+
+
+class GitHubBudgetEnvironment(unittest.TestCase):
+    def test_configured_cache_path_reaches_github_reader_without_credentials(self):
+        budget_path = "/tmp/github-read-budget.json"
+        env = rp.child_env({
+            "HOME": "/tmp/home",
+            "CARR_GITHUB_READ_BUDGET": budget_path,
+            "DATABASE_URL": "fixture-dsn",
+            "CARR_DB_PASSWORD": "fixture-password",
+            "GH_TOKEN": "fixture-token",
+        })
+
+        self.assertEqual(rp.GitHub("o/r", env).reader.budget.path, Path(budget_path))
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("CARR_DB_PASSWORD", env)
+        self.assertNotIn("GH_TOKEN", env)
 
 
 class ReviewGate(Base):
@@ -3341,9 +3603,10 @@ class AppLane(Base):
                 live["source_commit"] = sha
             return res
         runner.run = run  # type: ignore[method-assign]
-        self.assertEqual(pipe.tick(["app"]), 0)
-        self.assertEqual(runner.names()[:7], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build",
-                                              "smoke-baseline", "app-release", "smoke-post"])
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.names()[:8], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build",
+                                              "smoke-baseline", "app-main-ref-refresh", "app-release",
+                                              "smoke-post"])
         build_index = runner.names().index("app-build")
         self.assertEqual(runner.calls[build_index][1], ["npm", "run", "build"])
         self.assertEqual(runner.envs["app-build"]["DOCTORCRE_SOURCE_COMMIT"], sha)
@@ -3354,6 +3617,63 @@ class AppLane(Base):
         # no ops.release row for membership to attach to.
         self.assertEqual(self.fx.slice_marks, [])
         self.assertNotIn("slice_marker", self.fx.records()[-1])
+
+    def test_immutable_main_fetch_refreshes_stale_tracking_ref_before_exact_main_guard(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+        stale = git(self.fx.repo, "rev-parse", "refs/remotes/origin/main")
+        self.assertNotEqual(candidate, stale)
+        fetch_head = self.fx.repo / ".git/FETCH_HEAD"
+        fetch_head.write_text("another session's fetch evidence\n")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.guard_observations, [(candidate, candidate)])
+        self.assertEqual(git(self.fx.repo, "rev-parse", "HEAD"), self.fx.base)
+        self.assertEqual(git(self.fx.repo, "rev-parse", "refs/remotes/origin/main"), candidate)
+        self.assertEqual(fetch_head.read_text(), "another session's fetch evidence\n")
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_app_release_refuses_main_advance_during_build(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+
+        def advance_main():
+            (other / "src/next.js").write_text("unexpected later main commit\n")
+            git(other, "add", "src/next.js")
+            git(other, "commit", "-q", "-m", "advance main during app build")
+            git(other, "push", "-q", "origin", "HEAD:main")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live, on_build=advance_main)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 1)
+        self.assertNotIn("app-release", runner.names())
+        self.assertEqual(self.fx.records()[-1]["sha"], candidate)
+        self.assertEqual(self.fx.records()[-1]["status"], "failed")
+        self.assertNotEqual(git(self.fx.repo, "ls-remote", "origin", "refs/heads/main").split()[0], candidate)
 
     def test_failed_credential_free_build_never_reaches_publication(self):
         self.fx.commit({"src/worker.js": "1"})
@@ -3867,6 +4187,50 @@ class ClearFailedRetirement(Base):
         self.assert_retry_available()
 
 
+class ControllerSourceCapture(Base):
+    def test_default_provenance_survives_disk_updates_after_loading(self):
+        # Load real modules in a separate interpreter; fixture injection must
+        # not conceal a constructor that re-reads already replaced source.
+        files = {path: (HERE.parent / path).read_text() for path in (
+            "ops/release-pipeline.py", "lib/secret_redaction.py",
+            "lib/credential_file.py", "lib/github_reader.py")}
+        files["ops/config/release-pipeline.v1.json"] = json.dumps(self.fx.config())
+        for helper in ("ops/release-smoke.py", "ops/doctorcre-production-smoke.py"):
+            files[helper] = (HERE.parent / helper).read_text()
+        self.fx.commit(files)
+        script = '''
+import json, runpy, subprocess, sys
+from pathlib import Path
+repo = Path(sys.argv[1])
+module = runpy.run_path(str(repo / "ops/release-pipeline.py"))
+cfg = module["load_config"](repo / "ops/config/release-pipeline.v1.json")
+for path in ("ops/release-pipeline.py", "lib/credential_file.py",
+             "lib/github_reader.py", "lib/secret_redaction.py",
+             "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+             "ops/config/release-pipeline.v1.json", "mcp-server/package.json",
+             "mcp-server/package-lock.json"):
+    with (repo / path).open("a") as stream:
+        stream.write("\\nchanged after loading\\n")
+pipe = module["Pipeline"](cfg, repo=repo, out=lambda _: None)
+subprocess.run(["git", "add", "ops/release-pipeline.py", "lib/credential_file.py",
+                "lib/github_reader.py", "lib/secret_redaction.py", "ops/release-smoke.py",
+                "ops/doctorcre-production-smoke.py", "ops/config/release-pipeline.v1.json",
+                "mcp-server/package.json", "mcp-server/package-lock.json"], cwd=repo, check=True)
+subprocess.run(["git", "commit", "-qm", "updated disk"], cwd=repo, check=True)
+subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=repo, check=True)
+try:
+    pipe.controller_current({})
+except module["Blocked"] as exc:
+    print(exc.reason)
+else:
+    raise AssertionError("loaded controller passed after main changed")
+'''
+        result = subprocess.run([sys.executable, "-c", script, str(self.fx.repo)],
+                                env=FIXTURE_ENV, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "controller_stale")
+
+
 class ControllerFreshness(Base):
     """The tick runs from the canonical checkout. When that checkout lags
     origin/main (fleet-sync refuses to fast-forward over local changes), the
@@ -3907,6 +4271,89 @@ class ControllerFreshness(Base):
         git(other, "commit", "-q", "-m", "c")
         git(other, "push", "-q", "origin", "HEAD:main")
         return git(other, "rev-parse", "HEAD")
+
+    def test_freshness_read_failures_hold_then_retry_the_same_sha(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1", "ops/release-smoke.py": "helper\n"})
+        for command in ("ls-remote", "fetch", "ls-tree", "hash-object"):
+            with self.subTest(command=command):
+                runner, verbs = FakeRunner(), []
+                pipe = self.fx.pipeline(runner, verbs=verbs)
+                original = pipe.git
+                counts = {}
+
+                def read(*args, **kwargs):
+                    counts[args[0]] = counts.get(args[0], 0) + 1
+                    occurrence = 2 if command in ("ls-remote", "fetch") else 1
+                    if args[0] == command and counts[command] == occurrence:
+                        raise rp.StepFailed("git " + command, 128, "", "fixture read unavailable")
+                    return original(*args, **kwargs)
+
+                pipe.git = read
+                pipe.tick(["worker"])
+                self.assertEqual(runner.calls, [])
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(verbs, [])
+                self.assertEqual(self.fx.records()[-1]["reason"], "controller_unreadable")
+        live = {"sha": self.fx.base}
+        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+
+    def test_recovered_dry_run_preserves_populated_state_bytes(self):
+        self.push_from_elsewhere({"ops/release-pipeline.py": "v2\n", "mcp-server/src/a.js": "1"})
+        self.assertEqual(self.fx.pipeline(FakeRunner()).tick(["worker"]), 3)
+        git(self.fx.repo, "pull", "-q", "--ff-only", "origin", "main")
+        path = self.fx.repo / "out/release-pipeline/state.json"
+        before = path.read_bytes()
+        self.assertEqual(self.fx.pipeline(FakeRunner(), dry_run=True).tick(["worker"]), 0)
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_fast_forward_after_load_cannot_disguise_running_controller(self):
+        for path in ("ops/release-pipeline.py", "lib/credential_file.py",
+                     "lib/github_reader.py", "lib/secret_redaction.py",
+                     "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                     "ops/config/release-pipeline.v1.json"):
+            with self.subTest(path=path):
+                cfg = self.fx.config()
+                cfg["app"]["enabled"] = True
+                prior_release = self.fx.state().get("app", {}).get("last_released_sha")
+                self.fx.commit({path: json.dumps(cfg) if path.endswith(".json") else "old source\n"})
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner, cfg=rp.load_config(self.fx.repo / path)
+                                        if path.endswith(".json") else cfg)
+                pipe.http = lambda _url: {"source_commit": self.fx.base, "environment": "production"}
+                updated = json.loads(json.dumps(cfg))
+                updated["app"]["enabled"] = False
+                self.push_from_elsewhere({path: json.dumps(updated) if path.endswith(".json") else "new source\n",
+                                          "src/app.js": path})
+                git(self.fx.repo, "pull", "-q", "--ff-only", "origin", "main")
+                self.assertEqual(pipe.tick(["app"]), 3)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.records()[-1]["reason"], "controller_stale")
+                state = self.fx.state().get("app", {})
+                self.assertFalse(state.get("failed_sha"))
+                self.assertEqual(state.get("last_released_sha"), prior_release)
+
+    def test_wrangler_package_inputs_must_match_main_before_any_release_step(self):
+        prior_release = self.fx.state()["worker"]["last_released_sha"]
+        sha = self.fx.commit({"mcp-server/src/a.js": "candidate"})
+        for package_file in rp.TOOLCHAIN_FILES:
+            with self.subTest(package_file=package_file):
+                path = self.fx.repo / "mcp-server" / package_file
+                original = path.read_bytes()
+                path.write_bytes(original + b"\n")
+                runner = FakeRunner(live={"sha": self.fx.base})
+                try:
+                    self.assertEqual(self.fx.pipeline(runner, live={"sha": self.fx.base}).tick(["worker"]), 3)
+                    self.assertEqual(runner.calls, [])
+                    record = self.fx.records()[-1]
+                    self.assertEqual((record["status"], record["reason"], record["sha"]),
+                                     ("blocked", "controller_stale", sha))
+                    self.assertIn("mcp-server/" + package_file, record["detail"])
+                    state = self.fx.state()["worker"]
+                    self.assertFalse(state.get("failed_sha"))
+                    self.assertEqual(state["last_released_sha"], prior_release)
+                finally:
+                    path.write_bytes(original)
 
     def test_a_checkout_behind_main_holds_without_burning_the_sha_then_ships_once_current(self):
         released = self.fx.state()["worker"]["last_released_sha"]
@@ -4277,6 +4724,23 @@ class CapabilityRecovery(Base):
         self.assertNotIn("~/.config/carr/tokens.env", body)
 
 
+class GitHubBudgetEnvironment(unittest.TestCase):
+    def test_configured_cache_path_reaches_github_reader_without_credentials(self):
+        budget_path = "/tmp/github-read-budget.json"
+        env = rp.child_env({
+            "HOME": "/tmp/home",
+            "CARR_GITHUB_READ_BUDGET": budget_path,
+            "DATABASE_URL": "fixture-dsn",
+            "CARR_DB_PASSWORD": "fixture-password",
+            "GH_TOKEN": "fixture-token",
+        })
+
+        self.assertEqual(rp.GitHub("o/r", env).reader.budget.path, Path(budget_path))
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("CARR_DB_PASSWORD", env)
+        self.assertNotIn("GH_TOKEN", env)
+
+
 class DeployCredential(unittest.TestCase):
     """CLOUDFLARE_API_TOKEN comes from $HOME/.config/carr/tokens.env into the
     wrangler-running steps' env only. Every case runs under a temporary HOME,
@@ -4354,6 +4818,7 @@ class DeployCredential(unittest.TestCase):
         self.assertTrue(any("credential missing" in line for line in self.lines))
 
     def test_missing_file_fails_loudly_and_dispatches(self):
+        shutil.rmtree(self.fx.repo / "out/release-pipeline/toolchain")
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         verbs: list = []
         runner = FakeRunner()
@@ -4774,6 +5239,33 @@ class RealGitRunner(FakeRunner):
         return rp.Result(proc.returncode, proc.stdout + proc.stderr)
 
 
+class ExactMainAppGuardRunner(RealGitRunner):
+    """Use real local Git state for the app's unchanged exact-main guard."""
+
+    def __init__(self, **kw):
+        self.on_build = kw.pop("on_build", None)
+        super().__init__("", **kw)
+        self.guard_observations = []
+        self.live = kw.get("live")
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        if argv[:2] == ["node", "scripts/release-production.mjs"]:
+            head = git(Path(cwd), "rev-parse", "HEAD")
+            tracking = git(Path(cwd), "rev-parse", "refs/remotes/origin/main")
+            self.guard_observations.append((head, tracking))
+            if head != tracking:
+                self.calls.append((log.stem.split("-", 1)[1], list(argv)))
+                return rp.Result(1, "release guard: HEAD must equal origin/main")
+            if isinstance(self.live, dict):
+                self.live["source_commit"] = head
+                self.live["environment"] = "production"
+            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        if log.stem.endswith("app-build") and self.on_build is not None:
+            self.on_build()
+        return result
+
+
 class SchemaFollowupBase(Base):
     def test_schema_followup_branches_from_observed_main_not_the_stale_shared_ref(self):
         stale = self.fx.commit({"db/schema.sql": "create table a(id int);\n"})
@@ -4941,6 +5433,88 @@ class GitHubDiagnosticPersistence(Base):
             self.assertNotIn(token, diagnostic)
             self.assertIn("[REDACTED]", diagnostic)
             self.assertIn("HTTP 401", diagnostic)
+
+
+class TokenCheckWrangler(Base):
+    """wrangler-auth runs the pipeline's own wrangler install, never the
+    pipeline checkout's mcp-server/node_modules (emptied 2026-10-05, which
+    made `wrangler whoami` exit 127 on both lanes)."""
+
+    def toolchain(self) -> Path:
+        return self.fx.repo / "out/release-pipeline/toolchain"
+
+    def test_whoami_uses_the_installed_toolchain_not_the_checkout(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(runner.names()[0], "wrangler-auth")
+        self.assertNotIn("wrangler-install", runner.names())
+        whoami = dict(runner.calls)["wrangler-auth"]
+        self.assertEqual(whoami, [str(self.fx.wrangler), "whoami"])
+        self.assertEqual(runner.cwds["wrangler-auth"], str(self.fx.repo / "mcp-server"))
+
+    def test_missing_toolchain_is_installed_before_whoami_and_kept(self):
+        shutil.rmtree(self.toolchain())
+        stale = self.toolchain() / "mcp-server-0000000000000000"
+        stale.mkdir(parents=True)
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = InstallingRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual(runner.names()[:3], ["wrangler-install", "wrangler-auth", "worktree"])
+        install = dict(runner.calls)["wrangler-install"]
+        self.assertEqual(install, ["npm", "ci", "--no-audit", "--no-fund"])
+        home = self.fx.wrangler.parents[2]
+        self.assertEqual(runner.cwds["wrangler-install"], str(home) + ".partial")
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", runner.envs["wrangler-install"])
+        self.assertEqual(dict(runner.calls)["wrangler-auth"][0], str(self.fx.wrangler))
+        self.assertTrue(self.fx.wrangler.exists())
+        self.assertEqual(sorted(p.name for p in self.toolchain().iterdir()), [home.name])
+        for name in rp.TOOLCHAIN_FILES:
+            self.assertEqual((home / name).read_bytes(), (self.fx.repo / "mcp-server" / name).read_bytes())
+
+        # The next tick reuses the install.
+        self.fx.commit({"mcp-server/src/a.js": "2"})
+        again = InstallingRunner(live=live)
+        self.assertEqual(self.fx.pipeline(again, live=live).tick(["worker"]), 0)
+        self.assertNotIn("wrangler-install", again.names())
+
+    def test_lockfile_change_selects_a_new_install(self):
+        old = self.fx.wrangler
+        (self.fx.repo / "mcp-server/package-lock.json").write_text('{"lockfileVersion": 3, "x": 1}\n')
+        new = rp.wrangler_toolchain(self.fx.repo, self.fx.repo / "out/release-pipeline")
+        self.assertNotEqual(new, old.parents[2])
+
+    def test_install_without_a_binary_fails_at_wrangler_install(self):
+        shutil.rmtree(self.toolchain())
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
+        self.assertEqual(runner.names(), ["wrangler-install"])
+        rec = self.fx.records()[-1]
+        self.assertEqual((rec["status"], rec["step"], rec["sha"]), ("failed", "wrangler-install", sha))
+        self.assertFalse(self.fx.wrangler.parents[2].exists())
+
+    def test_failed_npm_ci_stops_before_whoami(self):
+        shutil.rmtree(self.toolchain())
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = InstallingRunner(live=live, fail_at="wrangler-install")
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
+        self.assertEqual(runner.names(), ["wrangler-install"])
+        self.assertEqual(self.fx.records()[-1]["step"], "wrangler-install")
+
+    def test_dry_run_installs_nothing(self):
+        shutil.rmtree(self.toolchain())
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.fx.pipeline(runner, live=live, dry_run=True).tick(["worker"])
+        self.assertEqual(runner.calls, [])
+        self.assertFalse(self.toolchain().exists())
 
 
 class Report(Base):
