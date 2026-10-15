@@ -69,7 +69,7 @@ class ExcludedTourValues:
 
 def excluded_tour_values(plan: Mapping[str, Any]) -> ExcludedTourValues:
     records, names, keys = plan.get("records"), plan.get("names"), plan.get("keys")
-    if not all(isinstance(item, dict) for item in (records, names, keys)):
+    if not isinstance(records, dict) or not isinstance(names, dict) or not isinstance(keys, dict):
         raise FixtureRefusal("tour plan lacks the App identity fields")
     tour, client = records.get("tour"), records.get("client")
     if not isinstance(tour, dict) or not isinstance(client, dict):
