@@ -176,14 +176,17 @@ def prepare_corpus(corpus):
 def pii_findings(text, corpus):
     words, numbers = [], []
     for number, line in enumerate(text.split('\n'), 1):
-        # The shaped rules also read the line as a program builds it; the client-data window reads the source.
-        forms = (decode_source(line), executable_form(line))
+        source = decode_source(line)
         for rule, regex in PII.items():
+            # A credential URL also counts as a program builds it. The contact rules and the
+            # client-data window read the source only: joining "a", "b" or "a" . "b" across
+            # ordinary code would turn every split synthetic fixture into contact data.
+            forms = (source, executable_form(line)) if rule == 'credential-url' else (source,)
             if any(not RESERVED_MAIL.search(match[0].rpartition('@')[2]) if rule == 'pii-email'
                    else real_password(match['secret']) if rule == 'credential-url' else True
                    for form in forms for match in regex.finditer(form)):
                 yield number, number, rule, ''
-        normalized = tokens(forms[0])
+        normalized = tokens(source)
         words.extend(normalized)
         numbers.extend([number] * len(normalized))
     if corpus and corpus['_lengths']:
