@@ -1,19 +1,20 @@
 {
-  "version": "model-routing-expectations/v2",
+  "version": "model-routing-expectations/v3",
   "baseline_ref": "9a6d255308abe154913657c3482103a8dae94ae6",
   "cases": {
-    "train-network-default-off": {
+    "train-default-off": {
       "split": "train",
       "input": {
-        "wire_case": "network-default-off",
         "network_access": false,
         "thread_id": null,
-        "sandbox": "workspace-write"
+        "sandbox": "workspace-write",
+        "cwd": null
       },
-      "input_sha256": "04abe9c554605e4bcdea82fc4cc53ea4c90c02f698755ff2540c0706810e148c",
+      "input_sha256": "37829d73f8a08d5a9acce29da4ca1a0a4d9585c481c7849226a6ca1101586c3e",
       "should_not_fire": true,
       "expected_wire": {
-        "outcome": "completed",
+        "outcome": "boot-refused-no-readonly-network",
+        "turn_status": "failed",
         "requests": [
           {
             "method": "thread/start",
@@ -29,7 +30,7 @@
               "input": [
                 {
                   "type": "text",
-                  "text": "<task>"
+                  "text": "<boot task>"
                 }
               ],
               "approvalPolicy": "never"
@@ -38,20 +39,21 @@
         ]
       },
       "source": "production_trace",
-      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default profile had no network capability."
+      "source_ref": "Production Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default read-only runtime could not fetch standing context."
     },
-    "train-network-opt-in-fresh": {
+    "train-fresh-opt-in": {
       "split": "train",
       "input": {
-        "wire_case": "network-opt-in-fresh",
         "network_access": true,
         "thread_id": null,
-        "sandbox": "read-only"
+        "sandbox": "read-only",
+        "cwd": null
       },
-      "input_sha256": "1438051c0d526b605c61a9853604e96a53991821fc1933fc3457bfe0c076987b",
+      "input_sha256": "7d881665262c992592efed5d66b439e704430b7497198afe53be2adf50b362b6",
       "should_not_fire": false,
       "expected_wire": {
-        "outcome": "completed",
+        "outcome": "synthetic-boot-accepted",
+        "turn_status": "completed",
         "requests": [
           {
             "method": "thread/start",
@@ -68,7 +70,7 @@
               "input": [
                 {
                   "type": "text",
-                  "text": "<task>"
+                  "text": "<boot task>"
                 }
               ],
               "approvalPolicy": "never",
@@ -80,44 +82,47 @@
           }
         ]
       },
-      "source": "production_trace",
-      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: requested read-only network on a fresh thread."
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
     },
-    "train-network-resume-refused": {
+    "train-resume-refused": {
       "split": "train",
       "input": {
-        "wire_case": "network-resume-refused",
         "network_access": true,
         "thread_id": "prior-thread",
-        "sandbox": "read-only"
+        "sandbox": "read-only",
+        "cwd": null
       },
-      "input_sha256": "5f0955e8e9f5dd882b4e0cedf2a02161bda1f9a763962854307290dc33267e9e",
+      "input_sha256": "2be9e7953d01768543121ebdba4858a3165de86f7fa592fc978e75c82c934508",
       "should_not_fire": true,
       "expected_wire": {
         "outcome": "network_access_requires_fresh_thread",
+        "turn_status": null,
         "requests": []
       },
       "source": "human_judged_hard_case",
-      "source_ref": "Independent PR 1780 review bf6: a network-enabled thread must be fresh and unresumable."
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
     },
-    "test-network-default-off": {
+    "test-readonly-default-off": {
       "split": "test",
       "input": {
-        "wire_case": "network-default-off",
         "network_access": false,
         "thread_id": null,
-        "sandbox": "workspace-write"
+        "sandbox": "read-only",
+        "cwd": "/synthetic/carr-system"
       },
-      "input_sha256": "04abe9c554605e4bcdea82fc4cc53ea4c90c02f698755ff2540c0706810e148c",
+      "input_sha256": "f15d4a7c55587363ad472ace1d1a04ad5667f058cb38f851a722fba8c202077c",
       "should_not_fire": true,
       "expected_wire": {
-        "outcome": "completed",
+        "outcome": "boot-refused-no-readonly-network",
+        "turn_status": "failed",
         "requests": [
           {
             "method": "thread/start",
             "params": {
               "approvalPolicy": "never",
-              "sandbox": "workspace-write"
+              "sandbox": "read-only",
+              "cwd": "/synthetic/carr-system"
             }
           },
           {
@@ -127,7 +132,7 @@
               "input": [
                 {
                   "type": "text",
-                  "text": "<task>"
+                  "text": "<boot task>"
                 }
               ],
               "approvalPolicy": "never"
@@ -136,27 +141,29 @@
         ]
       },
       "source": "production_trace",
-      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default profile had no network capability."
+      "source_ref": "Production Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default read-only runtime could not fetch standing context."
     },
-    "test-network-opt-in-fresh": {
+    "test-cwd-fresh-opt-in": {
       "split": "test",
       "input": {
-        "wire_case": "network-opt-in-fresh",
         "network_access": true,
         "thread_id": null,
-        "sandbox": "read-only"
+        "sandbox": "read-only",
+        "cwd": "/synthetic/carr-system"
       },
-      "input_sha256": "1438051c0d526b605c61a9853604e96a53991821fc1933fc3457bfe0c076987b",
+      "input_sha256": "23f2b1631875a0baccb6c607e2d9a39e1128475bf65540e4742a7fc2c9903603",
       "should_not_fire": false,
       "expected_wire": {
-        "outcome": "completed",
+        "outcome": "synthetic-boot-accepted",
+        "turn_status": "completed",
         "requests": [
           {
             "method": "thread/start",
             "params": {
               "approvalPolicy": "never",
               "sandbox": "read-only",
-              "ephemeral": true
+              "ephemeral": true,
+              "cwd": "/synthetic/carr-system"
             }
           },
           {
@@ -166,7 +173,7 @@
               "input": [
                 {
                   "type": "text",
-                  "text": "<task>"
+                  "text": "<boot task>"
                 }
               ],
               "approvalPolicy": "never",
@@ -178,25 +185,26 @@
           }
         ]
       },
-      "source": "production_trace",
-      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: requested read-only network on a fresh thread."
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
     },
-    "test-network-resume-refused": {
+    "test-cwd-resume-refused": {
       "split": "test",
       "input": {
-        "wire_case": "network-resume-refused",
         "network_access": true,
         "thread_id": "prior-thread",
-        "sandbox": "read-only"
+        "sandbox": "read-only",
+        "cwd": "/synthetic/carr-system"
       },
-      "input_sha256": "5f0955e8e9f5dd882b4e0cedf2a02161bda1f9a763962854307290dc33267e9e",
+      "input_sha256": "36fe3228e2ad71b0e4dbf40e0dd1b7e822f183c1094c372720d85c27a51d7b62",
       "should_not_fire": true,
       "expected_wire": {
         "outcome": "network_access_requires_fresh_thread",
+        "turn_status": null,
         "requests": []
       },
       "source": "human_judged_hard_case",
-      "source_ref": "Independent PR 1780 review bf6: a network-enabled thread must be fresh and unresumable."
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
     }
   }
 }

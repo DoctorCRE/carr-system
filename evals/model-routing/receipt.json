@@ -1,18 +1,18 @@
 {
   "schema_version": 2,
   "surface": "model-routing",
-  "change": "Measure Codex catalog routing and the fresh-only ephemeral read-only network boundary.",
+  "change": "Measure explicit synthetic boot refusal, fresh ephemeral read-only network opt-in, and resume refusal.",
   "measured_on": "2026-10-15",
   "rung": "regression",
   "adapter": {
     "surface": "offline_programmatic",
     "adapter_id": "codex-routing-fresh-network-matrix",
-    "adapter_version": "2",
+    "adapter_version": "3",
     "harness_id": "evals/model-routing/score.py",
-    "harness_version": "b49a82fb982b14e41d521e951370be3b519153ef7087d27fbf52aba32636e606",
+    "harness_version": "5496563e47e378e7ee3d8b6b949540ff8fea194d3bca2daafbd243866ae86a90",
     "provider_id": "none",
     "model_id": "deterministic-no-model",
-    "native_session_ref": "offline-fresh-network-boundary-v2",
+    "native_session_ref": "offline-fresh-network-boundary-v3",
     "configuration_fingerprint": "sha256:228c6babb43d67c93c274b146e0a60c88b3050fe7622a19227ce5191095afe02"
   },
   "cases": {
@@ -26,8 +26,7 @@
     ]
   },
   "split": {
-    "method": "exhaustive finite wire-protocol behavior matrix; each split covers every class",
-    "seed": 1667,
+    "method": "Disjoint finite protocol variants; test adds configured cwd and read-only default-off cases; no population inference.",
     "sealed_test": true
   },
   "repeats": 2,
@@ -51,8 +50,8 @@
       "status": "passed",
       "direction_vs_baseline": "improved",
       "evidence_refs": [
-        "evals/model-routing/evidence/v2/baseline.jsonl",
-        "evals/model-routing/evidence/v2/candidate.jsonl"
+        "evals/model-routing/evidence/v3/baseline.jsonl",
+        "evals/model-routing/evidence/v3/candidate.jsonl"
       ],
       "baseline": {
         "score": 0.3333333333333333,
@@ -79,8 +78,8 @@
         "fresh-network-boundary"
       ],
       "evidence_refs": [
-        "evals/model-routing/evidence/v2/baseline.jsonl",
-        "evals/model-routing/evidence/v2/candidate.jsonl"
+        "evals/model-routing/evidence/v3/baseline.jsonl",
+        "evals/model-routing/evidence/v3/candidate.jsonl"
       ]
     }
   ],
@@ -90,11 +89,12 @@
   },
   "verdict": {
     "decision": "ship",
-    "statement": "Finite deterministic measurements confirm fresh-only ephemeral read-only network policy; no model-quality claim."
+    "statement": "Finite offline protocol cases pass; actual authenticated CARR boot remains unqualified until a fresh post-merge probe."
   },
   "notes": [
-    "Finite programmatic matrix runs the real baseline and candidate wire implementations against synthetic App Server responses.",
-    "Cases are sourced from the production boot-probe failure and independent resume hard case; no model invocation or output-quality claim."
+    "Fake App Server explicitly refuses the synthetic boot task when read-only network permission is absent; it does not simulate App Server request rejection.",
+    "Test inputs are disjoint configured-workspace variants, not held-out samples or a model-quality/generalization measure.",
+    "The production trace establishes the missing network capability; synthetic acceptance does not prove live CARR reachability."
   ],
   "evidence": {
     "scorer": {
@@ -102,8 +102,8 @@
       "function": "score"
     },
     "source": {
-      "evals/model-routing/score.py": "b49a82fb982b14e41d521e951370be3b519153ef7087d27fbf52aba32636e606",
-      "evals/model-routing/make_report.py": "5d8f2883f1b07272c047a3ecbc82167491bd223cd5a57e5e337c2d8ce9cf5a5a"
+      "evals/model-routing/score.py": "5496563e47e378e7ee3d8b6b949540ff8fea194d3bca2daafbd243866ae86a90",
+      "evals/model-routing/make_report.py": "c0fd58f5f5fea222749eb3eaa04fde7d5bf8fba12f7430df43e4d6b6d8040e03"
     },
     "dependencies": {
       "tools/room-bridge/desks.py": "ab5891e98508b315ae23b96ffa5479826d6f012adc5e917494e6cfdd9146eda0",
@@ -111,18 +111,18 @@
       "tools/room-bridge/codex_wire.py": "df9e9faa037906030df39d467746a9f0b7fdb47ba6c38402f020f6fedd23f38f"
     },
     "expectations": {
-      "path": "evals/model-routing/expectations.v2.json",
-      "version": "model-routing-expectations/v2",
-      "sha256": "cb3544627bf0d47797f2651f394fe816e8a4b341dfff51ee8dd6c1f2862d0107"
+      "path": "evals/model-routing/expectations.v3.json",
+      "version": "model-routing-expectations/v3",
+      "sha256": "dd73433f08ba43fd78e8e40196150fe3500f512f3a6f6f546b547d225b4880e9"
     },
     "cohorts": {
       "baseline": {
-        "path": "evals/model-routing/evidence/v2/baseline.jsonl",
-        "sha256": "a2b83a191f1d6ceb338a7af7d3e69623cb2cd31d784918f6cfdee11cf6630075"
+        "path": "evals/model-routing/evidence/v3/baseline.jsonl",
+        "sha256": "7071727b54995a22cb7448685d1f644ca861d86b4a65abc754b35408f66cae35"
       },
       "candidate": {
-        "path": "evals/model-routing/evidence/v2/candidate.jsonl",
-        "sha256": "6582ade2554b4e95e41c1c4e973532b5d792b243707e5f2006461bb874ef1826"
+        "path": "evals/model-routing/evidence/v3/candidate.jsonl",
+        "sha256": "b21bbbdb16614351c9cb6c69b9b62415d30fd7e235ce6a641e4a9370a3ed96ca"
       }
     }
   }
