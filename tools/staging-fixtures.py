@@ -1065,7 +1065,7 @@ def _relationship_evidence(values: Mapping[str, Any], network: Mapping[str, Any]
         metric = _relationship_exact([r for r in network["referrals"] if r["node_id"] == f"party:{party}"],
             {"deals": 1, "won": 0, "lost": 0, "win_rate": None}, "owned referral metrics")
         metrics.append(metric)
-    territories = {}
+    territories: dict[str, dict[str, Any]] = {}
     for label, territory in (("inside", RELATIONSHIP_NORTH), ("outside", RELATIONSHIP_SOUTH)):
         member_ids = sorted(n["id"] for n in network["nodes"] if n.get("territory") == territory)
         referral_ids = sorted(e["id"] for e in network["edges"] if e["kind"] == "referred" and e["from"] in member_ids and e["id"].startswith("evidence:"))
