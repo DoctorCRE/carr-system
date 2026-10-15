@@ -20,7 +20,7 @@ nothing to production logs or caches (log_path=os.devnull, no session id).
 GRADER (programmatic, expected rule ids per case):
   expected  = gold - disputed - boot-delivered rules, restricted to rules the
               trigger layer owes (a trigger/path route, or pack-layer member).
-              Frozen per case in expectations.v2.json (--freeze-expectations)
+              Frozen per case in expectations.v3.json (--freeze-expectations)
               and graded from there, so a change to the routes cannot move its
               own denominator; a drift from the live derivation needs a new
               expectations version.
@@ -58,8 +58,9 @@ sys.path.insert(0, REPO)
 
 V2_CASES = os.path.join(REPO, "ops", "fixtures", "rule-delivery-eval", "cases.v2.json")
 HARD_CASES = os.path.join(HERE, "hard_cases.v1.json")
-EXPECTATIONS = os.path.join(HERE, "expectations.v2.json")
-EXPECTATIONS_VERSION = "rule-delivery-expectations/v2"
+EXPECTATIONS = os.path.join(HERE, "expectations.v3.json")
+EXPECTATIONS_VERSION = "rule-delivery-expectations/v3"
+PENDING_GOLD = os.path.join(HERE, "pending_gold.v1.json")
 RUNS = os.path.join(HERE, "runs")
 CHARS_PER_TOKEN = 4.0
 METRIC_IDS = ("recall", "false_deliveries", "tokens")
@@ -207,7 +208,7 @@ class World:
                               "rde_envelope").is_machine_envelope
         self.pinned = (expectations or {}).get("cases", {})
         self.labelled = (set(expectations["labelled"]) if expectations
-                         else set(self.statements))
+                         else set(self.statements) - pending_gold_ids(self.statements))
 
     def derive(self, case):
         """The live labels for a case: what the trigger layer owes it, from this tree."""
@@ -393,13 +394,34 @@ def write_run(out_dir, variant, rows):
 
 # ----------------------------------------------------------------- expectations
 
+def pending_gold_ids(statements, path=PENDING_GOLD):
+    """Corpus rules admitted after the gold was labelled. No case was judged
+    for them, so their deliveries are ungraded (neither hit nor false) until
+    the gold is extended and the id leaves the file. Absent file: nothing is
+    pending (checked before any open, so a baseline tree without the file is
+    not traced as a read dependency). An id outside the corpus is an error,
+    never silently ignored."""
+    if not os.path.exists(path):
+        return set()
+    with open(path, "r", encoding="utf-8") as handle:
+        doc = json.load(handle)
+    if doc.get("schema") != "rule-delivery-pending-gold/v1" or not isinstance(doc.get("rules"), dict):
+        raise ValueError(f"{path}: not a rule-delivery-pending-gold/v1 document")
+    pending = set(doc["rules"])
+    unknown = sorted(pending - set(statements))
+    if unknown:
+        raise ValueError(f"{path}: pending-gold rule(s) not in the selection corpus: {unknown}")
+    return pending
+
+
 def freeze_expectations(world, cases):
     """The grading labels for every case, as the live tree derives them now."""
     return {"schema": "rule-delivery-expectations", "version": EXPECTATIONS_VERSION,
             "rule": ("expected = gold - disputed - boot-delivered, restricted to rules the trigger layer "
                      "owes; hand cases use their required list. allowed = gold + disputed. cohort = "
                      "envelope when ops/machine_envelope classifies the prompt, else human. labelled = "
-                     "every rule in the selection corpus; only those count as false deliveries."),
+                     "every rule in the selection corpus except those in pending_gold.v1.json (admitted after "
+                     "the gold was labelled); only labelled rules count as false deliveries."),
             "labelled": sorted(world.labelled),
             "cases": {c["id"]: world.derive(c) for c in sorted(cases, key=lambda c: c["id"])}}
 

@@ -281,6 +281,49 @@ _wide = dict(RULES[0], id="ffffffff", statement=" ".join(f"cueword{i}" for i in 
 _q, _s, _i = rtc.questions_for(_wide, rtc.candidates(_wide, all_rules=RULES, pack_keywords={"p": [f"packcue{i}" for i in range(80)]}, verbs=set(), history={})[0],
                                ["near one", "near two"], Client)
 check("request stays within the Jev question contract", len(_q) <= rtc.MAX_QUESTIONS and "always_on" in _q and "no_cue" in _q)
+# Promotion: a proposal delivers nothing until a reviewer who did not run the compile attests to it.
+_pp_pending = dict(entry(RULES[1], keywords={"vendor": 0.7}), mode="review_required", proposed_mode="triggered")
+_pp_doc = rtc.document([entry(RULES[0], keywords={"git push": 0.8}), _pp_pending] + filler_entries())
+check("a pending proposal is a coverage problem", any("review" in p for p in rtc.coverage_problems(_pp_doc, ROSTER)))
+for _pp_label, _pp_ids, _pp_reviewer, _pp_note in [
+        ("no reviewer", [RULES[1]["id"]], "", "checked every cue against the statement"),
+        ("short note", [RULES[1]["id"]], "peer", "looks fine"),
+        ("unknown id", ["ffffffff"], "peer", "checked every cue against the statement")]:
+    try:
+        rtc.promote_proposals(_pp_doc, _pp_ids, reviewer=_pp_reviewer, note=_pp_note, reviewed_at="2026-10-15")
+        check("promotion refused: " + _pp_label, False)
+    except ValueError:
+        check("promotion refused: " + _pp_label, True)
+_pp_promoted = rtc.promote_proposals(_pp_doc, [RULES[1]["id"]], reviewer="peer", note="checked every cue against the statement", reviewed_at="2026-10-15")
+_pp_row = _pp_promoted["rules"].get(RULES[1]["id"]) or {}
+check("promotion delivers the proposed mode and records the reviewer",
+      _pp_row.get("mode") == "triggered" and "proposed_mode" not in _pp_row and _pp_row.get("reviewed_by") == "peer"
+      and _pp_row.get("reviewed_at") == "2026-10-15" and RULES[1]["id"] not in _pp_promoted["proposals"])
+check("promotion clears the review problem", not any("review" in p for p in rtc.coverage_problems(_pp_promoted, ROSTER)))
+# A reviewer's verdict file settles every proposal: approvals promote, rejections fall to run-time judging.
+_rv_pending = [dict(entry(RULES[1], keywords={"vendor": 0.7}), mode="review_required", proposed_mode="triggered"),
+               dict(entry(RULES[2], keywords={"plan": 0.6}), mode="review_required", proposed_mode="triggered")]
+_rv_doc = rtc.document([entry(RULES[0], keywords={"git push": 0.8})] + _rv_pending + filler_entries())
+_rv_good = {RULES[1]["id"]: {"decision": "approve", "reason": "cues are specific to vendor introductions and nothing else"},
+            RULES[2]["id"]: {"decision": "reject", "reason": "the one-word cue plan fires on most engineering prompts"}}
+for _rv_label, _rv_verdicts, _rv_reviewer in [
+        ("no reviewer", _rv_good, ""),
+        ("unknown decision", {RULES[1]["id"]: {"decision": "maybe", "reason": "six words are here for the reason"}}, "peer"),
+        ("short reason", {RULES[1]["id"]: {"decision": "approve", "reason": "fine"}}, "peer"),
+        ("unknown id", {"ffffffff": {"decision": "approve", "reason": "six words are here for the reason"}}, "peer")]:
+    try:
+        rtc.apply_review(_rv_doc, _rv_verdicts, reviewer=_rv_reviewer, reviewed_at="2026-10-15")
+        check("review refused: " + _rv_label, False)
+    except ValueError:
+        check("review refused: " + _rv_label, True)
+_rv_out, _rv_ok, _rv_no = rtc.apply_review(_rv_doc, _rv_good, reviewer="peer", reviewed_at="2026-10-15")
+_rv_rej = _rv_out["rules"].get(RULES[2]["id"]) or {}
+check("review promotes approvals and makes rejections residual",
+      _rv_ok == [RULES[1]["id"]] and _rv_no == [RULES[2]["id"]] and not _rv_out["proposals"]
+      and _rv_out["rules"][RULES[1]["id"]]["mode"] == "triggered"
+      and _rv_rej.get("mode") == "residual" and not any(_rv_rej["triggers"].values())
+      and _rv_rej.get("rejected_proposed_mode") == "triggered" and "plan" in _rv_rej.get("review_note", ""))
+check("a reviewed document covers its rules", rtc.coverage_problems(_rv_out, ROSTER) == [])
 committed=rtc.load_compiled()
 check("committed triggers cover current rules", rtc.coverage_problems(committed,rtc.pack_rules())==[])
 # Mutation probes keep teeth on the exact deterministic safety checks.

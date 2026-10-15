@@ -29,10 +29,14 @@ Nothing is written to production logs or caches. `selftest.py` checks that.
    misses (trigger vocabulary without the action), 13 positives.
 
 `split.json` freezes every case id to train or test before any edit;
-`selftest.py` fails if it moves. `expectations.v2.json` freezes each case's
+`selftest.py` fails if it moves. `expectations.v3.json` freezes each case's
 grading labels (expected and allowed rules, envelope or human cohort, input
 hash). A change to the routes cannot move its own denominator: grading reads
 the frozen labels, and a relabel is a new expectations version.
+`pending_gold.v1.json` names rules admitted after the gold was labelled; a
+delivery of one of those is ungraded (neither hit nor false) until the gold is
+extended and the id leaves that file, so a newly approved rule does not read
+as a precision regression before anyone has judged it.
 
 ## Grader (programmatic)
 
@@ -63,7 +67,7 @@ python3 evals/rule-delivery/run_eval.py --freeze-expectations # only for a new e
 `make_report.py receipt` replays every case through the working tree
 (candidate) and through the tree at `--baseline-ref` (baseline) with the same
 harness, and writes the raw observations to `evidence/{baseline,candidate}.jsonl`.
-`run_eval.score_receipt` grades both against `expectations.v2.json` and
+`run_eval.score_receipt` grades both against `expectations.v3.json` and
 computes each dimension on the test split of its cohort: per-arm case
 bootstrap intervals and a paired-bootstrap delta over identical cohorts.
 `receipt.json` binds the harness, every tracked file the candidate replay

@@ -2,9 +2,9 @@
   "adapter": {
     "adapter_id": "rule-delivery-production-functions",
     "adapter_version": "1",
-    "configuration_fingerprint": "sha256:9853a317ffce42b3d93946d9fb716e61ce4927a901d48e7551d7c238046d8003",
+    "configuration_fingerprint": "sha256:f173d85112e77e211ea2ba5134452d6bcf15a68bf37222dfb625fde8097d7ad8",
     "harness_id": "evals/rule-delivery/run_eval.py",
-    "harness_version": "2ae63fb8c732426126d9947eb87b1e6200967f2c8abce749c36c5a530d7faff1",
+    "harness_version": "2cf72d99d6f98e402758ce4a45c8e41179fdb784950bf20ece6ef362efc42cfe",
     "model_id": "deterministic-no-model",
     "native_session_ref": "01a12901-c908-7513-b43b-21aa1c012fea",
     "provider_id": "none",
@@ -20,7 +20,7 @@
     "total": 338,
     "train": 212
   },
-  "change": "Guidance Registry inputs follow the live rule inventory (loop 1304, PR 1750): 14 approved rules enter the reviewed map, manifest, classes, triage and trigger tables; 4 retired or still-proposed rules leave them. Hard case h-pos-gmail-send relabelled should_not_fire (expectations v2): its owning rule 9b081605 retired on 2026-08-01.",
+  "change": "Guidance Registry inputs follow the live rule inventory (loop 1304, PR 1750): 14 approved judgment rules enter the reviewed map, manifest, classes, triage and trigger tables; 4 retired or still-proposed rules leave them, and the still-proposed cloud-model-choice rule ede4b241 leaves the route file and selection corpus until admitted. The 14 rules' Jev-compiled trigger proposals went to an independent reviewer: 2 promoted to cue delivery, 12 rejected as imprecise and left residual (pack fallback, judged at run time). Expectations v3: hard case h-pos-gmail-send relabelled should_not_fire (its rule 9b081605 retired 2026-08-01) and rules admitted after the gold was labelled (pending_gold.v1.json) are ungraded rather than charged as false deliveries.",
   "cost": {
     "baseline_usd_per_case": 0.0,
     "candidate_usd_per_case": 0.0
@@ -103,23 +103,23 @@
     },
     {
       "baseline": {
-        "ci_high": 0.31339031339031337,
-        "ci_low": 0.18803418803418803,
-        "score": 0.24725274725274726
+        "ci_high": 0.34256055363321797,
+        "ci_low": 0.2028985507246377,
+        "score": 0.2692307692307692
       },
       "candidate": {
-        "ci_high": 0.29646017699115046,
-        "ci_low": 0.17777777777777778,
-        "score": 0.23482849604221637
+        "ci_high": 0.3585746102449889,
+        "ci_low": 0.2161290322580645,
+        "score": 0.2857142857142857
       },
       "critical": true,
       "delta": {
-        "ci_high": -0.006690179653918216,
-        "ci_low": -0.018781118043738554,
-        "value": -0.012424251210530896
+        "ci_high": 0.027739186811151256,
+        "ci_low": 0.0053191489361702204,
+        "value": 0.01648351648351648
       },
       "dimension_id": "human-delivery-precision",
-      "direction_vs_baseline": "regressed",
+      "direction_vs_baseline": "improved",
       "evidence_refs": [
         "evals/rule-delivery/evidence/baseline.jsonl",
         "evals/rule-delivery/evidence/candidate.jsonl"
@@ -165,11 +165,12 @@
       },
       "candidate": {
         "path": "evals/rule-delivery/evidence/candidate.jsonl",
-        "sha256": "8a0e34f9315e0e1a0dde202b44697573bdeb0ce50ba4eed9484b69b9c866f448"
+        "sha256": "965094c8e226eb69fd68be208952bfd0d37127951965c33a7d228ff0956b13f9"
       }
     },
     "dependencies": {
       "evals/rule-delivery/hard_cases.v1.json": "00e0060a82b58aacec8ae4861d50460d97c155413bd39fadc39ceedde6681078",
+      "evals/rule-delivery/pending_gold.v1.json": "698b893cada71a48f413b1b5893de28d6e253c1c2dd20b42ceb6daa7dc6ad82a",
       "hooks/rule-pack-preuse-reselection.py": "c05412a674990f701adecb8b4ee43e6ff6dd28429c097d2ccf5ec4a9c7b3ecae",
       "lib/hook_runtime.py": "924ebbdf3a4af705e08250950c298fadb257025f0abb9a80c5666fdcfee643d6",
       "lib/rule_delivery_preuse.py": "144dba02f5555287b65d0eb0da050cd6a2cba6fd2ad5b8a9dbe8f920947b6914",
@@ -179,24 +180,24 @@
       "ops/config/jev-cost-guard.v1.json": "8920873a41078dca949d8e31f50705e1330bcfa087b5260c22693f220488a2f8",
       "ops/config/rule-classes.v1.json": "fec56bcff6575c469466c4758b42b8cbf42d7de2daf0de75dc131ded1950401a",
       "ops/config/rule-enforcement-map.json": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
-      "ops/config/rule-jev-triggers.v1.json": "facb30252ec1790d45bffc25dbfae62d95122b34a87718a21bd671497f04b631",
-      "ops/config/rule-jit-triggers.v1.json": "3766e39e276066c9cbb56dbbb43965247ae660cd6dc43e0923b1a6435cd1e350",
-      "ops/config/rule-routes.v1.json": "936a564d1c490620debc1b3dffb5bd1005a7bb0a5ef8f3f2d17695f5dea02e02",
-      "ops/config/rule-selection-corpus.v1.json": "22949b641b0e44a2ce99e95fb63a9a763c5376acade2b1f91e45de4e347b4ed4",
+      "ops/config/rule-jev-triggers.v1.json": "f26d16ebdf35072ee9eee6eee07c4614a6d7131a379a917dbb40667afe87a62f",
+      "ops/config/rule-jit-triggers.v1.json": "ec7267a362f34c8e857dc72dfe538b882972e1cd8c230b53502e2e9de89a3fb8",
+      "ops/config/rule-routes.v1.json": "909287379da24360a6c9b6e846d24f88ce97b0d458b62d70e915974241a5d5f2",
+      "ops/config/rule-selection-corpus.v1.json": "71fb2e258fd8428af1f5bc2ec1ed68285aa0eba2fc966f49e01eab1d763f9845",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
       "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
       "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
       "ops/machine_envelope.py": "749970f4dfb838af4e6cd1e6537988a278fc0006a02b32f665dfd0f943266c3f",
       "ops/rule_delivery_eval.py": "10723a68d807fc54538c5e25cd6eb92f8006abeb0e8741e4249fce26768660f0",
-      "ops/rule_trigger_compile.py": "c7b5946951d95d525a17a29a80a51d6fb4f303eb6d873d02f5eebf8159cb35f6",
+      "ops/rule_trigger_compile.py": "ff27baed857313205eae990ac5b02b9edaab7ff900e7eb0eb67ed0ca6fcbf1c5",
       "ops/rule_trigger_delivery.py": "b50ec3b9fc2b81d0bdf3ac8512818ffb4c9d46d460ad2024d4ccfa8774c48777",
       "ops/typesafe_client.py": "91acd006df639e545a5fe6890712507652219fadb3d972b03b1fed42f1fa086d",
       "tools/judge/interface.py": "2e0440cc85660f83f4456829006f3f00a956e414c4c72e8217ab1a22622f3ed2"
     },
     "expectations": {
-      "path": "evals/rule-delivery/expectations.v2.json",
-      "sha256": "0879265b6e59033291e6d3b3cd75afc4f0210ec3be9d35e45dd1c2fc917025dd",
-      "version": "rule-delivery-expectations/v2"
+      "path": "evals/rule-delivery/expectations.v3.json",
+      "sha256": "95f5aa5ab29ac117829afd9dd6b9a5beecdd029a8c8c82860b31b59e9e7d19f7",
+      "version": "rule-delivery-expectations/v3"
     },
     "scorer": {
       "function": "score_receipt",
@@ -204,7 +205,7 @@
     },
     "source": {
       "evals/rule-delivery/make_report.py": "868f75651f7b80d6303d293a77ea151f4a8b69ed3ca49122cc474ac03ce86b26",
-      "evals/rule-delivery/run_eval.py": "2ae63fb8c732426126d9947eb87b1e6200967f2c8abce749c36c5a530d7faff1"
+      "evals/rule-delivery/run_eval.py": "2cf72d99d6f98e402758ce4a45c8e41179fdb784950bf20ece6ef362efc42cfe"
     }
   },
   "grader": {
@@ -217,7 +218,7 @@
       "result": "pass"
     }
   },
-  "measured_on": "2026-10-13",
+  "measured_on": "2026-10-14",
   "min_useful_gain": 0.7,
   "noise_floor": 0.3,
   "notes": [
@@ -266,7 +267,7 @@
         "e"
       ]
     },
-    "decision": "do_not_merge",
-    "statement": "human-delivery-precision regressed (0.2473 -> 0.2348, CI [-0.0188, -0.0067]) and blocks this receipt. Cause: the 14 rules new to the map have no Jev-compiled triggers yet, so the JIT table delivers them through their packs' fallback regexes (delegation-council: subagent|delegate|brief|workflow|seat...), which fire on cases whose gold predates the rules; f673326b (23 cases) and a3da3d39 (14) carry most of the drop. The compile (ops/rule-trigger-compile.py --changed) was refused on 2026-10-13: TypeSafe vendor credits exhausted (HTTP 402). Re-measure after the 14 triggers compile; full-text-availability keeps the accepted class D/E trade-off of decision 1616f64c. Other dimensions unchanged."
+    "decision": "ship",
+    "statement": "human-delivery-precision improved (0.2692 -> 0.2857, CI [+0.0053, +0.0277]): the route file no longer delivers the proposed rule ede4b241 and the two reviewed cue sets deliver only where their rules bind; human-required-recall and envelope-prompt-clean-delivery are unchanged. full-text-availability 1.0 -> 0.6764 is the accepted D/E boot tradeoff (decision 1616f64c), unchanged by this branch. Both arms are graded under expectations v3, which leaves the 14 newly admitted rules ungraded until the gold covers them; their deliveries are therefore neither credited nor charged here, and the Work Request to extend the gold is filed. Cost at parity (no provider spend either arm)."
   }
 }

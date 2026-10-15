@@ -326,7 +326,7 @@ def gap_evidence(doc, classes_path=CLASSES_PATH):
     root = Path(REPO)
     paths = [root / "ops/fixtures/rule-delivery-eval/cases.v2.json",
              root / "evals/rule-delivery/hard_cases.v1.json",
-             root / "evals/rule-delivery/expectations.v2.json",
+             root / "evals/rule-delivery/expectations.v3.json",
              root / "evals/rule-delivery/evidence/candidate.jsonl"]
     v2, hard, expectations = [json.loads(path.read_text()) for path in paths[:3]]
     observations = [json.loads(line) for line in paths[3].read_text().splitlines() if line.strip()]

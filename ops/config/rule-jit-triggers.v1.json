@@ -1,14 +1,14 @@
 {
  "counts": {
-  "jev_compiled_triggers": 117,
+  "jev_compiled_triggers": 119,
   "pack_fallback_triggers": 9,
   "seeded_detector_rule_ids": 49,
   "seeded_detector_triggers": 14,
   "structural_extra_triggers": 2,
-  "triggers": 148
+  "triggers": 150
  },
  "generated_from": {
-  "jev_triggers_sha256": "facb30252ec1790d45bffc25dbfae62d95122b34a87718a21bd671497f04b631",
+  "jev_triggers_sha256": "f26d16ebdf35072ee9eee6eee07c4614a6d7131a379a917dbb40667afe87a62f",
   "map_sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
   "triage_sha256": "4b4fc044c74627edb8f2832360afdce591cfd626b638f003ef1fb6b0f0f42e71"
  },
@@ -452,6 +452,18 @@
    ],
    "source": "prompt_cue",
    "trigger_id": "5370274a056f"
+  },
+  {
+   "kind": "prompt_regex",
+   "packs": [
+    "delegation-council"
+   ],
+   "pattern": "\\baccess\\s+restrictions\\b|\\bpersonal\\-scope\\b|\\bagent\\s+access\\b|\\bdata\\s+fences\\b|\\badd\\s+access\\b|\\bcustody\\b",
+   "rule_ids": [
+    "f673326b"
+   ],
+   "source": "jev_compiled",
+   "trigger_id": "5124db1844ad"
   },
   {
    "kind": "prompt_regex",
@@ -1231,6 +1243,19 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "810c790bd007"
+  },
+  {
+   "kind": "prompt_regex",
+   "packs": [
+    "records-intake",
+    "source-study"
+   ],
+   "pattern": "\\binternet\\s+research\\-site\\b|\\bresearch\\-site\\s+index\\b|\\badding\\s+removing\\b|\\bresearch\\-site\\b|\\bindex\\s+memory\\b|\\badd\\s+index\\b",
+   "rule_ids": [
+    "a9fc3f0e"
+   ],
+   "source": "jev_compiled",
+   "trigger_id": "f9e64cea1271"
   },
   {
    "kind": "prompt_regex",

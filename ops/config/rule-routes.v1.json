@@ -3316,24 +3316,6 @@
     }
    ]
   },
-  "ede4b241": {
-   "moment": "dispatching work to another model or launching a cloud session (model choice)",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "Agent",
-      "mcp__*__create_session",
-      "mcp__*__create_trigger"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*--(?:remote|cloud)(?=[\\s=;&|)<>]|$)",
-      "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*--environment(?:[ \\t]+|=)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)"
-     ]
-    }
-   ]
-  },
   "ede4c735": {
    "moment": "writing any prospect-visible draft",
    "routes": [
