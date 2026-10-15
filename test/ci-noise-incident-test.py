@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
 spec = importlib.util.spec_from_file_location('incident', Path(__file__).parents[1] / 'ops/ci-noise-incident.py')
+assert spec is not None and spec.loader is not None
 incident = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(incident)
 

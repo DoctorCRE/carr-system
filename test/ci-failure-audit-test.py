@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('audit', Path(__file__).parents[1] / 'tools/ci/ci-failure-audit.py')
+assert spec is not None and spec.loader is not None
 audit = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(audit)
 
