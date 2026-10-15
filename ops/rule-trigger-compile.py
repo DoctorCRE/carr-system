@@ -43,6 +43,14 @@ def main(argv=None):
     mode.add_argument("--backfill", action="store_true")
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--preview", metavar="RULE_ID")
+    mode.add_argument("--promote", nargs="+", metavar="RULE_ID",
+                      help="move reviewed proposals into the delivered rules; needs "
+                           "--reviewer and --review-note from someone who did not run the compile")
+    mode.add_argument("--apply-review", metavar="VERDICTS_JSON",
+                      help="apply an independent reviewer's verdict file ({rule id: {decision, reason}}): "
+                           "approvals are promoted, rejections become residual (judged at run time)")
+    parser.add_argument("--reviewer", default=None, help="who reviewed the proposals (not the compiling session)")
+    parser.add_argument("--review-note", default=None, help="what the review checked, six words or more")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--history", default=None,
                         help="selector log to mine candidates from (default: the "
@@ -56,6 +64,37 @@ def main(argv=None):
     emap = rtc.load_json(rtc.MAP_PATH)
     rules = rtc.pack_rules(corpus, emap)
     doc = rtc.load_compiled()
+
+    if args.promote:
+        import datetime
+        try:
+            promoted = rtc.promote_proposals(doc, args.promote, reviewer=args.reviewer, note=args.review_note,
+                                             reviewed_at=datetime.datetime.now(datetime.timezone.utc).date().isoformat())
+        except ValueError as error:
+            print(f"rule-trigger-compile --promote: refused: {error}")
+            return 1
+        with open(rtc.OUTPUT_PATH, "wb") as handle:
+            handle.write(rtc.canonical_bytes(promoted))
+        print(f"rule-trigger-compile: promoted {len(args.promote)} reviewed proposal(s); "
+              f"{len(promoted['proposals'])} still pending review; wrote {rtc.OUTPUT_PATH}")
+        return 0
+
+    if args.apply_review:
+        import datetime
+        try:
+            verdicts = rtc.load_json(args.apply_review)
+            verdicts = verdicts.get("verdicts", verdicts) if isinstance(verdicts, dict) else {}
+            reviewed, approved, rejected = rtc.apply_review(
+                doc, verdicts, reviewer=args.reviewer,
+                reviewed_at=datetime.datetime.now(datetime.timezone.utc).date().isoformat())
+        except (OSError, ValueError) as error:
+            print(f"rule-trigger-compile --apply-review: refused: {error}")
+            return 1
+        with open(rtc.OUTPUT_PATH, "wb") as handle:
+            handle.write(rtc.canonical_bytes(reviewed))
+        print(f"rule-trigger-compile: review applied — {len(approved)} promoted, {len(rejected)} rejected to residual, "
+              f"{len(reviewed['proposals'])} still pending; wrote {rtc.OUTPUT_PATH}")
+        return 0
 
     if args.check:
         problems = rtc.coverage_problems(doc, rules)

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Hermetic proof of Model Room -> Claude background -> Desktop delivery."""
 
 from __future__ import annotations
 
@@ -117,13 +116,6 @@ FIXTURE = json.loads((HERE / "testdata" / "claude_desktop_real_capture.json").re
 
 def _fake_claude(root: str, *, attach_output: list[str] | None = None, attach_exit: int | None = None,
                  after_desktop: list[str] | None = None, exit_after: int | None = None) -> tuple[Path, Path]:
-    """A stand-in ``claude`` that replays captured PTY bytes.
-
-    It prints ``attach_output`` and exits ``attach_exit`` when that is set
-    (the attach-refused path).  Otherwise it paints, reads the slash command,
-    replays ``after_desktop`` and stays alive like the real attached client,
-    unless ``exit_after`` is set.
-    """
     fake = Path(root) / "claude"
     calls = Path(root) / "calls.jsonl"
     spec = {"attach_output": attach_output, "attach_exit": attach_exit,
@@ -160,11 +152,6 @@ def _calls(path: Path) -> list[list[str]]:
 
 
 def test_real_desktop_output_is_not_matched_by_the_old_substring_check() -> None:
-    """Root cause of desktop_handoff_timeout (seq 43750/43776/43785/43796):
-    Claude Code paints a skipped space as a cursor move, so the real 2.1.281
-    bytes are ``Checking\\x1b[16Gfor Claude Desktop…``.  Stripping ANSI glued
-    the words, and the old ``b"Checking for Claude Desktop"`` check never
-    matched although Claude Desktop did open the session."""
     raw = "".join(FIXTURE["desktop_command_output"]).encode()
     old_rendered = wire.ANSI_ESCAPE.sub(b"", raw)
     assert b"Checking for Claude Desktop" not in old_rendered
@@ -184,11 +171,9 @@ def test_handoff_detects_real_output_when_status_is_unavailable() -> None:
 
 
 def test_handoff_success_is_the_supervisor_status_signal() -> None:
-    """The woken background process exits once /desktop hands the session
-    over; that supervisor fact decides success even with no progress text."""
     for after in (
-        [],  # background pid gone, nothing else listed (seen on the Studio)
-        [{"sessionId": SID, "kind": "interactive", "pid": 222, "status": "idle"}],  # Desktop resumed it
+        [],
+        [{"sessionId": SID, "kind": "interactive", "pid": 222, "status": "idle"}],
     ):
         listings = iter([
             [{"id": "12345678", "sessionId": SID, "kind": "background", "state": "done", "pid": 111}],
@@ -238,10 +223,6 @@ def test_handoff_error_copy_fails_fast() -> None:
 
 
 def test_session_already_open_in_desktop_is_not_attached() -> None:
-    """Root cause of desktop_attach_failed (seq 43742/43827/43859): by the
-    time the bridge attached, Claude Desktop already held the session — the
-    supervisor listed a live ``interactive`` row for it — and ``claude
-    attach`` refuses such a session.  That is the goal state, not a failure."""
     rows = [{"id": "12345678", "sessionId": SID, "kind": "background", "state": "done"},
             {"sessionId": SID, "kind": "interactive", "pid": 62502, "status": "idle"}]
     with tempfile.TemporaryDirectory() as root:
@@ -288,7 +269,7 @@ def test_registry_dispatch_and_queue_only_fanout() -> None:
         entry = reg.register("claude-desktop", "claude-desktop", model="opus",
                              effort="high", cwd=root)
         assert entry["permission_mode"] == "dontAsk"
-        raw = reg._load()  # local fixture readback
+        raw = reg._load()
         raw["desks"]["claude-desktop"]["room_seat"] = "claude"
         raw["desks"]["ordinary"] = {
             "kind": "claude-session", "room_seat": "reviewer", "socket": "/tmp/named.sock"
@@ -347,7 +328,6 @@ def test_done_pending_hands_off_then_finishes_queue() -> None:
         "claude-desktop", "claude", state,
         add_room_turn=post, log_path=Path("unused"),
         pending_timeout_s=1800, queue_executor=cast(Any, executor),
-        # Live Claude Code uses ``done`` for a completed --bg session.
         inspect_background=lambda _sid: {"state": "done", "found": True},
         read_background_result=lambda _sid: result,
         handoff_background=handoff,
@@ -362,13 +342,6 @@ def test_done_pending_hands_off_then_finishes_queue() -> None:
 
 
 def test_handoff_timeout_after_completion_finishes_and_never_relaunches() -> None:
-    """Defect a2e7dcb5: t_24f60cef completed and posted its answer (seq 43722),
-    then /desktop timed out (seq 43724) and the bridge launched a SECOND
-    session for the same task (seq 43725). The session already completed —
-    read_background_result already returned the real answer — so a handoff
-    failure afterward must mark only the handoff as failed and still finish
-    the task with that result. It must never call fail_pending, which is the
-    path that schedules a retry (a second launch) or blocks the task."""
     state = state_mod.default_state()
     state_mod.set_pending(
         state, "claude-desktop", dispatch_msg_id="dispatch-1", log_offset=0,
@@ -393,8 +366,6 @@ def test_handoff_timeout_after_completion_finishes_and_never_relaunches() -> Non
             }
 
         def fail_pending(self, pending: dict, reason: str, *, now=None) -> dict:
-            # This is the retry/relaunch path (queue_dispatch._retry_or_block).
-            # A handoff failure AFTER completion must never take it.
             raise AssertionError(
                 f"fail_pending must not be called after completion (reason={reason!r})")
 

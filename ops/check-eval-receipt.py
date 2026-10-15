@@ -655,7 +655,7 @@ _BASELINE_REPLAYS: dict[tuple[str, str], str] = {}
 def _observe_rule_delivery(tree: Path, tmp: Path, arm: str) -> dict:
     harness = "evals/rule-delivery/run_eval.py"
     separately_bound = {harness, "evals/rule-delivery/make_report.py",
-                        "evals/rule-delivery/expectations.v1.json"}
+                        "evals/rule-delivery/expectations.v3.json"}
     obs, trace = tmp / f"{arm}.jsonl", tmp / f"{arm}.reads.json"
     env = dict(os.environ, PYTHONPYCACHEPREFIX=str(tmp / f"{arm}-cache"))
     subprocess.run([sys.executable, "-B", str(tree / harness), "--observe", str(obs),

@@ -93,6 +93,26 @@ PARTIAL_ADMISSION_RULES = {
     "204391be",  # decide a missing product verb is required
     "a2e78f48",  # recognize a known repair
     "b7ec8f3b",  # review DoctorCRE surface grammar
+    # Approved through approve-rule between 2026-09-23 and 2026-10-13. That
+    # verb refuses a judgment_advisory admission, so every approved judgment
+    # rule lands in production as human_only, while the reviewed map records
+    # the residual duty (no control enforces it). The admission is preserved;
+    # the map must not claim a gate. Grows with every approved judgment rule
+    # until the admission class follows the map (WR-000285).
+    "07dde434",  # AI feeds conversations with the partners, never replaces them
+    "08c4eda2",  # Alabama leads are no longer Dell-only
+    "486584d6",  # a dashboard step in Joe's signed-in browser is the session's job
+    "4a77c35d",  # the Dot works paid-token-saving tasks first
+    "578fdd91",  # enrichment applies its corrections
+    "661d7757",  # Jev is available for all review work
+    "67e48aaf",  # no exposure warning for a credential Joe pasted
+    "76fcbed6",  # every source Joe sends gets its own full study
+    "a3da3d39",  # ask Joe directly for every approval, same turn
+    "a9fc3f0e",  # research uses the whole internet
+    "ac0a6579",  # client share-site passwords stay simple
+    "c363bd8b",  # batch PRs that touch the same files
+    "cfe6b5c6",  # an obvious improvement ships live, not in shadow mode
+    "f673326b",  # no access fences Joe did not ask for
 }
 
 

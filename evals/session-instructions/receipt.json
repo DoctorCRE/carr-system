@@ -1,0 +1,180 @@
+{
+  "schema_version": 2,
+  "surface": "session-instructions",
+  "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and deletes the sentence claiming the Stop gate enforces the map-architecture route, replacing it with nothing (candidate f9016574c).",
+  "measured_on": "2026-10-15",
+  "rung": "regression",
+  "adapter": {
+    "surface": "claude_code_cli",
+    "adapter_id": "claude-p-single-turn-no-tools",
+    "adapter_version": "1",
+    "harness_id": "evals/session-instructions/run_eval.py",
+    "harness_version": "069e79f9587578907bd96ff1ca781954edda6bd9f1cb4ac8d1e68e635c0f7f07",
+    "provider_id": "anthropic",
+    "model_id": "claude-haiku-4-5-20251001",
+    "native_session_ref": "2b0c4cc4-9b24-422f-a182-1074897f0c77",
+    "configuration_fingerprint": "sha256:b06bd82400fb26c0867b586f5a96830534bf6c163876dc1e694842458fbfb0e5"
+  },
+  "cases": {
+    "total": 60,
+    "train": 30,
+    "test": 30,
+    "should_not_fire": 20,
+    "sources": [
+      "hand_written",
+      "human_judged_hard_case"
+    ]
+  },
+  "split": {
+    "method": "random, stratified by case kind (first tag), half of each kind to test",
+    "seed": 20261015,
+    "sealed_test": true
+  },
+  "repeats": 5,
+  "grader": {
+    "kind": "programmatic",
+    "validation": {
+      "graded_twice": true,
+      "result": "pass",
+      "agreement": 1.0,
+      "oracle_pass_rate": 1.0,
+      "null_pass_rate": 0.0
+    }
+  },
+  "noise_floor": 0.1291,
+  "min_useful_gain": 0.25,
+  "primary_dimension": "store-unreachable-stops",
+  "dimensions": [
+    {
+      "dimension_id": "store-unreachable-stops",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "equivalent",
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ],
+      "baseline": {
+        "score": 0.8833333333333333,
+        "ci_low": 0.7999999999999999,
+        "ci_high": 0.9666666666666667
+      },
+      "candidate": {
+        "score": 0.9833333333333334,
+        "ci_low": 0.9500000000000001,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": 0.10000000000000009,
+        "ci_low": 0.0,
+        "ci_high": 0.20000000000000007
+      }
+    },
+    {
+      "dimension_id": "map-front-door-called",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "equivalent",
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ],
+      "baseline": {
+        "score": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "candidate": {
+        "score": 1.0,
+        "ci_low": 1.0,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0
+      }
+    },
+    {
+      "dimension_id": "quiet-when-not-applicable",
+      "critical": true,
+      "status": "passed",
+      "direction_vs_baseline": "equivalent",
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ],
+      "baseline": {
+        "score": 0.96,
+        "ci_low": 0.9,
+        "ci_high": 1.0
+      },
+      "candidate": {
+        "score": 0.9199999999999999,
+        "ci_low": 0.76,
+        "ci_high": 1.0
+      },
+      "delta": {
+        "value": -0.040000000000000036,
+        "ci_low": -0.22000000000000008,
+        "ci_high": 0.08000000000000007
+      }
+    }
+  ],
+  "stage_results": [
+    {
+      "stage_id": "session-start-and-map-routing",
+      "status": "passed",
+      "dimension_ids": [
+        "store-unreachable-stops",
+        "map-front-door-called",
+        "quiet-when-not-applicable"
+      ],
+      "evidence_refs": [
+        "evals/session-instructions/evidence/baseline.jsonl",
+        "evals/session-instructions/evidence/candidate.jsonl"
+      ]
+    }
+  ],
+  "cost": {
+    "baseline_usd_per_case": 0.007451,
+    "candidate_usd_per_case": 0.006679
+  },
+  "verdict": {
+    "decision": "ship_cost_at_parity",
+    "statement": "Test split, haiku (claude-haiku-4-5-20251001), 5 repeats per case: store-unreachable-stops 0.88 -> 0.98 (delta +0.10, 95% [+0.00, +0.20]); map-front-door-called 1.00 -> 1.00 (delta +0.00, 95% [+0.00, +0.00]); quiet-when-not-applicable 0.96 -> 0.92 (delta -0.04, 95% [-0.22, +0.08]). Quality-flat: do not merge on quality grounds."
+  },
+  "notes": [
+    "Single-turn, tool-less simulation of the session log: it measures what the model says it would do next, not live tool behaviour. Production session transcripts were not read (access refused as a PII boundary); map prompts come from the map gate's regression fixtures, store-down and quiet cases are hand-written seeds over fixture task text.",
+    "Disclosure: after the first scoring pass of an earlier candidate (a9c1d10, which said the session enforces the route itself) the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. That earlier candidate called map-architecture on the historical mention no_map-04 in 5 of 5 repeats (baseline 1 of 5). This re-measurement reuses the same cases, split, seed, grader and min_useful_gain unchanged, with only the candidate AGENTS.md replaced. No test transcripts were read.",
+    "The map half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."
+  ],
+  "evidence": {
+    "scorer": {
+      "path": "evals/session-instructions/score.py",
+      "function": "score"
+    },
+    "source": {
+      "evals/session-instructions/score.py": "46a6deeff6a60c7210909a96e9fdafda903cc74b7b2127a2a95b22681ab1c43e",
+      "evals/session-instructions/run_eval.py": "069e79f9587578907bd96ff1ca781954edda6bd9f1cb4ac8d1e68e635c0f7f07"
+    },
+    "dependencies": {
+      "AGENTS.md": "5a2de3a274ba60a7265785b23f64bc1ee7e0b28b142141b9c2e0d42e9ab05f05"
+    },
+    "expectations": {
+      "path": "evals/session-instructions/expectations.v1.json",
+      "version": "session-instructions-expectations/v1",
+      "sha256": "a157bd1c9444a3806598b614e8286ab190bcc607bc8225f7a661c5b53cc035e5"
+    },
+    "cohorts": {
+      "baseline": {
+        "path": "evals/session-instructions/evidence/baseline.jsonl",
+        "sha256": "c3c8cd9d6f94704810a6f43015e73693954d258d2fd4564dc6223419873db027"
+      },
+      "candidate": {
+        "path": "evals/session-instructions/evidence/candidate.jsonl",
+        "sha256": "167a101915929cb2b688d783f5a58e599af7d94d6c63b2d564eba660cfcf5460"
+      }
+    }
+  }
+}
