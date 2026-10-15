@@ -30,12 +30,17 @@ python3 ops/disk-reaper.py --execute
 | --- | --- |
 | `/private/tmp/room-codex-*` | Immediately after every matching dispatch job is released, with clean, published Git work |
 | Other Git scratch in `/private/tmp` | 24 hours since the latest file or index write |
-| `.claude/worktrees`, sibling `carr-system-fix-*`, `~/worktrees`, `~/orch-wt`, `~/.cache/wt-*`, `out/wt-*`, `out/orch/wt-dirty/*` | Immediately for closed or merged PRs, otherwise after three idle days |
+| `.claude/worktrees`, sibling `carr-system-fix-*`, `~/worktrees`, `~/orch-wt`, `~/.cache/wt-*`, `out/wt-*`, `out/orch/wt-dirty/*` | Always keep open PRs; immediately for closed or merged PRs, otherwise after three idle days |
 | `out/orch/e2e-*` | Keep the newest two complete trees in the e2e series |
 | `out/release-pipeline/runs/*` | Keep the newest two runs |
 | Release pipeline worktrees | Worktree policy, with cleared trees retained seven days |
 | `_to_delete` contents | Seven days since the latest write, including nested worktrees |
-| Session-registered scratch under `/private/tmp` or repository `out` | At Stop or SessionEnd, after the same safety checks |
+| Session-registered scratch within configured scratch, dispatch, or worktree locations | At Stop or SessionEnd, after the same safety checks |
+
+All discovery and removal paths must resolve inside the configured locations.
+Registered Git worktrees outside those locations stay kept. Symlink escapes do
+not extend that allowlist. Session registration uses the same location check,
+limited to scratch, dispatch, and worktree policies.
 
 The default config covers the three canonical repositories on both machines.
 It deliberately targets release runs and worktrees, leaving release state and
@@ -52,9 +57,9 @@ their common repository retains the other branches. A deleted upstream after a s
 requires a matching PR head fetched from GitHub's retained pull ref. A newer
 local tip still vetoes removal.
 
-Held or running dispatch jobs veto removal. An open PR updated within 24 hours
-protects its checkout. An open PR's body, changed file paths, comments, and review
-bodies protect referenced run artifacts. Failed GitHub queries preserve the
+Held or running dispatch jobs veto removal. An open PR always protects its
+checkout, regardless of its last update. An open PR's body, changed file paths,
+comments, and review bodies protect referenced run artifacts. Failed GitHub queries preserve the
 affected candidate. The protected list starts with
 `/private/tmp/doctorcre-staging-release-1014` and
 `/private/tmp/carr-v1-agent-control-1015`. Protection also covers containing and

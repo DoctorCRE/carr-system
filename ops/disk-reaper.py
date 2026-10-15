@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-from datetime import datetime
 import fcntl
 import glob
 import importlib.util
@@ -261,7 +260,18 @@ class Reaper:
         self.fetched = set()
         self.registry_path = self.root / "out/disk-scratch-registry.json"
 
-    def candidates(self, registry):
+    def allowed_location(self, p, kinds=None):
+        resolved = path(p)
+        for location in self.config["locations"]:
+            if kinds is not None and location["kind"] not in kinds:
+                continue
+            for root in self.roots:
+                pattern = str(path(location["pattern"].replace("{repo}", str(root))))
+                if any(parent.match(pattern) for parent in (resolved, *resolved.parents)):
+                    return True
+        return False
+
+    def candidates(self, registry, kept=None):
         found = {}
         for location in self.config["locations"]:
             patterns = [location["pattern"].replace("{repo}", str(r)) for r in self.roots]
@@ -271,6 +281,8 @@ class Reaper:
                     if p.is_symlink() or not p.is_dir() or ".git" in p.parts:
                         continue
                     p = p.resolve()
+                    if not self.allowed_location(p):
+                        continue
                     # Earlier specific policies win over /private/tmp/*.
                     found.setdefault(p, Candidate(p, "staged" if "_to_delete" in p.parts else location["kind"],
                         location.get("series", "").replace("{parent}", str(p.parent))))
@@ -278,6 +290,11 @@ class Reaper:
             for item in worktrees.worktree_entries(str(r)):
                 p = path(item["path"])
                 if p != r and p.is_dir():
+                    if not self.allowed_location(p):
+                        if kept is not None:
+                            kept.append({"path": str(p), "action": "keep",
+                                         "reason": "outside configured locations"})
+                        continue
                     found.setdefault(p, Candidate(p, "staged" if "_to_delete" in p.parts else "worktree"))
         for name in registry:
             p = Path(name)
@@ -288,8 +305,7 @@ class Reaper:
                 if not any(p != c.path and p.is_relative_to(c.path) for p in found)]
 
     def scratch_location(self, p):
-        return p.parent == Path("/private/tmp") or any(
-            p != r / "out" and p.is_relative_to(r / "out") for r in self.roots)
+        return self.allowed_location(p, {"scratch", "dispatch", "worktree"})
 
     def registry(self):
         return json.loads(self.registry_path.read_text()) if self.registry_path.exists() else {}
@@ -390,6 +406,8 @@ class Reaper:
 
     def safety(self, candidate, info, dispatch, *, fresh=False):
         p = candidate.path
+        if not self.allowed_location(p):
+            return "outside configured locations"
         if p in {Path('/'), Path.home(), self.root, Path.cwd().resolve(), *self.roots} or any(
                 r.is_relative_to(p) for r in [self.root, Path.cwd().resolve(), *self.roots]):
             return "canonical or invoking checkout"
@@ -422,9 +440,7 @@ class Reaper:
                 return "external git metadata"
             for pr in self.pr_rows(repo, fresh):
                 if pr["state"].lower() == "open":
-                    updated = datetime.fromisoformat(pr["updated_at"].replace("Z", "+00:00")).timestamp()
-                    if self.clock() - updated < 86400:
-                        return "open PR updated within 24h"
+                    return "open PR"
         if candidate.kind == "artifact" and self.artifact_referenced(candidate, fresh):
             return "referenced by open PR"
         return None
@@ -453,6 +469,8 @@ class Reaper:
         with ExitStack() as stack:
             for common in sorted(commons):
                 stack.enter_context(maintenance(common))
+            if not self.allowed_location(candidate.path):
+                raise RuntimeError("outside configured locations")
             current = inventory(candidate.path)
             if current.identity != info.identity or current.newest != info.newest:
                 raise RuntimeError("directory changed at removal")
@@ -490,7 +508,7 @@ class Reaper:
                 registry = self.registry()
                 dispatch = dispatches(self.config)
                 live_sessions = sessions(self.config)
-                candidates = self.candidates(registry)
+                candidates = self.candidates(registry, report["rows"])
                 if session:
                     selected = []
                     for c in candidates:
