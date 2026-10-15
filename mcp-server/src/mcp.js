@@ -25,7 +25,7 @@ import { deriveTrustedPrincipalBinding,
 import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
 import { gateZeroSeatConnection } from "./gate-zero-seat-connection.v5.js";
 import { providerFor as judgeProviderFor } from "./judge-provider.js";
-import { jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
+import { countPaidJevAttemptsToday, jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
   validateAskJevArgs } from "./jev-call-receipt.js";
 import { foundationAssuranceSeatConnection } from
   "./foundation-assurance-seat-connection.v5.js";
@@ -1019,9 +1019,11 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
         const actorRow = (await client.query("select id from actor where slug=$1", [actor.slug])).rows[0];
         if (!actorRow?.id)
           throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug });
-        jevAsk = jevAskBinding(env, fetch, { reserveAttempt: async () => {
-          return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs);
-        } });
+        jevAsk = jevAskBinding(env, fetch, {
+          countPaidAttemptsToday: () => countPaidJevAttemptsToday(client),
+          reserveAttempt: async dailyCap => {
+            return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs, dailyCap);
+          } });
         jevPrefetched = await prefetchJevAnswer(jevArgs, jevAsk, judgeWorkClass);
         client.jevPrefetched = jevPrefetched;
       }
