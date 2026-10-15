@@ -535,7 +535,7 @@ def validate_proof_destination(path: pathlib.Path) -> None:
 
 
 def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
-    """Atomically create a bounded 0600 proof; exact reruns validate but never replace it."""
+    """Atomically create a bounded 0600 proof; matching reruns retain the original."""
     encoded = (json.dumps(proof, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
     if len(encoded) > MAX_PROOF_BYTES:
         raise FixtureRefusal("proof exceeds the bounded size")
@@ -544,7 +544,7 @@ def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
     try:
         existing = _read_private_existing_proof(directory_fd, name)
         if existing is not None:
-            if existing == encoded:
+            if _proof_matches_readback(existing, encoded, proof):
                 return "already-exact"
             raise FixtureRefusal("existing proof does not exactly match this fixture readback")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
@@ -567,7 +567,7 @@ def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
             os.link(temp_name, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd, follow_symlinks=False)
         except FileExistsError:
             existing = _read_private_existing_proof(directory_fd, name)
-            if existing == encoded:
+            if _proof_matches_readback(existing, encoded, proof):
                 return "already-exact"
             raise FixtureRefusal("existing proof does not exactly match this fixture readback")
         except OSError as exc:
@@ -581,6 +581,34 @@ def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
         except FileNotFoundError:
             pass
         os.close(directory_fd)
+
+
+def _proof_matches_readback(existing: bytes | None, encoded: bytes, proof: Mapping[str, Any]) -> bool:
+    if existing == encoded:
+        return True
+    if existing is None or proof.get("schema") != RELATIONSHIP_SCHEMA:
+        return False
+    try:
+        retained = json.loads(existing)
+        network = dict(proof["projection"]["response"])
+        previous = retained["projection"]["response"]
+        observed = dt.datetime.strptime(previous["observed_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
+        valid_until = (observed + dt.timedelta(seconds=60)).isoformat(timespec="milliseconds") + "Z"
+        if previous["valid_until"] != valid_until:
+            return False
+        # Rebind freshly read content to the retained observation, then check every field and hash.
+        network.update(observed_at=previous["observed_at"], valid_until=valid_until)
+        projected = _relationship_projection("digest", {"network": network})
+        content_hash = _relationship_digest(network)
+        expected = dict(proof)
+        expected["projection"] = {**proof["projection"], "response": network, "response_sha256": content_hash}
+        expected["projection_evidence"] = {**proof["projection_evidence"],
+            "observed_at": network["observed_at"], "valid_until": valid_until,
+            "response_sha256": projected["response_sha256"],
+            "network_response_sha256": projected["response_sha256"], "content_sha256": content_hash}
+        return retained == expected
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 def build_fixture_proof(plan: Mapping[str, Any], target: Mapping[str, Any],
@@ -998,7 +1026,7 @@ def _relationship_projection(operation: str, payload: Mapping[str, Any] | None =
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 const input=JSON.parse(readFileSync(0,'utf8'));
-const network=input.operation==='sql' ? null : projectNetwork(input.snapshot,input.observed_at);
+const network=input.operation==='sql' ? null : input.operation==='digest' ? input.network : projectNetwork(input.snapshot,input.observed_at);
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 process.stdout.write(JSON.stringify(input.operation==='sql' ? networkStatement : {network,response_sha256:digest(network)}));
 """

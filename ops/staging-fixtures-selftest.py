@@ -1026,6 +1026,72 @@ class RelationshipFixtureTests(unittest.TestCase):
                     self.assertEqual(fixture.main(), 2)
                     target.assert_not_called()
 
+    def test_cli_rerun_retains_proof_without_writes(self):
+        self._check_cli_rerun(changed_state=False)
+
+    def test_cli_rerun_refuses_changed_committed_state(self):
+        self._check_cli_rerun(changed_state=True)
+
+    def _check_cli_rerun(self, *, changed_state):
+        db = RelationshipConnection()
+        clock = dt.datetime(2026, 10, 15, tzinfo=dt.timezone.utc)
+        class Clock(dt.datetime):
+            @classmethod
+            def now(cls, tz=None): return clock
+        def connect(*args):
+            context = Mock()
+            context.__enter__ = Mock(return_value=db)
+            context.__exit__ = Mock(return_value=False)
+            return context
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.json"
+            path.write_text(json.dumps(db.plan)); path.chmod(0o600)
+            proof = pathlib.Path(raw) / "relationship-fixture-proof.json"
+            args = ["staging-fixtures.py", "--relationship-plan", str(path), "--expected-app-sha", APP_SHA,
+                    "--expected-carr-sha", CARR_SHA, "--apply", "--proof-file", str(proof)]
+            with patch.object(sys, "argv", args), patch.dict(sys.modules, psycopg=SimpleNamespace(connect=connect)), \
+                    patch.object(fixture, "validate_target"), \
+                    patch.object(fixture, "validate_provider_binding", return_value={"database": "neondb"}), \
+                    patch.object(fixture.dt, "datetime", Clock), \
+                    patch("sys.stdout", new_callable=io.StringIO) as output, \
+                    patch("sys.stderr", new_callable=io.StringIO) as errors:
+                self.assertEqual(fixture.main(), 0)
+                self.assertIn("proof=created", output.getvalue())
+                self.assertEqual(db.writes, 9)
+                original = proof.read_bytes(); info = proof.stat()
+                clock += dt.timedelta(seconds=1)
+                output.truncate(0); output.seek(0)
+                self.assertEqual(fixture.main(), 0, errors.getvalue())
+                self.assertIn("relationship_rows_changed=0", output.getvalue())
+                self.assertEqual(db.writes, 9)
+                self.assertEqual(proof.read_bytes(), original)
+                self.assertEqual((proof.stat().st_ino, proof.stat().st_mtime_ns), (info.st_ino, info.st_mtime_ns))
+                if changed_state:
+                    # This field is allowed by fixture ownership checks and appears in physical receipts.
+                    db.rows["party"][0]["version"] += 1
+                    db.saved = copy.deepcopy(db.rows)
+                    self.assertEqual(fixture.main(), 2)
+                    self.assertIn("existing proof does not exactly match", errors.getvalue())
+                    self.assertEqual(db.writes, 9)
+                    self.assertEqual(proof.read_bytes(), original)
+                    return
+                for keys in (("fixture_run",), ("source_pair", "source_commit"), ("verified_target", "database"),
+                        ("row_sha256", "fixed_party"), ("receipts", "fixed_party", "after_sha256"),
+                        ("projection", "response_sha256"), ("projection", "response", "observed_at"),
+                        ("projection", "response", "valid_until"),
+                        ("projection_evidence", "response_sha256"), ("projection_evidence", "content_sha256"),
+                        ("projection_evidence", "network_response_sha256"), ("projection_evidence", "observed_at")):
+                    changed = json.loads(original)
+                    field = changed
+                    for key in keys[:-1]: field = field[key]
+                    field[keys[-1]] = "different"
+                    proof.write_text(json.dumps(changed))
+                    with self.subTest(tampered=keys):
+                        self.assertEqual(fixture.main(), 2)
+                        self.assertEqual(db.writes, 9)
+                        self.assertEqual(json.loads(proof.read_text()), changed)
+                proof.write_bytes(original)
+
     def test_cli_target_validation_precedes_connections_and_private_proof(self):
         with tempfile.TemporaryDirectory() as raw:
             path = pathlib.Path(raw) / "plan.json"; path.write_text(json.dumps(relationship_plan())); path.chmod(0o600)
