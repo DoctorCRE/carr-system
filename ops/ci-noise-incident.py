@@ -11,6 +11,8 @@ import sys
 
 TITLE = 'Edge liveness incident'
 MARKER = '<!-- ci-noise-incident:edge-liveness:v1 -->'
+LABEL = 'ci-edge-liveness'
+AUTHOR = {'id': 41898282, 'login': 'github-actions[bot]', 'type': 'Bot'}
 
 
 def github(endpoint, payload=None):
@@ -29,9 +31,12 @@ def publish(repo, code, details, run_url, api=github):
         raise ValueError(f'probe did not produce a liveness verdict: exit {code}')
     matches = []
     for page in range(1, 1001):
-        batch = api(f'repos/{repo}/issues?state=all&per_page=100&page={page}')
+        batch = api(f'repos/{repo}/issues?state=all&labels={LABEL}&per_page=100&page={page}')
+        if not isinstance(batch, list) or any(not isinstance(row, dict) for row in batch):
+            raise RuntimeError('malformed incident issue response')
         matches.extend(row for row in batch if not row.get('pull_request')
-                       and row['title'] == TITLE and MARKER in (row.get('body') or ''))
+                       and all(row.get('user', {}).get(key) == value for key, value in AUTHOR.items())
+                       and any(label.get('name') == LABEL for label in row.get('labels', [])))
         if len(batch) < 100:
             break
     else:
@@ -50,10 +55,25 @@ def publish(repo, code, details, run_url, api=github):
     if issue is None:
         if code == 0:
             return {'state': 'healthy', 'issue': None, 'probe_exit': code}
-        issue = api(f'repos/{repo}/issues', {'title': TITLE, 'body': body, 'assignees': ['jbookout']})
-    elif code != 0 or issue['state'] == 'open':
+        # Ensure the label exists before GitHub accepts it on the new issue.
+        labels = []
+        for page in range(1, 1001):
+            batch = api(f'repos/{repo}/labels?per_page=100&page={page}')
+            if not isinstance(batch, list) or any(not isinstance(row, dict) for row in batch):
+                raise RuntimeError('malformed incident label response')
+            labels.extend(row.get('name') for row in batch)
+            if len(batch) < 100:
+                break
+        else:
+            raise RuntimeError('incident label pagination incomplete')
+        if LABEL not in labels:
+            api(f'repos/{repo}/labels', {'name': LABEL, 'color': 'B60205'})
+        issue = api(f'repos/{repo}/issues', {'title': TITLE, 'body': body,
+                                          'labels': [LABEL], 'assignees': ['jbookout']})
+    elif code != 0 or issue['state'] == 'open' or not any(
+            user.get('login') == 'jbookout' for user in issue.get('assignees', []) if isinstance(user, dict)):
         issue = api(f'repos/{repo}/issues/{issue["number"]}',
-                    {'body': body, 'state': 'closed' if code == 0 else 'open'})
+                    {'body': body, 'state': 'closed' if code == 0 else 'open', 'assignees': ['jbookout']})
     return {'state': status, 'issue': issue['number'], 'probe_exit': code}
 
 
@@ -63,13 +83,27 @@ def main():
     repo = os.environ['GITHUB_REPOSITORY']
     run_url = (f'{os.environ["GITHUB_SERVER_URL"]}/{repo}/actions/runs/'
                f'{os.environ["GITHUB_RUN_ID"]}')
-    probe = subprocess.run([sys.executable, str(Path(__file__).with_name('edge-liveness.py'))],
-                           capture_output=True, text=True, timeout=180)
-    details = probe.stdout + probe.stderr
-    print(details, end='')
-    Path('edge-liveness-probe.json').write_text(json.dumps({
-        'probe_exit': probe.returncode, 'details': details, 'run_url': run_url}, indent=2))
-    result = publish(repo, probe.returncode, details, run_url)
+    verdict = {'status': 'ERROR', 'probe_exit': None, 'run_url': run_url}
+    try:
+        probe = subprocess.run([sys.executable, str(Path(__file__).with_name('ci-noise-probe.py'))],
+                               capture_output=True, text=True, timeout=180)
+        verdict['probe_exit'] = probe.returncode
+        completed = json.loads(probe.stdout)
+        expected = {0: 'HEALTHY', 1: 'ALARM', 78: 'BLIND'}.get(probe.returncode)
+        if (not isinstance(completed, dict) or expected is None
+                or completed.get('schema') != 'edge-liveness-verdict/v1'
+                or type(completed.get('probe_exit')) is not int
+                or completed['probe_exit'] != probe.returncode or completed.get('status') != expected):
+            raise ValueError('probe did not complete a valid verdict')
+        verdict['status'] = expected
+    except (ValueError, subprocess.TimeoutExpired, OSError):
+        pass
+    Path('edge-liveness-probe.json').write_text(json.dumps(verdict, indent=2))
+    print(json.dumps(verdict))
+    if verdict['status'] == 'ERROR':
+        print('BLIND/ERROR: probe failed; service health is unknown', file=sys.stderr)
+        return 1
+    result = publish(repo, probe.returncode, verdict['status'], run_url)
     print(json.dumps(result))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:

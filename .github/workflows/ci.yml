@@ -288,6 +288,10 @@ jobs:
         if: matrix.classes == 'gates'
         run: python3 test/ci-noise-incident-test.py
 
+      - name: Verify audit attempt and cache integrity
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-failure-audit-test.py
+
       - name: Run this group's check classes
         env:
           # ops/ci.sh refuses any DSN that is not loopback. This one is the

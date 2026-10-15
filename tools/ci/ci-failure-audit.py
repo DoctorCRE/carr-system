@@ -3,12 +3,33 @@
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 
 FIELDS = 'databaseId,workflowName,status,conclusion,headSha,event,createdAt,updatedAt,url,attempt,headBranch'
+
+
+def identity(row):
+    return row['databaseId'], row['attempt'], row['headSha'], row['conclusion']
+
+
+def verify_entry(target, row):
+    try:
+        manifest = json.loads((target / 'manifest.json').read_text())
+        if tuple(manifest['identity']) != identity(row):
+            raise RuntimeError('cached run identity differs from inventory')
+        for filename in ('failed.log', 'failed.json'):
+            digest = hashlib.sha256((target / filename).read_bytes()).hexdigest()
+            if digest != manifest['sha256'][filename]:
+                raise RuntimeError(f'cached {filename} digest mismatch')
+        if identity(json.loads((target / 'failed.json').read_text())) != identity(row):
+            raise RuntimeError('cached metadata identity differs from inventory')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError('incomplete or malformed audit cache entry') from exc
 
 
 def collect(repo, start, end, cache, workers=3):
@@ -37,19 +58,39 @@ def collect(repo, start, end, cache, workers=3):
                              '--limit', '1000', '--json', FIELDS))
     if len(failures) == 1000:
         raise RuntimeError('Failure query reached GitHub search cap')
-    if {r['databaseId'] for r in failures} != {r['databaseId'] for r in rows.values() if r['conclusion'] == 'failure'}:
+    if {identity(r) for r in failures} != {identity(r) for r in rows.values() if r['conclusion'] == 'failure'}:
         raise RuntimeError('Failure inventory changed during collection; reconcile before reporting')
     prefix = repo.replace('/', '-')
     (cache / f'{prefix}-window.json').write_text(json.dumps(list(rows.values()), indent=2))
 
     def logs(row):
-        target = cache / prefix / str(row['databaseId'])
-        target.mkdir(parents=True, exist_ok=True)
-        for filename, options in [('failed.log', ['--log-failed']),
-                                  ('failed.json', ['--json', 'jobs,attempt,conclusion,headSha,url'])]:
-            path = target / filename
-            if not path.exists() or not path.stat().st_size:
-                path.write_text(gh('run', 'view', str(row['databaseId']), '--repo', repo, *options))
+        parent = cache / prefix / str(row['databaseId'])
+        target = parent / str(row['attempt'])
+        if target.exists():
+            verify_entry(target, row)
+            return row['databaseId']
+        parent.mkdir(parents=True, exist_ok=True)
+        command = ('run', 'view', str(row['databaseId']), '--repo', repo, '--attempt', str(row['attempt']))
+        metadata = gh(*command, '--json', 'databaseId,jobs,attempt,conclusion,headSha,url')
+        if identity(json.loads(metadata)) != identity(row):
+            raise RuntimeError('fetched run identity differs from inventory')
+        log = gh(*command, '--log-failed')
+        with tempfile.TemporaryDirectory(prefix='.collect-', dir=parent) as temporary:
+            staged = Path(temporary) / 'entry'
+            staged.mkdir()
+            digests = {}
+            for filename, content in [('failed.json', metadata), ('failed.log', log)]:
+                path = staged / filename
+                path.write_text(content)
+                digests[filename] = hashlib.sha256(path.read_bytes()).hexdigest()
+            (staged / 'manifest.json').write_text(json.dumps({'identity': identity(row), 'sha256': digests}))
+            verify_entry(staged, row)
+            try:
+                staged.rename(target)
+            except OSError:
+                if not target.exists():
+                    raise
+                verify_entry(target, row)
         return row['databaseId']
 
     with ThreadPoolExecutor(max_workers=workers) as pool:

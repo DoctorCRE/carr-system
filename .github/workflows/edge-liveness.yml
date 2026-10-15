@@ -63,10 +63,12 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   liveness:
+    permissions:
+      contents: read
+      issues: write
     name: is anything that should be reporting not reporting
     runs-on: ubuntu-latest
     timeout-minutes: 10

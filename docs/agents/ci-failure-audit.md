@@ -26,6 +26,14 @@ python3 tools/ci/ci-failure-audit.py \
   --cache /private/tmp/ci-failure-audit-new
 ```
 
+The collector keys new entries by repository, run ID, and attempt. Every log
+and metadata request passes the inventoried `--attempt`; returned metadata must
+match the run ID, attempt, source SHA, and conclusion. Entries publish atomically
+with a SHA-256 manifest, and both files are checked before cache reuse. Invalid
+entries fail collection. Old run-ID-only cache files are never reused. These
+checks apply to new collections; they do not retrospectively authenticate the
+October 15 ledger's underlying logs.
+
 Counts are distinct failed runs, with one primary category per run. An estimated
 email is one failure notification per failed run to the pushing account. This is
 a workload estimate, not a mailbox count. Cancellations and skipped runs are
@@ -69,7 +77,15 @@ worker error, so those exact inner causes remain unresolved.
 
 1. Edge liveness produced 24 genuine outage alarms. `ops/edge-liveness.py` keeps
    its original exit codes. `ops/ci-noise-incident.py` records that probe verdict
-   in an artifact and updates one assigned incident issue. Repeated observations
+   in an artifact and updates one assigned incident issue. The probe launcher
+   emits a structured verdict only after the probe returns normally. An exit-1
+   traceback without that verdict fails as BLIND/ERROR and cannot update or
+   close the incident. Timeouts also retain an ERROR artifact and fail.
+   Publication includes only the validated status and run link, without raw
+   probe stdout or stderr. The incident requires the `ci-edge-liveness` label
+   and the GitHub Actions bot's account ID, login, and type; public title and
+   body text cannot select it. Every update restores the `jbookout` assignment.
+   Repeated observations
    edit the body without comments. Recovery closes the issue, and recurrence
    reopens it. Missing credentials or an unreadable ledger are explicitly BLIND.
    Unexpected probe exits and failed GitHub delivery still fail the workflow.
@@ -84,6 +100,8 @@ worker error, so those exact inner causes remain unresolved.
    The major version and all database checks stay. The health command names the
    throwaway database and role, avoiding repeated root-role errors in logs.
    [Google documents this mirror](https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images). The exact OCI index was fetched successfully and its SHA-256 digest and Linux amd64 entry verified before pinning.
+   The pinned image also pulled and initialized successfully in PR #1792's
+   [hosted CI run](https://github.com/jbookout/carr-system/actions/runs/38809784331).
 4. CI flake proposals ran 632 times, including 625 completion-triggered runs.
    The existing daily two-day reconciliation remains, with manual dispatch.
    Removing the completion chain cuts this workflow to seven scheduled runs per
