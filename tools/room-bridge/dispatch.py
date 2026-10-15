@@ -400,6 +400,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
     cwd = request.get('cwd')
     retrieval = request.get('retrieval', False)
     live_desktop = request.get('live_desktop', False)
+    network_access = entry.get('network_access', False)
     codex_timeout_s = request.get('codex_timeout_s')
     config_overrides = tuple(request.get('config_overrides', ()))
     stream_options: dict = {'stream_output': True} if request.get('stream_output') else {}
@@ -427,6 +428,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             entry["socket"], task,
             thread_id=None if fresh else entry.get("thread_id"),
             cwd=entry.get("cwd"), model=entry.get("model"), effort=entry["effort"],
+            network_access=network_access,
             deadline_s=codex_timeout_s,
             **executor_options,
         )
@@ -481,6 +483,10 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    network_access = entry.get('network_access', False)
+    if network_access and not fresh:
+        raise DeskError('network_access_requires_fresh_thread',
+                        'network_access desks require --fresh for every dispatched turn')
     if checkout is not None and entry['kind'] not in codex_models.CODEX_KINDS:
         raise DeskError('unsupported_checkout', '--checkout requires a Codex desk')
     if entry["kind"] in codex_models.CODEX_KINDS:
@@ -564,7 +570,7 @@ def dispatch(
             outcome = write_ownership.launch(msg_id, request, on_bound=executor_bound)
         else:
             outcome = _execute(request)
-        if outcome.get('thread_id') and (entry['kind'] == 'codex-live'
+        if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
                 or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
             registry.remember_thread(name, outcome['thread_id'])
     except BaseException:
@@ -581,6 +587,7 @@ def dispatch(
         **outcome,
         **ownership,
         'status': outcome['status'],
+        **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
     _record(results_path, row)
     return row
@@ -901,6 +908,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; omit to leave Codex's default")
+    r.add_argument("--network-access", action="store_true",
+                   help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
                    help="a directory this desk may write outside its workspace (repeatable)")
 
@@ -976,6 +985,7 @@ def main(argv: list[str]) -> int:
             entry = reg.register(a.name, kind, socket=a.socket, model=a.model, cwd=a.cwd,
                                  effort=a.effort, family=a.family,
                                  sandbox=getattr(a, "sandbox", None),
+                                 network_access=a.network_access,
                                  add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout)
             print(json.dumps({a.name: entry}, indent=2))
             return 0
