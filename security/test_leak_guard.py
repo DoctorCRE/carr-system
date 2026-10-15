@@ -686,7 +686,9 @@ class LeakGuardTest(unittest.TestCase):
         flagged = ['843 Imaginary ' + suffix for suffix in ('drive', 'rd', 'court', 'way', 'place', 'st')]
         flagged.append('2000 Imaginary' + ' avenue')
         ignored = ['it takes 10 minutes to ' + 'drive', 'step 3 is the best ' + 'way', 'in 2026 we took the ' + 'road',
-                   'about 5 miles down the ' + 'road', 'we met 2 people at the ' + 'court']
+                   'about 5 miles down the ' + 'road', 'we met 2 people at the ' + 'court',
+                   'it took 3 hours by the ' + 'road', 'after 2 weeks we went over the ' + 'way',
+                   'option 2 that ' + 'way', 'pick 1 or the other ' + 'way']
         (self.root / 'sample.txt').write_text('\n'.join(flagged + ignored) + '\n')
         self.git('add', 'sample.txt')
         result = self.run_guard('--staged', '--generic-only')
@@ -707,7 +709,9 @@ class LeakGuardTest(unittest.TestCase):
 
     def test_street_names_with_function_words_stay_addresses(self):
         flagged = ['843 Isle of Fiction' + ' avenue', '843 Imaginary and Fictional' + ' lane', '843 A' + ' street',
-                   '12 On the Green' + ' way', '77 Rue de la Fiction' + ' road']
+                   '12 On the Green' + ' way', '77 Rue de la Fiction' + ' road', '843 By the Lake' + ' avenue',
+                   '843 Over the Rainbow' + ' road', '843 over the rainbow' + ' road', '843 We the Fictional' + ' way',
+                   '843 Mile Creek' + ' drive']
         (self.root / 'address.txt').write_text('\n'.join(flagged) + '\n')
         self.git('add', 'address.txt')
         result = self.run_guard('--staged', '--generic-only')

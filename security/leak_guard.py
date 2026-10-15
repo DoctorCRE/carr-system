@@ -36,19 +36,20 @@ ARCHIVES = {
 STREET_WORDS = ('Street', 'St', 'Avenue', 'Ave', 'Road', 'Rd', 'Drive', 'Dr', 'Lane',
                 'Ln', 'Boulevard', 'Blvd', 'Court', 'Ct', 'Way', 'Place', 'Pl',
                 'Parkway', 'Pkwy')
-# Words that put a number and a street word in prose rather than an address: pronouns,
-# verbs, units and prepositions street names do not use. Articles, "of", "and", "on"
-# and "in" are left out because names use them ("Isle of Fiction Avenue", "On the Green Way").
-PROSE_WORDS = frozenset('''to at by for from with into is are was were be been
-    we i you he she it they me us them my our your his her its their this that these those than then so
-    about over down up per more less best took take takes went go goes get got met people times
-    minute minutes hour hours day days week weeks mile miles km step steps'''.split())
+# A lowercase word right after the number that makes it a count or a clause rather than a
+# house number: "10 minutes to drive", "step 3 is the best way", "option 2 that way".
+# Only that first word is read. Street names use any word after it ("By the Lake", "Isle of
+# Fiction") and capitalize the first ("Mile Creek", "We the People"), so neither is tested.
+QUANTITY_WORDS = frozenset('''is are was were be been has have had will would can took take takes
+    went go goes get got met this that these those than then so and or we i you he she it they me us
+    them my our your his her its their more less minute minutes hour hours day days week weeks month
+    months year years mile miles km step steps time times people persons percent'''.split())
 PII = {
     'pii-email': re.compile(r'(?<![A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+'),
     'pii-phone': re.compile(r'(?<![\w])(?:\+?1[ .-]?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[ .-]?[2-9]\d{2}[ .-]?\d{4}(?![\w])'),
     # A capitalized street word counts after any number. A street word in any case counts
-    # after a house number that stands alone, unless the words between them are prose
-    # ("10 minutes to drive", "in 2026 we took the road"): see address_shaped.
+    # after a house number that stands alone, unless the word after the number makes it a
+    # count ("10 minutes to drive", "in 2026 we took the road"): see QUANTITY_WORDS.
     'pii-address': re.compile(r'\b\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,6}(?:' + '|'.join(
         word + '|' + word.upper() for word in STREET_WORDS) + r')\b'
                               r'|(?<![\w.:/-])\d{1,6}\s+(?P<between>(?:[A-Za-z0-9.-]+\s+){1,4})'
@@ -108,7 +109,7 @@ def real_password(secret):
 
 def address_shaped(match):
     between = match['between']
-    return between is None or not PROSE_WORDS.intersection(between.lower().split())
+    return between is None or between.split()[0] not in QUANTITY_WORDS
 
 
 # A run of literals that a program joins: 'a' 'b', "a" + "b", "a" . "b" (PHP, Perl),
