@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.carr.disk-reaper</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/ops/disk-reaper.py</string>
+    <string>--execute</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>4</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>8</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>14</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>16</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>7</integer></dict>
+    <dict><key>Hour</key><integer>22</integer><key>Minute</key><integer>7</integer></dict>
+  </array>
+  <key>ProcessType</key><string>Background</string>
+  <key>LowPriorityIO</key><true/>
+  <key>Nice</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/disk-reaper.log</string>
+</dict>
+</plist>
