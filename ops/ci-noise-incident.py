@@ -95,6 +95,9 @@ def main():
                 or type(completed.get('probe_exit')) is not int
                 or completed['probe_exit'] != probe.returncode or completed.get('status') != expected):
             raise ValueError('probe did not complete a valid verdict')
+        verdict['affected_services'] = [
+            {'service_key': row['service_key'], 'hours_since_observed': row['hours_since_observed']}
+            for row in completed.get('affected_services', [])]
         verdict['status'] = expected
     except (ValueError, subprocess.TimeoutExpired, OSError):
         pass

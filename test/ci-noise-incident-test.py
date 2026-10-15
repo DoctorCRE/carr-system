@@ -191,10 +191,41 @@ class IncidentTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 if query == 'pass':
                     self.assertEqual(json.loads(result.stdout), {
-                        'schema': 'edge-liveness-verdict/v1', 'probe_exit': 1, 'status': 'ALARM'})
+                        'schema': 'edge-liveness-verdict/v1', 'probe_exit': 1, 'status': 'ALARM',
+                        'affected_services': [{'service_key': 'service', 'hours_since_observed': 24.0}]})
                 else:
                     self.assertEqual(result.stdout, '')
                     self.assertIn('Traceback', result.stderr)
+
+    def test_main_retains_real_probe_service_names_and_ages_in_artifact(self):
+        runner = Path(__file__).parents[1] / 'ops/ci-noise-probe.py'
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, 'psycopg.py').write_text(
+                'class Connection:\n'
+                ' def __enter__(self): return self\n'
+                ' def __exit__(self, *args): pass\n'
+                ' def cursor(self): return self\n'
+                ' def execute(self, *args): pass\n'
+                ' def fetchall(self): return [('
+                '"stopped-critical-service", "production", "high", "launchd", '
+                '"stale", "private-health-diagnostic", "observed", 24), ('
+                '"stopped-backup", "production", "critical", "launchd", '
+                '"stale", "private-health-diagnostic", "observed", 36)]\n'
+                'def connect(*args, **kwargs): return Connection()\n')
+            result = subprocess.run([sys.executable, str(runner)], capture_output=True, text=True,
+                                    env={**os.environ, 'PYTHONPATH': directory,
+                                         'LIVENESS_DATABASE_URL': 'private-credential'}, timeout=10)
+        self.assertEqual(result.returncode, 1)
+        code, artifact, publish = self.run_main(result)
+        self.assertEqual(code, 0)
+        self.assertEqual(artifact['status'], 'ALARM')
+        self.assertEqual(artifact['affected_services'], [
+            {'service_key': 'stopped-critical-service', 'hours_since_observed': 24.0},
+            {'service_key': 'stopped-backup', 'hours_since_observed': 36.0},
+        ])
+        self.assertNotIn('private-health-diagnostic', json.dumps(artifact))
+        self.assertNotIn('private-credential', json.dumps(artifact))
+        publish.assert_called_once()
 
     def test_edge_workflow_keeps_read_only_defaults(self):
         from tools.test_workflow_checks_write_grant import violations
