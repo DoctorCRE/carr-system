@@ -25,6 +25,9 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 FIXTURE_ID = uuid.uuid5(uuid.UUID("80d943c3-53af-4a13-9200-f3d8581a459a"),
                         "carr-clean-staging-replacement-party-v1")
 INVOICE_NAMESPACE = uuid.UUID("4acbfa5b-1f38-47af-aac0-1c4688cfc479")
+EXCLUDED_TOUR_NAMESPACE = uuid.UUID("61c09cb0-19e3-411c-98d8-ea2c962eb3a1")
+TOUR_TENANT = "carr-internal"
+EMPTY_ASSERTION_SET_DIGEST = "sha256:" + hashlib.sha256(b"[]").hexdigest()
 PLAN_SCHEMA = "doctorcre-staging-records-plan.v1"
 STAGING_ORIGIN = "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
 MAX_PLAN_BYTES = 1_048_576
@@ -52,6 +55,50 @@ class InvoiceValues:
     invoiced_on: dt.date
     due_on: dt.date | None
     observation_date: dt.date
+
+
+@dataclass(frozen=True)
+class ExcludedTourValues:
+    tour_id: uuid.UUID
+    name: str
+    client_id: uuid.UUID
+    creation_key: str
+    property_id: uuid.UUID
+    stop_id: uuid.UUID
+
+
+def excluded_tour_values(plan: Mapping[str, Any]) -> ExcludedTourValues:
+    records, names, keys = plan.get("records"), plan.get("names"), plan.get("keys")
+    if not isinstance(records, dict) or not isinstance(names, dict) or not isinstance(keys, dict):
+        raise FixtureRefusal("tour plan lacks the App identity fields")
+    tour, client = records.get("tour"), records.get("client")
+    if not isinstance(tour, dict) or not isinstance(client, dict):
+        raise FixtureRefusal("tour plan lacks the App-created Tour and client")
+    expected_name = f"Synthetic staging QA {plan.get('run')} draft tour"
+    if names.get("tour") != expected_name or tour.get("name") != expected_name:
+        raise FixtureRefusal("tour plan name does not bind to its synthetic run")
+    try:
+        tour_id = uuid.UUID(tour["id"])
+        client_id = uuid.UUID(client["id"])
+        creation_key = keys["tour"]
+        uuid.UUID(creation_key)
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        raise FixtureRefusal("tour plan has an invalid Tour, client, or creation key") from exc
+    property_id = uuid.uuid5(EXCLUDED_TOUR_NAMESPACE, f"property:{plan['run']}:{tour_id}")
+    stop_id = uuid.uuid5(EXCLUDED_TOUR_NAMESPACE, f"excluded-stop:{plan['run']}:{tour_id}")
+    return ExcludedTourValues(tour_id, expected_name, client_id, creation_key, property_id, stop_id)
+
+
+def load_private_tour_plan(path: pathlib.Path, expected_app_sha: str,
+                           expected_carr_sha: str) -> dict[str, Any]:
+    path = _private_plan_path(path)
+    parent = path.parent.lstat()
+    if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid() \
+            or stat.S_IMODE(parent.st_mode) != 0o700:
+        raise FixtureRefusal("tour plan parent must be an owned private 0700 directory")
+    plan = load_private_plan(path, expected_app_sha, expected_carr_sha)
+    excluded_tour_values(plan)
+    return plan
 
 
 def _private_plan_path(path: pathlib.Path) -> pathlib.Path:
@@ -276,6 +323,134 @@ def read_invoice_fixture(conn: Any, plan: Mapping[str, Any], *, aged: bool = Fal
         raise
 
 
+def _checked_tour_state(cur: Any, values: ExcludedTourValues, *, lock: bool) -> tuple[uuid.UUID, bool]:
+    suffix = " for update" if lock else ""
+    cur.execute("select session_user,current_user,current_database()")
+    if tuple(cur.fetchone() or ()) != ("neondb_owner", "neondb_owner", "neondb"):
+        raise FixtureRefusal("Tour fixture requires the exact owner database session")
+    cur.execute("select slug from public.actor where slug in ('joe','system') and active order by slug")
+    if [row[0] for row in cur.fetchall()] != ["joe", "system"]:
+        raise FixtureRefusal("Tour fixture requires active Joe and system actors")
+    cur.execute("""select 1 from public.tool_call tc join public.actor a on a.id=tc.actor_id
+                    where tc.idempotency_key=%s and tc.verb='create-tour-domain'
+                      and tc.organization_tenant_id=%s and a.slug='joe' and a.kind='human' and a.active
+                      and tc.response=jsonb_build_object('ok',true,'tour_id',%s::text)"""
+                + (" for share of tc,a" if lock else ""),
+                (values.creation_key, TOUR_TENANT, str(values.tour_id)))
+    if cur.fetchone() != (1,):
+        raise FixtureRefusal("Tour creation key lacks Joe's exact successful canonical tool call")
+    cur.execute("""select cl.id::text,cl.status,cl.merged_into,p.id::text,p.name,p.deleted_at,p.merged_into
+                     from public.client cl join public.party p on p.id=cl.party_id
+                    where cl.id=%s""" + suffix + (" of cl,p" if lock else ""), (values.client_id,))
+    client = cur.fetchone()
+    if not client or tuple(client) != (str(values.client_id), "engaged", None, str(FIXTURE_ID),
+                                     "Synthetic Staging Fixture", None, None):
+        raise FixtureRefusal("Tour client is not the active synthetic fixture party")
+    cur.execute("""select id,tour_name,tour_status,route_version,canonical_dataset_version,
+                          subject_type,subject_id,subject_bound_at
+                     from ops.tour where id=%s and organization_tenant_id=%s""" + suffix,
+                (values.tour_id, TOUR_TENANT))
+    tour = cur.fetchone()
+    if not tour or tuple(tour[:7]) != (values.tour_id, values.name, "draft", 1,
+                                      "synthetic-staging-qa-v1", "client", str(values.client_id)) \
+            or tour[7] is None:
+        raise FixtureRefusal("App-created Tour is missing, changed, or not a client draft")
+    cur.execute("""select id,route_version,base_route_version_id,start_point,end_point,
+                          routing_source,routing_provider,routing_rights_receipt_id,routing_request,
+                          routing_response_digest,created_by_actor_id,routing_policy_key
+                     from ops.tour_route_version where organization_tenant_id=%s and tour_id=%s""" + suffix,
+                (TOUR_TENANT, values.tour_id))
+    routes = cur.fetchall()
+    point = {"latitude": 30.4, "longitude": -87.2,
+             "precision_class": "approximate", "source_ref": "synthetic-staging-qa-point-v1"}
+    if len(routes) != 1 or tuple(routes[0][1:]) != (1, None, {**point, "position_role": "start"},
+                                             {**point, "position_role": "end"},
+                                             "manual", None, None, {}, None, "joe", None):
+        raise FixtureRefusal("Tour route drifted from Joe-created unaccepted manual version one")
+    route_id = routes[0][0]
+    cur.execute("select count(*) from ops.tour_route_version_acceptance where organization_tenant_id=%s and tour_id=%s",
+                (TOUR_TENANT, values.tour_id))
+    if cur.fetchone()[0]:
+        raise FixtureRefusal("Tour route has acceptance state")
+    for table in ("tour_property_membership", "tour_public_projection", "tour_selection_cart_version"):
+        cur.execute(f"select count(*) from ops.{table} where organization_tenant_id=%s and tour_id=%s",
+                    (TOUR_TENANT, values.tour_id))
+        if cur.fetchone()[0]:
+            raise FixtureRefusal("Tour has selected, projected, or shared state")
+    cur.execute("select id,organization_tenant_id,property_status,retired_at from ops.tour_property where id=%s" + suffix,
+                (values.property_id,))
+    property_row = cur.fetchone()
+    if property_row and tuple(property_row) != (values.property_id, TOUR_TENANT, "unknown", None):
+        raise FixtureRefusal("deterministic Tour property identifier collides or changed")
+    cur.execute("""select id,organization_tenant_id,route_version_id,property_id,route_sequence,route_label,
+                          stop_state,appointment_start,appointment_end,locked_appointment,dwell_minutes,
+                          buffer_minutes,access_coordinate_status,assertion_set_digest,created_by_actor_id
+                     from ops.tour_route_stop where route_version_id=%s or id=%s""" + suffix,
+                (route_id, values.stop_id))
+    stops = cur.fetchall()
+    expected_stop = (values.stop_id, TOUR_TENANT, route_id, values.property_id, None, None,
+                     "excluded", None, None, False, 0, 0, "unknown", EMPTY_ASSERTION_SET_DIGEST, "system")
+    if len(stops) > 1 or (stops and tuple(stops[0]) != expected_stop):
+        raise FixtureRefusal("Tour has another stop or deterministic stop collision")
+    if bool(property_row) != bool(stops):
+        raise FixtureRefusal("Tour property and excluded stop are not an exact atomic fixture")
+    if property_row:
+        cur.execute("""select count(*) from ops.tour_route_stop where property_id=%s and id<>%s""",
+                    (values.property_id, values.stop_id))
+        if cur.fetchone()[0]:
+            raise FixtureRefusal("synthetic Tour property is used by another route")
+        for table in ("tour_field_assertion", "tour_property_coordinate_candidate",
+                      "tour_property_membership"):
+            cur.execute(f"select count(*) from ops.{table} where property_id=%s", (values.property_id,))
+            if cur.fetchone()[0]:
+                raise FixtureRefusal("synthetic Tour property has assertions, coordinates, or accepted membership")
+    return route_id, bool(stops)
+
+
+def install_excluded_tour_fixture(conn: Any, plan: Mapping[str, Any]) -> int:
+    values = excluded_tour_values(plan)
+    try:
+        with conn.cursor() as cur:
+            route_id, exists = _checked_tour_state(cur, values, lock=True)
+            if not exists:
+                cur.execute("""insert into ops.tour_property
+                    (id,organization_tenant_id,property_status) values (%s,%s,'unknown')""",
+                    (values.property_id, TOUR_TENANT))
+                cur.execute("""insert into ops.tour_route_stop
+                    (id,organization_tenant_id,route_version_id,property_id,route_sequence,route_label,
+                     stop_state,appointment_start,appointment_end,locked_appointment,dwell_minutes,
+                     buffer_minutes,access_coordinate_status,assertion_set_digest,created_by_actor_id)
+                    values (%s,%s,%s,%s,null,null,'excluded',null,null,false,0,0,'unknown',%s,'system')""",
+                    (values.stop_id, TOUR_TENANT, route_id, values.property_id, EMPTY_ASSERTION_SET_DIGEST))
+                _checked_tour_state(cur, values, lock=False)
+        conn.commit()
+        return int(not exists)
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def read_excluded_tour_fixture(conn: Any, plan: Mapping[str, Any]) -> dict[str, Any]:
+    values = excluded_tour_values(plan)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("set transaction read only")
+            route_id, exists = _checked_tour_state(cur, values, lock=False)
+            if not exists:
+                raise FixtureRefusal("independent Tour readback has no excluded stop")
+        conn.rollback()
+        return {"tour_id": str(values.tour_id), "tour_name": values.name,
+                "client_id": str(values.client_id), "route_version_id": str(route_id),
+                "route_version": 1, "route_accepted": False, "active_stop_count": 0,
+                "excluded_stop_count": 1, "property_id": str(values.property_id),
+                "property_status": "unknown", "stop_id": str(values.stop_id),
+                "stop_state": "excluded", "route_sequence": None, "route_label": None,
+                "access_coordinate_status": "unknown"}
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def _private_proof_destination(path: pathlib.Path) -> tuple[pathlib.Path, str, int]:
     if ".." in pathlib.Path(path).parts:
         raise FixtureRefusal("proof path contains parent traversal")
@@ -433,6 +608,21 @@ def build_fixture_proof(plan: Mapping[str, Any], target: Mapping[str, Any],
     }
 
 
+def build_tour_fixture_proof(plan: Mapping[str, Any], target: Mapping[str, Any],
+                             readback: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": PROOF_SCHEMA,
+        "provenance": {"kind": "raw-sql-fixture", "readback": "separate-committed-readonly-connection"},
+        "fixture_run": plan["run"],
+        "source_pair": {"source_commit": plan["release"]["source_commit"],
+                        "carr_source_commit": plan["release"]["carr_source_commit"]},
+        "recorded_plan_observed_at": plan["observed_at"],
+        "verified_target": dict(target),
+        "tool_source_sha256": hashlib.sha256(pathlib.Path(__file__).resolve().read_bytes()).hexdigest(),
+        "fixture": {"mode": "excluded-tour-stop", "tour_readback": dict(readback)},
+    }
+
+
 def validate_target(dsn: str, project_id: str, endpoint_id: str, *,
                     environ: Mapping[str, str] = os.environ) -> None:
     parsed = urlsplit(dsn)
@@ -544,11 +734,46 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--invoice-plan", type=pathlib.Path)
+    parser.add_argument("--tour-plan", type=pathlib.Path)
     parser.add_argument("--expected-app-sha")
     parser.add_argument("--expected-carr-sha")
     parser.add_argument("--proof-file", type=pathlib.Path)
     parser.add_argument("--aged-invoice", action="store_true")
     args = parser.parse_args()
+    if args.tour_plan and (args.invoice_plan or args.aged_invoice):
+        parser.error("tour mode cannot be combined with invoice mode")
+    if args.tour_plan:
+        if not args.expected_app_sha or not args.expected_carr_sha:
+            parser.error("tour mode requires both explicit full source pins")
+        if args.apply and not args.proof_file:
+            parser.error("tour apply requires --proof-file for durable fixture evidence")
+        if args.proof_file and not args.apply:
+            parser.error("--proof-file is valid only with tour-plan apply")
+        try:
+            plan = load_private_tour_plan(args.tour_plan, args.expected_app_sha, args.expected_carr_sha)
+            if not args.apply:
+                print("staging-fixtures: PLAN excluded_tour_stops=1 mutated=false")
+                return 0
+            validate_proof_destination(args.proof_file)
+            dsn = os.environ.get("DATABASE_URL", "")
+            project = os.environ.get("CARR_STAGING_REPLACEMENT_PROJECT_ID", "")
+            endpoint = os.environ.get("CARR_STAGING_REPLACEMENT_ENDPOINT_ID", "")
+            validate_target(dsn, project, endpoint)
+            target = validate_provider_binding(dsn, project, endpoint)
+            import psycopg
+            with psycopg.connect(dsn) as conn:
+                count = install_excluded_tour_fixture(conn, plan)
+            with psycopg.connect(dsn) as conn:
+                readback = read_excluded_tour_fixture(conn, plan)
+            proof_state = publish_private_proof(args.proof_file, build_tour_fixture_proof(plan, target, readback))
+            print(f"staging-fixtures: PASS excluded_tour_stops={count} proof={proof_state}")
+            return 0
+        except (FixtureRefusal, ImportError) as exc:
+            print(f"staging-fixtures: REFUSED — {exc}", file=sys.stderr)
+            return 2
+        except Exception:
+            print("staging-fixtures: REFUSED — Tour fixture operation failed; details suppressed", file=sys.stderr)
+            return 2
     invoice_args = (args.expected_app_sha, args.expected_carr_sha)
     if bool(args.invoice_plan) != all(invoice_args) or (any(invoice_args) and not args.invoice_plan):
         parser.error("invoice mode requires --invoice-plan and both explicit full source pins")
