@@ -269,6 +269,33 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(evidence.automatic, false);
     }));
 
+    await t.test('a patch based on the latest field event is not a conflict with itself', async () => transaction(async () => {
+      await fixture(false);
+      // This file reads timestamptz as text; the Worker's Neon driver returns a
+      // millisecond Date, which is the precision this case must survive.
+      const worker = { query: async (...args) => {
+        const result = await c.query(...args);
+        const dated = (result.fields || []).filter(field => field.dataTypeID === 1184).map(field => field.name);
+        for (const row of result.rows) for (const name of dated) if (row[name] !== null) row[name] = new Date(row[name]);
+        return result;
+      } };
+      const first = await TOOLS['patch-deal-field'].handler(worker, actor, {
+        idempotency_key: id(20), deal: id(4), field: 'phase', value: 'negotiation', base_event_id: null,
+      });
+      assert.equal(first.ok, true);
+      const stored = (await c.query(`select extract(microseconds from recorded_at)::bigint % 1000 as sub_ms
+        from event where id=$1`, [first.event_id])).rows[0];
+      const second = await TOOLS['patch-deal-field'].handler(worker, actor, {
+        idempotency_key: id(21), deal: id(4), field: 'phase', value: 'legal', base_event_id: first.event_id,
+      });
+      assert.equal(second.ok, true, `sub-millisecond digits ${stored.sub_ms} must not make the base newer than itself`);
+      const stale = await TOOLS['patch-deal-field'].handler(worker, actor, {
+        idempotency_key: id(22), deal: id(4), field: 'phase', value: 'research', base_event_id: first.event_id,
+      });
+      assert.equal(stale.ok, false);
+      assert.equal(stale.conflict.event_a, second.event_id);
+    }));
+
     await t.test('account counters agree with the invoice-eligible board across outcome and parking states', async () => transaction(async () => {
       await fixture(true);
       for (const outcome of [null, 'won', 'lost', 'paused']) {
