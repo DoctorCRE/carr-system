@@ -346,6 +346,10 @@ def _run_turn(wire: Wire, task: str, *, thread_id, cwd, model, sandbox,
         })
     else:
         params = {"approvalPolicy": approval_policy, "sandbox": sandbox}
+        if network_access:
+            # A network-enabled turn must not leave a persistent thread that a
+            # later invocation could resume without this turn's policy.
+            params["ephemeral"] = True
         if cwd:
             params["cwd"] = cwd
         if model:

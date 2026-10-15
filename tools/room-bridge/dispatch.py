@@ -587,6 +587,7 @@ def dispatch(
         **outcome,
         **ownership,
         'status': outcome['status'],
+        **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
     _record(results_path, row)
     return row
@@ -907,6 +908,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; omit to leave Codex's default")
+    r.add_argument("--network-access", action="store_true",
+                   help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
                    help="a directory this desk may write outside its workspace (repeatable)")
 
@@ -982,6 +985,7 @@ def main(argv: list[str]) -> int:
             entry = reg.register(a.name, kind, socket=a.socket, model=a.model, cwd=a.cwd,
                                  effort=a.effort, family=a.family,
                                  sandbox=getattr(a, "sandbox", None),
+                                 network_access=a.network_access,
                                  add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout)
             print(json.dumps({a.name: entry}, indent=2))
             return 0

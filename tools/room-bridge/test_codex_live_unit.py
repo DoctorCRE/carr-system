@@ -24,6 +24,7 @@ sys.path.insert(0, str(HERE))
 
 import desks  # noqa: E402
 import dispatch  # noqa: E402
+import desk_cli  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -234,6 +235,13 @@ def main() -> int:
             row = dispatch.dispatch("cx-network", "read the authorized source", registry=reg,
                                    results_path=results, fresh=True)
             assert row["status"] == "completed", row
+            assert row["thread_id"] == "thread-live-0001", row
+            assert row["ephemeral_thread"] is True and row["thread_resumable"] is False, row
+            receipt = json.loads(results.read_text().splitlines()[-1])
+            assert receipt["thread_id"] == row["thread_id"], receipt
+            assert receipt["ephemeral_thread"] is True and receipt["thread_resumable"] is False, receipt
+            start = next(m for m in srv.seen if m.get("method") == "thread/start")
+            assert start["params"]["ephemeral"] is True, start
             turn = next(m for m in srv.seen if m.get("method") == "turn/start")
             assert turn["params"]["sandboxPolicy"] == {"type": "readOnly", "networkAccess": True}, turn
             assert srv.methods()[:4] == ["initialize", "initialized", "thread/start", "turn/start"], srv.methods()
@@ -279,6 +287,41 @@ def main() -> int:
 
     check("the wire rejects resume and non-boolean network requests before socket use",
           wire_refuses_network_on_resume_before_connecting)
+
+    def both_registration_clis_expose_only_codex_live_network_opt_in():
+        for cli_name, invoke in (
+            ("dispatch", lambda registry, sock: dispatch.main([
+                "--registry", str(registry), "register", "cli-network", "--kind", "codex-live",
+                "--socket", sock, "--model", "gpt-5.1-codex-mini", "--effort", "medium", "--network-access"])),
+            ("desk_cli", lambda registry, sock: desk_cli.main([
+                "--registry", str(registry), "register", "cli-network", "--kind", "codex-live",
+                "--socket", sock, "--model", "gpt-5.1-codex-mini", "--effort", "medium", "--network-access"])),
+        ):
+            cli_root = root / cli_name
+            cli_root.mkdir()
+            path = cli_root / "registry.json"
+            cli_sock = str(cli_root / "codex-live.sock")
+            if cli_name == "desk_cli":
+                with patch.object(desk_cli.desks, "is_live", return_value=True):
+                    assert invoke(path, cli_sock) == 0
+            else:
+                assert invoke(path, cli_sock) == 0
+            assert desks.Registry(path).entries()["cli-network"]["network_access"] is True
+            try:
+                bad_path = cli_root / "wrong-kind.json"
+                invoke_args = ["--registry", str(bad_path), "register", "wrong-kind", "--kind",
+                               "codex-session", "--model", "gpt-5.6-sol", "--effort", "high", "--network-access"]
+                if cli_name == "dispatch":
+                    status = dispatch.main(invoke_args)
+                else:
+                    status = desk_cli.main(invoke_args)
+                assert status == 2, (cli_name, status)
+                assert not bad_path.exists(), (cli_name, bad_path)
+            except TypeError as exc:
+                raise AssertionError(f"{cli_name} rejected the supported boolean option: {exc}")
+
+    check("both registration CLIs expose a strict codex-live-only network opt-in",
+          both_registration_clis_expose_only_codex_live_network_opt_in)
 
     def the_call_order_is_the_one_codex_found():
         srv = FakeAppServer(sock)
