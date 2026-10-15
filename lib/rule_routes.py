@@ -453,41 +453,78 @@ def fresh_ids(session_id: str, tool_name: str, ids: list[str],
     return sorted(rid for rid in ids if not _seen_in_context(state, rid, epoch, now))
 
 
-def record_delivered(session_id: str, tool_name: str, ids: list[str],
-                     now: float | None = None, *, agent_id: str | None = None) -> None:
-    """Remember full-text deliveries for one context. Best effort; never raises."""
-    now = time.time() if now is None else now
+def _update_state(session_id: str, agent_id: str | None, now: float, change):
+    """Read, change and write one context's state as a single step under its
+    lock, so concurrent hook processes see each other's writes. Returns what
+    change(state, epoch) returns; raises on any failure."""
+    path = _dedupe_path(session_id, agent_id)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(path.with_suffix(".lock"), "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        state = _read_state(path)
+        epoch = _context_epoch(session_id, agent_id)
+        if epoch is not None and state.get("_epoch") != epoch:
+            state = {"_epoch": epoch}  # a new context holds none of the old deliveries
+        result = change(state, epoch)
+        # Forget anything older than the window so the file stays small
+        # (an epoch-scoped context keeps everything it was given).
+        for rid in list(state):
+            if rid == "_epoch":
+                continue
+            if not isinstance(state[rid], dict):
+                del state[rid]
+                continue
+            tools = {t: ts for t, ts in state[rid].items()
+                     if isinstance(ts, (int, float))
+                     and (epoch is not None or now - ts < DEDUPE_SECONDS)}
+            if tools:
+                state[rid] = tools
+            else:
+                del state[rid]
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+        os.chmod(temp, 0o600)
+        os.replace(temp, path)
+        return result
+
+
+def claim_fresh(session_id: str, tool_name: str, ids: list[str],
+                now: float, *, agent_id: str | None = None) -> list[str]:
+    """fresh_ids, recorded as delivered in the same locked step: the returned
+    ids are stamped at `now` before the lock is released, so of several hook
+    processes in one parallel batch exactly one is handed each rule
+    (2026-10-14: four Agent launches delivered rule df55c398 three times).
+    A claim the caller then fails to deliver is undone with release_claim.
+
+    FAILS OPEN like fresh_ids: on any error every id is returned, unclaimed."""
+    def claim(state: dict, epoch: str | None) -> list[str]:
+        fresh = sorted(rid for rid in ids if not _seen_in_context(state, rid, epoch, now))
+        for rid in fresh:
+            state.setdefault(rid, {})[tool_name] = now
+        return fresh
+
     try:
-        path = _dedupe_path(session_id, agent_id)
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        lock = path.with_suffix(".lock")
-        with open(lock, "a", encoding="utf-8") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            state = _read_state(path)
-            epoch = _context_epoch(session_id, agent_id)
-            if epoch is not None and state.get("_epoch") != epoch:
-                state = {"_epoch": epoch}  # a new context holds none of the old deliveries
-            for rid in ids:
-                state.setdefault(rid, {})[tool_name] = now
-            # Forget anything older than the window so the file stays small
-            # (an epoch-scoped context keeps everything it was given).
-            for rid in list(state):
-                if rid == "_epoch":
-                    continue
-                if not isinstance(state[rid], dict):
-                    del state[rid]
-                    continue
-                tools = {t: ts for t, ts in state[rid].items()
-                         if isinstance(ts, (int, float))
-                         and (epoch is not None or now - ts < DEDUPE_SECONDS)}
-                if tools:
-                    state[rid] = tools
-                else:
-                    del state[rid]
-            temp = path.with_suffix(".tmp")
-            temp.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
-            os.chmod(temp, 0o600)
-            os.replace(temp, path)
+        return _update_state(session_id, agent_id, now, claim)
+    except Exception:
+        return sorted(ids)
+
+
+def release_claim(session_id: str, tool_name: str, ids: list[str],
+                  now: float, *, agent_id: str | None = None) -> None:
+    """Undo claim_fresh for the ids that were not delivered in full, so the
+    next call offers them again. Only the claim's own stamp is removed.
+    Best effort; never raises."""
+    if not ids:
+        return
+
+    def release(state: dict, _epoch: str | None) -> None:
+        for rid in ids:
+            tools = state.get(rid)
+            if isinstance(tools, dict) and tools.get(tool_name) == now:
+                del tools[tool_name]
+
+    try:
+        _update_state(session_id, agent_id, now, release)
     except Exception:
         return
 

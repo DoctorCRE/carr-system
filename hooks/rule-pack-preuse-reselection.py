@@ -557,11 +557,30 @@ def _semantic_receipt(payload: dict, response: dict, selected: list[dict],
     return row
 
 
+def _is_subagent_handback(prompt: str) -> bool:
+    """A subagent's report handed back to this session is not a partner
+    message: the rules it might match bind the subagent's work, already done.
+    17 of 19 logged hand-backs were judged and given rules. Any failure to
+    tell judges the prompt, as before."""
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "machine_envelope_live", REPO / "ops/machine_envelope.py")
+        if spec is None or spec.loader is None:
+            return False
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return bool(module.is_subagent_handback(prompt))
+    except Exception:
+        return False
+
+
 def _process_prompt(payload: dict, runner: Callable,
                     adviser: Callable[[str], list[dict]] | None) -> dict | None:
     prompt = payload.get("prompt")
     if (not _nonempty(payload.get("session_id")) or not _nonempty(prompt)
             or (_client(payload) == "codex" and not _nonempty(payload.get("turn_id")))):
+        return None
+    if _is_subagent_handback(prompt):
         return None
     if len(prompt) > MESSAGE_LIMIT_CHARS:
         return _context("RULE DELIVERY NOT ATTEMPTED: prompt exceeds the context limit.", "UserPromptSubmit")
@@ -696,16 +715,34 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
                                             else ([], [], []))
     candidates = sorted(set(routed) | set(table_ids)
                         | (set(scheduled_rule_ids()) if _matches(payload) else set()))
-    ids = rule_routes.fresh_ids(payload["session_id"], tool_name, candidates,
-                                agent_id=_agent_id(payload))
+    # Claimed before the door call, so the other hooks of one parallel batch
+    # skip these ids; whatever is not delivered in full is released after.
+    agent_id = _agent_id(payload)
+    claimed_at = time.time()
+    ids = rule_routes.claim_fresh(payload["session_id"], tool_name, candidates,
+                                  claimed_at, agent_id=agent_id)
     if not ids:
         return None
+    delivered: list[str] = []
+    try:
+        output, delivered = _deliver_routes(payload, ids, trigger_ids, routed, runner)
+        return output
+    finally:
+        rule_routes.release_claim(payload["session_id"], tool_name,
+                                  sorted(set(ids) - set(delivered)), claimed_at,
+                                  agent_id=agent_id)
+
+
+def _deliver_routes(payload: dict, ids: list[str], trigger_ids: list[str],
+                    routed: list[str], runner: Callable) -> tuple[dict | None, list[str]]:
+    """The injected context and the ids it delivers in full."""
+    tool_name = payload["tool_name"]
     try:
         packs = _route_packs(ids)
         response = _run_generalized_selector(packs, ids, runner)
         identity, delivery, found, not_found = _route_statements(response, packs, ids)
     except Exception:
-        return _context(rule_routes.notice_door_failure(ids))
+        return _context(rule_routes.notice_door_failure(ids)), []
     client = _client(payload)
     base = {
         "schema": rule_routes.ROUTE_RECEIPT_SCHEMA,
@@ -746,16 +783,15 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         # characters per id, so a large enough routed set cannot fit as a
         # receipt at all. Then nothing is claimed as delivered: the compact
         # notice names every id and records nothing for dedupe.
-        return _context(rule_routes.notice_too_large(ids))
-    rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full],
-                                 agent_id=_agent_id(payload))
+        return _context(rule_routes.notice_too_large(ids)), []
+    delivered = [r["id"] for r in full]
     try:
         from lib.rule_recall import log_delivery
         log_delivery(Path(REPO) / "out/rule-route-delivery.jsonl", json.loads(text)["receipt_id"],
-                     [r["id"] for r in full])
+                     delivered)
     except (OSError, ValueError):
         pass
-    return _context(text)
+    return _context(text), delivered
 
 
 def process(payload: dict, *, runner: Callable = subprocess.run,
