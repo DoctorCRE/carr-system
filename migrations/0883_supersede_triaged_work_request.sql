@@ -1,5 +1,5 @@
 -- rollback: forward-only — a request superseded from triaged keeps its triage fields, which the restored 0426 shape check would reject; recover with a new migration
--- lock-review: drops and re-adds one CHECK on ops.work_request (tens of rows, validated in milliseconds) and adds a row trigger to ops.work_request_triage_receipt (one row per triaged request); both take brief ACCESS EXCLUSIVE locks on small tables
+-- lock-review: drops and re-adds one CHECK on ops.work_request (tens of rows, validated in milliseconds) and adds a row trigger to ops.work_request_triage_receipt (one row per triaged request); all take brief ACCESS EXCLUSIVE locks on small tables; four name-only evidence tables gain BEFORE-row guards
 -- 0883_supersede_triaged_work_request.sql
 --
 -- SUPERSEDE A TRIAGED WORK REQUEST WHEN NOTHING DOWNSTREAM WOULD BE STRANDED.
@@ -124,6 +124,52 @@ comment on table ops.work_request_triage_receipt is
   'Receipt for triaging a sourced Work Request. Append-only, enforced by trigger since 0883. '
   'Stays attached to a request superseded from triaged, readable through superseded_by.';
 
+-- Name-only references have no FK lock. Lock the referenced Work Request row
+-- before every insert, including direct SQL writers. Supersession already takes
+-- FOR UPDATE on that row. SHARE also conflicts with a direct UPDATE's
+-- NO KEY UPDATE lock, so the immutable trigger's census is protected too.
+-- Unchanged references remain writable on historical evidence rows.
+create function ops.work_request_evidence_requires_live_request()
+returns trigger language plpgsql
+set search_path to 'pg_catalog', 'ops', 'pg_temp' as $fn$
+declare
+  v_reference text := to_jsonb(new)->>tg_argv[0];
+  v_state text;
+begin
+  if v_reference is null then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and v_reference is not distinct from (to_jsonb(old)->>tg_argv[0]) then
+    return new;
+  end if;
+  if tg_argv[1] = 'uuid' then
+    select w.state into v_state from ops.work_request w
+     where w.id = v_reference::uuid for share;
+  else
+    select w.state into v_state from ops.work_request w
+     where w.ref = v_reference for share;
+  end if;
+  -- Historical name-only references need not have a local Work Request row.
+  if v_state in ('declined', 'superseded') then
+    raise exception 'work_request_evidence_not_live: % names a % Work Request', v_reference, v_state;
+  end if;
+  return new;
+end;
+$fn$;
+
+create trigger a0_work_request_evidence_requires_live_request
+  before insert or update of work_request_id on public.room_dispatch_link
+  for each row execute function ops.work_request_evidence_requires_live_request('work_request_id', 'uuid');
+create trigger a0_work_request_evidence_requires_live_request
+  before insert or update of work_request_id on ops.assurance_health_evidence
+  for each row execute function ops.work_request_evidence_requires_live_request('work_request_id', 'ref');
+create trigger a0_work_request_evidence_requires_live_request
+  before insert or update of work_request_ref on ops.release
+  for each row execute function ops.work_request_evidence_requires_live_request('work_request_ref', 'ref');
+create trigger a0_work_request_evidence_requires_live_request
+  before insert or update of work_request_ref on ops.engineering_stale_contract_fence
+  for each row execute function ops.work_request_evidence_requires_live_request('work_request_ref', 'ref');
+
 -- ---------------------------------------------------------- (a) the census
 -- Returns every place that names the request outside its own intake receipts,
 -- as 'schema.table.column'; empty when a successor would strand nothing.
@@ -242,6 +288,7 @@ declare
           and r.exit_reason = new.exit_reason
           and r.superseded_by is not distinct from new.superseded_by
      )
+     and current_setting('transaction_isolation') = 'read committed'
      and cardinality(ops.work_request_supersession_strands(old.id)) = 0 then
     return new;
   end if;
@@ -315,6 +362,9 @@ begin
   end if;
 
   if v_state = 'triaged' then
+    if current_setting('transaction_isolation') <> 'read committed' then
+      raise exception 'triaged_work_request_requires_read_committed: the census must see writers committed while waiting';
+    end if;
     v_strands := ops.work_request_supersession_strands(v_id);
     if cardinality(v_strands) > 0 then
       raise exception 'triaged_work_request_has_downstream_evidence: % is named by % and a successor cannot inherit it',

@@ -15,7 +15,7 @@ const DECLINE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", 
 const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason", "superseded_by"]);
 const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
   "successor_is_self", "successor_withdrawn", "successor_not_sourced", "supersession_cycle",
-  "triaged_work_request_has_downstream_evidence"]);
+  "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
 const PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
 const ACCEPT_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash"]);
 const AMEND_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","predecessor_plan_hash","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);

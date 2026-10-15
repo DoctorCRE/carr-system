@@ -97,20 +97,20 @@ def refuses_named(cur, sql, params, name, label):
     raise RuntimeError(f"{label} was ACCEPTED; it must be refused as {name}")
 
 
-def fixture(cur):
+def fixture(cur, *, slug="wr-withdrawal-gate", doc=DOC, section=SEC, revision=REV):
     """A doctrine origin to capture against, built and rolled back with the gate."""
     actor = cur.execute("select id from public.actor order by slug limit 1").fetchone()[0]
     cur.execute(
         "insert into public.doctrine_document (id,slug,title,content_class,visibility)"
-        " values (%s,'wr-withdrawal-gate','Withdrawal gate','reference','shared')", (DOC,))
+        " values (%s,%s,'Withdrawal gate','reference','shared')", (doc, slug))
     cur.execute(
         "insert into public.doctrine_section (id,document_id,section_key,title,ordinal,status,current_version)"
-        " values (%s,%s,'origin','Origin',1,'active',1)", (SEC, DOC))
+        " values (%s,%s,'origin','Origin',1,'active',1)", (section, doc))
     cur.execute(
         "insert into public.doctrine_revision (id,section_id,version,actor_id,body,plain_text,content_hash)"
         " values (%s,%s,1,%s,%s,'x',%s)",
-        (REV, SEC, actor, Jsonb({"text": "x"}), hashlib.sha256(b"x").hexdigest()))
-    cur.execute("update public.doctrine_section set current_revision_id=%s where id=%s", (REV, SEC))
+        (revision, section, actor, Jsonb({"text": "x"}), hashlib.sha256(b"x").hexdigest()))
+    cur.execute("update public.doctrine_section set current_revision_id=%s where id=%s", (revision, section))
     return actor
 
 
@@ -151,23 +151,23 @@ def triage(cur, ref):
         raise RuntimeError(f"fixture triage did not land: {row}")
 
 
-def capture(cur, title):
+def capture(cur, title, *, slug="wr-withdrawal-gate", section=SEC, revision=REV):
     return cur.execute(
         "select ref from ops.capture_sourced_work_request("
-        "'doctrine:wr-withdrawal-gate#origin',%s,'outcome',%s::jsonb,%s,%s,%s)",
-        (title, CRITERIA, SEC, REV, str(uuid.uuid4()))).fetchone()[0]
+        "%s,%s,'outcome',%s::jsonb,%s,%s,%s)",
+        (f"doctrine:{slug}#origin", title, CRITERIA, section, revision, str(uuid.uuid4()))).fetchone()[0]
 
 
 def wait_for_blocker(observer, future, waiter_pid, blocker_pid):
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if future.done():
-            raise RuntimeError(f"supersession did not wait for the evidence writer: {future.result()}")
+            raise RuntimeError(f"concurrent operation did not wait for its blocker: {future.result()}")
         blockers = observer.execute("select pg_blocking_pids(%s)", (waiter_pid,)).fetchone()[0]
         if blocker_pid in blockers:
             return
         time.sleep(0.02)
-    raise RuntimeError("supersession never blocked on the evidence writer")
+    raise RuntimeError("concurrent operation never blocked on the expected backend")
 
 
 def concurrency_test(dsn):
@@ -180,9 +180,14 @@ def concurrency_test(dsn):
 
     with psycopg.connect(dsn) as setup:
         cur = setup.cursor()
-        fixture(cur)
-        retired, successor = capture(cur, "Concurrent evidence"), capture(cur, "Concurrent successor")
+        slug = "wr-concurrency-" + uuid.uuid4().hex
+        section, revision = uuid.uuid4(), uuid.uuid4()
+        fixture(cur, slug=slug, doc=uuid.uuid4(), section=section, revision=revision)
+        refs = [capture(cur, title, slug=slug, section=section, revision=revision)
+                for title in ("Concurrent evidence", "Concurrent successor", "Supersession first")]
+        retired, successor, reverse_retired = refs
         triage(cur, retired)
+        triage(cur, reverse_retired)
         request_id = cur.execute("select id from ops.work_request where ref=%s", (retired,)).fetchone()[0]
     now = datetime.now(timezone.utc)
     scope = {"workflow_key": "wr-withdrawal-concurrency", "workflow_version": 1,
@@ -230,7 +235,32 @@ def concurrency_test(dsn):
         if writer.execute("select work_request_id from ops.assurance_health_evidence where id=%s",
                           (receipt["id"],)).fetchone() != (retired,):
             raise RuntimeError("committed evidence lost its Work Request")
-    print("PASS: uncommitted evidence blocks supersession; committed evidence refuses it by name")
+        superseder.execute("begin")
+        superseder.execute("select ops.supersede_sourced_work_request(%s,2,'carried forward',%s,'joe',%s)",
+                           (reverse_retired, successor, uuid.uuid4()))
+        reverse_scope = {**scope, "work_request_id": reverse_retired}
+        writer.execute("set carr.acting_actor_slug='joe'")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            def write_after_supersession():
+                try:
+                    writer.execute("select ops.record_assurance_health_evidence(%s,%s,%s)",
+                                   (Jsonb(reverse_scope), Jsonb(evidence), uuid.uuid4()))
+                    return "accepted"
+                except psycopg.Error as exc:
+                    return str(exc.diag.message_primary or exc)
+            pending = pool.submit(write_after_supersession)
+            try:
+                wait_for_blocker(superseder, pending, writer_pid, superseder_pid)
+            finally:
+                superseder.execute("commit")
+            message = pending.result(timeout=12)
+        if not message.startswith("work_request_evidence_not_live:"):
+            raise RuntimeError(f"writer accepted evidence after waiting for supersession: {message}")
+        count = writer.execute("select count(*) from ops.assurance_health_evidence where work_request_id=%s",
+                               (reverse_retired,)).fetchone()[0]
+        if count != 0:
+            raise RuntimeError("evidence was committed after the request was superseded")
+    print("PASS: evidence-first and supersession-first transactions serialize and refuse stranding")
 
 
 def main() -> int:
