@@ -196,8 +196,6 @@ test("V5-A01: evidence ingress derives attribution and cannot accept a label, gr
   assert.equal(calls.length, 2);
   assert.match(calls[0].sql, /set_config\('carr\.acting_actor_slug',\$1::text,true\)/);
   assert.match(calls[1].sql, /ops\.record_assurance_health_evidence\(\$1::jsonb,\$2::jsonb,\$3::uuid\)/);
-  // The acting slug is the authenticated actor's, bound as a parameter -- never
-  // anything the caller put in args (subject_ref here is deliberately different).
   assert.deepEqual(calls[0].params, [actor.slug]);
   assert.notEqual(calls[0].params[0], evidence.subject_ref);
   assert.deepEqual(calls[1].params, [JSON.stringify(SCOPE), JSON.stringify(evidence), args.idempotency_key]);
@@ -316,8 +314,6 @@ test("V5-A01 planted projection mutants are each killed by a guard", () => {
     error => error.payload?.error === "assurance_health_projection_invalid", "recovery omits a non-passing layer");
   degraded.recovery.required_evidence = ["activation_readback"];
   assert.equal(validateAssuranceHealthProjection(degraded, SCOPE, ToolError).state, "degraded");
-  // Distinctness is enforced on every projection, not only a healthy one: two
-  // passing layers sharing one receipt identity are refused even when degraded.
   const shared = structuredClone(degraded);
   shared.evidence.execution_assessment.evidence_ref = shared.evidence.artifact_assessment.evidence_ref;
   shared.evidence.execution_assessment.evidence_digest = shared.evidence.artifact_assessment.evidence_digest;

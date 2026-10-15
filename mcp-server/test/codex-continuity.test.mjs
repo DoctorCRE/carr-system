@@ -7,10 +7,6 @@ import { TOOLS } from "../src/tools.js";
 import { digest } from "../src/artifact-trust.js";
 import { splitReferenceManifest, storedJsonBytes } from "../continuity-reference-manifest.mjs";
 import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps } from "../src/identity.js";
-// `actorFromProps` is module-private under amendment 8 (PR 1013). The exported
-// grant door is `authenticatedIdentity.connectionForGrant`; called without the
-// server's witness it returns exactly the same actor, unbranded, which is what
-// every case in this file is about.
 const actorFromProps = (props, bindings = null) =>
   authenticatedIdentity.connectionForGrant(props, bindings);
 
@@ -892,8 +888,6 @@ test("real PostgreSQL handlers serialize races and isolate tenant, owner, and ta
   const databaseDriver = await import(driverModule);
   const Pool = databaseDriver.Pool || databaseDriver.default?.Pool;
   assert.equal(typeof Pool, "function", `database driver ${driverModule} must export Pool`);
-  // Revisions are deliberately undeletable.  This must target a disposable
-  // database that the test runner destroys after the process exits.
   const pool = new Pool({ connectionString: process.env.CARR_CONTINUITY_EPHEMERAL_DATABASE_URL });
   const setup = await pool.connect();
   const task = `continuity-test-${randomUUID()}`;

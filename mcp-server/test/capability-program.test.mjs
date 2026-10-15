@@ -163,11 +163,6 @@ test("the registry exposes a read context and only human-governed lifecycle writ
   assert.equal(Boolean(TOOLS["complete-capability-project"]?.write), true);
   assert.equal(Boolean(TOOLS["begin-capability-project"]?.write), true);
   assert.equal(Boolean(TOOLS["attest-capability-project"]?.write), true);
-  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): it was already a
-  // dead label — executeRegisteredTool stopped reading it 2026-08-26 by Joe's
-  // ruling, decision dc57f62d — and this slice removes the stale declaration
-  // from capability-program.js. These are still write:true, human-governed
-  // lifecycle transitions; only the unread flag is gone.
   assert.equal(TOOLS["complete-capability-project"].humanOnly, undefined);
   assert.equal(TOOLS["start-capability-project"].humanOnly, undefined);
   assert.equal(TOOLS["begin-capability-project"].humanOnly, undefined);
@@ -242,12 +237,6 @@ test("capability-program returns no session when the current Work Request has no
 });
 
 test("a proposed decline is never offered as the next build item, and never counted as done", async () => {
-  // THE LIVE SHAPE THIS PINS. 29 of the program's 51 rows carry disposition
-  // 'decline' while sitting in state 'ready'. Nothing records that any of those
-  // declines was DECIDED — shape disposition, decider, decision timestamp,
-  // triage classification and triaging actor are null on all 29 — and each row's
-  // own completion definition writes the decline as a condition rather than an
-  // outcome. So they can be neither built nor closed by this read.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const decline = { id: "b", ref: "WR-AI-014", program_ordinal: 2, version: 1,
@@ -274,19 +263,6 @@ test("a proposed decline is never offered as the next build item, and never coun
 });
 
 test("the read names what the CLOSE path will demand next, not only what to build", async () => {
-  // THE DIVERGENCE THIS PINS, which the fixture above already contained and
-  // nothing asserted on. `current` skips proposed declines so a session is never
-  // handed one to build — deliberate and right. The close path does not skip: it
-  // takes the first row that is not confirmed_closed in program order and refuses
-  // anything else with out_of_order_project.
-  //
-  // Here the decline sits at ordinal 2 and the buildable row at ordinal 3. So a
-  // session reads WR-AI-001, builds it, calls complete on its sequence, and is
-  // refused by a verb naming a sequence it was never shown. On the live program
-  // that moment is twelve closes away: the first proposed decline is at ordinal
-  // 14 and the queue is at ordinal 2.
-  //
-  // Both answers ship, because they answer different questions.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const decline = { id: "b", ref: "WR-AI-014", program_ordinal: 2, version: 1,
@@ -314,8 +290,6 @@ test("the read names what the CLOSE path will demand next, not only what to buil
 });
 
 test("no close-sequence warning when the two definitions agree", async () => {
-  // The other half. A warning that fires when nothing is wrong is noise, and
-  // this read is consumed by sessions deciding what to do next.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const buildable = { id: "c", ref: "WR-AI-001", program_ordinal: 2, version: 1,
@@ -338,9 +312,6 @@ test("no close-sequence warning when the two definitions agree", async () => {
 });
 
 test("a program with only proposed declines left is NOT complete", async () => {
-  // The dangerous half of stepping over them. If the read skipped declines and
-  // called the program done, 29 undecided rows would vanish behind a green
-  // headline — the false-green shape this system keeps finding.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const decline = { id: "b", ref: "WR-AI-014", program_ordinal: 2, version: 1,
@@ -360,9 +331,6 @@ test("a program with only proposed declines left is NOT complete", async () => {
 });
 
 test("a decline that WAS decided stops being a proposed decline", async () => {
-  // The rule is about undecided rows, not about the word decline. A row moved to
-  // a terminal state is settled and must leave the awaiting count, or the number
-  // could never fall to zero and the program could never complete.
   const settled = { id: "a", ref: "WR-AI-014", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "decline", title: "Text-to-SQL", project_context: {} };
   const db = { query: async (sql) => {
@@ -379,11 +347,6 @@ test("a decline that WAS decided stops being a proposed decline", async () => {
 });
 
 test("a settled decline may be closed out of order; build work may not", async () => {
-  // WHY THIS EXISTS. On 2026-08-22 Joe ruled on twelve declines in one sitting
-  // and not one could be recorded: the earliest sat at sequence 24, behind an
-  // unbuilt evaluation harness at sequence 2. Build ordering is about WORK, and
-  // a decline is never built — holding it in the lane is what makes the queue
-  // read fifty deep when twenty-one items are real.
   const head = { id: "h", ref: "WR-AI-001", program_ordinal: 2, version: 3,
     state: "ready", disposition: "extend", title: "LLM evaluation harness", project_context: {} };
   const decline = { id: "d", ref: "WR-AI-024", program_ordinal: 24, version: 5,
@@ -403,8 +366,6 @@ test("a settled decline may be closed out of order; build work may not", async (
 
   const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
 
-  // A DECLINE OUT OF ORDER IS REACHABLE. It must fail for a reason that is NOT
-  // out_of_order_project — reaching it is the whole point.
   let err = null;
   try {
     await tools["start-capability-project"].handler(dbFor([decline]), actor,
@@ -413,8 +374,6 @@ test("a settled decline may be closed out of order; build work may not", async (
   assert.notEqual(err?.payload?.error, "out_of_order_project",
     "a row already dispositioned decline must not be refused for being out of sequence");
 
-  // BUILD WORK OUT OF ORDER IS STILL REFUSED. This is the half that must not
-  // move: the exemption tests the row's disposition, never the caller's wish.
   err = null;
   try {
     await tools["start-capability-project"].handler(dbFor([buildLater]), actor,
@@ -423,8 +382,6 @@ test("a settled decline may be closed out of order; build work may not", async (
   assert.equal(err?.payload?.error, "out_of_order_project",
     "buildable work stays strictly ordered");
 
-  // A STALE READ IS STILL REFUSED even on the decline path, or the exemption
-  // would also be a way past the version guard.
   err = null;
   try {
     await tools["start-capability-project"].handler(dbFor([decline]), actor,
@@ -566,12 +523,6 @@ test("the scheduled builder definition cannot certify, merge, deploy, or communi
 });
 
 test("the dispatcher lets a non-human actor reach every capability lifecycle handler", async () => {
-  // INVERTED, not deleted (Joe's ruling 2026-08-26, decision dc57f62d). These
-  // five used to be stopped at the dispatcher before their handler ran. The
-  // point now is the opposite one, and it is still worth pinning: the actor
-  // must REACH the handler. The fake client throws the moment it is touched, so
-  // "handler must not run" arriving is proof the dispatcher passed the call
-  // through rather than refusing it on authority.
   const nonHuman = { id: "scheduled-builder", human: false, slug: "scheduled-builder" };
   for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project", "cancel-capability-session"]) {
     await assert.rejects(
@@ -582,11 +533,6 @@ test("the dispatcher lets a non-human actor reach every capability lifecycle han
 });
 
 
-// ── cancel-capability-session ────────────────────────────────────────────────
-// The verb that unsticks a row whose session died mid-flight. These pin the
-// three ways a cancel could quietly become something worse than the problem it
-// solves: undoing a settled close, erasing evidence, and running without a
-// stated reason.
 
 function cancelFixture(overrides = {}) {
   const row = { id: "wr", ref: "WR-AI-038", program_ordinal: 38, version: 5,
@@ -640,13 +586,10 @@ test("a cancel returns the row to ready, cancels the session, and deletes nothin
 });
 
 test("a cancel can NEVER reopen a settled close", async () => {
-  // requireProject only ever returns rows that are not confirmed_closed, so a
-  // closed row is simply not found out of order. This is the assertion that
-  // stops cancel becoming a back door around the immutability trigger.
   const { db } = cancelFixture({ __noSession: false });
   const closedDb = { query: async (sql, params = []) => {
     if (/order by w.program_ordinal limit 1/.test(sql)) return { rows: [{ id: "head", ref: "WR-AI-001", program_ordinal: 2, version: 3, state: "ready", disposition: "extend", project_context: {} }] };
-    if (/program_ordinal=\$2/.test(sql)) return { rows: [] };  // closed rows are excluded by the query itself
+    if (/program_ordinal=\$2/.test(sql)) return { rows: [] };
     return db.query(sql, params);
   }};
   await assert.rejects(
@@ -674,10 +617,6 @@ test("a cancel refuses without a reason, and refuses a row that is not in flight
 });
 
 test("a cancel refuses a row with no shape disposition rather than letting the database refuse it", async () => {
-  // ops.work_request_shape_gate rejects any row entering ready without one, and
-  // freezes the shape columns after claim, so this verb cannot set one itself.
-  // Catching it here is the difference between a usable message and a raw
-  // trigger exception surfacing as an internal error.
   const { db } = cancelFixture({ shape_disposition: null });
   await assert.rejects(
     cancelTools()["cancel-capability-session"].handler(db, actor, {

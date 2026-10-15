@@ -1,15 +1,3 @@
-// V5-A04 — the 150/200 thresholds, what a replan may change, and who gets
-// involved: Q115.D1 and Q128.D1 proved case by case.
-//
-// The suite is organised around the two claims that matter most and are easiest
-// to get quietly wrong: that the thresholds fire at exactly the stated
-// percentages (boundaries included), and that NO input anywhere produces a
-// replan permitting unqualified routing or weakened quality. The second is
-// proved by an exhaustive sweep over every combination the closed vocabularies
-// admit, because a spot check cannot establish a "never".
-//
-// EVERY COST AND ESTIMATE BELOW IS A SYNTHETIC FIXTURE. Nothing was spent, no
-// replan was really directed, and no human was really escalated to.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -65,7 +53,6 @@ function assess(expected, incurred) {
   return assessVariance({ expected_total_cost_units: expected, incurred_units: incurred });
 }
 
-// --- the thresholds are the decision's own numbers -------------------------
 
 test("THRESHOLD: the constants are Q128's 150 and 200 percent, in basis points", () => {
   assert.equal(V5_COST_BASIS_POINTS, 10000);
@@ -93,8 +80,6 @@ test("THRESHOLD: on plan and under plan both continue", () => {
 });
 
 test("THRESHOLD: the ratio floors rather than rounds, so 199.99 percent has not reached 200", () => {
-  // 100 expected, 19999 hundredths incurred is not expressible in whole units,
-  // so use a larger denominator: 10000 expected, 19999 incurred = 19999 bp.
   assert.equal(varianceBasisPoints(10000, 19999), 19999);
   assert.equal(directiveForBasisPoints(19999), "warn");
   assert.equal(varianceBasisPoints(10000, 20000), 20000);
@@ -130,7 +115,6 @@ test("VARIANCE: a negative incurred or a fractional estimate is refused", () => 
   refuses(() => varianceBasisPoints(0, 10), "invalid_cost_units");
 });
 
-// --- the replan directive --------------------------------------------------
 
 test("REPLAN: 200 percent fires the cost trigger", () => {
   const directive = evaluateReplan({
@@ -209,7 +193,6 @@ test("REPLAN: NO input produces unqualified routing or a weakened quality floor"
     }
     assert.ok(V5_VARIANCE_DIRECTIVES.includes(directive.directive));
   }
-  // The sweep is worthless if it never reached the interesting states.
   assert.ok(results.some(entry => entry.directive === "continue"));
   assert.ok(results.some(entry => entry.directive === "warn"));
   assert.ok(results.some(entry => entry.directive === "replan"));
@@ -242,7 +225,6 @@ test("REPLAN: an unregistered qualification state is refused by name", () => {
   }), "unknown_qualification_state");
 });
 
-// --- continue only when value and quality remain justified -----------------
 
 test("CONTINUE: both justifications true is the only way through", () => {
   const directive = evaluateReplan({
@@ -329,7 +311,6 @@ test("CONTINUE: every combination is swept, and none permits a downgrade", () =>
   }
 });
 
-// --- Q128's escalation rule ------------------------------------------------
 
 test("ESCALATION: exactly three of the registered change kinds reach a human", () => {
   const escalating = V5_REPLAN_CHANGE_KINDS.filter(kind =>
@@ -391,7 +372,6 @@ test("ESCALATION: an empty change list is a broken caller", () => {
     "invalid_shape");
 });
 
-// --- Q115's five measured dimensions ---------------------------------------
 
 test("Q115: the five measured dimensions are read off the registry's own component names", () => {
   const components = {
@@ -414,7 +394,6 @@ test("Q115: a basis missing one of the five is refused, not reported smaller", (
   }), "missing_field");
 });
 
-// --- the ledger seam -------------------------------------------------------
 
 function ledgerFixture(estimate, steps) {
   const tree = compileScopeTree({
@@ -507,7 +486,6 @@ test("LEDGER SEAM: a node the projection does not carry throws", () => {
   refuses(() => assessNodeVariance({ projection, node_id: "s:missing" }), "unknown_node");
 });
 
-// --- the projection --------------------------------------------------------
 
 test("PROJECTION: the thresholds and every closed vocabulary are hashed in", () => {
   const preimage = v5CostVariancePreimage();

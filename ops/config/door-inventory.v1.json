@@ -207,12 +207,6 @@
       "evidence": "f163962f (ORDER 40, rehearsed)"
     },
     {
-      "path": "tools/room-bridge/model_room_preview_server.py",
-      "class": "inert",
-      "reason": "Offline host for browser verification of the Model Room bundle; no harness launches it yet.",
-      "evidence": "loop #1305 (launch it from the Model Room browser visual gate harness)"
-    },
-    {
       "path": "tools/staging-heavy-build-parity.py",
       "class": "one_shot",
       "reason": "Applied the two heavy-build migrations to the isolated staging project once, matching what production already ran.",

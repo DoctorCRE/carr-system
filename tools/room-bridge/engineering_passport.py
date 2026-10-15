@@ -120,25 +120,12 @@ def _validate_check(value: Any, label: str) -> dict[str, Any]:
     return row
 
 
-# --- V5-F03 deep-module execution contract -----------------------------------
-#
-# engineering-slice-plan.v1 remains exactly as accepted: the same closed field
-# set, the same refusals and the same canonical digest.  The Q046.D1 machine
-# readable slice contract, the Q016.D1/Q029.D1 code-versus-model bindings and
-# the Q035.D1 design-depth classifier arrive as the explicit successor
-# engineering-slice-plan.v2, so no established v1 producer is silently
-# reinterpreted and no second slice-contract authority is created.
 
 SLICE_PLAN_V1 = "engineering-slice-plan.v1"
 SLICE_PLAN_V2 = "engineering-slice-plan.v2"
 ENGINEERING_SLICE_PLAN_VERSIONS = (SLICE_PLAN_V1, SLICE_PLAN_V2)
 DESIGN_CONTRACT_VERSION = "engineering-design-contract.v1"
 
-# Q035.D1 classifier inputs.  These are the only slice facts the classifier may
-# read.  planned_checks is deliberately absent: every declared check stays
-# mandatory and adding verification can never move a slice from SHORT to FULL.
-# Free text (objective, definition_of_done, scope_boundary, failure conditions)
-# is never parsed, because interpreting prose would recreate model judgment.
 DESIGN_DEPTH_INPUT_FIELDS = (
     "risk_class", "concurrency_posture", "manual_qa_required", "release_requirement",
     "dependency_refs", "declared_resource_refs", "declared_component_refs",
@@ -160,17 +147,9 @@ def _short_predicate_v1(row: dict[str, Any]) -> bool:
     )
 
 
-# The accepted Q035.D1 predicate is frozen to the design-contract version that
-# sealed it.  A registered plan is immutable and is revalidated on every read,
-# so a predicate that quietly changed underneath a stored contract would
-# reclassify already sealed work and make its passport unreadable with nothing
-# able to amend the row.  A different boundary ships as an explicit successor
-# contract version with its own entry here; the v1 entry never moves.
 DESIGN_DEPTH_PREDICATES = {DESIGN_CONTRACT_VERSION: _short_predicate_v1}
 DESIGN_DEPTH_PREDICATE_VERSIONS = tuple(DESIGN_DEPTH_PREDICATES)
 
-# The agent may never hand the classifier its own answer.  The closed field set
-# already refuses unknown keys; this named refusal makes the bypass explicit.
 SELF_LABEL_FIELDS = frozenset({
     "design_depth", "depth", "template", "template_kind", "complexity", "complexity_class",
     "simple", "is_simple", "classification", "classifier_override", "bypass",
@@ -191,35 +170,23 @@ FULL_DESIGN_REF_FIELDS = {
 }
 SHORT_TEMPLATE_FIELDS = {"template_ref", "objective_summary", "verification_ref"}
 
-# Q016.D1: deterministic code owns these outright; a model judgment step that
-# claims one of them is refused rather than reviewed.
 RESERVED_CODE_RESPONSIBILITIES = frozenset({
     "identity", "policy", "permissions", "state", "validation", "idempotency", "execution",
 })
 TYPED_UNCERTAINTY_CLASSES = frozenset({
     "classification", "extraction", "summarization", "ranking", "drafting", "disambiguation",
 })
-# Q029.D1: cost may appear alongside a capability reason but never alone.
 SELECTION_BASIS_VALUES = frozenset({
     "typed_uncertainty", "capability_gain", "quality_gain", "adaptability_gain", "cost",
 })
 EXECUTOR_CLASSES = frozenset({"deterministic_code", "attended_human", "model_assisted"})
-# A slice packet narrows one server-issued adapter envelope, so a contract that
-# routes the work to an attended human names an executor no packet can carry.
 ADMISSIBLE_EXECUTOR_CLASSES = frozenset({"deterministic_code", "model_assisted"})
 AUTHORITY_ENVIRONMENTS = frozenset({"local", "rehearsal", "staging", "production"})
 VERIFICATION_LANES = frozenset({"unit", "contract", "integration", "manual_qa"})
-# The only reviewer provider at this seam records one independent automation
-# actor's typed fact, and nothing anywhere checks that a reviewer is a human.
-# Accepting independent_human would seal a requirement into an immutable plan
-# that no code can satisfy or refuse, so the unsupported class is refused until
-# a human-review provider exists.
 REVIEWER_CLASSES = frozenset({"independent_agent"})
 EVIDENCE_REDACTION_CLASSES = frozenset({"metadata_only", "redacted_evidence"})
 EVIDENCE_RETENTIONS = frozenset({"ephemeral", "material_redacted"})
 COMPLETION_VERIFIERS = frozenset({"independent_review", "independent_review_and_manual_qa"})
-# Q063.D1 / Q122.D1: extend a proven deep module, or replace it cleanly; a new
-# module needs a real seam and no plan may create two owners for one seam.
 SEAM_MODES = frozenset({"reuse", "extend", "replace", "new_module"})
 NEW_MODULE_JUSTIFICATIONS = frozenset({"authority", "lifecycle", "failure_isolation", "multi_adapter"})
 MEASUREMENT_BASES = frozenset({
@@ -530,7 +497,6 @@ def _validate_design_depth_material(contract: dict[str, Any], depth: str, label:
 
 
 def _validate_design_contract(value: Any, slice_row: dict[str, Any], label: str) -> dict[str, Any]:
-    """Validate the closed Q046.D1 slice contract for one accepted v2 slice."""
     _refuse_self_label(value, label)
     row = _exact(value, DESIGN_CONTRACT_FIELDS, label)
     if row["contract_version"] != DESIGN_CONTRACT_VERSION:
@@ -553,7 +519,6 @@ def _validate_design_contract(value: Any, slice_row: dict[str, Any], label: str)
 
 
 def _assert_seam_authority(slices: Iterable[dict[str, Any]]) -> None:
-    """Refuse duplicate seam authority and half-replacement across one plan."""
     owners: dict[str, str] = {}
     retired: dict[str, str] = {}
     for row in slices:
@@ -579,7 +544,6 @@ def _assert_seam_authority(slices: Iterable[dict[str, Any]]) -> None:
 
 
 def _transitive_dependencies(slices: Iterable[dict[str, Any]]) -> dict[str, set[str]]:
-    """Every slice a slice depends on, directly or transitively."""
     direct = {row["slice_ref"]: list(row["dependency_refs"]) for row in slices}
     resolved: dict[str, set[str]] = {}
 
@@ -603,25 +567,11 @@ def _transitive_dependencies(slices: Iterable[dict[str, Any]]) -> dict[str, set[
 
 
 def _assert_parallel_resource_isolation(slices: Iterable[dict[str, Any]]) -> None:
-    """Refuse two concurrently admissible slices that own one declared resource.
-
-    declared_resource_refs are the mutable resources the envelope binds by
-    revision under compare_and_swap_required, and a parallel_safe slice has
-    already had to state isolation shared_resource_refs as empty -- "nothing I
-    touch is shared".  Two such slices naming one resource are two contradictory
-    statements inside one sealed plan, and both become eligible at once.  A
-    dependency edge between them removes the contradiction, because the
-    dependent slice cannot run until the other is verified complete, so ordered
-    work is left alone.  Serial and exclusive postures, which is how contention
-    is meant to be declared, are untouched, and so are v1 plans.
-    """
     ordered = _transitive_dependencies(slices)
     owners: dict[str, list[str]] = {}
     for row in slices:
         if row["concurrency_posture"] != "parallel_safe":
             continue
-        # declared_resource_refs is not required to be unique, and one slice
-        # repeating its own resource is not contention with anyone.
         for resource_ref in dict.fromkeys(row["declared_resource_refs"]):
             for other in owners.get(resource_ref, []):
                 if other in ordered.get(row["slice_ref"], set()) or row["slice_ref"] in ordered.get(other, set()):
@@ -634,15 +584,6 @@ def _assert_parallel_resource_isolation(slices: Iterable[dict[str, Any]]) -> Non
 
 
 def _assert_design_execution_binding(slice_row: dict[str, Any], envelope: dict[str, Any]) -> None:
-    """Refuse a v2 slice whose accepted contract contradicts the server binding.
-
-    routing and authority are validated at registration and sealed inside
-    plan_digest, but the packet copied server_binding verbatim and never
-    compared the two, so a slice whose accepted contract said read-only work on
-    a human desk could be packaged against a write-capable automation envelope
-    with both statements recorded as true.  This compares and refuses only: it
-    never rewrites, widens, or narrows the server binding to match a contract.
-    """
     contract = slice_row.get("design_contract")
     if not contract:
         return
@@ -730,7 +671,6 @@ def validate_engineering_slice_plan(plan: Any) -> dict[str, Any]:
 
 
 def _validate_plan_envelope_binding(plan: dict[str, Any], envelope: dict[str, Any]) -> None:
-    """Require the accepted plan and server envelope to describe one authority state."""
     if plan["work_request"]["id"] != envelope["work_request_id"]:
         raise EngineeringContractError("accepted plan work request does not match execution envelope")
     state = envelope["state_binding"]
@@ -741,7 +681,6 @@ def _validate_plan_envelope_binding(plan: dict[str, Any], envelope: dict[str, An
 
 
 def _validate_authoritative_envelopes(plan: dict[str, Any], values: Any) -> dict[str, dict[str, Any]]:
-    """Validate and index server-issued envelopes persisted by a passport."""
     rows = _list(values, "engineering passport execution_envelopes")
     result: dict[str, dict[str, Any]] = {}
     for index, raw in enumerate(rows):
@@ -904,7 +843,6 @@ def build_engineering_slice_packet(envelope: Any, plan: Any, slice_ref: str) -> 
 
 
 def _narrowed_envelope(source: dict[str, Any], slice_row: dict[str, Any]) -> dict[str, Any]:
-    """Derive the only legal slice narrowing from source and accepted plan."""
     _assert_design_execution_binding(slice_row, source)
     packet = copy.deepcopy(source)
     expected = source["request"]["declared_expectations"]

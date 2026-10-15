@@ -252,8 +252,6 @@ test("worst-case capsule reserves all mandatory recovery sections before optiona
   } });
   const capsuleBytes = new TextEncoder().encode(capsule).byteLength;
   assert.ok(capsuleBytes <= 3200);
-  // A deliberately conservative measured budget (3 UTF-8 bytes/token) keeps
-  // the Worker capsule at or below 1,200 tokens before the native envelope.
   assert.ok(Math.ceil(capsuleBytes / 3) <= 1200);
   for (const required of ["Objective:", "objective sentinel", "Current corrections:", "correction-0",
     "Current constraints:", "constraint-0", "Pending external effects (verify; never replay):",

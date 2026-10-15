@@ -5,9 +5,11 @@
 
 WHY (decisions 17ef11fa and b729859d, 2026-09-24). Joe: CARR runs itself, and
 "even the review, merge, and release steps can be triggered by scripts too".
-A separate pipeline reviews and merges and appends a merge event (one JSON line)
-to out/merge-events.jsonl. This file is the RELEASE step that consumes merges to
-main. It is ticked by launchd (ops/launchd/com.carr.release-pipeline.plist,
+A separate local source step appends a review event (one JSON line) to
+out/merge-events.jsonl after an exact-head approved PR is merged and
+codex-record-event accepts the authenticated native Codex continuity receipt.
+This file is the RELEASE step that consumes merges to main. It is ticked by
+launchd (ops/launchd/com.carr.release-pipeline.plist,
 whose header carries the three install commands; installing it is a deliberate
 human act) through bin/run-scheduled.sh, like every other local job.
 
@@ -95,11 +97,12 @@ Evidence: out/release-smoke/<sha>/<phase>-<invocation>/. Each lane must set
 
 CONTROLLER FRESHNESS. launchd runs this file from the canonical checkout,
 and fleet-sync fast-forwards that checkout only when it has no local changes.
-Before releasing either lane the tick compares its own source
-(CONTROLLER_PATHS) on disk with origin/main; any difference holds every lane
-as `controller_stale` (nothing run, no SHA burned) and files one loop per stale
-episode. 2026-10-05: a checkout 8 commits behind ran app f04c9ab8 without the
-`app-build` step main already carried, and burned that SHA.
+Before releasing either lane the tick compares imported source bytes, current
+checkout bytes, and the Wrangler package inputs in CONTROLLER_PATHS with
+origin/main. Any difference holds every lane as `controller_stale` (nothing
+run, no SHA burned) and files one loop per stale episode. 2026-10-05: a
+checkout 8 commits behind ran app f04c9ab8 without the `app-build` step main
+already carried, and burned that SHA.
 
 BATCHING. Each lane releases the LATEST main SHA, never each merge separately.
 The last released SHA per lane lives in out/release-pipeline/state.json; when it
@@ -185,18 +188,22 @@ name that target.
 
 THE TRUST BOUNDARY, stated plainly. Every CARR session posts to GitHub as
 jbookout, which GitHub reports as OWNER. Comment authorship therefore proves only
-"posted from inside CARR", NOT which agent reviewed. Maker ≠ verifier is
-enforced by (1) the reviewer identity in the merge event the local
-review-and-merge pipeline writes, which must differ from its author, and (2) the
-database, which refuses a verifier slug equal to the maker (carr_jobs). The
-comment is evidence of the verdict and the reviewed SHA, not of identity. App lane: the named required checks (`test`) are present
-and green; an empty check list is a hold.
+"posted from inside CARR", NOT which agent reviewed. The local release-review
+producer records reviewer `codex` only after the deployed Worker accepts a
+`codex-record-event` request through the dedicated continuity profile. Its
+native task reference is caller-reported; the Worker authenticates the Codex
+actor and validates the task binding, but does not prove that reference is a
+review outcome. The event binds the exact PR, approval comment, reviewed head
+and merge SHA. The comment is evidence of the verdict and reviewed SHA, not of
+identity. The database also refuses a verifier slug equal to the maker
+(`carr_jobs`). App lane: the named required checks (`test`) are present and
+green; an empty check list is a hold.
 
 VERIFIER ≠ MAKER. The database derives the release maker from the filing login
 (carr_jobs) and refuses a verifier equal to it (ops.approve_program5_release,
-ops.record_program5_release_readiness). The verifier slug comes ONLY from the
-merge event (`reviewer`) the local review-and-merge pipeline wrote, else the
-configured default (`claude-review-agent`) — never from comment text. It is
+ops.record_program5_release_readiness). The verifier slug comes only from the
+event written after the authenticated continuity record — never from comment
+text and never from a configured fallback. It is
 refused if it names the maker, a human partner (the review was not a human's and
 must never be booked as one), this pipeline, the GitHub account comments are
 posted through, or the merge event's author.
@@ -243,32 +250,35 @@ from typing import Any, Callable, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.credential_file import credential, read_env_file  # noqa: E402
-from lib.github_reader import GitHubReader, GitHubUnreadable  # noqa: E402
-from lib.secret_redaction import redact_text, sensitive_env_values  # noqa: E402
+from lib.credential_file import SOURCE_BYTES as CREDENTIAL_FILE_SOURCE_BYTES, credential, read_env_file  # noqa: E402
+from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHubReader, GitHubUnreadable  # noqa: E402
+from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
+CONTROLLER_SOURCE_BYTES = Path(__file__).read_bytes()
 CONFIG_PATH = REPO / "ops" / "config" / "release-pipeline.v1.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-SLUG_RE = re.compile(r"^[a-z][a-z0-9._:-]{1,63}$")
 ROOM_NAMESPACE = uuid.UUID("3d0e3c55-6a51-4c3e-9b8f-2b6c1f0a7e41")
 BREW_PATH = ("/opt/homebrew/opt/node@22/bin:/usr/local/opt/node@22/bin:/opt/homebrew/bin:"
              "/opt/homebrew/sbin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin:"
              "/usr/sbin:/sbin")
 CHILD_ENV_NAMES = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL",
-                   "SSL_CERT_FILE", "SSL_CERT_DIR")
+                   "SSL_CERT_FILE", "SSL_CERT_DIR", "CARR_GITHUB_READ_BUDGET")
 
 # The Workers deploy credential. Loaded from its file into the environment of
 # the wrangler-running steps ONLY (never child_env, never argv, never a log
 # line), so no step can fall back to wrangler's interactive OAuth login.
 CLOUDFLARE_TOKEN_NAME = "CLOUDFLARE_API_TOKEN"
 CLOUDFLARE_TOKEN_FILE = "tokens.env"   # under credential_dir
+TOOLCHAIN_FILES = ("package.json", "package-lock.json")   # mcp-server files that key the token-check wrangler
 CREDENTIAL_INVENTORY_PATH = REPO / "ops/config/credential-inventory.v1.json"
-# The code and config this tick executes from the canonical checkout; each must
-# equal origin/main before any lane releases (see CONTROLLER FRESHNESS above).
+# Code this process loaded and disk inputs used by its subprocesses; all must
+# match origin/main before a lane can release (see CONTROLLER FRESHNESS above).
 CONTROLLER_PATHS = ("ops/release-pipeline.py", "ops/config/release-pipeline.v1.json",
-                    "lib/secret_redaction.py", "ops/release-smoke.py",
-                    "ops/doctorcre-production-smoke.py")
+                    "lib/credential_file.py", "lib/github_reader.py", "lib/secret_redaction.py",
+                    "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                    "mcp-server/package.json", "mcp-server/package-lock.json")
 CONTROLLER_STALE = "controller_stale"
+CONTROLLER_UNREADABLE = "controller_unreadable"
 
 
 # ── results and the command runner seam ───────────────────────────────────────
@@ -327,6 +337,8 @@ SMOKE_ALWAYS_ATTRIBUTED = frozenset({"release-identity", "verb-registry", "brows
 SMOKE_OUT = Path("out") / "release-smoke"
 _SMOKE = runpy.run_path(str(REPO / "ops/release-smoke.py"))
 SMOKE_LANE_JOURNEYS: dict[str, tuple[str, ...]] = _SMOKE["LANE_JOURNEYS"]
+SMOKE_SOURCE_BYTES: bytes = _SMOKE["SOURCE_BYTES"]
+DOCTOR_SMOKE_SOURCE_BYTES: bytes = _SMOKE["DOCTOR_SOURCE_BYTES"]
 served_version: Callable[[str, Any], str | None] = _SMOKE["served_version"]
 
 
@@ -456,7 +468,19 @@ class ObservedGitHub:
 # ── configuration, state, records ─────────────────────────────────────────────
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    source = path.read_bytes()
+    cfg = LoadedConfig(json.loads(source))
+    cfg.source_blob = git_blob(source)
+    return cfg
+
+
+class LoadedConfig(dict):
+    """Parsed values with the provenance of the bytes that supplied them."""
+    source_blob: str
+
+
+def git_blob(source: bytes) -> str:
+    return hashlib.sha1(f"blob {len(source)}\0".encode() + source).hexdigest()
 
 
 def smoke_enabled(lane_cfg: dict) -> bool:
@@ -468,6 +492,15 @@ def smoke_enabled(lane_cfg: dict) -> bool:
         raise Blocked("config_invalid", "the lane's post_release_smoke must be true or false in "
                       "ops/config/release-pipeline.v1.json")
     return value
+
+
+def wrangler_toolchain(repo: Path, store_root: Path) -> Path:
+    """Where Pipeline.auth_wrangler installs wrangler for `repo`'s current
+    mcp-server lockfile."""
+    digest = hashlib.sha256()
+    for name in TOOLCHAIN_FILES:
+        digest.update((repo / "mcp-server" / name).read_bytes())
+    return store_root / "toolchain" / f"mcp-server-{digest.hexdigest()[:16]}"
 
 
 def expand(p: str) -> Path:
@@ -587,11 +620,10 @@ def single_run_lock(root: Path):
         fh.close()
 
 
-def read_merge_events(path: Path) -> dict[str, dict]:
-    """Index the merge-event file by merge SHA. The format belongs to the
-    review-and-merge pipeline; this reads it tolerantly and only takes review
-    evidence from it — main's SHA, not this file, is what decides a release."""
-    events: dict[str, dict] = {}
+def read_merge_events(path: Path) -> dict[str, dict[str, dict]]:
+    """Index local review events by merge SHA and repository. Main's SHA, not
+    this coordination file, is what decides a release."""
+    events: dict[str, dict[str, dict]] = {}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -604,8 +636,14 @@ def read_merge_events(path: Path) -> dict[str, dict]:
         if not isinstance(ev, dict):
             continue
         sha = str(ev.get("merge_sha") or ev.get("merge_commit_sha") or ev.get("sha") or "").lower()
-        if SHA_RE.fullmatch(sha):
-            events[sha] = ev
+        repo = str(ev.get("repository") or "")
+        if SHA_RE.fullmatch(sha) and repo:
+            by_repo = events.setdefault(sha, {})
+            prior = by_repo.get(repo)
+            if prior is not None and prior != ev:
+                by_repo[repo] = {"event_conflict": True}
+            elif prior is None:
+                by_repo[repo] = ev
     return events
 
 
@@ -665,15 +703,26 @@ def classify(paths: Iterable[str], lane_cfg: dict) -> tuple[bool, list[str]]:
 def choose_verifier(cfg: dict, event: dict | None) -> str:
     """The independent reviewer's slug, or Blocked. Never the maker.
 
-    Taken ONLY from the merge event the review-and-merge pipeline wrote on this
-    machine, else the configured default. Never from comment text: the
-    repositories are public, so a comment is not a place an identity can be
-    asserted from."""
+    Taken only from a local event written after the deployed Worker accepted a
+    native Codex continuity record. Task references are caller-reported audit
+    context; the public comment never asserts reviewer identity."""
     event = event or {}
-    raw = str(event.get("reviewer") or event.get("verifier_actor") or cfg.get("default_verifier") or "")
+    if (event.get("schema") != "carr-release-merge-event.v1" or
+            event.get("provenance_source") != "codex-record-event" or
+            not event.get("continuity_event_id")):
+        raise Blocked("verifier_provenance_missing", "the exact merged PR approval has no authenticated Codex continuity event")
+    reviewer_job = str(event.get("reviewer_task_ref") or "").strip()
+    maker_job = str(event.get("maker_task_ref") or "").strip()
+    builder_refs = event.get("builder_evidence_refs")
+    if (not reviewer_job or not maker_job or reviewer_job == maker_job or
+            event.get("task_refs_verified") is not False or
+            not isinstance(builder_refs, list) or not builder_refs or
+            any(not isinstance(ref, str) or not ref.strip() for ref in builder_refs)):
+        raise Blocked("verifier_job_evidence_invalid", "distinct caller-reported reviewer/maker jobs and builder evidence are required")
+    raw = str(event.get("reviewer") or "")
     slug = raw.strip().lower()
-    if not SLUG_RE.fullmatch(slug):
-        raise Blocked("verifier_invalid", f"verifier {raw!r} is not a lowercase actor slug")
+    if slug != "codex":
+        raise Blocked("verifier_invalid", "reviewer must be the authenticated native Codex actor")
     forbidden = {str(x).lower() for x in cfg.get("forbidden_verifiers") or []}
     makers = {str(event.get(k) or "").strip().lower()
               for k in ("author_actor", "maker_actor", "author", "maker")} - {""}
@@ -887,6 +936,7 @@ class Pipeline:
                  http: Callable[[str], Any] = http_json,
                  call_verb: Callable[[str, dict], tuple[bool, Any]] | None = None,
                  slice_marker: Callable[[str, str], dict] | None = None,
+                 controller_blobs: dict[str, str | None] | None = None,
                  dry_run: bool = False, env: dict[str, str] | None = None,
                  today: str | None = None, out: Callable[[str], None] = print,
                  rotate_lost_staging_credentials: tuple[str, ...] = ()):
@@ -896,6 +946,15 @@ class Pipeline:
         # --rotate-lost-credential, and the provisioner alone decides whether
         # that profile is really in the lost-file state. Never set by launchd.
         self.rotate_lost_staging_credentials = tuple(rotate_lost_staging_credentials)
+        self.controller_blobs = dict(controller_blobs) if controller_blobs is not None else {
+            "ops/release-pipeline.py": git_blob(CONTROLLER_SOURCE_BYTES),
+            "lib/credential_file.py": git_blob(CREDENTIAL_FILE_SOURCE_BYTES),
+            "lib/github_reader.py": git_blob(GITHUB_READER_SOURCE_BYTES),
+            "lib/secret_redaction.py": git_blob(REDACTION_SOURCE_BYTES),
+            "ops/release-smoke.py": git_blob(SMOKE_SOURCE_BYTES),
+            "ops/doctorcre-production-smoke.py": git_blob(DOCTOR_SMOKE_SOURCE_BYTES),
+            "ops/config/release-pipeline.v1.json": getattr(cfg, "source_blob", None),
+        }
         self.runner = runner or Runner()
         self.env = env if env is not None else child_env()
         self._github = github or (lambda repo_name: GitHub(repo_name, self.env))
@@ -978,6 +1037,10 @@ class Pipeline:
 
     def git(self, *args: str, cwd: Path | None = None, trim_output: bool = True) -> str:
         if args and args[0] == "fetch":
+            # Ordinary fetches keep the shared remote-tracking refs and
+            # FETCH_HEAD untouched. App publication has one explicit,
+            # verified ref refresh below because its unchanged release guard
+            # requires the detached candidate to equal refs/remotes/origin/main.
             args = ("fetch", "--no-write-fetch-head", "--refmap=", *args[1:])
         proc = subprocess.run(["git", "-C", str(cwd or self.repo), *args], env=self.env,
                               stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
@@ -1341,11 +1404,25 @@ class Pipeline:
                 release_prs.append({"pr": number, "head_sha": head_sha})
             if commit == sha and approval is not None:
                 head = {"pr": number, "head_sha": head_sha, "url": str(approval.get("html_url") or ""),
-                        "event": events.get(commit) or {}, "rule": rule, "reviewed_sha": reviewed_sha}
+                        "review_comment_id": int(approval.get("id") or 0),
+                        "event": events.get(commit.lower(), {}).get(lane_cfg["github_repo"]) or {},
+                        "rule": rule, "reviewed_sha": reviewed_sha}
         fix_forwards = self.resolve_fix_forwards(repo_dir, sha, blocked, fixers,
                                                  lane_cfg.get("fix_forward_derived_fields") or [])
         if head is None:
             raise Blocked("no_independent_review", f"the head commit {sha[:12]} has no approval")
+        event = head["event"]
+        if (event.get("schema") != "carr-release-merge-event.v1" or
+                event.get("provenance_source") != "codex-record-event" or
+                not event.get("continuity_event_id")):
+            raise Blocked("verifier_provenance_missing", "the exact merged PR approval has no authenticated Codex continuity event")
+        if (event.get("repository") != lane_cfg["github_repo"] or
+                str(event.get("merge_sha") or "").lower() != sha.lower() or
+                str(event.get("head_sha") or "").lower() != head["head_sha"].lower() or
+                event.get("pull_number") != head["pr"] or
+                str(event.get("reviewed_sha") or "").lower() != head["reviewed_sha"].lower() or
+                event.get("review_comment_id") != head["review_comment_id"]):
+            raise Blocked("verifier_provenance_mismatch", "local review event does not bind this exact merged PR approval")
         return {"head": head, "prs": reviewed, "pre_pipeline_prs": pre_pipeline, "release_prs": release_prs,
                 "reviews": reviews, "fix_forwards": fix_forwards,
                 "verifier": choose_verifier(lane_cfg, head["event"]),
@@ -1706,13 +1783,49 @@ class Pipeline:
         env[CLOUDFLARE_TOKEN_NAME] = token
         return env
 
-    def wrangler_auth(self, wrangler: Path, cwd: Path) -> None:
+    def auth_wrangler(self) -> Path:
+        """The wrangler binary that checks the deploy token: the pipeline's
+        own install under <store>/toolchain, keyed by this checkout's
+        mcp-server package.json + package-lock.json and reused until they
+        change. Never this checkout's mcp-server/node_modules: any session
+        running `npm ci` there can leave it empty, and on 2026-10-05 one did,
+        so `wrangler whoami` exited 127 on both lanes. Installed into a
+        `.partial` sibling and renamed into place, so an existing directory
+        is always a finished install."""
+        home = wrangler_toolchain(self.repo, self.store.root)
+        wrangler = home / "node_modules/.bin/wrangler"
+        if wrangler.exists():
+            return wrangler
+        if self.dry_run:
+            self.out(f"  [dry-run] would install the token-check wrangler into {home}")
+            return wrangler
+        partial = home.with_name(home.name + ".partial")
+        shutil.rmtree(partial, ignore_errors=True)
+        partial.mkdir(parents=True)
+        for name in TOOLCHAIN_FILES:
+            shutil.copy2(self.repo / "mcp-server" / name, partial / name)
+        res = self.step("wrangler-install", ["npm", "ci", "--no-audit", "--no-fund"], partial, timeout=1800)
+        if not (partial / "node_modules/.bin/wrangler").exists():
+            raise StepFailed("wrangler-install", 127, res.log,
+                             f"npm ci in {partial} finished without installing node_modules/.bin/wrangler")
+        shutil.rmtree(home, ignore_errors=True)
+        partial.rename(home)
+        for stale in home.parent.iterdir():
+            if stale != home:
+                shutil.rmtree(stale, ignore_errors=True)
+        return wrangler
+
+    def wrangler_auth(self) -> None:
         """Before any worktree exists: the deploy token must be present and
         accepted. Either failure stops the lane and dispatches; neither is a
-        silent hold, because a missing token never heals itself."""
+        silent hold, because a missing token never heals itself. The token is
+        read before the token-check wrangler is installed, so a missing token
+        still fails with no subprocess run at all."""
+        env = self.deploy_env()
+        wrangler = self.auth_wrangler()
         try:
-            who = self.step("wrangler-auth", [str(wrangler), "whoami"], cwd, timeout=120,
-                            env=self.deploy_env())
+            who = self.step("wrangler-auth", [str(wrangler), "whoami"], self.repo / "mcp-server",
+                            timeout=120, env=env)
         except StepFailed as failure:
             if failure.step != "wrangler-auth":
                 raise
@@ -1787,33 +1900,37 @@ class Pipeline:
                               capability=name)
 
     def controller_current(self, state: dict) -> None:
-        """Blocked unless every CONTROLLER_PATHS file on disk is byte-equal to
-        origin/main (git hash-object vs the committed blob), so a lagging or
-        locally edited checkout never releases main with other code. Once
-        current again, the filed loop is forgotten so the next episode files."""
-        remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main").split()
-        if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
-            raise Blocked("github_unreadable", "controller main has no exact SHA acknowledgement")
-        main = remote[0]
-        self.git("fetch", "--quiet", "origin", main)
-        stale = []
-        for path in CONTROLLER_PATHS:
-            try:
-                committed = self.git("rev-parse", f"{main}:{path}")
-            except StepFailed:
-                committed = None
-            disk = self.git("hash-object", "--", path) if (self.repo / path).is_file() else None
-            if disk != committed:
-                stale.append(path)
+        """Compare loaded code and current on-disk inputs to immutable main.
+        Unreadable evidence is a retryable hold, never a deployment failure.
+        Recovery state is only cleared in a real tick."""
+        try:
+            remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main").split()
+            if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
+                raise Blocked(CONTROLLER_UNREADABLE, "controller main has no exact SHA acknowledgement")
+            main = remote[0]
+            self.git("fetch", "--quiet", "origin", main)
+            stale = []
+            for path in CONTROLLER_PATHS:
+                entry = self.git("ls-tree", main, "--", path)
+                committed = entry.split()[2] if entry else None
+                loaded = self.controller_blobs.get(path, committed)
+                disk = self.git("hash-object", "--", path) if (self.repo / path).is_file() else None
+                if loaded != committed or disk != committed:
+                    stale.append(path)
+        except (StepFailed, OSError) as exc:
+            raise Blocked(CONTROLLER_UNREADABLE, f"controller freshness read unavailable: {exc}") from exc
         if stale:
             raise Blocked(CONTROLLER_STALE,
-                          f"{self.repo} differs from origin/main {main[:12]} in {', '.join(stale)}; "
-                          "fleet-sync fast-forwards it once its local changes are gone",
+                          f"loaded controller or helpers in {self.repo} differ from origin/main "
+                          f"{main[:12]} in {', '.join(stale)}; "
+                          "fleet-sync must fast-forward the checkout and a fresh tick must load it",
                           capability=CONTROLLER_STALE)
+        if self.dry_run:
+            return
         changed = bool(state.get("filed_blockers", {}).pop(CONTROLLER_STALE, None))
         for lane in ("worker", "app"):
             lane_state = state.get(lane, {})
-            if (lane_state.get("rejection") or {}).get("reason") == CONTROLLER_STALE:
+            if (lane_state.get("rejection") or {}).get("reason") in (CONTROLLER_STALE, CONTROLLER_UNREADABLE):
                 lane_state.pop("rejection")
                 changed = True
         if changed:
@@ -2070,8 +2187,11 @@ class Pipeline:
         self.observed_main = ""
         try:
             repo_dir = lane_repo_dir(self.cfg, lane, self.repo)
-            # Read and fetch an immutable main object, without writing any
-            # remote-tracking ref or another session's FETCH_HEAD.
+            # Read and fetch an immutable main object without writing any
+            # remote-tracking ref or another session's FETCH_HEAD. The app
+            # lane's unchanged exact-main guard needs origin/main refreshed
+            # later, after build and directly before publication; that one
+            # explicit ref update is verified and leaves every HEAD untouched.
             remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
             if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
                 raise Blocked("github_unreadable", "remote main has no exact SHA acknowledgement")
@@ -2376,7 +2496,7 @@ class Pipeline:
         # before the release worktree for that failure to stay a clean,
         # zero-subprocess failure (existing DeployCredential selftests pin
         # `runner.calls == []` for it).
-        self.wrangler_auth(self.repo / "mcp-server/node_modules/.bin/wrangler", self.repo / "mcp-server")
+        self.wrangler_auth()
 
         # 1. the release worktree at exactly S, venv-linked, `npm ci`'d — a
         # checkout and install only, no --apply yet, created BEFORE the
@@ -2681,7 +2801,7 @@ class Pipeline:
         rev = self.dry_tolerant("app review", lambda: self.review_evidence(gh, lane_cfg, repo_dir, base, sha),
                                 {"prs": [], "pre_pipeline_prs": [], "verifier_evidence": "<approval>"})
         self.out(f"  evidence: PRs {rev['prs']} approved; head approval {rev['verifier_evidence']}")
-        self.wrangler_auth(self.repo / "mcp-server/node_modules/.bin/wrangler", self.repo / "mcp-server")
+        self.wrangler_auth()
         wt = self.store.release_worktree("app", sha, self.run_id)
         self.add_worktree("app-worktree", repo_dir, wt, sha)
         self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800)
@@ -2693,6 +2813,7 @@ class Pipeline:
         if smoke_on:
             prior_app = self.live_value(lane_cfg, lambda live: served_version("app", live))
             smoke_baseline = self.smoke_run("app", sha, "baseline", app_dir=wt)
+        self.refresh_app_main_ref(repo_dir, wt, sha)
         self.step("app-release", ["node", "scripts/release-production.mjs"], wt, timeout=900,
                   env=self.deploy_env())
         live_identity = None
@@ -2711,6 +2832,44 @@ class Pipeline:
                 "review_rule": head.get("rule"),
                 "reviewed_sha": head.get("reviewed_sha"), "pr_head_sha": head.get("head_sha"),
                 "review_evidence": rev["verifier_evidence"], "post_release": post_release}
+
+    def refresh_app_main_ref(self, repo_dir: Path, wt: Path, sha: str) -> None:
+        """Refresh the shared origin/main ref only after confirming it is sha.
+
+        App's release script deliberately requires HEAD == origin/main. The
+        immutable-SHA fetch earlier in run_lane avoids moving tracking refs,
+        so an app checkout can retain a stale origin/main. This explicit fetch
+        updates that one shared ref for linked worktrees; it never checks out
+        or advances any worktree's HEAD, and publication is refused unless the
+        detached HEAD, fetched ref, and remote main still agree on sha.
+        """
+        if not SHA_RE.fullmatch(sha):
+            raise Blocked("app_main_unverified", "release target is not an exact commit SHA")
+        if self.dry_run:
+            self.step("app-main-ref-refresh", [
+                "git", "-C", str(repo_dir), "fetch", "--no-write-fetch-head", "--refmap=",
+                "origin", "refs/heads/main:refs/remotes/origin/main"], repo_dir)
+            self.out(f"  [dry-run] verify remote main, origin/main, and detached HEAD all equal {sha}")
+            return
+
+        def remote_main() -> str:
+            rows = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
+            if len(rows) != 2 or not SHA_RE.fullmatch(rows[0]) or rows[1] != "refs/heads/main":
+                raise Blocked("app_main_unreadable", "remote main has no exact SHA acknowledgement before app release")
+            return rows[0]
+
+        observed = remote_main()
+        if observed != sha:
+            raise Blocked("app_main_advanced", f"remote main advanced from target {sha[:12]} to {observed[:12]} before app release")
+
+        self.step("app-main-ref-refresh", [
+            "git", "-C", str(repo_dir), "fetch", "--no-write-fetch-head", "--refmap=",
+            "origin", "refs/heads/main:refs/remotes/origin/main"], repo_dir)
+        tracking = self.git("rev-parse", "refs/remotes/origin/main", cwd=repo_dir)
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        after = remote_main()
+        if tracking != sha or head != sha or after != sha:
+            raise Blocked("app_main_changed", "app release requires remote main, refreshed origin/main, and detached HEAD to match the reviewed target")
 
     # -- post-release proof ------------------------------------------------
     def live_value(self, lane_cfg: dict, pick: Callable[[dict], Any]) -> Any:
