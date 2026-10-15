@@ -85,6 +85,9 @@ REGISTRY_VERB = re.compile(r'"ingress_key":\s*"mcp-tool:([a-z0-9][a-z0-9-]*)"')
 SHORT_ID = re.compile(r"\b[0-9a-f]{8}\b")
 
 DEDUPE_SECONDS = 30 * 60
+# A pending claim outlives its hook by at most this long (the hook's own
+# budget is well under it).
+CLAIM_SECONDS = 120
 # Claude Code 2.1.283 persists any hook additionalContext longer than 10,000
 # characters to a file and shows only a 2,000-character preview (CLo=1e4 in the
 # shipped bundle, applied to every hook event). A preview is not delivery, so
@@ -453,6 +456,25 @@ def fresh_ids(session_id: str, tool_name: str, ids: list[str],
     return sorted(rid for rid in ids if not _seen_in_context(state, rid, epoch, now))
 
 
+def _claim_live(claim: object, now: float) -> bool:
+    """Whether a pending claim still holds its rules: its hook process is alive
+    and the claim is younger than CLAIM_SECONDS. A hook that crashed between
+    claim and delivery therefore stops suppressing its rules at once, and a
+    hung one does so after CLAIM_SECONDS."""
+    if not isinstance(claim, dict):
+        return False
+    pid, at = claim.get("pid"), claim.get("at")
+    if not isinstance(pid, int) or not isinstance(at, (int, float)) or now - at >= CLAIM_SECONDS:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, owned by someone else
+    return True
+
+
 def _update_state(session_id: str, agent_id: str | None, now: float, change):
     """Read, change and write one context's state as a single step under its
     lock, so concurrent hook processes see each other's writes. Returns what
@@ -465,11 +487,16 @@ def _update_state(session_id: str, agent_id: str | None, now: float, change):
         epoch = _context_epoch(session_id, agent_id)
         if epoch is not None and state.get("_epoch") != epoch:
             state = {"_epoch": epoch}  # a new context holds none of the old deliveries
+        claims = state.get("_claims")
+        state["_claims"] = claims if isinstance(claims, dict) else {}
         result = change(state, epoch)
+        state["_claims"] = {rid: c for rid, c in state["_claims"].items() if _claim_live(c, now)}
+        if not state["_claims"]:
+            del state["_claims"]
         # Forget anything older than the window so the file stays small
         # (an epoch-scoped context keeps everything it was given).
         for rid in list(state):
-            if rid == "_epoch":
+            if rid in ("_epoch", "_claims"):
                 continue
             if not isinstance(state[rid], dict):
                 del state[rid]
@@ -490,17 +517,21 @@ def _update_state(session_id: str, agent_id: str | None, now: float, change):
 
 def claim_fresh(session_id: str, tool_name: str, ids: list[str],
                 now: float, *, agent_id: str | None = None) -> list[str]:
-    """fresh_ids, recorded as delivered in the same locked step: the returned
-    ids are stamped at `now` before the lock is released, so of several hook
+    """The ids this context has neither been given nor has a live claim on,
+    claimed for this process in the same locked step, so of several hook
     processes in one parallel batch exactly one is handed each rule
     (2026-10-14: four Agent launches delivered rule df55c398 three times).
-    A claim the caller then fails to deliver is undone with release_claim.
+    A claim is not a delivery: the caller ends it with finish_claim, and one
+    left behind by a crashed hook lapses (_claim_live).
 
     FAILS OPEN like fresh_ids: on any error every id is returned, unclaimed."""
     def claim(state: dict, epoch: str | None) -> list[str]:
-        fresh = sorted(rid for rid in ids if not _seen_in_context(state, rid, epoch, now))
+        held = state["_claims"]
+        fresh = sorted(rid for rid in ids
+                       if not _seen_in_context(state, rid, epoch, now)
+                       and not _claim_live(held.get(rid), now))
         for rid in fresh:
-            state.setdefault(rid, {})[tool_name] = now
+            held[rid] = {"pid": os.getpid(), "at": now}
         return fresh
 
     try:
@@ -509,22 +540,24 @@ def claim_fresh(session_id: str, tool_name: str, ids: list[str],
         return sorted(ids)
 
 
-def release_claim(session_id: str, tool_name: str, ids: list[str],
-                  now: float, *, agent_id: str | None = None) -> None:
-    """Undo claim_fresh for the ids that were not delivered in full, so the
-    next call offers them again. Only the claim's own stamp is removed.
-    Best effort; never raises."""
-    if not ids:
+def finish_claim(session_id: str, tool_name: str, claimed: list[str],
+                 delivered: list[str], now: float, *, agent_id: str | None = None) -> None:
+    """End this process's claim from claim_fresh(now): the delivered ids are
+    recorded as given to the context, the rest are offered again on the next
+    call. Best effort; never raises (an unfinished claim lapses on its own)."""
+    if not claimed:
         return
 
-    def release(state: dict, _epoch: str | None) -> None:
-        for rid in ids:
-            tools = state.get(rid)
-            if isinstance(tools, dict) and tools.get(tool_name) == now:
-                del tools[tool_name]
+    def finish(state: dict, _epoch: str | None) -> None:
+        held = state["_claims"]
+        for rid in claimed:
+            if held.get(rid) == {"pid": os.getpid(), "at": now}:
+                del held[rid]
+        for rid in delivered:
+            state.setdefault(rid, {})[tool_name] = now
 
     try:
-        _update_state(session_id, agent_id, now, release)
+        _update_state(session_id, agent_id, now, finish)
     except Exception:
         return
 

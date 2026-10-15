@@ -557,11 +557,15 @@ def _semantic_receipt(payload: dict, response: dict, selected: list[dict],
     return row
 
 
-def _is_subagent_handback(prompt: str) -> bool:
+HANDBACK_TAIL_BYTES = 256 * 1024
+
+
+def _is_subagent_handback(payload: dict, prompt: str) -> bool:
     """A subagent's report handed back to this session is not a partner
     message: the rules it might match bind the subagent's work, already done.
-    17 of 19 logged hand-backs were judged and given rules. Any failure to
-    tell judges the prompt, as before."""
+    17 of 19 logged hand-backs were judged and given rules. The wrapper text
+    alone is typeable, so the skip also needs the harness's own transcript
+    record for this prompt. Any failure to tell judges the prompt, as before."""
     try:
         spec = importlib.util.spec_from_file_location(
             "machine_envelope_live", REPO / "ops/machine_envelope.py")
@@ -569,9 +573,36 @@ def _is_subagent_handback(prompt: str) -> bool:
             return False
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        return bool(module.is_subagent_handback(prompt))
+        return bool(module.is_subagent_handback(prompt)) and _handback_recorded(
+            payload.get("transcript_path"), prompt)
     except Exception:
         return False
+
+
+def _handback_recorded(transcript_path: object, prompt: str) -> bool:
+    """The newest conversational record is the harness's hand-back entry
+    (meta, peer origin, handback) carrying this prompt. A typed prompt has no
+    such record, and an older hand-back is followed by an assistant turn."""
+    if not _nonempty(transcript_path):
+        return False
+    with open(transcript_path, "rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, handle.tell() - HANDBACK_TAIL_BYTES))
+        lines = handle.read().decode("utf-8", "replace").splitlines()
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(record, dict) or record.get("type") not in ("user", "assistant"):
+            continue
+        origin = record.get("origin")
+        content = (record.get("message") or {}).get("content")
+        return (record.get("type") == "user" and record.get("isMeta") is True
+                and isinstance(origin, dict) and origin.get("kind") == "peer"
+                and origin.get("handback") is True
+                and isinstance(content, str) and prompt.strip() in content)
+    return False
 
 
 def _process_prompt(payload: dict, runner: Callable,
@@ -580,7 +611,7 @@ def _process_prompt(payload: dict, runner: Callable,
     if (not _nonempty(payload.get("session_id")) or not _nonempty(prompt)
             or (_client(payload) == "codex" and not _nonempty(payload.get("turn_id")))):
         return None
-    if _is_subagent_handback(prompt):
+    if _is_subagent_handback(payload, prompt):
         return None
     if len(prompt) > MESSAGE_LIMIT_CHARS:
         return _context("RULE DELIVERY NOT ATTEMPTED: prompt exceeds the context limit.", "UserPromptSubmit")
@@ -716,7 +747,7 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
     candidates = sorted(set(routed) | set(table_ids)
                         | (set(scheduled_rule_ids()) if _matches(payload) else set()))
     # Claimed before the door call, so the other hooks of one parallel batch
-    # skip these ids; whatever is not delivered in full is released after.
+    # skip these ids; only what is delivered in full is recorded after.
     agent_id = _agent_id(payload)
     claimed_at = time.time()
     ids = rule_routes.claim_fresh(payload["session_id"], tool_name, candidates,
@@ -728,9 +759,8 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         output, delivered = _deliver_routes(payload, ids, trigger_ids, routed, runner)
         return output
     finally:
-        rule_routes.release_claim(payload["session_id"], tool_name,
-                                  sorted(set(ids) - set(delivered)), claimed_at,
-                                  agent_id=agent_id)
+        rule_routes.finish_claim(payload["session_id"], tool_name, ids, delivered,
+                                 claimed_at, agent_id=agent_id)
 
 
 def _deliver_routes(payload: dict, ids: list[str], trigger_ids: list[str],
