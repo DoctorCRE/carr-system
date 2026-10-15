@@ -1,8 +1,16 @@
-"""Repository-local leak gate. Diagnostics contain locations, never values."""
+"""Repository-local leak gate. Diagnostics contain locations, never values.
+
+--staged, --range, --ci and --pre-push judge a change only on the lines it adds:
+for each commit in scope, the lines its diff against its parents adds (for a merge,
+the lines new against every parent, so only conflict resolutions and evil-merge
+lines count). Content already upstream is treated as reviewed. A path counts as a
+filename finding only where the commit introduces it, and an opaque binary blob
+is refused wherever it is added or changed. --history audits whole blobs.
+"""
 import argparse
 import bisect
 import html
-from collections import Counter
+from collections import Counter, namedtuple
 import hashlib
 import io
 import json
@@ -40,9 +48,29 @@ PII = {
 RESERVED_MAIL = re.compile(r'(?:^|\.)(?:example|invalid|test|localhost)$|^example\.(?:com|net|org)$'
                            r'|^users\.noreply\.github\.com$|^[\d.]+$', re.I)
 # A one-token client value (a first name, a town, a word like "health") matches
-# ordinary prose and source identifiers, so client data is matched on two or more
-# tokens only. One-token corpus entries are dropped when the corpus is loaded.
+# ordinary prose and source identifiers, so the window loop in pii_findings only
+# tests windows of two or more tokens. Loading the corpus drops shorter lengths
+# so the loop does not hash windows that can never be tested.
 MIN_CLIENT_TOKENS = 2
+CORPUS_SCHEMA = 'leak-guard-corpus.v2'
+# Tokens are hashed with a separator, so "000 0 000" and "0000000" differ.
+TOKEN_SEPARATOR = '\0'
+# The lines and paths a change introduces. added is the set of 1-based blob line
+# numbers it adds, or None when every line counts; named says the path is new.
+Change = namedtuple('Change', 'path raw added named')
+
+
+class Refusal(ValueError):
+    """A refusal whose message names no value and is safe to print."""
+
+
+def client_window(window):
+    """All-digit windows match only when phone-shaped (10 or 11 digits)."""
+    return not all(token.isdigit() for token in window) or sum(map(len, window)) in (10, 11)
+
+
+def client_hash(salt, normalized):
+    return hashlib.sha256((salt + '\0' + TOKEN_SEPARATOR.join(normalized)).encode()).hexdigest()
 
 
 def tokens(text):
@@ -59,8 +87,9 @@ def decode_source(text):
 
 
 def validate_corpus(corpus):
-    if (corpus.get('schema') != 'leak-guard-corpus.v1'
-        or not re.fullmatch(r'[0-9a-f]{64}', corpus.get('salt', ''))
+    if corpus.get('schema') != CORPUS_SCHEMA:
+        raise Refusal('corpus schema is not ' + CORPUS_SCHEMA + '; rebuild it with ops/export-leak-guard-hashes.py')
+    if (not re.fullmatch(r'[0-9a-f]{64}', corpus.get('salt', ''))
         or not corpus.get('hashes') or not corpus.get('lengths')
         or any(type(n) is not int or not 1 <= n <= 64 for n in corpus['lengths'])
         or any(not re.fullmatch(r'[0-9a-f]{64}', h) for h in corpus['hashes'])):
@@ -80,16 +109,16 @@ def make_corpus(values, salt):
     hashes, lengths, starts, start_lengths = set(), set(), set(), {}
     for value in values:
         normalized = tokens(str(value))
-        if not normalized:
+        if not normalized or not client_window(normalized):
             continue
         if len(normalized) > 64:
             raise ValueError('export value exceeds window')
         lengths.add(len(normalized))
-        hashes.add(hashlib.sha256((salt + '\0' + ''.join(normalized)).encode()).hexdigest())
-        first = hashlib.sha256((salt + '\0' + normalized[0]).encode()).hexdigest()
+        hashes.add(client_hash(salt, normalized))
+        first = client_hash(salt, normalized[:1])
         starts.add(first)
         start_lengths.setdefault(first, set()).add(len(normalized))
-    return validate_corpus({'schema': 'leak-guard-corpus.v1', 'salt': salt,
+    return validate_corpus({'schema': CORPUS_SCHEMA, 'salt': salt,
                             'lengths': sorted(lengths), 'hashes': sorted(hashes), 'starts': sorted(starts),
                             'start_lengths': {h: sorted(ns) for h, ns in sorted(start_lengths.items())}})
 
@@ -145,8 +174,9 @@ def pii_findings(text, corpus):
             digest.update(word.encode())
             found = []
             for end in range(start + 1, min(len(words), start + longest)):
-                digest.update(words[end].encode())
-                if end - start + 1 in candidates and digest.copy().hexdigest() in hashes:
+                digest.update((TOKEN_SEPARATOR + words[end]).encode())
+                if (end - start + 1 in candidates and client_window(words[start:end + 1])
+                        and digest.copy().hexdigest() in hashes):
                     found.append(digest.hexdigest())
                     yield numbers[start], 'client-data', digest.hexdigest()
             if len(window_cache) >= 100000:
@@ -183,53 +213,78 @@ def git(root, *args):
     return subprocess.run(['git', '--no-replace-objects', '-C', str(root), *args], check=True, capture_output=True).stdout
 
 
-def staged(root):
-    changed = set(git(root, 'diff', '--cached', '--name-only', '--diff-filter=ACMRT', '-z').split(b'\0'))
-    entries = git(root, 'ls-files', '--stage', '-z').split(b'\0')
-    for entry in entries:
-        if not entry:
-            continue
-        meta, path = entry.split(b'\t', 1)
-        if path not in changed:
-            continue
-        mode, oid, stage = meta.split()
-        if stage != b'0':
-            raise ValueError('unmerged index')
-        if mode == b'160000':
-            continue
-        yield path.decode('utf-8', 'surrogateescape'), git(root, 'cat-file', 'blob', oid.decode())
+HUNK = re.compile(rb'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', re.M)
 
 
-def history(root, revisions):
-    if git(root, 'rev-parse', '--is-shallow-repository').strip() != b'false':
-        raise ValueError('shallow history')
-    # A merge contributes only the paths whose result differs from every parent
-    # (a conflict resolution or an evil merge); a blob equal to one parent's was
-    # introduced by that parent's own commit, scanned there or already upstream.
-    changes = git(root, 'log', '--format=', '--raw', '-z', '--no-abbrev', '--no-renames',
-                  '--root', '--diff-merges=combined', *revisions, '--').split(b'\0')
-    objects = {}
+def added_lines(patch):
+    """The new-side line numbers a zero-context unified diff adds."""
+    added = set()
+    for start, count in HUNK.findall(patch):
+        added.update(range(int(start), int(start) + (int(count) if count else 1)))
+    return added
+
+
+def change_scope(parent_blobs, added_against):
+    """Lines a change adds against every parent blob, or None when no parent had the path."""
+    added = None
+    for parent in parent_blobs:
+        lines = added_against(parent)
+        added = lines if added is None else added & lines
+    return added
+
+
+def in_scope(change, line, rule):
+    if rule == 'opaque-binary':
+        return True
+    if line == 0:
+        return change.named
+    return change.added is None or line in change.added
+
+
+def raw_records(output):
+    """Parse `--raw -z` output into (parent blobs, blob, path), skipping deletions and submodules."""
+    fields_and_paths = output.split(b'\0')
     index = 0
-    while index < len(changes):
-        header = changes[index].lstrip(b'\n')
+    while index < len(fields_and_paths):
+        header = fields_and_paths[index].lstrip(b'\n')
         index += 1
         if not header:
             continue
-        if not header.startswith(b':') or index >= len(changes):
+        if not header.startswith(b':') or index >= len(fields_and_paths):
             raise ValueError('invalid raw history')
         parents = len(header) - len(header.lstrip(b':'))
-        fields = header.split()
+        fields = header.lstrip(b':').split()
         if len(fields) != 2 * parents + 3:
             raise ValueError('invalid raw history')
-        path = changes[index].decode('utf-8', 'surrogateescape')
+        path = fields_and_paths[index].decode('utf-8', 'surrogateescape')
         index += 1
+        if b'U' in fields[-1]:
+            raise ValueError('unmerged index')
         if fields[parents] in (b'000000', b'160000'):
             continue
-        objects.setdefault(fields[2 * parents + 1], set()).add(path)
+        parent_blobs = tuple(oid for mode, oid in zip(fields[:parents], fields[parents + 1:2 * parents + 1])
+                             if mode not in (b'000000', b'160000'))
+        yield parent_blobs, fields[2 * parents + 1], path
+
+
+def introduced(root, records, whole=False):
+    """Read each introduced blob once and attach the lines and path it introduces."""
+    blobs = {}
+    for parent_blobs, oid, path in records:
+        blobs.setdefault(oid, {}).setdefault(path, []).append(parent_blobs)
+    diffs = {}
+
+    def added_against(old, new):
+        if (old, new) not in diffs:
+            diffs[old, new] = added_lines(git(root, '-c', 'diff.algorithm=myers', 'diff', '-U0', '--text',
+                                              '--inter-hunk-context=0', '--no-color', '--no-ext-diff',
+                                              '--no-textconv', old.decode(), new.decode()))
+        return diffs[old, new]
+
     child = subprocess.Popen(['git', '--no-replace-objects', '-C', str(root), 'cat-file', '--batch'],
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     try:
-        for oid, paths in objects.items():
+        for oid, paths in blobs.items():
             child.stdin.write(oid + b'\n')
             child.stdin.flush()
             header = child.stdout.readline().split()
@@ -238,13 +293,43 @@ def history(root, revisions):
             raw = child.stdout.read(int(header[2]))
             if len(raw) != int(header[2]) or child.stdout.read(1) != b'\n':
                 raise ValueError('truncated blob')
-            for path in sorted(paths):
-                yield path, raw
+            # Git counts UTF-16 lines by byte, not by character, so its diff lines cannot be trusted.
+            whole_blob = whole or raw.startswith((b"\xff\xfe", b"\xfe\xff"))
+            for path, changes in sorted(paths.items()):
+                scopes = [None if whole_blob else change_scope(parents, lambda old: added_against(old, oid))
+                          for parents in changes]
+                added = None if None in scopes else frozenset().union(*scopes)
+                yield Change(path, raw, added, whole or any(not parents for parents in changes))
     finally:
         child.stdin.close()
         child.stdout.close()
         if child.wait() != 0:
             raise ValueError('git object reader failed')
+
+
+def staged(root):
+    return introduced(root, list(raw_records(git(root, 'diff', '--cached', '--raw', '-z', '--no-abbrev',
+                                                 '--no-renames'))))
+
+
+def history(root, revisions, whole=False):
+    if git(root, 'rev-parse', '--is-shallow-repository').strip() != b'false':
+        raise ValueError('shallow history')
+    # A merge lists only the paths whose result differs from every parent, and
+    # within them only the lines new against every parent count: a line equal to
+    # one parent's was introduced by that parent's own commit, judged there or
+    # already upstream.
+    changes = git(root, 'log', '--format=', '--raw', '-z', '--no-abbrev', '--no-renames',
+                  '--root', '--diff-merges=combined', *revisions, '--')
+    return introduced(root, list(raw_records(changes)), whole)
+
+
+def upstream(root, remote_name):
+    """Exclusions for every tracking ref of the remote: commits it already holds were judged there."""
+    if not re.fullmatch(r'[A-Za-z0-9._-]+', remote_name):
+        return []
+    known = git(root, 'for-each-ref', '--format=%(objectname)', 'refs/remotes/' + remote_name)
+    return ['^' + oid for oid in known.decode().splitlines()]
 
 
 def pushed(root, stream, remote_name):
@@ -265,10 +350,7 @@ def pushed(root, stream, remote_name):
         if remote != zero:
             git(root, 'rev-parse', '--verify', remote + '^{commit}')
             revisions.append('^' + remote)
-    if revisions and re.fullmatch(r'[A-Za-z0-9._-]+', remote_name):
-        known = git(root, 'for-each-ref', '--format=%(objectname)', 'refs/remotes/' + remote_name)
-        revisions.extend('^' + oid for oid in known.decode().splitlines())
-    return history(root, revisions) if revisions else iter(())
+    return history(root, revisions + upstream(root, remote_name)) if revisions else iter(())
 
 
 def load_allowlist(path):
@@ -303,7 +385,7 @@ def scan(root, source, corpus, allowed, report_path=None):
     findings, sensitive_paths, pii_cache = set(), set(), {}
     if corpus:
         corpus = prepare_corpus(corpus)
-    chunks, locations, starts, digests, hits = [], [], [], [], []
+    chunks, changes, starts, digests, hits = [], [], [], [], []
     line, batch_bytes = 1, 0
 
     def flush():
@@ -321,20 +403,23 @@ def scan(root, source, corpus, allowed, report_path=None):
                 raise ValueError('invalid secret location')
             offset = hit['line'] - starts[index]
             if offset == 0:
-                sensitive_paths.add(locations[index])
-            hits.append((index, max(1, offset), hit['rule'], ''))
+                sensitive_paths.add(changes[index].path)
+            hits.append((index, offset, hit['rule'], ''))
             secret_count += 1
         if (result.returncode == 1) != bool(secret_count):
             raise ValueError('gitleaks verdict/report disagreement')
-        findings.update((locations[i], number, rule) for i, number, rule, fingerprint in hits
-                        if (locations[i], digests[i], rule, fingerprint) not in allowed)
+        # Line 0 is the filename. The reported line stays the blob's line number.
+        findings.update((changes[i].path, max(1, number), rule) for i, number, rule, fingerprint in hits
+                        if in_scope(changes[i], number, rule)
+                        and (changes[i].path, digests[i], rule, fingerprint) not in allowed)
         chunks.clear()
-        locations.clear()
+        changes.clear()
         starts.clear()
         digests.clear()
         hits.clear()
 
-    for path, raw in source:
+    for change in source:
+        path, raw = change.path, change.raw
         digest = hashlib.sha256(raw).hexdigest()
         utf16 = raw.startswith((b"\xff\xfe", b"\xfe\xff"))
         opaque = (b'\0' in raw and not utf16) or raw.startswith((b'%PDF-', b'PK\x03\x04', b'\x1f\x8b'))
@@ -345,9 +430,9 @@ def scan(root, source, corpus, allowed, report_path=None):
         if chunks and batch_bytes + len(secret_input) > 8 * 1048576:
             flush()
             line, batch_bytes = 1, 0
-        index = len(locations)
+        index = len(changes)
         starts.append(line)
-        locations.append(path)
+        changes.append(change)
         digests.append(digest)
         if opaque:
             hits.append((index, 1, 'opaque-binary', ''))
@@ -355,7 +440,7 @@ def scan(root, source, corpus, allowed, report_path=None):
             if digest not in pii_cache:
                 pii_cache[digest] = list(pii_findings(text, corpus))
             hits.extend((index, number, rule, fingerprint) for number, rule, fingerprint in pii_cache[digest])
-        hits.extend((index, 1, rule, fingerprint) for _, rule, fingerprint in pii_findings(path, corpus))
+        hits.extend((index, 0, rule, fingerprint) for _, rule, fingerprint in pii_findings(path, corpus))
         chunks.append(secret_input)
         line += secret_input.count(b'\n')
         batch_bytes += len(secret_input)
@@ -386,11 +471,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=pathlib.Path, default=HERE.parent)
     scope = parser.add_mutually_exclusive_group()
-    scope.add_argument('--staged', action='store_true')
-    scope.add_argument('--history', action='store_true')
-    scope.add_argument('--range')
-    scope.add_argument('--pre-push', action='store_true')
-    scope.add_argument('--ci', action='store_true')
+    scope.add_argument('--staged', action='store_true', help='lines the index adds over HEAD (the default)')
+    scope.add_argument('--history', action='store_true',
+                       help='audit every blob in all history as a whole; not limited to added lines')
+    scope.add_argument('--range', help='lines added by each commit in BASE..HEAD not already on --remote')
+    scope.add_argument('--pre-push', action='store_true',
+                       help='lines added by each pushed commit not already on --remote (refs on stdin)')
+    scope.add_argument('--ci', action='store_true', help="lines added by each commit of the pull request event")
     parser.add_argument('--generic-only', action='store_true')
     parser.add_argument('--corpus', type=pathlib.Path, default=HERE / 'client-hashes.json')
     parser.add_argument('--allowlist', type=pathlib.Path, default=HERE / 'allowlist.json')
@@ -402,11 +489,11 @@ def main():
     if args.pre_push:
         source = pushed(args.root, sys.stdin.read(), args.remote)
     elif args.history:
-        source = history(args.root, ['--all'])
+        source = history(args.root, ['--all'], whole=True)
     elif args.range:
         if not re.fullmatch(r'[0-9a-f]{40}\.\.[0-9a-f]{40}', args.range):
             raise ValueError('range must bind full commit hashes')
-        source = history(args.root, [args.range])
+        source = history(args.root, [args.range, *upstream(args.root, args.remote)])
     elif args.ci:
         if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
             raise ValueError('CI scope requires a pull request event')
@@ -423,6 +510,9 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(main())
+    except Refusal as refusal:
+        print('leak-guard: ' + str(refusal) + '; push/CI refused', file=sys.stderr)
+        sys.exit(2)
     except Exception:
         print('leak-guard: scan could not complete; push/CI refused', file=sys.stderr)
         sys.exit(2)

@@ -1,6 +1,7 @@
 import json
 import base64
 import hashlib
+import importlib.util
 import os
 import pathlib
 import subprocess
@@ -9,6 +10,22 @@ import uuid
 
 
 SCRIPT = pathlib.Path(__file__).with_name('leak_guard.py')
+EXPORTER = SCRIPT.parents[1] / 'ops' / 'export-leak-guard-hashes.py'
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+guard = load('guard', SCRIPT)
+exporter = load('exporter', EXPORTER)
+
+
+def corpus_hash(salt, *words):
+    return hashlib.sha256((salt + '\0' + '\0'.join(words)).encode()).hexdigest()
 
 
 class LeakGuardTest(unittest.TestCase):
@@ -40,8 +57,8 @@ class LeakGuardTest(unittest.TestCase):
     def test_private_export_and_generic_pii_are_blocked(self):
         name = 'Fictional' + ' Person'
         salt = '12' * 32
-        corpus = {'schema': 'leak-guard-corpus.v1', 'salt': salt, 'lengths': [2],
-                  'hashes': [hashlib.sha256((salt + '\0fictionalperson').encode()).hexdigest()]}
+        corpus = {'schema': 'leak-guard-corpus.v2', 'salt': salt, 'lengths': [2],
+                  'hashes': [corpus_hash(salt, 'fictional', 'person')]}
         corpus_path = self.root / 'corpus.json'
         corpus_path.write_text(json.dumps(corpus))
         values = [name, 'contact@' + 'fictional-mail.com', '(212)' + ' 234-6789', '843' + ' Imaginary Avenue']
@@ -99,6 +116,9 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         refs = f'refs/heads/feature {head} refs/heads/feature {before_merge}\n'
         self.git('update-ref', 'refs/remotes/origin/main', main)
+        # ops/ci.sh check_secret runs this when the pre-push hook sets CARR_CI_RANGE.
+        result = self.run_guard('--range', before_merge + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 0, 'ci.sh pre-push range: ' + result.stdout + result.stderr)
         hook = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--pre-push', '--generic-only'],
                               input=refs, env=self.env, capture_output=True, text=True)
         self.assertEqual(hook.returncode, 0, hook.stdout + hook.stderr)
@@ -150,25 +170,25 @@ class LeakGuardTest(unittest.TestCase):
         result = self.run_guard('--staged', '--generic-only', '--allowlist', str(allow))
         self.assertEqual(result.returncode, 2, result.stderr)
 
+    def export(self, values, excluded=()):
+        output = self.root / 'corpus.json'
+        counts = exporter.export(values, list(excluded), output)
+        return counts, output.read_text()
+
     def test_hash_export_contains_no_original_values(self):
         values = ['Fictional' + ' Person', 'contact@' + 'fictional-mail.com', '843' + ' Imaginary Avenue']
-        exporter = SCRIPT.with_name('hash_export.py')
-        result = subprocess.run(['python3', str(exporter)], input=json.dumps({'values': values}),
-                                capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        corpus = json.loads(result.stdout)
-        self.assertEqual(corpus['schema'], 'leak-guard-corpus.v1')
+        counts, text = self.export(values)
+        corpus = json.loads(text)
+        self.assertEqual(counts, (3, 0, 3))
+        self.assertEqual(corpus['schema'], 'leak-guard-corpus.v2')
         self.assertEqual(len(corpus['hashes']), 3)
         for value in values:
-            self.assertNotIn(value, result.stdout)
+            self.assertNotIn(value, text)
 
     def test_non_latin_name_export_and_detection_preserve_letters(self):
         value = chr(0x6f22) + chr(0x5b57) + ' ' + chr(0x540d) + chr(0x524d)
-        export = subprocess.run(['python3', str(SCRIPT.with_name('hash_export.py'))],
-                                input=json.dumps({'values': [value]}), capture_output=True, text=True)
-        self.assertEqual(export.returncode, 0, export.stderr)
+        self.export([value])
         corpus = self.root / 'corpus.json'
-        corpus.write_text(export.stdout)
         (self.root / 'sample.txt').write_text(value + '\n')
         subprocess.run(['git', '-C', str(self.root), 'add', 'sample.txt'], check=True)
         result = self.run_guard('--staged', '--corpus', str(corpus))
@@ -179,9 +199,9 @@ class LeakGuardTest(unittest.TestCase):
     def test_client_data_needs_more_than_one_token(self):
         salt = '12' * 32
         corpus = self.root / 'corpus.json'
-        corpus.write_text(json.dumps({'schema': 'leak-guard-corpus.v1', 'salt': salt, 'lengths': [1, 2],
-                                      'hashes': [hashlib.sha256((salt + '\0' + word).encode()).hexdigest()
-                                                 for word in ('ordinary', 'fictionalperson')]}))
+        corpus.write_text(json.dumps({'schema': 'leak-guard-corpus.v2', 'salt': salt, 'lengths': [1, 2],
+                                      'hashes': [corpus_hash(salt, 'ordinary'),
+                                                 corpus_hash(salt, 'fictional', 'person')]}))
         (self.root / 'sample.py').write_text('ordinary = 1\n' + 'Fictional' + ' Person\n')
         subprocess.run(['git', '-C', str(self.root), 'add', 'sample.py'], check=True)
         result = self.run_guard('--staged', '--corpus', str(corpus))
@@ -200,9 +220,7 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(result.stdout, 'sample.txt:6 pii-email\nsample.txt:7 pii-address\n')
 
     def test_export_indexes_only_possible_lengths_for_each_hashed_start(self):
-        exporter = SCRIPT.with_name('hash_export.py')
-        result = subprocess.run(['python3', str(exporter)], input=json.dumps({'values': ['Fictional', 'Imaginary' + ' Customer']}), capture_output=True, text=True)
-        corpus = json.loads(result.stdout)
+        corpus = json.loads(self.export(['Fictional', 'Imaginary' + ' Customer'])[1])
         self.assertEqual(sorted(corpus['start_lengths'].values()), [[1], [2]])
         self.assertTrue(all(len(key) == 64 for key in corpus['start_lengths']))
 
@@ -245,10 +263,9 @@ class LeakGuardTest(unittest.TestCase):
         salt = '12' * 32
         first = 'Fictional' + ' Person'
         second = 'Imaginary' + ' Customer'
-        hashes = [hashlib.sha256((salt + '\0' + word).encode()).hexdigest()
-                  for word in ('fictionalperson', 'imaginarycustomer')]
+        hashes = [corpus_hash(salt, 'fictional', 'person'), corpus_hash(salt, 'imaginary', 'customer')]
         corpus = self.root / 'corpus.json'
-        corpus.write_text(json.dumps({'schema': 'leak-guard-corpus.v1', 'salt': salt, 'lengths': [2], 'hashes': hashes}))
+        corpus.write_text(json.dumps({'schema': 'leak-guard-corpus.v2', 'salt': salt, 'lengths': [2], 'hashes': hashes}))
         raw = (first + '\n' + second + '\n').encode()
         (self.root / 'fixture.txt').write_bytes(raw)
         subprocess.run(['git', '-C', str(self.root), 'add', 'fixture.txt'], check=True)
@@ -262,7 +279,11 @@ class LeakGuardTest(unittest.TestCase):
         self.assertIn('fixture.txt:2', result.stdout)
 
     def test_git_push_hook_refuses_seeded_secret_before_receiver_gets_it(self):
-        (self.root / 'security').symlink_to(SCRIPT.parent, target_is_directory=True)
+        # A copy of the guard reads a synthetic corpus beside it, not the committed one.
+        (self.root / 'security').mkdir()
+        (self.root / 'security' / 'leak_guard.py').write_bytes(SCRIPT.read_bytes())
+        (self.root / 'security' / 'client-hashes.json').write_text(json.dumps(guard.make_corpus(['Fictional Person'], '12' * 32)))
+        (self.root / '.git' / 'info' / 'exclude').write_text('security/\n')
         # The committed hook carries no executable bit; Git runs only executable hooks.
         hooks = self.root / '.git' / 'leak-guard-hooks'
         hooks.mkdir()
@@ -284,18 +305,14 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(refs, b'')
 
     def test_large_scan_bounds_each_gitleaks_input_batch(self):
-        import importlib.util
         from unittest.mock import patch
-        spec = importlib.util.spec_from_file_location('guard', SCRIPT)
-        guard = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(guard)
         run = subprocess.run
         sizes = []
         def observed_run(*args, **kwargs):
             if 'input' in kwargs:
                 sizes.append(len(kwargs['input']))
             return run(*args, **kwargs)
-        source = [(f'file-{i}.txt', b'x' * 1048576) for i in range(20)]
+        source = [guard.Change(f'file-{i}.txt', b'x' * 1048576, None, True) for i in range(20)]
         with patch.object(guard.subprocess, 'run', side_effect=observed_run):
             self.assertEqual(guard.scan(self.root, source, None, set()), 0)
         self.assertGreater(len(sizes), 1)
@@ -308,6 +325,132 @@ class LeakGuardTest(unittest.TestCase):
                                  '--staged', '--generic-only'], capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+    def secret(self):
+        return 'ghp_' + base64.b64encode(bytes(range(27))).decode()
+
+    def write_commit(self, path, text):
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text(text)
+        self.git('add', path)
+        return self.commit()
+
+    def test_only_added_lines_are_judged(self):
+        value = self.secret()
+        base = self.write_commit('config.txt', 'token="' + value + '"\nmode = old\n')
+        edited = self.write_commit('config.txt', 'token="' + value + '"\nmode = new\n')
+        result = self.run_guard('--range', base + '..' + edited, '--generic-only')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (self.root / 'config.txt').write_text('token="' + value + '"\nmode = staged\n')
+        self.git('add', 'config.txt')
+        self.assertEqual(self.run_guard('--staged', '--generic-only').returncode, 0)
+        head = self.write_commit('config.txt', 'token="' + value + '"\nmode = new\nother="' + value + '"\n')
+        result = self.run_guard('--range', base + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, 'config.txt:3 github-pat\n')
+
+    def test_merge_judges_lines_new_against_every_parent(self):
+        value = self.secret()
+        self.write_commit('shared.txt', 'first\n\n\n\nlast\n')
+        self.git('branch', '-M', 'main')
+        self.git('checkout', '-qb', 'feature')
+        self.write_commit('shared.txt', 'first edited\n\n\n\nlast\n')
+        self.git('checkout', '-q', 'main')
+        main = self.write_commit('shared.txt', 'first\n\n\n\nlast\ntoken="' + value + '"\n')
+        self.git('checkout', '-q', 'feature')
+        self.git('merge', '-q', '--no-edit', 'main')
+        head = self.git('rev-parse', 'HEAD')
+        result = self.run_guard('--range', main + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_client_data_in_a_path_counts_only_where_the_path_is_introduced(self):
+        corpus = self.root / 'corpus.json'
+        corpus.write_text(json.dumps(guard.make_corpus(['Fictional' + ' Person'], '12' * 32)))
+        self.git('add', 'corpus.json')
+        name = 'notes/fictional-' + 'person.txt'
+        base = self.write_commit(name, 'first\n')
+        edited = self.write_commit(name, 'second\n')
+        result = self.run_guard('--range', base + '..' + edited, '--corpus', str(corpus), '--generic-only')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        result = self.run_guard('--range', base + '..' + edited, '--corpus', str(corpus))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        added = self.write_commit('archive/fictional-' + 'person.txt', 'second\n')
+        result = self.run_guard('--range', edited + '..' + added, '--corpus', str(corpus))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertRegex(result.stdout, r'^\[redacted-path:[0-9a-f]{12}\]:1 client-data\n$')
+
+    def matches(self, corpus, text):
+        return [rule for _, rule, _ in guard.pii_findings(text, guard.prepare_corpus(corpus))
+                if rule == 'client-data']
+
+    def test_tokens_are_hashed_with_a_separator(self):
+        salt = '12' * 32
+        # Without the start index every window is hashed, as with an older corpus.
+        corpus = guard.validate_corpus({'schema': 'leak-guard-corpus.v2', 'salt': salt, 'lengths': [2, 3],
+                                        'hashes': [corpus_hash(salt, '0000000'),
+                                                   corpus_hash(salt, 'imaginary', 'customer')]})
+        self.assertEqual(self.matches(corpus, 'score 000 0 000\n'), [])
+        self.assertEqual(self.matches(corpus, 'Imagin Arycustomer\n'), [])
+        self.assertEqual(self.matches(corpus, 'Imaginary' + ' Customer\n'), ['client-data'])
+
+    def test_only_phone_shaped_digit_runs_are_client_data(self):
+        salt = '12' * 32
+        corpus = guard.make_corpus(['(212)' + ' 234-6789', 'Fictional' + ' Person'], salt)
+        corpus['hashes'] = sorted(corpus['hashes'] + [corpus_hash(salt, '2', '0', '0'), corpus_hash(salt, '000', '0', '000')])
+        corpus['lengths'] = sorted(set(corpus['lengths']) | {3})
+        del corpus['starts'], corpus['start_lengths']
+        corpus = guard.validate_corpus(corpus)
+        self.assertEqual(self.matches(corpus, '"version": "2.0.0"\nscores 000 0 000\n'), [])
+        self.assertEqual(self.matches(corpus, 'call 212.234.' + '6789\n'), ['client-data'])
+
+    def test_corpus_before_separator_hashing_is_refused_without_values(self):
+        corpus = guard.make_corpus(['Fictional' + ' Person'], '12' * 32)
+        corpus['schema'] = 'leak-guard-corpus.v1'
+        path = self.root / 'corpus.json'
+        path.write_text(json.dumps(corpus))
+        (self.root / 'sample.txt').write_text('safe\n')
+        self.git('add', 'sample.txt')
+        result = self.run_guard('--staged', '--corpus', str(path))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('ops/export-leak-guard-hashes.py', result.stderr)
+        self.assertNotIn(corpus['salt'], result.stdout + result.stderr)
+        self.assertNotIn(corpus['hashes'][0], result.stdout + result.stderr)
+
+    def test_export_drops_excluded_staff_values(self):
+        excluded = ['Fictional' + ' Partner', 'Imaginary']
+        values = ['Fictional' + ' Partner', 'Dr. Fictional' + ' Partner DDS', 'partner@' + 'fictional-mail.com',
+                  'Imaginary', 'Imaginary' + ' Customer', 'Synthetic' + ' Client']
+        counts, text = self.export(values, excluded)
+        self.assertEqual(counts, (6, 3, 3))
+        for value in values + excluded:
+            self.assertNotIn(value, text)
+        corpus = guard.validate_corpus(json.loads(text))
+        self.assertEqual(self.matches(corpus, 'Fictional' + ' Partner\n'), [])
+        self.assertEqual(self.matches(corpus, 'Imaginary' + ' Customer\n'), ['client-data'])
+        self.assertEqual(self.matches(corpus, 'Synthetic' + ' Client\n'), ['client-data'])
+
+    def test_export_salt_is_kept_only_within_a_schema(self):
+        output = self.root / 'corpus.json'
+        output.write_text(json.dumps({'schema': 'leak-guard-corpus.v1', 'salt': '34' * 32}))
+        exporter.export(['Fictional' + ' Person'], [], output)
+        fresh = json.loads(output.read_text())['salt']
+        self.assertNotEqual(fresh, '34' * 32)
+        exporter.export(['Fictional' + ' Person'], [], output)
+        self.assertEqual(json.loads(output.read_text())['salt'], fresh)
+
+    def test_exclusion_list_must_be_untracked_under_out(self):
+        (self.root / '.gitignore').write_text('out/\n')
+        listed = self.root / 'out' / 'staff.txt'
+        listed.parent.mkdir()
+        listed.write_text('Fictional' + ' Partner\n')
+        self.assertEqual(exporter.exclusion_file(self.root, listed), ['Fictional' + ' Partner'])
+        outside = self.root / 'staff.txt'
+        outside.write_text('Fictional' + ' Partner\n')
+        with self.assertRaisesRegex(exporter.Refusal, 'under out/'):
+            exporter.exclusion_file(self.root, outside)
+        self.git('add', '-f', 'out/staff.txt')
+        with self.assertRaisesRegex(exporter.Refusal, 'tracked'):
+            exporter.exclusion_file(self.root, listed)
 
 if __name__ == '__main__':
     unittest.main()

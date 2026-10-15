@@ -957,11 +957,10 @@ check_secret() {
     bad secret "secret or client data in introduced Git blobs"
     return
   fi
-  # SCOPE IS A FLAG ON ONE SCANNER, never a second scanner (rule a8c55a47).
-  # Unset CARR_CI_RANGE -- hosted CI -- reads every tracked file, which is the
-  # depth a merge is judged at. Set, it reads only the blobs the range
-  # introduces, which is O(what is being pushed) rather than O(repo): 1,514
-  # files read on this tree today versus the handful in a normal branch.
+  # The leak guard above judges only the lines each commit in scope adds (Joe,
+  # decision d46763c4). The shaped-credential scan below keeps its own scope:
+  # unset CARR_CI_RANGE (hosted CI) reads every tracked file; set, it reads only
+  # the blobs the range introduces. Scope is a flag on each scanner (rule a8c55a47).
   local scope_args="" scope_words="tracked files"
   if [ -n "${CARR_CI_RANGE:-}" ]; then
     scope_args="--range $CARR_CI_RANGE"
