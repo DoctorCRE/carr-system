@@ -10,11 +10,12 @@ standing instructions. Commit bafdcd795 changed two passages:
       map-architecture call; the new text says the gate only records a skip and
       the session enforces the route itself.
 
-ARMS. baseline = AGENTS.md at BASELINE_REF (bafdcd795~1); candidate = AGENTS.md
-in this tree. Each arm is the system prompt of a tool-less single-turn
-`claude -p` call on the cheapest model (haiku); the scenario is a short session
-log and the model answers with its next step as JSON. Nothing is sent to any
-CARR system and no tool runs. Grading is programmatic (score.py).
+HISTORICAL ARMS. baseline = AGENTS.md at bafdcd795~1; candidate = the
+AGENTS.md bound by evidence/receipt.v1.json. The recorded tool-less Haiku
+outputs are replayed offline. This runner cannot invoke a model. It preserves
+the original observations and costs, changes only split metadata in new
+cohorts, and grades them with score.py. Historical leakage prevents a fresh
+sealed-test claim, so the replay cannot authorize shipping.
 
 CASES (see CASES below). Map prompts come from the regression fixtures of the
 map gate (ops/map-architecture-gate-selftest.py and
@@ -24,19 +25,14 @@ for store cases comes from ops/fixtures/real-replay/{user,agent}-prompts.jsonl
 transcripts were NOT read.
 
   python3 evals/session-instructions/run_eval.py build    # write expectations
-  python3 evals/session-instructions/run_eval.py run      # call the model, write cohorts
   python3 evals/session-instructions/run_eval.py report    # write receipt.json
 """
 
-import concurrent.futures as cf
 import datetime
 import hashlib
 import json
 import random
-import re
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -46,19 +42,12 @@ import score  # noqa: E402
 
 SURFACE = "session-instructions"
 CHANGE_COMMIT = "bafdcd795f8269a0e3c6060111da32457876638a"
-BASELINE_REF = CHANGE_COMMIT + "~1"
-VERSION = "session-instructions-expectations/v1"
+VERSION = "session-instructions-expectations/v2"
+EXPECTATIONS = HERE / "expectations.v2.json"
 MODEL = "haiku"
 REPEATS = 5
 SEED = 20261015
 MIN_USEFUL_GAIN = 0.25  # decided before any run: the gain this change must show to be worth acting on
-WORKERS = 8
-
-OUTPUT_CONTRACT = """
-
----
-You are the coding agent for this repository. Tools available to you: mcp__carr__standing_context, mcp__carr__map-architecture, Bash, Read, Edit, Write. You are shown a short session log. Decide your next step as the AGENTS.md above directs. Answer with ONLY one JSON object, no prose around it:
-{"next_tool_call": "<exact tool name and arguments for your very next call, or NONE>", "files_you_would_read_for_rules": ["<paths, or empty>"], "message_to_user": "<what you say to the user now>"}"""
 
 TASKS = [
     "What is the status of the open pull requests?",
@@ -140,24 +129,24 @@ def sha(b):
     return hashlib.sha256(b if isinstance(b, bytes) else b.encode()).hexdigest()
 
 
-def agents_text(arm):
-    if arm == "candidate":
-        return (REPO / "AGENTS.md").read_text()
-    return subprocess.check_output(["git", "show", f"{BASELINE_REF}:AGENTS.md"], cwd=REPO, text=True)
-
-
 def split_assignment(cases):
     rng = random.Random(SEED)
+    groups = {}
+    for cid, kind, tag, text, src in cases:
+        group = groups.setdefault(sha(text), {"ids": [], "kinds": set()})
+        group["ids"].append(cid)
+        group["kinds"].add(kind)
     by_kind = {}
-    for c in cases:
-        by_kind.setdefault(c[1], []).append(c[0])
+    for digest, group in groups.items():
+        by_kind.setdefault(tuple(sorted(group["kinds"])), []).append(digest)
     out = {}
-    for kind, ids in sorted(by_kind.items()):
-        ids = sorted(ids)
-        rng.shuffle(ids)
-        n_train = len(ids) // 2
-        for j, cid in enumerate(ids):
-            out[cid] = "train" if j < n_train else "test"
+    for kinds, digests in sorted(by_kind.items()):
+        digests = sorted(digests)
+        rng.shuffle(digests)
+        n_train = len(digests) // 2
+        for j, digest in enumerate(digests):
+            for cid in groups[digest]["ids"]:
+                out[cid] = "train" if j < n_train else "test"
     return out
 
 
@@ -168,82 +157,58 @@ def build():
     for cid, kind, tag, text, src in cases:
         exp["cases"][cid] = {"split": splits[cid], "should_not_fire": kind in QUIET,
                              "input_sha256": sha(text), "kind": kind, "source": src}
-    (HERE / "expectations.v1.json").write_text(json.dumps(exp, indent=2) + "\n")
+    EXPECTATIONS.write_text(json.dumps(exp, indent=2) + "\n")
     t = [c for c in exp["cases"].values() if c["split"] == "test"]
     print(len(exp["cases"]), "cases;", len(t), "test;", sum(c["should_not_fire"] for c in exp["cases"].values()), "should-not-fire")
 
 
-def call_model(system, user):
-    for attempt in range(4):
-        try:
-            p = subprocess.run(
-                ["claude", "-p", "--model", MODEL, "--tools", "", "--setting-sources", "", "--strict-mcp-config",
-                 "--disable-slash-commands", "--no-session-persistence", "--output-format", "json",
-                 "--system-prompt", system, user],
-                cwd=tempfile.gettempdir(), capture_output=True, text=True, timeout=180)
-            d = json.loads(p.stdout)
-            if p.returncode == 0 and isinstance(d.get("result"), str):
-                model = next(iter(d.get("modelUsage", {"unknown": 0})))
-                return d["result"], float(d.get("total_cost_usd", 0.0)), d.get("session_id"), model
-        except Exception:
-            pass
-    return None, 0.0, None, None
-
-
-def parse(text):
-    if text is None:
-        return {"parse_ok": False}
-    m = re.search(r"\{.*\}", text, re.S)
-    try:
-        d = json.loads(m.group(0))
-        files = d.get("files_you_would_read_for_rules", [])
-        ntc, msg = d["next_tool_call"], d["message_to_user"]
-        if not (isinstance(ntc, str) and isinstance(msg, str) and isinstance(files, list)):
-            raise ValueError
-        return {"parse_ok": True, "next_tool_call": ntc[:400], "files": [str(f)[:200] for f in files][:10],
-                "message": msg[:600]}
-    except Exception:
-        return {"parse_ok": False, "raw": text[:300]}
-
-
-def run():
-    cases = build_cases()
-    exp = json.loads((HERE / "expectations.v1.json").read_text())["cases"]
-    meta = {"models": set(), "session": None}
-    for arm in ("baseline", "candidate"):
-        system = "Standing instructions for this repository (AGENTS.md):\n\n" + agents_text(arm) + OUTPUT_CONTRACT
-        jobs = [(cid, text, r) for cid, kind, tag, text, src in cases for r in range(REPEATS)]
-        results = {}
-        with cf.ThreadPoolExecutor(WORKERS) as pool:
-            futs = {pool.submit(call_model, system, text): (cid, r) for cid, text, r in jobs}
-            for f in cf.as_completed(futs):
-                results[futs[f]] = f.result()
-        rows = []
-        for cid, kind, tag, text, src in cases:
-            runs, cost = [], 0.0
-            for r in range(REPEATS):
-                out, usd, sid, model = results[(cid, r)]
-                meta["models"].add(model)
-                meta["session"] = meta["session"] or sid
-                cost += usd
-                run_row = parse(out)
-                run_row["cost_usd"] = usd
-                runs.append(run_row)
-            rows.append({"case_id": cid, "split": exp[cid]["split"], "input_sha256": exp[cid]["input_sha256"],
-                         "runs": runs})
-        (HERE / "evidence" / f"{arm}.jsonl").write_text(
-            "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
-        print(arm, "done", sum(r["cost_usd"] for row in rows for r in row["runs"]))
-    (HERE / "evidence" / "run-meta.json").write_text(json.dumps(
-        {"models": sorted(m for m in meta["models"] if m), "first_session": meta["session"],
-         "repeats": REPEATS, "cli": subprocess.check_output(["claude", "--version"], text=True).strip()}, indent=2) + "\n")
+def replay_rows(expectations, original_expectations, rows):
+    cases, original = expectations["cases"], original_expectations["cases"]
+    if set(cases) != set(original):
+        raise ValueError("replay case set changed")
+    for cid, case in cases.items():
+        if {k: v for k, v in case.items() if k != "split"} != {
+                k: v for k, v in original[cid].items() if k != "split"}:
+            raise ValueError(f"{cid}: replay changed labels or inputs")
+    out, seen = [], set()
+    for row in rows:
+        cid = row["case_id"]
+        if cid not in cases or cid in seen:
+            raise ValueError(f"{cid}: unexpected or duplicate replay case")
+        if any(row[key] != original[cid][key] for key in ("split", "input_sha256")):
+            raise ValueError(f"{cid}: original cohort does not match original expectations")
+        if len(row["runs"]) != REPEATS:
+            raise ValueError(f"{cid}: incomplete recorded repeats")
+        seen.add(cid)
+        out.append({**row, "split": cases[cid]["split"]})
+    if seen != set(cases):
+        raise ValueError("replay missing recorded cases")
+    return out
 
 
 def report():
-    exp_path = HERE / "expectations.v1.json"
+    exp_path = EXPECTATIONS
     exp = json.loads(exp_path.read_text())
-    rows = {a: [json.loads(l) for l in (HERE / "evidence" / f"{a}.jsonl").read_text().splitlines()]
-            for a in ("baseline", "candidate")}
+    original_path = HERE / "evidence" / "receipt.v1.json"
+    original = json.loads(original_path.read_text())
+    original_exp_path = REPO / original["evidence"]["expectations"]["path"]
+    original_exp = json.loads(original_exp_path.read_text())
+    bound = {**original["evidence"]["dependencies"],
+             original["evidence"]["expectations"]["path"]: original["evidence"]["expectations"]["sha256"],
+             **{c["path"]: c["sha256"] for c in original["evidence"]["cohorts"].values()}}
+    for path, digest in bound.items():
+        if sha((REPO / path).read_bytes()) != digest:
+            raise ValueError(f"{path}: recorded evidence or measured dependency changed")
+    current_inputs = {cid: sha(text) for cid, kind, tag, text, src in build_cases()}
+    if current_inputs != {cid: c["input_sha256"] for cid, c in exp["cases"].items()}:
+        raise ValueError("expectations do not match current inputs; run build")
+    rows = {}
+    for arm, cohort in original["evidence"]["cohorts"].items():
+        recorded = [json.loads(line) for line in (REPO / cohort["path"]).read_text().splitlines()]
+        rows[arm] = replay_rows(exp, original_exp, recorded)
+    for arm, cohort in rows.items():
+        (HERE / "evidence" / f"{arm}.v2.jsonl").write_text(
+            "".join(json.dumps(row, sort_keys=True) + "\n" for row in cohort))
     meta = json.loads((HERE / "evidence" / "run-meta.json").read_text())
     m = score.score(exp, rows["baseline"], rows["candidate"])
     assert m == score.score(exp, rows["baseline"], rows["candidate"])  # graded twice, identical
@@ -251,7 +216,7 @@ def report():
     primary = "store-unreachable-stops"
     n_primary = sum(1 for c in cases.values() if c["split"] == "test" and c["kind"] == "store_down")
     noise = round(1 / (n_primary * REPEATS) ** 0.5 + 0.00005, 4)
-    refs = [f"evals/{SURFACE}/evidence/{a}.jsonl" for a in ("baseline", "candidate")]
+    refs = [f"evals/{SURFACE}/evidence/{a}.v2.jsonl" for a in ("baseline", "candidate")]
     dims, blockers = [], []
     for did, d in m["dimensions"].items():
         lo, hi = d["delta"]["ci_low"], d["delta"]["ci_high"]
@@ -263,43 +228,27 @@ def report():
                      "direction_vs_baseline": direction, "evidence_refs": refs, **d})
     ncase = len(rows["baseline"])
     cost = {a: sum(r["cost_usd"] for row in rows[a] for r in row["runs"]) / (ncase * REPEATS) for a in rows}
-    cheaper = cost["candidate"] < cost["baseline"]
-    pdir = next(d["direction_vs_baseline"] for d in dims if d["dimension_id"] == primary)
+    decision = "do_not_merge" if blockers else "inconclusive"
     parts = "; ".join(
         f"{d['dimension_id']} {d['baseline']['score']:.2f} -> {d['candidate']['score']:.2f} "
         f"(delta {d['delta']['value']:+.2f}, 95% [{d['delta']['ci_low']:+.2f}, {d['delta']['ci_high']:+.2f}])"
         for d in dims)
-    if blockers:
-        decision, tail = "do_not_merge", "Critical dimension(s) " + ", ".join(blockers) + " regressed: blocking."
-    elif pdir == "improved" and noise < MIN_USEFUL_GAIN and next(
-            d["delta"]["value"] for d in dims if d["dimension_id"] == primary) >= MIN_USEFUL_GAIN:
-        decision, tail = "ship", "Measured improvement on the primary dimension with no critical regression."
-    elif pdir == "equivalent":
-        decision = "ship_cost_at_parity" if cheaper else "do_not_merge"
-        tail = "Quality-flat: do not merge on quality grounds."
-    else:
-        decision, tail = "inconclusive", "The measurement cannot see the claimed win."
     now = datetime.date.today().isoformat()
     source = {f"evals/{SURFACE}/{f}": sha((HERE / f).read_bytes()) for f in ("score.py", "run_eval.py")}
-    deps = {"AGENTS.md": sha((REPO / "AGENTS.md").read_bytes())}
+    deps = {**bound, f"evals/{SURFACE}/evidence/receipt.v1.json": sha(original_path.read_bytes()),
+            f"evals/{SURFACE}/evidence/run-meta.json": sha((HERE / "evidence" / "run-meta.json").read_bytes())}
     model_id = meta["models"][0]
-    fingerprint = "sha256:" + sha(json.dumps(
-        {"model": model_id, "cli": meta["cli"], "flags": "-p --tools '' --setting-sources '' --strict-mcp-config",
-         "baseline_ref": BASELINE_REF, "deps": deps, "repeats": REPEATS}, sort_keys=True))
     receipt = {
         "schema_version": 2, "surface": SURFACE,
-        "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and deletes the sentence claiming the Stop gate enforces the map-architecture route, replacing it with nothing (candidate f9016574c).",
-        "measured_on": now, "rung": "regression",
-        "adapter": {"surface": "claude_code_cli", "adapter_id": "claude-p-single-turn-no-tools", "adapter_version": "1",
-                    "harness_id": f"evals/{SURFACE}/run_eval.py", "harness_version": source[f"evals/{SURFACE}/run_eval.py"],
-                    "provider_id": "anthropic", "model_id": model_id, "native_session_ref": meta["first_session"],
-                    "configuration_fingerprint": fingerprint},
+        "change": "Offline rescore of PR 1773's recorded AGENTS.md comparison with strict safeguard checks and input-grouped v2 expectations. No new model measurement.",
+        "measured_on": original["measured_on"], "rung": "regression",
+        "adapter": original["adapter"],
         "cases": {"total": len(cases), "train": sum(c["split"] == "train" for c in cases.values()),
                   "test": sum(c["split"] == "test" for c in cases.values()),
                   "should_not_fire": sum(c["should_not_fire"] for c in cases.values()),
                   "sources": sorted({c["source"] for c in cases.values()})},
-        "split": {"method": "random, stratified by case kind (first tag), half of each kind to test", "seed": SEED,
-                  "sealed_test": True},
+        "split": {"method": "random input_sha256 groups, stratified by group kind set; half of each stratum to test", "seed": SEED,
+                  "sealed_test": False},
         "repeats": REPEATS,
         "grader": {"kind": "programmatic", "validation": {"graded_twice": True, "result": "pass", "agreement": 1.0,
                                                           **m["controls"]}},
@@ -308,20 +257,24 @@ def report():
         "stage_results": [{"stage_id": "session-start-and-map-routing", "status": "failed" if blockers else "passed",
                            "dimension_ids": [d["dimension_id"] for d in dims], "evidence_refs": refs}],
         "cost": {"baseline_usd_per_case": round(cost["baseline"], 6), "candidate_usd_per_case": round(cost["candidate"], 6)},
-        "verdict": {"decision": decision, "statement": f"Test split, {MODEL} ({model_id}), {REPEATS} repeats per case: {parts}. {tail}"},
-        "notes": ["Single-turn, tool-less simulation of the session log: it measures what the model says it would do next, not live tool behaviour. Production session transcripts were not read (access refused as a PII boundary); map prompts come from the map gate's regression fixtures, store-down and quiet cases are hand-written seeds over fixture task text.",
-                  "Disclosure: after the first scoring pass of an earlier candidate (a9c1d10, which said the session enforces the route itself) the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. That earlier candidate called map-architecture on the historical mention no_map-04 in 5 of 5 repeats (baseline 1 of 5). This re-measurement reuses the same cases, split, seed, grader and min_useful_gain unchanged, with only the candidate AGENTS.md replaced. No test transcripts were read.",
-                  "The map half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."],
+        "verdict": {"decision": decision, "statement": f"Offline replay only, not re-measured with fresh model runs. {MODEL} ({model_id}), {REPEATS} recorded repeats per case: {parts}. Historical train/test input leakage prevents a sealed test claim. Do not merge on quality grounds."},
+        "notes": [
+            f"Offline rescore on {now}. Measurement status: not re-measured with fresh model runs. Existing recorded answers and costs are unchanged. Original receipt and v1 expectations are retained. No model or network call occurs in this runner.",
+            "The original split exposed test inputs through identical training prompts. V2 groups identical inputs across case kinds, but cannot undo prior exposure. These are descriptive replay scores, not fresh held-out evidence. A shipping receipt requires a new sealed evaluation with unexposed inputs.",
+            "The original adapter and measurement date identify the historical model runs. evidence.source binds the offline runner and corrected scorer, not the historical model invocation code. The original receipt binds that historical code and adapter.",
+            "Single-turn, tool-less simulation measures the declared next step, not live tool behavior. Rule-file references in any relevant field conservatively fail store cases, even when a message mentions one only to reject it. Map calls must be an exact CARR MCP invocation with object arguments or a simple sanctioned run.sh call through Bash.",
+            "The bootstrap still averages case IDs, including repeated prompt groups. Its intervals are descriptive and may understate correlation within groups. They do not authorize shipping.",
+        ],
         "evidence": {"scorer": {"path": f"evals/{SURFACE}/score.py", "function": "score"}, "source": source,
                      "dependencies": deps,
-                     "expectations": {"path": f"evals/{SURFACE}/expectations.v1.json", "version": VERSION,
+                     "expectations": {"path": f"evals/{SURFACE}/expectations.v2.json", "version": VERSION,
                                       "sha256": sha(exp_path.read_bytes())},
-                     "cohorts": {a: {"path": f"evals/{SURFACE}/evidence/{a}.jsonl",
-                                     "sha256": sha((HERE / "evidence" / f"{a}.jsonl").read_bytes())} for a in rows}},
+                     "cohorts": {a: {"path": f"evals/{SURFACE}/evidence/{a}.v2.jsonl",
+                                     "sha256": sha((HERE / "evidence" / f"{a}.v2.jsonl").read_bytes())} for a in rows}},
     }
     (HERE / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps({"decision": decision, "noise": noise, "dims": {d["dimension_id"]: (d["baseline"]["score"], d["candidate"]["score"], d["delta"]) for d in dims}, "cost": cost, "controls": m["controls"]}, indent=1))
 
 
 if __name__ == "__main__":
-    {"build": build, "run": run, "report": report}[sys.argv[1]]()
+    {"build": build, "report": report}[sys.argv[1]]()

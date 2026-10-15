@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "surface": "session-instructions",
-  "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and deletes the sentence claiming the Stop gate enforces the map-architecture route, replacing it with nothing (candidate f9016574c).",
+  "change": "Offline rescore of PR 1773's recorded AGENTS.md comparison with strict safeguard checks and input-grouped v2 expectations. No new model measurement.",
   "measured_on": "2026-10-15",
   "rung": "regression",
   "adapter": {
@@ -26,9 +26,9 @@
     ]
   },
   "split": {
-    "method": "random, stratified by case kind (first tag), half of each kind to test",
+    "method": "random input_sha256 groups, stratified by group kind set; half of each stratum to test",
     "seed": 20261015,
-    "sealed_test": true
+    "sealed_test": false
   },
   "repeats": 5,
   "grader": {
@@ -49,25 +49,25 @@
       "dimension_id": "store-unreachable-stops",
       "critical": true,
       "status": "passed",
-      "direction_vs_baseline": "equivalent",
+      "direction_vs_baseline": "improved",
       "evidence_refs": [
-        "evals/session-instructions/evidence/baseline.jsonl",
-        "evals/session-instructions/evidence/candidate.jsonl"
+        "evals/session-instructions/evidence/baseline.v2.jsonl",
+        "evals/session-instructions/evidence/candidate.v2.jsonl"
       ],
       "baseline": {
-        "score": 0.8833333333333333,
-        "ci_low": 0.7999999999999999,
-        "ci_high": 0.9666666666666667
+        "score": 0.3,
+        "ci_low": 0.16666666666666666,
+        "ci_high": 0.4166666666666667
       },
       "candidate": {
-        "score": 0.9833333333333334,
-        "ci_low": 0.9500000000000001,
-        "ci_high": 1.0
+        "score": 0.55,
+        "ci_low": 0.4166666666666667,
+        "ci_high": 0.7000000000000001
       },
       "delta": {
-        "value": 0.10000000000000009,
-        "ci_low": 0.0,
-        "ci_high": 0.20000000000000007
+        "value": 0.25000000000000006,
+        "ci_low": 0.08333333333333331,
+        "ci_high": 0.43333333333333335
       }
     },
     {
@@ -76,23 +76,23 @@
       "status": "passed",
       "direction_vs_baseline": "equivalent",
       "evidence_refs": [
-        "evals/session-instructions/evidence/baseline.jsonl",
-        "evals/session-instructions/evidence/candidate.jsonl"
+        "evals/session-instructions/evidence/baseline.v2.jsonl",
+        "evals/session-instructions/evidence/candidate.v2.jsonl"
       ],
       "baseline": {
-        "score": 1.0,
-        "ci_low": 1.0,
-        "ci_high": 1.0
+        "score": 0.925,
+        "ci_low": 0.8500000000000001,
+        "ci_high": 0.975
       },
       "candidate": {
-        "score": 1.0,
-        "ci_low": 1.0,
+        "score": 0.975,
+        "ci_low": 0.925,
         "ci_high": 1.0
       },
       "delta": {
-        "value": 0.0,
+        "value": 0.04999999999999993,
         "ci_low": 0.0,
-        "ci_high": 0.0
+        "ci_high": 0.09999999999999998
       }
     },
     {
@@ -101,23 +101,23 @@
       "status": "passed",
       "direction_vs_baseline": "equivalent",
       "evidence_refs": [
-        "evals/session-instructions/evidence/baseline.jsonl",
-        "evals/session-instructions/evidence/candidate.jsonl"
+        "evals/session-instructions/evidence/baseline.v2.jsonl",
+        "evals/session-instructions/evidence/candidate.v2.jsonl"
       ],
       "baseline": {
-        "score": 0.96,
-        "ci_low": 0.9,
+        "score": 0.9800000000000001,
+        "ci_low": 0.9400000000000001,
         "ci_high": 1.0
       },
       "candidate": {
-        "score": 0.9199999999999999,
-        "ci_low": 0.76,
+        "score": 0.9400000000000001,
+        "ci_low": 0.82,
         "ci_high": 1.0
       },
       "delta": {
         "value": -0.040000000000000036,
-        "ci_low": -0.22000000000000008,
-        "ci_high": 0.08000000000000007
+        "ci_low": -0.18000000000000005,
+        "ci_high": 0.05999999999999994
       }
     }
   ],
@@ -131,8 +131,8 @@
         "quiet-when-not-applicable"
       ],
       "evidence_refs": [
-        "evals/session-instructions/evidence/baseline.jsonl",
-        "evals/session-instructions/evidence/candidate.jsonl"
+        "evals/session-instructions/evidence/baseline.v2.jsonl",
+        "evals/session-instructions/evidence/candidate.v2.jsonl"
       ]
     }
   ],
@@ -141,13 +141,15 @@
     "candidate_usd_per_case": 0.006679
   },
   "verdict": {
-    "decision": "ship_cost_at_parity",
-    "statement": "Test split, haiku (claude-haiku-4-5-20251001), 5 repeats per case: store-unreachable-stops 0.88 -> 0.98 (delta +0.10, 95% [+0.00, +0.20]); map-front-door-called 1.00 -> 1.00 (delta +0.00, 95% [+0.00, +0.00]); quiet-when-not-applicable 0.96 -> 0.92 (delta -0.04, 95% [-0.22, +0.08]). Quality-flat: do not merge on quality grounds."
+    "decision": "inconclusive",
+    "statement": "Offline replay only, not re-measured with fresh model runs. haiku (claude-haiku-4-5-20251001), 5 recorded repeats per case: store-unreachable-stops 0.30 -> 0.55 (delta +0.25, 95% [+0.08, +0.43]); map-front-door-called 0.93 -> 0.97 (delta +0.05, 95% [+0.00, +0.10]); quiet-when-not-applicable 0.98 -> 0.94 (delta -0.04, 95% [-0.18, +0.06]). Historical train/test input leakage prevents a sealed test claim. Do not merge on quality grounds."
   },
   "notes": [
-    "Single-turn, tool-less simulation of the session log: it measures what the model says it would do next, not live tool behaviour. Production session transcripts were not read (access refused as a PII boundary); map prompts come from the map gate's regression fixtures, store-down and quiet cases are hand-written seeds over fixture task text.",
-    "Disclosure: after the first scoring pass of an earlier candidate (a9c1d10, which said the session enforces the route itself) the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. That earlier candidate called map-architecture on the historical mention no_map-04 in 5 of 5 repeats (baseline 1 of 5). This re-measurement reuses the same cases, split, seed, grader and min_useful_gain unchanged, with only the candidate AGENTS.md replaced. No test transcripts were read.",
-    "The map half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."
+    "Offline rescore on 2026-10-15. Measurement status: not re-measured with fresh model runs. Existing recorded answers and costs are unchanged. Original receipt and v1 expectations are retained. No model or network call occurs in this runner.",
+    "The original split exposed test inputs through identical training prompts. V2 groups identical inputs across case kinds, but cannot undo prior exposure. These are descriptive replay scores, not fresh held-out evidence. A shipping receipt requires a new sealed evaluation with unexposed inputs.",
+    "The original adapter and measurement date identify the historical model runs. evidence.source binds the offline runner and corrected scorer, not the historical model invocation code. The original receipt binds that historical code and adapter.",
+    "Single-turn, tool-less simulation measures the declared next step, not live tool behavior. Rule-file references in any relevant field conservatively fail store cases, even when a message mentions one only to reject it. Map calls must be an exact CARR MCP invocation with object arguments or a simple sanctioned run.sh call through Bash.",
+    "The bootstrap still averages case IDs, including repeated prompt groups. Its intervals are descriptive and may understate correlation within groups. They do not authorize shipping."
   ],
   "evidence": {
     "scorer": {
@@ -155,25 +157,30 @@
       "function": "score"
     },
     "source": {
-      "evals/session-instructions/score.py": "46a6deeff6a60c7210909a96e9fdafda903cc74b7b2127a2a95b22681ab1c43e",
-      "evals/session-instructions/run_eval.py": "069e79f9587578907bd96ff1ca781954edda6bd9f1cb4ac8d1e68e635c0f7f07"
+      "evals/session-instructions/score.py": "a58a15afdc45e8d049dc71f0fe1043ec5bbfa21acf954e2f3c4c6ecc6f1dd8ec",
+      "evals/session-instructions/run_eval.py": "dda2141b6c46c9892fb915a8ccf9816e1934e475fc791c0c39e2d08041fe2ef6"
     },
     "dependencies": {
-      "AGENTS.md": "5a2de3a274ba60a7265785b23f64bc1ee7e0b28b142141b9c2e0d42e9ab05f05"
+      "AGENTS.md": "5a2de3a274ba60a7265785b23f64bc1ee7e0b28b142141b9c2e0d42e9ab05f05",
+      "evals/session-instructions/expectations.v1.json": "a157bd1c9444a3806598b614e8286ab190bcc607bc8225f7a661c5b53cc035e5",
+      "evals/session-instructions/evidence/baseline.jsonl": "c3c8cd9d6f94704810a6f43015e73693954d258d2fd4564dc6223419873db027",
+      "evals/session-instructions/evidence/candidate.jsonl": "167a101915929cb2b688d783f5a58e599af7d94d6c63b2d564eba660cfcf5460",
+      "evals/session-instructions/evidence/receipt.v1.json": "98d8ca26cf544e198ba3078685a1a5257b413c75674ac9173c2a9085b3e951c8",
+      "evals/session-instructions/evidence/run-meta.json": "d3a7acc28ed47fedcc80f0b7c901ec376da3267a2d94da3a57c6e10e50173180"
     },
     "expectations": {
-      "path": "evals/session-instructions/expectations.v1.json",
-      "version": "session-instructions-expectations/v1",
-      "sha256": "a157bd1c9444a3806598b614e8286ab190bcc607bc8225f7a661c5b53cc035e5"
+      "path": "evals/session-instructions/expectations.v2.json",
+      "version": "session-instructions-expectations/v2",
+      "sha256": "9ddac8cd8f77505b3c3f023742f788e913237a36976b6cfc73a66091ebb98147"
     },
     "cohorts": {
       "baseline": {
-        "path": "evals/session-instructions/evidence/baseline.jsonl",
-        "sha256": "c3c8cd9d6f94704810a6f43015e73693954d258d2fd4564dc6223419873db027"
+        "path": "evals/session-instructions/evidence/baseline.v2.jsonl",
+        "sha256": "e63ec30df469a66c44c6ccce0e8e46e5444129098df9d3f9cc2e6531cfea8a8f"
       },
       "candidate": {
-        "path": "evals/session-instructions/evidence/candidate.jsonl",
-        "sha256": "167a101915929cb2b688d783f5a58e599af7d94d6c63b2d564eba660cfcf5460"
+        "path": "evals/session-instructions/evidence/candidate.v2.jsonl",
+        "sha256": "3dc04c22c996822db3d2a42d8da800bf049b6f10cadfe332a2cbdbadba595de7"
       }
     }
   }

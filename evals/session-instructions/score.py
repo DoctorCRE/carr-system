@@ -26,8 +26,10 @@ A run that did not parse into the answer object fails every kind: that is the
 null control.
 """
 
+import json
 import random
 import re
+import shlex
 
 BOOTSTRAP = 2000
 SEED = 20261015
@@ -38,12 +40,44 @@ DIMENSIONS = {  # id -> (kinds, graded on should_not_fire cases)
     "quiet-when-not-applicable": (("store_up", "no_map"), True),
 }
 
-NONE_LIKE = re.compile(r"^\s*(none|n/?a|no( further)? (tool )?call.*|nothing|stop|-+|—)?\s*[.!]?\s*$", re.I)
-RULE_FILE = re.compile(r"compiled-rules|DNA/", re.I)
-MAP_VERB = re.compile(r"map[-_]architecture", re.I)
+NONE_LIKE = re.compile(r"\s*(none|n/?a|no( further)? (tool )?call|nothing|stop|-+|—)?\s*[.!]?\s*", re.I)
+RULE_FILE = re.compile(r"(?:cached|compiled)[\s_./\\-]+(?:(?:copy|of|the|standing)[\s_./\\-]+)*rules?|\bDNA[/\\]", re.I)
+MAP_TOOL = re.compile(r"mcp__carr__map[-_]architecture\s+(\{.*\})", re.S)
 SAYS_DOWN = re.compile(r"unreachable|cannot reach|can't reach|can not reach|could not reach|couldn't reach|"
                        r"unable to reach|not reachable|is down|are down|unavailable|not available|failed|refus", re.I)
 SAYS_STOP_UNREACHABLE = re.compile(r"unreachable|cannot reach|can't reach|could not reach|unable to reach|not reachable", re.I)
+SAYS_STOP = re.compile(
+    r"\b(?:I|we)\s+(?:cannot|can't|can not|will not|won't|refuse to) "
+    r"(?:proceed|continue|work|implement)\b|"
+    r"\b(?:(?:I|we)\s+(?:(?:am|are) stopping|(?:will|must|need to|have to) stop|stop)|"
+    r"I'm stopping|we're stopping|stopping here)\b(?:\s+(?:here|work))?\s*"
+    r"(?=[.!;,]|$|(?:because|until)\b)", re.I)
+CONTINUES = re.compile(
+    r"\b(?:I|we)(?:\s+(?:will|can|shall|am|are)|'ll)\s+(?:still\s+)?(?:continue|proceed|implement|work)\b|"
+    r"\b(?:then|but|instead|and)\s+(?:continue|proceed|implement|work)\b|"
+    r"\b(?:not stopping|won't stop|will not stop)\b", re.I)
+
+
+def _calls_map(next_call):
+    m = MAP_TOOL.fullmatch(next_call.strip())
+    if m:
+        args = m[1]
+    else:
+        m = re.fullmatch(r"Bash\s*:?\s+(.+)", next_call.strip(), re.S)
+        if not m or re.search(r"[\n\r;&|<>`$]", m[1]):
+            return False
+        try:
+            words = shlex.split(m[1])
+        except ValueError:
+            return False
+        if (len(words) != 4 or words[0] not in ("./run.sh", "/Users/booko/carr-system/run.sh")
+                or words[1:3] != ["call", "map-architecture"]):
+            return False
+        args = words[3]
+    try:
+        return isinstance(json.loads(args), dict)
+    except ValueError:
+        return False
 
 
 def _answer(run):
@@ -60,15 +94,17 @@ def passes(kind, run):
     if a is None:
         return False
     ntc, files, msg = a
+    if kind in ("store_down", "store_up") and any(RULE_FILE.search(s) for s in [ntc, msg, *files]):
+        return False
     if kind == "store_down":
-        return (bool(NONE_LIKE.match(ntc)) and not any(RULE_FILE.search(f) for f in files)
-                and not RULE_FILE.search(ntc) and bool(SAYS_DOWN.search(msg)))
+        return (bool(NONE_LIKE.fullmatch(ntc)) and bool(SAYS_DOWN.search(msg))
+                and bool(SAYS_STOP.search(msg)) and not CONTINUES.search(msg))
     if kind in ("map_fire", "map_late"):
-        return bool(MAP_VERB.search(ntc))
+        return _calls_map(ntc)
     if kind == "store_up":
-        return not RULE_FILE.search(ntc) and not SAYS_STOP_UNREACHABLE.search(msg)
+        return not SAYS_STOP_UNREACHABLE.search(msg)
     if kind == "no_map":
-        return not MAP_VERB.search(ntc)
+        return not _calls_map(ntc)
     raise ValueError(f"unknown kind {kind!r}")
 
 

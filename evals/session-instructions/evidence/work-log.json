@@ -21,11 +21,11 @@
     },
     {
       "step": "Verify on the same surface",
-      "status": "pending"
+      "status": "done; 9 selftests pass, four assertion mutants fail, report repeats byte-for-byte with network and subprocesses forbidden."
     },
     {
       "step": "Stage the commits so the failing repro lands before the fix in git history",
-      "status": "in progress"
+      "status": "done; ac079568 records the failing regression before implementation."
     },
     {
       "step": "Run Opening a PR",
@@ -50,5 +50,32 @@
     "cross_split_groups": 4
   },
   "latest_correction": "Historical input exposure cannot be undone by relabeling. Offline replay must not claim a fresh sealed measurement.",
-  "next_action": "Commit red selftest, implement scorer and grouped splits, replay without changing recorded run data."
+  "next_action": "Push the committed fix and open the non-draft fix-forward PR; report the receipt gate refusal without a shipping claim.",
+  "verification": {
+    "selftest_tests": 9,
+    "assertion_mutations_caught": 4,
+    "input_groups_crossing_split": 0,
+    "recorded_runs_preserved": 600,
+    "original_expectations": "expectations.v1.json unchanged",
+    "receipt_evidence_recomputation": "passes with no errors",
+    "receipt_claim_validation": "refuses only split.sealed_test=false, intentionally truthful",
+    "full_gate": {
+      "command": "TMPDIR=$HOME/.cache/carr-tmp LC_ALL=C PYTHONDONTWRITEBYTECODE=1 python3 ops/check-eval-receipt.py",
+      "exit": 1,
+      "reason": "split.sealed_test must be true: the test split's transcripts are never read while proposing changes"
+    },
+    "fresh_model_measurement": "not re-measured; historical exposure requires new sealed inputs",
+    "checks_environment": "TMPDIR=$HOME/.cache/carr-tmp LC_ALL=C PYTHONDONTWRITEBYTECODE=1"
+  },
+  "principles": {
+    "Model the Domain": "Input hash groups own their split across case kinds.",
+    "Test Behavior, Not Implementation": "Reviewer counterexamples assert False; valid stops and actual live map calls assert True.",
+    "Prove It Works": "Replay compares unchanged observations, and the receipt gate independently recomputes every bound score and digest."
+  },
+  "debt_pass": "Removed the unused direct-model runner and stale shipping path. The remaining build/report commands are offline. Preserved v1 expectations, raw cohorts, run metadata, and archived receipt as evidence.",
+  "findings": {
+    "1": "Fixed; exact reviewer negatives now False, positive controls True.",
+    "2": "Fixed; identical input hashes share splits across case kinds; expectations v2 retains v1.",
+    "remeasurement": "Offline descriptive replay complete. Fresh sealed shipping measurement remains unavailable under the no-model-run constraint."
+  }
 }
