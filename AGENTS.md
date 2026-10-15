@@ -172,9 +172,7 @@ must be copied into an isolated tree and delivered through the normal PR path.
 For any request to recommend, design, build, revise, review, or publish a map,
 GIS analysis, route, day trip, or Tour surface, call the live `map-architecture`
 verb before advising or editing. It returns the current doctrine and the
-machine-contract pointer. The Stop gate only announces a skip (recorded in
-`out/map-architecture-gate.jsonl`) and does not block, so the session enforces
-this route itself.
+machine-contract pointer.
 
 ## main is not directly pushable
 
