@@ -952,7 +952,8 @@ check_secret() {
     fi
   done
   # shellcheck disable=SC2086
-  if ! run_quiet "$LOGDIR/leak-guard.log" "$PY" security/leak_guard.py $leak_args; then
+  if ! run_quiet "$LOGDIR/leak-guard.log" "$PY" security/leak_guard.py $leak_args \
+      ${CARR_PUSH_RECEIVER:+--remote "$CARR_PUSH_RECEIVER"}; then
     cat "$LOGDIR/leak-guard.log" >&2
     bad secret "secret or client data in introduced Git blobs"
     return

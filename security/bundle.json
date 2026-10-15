@@ -3,10 +3,10 @@
   "upstream": "jbookout/software-factory",
   "scanner_version": "1.0.0",
   "files": {
-    "leak_guard.py": "bd7c287bb1336533de11e2690635ede88a557324ba392aa91998492442288280",
-    "test_leak_guard.py": "8dbb31487920f167cf42253c260381e695587cc2ed995a07e4c2ed32b1b96301",
+    "leak_guard.py": "481be98d608bb890029e17e2b71bb05f0bef933c481e63aeaae7f8f2ad34a560",
+    "test_leak_guard.py": "55a7d3b886843265f7a3bfcdb530e81393b45c630c7b1dac50a621423d5566a4",
     "install_hook.py": "e933c18a54b8ffd4355836ce823160e5ef74c5cf9592648e0623d7f20eb227f3",
-    "pre-push": "6638787c02172d40d292552ce70b5376dd80c8483476e2894101260591c83130"
+    "pre-push": "983aaea6f3312f207339688c42957e22d7498d99e2bfcb30a45ad3c6eac5561b"
   },
   "gitleaks": "8.30.0",
   "source_commit": "f8e05a5a85bce82f28fc302a60981e74c76e5442"

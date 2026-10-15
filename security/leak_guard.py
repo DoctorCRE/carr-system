@@ -36,13 +36,23 @@ ARCHIVES = {
 PII = {
     'pii-email': re.compile(r'(?<![A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+'),
     'pii-phone': re.compile(r'(?<![\w])(?:\+?1[ .-]?)?(?:\([2-9]\d{2}\)|[2-9]\d{2})[ .-]?[2-9]\d{2}[ .-]?\d{4}(?![\w])'),
-    # The street word must be capitalized: "one place" in prose is not an address.
+    # A capitalized street word counts after any number. A lowercase one counts only
+    # for words prose rarely ends on ("street", not "way" or "place"), after a house
+    # number that stands alone and is not a year: "in 2026 we took the road" is prose.
     'pii-address': re.compile(r'\b\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,6}(?:' + '|'.join(
         word + '|' + word.upper() for word in ('Street', 'St', 'Avenue', 'Ave', 'Road', 'Rd', 'Drive', 'Dr', 'Lane',
                                                'Ln', 'Boulevard', 'Blvd', 'Court', 'Ct', 'Way', 'Place', 'Pl',
-                                               'Parkway', 'Pkwy')) + r')\b'),
+                                               'Parkway', 'Pkwy')) + r')\b'
+                              r'|(?<![\w.:/-])(?!(?:19|20)\d\d\b)\d{1,6}\s+(?:[A-Za-z0-9.-]+\s+){1,4}'
+                              r'(?i:street|avenue|road|boulevard|parkway|lane|ave|blvd|pkwy)\b'),
     'pii-ssn': re.compile(r'(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)'),
+    # scheme://user:password@host at any host, a loopback IP or a one-word name included.
+    'credential-url': re.compile(r'(?<![\w+.-])[A-Za-z][A-Za-z0-9+.-]{1,30}://[^\s:/@\'"<>]+:'
+                                 r'(?P<secret>[^\s@/\'"<>]+)@[^\s/\'"<>]'),
 }
+# A credential URL whose password is a variable, a template or a stock word is documentation.
+PLACEHOLDER_PASSWORDS = {'password', 'passwd', 'pass', 'secret', 'changeme', 'example', 'placeholder',
+                         'redacted', 'postgres', 'username', 'user', 'pw', 'pwd'}
 # Mail at a reserved domain (RFC 2606/6761), an IP literal or GitHub's public
 # noreply identity reaches no person, so it is not contact data.
 RESERVED_MAIL = re.compile(r'(?:^|\.)(?:example|invalid|test|localhost)$|^example\.(?:com|net|org)$'
@@ -78,6 +88,31 @@ def tokens(text):
         text = unicodedata.normalize('NFKD', text)
         text = ''.join(c for c in text if not unicodedata.combining(c))
     return re.findall(r'[^\W_]+', text.lower())
+
+
+def real_password(secret):
+    return not (len(secret) < 6 or secret[0] in '$<{%[(*' or len(set(secret)) < 4
+                or secret.lower() in PLACEHOLDER_PASSWORDS)
+
+
+# A string literal, and a run of literals that a compiler joins: 'a' 'b' or "a" + "b".
+LITERAL = r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\''
+LITERAL_RUN = re.compile('(?:' + LITERAL + r')(?:\s*\+?\s*(?:' + LITERAL + '))+')
+BYTE_ESCAPE = re.compile(r'\\(?:x([0-9a-fA-F]{2})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8}))')
+
+
+def executable_form(line):
+    """The line as a program would build it: adjacent literals joined, hex and unicode escapes decoded.
+
+    A control character decodes to a space, so the result keeps the line's place.
+    """
+    line = LITERAL_RUN.sub(lambda run: '"' + ''.join(literal[1:-1] for literal in re.findall(LITERAL, run[0])) + '"',
+                           line)
+
+    def decoded(match):
+        point = int(next(group for group in match.groups() if group), 16)
+        return chr(point) if 0x20 <= point <= 0x10ffff and not 0xd800 <= point <= 0xdfff else ' '
+    return BYTE_ESCAPE.sub(decoded, line)
 
 
 def decode_source(text):
@@ -140,7 +175,8 @@ def pii_findings(text, corpus):
     for number, line in enumerate(text.split('\n'), 1):
         line = decode_source(line)
         for rule, regex in PII.items():
-            if any(rule != 'pii-email' or not RESERVED_MAIL.search(match[0].rpartition('@')[2])
+            if any(not RESERVED_MAIL.search(match[0].rpartition('@')[2]) if rule == 'pii-email'
+                   else real_password(match['secret']) if rule == 'credential-url' else True
                    for match in regex.finditer(line)):
                 yield number, number, rule, ''
         normalized = tokens(line)
@@ -209,8 +245,9 @@ def gitleaks():
     return executable
 
 
-def git(root, *args):
-    return subprocess.run(['git', '--no-replace-objects', '-C', str(root), *args], check=True, capture_output=True).stdout
+def git(root, *args, input=None):
+    return subprocess.run(['git', '--no-replace-objects', '-C', str(root), *args], check=True, capture_output=True,
+                          input=input).stdout
 
 
 HUNK = re.compile(rb'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@', re.M)
@@ -243,7 +280,10 @@ def in_scope(change, first, last, rule):
 
 
 def raw_records(output):
-    """Parse `--raw -z` output into (parent blobs, blob, path), skipping deletions and submodules."""
+    """Parse `--raw -z` output into (parent blobs, blob, path), skipping deletions.
+
+    A gitlink has no blob to read; it is (parent entries, None, path) so its name is still judged.
+    """
     fields_and_paths = output.split(b'\0')
     index = 0
     while index < len(fields_and_paths):
@@ -261,7 +301,11 @@ def raw_records(output):
         index += 1
         if b'U' in fields[-1]:
             raise ValueError('unmerged index')
-        if fields[parents] in (b'000000', b'160000'):
+        if fields[parents] == b'000000':
+            continue
+        if fields[parents] == b'160000':
+            yield tuple(oid for mode, oid in zip(fields[:parents], fields[parents + 1:2 * parents + 1])
+                        if mode != b'000000'), None, path
             continue
         parent_blobs = tuple(oid for mode, oid in zip(fields[:parents], fields[parents + 1:2 * parents + 1])
                              if mode not in (b'000000', b'160000'))
@@ -272,6 +316,10 @@ def introduced(root, records, whole=False):
     """Read each introduced blob once and attach the lines and path it introduces."""
     blobs = {}
     for parent_blobs, oid, path in records:
+        if oid is None:
+            if whole or not parent_blobs:
+                yield Change(path, b'', frozenset(), True)
+            continue
         if oid in parent_blobs:
             continue  # a mode-only change introduces no content
         blobs.setdefault(oid, {}).setdefault(path, []).append(parent_blobs)
@@ -327,15 +375,33 @@ def history(root, revisions, whole=False):
     return introduced(root, list(raw_records(changes)), whole)
 
 
-def upstream(root, remote_name):
-    """Exclusions for every tracking ref of the remote: commits it already holds were judged there."""
-    if not re.fullmatch(r'[A-Za-z0-9._-]+', remote_name):
+def upstream(root, receiver):
+    """Exclusions for the commits the receiver advertises now: they were judged when they reached it.
+
+    A cached tracking ref is not evidence: the remote's URL may have changed, or the push
+    may go to another URL. When the receiver cannot be asked, nothing is excluded.
+    """
+    if receiver.startswith('-'):
         return []
-    known = git(root, 'for-each-ref', '--format=%(objectname)', 'refs/remotes/' + remote_name)
-    return ['^' + oid for oid in known.decode().splitlines()]
+    env = dict(os.environ, GIT_TERMINAL_PROMPT='0')
+    try:
+        advertised = subprocess.run(['git', '--no-replace-objects', '-C', str(root), 'ls-remote', '--refs',
+                                     receiver, 'refs/heads/*', 'refs/tags/*'], capture_output=True, env=env,
+                                    timeout=120)
+    except subprocess.TimeoutExpired:
+        return []
+    if advertised.returncode != 0:
+        return []
+    oids = sorted({line.split()[0] for line in advertised.stdout.decode().splitlines() if line.strip()})
+    if not oids or not all(re.fullmatch(r'[0-9a-f]{40}', oid) for oid in oids):
+        return []
+    # Only commits present here can bound the walk; an unknown oid excludes nothing.
+    present = git(root, 'cat-file', '--batch-check=%(objectname) %(objecttype)', input=''.join(
+        oid + '\n' for oid in oids).encode()).decode().split('\n')
+    return ['^' + line.split()[0] for line in present if line.endswith(' commit')]
 
 
-def pushed(root, stream, remote_name):
+def pushed(root, stream, receiver):
     revisions = []
     zero = '0' * 40
     for line in stream.splitlines():
@@ -347,13 +413,13 @@ def pushed(root, stream, remote_name):
             continue
         git(root, 'rev-parse', '--verify', local + '^{commit}')
         # Every intermediate commit is scanned; ancestry the receiver already has
-        # (the ref's old value, or any of its tracking refs, e.g. a merged-in main)
+        # (the ref's old value, or any ref it advertises, e.g. a merged-in main)
         # is excluded.
         revisions.append(local)
         if remote != zero:
             git(root, 'rev-parse', '--verify', remote + '^{commit}')
             revisions.append('^' + remote)
-    return history(root, revisions + upstream(root, remote_name)) if revisions else iter(())
+    return history(root, revisions + upstream(root, receiver)) if revisions else iter(())
 
 
 def load_allowlist(path):
@@ -429,14 +495,17 @@ def scan(root, source, corpus, allowed, report_path=None):
         # Uninspectable binary content is refused as a whole, never silently skipped.
         text = '' if opaque else raw.decode('utf-16' if utf16 else 'utf-8', errors='replace')
         filename_line = path.replace('\r', ' ').replace('\n', ' ')
-        secret_input = filename_line.encode('utf-8', 'surrogateescape') + b'\n' + text.encode('utf-8') + b'\n'
-        if chunks and batch_bytes + len(secret_input) > 8 * 1048576:
+        inputs = [filename_line.encode('utf-8', 'surrogateescape') + b'\n' + text.encode('utf-8') + b'\n']
+        # gitleaks also reads the text as a program would build it, line for line, as a
+        # second entry for the same change whose filename line is empty.
+        built = '\n'.join(executable_form(source_line) for source_line in text.split('\n'))
+        if built != text:
+            inputs.append(b'\n' + built.encode('utf-8') + b'\n')
+        size = sum(map(len, inputs))
+        if chunks and batch_bytes + size > 8 * 1048576:
             flush()
             line, batch_bytes = 1, 0
         index = len(changes)
-        starts.append(line)
-        changes.append(change)
-        digests.append(digest)
         if opaque:
             hits.append((index, 1, 1, 'opaque-binary', ''))
         else:
@@ -444,9 +513,13 @@ def scan(root, source, corpus, allowed, report_path=None):
                 pii_cache[digest] = list(pii_findings(text, corpus))
             hits.extend((index, *hit) for hit in pii_cache[digest])
         hits.extend((index, 0, 0, rule, fingerprint) for _, _, rule, fingerprint in pii_findings(path, corpus))
-        chunks.append(secret_input)
-        line += secret_input.count(b'\n')
-        batch_bytes += len(secret_input)
+        for secret_input in inputs:
+            starts.append(line)
+            changes.append(change)
+            digests.append(digest)
+            chunks.append(secret_input)
+            line += secret_input.count(b'\n')
+        batch_bytes += size
     flush()
     findings = sorted(findings)
     if report_path:

@@ -6,6 +6,7 @@ import os
 import pathlib
 import subprocess
 import unittest
+from unittest.mock import patch
 import uuid
 
 
@@ -22,6 +23,7 @@ def load(name, path):
 
 guard = load('guard', SCRIPT)
 exporter = load('exporter', EXPORTER)
+git_env = load('git_env', SCRIPT.parents[1] / 'ops' / 'git_env.py')
 
 
 def corpus_hash(salt, *words):
@@ -30,10 +32,20 @@ def corpus_hash(salt, *words):
 
 class LeakGuardTest(unittest.TestCase):
     def setUp(self):
+        # Every fixture git call, and the guard's own, inherits this environment:
+        # a GIT_DIR exported by a hook or a caller must not reach the invoking repository.
+        scrubbed = patch.dict(os.environ, git_env.fixture_env(), clear=True)
+        scrubbed.start()
+        self.addCleanup(scrubbed.stop)
         self.root = pathlib.Path(os.environ.get('LEAK_GUARD_TEST_ROOT', '/tmp/leak-guard-tests')) / str(uuid.uuid4())
         self.root.mkdir(parents=True, mode=0o700)
         subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
         self.env = dict(os.environ)
+
+    def receiver(self, name):
+        path = self.root.with_name(self.root.name + '-' + name + '.git')
+        subprocess.run(['git', 'init', '--bare', '-q', str(path)], check=True)
+        return path
 
     def run_guard(self, *args):
         return subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), *args],
@@ -115,7 +127,8 @@ class LeakGuardTest(unittest.TestCase):
         result = self.run_guard('--range', main + '..' + head, '--generic-only')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         refs = f'refs/heads/feature {head} refs/heads/feature {before_merge}\n'
-        self.git('update-ref', 'refs/remotes/origin/main', main)
+        self.git('remote', 'add', 'origin', str(self.receiver('origin')))
+        self.git('push', '-q', 'origin', 'main', before_merge + ':refs/heads/feature')
         # ops/ci.sh check_secret runs this when the pre-push hook sets CARR_CI_RANGE.
         result = self.run_guard('--range', before_merge + '..' + head, '--generic-only')
         self.assertEqual(result.returncode, 0, 'ci.sh pre-push range: ' + result.stdout + result.stderr)
@@ -305,7 +318,6 @@ class LeakGuardTest(unittest.TestCase):
         self.assertEqual(refs, b'')
 
     def test_large_scan_bounds_each_gitleaks_input_batch(self):
-        from unittest.mock import patch
         run = subprocess.run
         sizes = []
         def observed_run(*args, **kwargs):
@@ -480,6 +492,97 @@ class LeakGuardTest(unittest.TestCase):
         self.git('add', 'b.bin')
         result = self.run_guard('--staged', '--generic-only')
         self.assertEqual(result.stdout, 'b.bin:1 opaque-binary\n')
+
+    def test_exclusions_come_from_the_receiver_not_cached_tracking_refs(self):
+        base = self.write_commit('sample.txt', 'safe\n')
+        value = self.secret()
+        head = self.write_commit('sample.txt', 'token="' + value + '"\n')
+        private = self.receiver('private')
+        self.git('remote', 'add', 'origin', str(private))
+        self.git('push', '-q', 'origin', 'HEAD:refs/heads/private')
+        self.assertEqual(self.git('rev-parse', 'refs/remotes/origin/private'), head)
+        public = self.receiver('public')
+        self.git('remote', 'set-url', 'origin', str(public))
+        refs = f'refs/heads/main {head} refs/heads/main {"0" * 40}\n'
+        for remote in ('origin', str(public)):
+            hook = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--pre-push', '--generic-only',
+                                   '--remote', remote], input=refs, env=self.env, capture_output=True, text=True)
+            self.assertEqual(hook.returncode, 1, remote + ': ' + hook.stdout + hook.stderr)
+            self.assertIn('sample.txt:1 github-pat', hook.stdout)
+        result = self.run_guard('--range', base + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 1, 'ci.sh pre-push range: ' + result.stdout + result.stderr)
+        # The receiver that really holds the commit still excludes it.
+        hook = subprocess.run(['python3', str(SCRIPT), '--root', str(self.root), '--pre-push', '--generic-only',
+                               '--remote', str(private)], input=refs, env=self.env, capture_output=True, text=True)
+        self.assertEqual(hook.returncode, 0, hook.stdout + hook.stderr)
+        self.assertNotIn(value, hook.stdout + hook.stderr)
+
+    def test_credential_urls_are_blocked_in_history(self):
+        password = base64.b64encode(bytes(range(40, 58))).decode().rstrip('=').replace('/', 'Q').replace('+', 'R')
+        lines = ['url = "postgresql://user:' + password + '@127.0.0.1:5432/production"',
+                 'MONGO=mongodb://app:' + password + '@db/app',
+                 'DATABASE_URL=postgresql:' + '//user:${DB_PASSWORD}@db/app',
+                 'see postgresql:' + '//user:<password>@host/db or postgres:' + '//user:password@localhost/db']
+        (self.root / 'settings.txt').write_text('\n'.join(lines) + '\n')
+        self.git('add', 'settings.txt')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, 'settings.txt:1 credential-url\nsettings.txt:2 credential-url\n')
+        self.assertNotIn(password, result.stdout + result.stderr)
+        base = self.write_commit('db.txt', 'safe\n')
+        self.write_commit('db.txt', lines[0] + '\n')
+        head = self.write_commit('db.txt', 'safe\n')
+        result = self.run_guard('--range', base + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('db.txt:1 credential-url', result.stdout)
+
+    def test_escaped_and_split_string_tokens_are_blocked(self):
+        value = self.secret()
+        escaped = ''.join('\\x%02x' % byte for byte in value.encode())
+        cut = len(value) // 2
+        lines = ['# synthetic', 'token = "' + escaped + '"',
+                 "token = '" + value[:cut] + "' '" + value[cut:] + "'",
+                 'token = "' + value[:cut] + '" + "' + value[cut:] + '"']
+        for number in range(2, 5):
+            (self.root / 'sample.py').write_text('\n'.join(lines[:1] + [lines[number - 1]]) + '\n')
+            self.git('add', 'sample.py')
+            result = self.run_guard('--staged', '--generic-only')
+            self.assertEqual(result.returncode, 1, lines[number - 1][:12] + result.stderr)
+            self.assertEqual(result.stdout, 'sample.py:2 github-pat\n')
+            self.assertNotIn(value[:cut], result.stdout + result.stderr)
+
+    def test_gitlink_filename_is_scanned(self):
+        value = self.secret()
+        commit = self.write_commit('sample.txt', 'safe\n')
+        self.git('update-index', '--add', '--cacheinfo', '160000,' + commit + ',vendor/' + value)
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertRegex(result.stdout, r'^\[redacted-path:[0-9a-f]{12}\]:1 github-pat\n$')
+        self.assertNotIn(value, result.stdout + result.stderr)
+
+    def test_lowercase_addresses_are_contact_data(self):
+        flagged = ['843' + ' Imaginary avenue', '12 fictional' + ' street', '4410 IMAGINARY' + ' PKWY']
+        ignored = ['in 2026 we took the ' + 'road', 'it takes 10 minutes to ' + 'drive', 'step 3 is the best ' + 'way']
+        (self.root / 'sample.txt').write_text('\n'.join(flagged + ignored) + '\n')
+        self.git('add', 'sample.txt')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.stdout, ''.join(f'sample.txt:{n} pii-address\n' for n in (1, 2, 3)))
+
+    def test_suite_under_a_foreign_git_dir_leaves_that_repository_alone(self):
+        victim = self.root.with_name(self.root.name + '-victim')
+        subprocess.run(['git', 'init', '-q', str(victim)], check=True)
+        (victim / 'keep.txt').write_text('victim\n')
+        subprocess.run(['git', '-C', str(victim), 'add', 'keep.txt'], check=True)
+        subprocess.run(['git', '-C', str(victim), '-c', 'user.name=Synthetic', '-c',
+                        'user.email=synthetic@example.invalid', 'commit', '-qm', 'victim'], check=True)
+        before = subprocess.check_output(['git', '-C', str(victim), 'rev-parse', 'HEAD'])
+        env = dict(self.env, GIT_DIR=str(victim / '.git'), GIT_WORK_TREE=str(victim))
+        result = subprocess.run(['python3', str(pathlib.Path(__file__).resolve()),
+                                 'LeakGuardTest.test_removed_secret_still_blocks_range_and_pre_push'],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        self.assertEqual(subprocess.check_output(['git', '-C', str(victim), 'rev-parse', 'HEAD']), before)
+        self.assertEqual(subprocess.check_output(['git', '-C', str(victim), 'status', '--porcelain']), b'')
 
 if __name__ == '__main__':
     unittest.main()
