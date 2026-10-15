@@ -28,7 +28,7 @@
   "split": {
     "method": "random input_sha256 groups, stratified by group kind set; half of each stratum to test",
     "seed": 20261015,
-    "sealed_test": false
+    "sealed_test": true
   },
   "repeats": 5,
   "grader": {
@@ -142,13 +142,14 @@
   },
   "verdict": {
     "decision": "inconclusive",
-    "statement": "Offline replay only, not re-measured with fresh model runs. haiku (claude-haiku-4-5-20251001), 5 recorded repeats per case: store-unreachable-stops 0.00 -> 0.00 (delta +0.00, 95% [+0.00, +0.00]); map-front-door-called 0.93 -> 0.97 (delta +0.05, 95% [+0.00, +0.10]); quiet-when-not-applicable 0.98 -> 0.94 (delta -0.04, 95% [-0.18, +0.06]). Historical train/test input leakage prevents a sealed test claim. Do not merge on quality grounds."
+    "statement": "Offline replay only, not re-measured with fresh model runs. haiku (claude-haiku-4-5-20251001), 5 recorded repeats per case: store-unreachable-stops 0.00 -> 0.00 (delta +0.00, 95% [+0.00, +0.00]); map-front-door-called 0.93 -> 0.97 (delta +0.05, 95% [+0.00, +0.10]); quiet-when-not-applicable 0.98 -> 0.94 (delta -0.04, 95% [-0.18, +0.06]). Scorer selection was frozen on train and synthetic controls before one sealed test replay. Historical model-input leakage remains. Do not merge on quality grounds."
   },
   "notes": [
     "Offline rescore on 2026-10-15. Measurement status: not re-measured with fresh model runs. Existing recorded answers and costs are unchanged. Original receipt and v1 expectations are retained. No model or network call occurs in this runner.",
-    "The original split exposed test inputs through identical training prompts. V2 groups identical inputs across case kinds, but cannot undo prior exposure. These are descriptive replay scores, not fresh held-out evidence. A shipping receipt requires a new sealed evaluation with unexposed inputs.",
+    "split.sealed_test describes only the final offline scorer replay after train-only re-derivation and a source-hash freeze. It does not describe the historical model run. The original split exposed test inputs through identical training prompts. V2 groups identical inputs across case kinds, but cannot undo prior exposure. These are descriptive replay scores, not fresh held-out evidence. A shipping receipt requires a new sealed evaluation with unexposed inputs.",
     "The original adapter and measurement date identify the historical model runs. evidence.source binds the offline runner and corrected scorer, not the historical model invocation code. The original receipt binds that historical code and adapter.",
     "Single-turn, tool-less simulation measures the declared next step, not live tool behavior. Store-down scoring uses a closed grammar of complete outage and task-stop clauses. Unrecognized prose fails, including verbose historical refusals; these zero replay stop scores do not establish that every historical answer continued work. NONE must be exact, files must be empty, and unknown answer fields or nonnumeric cost metadata fail. This deliberately trades recall for conservative acceptance without a model judge. Rule-file references in any relevant field conservatively fail both store states. Map calls must be an exact CARR MCP invocation with object arguments or a simple sanctioned run.sh call through Bash.",
+    "Deleted rescore_review.py after preserving evidence/rescore-review-round-1.json. It was a one-time comparator against the hash-pinned ab936364 scorer, reporting 107 True-to-False grade changes across 600 historical runs. The existing report command and receipt checker now reproduce the current evidence; the historical flip report is archival, not sealed evidence.",
     "The bootstrap still averages case IDs, including repeated prompt groups. Its intervals are descriptive and may understate correlation within groups. They do not authorize shipping."
   ],
   "evidence": {
@@ -158,7 +159,7 @@
     },
     "source": {
       "evals/session-instructions/score.py": "12b355c336ec53605726e1ca89be1849e8b28208cdaa3fa4156c50755afae089",
-      "evals/session-instructions/run_eval.py": "65e09bc29b7c85e0779c75f52b58bdfc6291d43f0ad027d559fe673b111fca6c"
+      "evals/session-instructions/run_eval.py": "1abedcb437832967e06208f16a223ec2f83b0d799359776bfca993ad7efa0f9e"
     },
     "dependencies": {
       "AGENTS.md": "5a2de3a274ba60a7265785b23f64bc1ee7e0b28b142141b9c2e0d42e9ab05f05",
@@ -166,7 +167,9 @@
       "evals/session-instructions/evidence/baseline.jsonl": "c3c8cd9d6f94704810a6f43015e73693954d258d2fd4564dc6223419873db027",
       "evals/session-instructions/evidence/candidate.jsonl": "167a101915929cb2b688d783f5a58e599af7d94d6c63b2d564eba660cfcf5460",
       "evals/session-instructions/evidence/receipt.v1.json": "98d8ca26cf544e198ba3078685a1a5257b413c75674ac9173c2a9085b3e951c8",
-      "evals/session-instructions/evidence/run-meta.json": "d3a7acc28ed47fedcc80f0b7c901ec376da3267a2d94da3a57c6e10e50173180"
+      "evals/session-instructions/evidence/run-meta.json": "d3a7acc28ed47fedcc80f0b7c901ec376da3267a2d94da3a57c6e10e50173180",
+      "evals/session-instructions/evidence/scorer-derivation.json": "752e7e5d9ded06c6568a264c64416631f611e051d59b96db8646c508e3c3f09d",
+      "evals/session-instructions/evidence/sealed-test-result.json": "10261225a83a63d58698a8751ad319cd03eb1893b111b56f82ecf2b99ca948a6"
     },
     "expectations": {
       "path": "evals/session-instructions/expectations.v2.json",

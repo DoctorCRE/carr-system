@@ -1,5 +1,5 @@
 {
-  "objective": "Fix forward PR 1773 with strict safeguard scoring and input-grouped splits; open one non-draft PR.",
+  "objective": "Repair PR 1790 hosted eval-receipt and door-reachability failures; commit, push, and comment on the owned branch.",
   "constraints": [
     "Only evals/session-instructions paths may change.",
     "No model runs, browser tests, full CI, or edits to repository gates.",
@@ -49,8 +49,8 @@
     ],
     "cross_split_groups": 4
   },
-  "latest_correction": "A refused live lookup is not a stopped task. Every unrecognized continuation or ambiguous clause must fail, across the whole answer.",
-  "next_action": "Commit the final scorer and evidence, update PR 1790 with Review round 1, push, and verify the remote head. Independent review belongs to the orchestrator.",
+  "latest_correction": "sealed_test applies to the new train-only scorer selection and frozen offline replay only. Historical model-input leakage remains disclosed and the verdict remains inconclusive.",
+  "next_action": "Commit the scoped changes, push fix-forward-1773-session-eval, update PR 1790, and verify the remote head and posted comment.",
   "verification": {
     "selftest_tests": 9,
     "assertion_mutations_caught": 4,
@@ -146,5 +146,37 @@
       "deslop": "Reviewed the scoped diff. The pinned-scorer comparator is the reproducible source for the flip report; no duplicate live scorer or model path was added."
     },
     "pending_operations": []
+  },
+  "ci_repair": {
+    "objective": "Repair PR 1790 hosted eval-receipt and door-reachability failures; commit, push, and comment on the owned branch.",
+    "constraints": [
+      "Only evals/session-instructions and its evidence may change.",
+      "Do not edit door-inventory.v1.json, run browser tests, call models, or run full ops/ci.sh.",
+      "Route any required decision to the orchestrator, never Joe."
+    ],
+    "reproduced": {
+      "eval_receipt": "exit 1: split.sealed_test must be true",
+      "door_reachability": "FAIL: unreachable evals/session-instructions/rescore_review.py"
+    },
+    "derivation": "Re-derived acceptance criteria from synthetic controls and v2 training rows. Retained the scorer policy because whole-clause recognition satisfies the safeguard contract. Training safe refusals outside the grammar remain rejected. No test transcript was inspected while selecting or proposing changes in this repair.",
+    "freeze": "evidence/scorer-derivation.json binds scorer, runner, selftest, and expectations before test replay.",
+    "sealed_result": "evidence/sealed-test-result.json records one completed offline replay, 30 test cases and 150 runs per arm, with no post-test tuning. Checker recomputation is verification, not another selection round.",
+    "design_and_debt_pass": {
+      "codebase-design": "Kept passes(kind, run) unchanged after train-only derivation. Put freeze and replay enforcement in the existing offline runner rather than adding another script.",
+      "zero-tech-debt": "Deleted the one-time rescore comparator and replaced unit-test reads of real test recordings with synthetic controls. Historical flip artifact stays archived.",
+      "deslop": "Removed obsolete imports and report reruns from development tests. Kept one derivation manifest and one execution result with no new executable door."
+    },
+    "verification": {
+      "eval_receipt": "check-eval-receipt: OK (0 surface(s) touched, 1 receipt(s) checked)",
+      "door_reachability": "door-reachability: OK; 773 wired, 89 ci-only, 13 prose-only, 38 declared",
+      "unit_tests": 14,
+      "scorer_mutations_caught": 6,
+      "assertion_mutations_caught": 4,
+      "diff_check": "passed",
+      "score_and_cost_changes": "none",
+      "historical_observations_and_expectations": "unchanged"
+    },
+    "pending_operations": [],
+    "next_action": "Commit the scoped changes, push fix-forward-1773-session-eval, update PR 1790, and verify the remote head and posted comment."
   }
 }

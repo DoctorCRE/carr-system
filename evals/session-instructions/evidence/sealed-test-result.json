@@ -1,0 +1,16 @@
+{
+  "status": "completed",
+  "started_at": "2026-10-15T19:17:48.140881+00:00",
+  "completed_at": "2026-10-15T19:17:48.323839+00:00",
+  "derivation_sha256": "752e7e5d9ded06c6568a264c64416631f611e051d59b96db8646c508e3c3f09d",
+  "sources": {
+    "evals/session-instructions/score.py": "12b355c336ec53605726e1ca89be1849e8b28208cdaa3fa4156c50755afae089",
+    "evals/session-instructions/run_eval.py": "1abedcb437832967e06208f16a223ec2f83b0d799359776bfca993ad7efa0f9e",
+    "evals/session-instructions/selftest.py": "5413093c5baf1f51a7d8991bd86e6c6fd9e7a54105d2fef34558c61f227e5e09",
+    "evals/session-instructions/expectations.v2.json": "9ddac8cd8f77505b3c3f023742f788e913237a36976b6cfc73a66091ebb98147"
+  },
+  "decision": "inconclusive",
+  "test_cases_per_arm": 30,
+  "test_runs_per_arm": 150,
+  "post_test_tuning": false
+}

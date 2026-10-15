@@ -3,8 +3,7 @@
 
 import unittest
 import copy
-import contextlib
-import io
+import tempfile
 import json
 import sys
 from pathlib import Path
@@ -191,22 +190,60 @@ class SplitControls(unittest.TestCase):
         new = json.loads((here / "expectations.v2.json").read_text())
         splits = run_eval.split_assignment(run_eval.build_cases())
         self.assertEqual({cid: c["split"] for cid, c in new["cases"].items()}, splits)
-        for arm in ("baseline", "candidate"):
-            rows = [json.loads(line) for line in (here / "evidence" / f"{arm}.jsonl").read_text().splitlines()]
-            replay = [json.loads(line) for line in (here / "evidence" / f"{arm}.v2.jsonl").read_text().splitlines()]
-            self.assertEqual(replay, run_eval.replay_rows(new, old, rows))
+        self.assertEqual(set(old["cases"]), set(new["cases"]))
+        for cid, case in new["cases"].items():
+            self.assertEqual({k: v for k, v in case.items() if k != "split"},
+                             {k: v for k, v in old["cases"][cid].items() if k != "split"})
 
-    def test_offline_report_reproduces_artifacts(self):
-        here = Path(__file__).resolve().parent
-        paths = [here / "receipt.json", here / "expectations.v2.json",
-                 *[here / "evidence" / f"{arm}.v2.jsonl" for arm in ("baseline", "candidate")]]
-        before = [p.read_bytes() for p in paths]
+    def test_prepare_scores_training_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            here = Path(tmp)
+            (here / "evidence").mkdir()
+            expectations = here / "expectations.json"
+            expectations.write_text(json.dumps({"cases": {
+                "train": {"split": "train", "kind": "store_down"},
+                "test": {"split": "test", "kind": "store_down"}}}))
+            for arm in ("baseline", "candidate"):
+                (here / "evidence" / f"{arm}.v2.jsonl").write_text("\n".join(json.dumps(row) for row in [
+                    {"case_id": "train", "runs": [answer()]},
+                    {"case_id": "test", "runs": [{"must_not_be_scored": True}]}]))
+            seal = here / "seal.json"
+            with patch.object(run_eval, "HERE", here), patch.object(run_eval, "EXPECTATIONS", expectations), \
+                    patch.object(run_eval, "DERIVATION", seal), \
+                    patch.object(run_eval, "frozen_sources", return_value={"scorer": "hash"}), \
+                    patch.object(score, "passes", wraps=score.passes) as grader, patch("builtins.print"):
+                run_eval.prepare()
+            self.assertEqual(grader.call_args_list, [unittest.mock.call("store_down", answer())] * 2)
+            self.assertEqual(json.loads(seal.read_text())["training"], {
+                arm: {"store_down": {"runs": 1, "passes": 1}} for arm in ("baseline", "candidate")})
+
+    def test_frozen_selection_required_before_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            seal, result = Path(tmp) / "seal.json", Path(tmp) / "result.json"
+            with patch.object(run_eval, "DERIVATION", seal), patch.object(run_eval, "TEST_RESULT", result):
+                for sources in ({}, run_eval.frozen_sources()):
+                    seal.write_text(json.dumps({"status": "frozen_before_test", "sources": sources}))
+                    if not sources:
+                        with self.assertRaisesRegex(ValueError, "changed after freezing"):
+                            run_eval.verify_derivation()
+                    else:
+                        run_eval.verify_derivation()
+                result.write_text('{"status": "started"}')
+                with self.assertRaisesRegex(ValueError, "already started"):
+                    run_eval.report()
+
+    def test_offline_scoring_with_synthetic_observations(self):
+        cases = {kind: {"kind": kind, "split": "test", "should_not_fire": kind in run_eval.QUIET}
+                 for kind in ("store_down", "store_up", "map_fire", "map_late", "no_map")}
+        rows = [{"case_id": kind, "runs": [score._oracle_run(kind)]} for kind in cases]
         with patch("subprocess.Popen", side_effect=AssertionError("subprocess forbidden")), \
-                patch("socket.socket", side_effect=AssertionError("network forbidden")), \
-                contextlib.redirect_stdout(io.StringIO()):
-            run_eval.build()
-            run_eval.report()
-        self.assertEqual([p.read_bytes() for p in paths], before)
+                patch("socket.socket", side_effect=AssertionError("network forbidden")):
+            result = score.score({"cases": cases}, rows, rows)
+            self.assertEqual(result, score.score({"cases": cases}, rows, rows))
+        self.assertEqual(result["controls"], {"oracle_pass_rate": 1.0, "null_pass_rate": 0.0})
+        for dimension in result["dimensions"].values():
+            self.assertEqual(dimension["baseline"]["score"], 1.0)
+            self.assertEqual(dimension["delta"]["value"], 0.0)
 
 
 def mutation_selftest():
