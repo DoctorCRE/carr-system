@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import pathlib
@@ -534,6 +535,127 @@ class TargetTests(unittest.TestCase):
             self.assertEqual(connect.call_count, 0)
             self.assertEqual(provider.call_count, 0)
             self.assertIn("libpq target override", stderr.getvalue())
+
+
+class VendorReferenceFixtureTests(unittest.TestCase):
+    expected = (fixture.VENDOR_REFERENCE_SLUG, fixture.VENDOR_REFERENCE_LABEL,
+                fixture.VENDOR_REFERENCE_SORT)
+
+    class Cursor:
+        def __init__(self, db): self.db, self.result = db, None
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def execute(self, sql, args=None):
+            low = " ".join(sql.lower().split())
+            self.db.sql.append((low, args))
+            if low == "select session_user,current_user,current_database()":
+                self.result = self.db.identity
+            elif low.startswith("select slug,label,sort from public.vendor_stage"):
+                self.result = self.db.row
+            elif low.startswith("insert into public.vendor_stage"):
+                self.db.insert_count += 1
+                if self.db.row is None:
+                    self.db.row = tuple(args)
+                    self.result = (args[0],)
+                else:
+                    self.result = None
+            elif low == "set transaction read only":
+                self.result = None
+            else:
+                raise AssertionError(f"unexpected vendor reference SQL: {low}")
+        def fetchone(self): return self.result
+
+    class Connection:
+        def __init__(self, row=None, identity=("neondb_owner", "neondb_owner", "neondb")):
+            self.row, self.identity, self.sql = row, identity, []
+            self.insert_count = self.commits = self.rollbacks = 0
+        def cursor(self): return VendorReferenceFixtureTests.Cursor(self)
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def commit(self): self.commits += 1
+        def rollback(self): self.rollbacks += 1
+
+    def test_install_is_narrow_idempotent_and_exact(self):
+        empty = self.Connection()
+        self.assertEqual(fixture.install_vendor_reference_data(empty), 1)
+        self.assertEqual(empty.row, self.expected)
+        self.assertEqual(empty.commits, 1)
+        self.assertEqual(empty.insert_count, 1)
+        self.assertTrue(all("public.vendor_stage" in sql or "session_user" in sql for sql, _ in empty.sql))
+
+        exact = self.Connection(row=self.expected)
+        self.assertEqual(fixture.install_vendor_reference_data(exact), 0)
+        self.assertEqual(exact.insert_count, 0)
+        self.assertEqual(exact.commits, 1)
+
+        different = self.Connection(row=(self.expected[0], "different label", self.expected[2]))
+        with self.assertRaises(fixture.FixtureRefusal):
+            fixture.install_vendor_reference_data(different)
+        self.assertEqual(different.insert_count, 0)
+        self.assertEqual(different.commits, 0)
+        self.assertEqual(different.rollbacks, 1)
+
+        wrong_owner = self.Connection(identity=("joe", "joe", "neondb"))
+        with self.assertRaises(fixture.FixtureRefusal):
+            fixture.install_vendor_reference_data(wrong_owner)
+        self.assertEqual(wrong_owner.insert_count, 0)
+        self.assertEqual(wrong_owner.rollbacks, 1)
+
+    def test_separate_readback_requires_exact_owner_database_and_row(self):
+        conn = self.Connection(row=self.expected)
+        self.assertEqual(fixture.read_vendor_reference_data(conn), {
+            "slug": self.expected[0], "label": self.expected[1], "sort": self.expected[2]})
+        self.assertEqual(conn.rollbacks, 1)
+        with self.assertRaises(fixture.FixtureRefusal):
+            fixture.read_vendor_reference_data(self.Connection(identity=("other", "other", "neondb"),
+                                                                 row=self.expected))
+        with self.assertRaises(fixture.FixtureRefusal):
+            fixture.read_vendor_reference_data(self.Connection(row=None))
+
+    def test_proof_binds_unique_operation_source_target_readback_and_tool(self):
+        operation_id = uuid.UUID("791a9bc4-177a-42ed-91b6-9469e9a102a2")
+        target = {"project": {"id": "project"}, "branch": {"id": "branch"},
+                  "endpoint": {"id": "endpoint"}, "database": "neondb"}
+        readback = {"slug": self.expected[0], "label": self.expected[1], "sort": self.expected[2]}
+        proof = fixture.build_vendor_reference_proof(operation_id, APP_SHA, CARR_SHA, target, readback)
+        self.assertEqual(proof["operation_id"], str(operation_id))
+        self.assertEqual(proof["source_pair"], {"source_commit": APP_SHA, "carr_source_commit": CARR_SHA})
+        self.assertEqual(proof["verified_target"], target)
+        self.assertEqual(proof["fixture"]["row_readback"], readback)
+        self.assertRegex(proof["recorded_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")
+        self.assertEqual(proof["tool_source_sha256"],
+                         hashlib.sha256(pathlib.Path(fixture.__file__).read_bytes()).hexdigest())
+
+    def test_plan_mode_is_read_only_and_production_target_refuses_before_provider_or_connect(self):
+        args = ["staging-fixtures.py", "--vendor-reference-data",
+                "--expected-app-sha", APP_SHA, "--expected-carr-sha", CARR_SHA]
+        output = io.StringIO()
+        provider = Mock(side_effect=AssertionError("plan mode reached provider"))
+        with patch.object(sys, "argv", args), patch.object(sys, "stdout", output), \
+                patch.object(fixture, "validate_provider_binding", provider):
+            self.assertEqual(fixture.main(), 0)
+        self.assertEqual(output.getvalue(), "staging-fixtures: PLAN vendor_reference_rows=1 mutated=false\n")
+        self.assertEqual(provider.call_count, 0)
+
+        with tempfile.TemporaryDirectory() as raw:
+            proof_parent = pathlib.Path(raw) / "proofs"
+            proof_parent.mkdir(mode=0o700); proof_parent.chmod(0o700)
+            proof_path = proof_parent / "fixture.json"
+            args += ["--apply", "--proof-file", str(proof_path)]
+            environment = {"DATABASE_URL": "postgresql://neondb_owner:dummy@ep-prod.neon.tech/neondb",
+                           "CARR_STAGING_REPLACEMENT_PROJECT_ID": fixture.PRODUCTION_PROJECT_ID,
+                           "CARR_STAGING_REPLACEMENT_ENDPOINT_ID": "ep-prod"}
+            provider = Mock(side_effect=AssertionError("production target reached provider"))
+            connect = Mock(side_effect=AssertionError("production target reached database"))
+            stderr = io.StringIO()
+            with patch.object(sys, "argv", args), patch.object(sys, "stderr", stderr), \
+                    patch.dict(fixture.os.environ, environment, clear=True), \
+                    patch.object(fixture, "validate_provider_binding", provider), \
+                    patch.dict(sys.modules, {"psycopg": SimpleNamespace(connect=connect)}):
+                self.assertEqual(fixture.main(), 2)
+            self.assertEqual(provider.call_count, 0)
+            self.assertEqual(connect.call_count, 0)
+            self.assertIn("forbidden", stderr.getvalue())
 
 
 class TourFixtureTests(unittest.TestCase):
