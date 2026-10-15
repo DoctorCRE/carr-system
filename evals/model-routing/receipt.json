@@ -12,7 +12,7 @@
     "harness_version": "b49a82fb982b14e41d521e951370be3b519153ef7087d27fbf52aba32636e606",
     "provider_id": "none",
     "model_id": "deterministic-no-model",
-    "native_session_ref": "01a11f56-a1fd-72f1-87e6-c6f7e2013330",
+    "native_session_ref": "offline-fresh-network-boundary-v2",
     "configuration_fingerprint": "sha256:228c6babb43d67c93c274b146e0a60c88b3050fe7622a19227ce5191095afe02"
   },
   "cases": {
@@ -26,7 +26,7 @@
     ]
   },
   "split": {
-    "method": "seeded finite registry-routing and wire-protocol behavior matrix; each split covers every class",
+    "method": "exhaustive finite wire-protocol behavior matrix; each split covers every class",
     "seed": 1667,
     "sealed_test": true
   },
@@ -103,7 +103,7 @@
     },
     "source": {
       "evals/model-routing/score.py": "b49a82fb982b14e41d521e951370be3b519153ef7087d27fbf52aba32636e606",
-      "evals/model-routing/make_report.py": "41ebe2fc2c0ab6268ae67b724815eeb2eeb1fea1925734f0fbaa6483f1a0cc35"
+      "evals/model-routing/make_report.py": "5d8f2883f1b07272c047a3ecbc82167491bd223cd5a57e5e337c2d8ce9cf5a5a"
     },
     "dependencies": {
       "tools/room-bridge/desks.py": "ab5891e98508b315ae23b96ffa5479826d6f012adc5e917494e6cfdd9146eda0",
