@@ -453,7 +453,7 @@ class LeakGuardTest(unittest.TestCase):
             exporter.exclusion_file(self.root, listed)
 
     def test_finding_spanning_an_added_line_is_judged(self):
-        key = '-----BEGIN RSA PRIVATE KEY-----\n{}\n-----END RSA PRIVATE KEY-----\n'
+        key = '-----BEGIN RSA ' + 'PRIVATE KEY-----\n{}\n-----END RSA ' + 'PRIVATE KEY-----\n'
         base = self.write_commit('k.pem', key.format('placeholder'))
         body = base64.b64encode(bytes(range(256)) * 3).decode()
         head = self.write_commit('k.pem', key.format('\n'.join(body[i:i + 64] for i in range(0, len(body), 64))))
