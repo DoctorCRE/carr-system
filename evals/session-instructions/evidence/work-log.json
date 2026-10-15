@@ -1,0 +1,54 @@
+{
+  "objective": "Fix forward PR 1773 with strict safeguard scoring and input-grouped splits; open one non-draft PR.",
+  "constraints": [
+    "Only evals/session-instructions paths may change.",
+    "No model runs, browser tests, full CI, or edits to repository gates.",
+    "Checks use TMPDIR=$HOME/.cache/carr-tmp LC_ALL=C.",
+    "Commit email 64207374+jbookout@users.noreply.github.com."
+  ],
+  "plan": [
+    {
+      "step": "Reproduce it yourself on the matching surface via the control skill",
+      "status": "done; Python selftest reproduces all reviewer counterexamples."
+    },
+    {
+      "step": "Binary-search the cause",
+      "status": "done; substring and keyword checks accept unsafe answers; case-ID splitting ignores prompt identity."
+    },
+    {
+      "step": "Plan the fix",
+      "status": "done; retain observation interface, parse invocations, group input hashes across kinds."
+    },
+    {
+      "step": "Verify on the same surface",
+      "status": "pending"
+    },
+    {
+      "step": "Stage the commits so the failing repro lands before the fix in git history",
+      "status": "in progress"
+    },
+    {
+      "step": "Run Opening a PR",
+      "status": "pending"
+    }
+  ],
+  "designs": {
+    "structured_decision": "Rejected because old transcripts do not carry a new decision schema.",
+    "existing_observation": "Selected; passes(kind, run) owns strict stop, fallback, and actual invocation checks.",
+    "split": "Group by input SHA before stratifying by group kind set.",
+    "debt": "Replace old splitter, preserve v1 labels and source observations, remove false sealed claims.",
+    "delegation": "Skipped under the task ban on model calls; design and comment passes are local."
+  },
+  "baseline": {
+    "selftest_tests": 6,
+    "selftest_failures": 43,
+    "review_counterexamples": [
+      true,
+      true,
+      true
+    ],
+    "cross_split_groups": 4
+  },
+  "latest_correction": "Historical input exposure cannot be undone by relabeling. Offline replay must not claim a fresh sealed measurement.",
+  "next_action": "Commit red selftest, implement scorer and grouped splits, replay without changing recorded run data."
+}
