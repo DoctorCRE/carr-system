@@ -120,9 +120,10 @@ class FakeClient {
         e.subject_id === params[1] && e.field === params[2]).map(e => ({ recorded_at: e.recorded_at, id: e.id })) };
     }
     if (sql.includes("dealroom:latest-field-event")) {
-      const [dealId, field, baseTime, baseId] = params;
+      const [dealId, field, baseId] = params;
+      const base = baseId ? this.events.find(e => e.id === baseId) : null;
       const rows = this.events.filter(e => e.subject_type === "deal" && e.subject_id === dealId && e.field === field)
-        .filter(e => !baseTime || this.tupleAfter(e, String(baseTime), String(baseId)))
+        .filter(e => !base || this.tupleAfter(e, base.recorded_at, base.id))
         .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at) || b.id.localeCompare(a.id));
       return { rows: rows.slice(0, 1).map(e => ({ event_id: e.id, actor_id: e.actor_id,
         actor: e.actor, value: e.new_value?.[field] ?? null })) };

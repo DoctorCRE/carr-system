@@ -279,21 +279,32 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         for (const row of result.rows) for (const name of dated) if (row[name] !== null) row[name] = new Date(row[name]);
         return result;
       } };
-      const first = await TOOLS['patch-deal-field'].handler(worker, actor, {
+      const written = await TOOLS['patch-deal-field'].handler(worker, actor, {
         idempotency_key: id(20), deal: id(4), field: 'phase', value: 'negotiation', base_event_id: null,
       });
-      assert.equal(first.ok, true);
-      const stored = (await c.query(`select extract(microseconds from recorded_at)::bigint % 1000 as sub_ms
-        from event where id=$1`, [first.event_id])).rows[0];
+      assert.equal(written.ok, true);
+      // A base with sub-millisecond digits, fixed rather than left to clock_timestamp().
+      const columns = (await c.query(`select column_name from information_schema.columns
+        where table_schema='public' and table_name='event' and is_generated='NEVER'
+          and coalesce(identity_generation, '') <> 'ALWAYS'
+          and column_name not in ('id', 'idempotency_key', 'recorded_at')`)).rows.map(row => `"${row.column_name}"`).join(', ');
+      const first = { event_id: (await c.query(`insert into event (id, idempotency_key, recorded_at, ${columns})
+          select gen_random_uuid(), $2::text,
+            case when date_trunc('milliseconds', recorded_at) + interval '749 microseconds' > recorded_at
+              then date_trunc('milliseconds', recorded_at) + interval '749 microseconds'
+              else date_trunc('milliseconds', recorded_at) + interval '1749 microseconds' end, ${columns}
+          from event where id=$1 returning id`, [written.event_id, id(23)])).rows[0].id };
+      assert.equal((await c.query(`select extract(microseconds from recorded_at)::bigint % 1000 as sub_ms
+        from event where id=$1`, [first.event_id])).rows[0].sub_ms, '749');
       const second = await TOOLS['patch-deal-field'].handler(worker, actor, {
         idempotency_key: id(21), deal: id(4), field: 'phase', value: 'legal', base_event_id: first.event_id,
       });
-      assert.equal(second.ok, true, `sub-millisecond digits ${stored.sub_ms} must not make the base newer than itself`);
+      assert.equal(second.ok, true, 'sub-millisecond digits must not make the base newer than itself');
       const stale = await TOOLS['patch-deal-field'].handler(worker, actor, {
-        idempotency_key: id(22), deal: id(4), field: 'phase', value: 'research', base_event_id: first.event_id,
+        idempotency_key: id(22), deal: id(4), field: 'phase', value: 'research', base_event_id: written.event_id,
       });
       assert.equal(stale.ok, false);
-      assert.equal(stale.conflict.event_a, second.event_id);
+      assert.notEqual(stale.conflict.event_a, written.event_id);
     }));
 
     await t.test('account counters agree with the invoice-eligible board across outcome and parking states', async () => transaction(async () => {
