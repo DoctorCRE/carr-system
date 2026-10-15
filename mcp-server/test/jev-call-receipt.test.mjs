@@ -247,6 +247,18 @@ test("JEV_WORKER_DAILY_CAP overrides the default ceiling", async () => {
   }
 });
 
+test("an override past the safe integer range keeps the default ceiling", async () => {
+  for (const override of ["9".repeat(400), "9007199254740993"]) {
+    const fetchImpl = fakeFetch([jsonResponse(200, { model: "m", answers: ANSWERS })]);
+    const { ask, seen } = cappedAsk({ JEV_WORKER_DAILY_CAP: override }, { count: () => 300, fetchImpl });
+    const out = await prefetchJevAnswer(askArgs({ transport_mode: "paid_once" }), ask);
+    assert.deepEqual(out.error, { error: "jev_worker_daily_cap", cap: 300, count: 300,
+      resets_at: "2026-10-16T00:00:00.000Z" }, `${override.length}-digit override`);
+    assert.equal(seen.reservations, 0);
+    assert.equal(fetchImpl.calls.length, 0);
+  }
+});
+
 test("an unreadable day count refuses as jev_receipt_store_unavailable before reserving", async () => {
   for (const count of [() => { throw new Error("db down"); }, () => "12", () => -1, null]) {
     const fetchImpl = fakeFetch([jsonResponse(200, { model: "m", answers: ANSWERS })]);
