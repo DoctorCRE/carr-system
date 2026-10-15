@@ -80,10 +80,10 @@ worker error, so those exact inner causes remain unresolved.
    moves before release. It never retries a mutation. Geometry and pointer
    cleanup are locally verified; hosted browser verification remains required.
 3. Four CARR runs failed Docker Hub's unauthenticated Postgres pull limit. PR CI
-   and the main canary use Docker's official Postgres image through ECR Public.
+   and the main canary use Docker's official Postgres image through Google's public Docker Hub mirror.
    The major version and all database checks stay. The health command names the
    throwaway database and role, avoiding repeated root-role errors in logs.
-   [AWS documents unauthenticated public pulls](https://docs.aws.amazon.com/AmazonECR/latest/public/docker-pull-ecr-image.html).
+   [Google documents this mirror](https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images). The exact OCI index was fetched successfully and its SHA-256 digest and Linux amd64 entry verified before pinning.
 4. CI flake proposals ran 632 times, including 625 completion-triggered runs.
    The existing daily two-day reconciliation remains, with manual dispatch.
    Removing the completion chain cuts this workflow to seven scheduled runs per
