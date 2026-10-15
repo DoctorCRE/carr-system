@@ -166,7 +166,7 @@ test("a triaged request superseded through the verb is recorded as leaving triag
 
 test("every refusal the supersede function names reaches the caller by that name", async () => {
   const names = ["withdrawal_reason_missing", "unknown_actor", "successor_not_found", "successor_is_self",
-    "successor_withdrawn", "successor_not_sourced", "supersession_cycle", "triaged_work_request_has_downstream_evidence"];
+    "successor_withdrawn", "successor_not_sourced", "supersession_cycle", "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"];
   for (const name of names) {
     const detail = `${name}: WR-000032 is named by ops.sourced_work_request_plan.work_request_id`;
     const out = await rejected(() => executeRegisteredTool(new WithdrawFake({ from: "triaged", refusal: detail }),

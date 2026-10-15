@@ -41,10 +41,14 @@ WHAT IT PROVES, in the order a reader would want it:
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import pathlib
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import uuid
 
 import psycopg
@@ -154,12 +158,94 @@ def capture(cur, title):
         (title, CRITERIA, SEC, REV, str(uuid.uuid4()))).fetchone()[0]
 
 
+def wait_for_blocker(observer, future, waiter_pid, blocker_pid):
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if future.done():
+            raise RuntimeError(f"supersession did not wait for the evidence writer: {future.result()}")
+        blockers = observer.execute("select pg_blocking_pids(%s)", (waiter_pid,)).fetchone()[0]
+        if blocker_pid in blockers:
+            return
+        time.sleep(0.02)
+    raise RuntimeError("supersession never blocked on the evidence writer")
+
+
+def concurrency_test(dsn):
+    # This test commits fixtures. It is only for the disposable loopback database.
+    from psycopg.conninfo import conninfo_to_dict
+    info = conninfo_to_dict(dsn)
+    if info.get("host") not in ("127.0.0.1", "localhost", "::1") or (
+            info.get("hostaddr") and info["hostaddr"] not in ("127.0.0.1", "::1")):
+        raise RuntimeError("--concurrency-only requires a disposable loopback DATABASE_URL")
+
+    with psycopg.connect(dsn) as setup:
+        cur = setup.cursor()
+        fixture(cur)
+        retired, successor = capture(cur, "Concurrent evidence"), capture(cur, "Concurrent successor")
+        triage(cur, retired)
+        request_id = cur.execute("select id from ops.work_request where ref=%s", (retired,)).fetchone()[0]
+    now = datetime.now(timezone.utc)
+    scope = {"workflow_key": "wr-withdrawal-concurrency", "workflow_version": 1,
+             "work_request_id": retired}
+    evidence = {"layer": "controller_assessment", "basis": "controller_observation", "status": "pass",
+                "subject_ref": "controller:withdrawal-gate", "evidence_ref": "test:" + str(uuid.uuid4()),
+                "evidence_digest": "sha256:" + "a" * 64, "observed_at": now.isoformat(),
+                "expires_at": (now + timedelta(hours=1)).isoformat(),
+                "detail": {"controller_state": "running", "readback_source": "withdrawal-gate",
+                           "readback_at": now.isoformat()}, "incident_refs": [], "recovery_refs": []}
+    with psycopg.connect(dsn, autocommit=True) as writer, psycopg.connect(dsn, autocommit=True) as superseder:
+        writer.execute("set statement_timeout='10s'")
+        superseder.execute("set statement_timeout='10s'")
+        # Use the database's declared basis; this test targets serialization.
+        evidence["basis"] = writer.execute(
+            "select ops.assurance_health_basis('controller_assessment')").fetchone()[0]
+        writer_pid = writer.info.backend_pid
+        superseder_pid = superseder.info.backend_pid
+        writer.execute("begin")
+        writer.execute("set local carr.acting_actor_slug='joe'")
+        receipt = writer.execute("select ops.record_assurance_health_evidence(%s,%s,%s)",
+                                 (Jsonb(scope), Jsonb(evidence), uuid.uuid4())).fetchone()[0]
+        if receipt.get("replayed") is not False or not receipt.get("id"):
+            raise RuntimeError(f"evidence writer did not insert: {receipt}")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            def supersede():
+                try:
+                    superseder.execute("select ops.supersede_sourced_work_request(%s,2,'carried forward',%s,'joe',%s)",
+                                       (retired, successor, uuid.uuid4()))
+                    return "accepted"
+                except psycopg.Error as exc:
+                    return str(exc.diag.message_primary or exc)
+            pending = pool.submit(supersede)
+            try:
+                wait_for_blocker(writer, pending, superseder_pid, writer_pid)
+            finally:
+                writer.execute("commit")
+            message = pending.result(timeout=12)
+        if not message.startswith("triaged_work_request_has_downstream_evidence:") or (
+                "ops.assurance_health_evidence.work_request_id" not in message):
+            raise RuntimeError(f"committed evidence was not named as a strand: {message}")
+        state = writer.execute("select state,version from ops.work_request where id=%s", (request_id,)).fetchone()
+        if state != ("triaged", 2):
+            raise RuntimeError(f"concurrent supersession changed the request: {state}")
+        if writer.execute("select work_request_id from ops.assurance_health_evidence where id=%s",
+                          (receipt["id"],)).fetchone() != (retired,):
+            raise RuntimeError("committed evidence lost its Work Request")
+    print("PASS: uncommitted evidence blocks supersession; committed evidence refuses it by name")
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--concurrency-only", action="store_true",
+                        help="commit fixtures on a disposable loopback database and test two connections")
+    args = parser.parse_args()
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         print("work-request-withdrawal-db-gate: DATABASE_URL is not set", file=sys.stderr)
         return 1
     try:
+        if args.concurrency_only:
+            concurrency_test(dsn)
+            return 0
         with rollback_only_connection(dsn) as conn:
             cur = conn.cursor()
             actor = fixture(cur)
@@ -270,6 +356,15 @@ def main() -> int:
                 " where succ.ref = %s", (successor,)).fetchall()
             if kept != [("operational", 1, 2, retired)]:
                 raise RuntimeError(f"the triage receipt is not readable through superseded_by: {kept}")
+
+            retired_id = cur.execute("select id from ops.work_request where ref=%s", (retired,)).fetchone()[0]
+            for table, column, value in (
+                    ("public.room_dispatch_link", "work_request_id", retired_id),
+                    ("ops.assurance_health_evidence", "work_request_id", retired),
+                    ("ops.release", "work_request_ref", retired),
+                    ("ops.engineering_stale_contract_fence", "work_request_ref", retired)):
+                refuses_named(cur, f"insert into {table} ({column}) values (%s)", (value,),
+                              "work_request_evidence_not_live:", f"new evidence on a retired request in {table}")
 
             # --- 0883: the triage receipt is evidence -----------------------------
             refuses_named(cur, "update ops.work_request_triage_receipt set classification='safety_review'",
