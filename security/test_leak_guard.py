@@ -705,5 +705,19 @@ class LeakGuardTest(unittest.TestCase):
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_street_names_with_function_words_stay_addresses(self):
+        flagged = ['843 Isle of Fiction' + ' avenue', '843 Imaginary and Fictional' + ' lane', '843 A' + ' street',
+                   '12 On the Green' + ' way', '77 Rue de la Fiction' + ' road']
+        (self.root / 'address.txt').write_text('\n'.join(flagged) + '\n')
+        self.git('add', 'address.txt')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.stdout, ''.join(f'address.txt:{n} pii-address\n' for n in range(1, len(flagged) + 1)))
+        self.git('rm', '-q', '--cached', 'address.txt')
+        base = self.write_commit('data.txt', 'safe\n')
+        self.write_commit('data.txt', flagged[0] + '\n')
+        head = self.write_commit('data.txt', 'safe\n')
+        result = self.run_guard('--range', base + '..' + head, '--remote', 'none', '--generic-only')
+        self.assertEqual(result.stdout, 'data.txt:1 pii-address\n')
+
 if __name__ == '__main__':
     unittest.main()

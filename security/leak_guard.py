@@ -36,10 +36,12 @@ ARCHIVES = {
 STREET_WORDS = ('Street', 'St', 'Avenue', 'Ave', 'Road', 'Rd', 'Drive', 'Dr', 'Lane',
                 'Ln', 'Boulevard', 'Blvd', 'Court', 'Ct', 'Way', 'Place', 'Pl',
                 'Parkway', 'Pkwy')
-# Function words and units that put a number and a street word in prose, not an address.
-PROSE_WORDS = frozenset('''a an the to of in on at by for from with into onto and or but is are was were be been
-    we i you he she it they me us them my our your his her its their this that these those as than then so
-    about over down up per one more less best took take takes went go goes get got met people times
+# Words that put a number and a street word in prose rather than an address: pronouns,
+# verbs, units and prepositions street names do not use. Articles, "of", "and", "on"
+# and "in" are left out because names use them ("Isle of Fiction Avenue", "On the Green Way").
+PROSE_WORDS = frozenset('''to at by for from with into is are was were be been
+    we i you he she it they me us them my our your his her its their this that these those than then so
+    about over down up per more less best took take takes went go goes get got met people times
     minute minutes hour hours day days week weeks mile miles km step steps'''.split())
 PII = {
     'pii-email': re.compile(r'(?<![A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&\x27*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+'),
