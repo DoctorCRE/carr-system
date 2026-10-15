@@ -70,7 +70,7 @@ const READ_LIMIT_MAX = 500;
 // This counts the attempt ledger's paid rows for the UTC day, whoever asked,
 // before any reservation, and counts again inside the reservation transaction
 // under one advisory lock, so concurrent callers at the boundary cannot both
-// reserve. JEV_WORKER_DAILY_CAP overrides it; a value that is not a whole
+// reserve. JEV_WORKER_DAILY_CAP overrides it; a value that is not a safe whole
 // number keeps this default.
 const WORKER_DAILY_CAP_DEFAULT = 300;
 
@@ -144,7 +144,9 @@ async function verifyAdmission(secret, token, session, now) {
 
 function workerDailyCap(env) {
   const raw = env?.JEV_WORKER_DAILY_CAP;
-  return typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : WORKER_DAILY_CAP_DEFAULT;
+  // A digit string past the safe range parses to Infinity, which lifts the cap.
+  const cap = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(cap) ? cap : WORKER_DAILY_CAP_DEFAULT;
 }
 
 function nextUtcMidnight(ms) {
