@@ -288,7 +288,7 @@ def report():
          "baseline_ref": BASELINE_REF, "deps": deps, "repeats": REPEATS}, sort_keys=True))
     receipt = {
         "schema_version": 2, "surface": SURFACE,
-        "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and says the map-architecture Stop gate only announces a skip, so the session enforces the route itself.",
+        "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and deletes the sentence claiming the Stop gate enforces the map-architecture route, replacing it with nothing (candidate f9016574c).",
         "measured_on": now, "rung": "regression",
         "adapter": {"surface": "claude_code_cli", "adapter_id": "claude-p-single-turn-no-tools", "adapter_version": "1",
                     "harness_id": f"evals/{SURFACE}/run_eval.py", "harness_version": source[f"evals/{SURFACE}/run_eval.py"],
@@ -310,9 +310,8 @@ def report():
         "cost": {"baseline_usd_per_case": round(cost["baseline"], 6), "candidate_usd_per_case": round(cost["candidate"], 6)},
         "verdict": {"decision": decision, "statement": f"Test split, {MODEL} ({model_id}), {REPEATS} repeats per case: {parts}. {tail}"},
         "notes": ["Single-turn, tool-less simulation of the session log: it measures what the model says it would do next, not live tool behaviour. Production session transcripts were not read (access refused as a PII boundary); map prompts come from the map gate's regression fixtures, store-down and quiet cases are hand-written seeds over fixture task text.",
-                  "Disclosure: after the first scoring pass the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. The one test case whose aggregate failure pattern was inspected is no_map-04 (candidate called map-architecture on a historical mention in 5 of 5 repeats, baseline 1 of 5); no test transcripts were read.",
-                  "Finding: the new 'the session enforces this route itself' wording made haiku call map-architecture on a mere mention of a tour map, where the old wording mostly did not. The store-down stop improved (failed repeats fell from 9 of 60 to 2 of 60 on the test split), but the gain is smaller than the pre-declared useful gain.",
-                  "The Stop-gate half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."],
+                  "Disclosure: after the first scoring pass of an earlier candidate (a9c1d10, which said the session enforces the route itself) the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. That earlier candidate called map-architecture on the historical mention no_map-04 in 5 of 5 repeats (baseline 1 of 5). This re-measurement reuses the same cases, split, seed, grader and min_useful_gain unchanged, with only the candidate AGENTS.md replaced. No test transcripts were read.",
+                  "The map half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."],
         "evidence": {"scorer": {"path": f"evals/{SURFACE}/score.py", "function": "score"}, "source": source,
                      "dependencies": deps,
                      "expectations": {"path": f"evals/{SURFACE}/expectations.v1.json", "version": VERSION,

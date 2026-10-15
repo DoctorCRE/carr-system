@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "surface": "session-instructions",
-  "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and says the map-architecture Stop gate only announces a skip, so the session enforces the route itself.",
+  "change": "AGENTS.md drops the vault compiled-rules file fallback (say so and stop when the store is unreachable) and deletes the sentence claiming the Stop gate enforces the map-architecture route, replacing it with nothing (candidate f9016574c).",
   "measured_on": "2026-10-15",
   "rung": "regression",
   "adapter": {
@@ -9,11 +9,11 @@
     "adapter_id": "claude-p-single-turn-no-tools",
     "adapter_version": "1",
     "harness_id": "evals/session-instructions/run_eval.py",
-    "harness_version": "5b5376f180593ed7fef3bf2fb1c967c3d52a107341139dd5e688e0ebeea1c864",
+    "harness_version": "069e79f9587578907bd96ff1ca781954edda6bd9f1cb4ac8d1e68e635c0f7f07",
     "provider_id": "anthropic",
     "model_id": "claude-haiku-4-5-20251001",
-    "native_session_ref": "b3664669-5dd5-474f-871f-b4fa883bc0ec",
-    "configuration_fingerprint": "sha256:7582b033df9c080b4ea6273378935a73d82a075d268060d5c91bafbe94894c35"
+    "native_session_ref": "2b0c4cc4-9b24-422f-a182-1074897f0c77",
+    "configuration_fingerprint": "sha256:b06bd82400fb26c0867b586f5a96830534bf6c163876dc1e694842458fbfb0e5"
   },
   "cases": {
     "total": 60,
@@ -49,25 +49,25 @@
       "dimension_id": "store-unreachable-stops",
       "critical": true,
       "status": "passed",
-      "direction_vs_baseline": "improved",
+      "direction_vs_baseline": "equivalent",
       "evidence_refs": [
         "evals/session-instructions/evidence/baseline.jsonl",
         "evals/session-instructions/evidence/candidate.jsonl"
       ],
       "baseline": {
-        "score": 0.85,
-        "ci_low": 0.7333333333333334,
-        "ci_high": 0.9500000000000001
+        "score": 0.8833333333333333,
+        "ci_low": 0.7999999999999999,
+        "ci_high": 0.9666666666666667
       },
       "candidate": {
-        "score": 0.9666666666666667,
-        "ci_low": 0.9166666666666666,
+        "score": 0.9833333333333334,
+        "ci_low": 0.9500000000000001,
         "ci_high": 1.0
       },
       "delta": {
-        "value": 0.1166666666666667,
-        "ci_low": 0.033333333333333326,
-        "ci_high": 0.23333333333333317
+        "value": 0.10000000000000009,
+        "ci_low": 0.0,
+        "ci_high": 0.20000000000000007
       }
     },
     {
@@ -105,19 +105,19 @@
         "evals/session-instructions/evidence/candidate.jsonl"
       ],
       "baseline": {
-        "score": 0.9800000000000001,
-        "ci_low": 0.9400000000000001,
+        "score": 0.96,
+        "ci_low": 0.9,
         "ci_high": 1.0
       },
       "candidate": {
-        "score": 0.86,
-        "ci_low": 0.6599999999999999,
+        "score": 0.9199999999999999,
+        "ci_low": 0.76,
         "ci_high": 1.0
       },
       "delta": {
-        "value": -0.1200000000000001,
-        "ci_low": -0.28000000000000014,
-        "ci_high": 0.0
+        "value": -0.040000000000000036,
+        "ci_low": -0.22000000000000008,
+        "ci_high": 0.08000000000000007
       }
     }
   ],
@@ -137,18 +137,17 @@
     }
   ],
   "cost": {
-    "baseline_usd_per_case": 0.00718,
-    "candidate_usd_per_case": 0.007115
+    "baseline_usd_per_case": 0.007451,
+    "candidate_usd_per_case": 0.006679
   },
   "verdict": {
-    "decision": "inconclusive",
-    "statement": "Test split, haiku (claude-haiku-4-5-20251001), 5 repeats per case: store-unreachable-stops 0.85 -> 0.97 (delta +0.12, 95% [+0.03, +0.23]); map-front-door-called 1.00 -> 1.00 (delta +0.00, 95% [+0.00, +0.00]); quiet-when-not-applicable 0.98 -> 0.86 (delta -0.12, 95% [-0.28, +0.00]). The measurement cannot see the claimed win."
+    "decision": "ship_cost_at_parity",
+    "statement": "Test split, haiku (claude-haiku-4-5-20251001), 5 repeats per case: store-unreachable-stops 0.88 -> 0.98 (delta +0.10, 95% [+0.00, +0.20]); map-front-door-called 1.00 -> 1.00 (delta +0.00, 95% [+0.00, +0.00]); quiet-when-not-applicable 0.96 -> 0.92 (delta -0.04, 95% [-0.22, +0.08]). Quality-flat: do not merge on quality grounds."
   },
   "notes": [
     "Single-turn, tool-less simulation of the session log: it measures what the model says it would do next, not live tool behaviour. Production session transcripts were not read (access refused as a PII boundary); map prompts come from the map gate's regression fixtures, store-down and quiet cases are hand-written seeds over fixture task text.",
-    "Disclosure: after the first scoring pass the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. The one test case whose aggregate failure pattern was inspected is no_map-04 (candidate called map-architecture on a historical mention in 5 of 5 repeats, baseline 1 of 5); no test transcripts were read.",
-    "Finding: the new 'the session enforces this route itself' wording made haiku call map-architecture on a mere mention of a tour map, where the old wording mostly did not. The store-down stop improved (failed repeats fell from 9 of 60 to 2 of 60 on the test split), but the gain is smaller than the pre-declared useful gain.",
-    "The Stop-gate half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."
+    "Disclosure: after the first scoring pass of an earlier candidate (a9c1d10, which said the session enforces the route itself) the store_up grader was changed (a clarifying question because the tool-less harness cwd is not the repo no longer counts as a failed proceed); the diagnosis came from train transcripts only. That earlier candidate called map-architecture on the historical mention no_map-04 in 5 of 5 repeats (baseline 1 of 5). This re-measurement reuses the same cases, split, seed, grader and min_useful_gain unchanged, with only the candidate AGENTS.md replaced. No test transcripts were read.",
+    "The map half of the change is measured as: after skipping the verb with a Stop hook present, does the session call it itself."
   ],
   "evidence": {
     "scorer": {
@@ -157,10 +156,10 @@
     },
     "source": {
       "evals/session-instructions/score.py": "46a6deeff6a60c7210909a96e9fdafda903cc74b7b2127a2a95b22681ab1c43e",
-      "evals/session-instructions/run_eval.py": "5b5376f180593ed7fef3bf2fb1c967c3d52a107341139dd5e688e0ebeea1c864"
+      "evals/session-instructions/run_eval.py": "069e79f9587578907bd96ff1ca781954edda6bd9f1cb4ac8d1e68e635c0f7f07"
     },
     "dependencies": {
-      "AGENTS.md": "6f6cd5e155a4204173b9d49d1e12ea10cd23b469e88e9a70f62e58066f5c65b1"
+      "AGENTS.md": "5a2de3a274ba60a7265785b23f64bc1ee7e0b28b142141b9c2e0d42e9ab05f05"
     },
     "expectations": {
       "path": "evals/session-instructions/expectations.v1.json",
@@ -170,11 +169,11 @@
     "cohorts": {
       "baseline": {
         "path": "evals/session-instructions/evidence/baseline.jsonl",
-        "sha256": "052625d1e5b5c1b7eb8a9cb9a61220be56bba032bbec9149ea4e9a35bc255fed"
+        "sha256": "c3c8cd9d6f94704810a6f43015e73693954d258d2fd4564dc6223419873db027"
       },
       "candidate": {
         "path": "evals/session-instructions/evidence/candidate.jsonl",
-        "sha256": "7d05a80206f8afa55ab964aa0e1129963031b8498afaf7e7025b5bbe726ca768"
+        "sha256": "167a101915929cb2b688d783f5a58e599af7d94d6c63b2d564eba660cfcf5460"
       }
     }
   }
