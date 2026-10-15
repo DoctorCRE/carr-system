@@ -345,6 +345,11 @@ def matches(entry: dict[str, Any], reference: Reference) -> bool:
 
 def audit(root: Path, registry: dict[str, Any]) -> tuple[list[Reference], list[Reference], list[tuple[Reference, list[str]]]]:
     entries = validate_registry(registry, schema=_read_json(_schema_path(root)))
+    tracked = [path.relative_to(root).as_posix() for path, _mode in _tracked_paths(root)]
+    stale = [f"{entry['id']}: {source}" for entry in entries for source in entry["sources"]
+             if not any(fnmatch.fnmatchcase(rel, source) for rel in tracked)]
+    if stale:
+        raise InventoryError(f"sources match no tracked path: {'; '.join(stale)}")
     refs = scan(root, list(registry["binary_exclusions"]))
     uncovered: list[Reference] = []
     multiple: list[tuple[Reference, list[str]]] = []
