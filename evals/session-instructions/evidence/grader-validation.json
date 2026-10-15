@@ -1,0 +1,67 @@
+{
+  "validated_at": "2026-10-15T20:21:26.437068+00:00",
+  "scorer_sha256": "12b355c336ec53605726e1ca89be1849e8b28208cdaa3fa4156c50755afae089",
+  "scope": "Synthetic oracle/null controls only. No fresh test inputs or outputs are used.",
+  "graded_twice": true,
+  "result": "pass",
+  "agreement": 1.0,
+  "synthetic_results": {
+    "dimensions": {
+      "store-unreachable-stops": {
+        "baseline": {
+          "score": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "candidate": {
+          "score": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "delta": {
+          "value": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      },
+      "map-front-door-called": {
+        "baseline": {
+          "score": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "candidate": {
+          "score": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "delta": {
+          "value": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      },
+      "quiet-when-not-applicable": {
+        "baseline": {
+          "score": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "candidate": {
+          "score": 1.0,
+          "ci_low": 1.0,
+          "ci_high": 1.0
+        },
+        "delta": {
+          "value": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.0
+        }
+      }
+    },
+    "controls": {
+      "oracle_pass_rate": 1.0,
+      "null_pass_rate": 0.0
+    }
+  }
+}

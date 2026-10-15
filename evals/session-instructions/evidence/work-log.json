@@ -1,5 +1,5 @@
 {
-  "objective": "Repair PR 1790 hosted eval-receipt and door-reachability failures; commit, push, and comment on the owned branch.",
+  "objective": "Repair PR 1790 seal integrity using genuinely fresh held-out capture on the orchestrator machine.",
   "constraints": [
     "Only evals/session-instructions paths may change.",
     "No model runs, browser tests, full CI, or edits to repository gates.",
@@ -49,8 +49,8 @@
     ],
     "cross_split_groups": 4
   },
-  "latest_correction": "sealed_test applies to the new train-only scorer selection and frozen offline replay only. Historical model-input leakage remains disclosed and the verdict remains inconclusive.",
-  "next_action": "Commit the scoped changes, push fix-forward-1773-session-eval, update PR 1790, and verify the remote head and posted comment.",
+  "latest_correction": "All historical observations informed scorer development and belong to train. The earlier replay seal is invalid. Only future fresh answers may establish a new seal after the committed scorer freeze.",
+  "next_action": "Push the second scoped commit, comment PR 1790 with capture-fresh and report-fresh commands, and leave real capture to the orchestrator.",
   "verification": {
     "selftest_tests": 9,
     "assertion_mutations_caught": 4,
@@ -186,13 +186,43 @@
       "Only evals/session-instructions writes",
       "No model calls in this sandbox",
       "No browser tests or full ops/ci.sh",
-      "Push quarantine/freeze before creating fresh cases"
+      "Push quarantine/freeze before creating fresh cases",
+      "No nested model delegation; required independent review remains with the orchestrator",
+      "Capture and report each refuse re-execution after a start marker; unknown model outcomes are not retried"
     ],
     "progress": [
       "All 60 cases / 52 input groups moved to train",
-      "Scorer unchanged and hash frozen before any fresh case exists"
+      "Scorer unchanged and hash frozen before any fresh case exists",
+      "Step 1 pushed at c33e24bc62fa572c664dc9804888d7b0b0c1581f before fresh seeds existed",
+      "Authored 48 new hand-written seeds and expectations after freeze",
+      "Built guarded capture-fresh and one-pass report-fresh; no real model capture"
     ],
-    "next_action": "Verify and push step 1, then author fresh cases and guarded capture/report commands",
-    "pending_operations": []
+    "next_action": "Push the second scoped commit, comment PR 1790 with capture-fresh and report-fresh commands, and leave real capture to the orchestrator.",
+    "pending_operations": [],
+    "design_and_debt_pass": {
+      "codebase-design": "Compared a separate capture module against restoring capture/report at the existing runner. Kept one runner and the pure frozen score interface. The capture manifest owns sources and cohort bindings; exclusive start records own lifecycle state.",
+      "zero-tech-debt": "Deleted historical prepare/report paths that could falsely reseal exposed observations. The build command now reproduces train quarantine via the retained replay function. No compatibility alias or extra executable capture command.",
+      "deslop": "Reviewed the scoped diff, removed draft branches and unused imports, retained lossless answer parsing and boundary checks."
+    },
+    "verification": {
+      "unit_tests": 12,
+      "safeguard_selftests": 13,
+      "scorer_mutations_caught": 6,
+      "assertion_mutations_caught": 4,
+      "checks_environment": "LC_ALL=C TMPDIR=$HOME/.cache/carr-tmp PYTHONDONTWRITEBYTECODE=1",
+      "synthetic_report_evidence_errors": [],
+      "synthetic_report_claim_errors": [
+        "cases.sources must include production_trace or human_judged_hard_case: real traffic and human-judged hard cases come first"
+      ],
+      "real_capture": "NOT RUN",
+      "fresh_inputs": 48,
+      "fresh_expected_calls": 480,
+      "original_records_preserved": 600
+    },
+    "limitations": [
+      "Fresh seeds are synthetic hand_written, not newly human-judged or production cases. The reporter preserves that provenance and returns inconclusive unless any critical regression requires do_not_merge. Existing receipt source-realism requirements remain unsatisfied.",
+      "The closed grammar may reject verbose safe refusals. No fresh answer may be used to tune the frozen scorer.",
+      "Unknown CLI outcomes are not retried, unlike the historical runner retry loop. The exact original flags, output contract, arms, and repeat count are retained."
+    ]
   }
 }

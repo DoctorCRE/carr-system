@@ -55,7 +55,8 @@
   "notes": [
     "Review 6200891343 invalidates the previous seal. Every historical input-hash group, including every former test answer, informed scorer development and is now train/dev.",
     "The scorer is frozen in evidence/scorer-freeze.json before fresh tasks exist. Original v1 observations remain unchanged; v2 observations change only split metadata.",
-    "Historical descriptive metrics are archived in evidence/receipt.v2.exposed.json with sealed_test=false. Capture and one fresh scoring pass must complete before receipt.json can claim sealed_test=true."
+    "Historical descriptive metrics are archived in evidence/receipt.v2.exposed.json with sealed_test=false. Capture and one fresh scoring pass must complete before receipt.json can claim sealed_test=true.",
+    "Fresh v3 expectations now predeclare 48 synthetic test-only inputs, requiring 480 Haiku calls across the two original AGENTS.md arms and five repeats. Capture has not run. The active receipt remains unsealed and inconclusive until report-fresh consumes a completed capture."
   ],
   "evidence": {
     "scorer": {
@@ -64,11 +65,14 @@
     },
     "source": {
       "evals/session-instructions/score.py": "12b355c336ec53605726e1ca89be1849e8b28208cdaa3fa4156c50755afae089",
-      "evals/session-instructions/run_eval.py": "d0997d145872aa36c7acb13cd63921494cef44f1d5d57ae19cdec490fb3861a0"
+      "evals/session-instructions/run_eval.py": "595e626c1df94c369fa245cb437d3c9a7651f980b3d1289c397958419a5b4ec7"
     },
     "dependencies": {
       "evals/session-instructions/evidence/scorer-freeze.json": "bd507811824e1a28037373be5c37c3d80c3f4801b9c3f4b75feb80e721bf9a00",
-      "evals/session-instructions/evidence/receipt.v2.exposed.json": "307768700495f3bfaa4082b6340d008104e52667f94696af2efa41ed0c2166db"
+      "evals/session-instructions/evidence/receipt.v2.exposed.json": "307768700495f3bfaa4082b6340d008104e52667f94696af2efa41ed0c2166db",
+      "evals/session-instructions/expectations.v3.json": "b7538e338192b721912ece33383d71254623b9874896b84e43e31ce774e23ef8",
+      "evals/session-instructions/evidence/fresh-plan.json": "f29b21c24b9c51f3a300f9fced26cc53eaeb5c369905e9aeafe4f60440c21f2e",
+      "evals/session-instructions/evidence/grader-validation.json": "fda3bf6499b93efc7bcdf5882f2c1a1d000309cc5768a6c521dcf524a8346c95"
     },
     "expectations": {
       "path": "evals/session-instructions/expectations.v2.json",

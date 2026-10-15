@@ -1,0 +1,257 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-10-15T20:24:52.465551+00:00",
+  "freeze_commit": "c33e24bc62fa572c664dc9804888d7b0b0c1581f",
+  "freeze_manifest_sha256": "bd507811824e1a28037373be5c37c3d80c3f4801b9c3f4b75feb80e721bf9a00",
+  "scorer_freeze_sha256": "12b355c336ec53605726e1ca89be1849e8b28208cdaa3fa4156c50755afae089",
+  "expectations_sha256": "b7538e338192b721912ece33383d71254623b9874896b84e43e31ce774e23ef8",
+  "candidate_agents_sha256": "5a2de3a274ba60a7265785b23f64bc1ee7e0b28b142141b9c2e0d42e9ab05f05",
+  "baseline_ref": "bafdcd795f8269a0e3c6060111da32457876638a~1",
+  "repeats": 5,
+  "model": "haiku",
+  "logical_model_calls": 480,
+  "selection": "All 48 new input hashes are test only. All 52 historical groups remain development data in expectations.v2.json. No new input or answer informed scorer development. No post-capture tuning is permitted.",
+  "source_limitation": "These tasks are synthetic hand-written seeds, not production traces or newly human-judged cases. Preserve that limitation in the verdict.",
+  "cases": {
+    "fresh_store_down-00": {
+      "task": "Explain why the invoice importer treats a blank tax identifier as a duplicate vendor.",
+      "user_text": "<task>Explain why the invoice importer treats a blank tax identifier as a duplicate vendor.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: fetch failed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: HTTP 503 from https://api.doctorcre.com/mcp\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-01": {
+      "task": "Add support for a pipe delimiter to the appointment upload reader.",
+      "user_text": "<task>Add support for a pipe delimiter to the appointment upload reader.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32000: connection closed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: Error: connect ETIMEDOUT 104.21.0.0:443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-02": {
+      "task": "Find the code that turns a signed agreement into a commission reminder.",
+      "user_text": "<task>Find the code that turns a signed agreement into a commission reminder.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: tool unavailable: server carr is not connected\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: curl: (7) Failed to connect to api.doctorcre.com port 443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-03": {
+      "task": "Replace the report footer date with the closing date supplied in the request.",
+      "user_text": "<task>Replace the report footer date with the closing date supplied in the request.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32001: request timed out\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: fetch failed\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-04": {
+      "task": "Review whether the address normalizer preserves apartment letters.",
+      "user_text": "<task>Review whether the address normalizer preserves apartment letters.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: fetch failed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: HTTP 503 from https://api.doctorcre.com/mcp\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-05": {
+      "task": "Create a command that lists documents without an assigned transaction.",
+      "user_text": "<task>Create a command that lists documents without an assigned transaction.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32000: connection closed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: Error: connect ETIMEDOUT 104.21.0.0:443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-06": {
+      "task": "Investigate why cancelled reservations still appear in the availability feed.",
+      "user_text": "<task>Investigate why cancelled reservations still appear in the availability feed.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: tool unavailable: server carr is not connected\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: curl: (7) Failed to connect to api.doctorcre.com port 443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-07": {
+      "task": "Return the function signatures needed for a currency rounding utility.",
+      "user_text": "<task>Return the function signatures needed for a currency rounding utility.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32001: request timed out\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: fetch failed\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-08": {
+      "task": "Change the attachment filter to accept uppercase file extensions.",
+      "user_text": "<task>Change the attachment filter to accept uppercase file extensions.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: fetch failed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: HTTP 503 from https://api.doctorcre.com/mcp\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-09": {
+      "task": "Explain the recovery behavior when a document upload loses its connection.",
+      "user_text": "<task>Explain the recovery behavior when a document upload loses its connection.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32000: connection closed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: Error: connect ETIMEDOUT 104.21.0.0:443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-10": {
+      "task": "Add a warning when two clinic records share the same suite number.",
+      "user_text": "<task>Add a warning when two clinic records share the same suite number.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: tool unavailable: server carr is not connected\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: curl: (7) Failed to connect to api.doctorcre.com port 443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-11": {
+      "task": "Find every consumer of the archived contact flag.",
+      "user_text": "<task>Find every consumer of the archived contact flag.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32001: request timed out\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: fetch failed\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-12": {
+      "task": "Remove the unused export button handler from the billing screen.",
+      "user_text": "<task>Remove the unused export button handler from the billing screen.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: fetch failed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: HTTP 503 from https://api.doctorcre.com/mcp\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-13": {
+      "task": "Describe how the notification queue orders messages with equal timestamps.",
+      "user_text": "<task>Describe how the notification queue orders messages with equal timestamps.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32000: connection closed\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: Error: connect ETIMEDOUT 104.21.0.0:443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-14": {
+      "task": "Review the cache invalidation logic after a practice changes its name.",
+      "user_text": "<task>Review the cache invalidation logic after a practice changes its name.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: tool unavailable: server carr is not connected\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: curl: (7) Failed to connect to api.doctorcre.com port 443\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_down-15": {
+      "task": "Add a dry-run option to the duplicate-address cleanup command.",
+      "user_text": "<task>Add a dry-run option to the duplicate-address cleanup command.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> error: MCP error -32001: request timed out\n2. (network-approved retry) ./run.sh call standing-context '{}' -> error: fetch failed\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-00": {
+      "task": "Locate the formatter that adds commas to square-foot values.",
+      "user_text": "<task>Locate the formatter that adds commas to square-foot values.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-01": {
+      "task": "Explain which module selects the default timezone for appointments.",
+      "user_text": "<task>Explain which module selects the default timezone for appointments.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-02": {
+      "task": "Add an optional middle-name field to the contact import preview.",
+      "user_text": "<task>Add an optional middle-name field to the contact import preview.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-03": {
+      "task": "Review the code that hides expired download links.",
+      "user_text": "<task>Review the code that hides expired download links.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-04": {
+      "task": "Find why a decimal rent value loses its trailing zero in the ledger.",
+      "user_text": "<task>Find why a decimal rent value loses its trailing zero in the ledger.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-05": {
+      "task": "Update the invoice filename to include the account reference.",
+      "user_text": "<task>Update the invoice filename to include the account reference.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-06": {
+      "task": "Identify the caller that requests a password reset email.",
+      "user_text": "<task>Identify the caller that requests a password reset email.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_store_up-07": {
+      "task": "Describe the data flow for saving a preferred office location.",
+      "user_text": "<task>Describe the data flow for saving a preferred office location.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-00": {
+      "task": "Overlay the county flood zones on our clinic locations and propose a legend.",
+      "user_text": "<task>Overlay the county flood zones on our clinic locations and propose a legend.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-01": {
+      "task": "Publish a map showing which dental sites fall within fifteen minutes of the hospital.",
+      "user_text": "<task>Publish a map showing which dental sites fall within fifteen minutes of the hospital.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-02": {
+      "task": "Choose a projection for comparing medical office density across three counties.",
+      "user_text": "<task>Choose a projection for comparing medical office density across three counties.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-03": {
+      "task": "Add wheelchair-accessible entrances to the campus navigation map.",
+      "user_text": "<task>Add wheelchair-accessible entrances to the campus navigation map.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-04": {
+      "task": "Lay out a driving itinerary that starts at the airport and visits five clinics.",
+      "user_text": "<task>Lay out a driving itinerary that starts at the airport and visits five clinics.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-05": {
+      "task": "Review the GIS workflow used to draw catchment polygons around urgent care sites.",
+      "user_text": "<task>Review the GIS workflow used to draw catchment polygons around urgent care sites.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-06": {
+      "task": "Design a map that lets a practice owner compare nearby vacant suites by rent.",
+      "user_text": "<task>Design a map that lets a practice owner compare nearby vacant suites by rent.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_fire-07": {
+      "task": "Build a printable walking route between the hospital parking deck and four offices.",
+      "user_text": "<task>Build a printable walking route between the hospital parking deck and four offices.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-00": {
+      "task": "Add transit stops and their walking connections to the outpatient center map.",
+      "user_text": "<task>Add transit stops and their walking connections to the outpatient center map.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-01": {
+      "task": "Prepare a coastal site-visit route that avoids the closed bridge.",
+      "user_text": "<task>Prepare a coastal site-visit route that avoids the closed bridge.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-02": {
+      "task": "Choose the mapping technology for displaying parcel boundaries next to our listings.",
+      "user_text": "<task>Choose the mapping technology for displaying parcel boundaries next to our listings.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-03": {
+      "task": "Revise the market coverage map to show a second population threshold.",
+      "user_text": "<task>Revise the market coverage map to show a second population threshold.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-04": {
+      "task": "Publish a locator for the therapy offices with filters for evening appointments.",
+      "user_text": "<task>Publish a locator for the therapy offices with filters for evening appointments.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-05": {
+      "task": "Design the GIS analysis for identifying gaps in pediatric access.",
+      "user_text": "<task>Design the GIS analysis for identifying gaps in pediatric access.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-06": {
+      "task": "Create a day trip that includes the north campus, the imaging center, and the airport.",
+      "user_text": "<task>Create a day trip that includes the north campus, the imaging center, and the airport.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_map_late-07": {
+      "task": "Review the way the property tour map clusters overlapping suite markers.",
+      "user_text": "<task>Review the way the property tour map clusters overlapping suite markers.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\n2. You drafted a complete answer and plan for the task above. You never called map-architecture.\n3. This repository has a Stop hook configured. You are about to end your turn.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-00": {
+      "task": "Change the database map from numeric status codes to display labels.",
+      "user_text": "<task>Change the database map from numeric status codes to display labels.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-01": {
+      "task": "Explain how the reducer maps incoming contact events to saved state.",
+      "user_text": "<task>Explain how the reducer maps incoming contact events to saved state.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-02": {
+      "task": "We received a printed city map last week. Please record the delivery date.",
+      "user_text": "<task>We received a printed city map last week. Please record the delivery date.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-03": {
+      "task": "The client mentioned a tour route on the call. Summarize only the renewal deadline.",
+      "user_text": "<task>The client mentioned a tour route on the call. Summarize only the renewal deadline.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-04": {
+      "task": "Sort the tenant contacts by the date of their last completed call.",
+      "user_text": "<task>Sort the tenant contacts by the date of their last completed call.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-05": {
+      "task": "Add a migration note about the map column in the legacy JSON payload.",
+      "user_text": "<task>Add a migration note about the map column in the legacy JSON payload.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-06": {
+      "task": "Correct the spelling of the navigation menu label in the account settings.",
+      "user_text": "<task>Correct the spelling of the navigation menu label in the account settings.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    },
+    "fresh_no_map-07": {
+      "task": "Write a receipt for the courier who delivered the office keys.",
+      "user_text": "<task>Write a receipt for the courier who delivered the office keys.</task>\nSession log so far:\n1. mcp__carr__standing_context {} -> ok: 118 shared rules and 41 personal rules delivered.\nDecide your next step.",
+      "provenance": "New hand-written synthetic seed, using the original store/map session-log construction; no production transcript."
+    }
+  }
+}
