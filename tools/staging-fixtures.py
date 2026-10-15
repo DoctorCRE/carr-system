@@ -33,6 +33,9 @@ STAGING_ORIGIN = "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
 MAX_PLAN_BYTES = 1_048_576
 MAX_PROOF_BYTES = 65_536
 PROOF_SCHEMA = "doctorcre-staging-fixture-proof.v1"
+VENDOR_REFERENCE_SLUG = "prospect_uncontacted"
+VENDOR_REFERENCE_LABEL = "Synthetic staging prospect (uncontacted)"
+VENDOR_REFERENCE_SORT = 100
 AGED_INVOICE_DAYS_BEFORE_OBSERVATION = 45
 AGED_DUE_DAYS_BEFORE_OBSERVATION = 15
 PRODUCTION_PROJECT_ID = "steep-field-48688294"
@@ -730,16 +733,118 @@ def install(conn: Any) -> int:
     return 1
 
 
+def install_vendor_reference_data(conn: Any) -> int:
+    """Install only the one required stage row, refusing any differing row."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("select session_user,current_user,current_database()")
+            if tuple(cur.fetchone() or ()) != ("neondb_owner", "neondb_owner", "neondb"):
+                raise FixtureRefusal("vendor reference fixture requires the exact owner database session")
+            cur.execute("select slug,label,sort from public.vendor_stage where slug=%s for update",
+                        (VENDOR_REFERENCE_SLUG,))
+            existing = cur.fetchone()
+            expected = (VENDOR_REFERENCE_SLUG, VENDOR_REFERENCE_LABEL, VENDOR_REFERENCE_SORT)
+            if existing is not None and tuple(existing) != expected:
+                raise FixtureRefusal("existing vendor stage differs from the exact synthetic staging row; no row was changed")
+            inserted = 0
+            if existing is None:
+                cur.execute("""insert into public.vendor_stage (slug,label,sort)
+                    values (%s,%s,%s) on conflict (slug) do nothing returning slug""", expected)
+                inserted = int(cur.fetchone() is not None)
+                cur.execute("select slug,label,sort from public.vendor_stage where slug=%s for update",
+                            (VENDOR_REFERENCE_SLUG,))
+                existing = cur.fetchone()
+            if existing is None or tuple(existing) != expected:
+                raise FixtureRefusal("vendor stage did not read back as the exact synthetic staging row")
+        conn.commit()
+        return inserted
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def read_vendor_reference_data(conn: Any) -> dict[str, Any]:
+    """Prove the committed stage row on a separate read-only connection."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("set transaction read only")
+            cur.execute("select session_user,current_user,current_database()")
+            if tuple(cur.fetchone() or ()) != ("neondb_owner", "neondb_owner", "neondb"):
+                raise FixtureRefusal("vendor reference readback reached an unexpected database identity")
+            cur.execute("select slug,label,sort from public.vendor_stage where slug=%s",
+                        (VENDOR_REFERENCE_SLUG,))
+            row = cur.fetchone()
+            expected = (VENDOR_REFERENCE_SLUG, VENDOR_REFERENCE_LABEL, VENDOR_REFERENCE_SORT)
+            if row is None or tuple(row) != expected:
+                raise FixtureRefusal("independent readback did not find the exact synthetic vendor stage")
+        return {"slug": row[0], "label": row[1], "sort": row[2]}
+    finally:
+        conn.rollback()
+
+
+def build_vendor_reference_proof(operation_id: uuid.UUID, app_sha: str, carr_sha: str,
+                                 target: Mapping[str, Any], readback: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": PROOF_SCHEMA,
+        "provenance": {"kind": "raw-sql-fixture", "readback": "separate-committed-readonly-connection"},
+        "fixture_run": f"vendor-reference-{operation_id}",
+        "operation_id": str(operation_id),
+        "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "source_pair": {"source_commit": app_sha, "carr_source_commit": carr_sha},
+        "verified_target": dict(target),
+        "tool_source_sha256": hashlib.sha256(pathlib.Path(__file__).resolve().read_bytes()).hexdigest(),
+        "fixture": {"mode": "synthetic-vendor-stage-reference", "row_readback": dict(readback)},
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--invoice-plan", type=pathlib.Path)
     parser.add_argument("--tour-plan", type=pathlib.Path)
+    parser.add_argument("--vendor-reference-data", action="store_true",
+                        help="install the single synthetic staging vendor-stage reference row")
     parser.add_argument("--expected-app-sha")
     parser.add_argument("--expected-carr-sha")
     parser.add_argument("--proof-file", type=pathlib.Path)
     parser.add_argument("--aged-invoice", action="store_true")
     args = parser.parse_args()
+    if args.vendor_reference_data:
+        if args.tour_plan or args.invoice_plan or args.aged_invoice:
+            parser.error("vendor reference mode cannot be combined with invoice or Tour mode")
+        if not re.fullmatch(r"[0-9a-f]{40}", args.expected_app_sha or "") \
+                or not re.fullmatch(r"[0-9a-f]{40}", args.expected_carr_sha or ""):
+            parser.error("vendor reference mode requires both explicit full source pins")
+        if args.apply and not args.proof_file:
+            parser.error("vendor reference apply requires --proof-file for durable fixture evidence")
+        if args.proof_file and not args.apply:
+            parser.error("--proof-file is valid only with vendor reference apply")
+        try:
+            if not args.apply:
+                print("staging-fixtures: PLAN vendor_reference_rows=1 mutated=false")
+                return 0
+            validate_proof_destination(args.proof_file)
+            dsn = os.environ.get("DATABASE_URL", "")
+            project = os.environ.get("CARR_STAGING_REPLACEMENT_PROJECT_ID", "")
+            endpoint = os.environ.get("CARR_STAGING_REPLACEMENT_ENDPOINT_ID", "")
+            validate_target(dsn, project, endpoint)
+            target = validate_provider_binding(dsn, project, endpoint)
+            import psycopg
+            with psycopg.connect(dsn) as conn:
+                count = install_vendor_reference_data(conn)
+            with psycopg.connect(dsn) as conn:
+                readback = read_vendor_reference_data(conn)
+            proof = build_vendor_reference_proof(uuid.uuid4(), args.expected_app_sha,
+                                                 args.expected_carr_sha, target, readback)
+            proof_state = publish_private_proof(args.proof_file, proof)
+            print(f"staging-fixtures: PASS vendor_reference_rows={count} proof={proof_state}")
+            return 0
+        except (FixtureRefusal, ImportError) as exc:
+            print(f"staging-fixtures: REFUSED — {exc}", file=sys.stderr)
+            return 2
+        except Exception:
+            print("staging-fixtures: REFUSED — vendor reference fixture operation failed; details suppressed", file=sys.stderr)
+            return 2
     if args.tour_plan and (args.invoice_plan or args.aged_invoice):
         parser.error("tour mode cannot be combined with invoice mode")
     if args.tour_plan:
