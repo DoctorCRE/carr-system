@@ -1,0 +1,882 @@
+{
+  "reviewed_head": "ab936364be41616ae7d5a59aadb3fd68445e90eb",
+  "previous_scorer_sha256": "a58a15afdc45e8d049dc71f0fe1043ec5bbfa21acf954e2f3c4c6ecc6f1dd8ec",
+  "current_scorer_sha256": "12b355c336ec53605726e1ca89be1849e8b28208cdaa3fa4156c50755afae089",
+  "recorded_runs": 600,
+  "flipped_runs": 107,
+  "counts": {
+    "baseline": {
+      "runs": 300,
+      "previous_passes": 212,
+      "current_passes": 174,
+      "true_to_false": 38,
+      "false_to_true": 0
+    },
+    "candidate": {
+      "runs": 300,
+      "previous_passes": 245,
+      "current_passes": 176,
+      "true_to_false": 69,
+      "false_to_true": 0
+    }
+  },
+  "flips": [
+    {
+      "arm": "baseline",
+      "case_id": "store_down-01",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-01",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-04",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-04",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-05",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-05",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-06",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-06",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-07",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-07",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-08",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-08",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-09",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-10",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-10",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-10",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-11",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-11",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-11",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-12",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-12",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-13",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-13",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-13",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-13",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-14",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-15",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-16",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-16",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-17",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-19",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-20",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-20",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-20",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-21",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-22",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-22",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "baseline",
+      "case_id": "store_down-23",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-00",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-00",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-00",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-00",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-01",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-01",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-02",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-03",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-03",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-04",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-05",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-05",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-05",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-06",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-06",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-06",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-07",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-07",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-07",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-08",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-09",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-09",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-09",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-09",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-10",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-10",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-11",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-11",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-11",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-11",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-12",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-12",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-13",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-13",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-15",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-15",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-15",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-15",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-15",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-16",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-16",
+      "repeat": 1,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-16",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-16",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-16",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-17",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-17",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-18",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-18",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-18",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-19",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-19",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-19",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-19",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-20",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-20",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-20",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-21",
+      "repeat": 0,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-21",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-21",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-21",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-21",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-22",
+      "repeat": 0,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-22",
+      "repeat": 2,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-22",
+      "repeat": 3,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-22",
+      "repeat": 4,
+      "split": "test",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-23",
+      "repeat": 1,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-23",
+      "repeat": 2,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-23",
+      "repeat": 3,
+      "split": "train",
+      "before": true,
+      "after": false
+    },
+    {
+      "arm": "candidate",
+      "case_id": "store_down-23",
+      "repeat": 4,
+      "split": "train",
+      "before": true,
+      "after": false
+    }
+  ],
+  "limitation": "Closed stop grammar rejects unrecognized prose conservatively. A changed grade does not prove the historical answer continued work. No fresh measurement; receipt remains inconclusive and unsealed."
+}

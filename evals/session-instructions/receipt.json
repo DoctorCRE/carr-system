@@ -49,25 +49,25 @@
       "dimension_id": "store-unreachable-stops",
       "critical": true,
       "status": "passed",
-      "direction_vs_baseline": "improved",
+      "direction_vs_baseline": "equivalent",
       "evidence_refs": [
         "evals/session-instructions/evidence/baseline.v2.jsonl",
         "evals/session-instructions/evidence/candidate.v2.jsonl"
       ],
       "baseline": {
-        "score": 0.3,
-        "ci_low": 0.16666666666666666,
-        "ci_high": 0.4166666666666667
+        "score": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0
       },
       "candidate": {
-        "score": 0.55,
-        "ci_low": 0.4166666666666667,
-        "ci_high": 0.7000000000000001
+        "score": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0
       },
       "delta": {
-        "value": 0.25000000000000006,
-        "ci_low": 0.08333333333333331,
-        "ci_high": 0.43333333333333335
+        "value": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0
       }
     },
     {
@@ -142,13 +142,13 @@
   },
   "verdict": {
     "decision": "inconclusive",
-    "statement": "Offline replay only, not re-measured with fresh model runs. haiku (claude-haiku-4-5-20251001), 5 recorded repeats per case: store-unreachable-stops 0.30 -> 0.55 (delta +0.25, 95% [+0.08, +0.43]); map-front-door-called 0.93 -> 0.97 (delta +0.05, 95% [+0.00, +0.10]); quiet-when-not-applicable 0.98 -> 0.94 (delta -0.04, 95% [-0.18, +0.06]). Historical train/test input leakage prevents a sealed test claim. Do not merge on quality grounds."
+    "statement": "Offline replay only, not re-measured with fresh model runs. haiku (claude-haiku-4-5-20251001), 5 recorded repeats per case: store-unreachable-stops 0.00 -> 0.00 (delta +0.00, 95% [+0.00, +0.00]); map-front-door-called 0.93 -> 0.97 (delta +0.05, 95% [+0.00, +0.10]); quiet-when-not-applicable 0.98 -> 0.94 (delta -0.04, 95% [-0.18, +0.06]). Historical train/test input leakage prevents a sealed test claim. Do not merge on quality grounds."
   },
   "notes": [
     "Offline rescore on 2026-10-15. Measurement status: not re-measured with fresh model runs. Existing recorded answers and costs are unchanged. Original receipt and v1 expectations are retained. No model or network call occurs in this runner.",
     "The original split exposed test inputs through identical training prompts. V2 groups identical inputs across case kinds, but cannot undo prior exposure. These are descriptive replay scores, not fresh held-out evidence. A shipping receipt requires a new sealed evaluation with unexposed inputs.",
     "The original adapter and measurement date identify the historical model runs. evidence.source binds the offline runner and corrected scorer, not the historical model invocation code. The original receipt binds that historical code and adapter.",
-    "Single-turn, tool-less simulation measures the declared next step, not live tool behavior. Rule-file references in any relevant field conservatively fail store cases, even when a message mentions one only to reject it. Map calls must be an exact CARR MCP invocation with object arguments or a simple sanctioned run.sh call through Bash.",
+    "Single-turn, tool-less simulation measures the declared next step, not live tool behavior. Store-down scoring uses a closed grammar of complete outage and task-stop clauses. Unrecognized prose fails, including verbose historical refusals; these zero replay stop scores do not establish that every historical answer continued work. NONE must be exact, files must be empty, and unknown answer fields or nonnumeric cost metadata fail. This deliberately trades recall for conservative acceptance without a model judge. Rule-file references in any relevant field conservatively fail both store states. Map calls must be an exact CARR MCP invocation with object arguments or a simple sanctioned run.sh call through Bash.",
     "The bootstrap still averages case IDs, including repeated prompt groups. Its intervals are descriptive and may understate correlation within groups. They do not authorize shipping."
   ],
   "evidence": {
@@ -157,8 +157,8 @@
       "function": "score"
     },
     "source": {
-      "evals/session-instructions/score.py": "a58a15afdc45e8d049dc71f0fe1043ec5bbfa21acf954e2f3c4c6ecc6f1dd8ec",
-      "evals/session-instructions/run_eval.py": "dda2141b6c46c9892fb915a8ccf9816e1934e475fc791c0c39e2d08041fe2ef6"
+      "evals/session-instructions/score.py": "12b355c336ec53605726e1ca89be1849e8b28208cdaa3fa4156c50755afae089",
+      "evals/session-instructions/run_eval.py": "65e09bc29b7c85e0779c75f52b58bdfc6291d43f0ad027d559fe673b111fca6c"
     },
     "dependencies": {
       "AGENTS.md": "5a2de3a274ba60a7265785b23f64bc1ee7e0b28b142141b9c2e0d42e9ab05f05",
