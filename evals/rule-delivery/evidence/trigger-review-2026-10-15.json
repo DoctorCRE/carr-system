@@ -1,0 +1,77 @@
+{
+  "reviewer": "independent-subagent-opus",
+  "reviewed_at": "2026-10-14",
+  "method_note": "Cues compile via ops/rule_trigger_compile.py _alternation: stopwords are stripped from the cue but the regex requires the remaining words ADJACENT (space -> \\s+), so stopword-stripped bigrams such as 'party record' or 'behind scenes' cannot match natural prose ('party of record', 'behind the scenes') and are dead cues. trigger_rows() also emits every key of triggers.paths/commands as a row with no SURFACE_AT threshold applied.",
+  "verdicts": {
+    "07dde434": {
+      "decision": "reject",
+      "reason": "'advisor' is a one-word cue that fires on routine deal prompts (tenant/client advisor, Jev as advisor) and 'self-serve' fires on the house phrase 'self-serve the blocker' (rule 5cd8d0f6) in engineering prompts; neither is specific to building a prospect-facing AI. 'behind scenes', 'briefs call', 'build answers', 'allowed trade-off' are dead stopword-stripped bigrams.",
+      "generic_cues_at_or_above_0.5": ["advisor", "self-serve"]
+    },
+    "08c4eda2": {
+      "decision": "reject",
+      "reason": "'agreement', 'loi', 'letter of intent', 'representation' and 'issued' fire on nearly every deal prompt (and 'issued'/'agreement' on engineering ones), while the rule binds only Alabama lead routing and Alabama party-of-record; the discriminating cue 'alabama' (or 'licence/license') is absent, and 'party record' / 'record alabama' are dead bigrams.",
+      "generic_cues_at_or_above_0.5": ["agreement", "loi", "letter of intent", "representation", "issued"]
+    },
+    "486584d6": {
+      "decision": "reject",
+      "reason": "'already signed' matches routine deal prompts ('the tenant already signed the LOI/lease'), not just 'already signed in'; tighten it to 'already signed in'. Other cues are precise but mostly dead in Joe's phrasing ('browser session's', 'joe's signed-in'); consider 'chrome', 'dashboard', 'cloudflare console'-style cues.",
+      "generic_cues_at_or_above_0.5": ["already signed"]
+    },
+    "4a77c35d": {
+      "decision": "reject",
+      "reason": "The only surviving cue 'dot chatgpt' requires 'dot' immediately followed by 'chatgpt', which natural prompts ('the Dot', 'send it to ChatGPT') will not contain, so a triggered rule with no live cue is effectively never delivered; needs cues like 'the dot' or 'chatgpt'.",
+      "generic_cues_at_or_above_0.5": []
+    },
+    "578fdd91": {
+      "decision": "reject",
+      "reason": "'identity' fires on constant engineering talk (session identity, local-verb identity, identity field, visual identity) and 'prior' on any 'prior session/PR/run'; the real cue 'enrich'/'enrichment' alone is missing, and 'applies corrections', 'apply overwriting', 'apply pass', 'enrichment applies' are dead bigrams.",
+      "generic_cues_at_or_above_0.5": ["identity", "prior"]
+    },
+    "661d7757": {
+      "decision": "reject",
+      "reason": "'carr records' fires on routine deal/record lookups ('check CARR records for X') where a Jev-review permission rule does not bind, and 'bounded' (0.50) fires on unrelated text ('bounded migration', 'bounded context'). 'jev' and 'jev available' are acceptable.",
+      "generic_cues_at_or_above_0.5": ["carr records", "bounded"]
+    },
+    "67e48aaf": {
+      "decision": "reject",
+      "reason": "'exposed' fires on engineering prompts about exposed endpoints/ports/verbs and 'rotating' on any key or share-grant rotation work, neither of which is Joe pasting a credential; most other cues ('accepts exposure', 'showed screenshot', 'warn token', 'chat showed') are dead bigrams. The real binding moment is a pasted token-shaped string, which no cue detects.",
+      "generic_cues_at_or_above_0.5": ["exposed", "rotating"]
+    },
+    "76fcbed6": {
+      "decision": "reject",
+      "reason": "'link' (0.52) is a one-word cue that fires on routine prompts ('link the lead to the client', 'link to the PR', link-parties) unrelated to a source arriving; the arrival of a source is better detected by the existing URL prompt_cue pattern. 'apply source', 'sends gets', 'arrives study's', 'started arrives', 'study's job' are dead bigrams.",
+      "generic_cues_at_or_above_0.5": ["link"]
+    },
+    "a3da3d39": {
+      "decision": "reject",
+      "reason": "'left' (0.51), 'pending', 'awaiting', 'retire' and 'anything left' would fire on a large share of engineering and deal prompts (pending PR/checks/deal, 'anything left?'). The binding moment is in the session's own output (leaving something awaiting Joe), which prompt cues cannot see; a short rule like this fits always_on better than triggered.",
+      "generic_cues_at_or_above_0.5": ["left", "pending", "awaiting", "anything left", "retire"]
+    },
+    "a9fc3f0e": {
+      "decision": "approve",
+      "reason": "Live cues ('research-site index', 'research-site') are specific and will not fire on unrelated prompts; triggered mode fits. Recall is weak (rule binds on any research or fact-check, and 'add index', 'adding removing', 'index memory', 'internet research-site' are dead bigrams), worth a recall pass later.",
+      "generic_cues_at_or_above_0.5": []
+    },
+    "ac0a6579": {
+      "decision": "reject",
+      "reason": "'another client' fires on ordinary deal prompts ('another client wants a clinic in Fairhope') where share-site password policy does not bind; the specific 'share-site' cues are good, and 'share.doctorcre.com' plus 'password' near 'client' would be stronger additions.",
+      "generic_cues_at_or_above_0.5": ["another client"]
+    },
+    "c363bd8b": {
+      "decision": "reject",
+      "reason": "The path triggers db/schema.sql and ops/config/gate-baseline.json fire on every tool call touching files the rule itself says nearly every carr-system PR regenerates, so the merge-time orchestrator rule lands on routine builder work (and trigger_rows emits paths with no 0.5 threshold). 'overlap' alone also fires on territory/schedule overlap; the PR-specific prompt cues ('batch prs', 'shared files', 'remerge') are fine.",
+      "generic_cues_at_or_above_0.5": ["overlap", "path:db/schema.sql", "path:ops/config/gate-baseline.json"]
+    },
+    "cfe6b5c6": {
+      "decision": "reject",
+      "reason": "'null' is a one-word cue that fires on everyday engineering prompts (null values, NULL handling) and 'already asked' fires on any frustrated follow-up ('I already asked you to...'); 'shadow mode' and 'obvious improvement' are the right cues.",
+      "generic_cues_at_or_above_0.5": ["null", "already asked"]
+    },
+    "f673326b": {
+      "decision": "approve",
+      "reason": "Cues ('agent access', 'access restrictions', 'add access', 'data fences', 'personal-scope', 'custody') appear where an agent is being granted access and rarely in unrelated engineering or deal prompts; triggered mode fits a rule that binds at access-grant time.",
+      "generic_cues_at_or_above_0.5": []
+    }
+  }
+}

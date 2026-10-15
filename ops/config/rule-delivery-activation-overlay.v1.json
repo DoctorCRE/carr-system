@@ -6,7 +6,8 @@
   "_repin_note_2026_10_12_held_controls": "The session_boot, ledger_capture and loop_guard control_catalog entries each gained a CI-run test (migration 0874 installs them). No rule_controls, rule_load_layers or active_rule_ids entry changed, so none of the eight activation-target contracts changed; migration 0875 moves their guarded map-digest preimage forward from the post-0871 digest.",
   "_repin_note_2026_10_12_unfiled_bug": "The unfiled_bug Stop-gate control was registered and rule 19ebbeb3 was bound to it. None of the eight activation-target contracts changed; migration 0871 moves their guarded map-digest preimage forward.",
   "_repin_note_2026_10_13_github_burst_guard": "The github-burst-guard control_catalog entry was registered (migration 0877 installs it). No rule_controls, rule_load_layers or active_rule_ids entry changed, so none of the eight activation-target contracts changed; migration 0878 moves their guarded map-digest preimage forward from the post-0875 digest.",
-  "base_map_sha256": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
+  "_repin_note_2026_10_13_registry_inventory": "Fourteen approved rules entered the reviewed map as judgment pack rules and four left it (9b081605 and 5697071b retired; ede4b241 and 8400cd3d still proposed). None of the eight activation-target contracts changed; migration 0880 moves their guarded map-digest preimage forward.",
+  "base_map_sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
   "schema": "rule-delivery-activation-overlay/v1",
   "targets": [
     {
