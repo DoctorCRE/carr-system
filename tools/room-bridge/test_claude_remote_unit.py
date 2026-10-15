@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise the public wrapper with a synthetic desk and SSH executable."""
 import json
 import os
 from pathlib import Path

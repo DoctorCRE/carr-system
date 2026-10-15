@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Synthetic desk contracts: no provider, credentials, or live sessions."""
 
 from __future__ import annotations
 
@@ -150,8 +149,6 @@ class DeskFirstTurnTests(unittest.TestCase):
                     os.close(fd)
 
     def test_post_bind_exit_and_missing_fifo_reader_return_typed_failure(self):
-        # Bound the reproduction in a separate process: the old blocking
-        # open must never hang the test runner. The FIFO has no reader.
         probe = '''
 import json, os, sys
 from pathlib import Path
@@ -197,8 +194,6 @@ print(json.dumps({**result, "entries": reg.entries()}))
             reg = desks.Registry(Path(root) / "registry.json")
             readers = []
             def launch(*_args, **_kwargs):
-                # A real FIFO with a synthetic provider reader; don't replace
-                # the FIFO with a regular file (that hides startup races).
                 readers.append(os.open(state_dir / "fixture-desk.stdin", os.O_RDONLY | os.O_NONBLOCK))
                 (state_dir / "fixture-desk.log").touch()
                 return SimpleNamespace(pid=4242, poll=lambda: None)
@@ -243,7 +238,6 @@ print(json.dumps({**result, "entries": reg.entries()}))
             reg.register("fixture-flash", "flash-local")
             with patch.object(dispatch.flash_wire, "_run_flash_script", return_value=(0, {"answer": "3"})):
                 direct = dispatch.flash_wire.run_task(task, roots=[root])
-                # Keep the real dispatch -> Flash parser/runner boundary.
                 with patch.object(dispatch.flash_wire, "data_roots", return_value=[str(Path(root).resolve())]):
                     row = dispatch.dispatch("fixture-flash", task, registry=reg,
                                             results_path=Path(root) / "results.jsonl")
@@ -332,7 +326,6 @@ print(json.dumps({**result, "entries": reg.entries()}))
                 self.assertEqual(calls[0][-1], INSTRUCTION + "\n\nSynthetic task")
 
     def test_every_desk_dispatch_includes_instruction_on_start_and_resume(self):
-        # Observe the prompt at each provider boundary; no provider is called.
         with tempfile.TemporaryDirectory() as root:
             reg = desks.Registry(Path(root) / "registry.json")
             cases = {

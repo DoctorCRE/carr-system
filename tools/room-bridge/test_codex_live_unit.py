@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
-"""Unit proof for the codex-live desk. No Codex, no model spend.
-
-A stand-in speaks the app-server's side of the wire — the WebSocket upgrade,
-then the four messages a turn actually needs — so the client is tested against
-the protocol rather than against a live seat. What it pins down is the part
-that is not guessable from the schema: the ORDER (initialize, then the
+"""the ORDER (initialize, then the
 initialized notification, then thread/start or thread/resume, then turn/start),
 and that a resumed desk sends thread/resume with the id it was given instead of
 starting a fresh thread.
-
-Codex derived this protocol; see codex_wire.py. The live half is proven in
-test_codex_live_live.py, which needs a real app-server.
-
-Run:  python3 tools/room-bridge/test_codex_live_unit.py
 """
 
 from __future__ import annotations
@@ -52,7 +42,6 @@ def check(label: str, fn) -> None:
 
 
 class FakeAppServer:
-    """Speaks the server half: upgrade, then answer the four messages."""
 
     def __init__(self, path: str, answer: str = "the live seat answered",
                  silent_turn: bool = False, finish_on_interrupt: bool = False,
@@ -74,7 +63,6 @@ class FakeAppServer:
         self.srv.settimeout(10)
         threading.Thread(target=self._serve, daemon=True).start()
 
-    # -- websocket plumbing, mirrored from the client side -----------------
     @staticmethod
     def _accept_key(key: str) -> str:
         return base64.b64encode(
@@ -123,9 +111,6 @@ class FakeAppServer:
             return None
 
     def _serve(self) -> None:
-        # Accept in a loop. resolve() probes liveness by connecting, and that
-        # probe would otherwise consume the only accept the real turn needs —
-        # the same trap the Claude stand-in hit.
         while True:
             try:
                 conn, _ = self.srv.accept()
@@ -190,10 +175,6 @@ class FakeAppServer:
                             {'id': 'turn-1', 'status': 'inProgress' if self.silent_turn else 'completed'}]}}})
 
     def methods(self) -> list[str]:
-        # str(...): the JSON-RPC `method` field is always a string when
-        # present; the explicit coercion is only here so mypy's comprehension
-        # narrowing (which does not apply the `if` filter to the element
-        # expression's type) does not read this as list[Any | None].
         return [str(m.get("method")) for m in self.seen if m.get("method")]
 
     def close(self) -> None:
@@ -295,9 +276,6 @@ def main() -> int:
           a_dead_app_server_is_refused)
 
     def a_silent_seat_stops_at_the_callers_limit():
-        """PR 1660 re-review: a queued codex-live job ignored the claim-scoped
-        limit, and each read could wait the full per-read timeout. A seat that
-        accepts but never answers must stop at the caller's whole-call limit."""
         import time as _time
         quiet = str(root / "quiet.sock")
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -337,8 +315,6 @@ def main() -> int:
           a_silent_seat_stops_at_the_callers_limit)
 
     def a_turn_that_times_out_keeps_its_new_thread():
-        """PR 1660 re-review: a timeout after thread/start returned the input
-        thread id (None for a fresh desk), so a retry opened a second thread."""
         stalled = str(root / "stalled.sock")
         srv = FakeAppServer(stalled, silent_turn=True)
         try:

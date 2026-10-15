@@ -1132,20 +1132,28 @@ class SynchronousCompletionPostOrderingTests(unittest.TestCase):
 
 
 class ReplyWordingTests(unittest.TestCase):
-    """PR #1254 round 2, finding 4: _bounded_reply strips and truncates; it does not
-    redact (no secret/PII scrubbing happens), and its own docstrings must say so."""
+    def test_bounded_reply_preserves_body_and_strips_terminal_protocol(self):
+        self.assertEqual(
+            queue_dispatch._bounded_reply(
+                'A synthetic email: person@example.invalid\nCARR_QUEUE_RESULT {"status":"done"}'
+            ),
+            "A synthetic email: person@example.invalid",
+        )
+        self.assertEqual(
+            queue_dispatch._bounded_reply("CARR_QUEUE_RESULT belongs in the body\nMore text"),
+            "CARR_QUEUE_RESULT belongs in the body\nMore text",
+        )
 
-    def test_bounded_reply_docstring_does_not_overclaim_redaction(self):
-        source = inspect.getsource(queue_dispatch._bounded_reply)
-        # The old wording ("the desk's own prose, redacted of the protocol line")
-        # claimed redaction as a positive attribute. A bare "not redaction"/"never
-        # redacts" disclaimer is fine — what must never come back is a claim that
-        # this function redacts anything.
-        self.assertNotIn("prose, redacted", source.lower())
-        self.assertNotIn("redacted exception", source.lower())
-        self.assertIn("not redaction", source.lower())
-        self.assertIn("stripped", source.lower())
-        self.assertIn("truncat", source.lower())
+    def test_bounded_reply_truncates_at_the_reply_boundary(self):
+        self.assertEqual(
+            queue_dispatch._bounded_reply("x" * 4002),
+            "x" * 4000
+            + "\n... [truncated 2 chars; full reply in ~/.config/carr/hermes-dispatch-results.jsonl]",
+        )
+
+    def test_bounded_reply_reports_empty_input(self):
+        self.assertEqual(queue_dispatch._bounded_reply("   "), "(empty reply)")
+        self.assertEqual(queue_dispatch._bounded_reply('CARR_QUEUE_RESULT {}'), "(empty reply)")
 
     def test_completion_payload_docstring_does_not_overclaim_redaction_either(self):
         source = inspect.getsource(queue_dispatch.QueueDeskExecutor.completion_payload)

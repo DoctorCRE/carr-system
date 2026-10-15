@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""Pins PR 1660's post-merge P1 in codex_wire.run_turn.
-
-A live deadline used to return timed_out without interrupting the server turn,
-so a queue retry could start a second executor while the original still wrote.
-The contract held here: on deadline the EXACT active (thread, turn) is sent
-turn/interrupt, and write ownership is not released until a terminal
-confirmation arrives. An acknowledgement of the interrupt is not termination.
-
-Run:  python3 tools/room-bridge/test_codex_deadline_interrupt_unit.py
-"""
 from __future__ import annotations
 
 import sys
@@ -76,15 +66,12 @@ class DeadlineInterruptTests(unittest.TestCase):
         self.assertTrue(codex_wire._terminal(message, "thread-live-0001", "turn-1"))
 
     def test_write_ownership_is_released_only_on_terminal_confirmation(self):
-        """write_ownership.release trusts termination_evidence alone. An active
-        turn on the owning server yields no evidence, so the claim stays held and
-        a retry cannot start beside the original writer; a terminal turn does."""
         path, srv = self.serve("claim.sock")
         row = {"launch_marker": "m", "ownership_state": "held",
                "executor": {"kind": "codex_turn", "socket": path,
                             "thread_id": "thread-live-0001", "turn_id": "turn-1"}}
         self.assertIsNone(write_ownership.termination_evidence(row))
-        srv.silent_turn = False  # thread/read now reports the exact turn completed
+        srv.silent_turn = False
         self.assertEqual(write_ownership.termination_evidence(row),
                          "Codex turn terminated (thread/read)")
         row["executor"]["turn_id"] = "some-other-turn"
