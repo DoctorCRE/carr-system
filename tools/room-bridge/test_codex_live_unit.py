@@ -210,11 +210,75 @@ def main() -> int:
             turn = next(m for m in srv.seen if m.get("method") == "turn/start")
             assert turn["params"]["model"] == "gpt-6.1-sol", turn
             assert turn["params"]["effort"] == "medium", turn
+            assert "sandboxPolicy" not in turn["params"], turn
         finally:
             srv.close()
 
     check("a task reaches a live Codex seat and its answer comes straight back",
           a_turn_reaches_a_live_codex_seat)
+
+    def read_only_network_access_is_opt_in_fresh_and_ephemeral():
+        srv = FakeAppServer(sock)
+        try:
+            reg.register("cx-network", "codex-live", socket=sock, cwd=str(root),
+                         model="gpt-5.1-codex-mini", effort="medium", network_access=True)
+            try:
+                dispatch.dispatch("cx-network", "read the authorized source", registry=reg,
+                                  results_path=results)
+            except desks.DeskError as exc:
+                assert exc.code == "network_access_requires_fresh_thread", exc.code
+            else:
+                raise AssertionError("network-enabled dispatch without --fresh was accepted")
+            assert srv.methods() == [], srv.methods()
+
+            row = dispatch.dispatch("cx-network", "read the authorized source", registry=reg,
+                                   results_path=results, fresh=True)
+            assert row["status"] == "completed", row
+            turn = next(m for m in srv.seen if m.get("method") == "turn/start")
+            assert turn["params"]["sandboxPolicy"] == {"type": "readOnly", "networkAccess": True}, turn
+            assert srv.methods()[:4] == ["initialize", "initialized", "thread/start", "turn/start"], srv.methods()
+            assert reg.entries()["cx-network"].get("thread_id") is None, reg.entries()["cx-network"]
+        finally:
+            srv.close()
+
+    check("read-only network access is explicit, fresh-only, and never pinned for resume",
+          read_only_network_access_is_opt_in_fresh_and_ephemeral)
+
+    def network_access_registry_values_are_strict_and_codex_live_only():
+        for value in (1, "true", None):
+            try:
+                reg.register("bad-network", "codex-live", socket=sock,
+                             model="gpt-5.1-codex-mini", effort="medium", network_access=value)
+            except desks.DeskError as exc:
+                assert exc.code == "bad_network_access", exc.code
+            else:
+                raise AssertionError(f"non-boolean network_access accepted: {value!r}")
+        try:
+            reg.register("wrong-kind", "codex-session", model="gpt-5.6-sol", effort="high",
+                         network_access=True)
+        except desks.DeskError as exc:
+            assert exc.code == "bad_network_access", exc.code
+        else:
+            raise AssertionError("network_access accepted on codex-session")
+
+    check("network access registry opt-in rejects non-booleans and other desk kinds",
+          network_access_registry_values_are_strict_and_codex_live_only)
+
+    def wire_refuses_network_on_resume_before_connecting():
+        for value, thread_id, expected in (
+            (True, "existing-thread", "network_access_requires_fresh_thread"),
+            (1, None, "bad_network_access"),
+        ):
+            try:
+                dispatch.codex_wire.run_turn(sock, "read", thread_id=thread_id,
+                                             network_access=value)
+            except desks.DeskError as exc:
+                assert exc.code == expected, exc.code
+            else:
+                raise AssertionError(f"unsafe wire request accepted: {value!r}, {thread_id!r}")
+
+    check("the wire rejects resume and non-boolean network requests before socket use",
+          wire_refuses_network_on_resume_before_connecting)
 
     def the_call_order_is_the_one_codex_found():
         srv = FakeAppServer(sock)

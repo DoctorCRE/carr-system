@@ -293,6 +293,7 @@ def run_turn(
     timeout: float = 300.0,
     deadline_s: float | None = None,
     effort: str | None = None,
+    network_access: bool = False,
     on_executor=None,
 ) -> dict:
     """Deliver one turn to a live Codex session and wait for its answer.
@@ -305,6 +306,11 @@ def run_turn(
     if approval_policy != "never":
         raise DeskError("unsafe_approval_policy",
                         "dispatched Codex desks require never; permission needs go to the orchestrator")
+    if type(network_access) is not bool:
+        raise DeskError("bad_network_access", "network_access must be an explicit boolean")
+    if network_access and thread_id is not None:
+        raise DeskError("network_access_requires_fresh_thread",
+                        "network access is permitted only on a fresh thread")
     task = desk_prompt(task)
     started = time.monotonic()
     if on_executor:
@@ -315,6 +321,7 @@ def run_turn(
     try:
         return _run_turn(wire, task, thread_id=thread_id, cwd=cwd, model=model,
                          sandbox=sandbox, approval_policy=approval_policy, timeout=timeout, effort=effort,
+                         network_access=network_access,
                          on_executor=on_executor)
     except TimeoutError:
         confirmed = _interrupt(wire)
@@ -327,7 +334,7 @@ def run_turn(
 
 
 def _run_turn(wire: Wire, task: str, *, thread_id, cwd, model, sandbox,
-              approval_policy, timeout, effort=None, on_executor=None) -> dict:
+              approval_policy, timeout, effort=None, network_access=False, on_executor=None) -> dict:
     transcript: list[dict] = []
     _initialize(wire)
 
@@ -356,6 +363,8 @@ def _run_turn(wire: Wire, task: str, *, thread_id, cwd, model, sandbox,
         turn_params["model"] = model
     if effort:
         turn_params["effort"] = effort
+    if network_access:
+        turn_params["sandboxPolicy"] = {"type": "readOnly", "networkAccess": True}
     wire.turn_requested = True
     wire.send_json({"id": "turn-start", "method": "turn/start", "params": turn_params})
     try:

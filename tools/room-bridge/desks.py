@@ -209,6 +209,7 @@ class Registry:
         host: str | None = None,
         timeout_s: float = 900,
         family: str | None = None,
+        network_access: bool = False,
     ) -> dict:
         if not NAME_OK.match(name or ""):
             raise DeskError(
@@ -219,6 +220,10 @@ class Registry:
         kind = KIND_ALIASES.get(kind, kind)
         if kind not in KINDS:
             raise DeskError("bad_kind", f"{kind!r} is not one of {', '.join(KINDS)}")
+        if type(network_access) is not bool:
+            raise DeskError("bad_network_access", "network_access must be an explicit boolean")
+        if network_access and kind != "codex-live":
+            raise DeskError("bad_network_access", "network_access is supported only by codex-live")
         effort = _normalize_effort(kind, effort)
         if kind in codex_models.CODEX_KINDS:
             family = codex_models.family_default(family, model)
@@ -264,6 +269,8 @@ class Registry:
             entry["effort"] = effort
             if family:
                 entry["family"] = family
+            if network_access:
+                entry["network_access"] = True
         else:
             entry = {"kind": kind, "cwd": str(cwd or Path.cwd()),
                      "thread_id": None, "effort": effort}
@@ -318,6 +325,9 @@ class Registry:
         if kind == "grok-cli" and (entry.get("model") != "grok-4.7"
                 or entry.get("effort") != "high" or entry.get("sandbox") != "read-only"):
             raise DeskError("bad_grok_posture", "Grok requires grok-4.7/high/read-only")
+        network_access = entry.get("network_access", False)
+        if type(network_access) is not bool or (network_access and kind != "codex-live"):
+            raise DeskError("bad_network_access", "network_access must be boolean and is supported only by codex-live")
         if kind in ("claude-session", "codex-live"):
             sock = entry.get("socket", "")
             refuse_pid_socket(sock)
