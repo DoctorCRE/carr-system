@@ -11480,7 +11480,7 @@ CREATE TABLE ops.work_request (
     CONSTRAINT work_request_program_ordinal_positive CHECK (((program_ordinal IS NULL) OR (program_ordinal > 0))),
     CONSTRAINT work_request_shape_disposition_complete CHECK ((((shape_disposition IS NULL) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NULL) AND (shape_decided_by_actor_id IS NULL) AND (shape_decided_at IS NULL)) OR ((shape_disposition = 'required'::text) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)) OR ((shape_disposition = 'not_required'::text) AND (shape_fixed_surface_ref IS NOT NULL) AND (btrim(shape_fixed_surface_ref) <> ''::text) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)))),
     CONSTRAINT work_request_shape_disposition_valid CHECK (((shape_disposition IS NULL) OR (shape_disposition = ANY (ARRAY['required'::text, 'not_required'::text])))),
-    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
+    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = 'superseded'::text) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
     CONSTRAINT work_request_state_check CHECK ((state = ANY (ARRAY['captured'::text, 'triaged'::text, 'ready'::text, 'claimed'::text, 'in_progress'::text, 'verification'::text, 'awaiting_release'::text, 'released'::text, 'confirmed_closed'::text, 'needs_joe'::text, 'blocked'::text, 'declined'::text, 'superseded'::text, 'failed'::text])))
 );
 
@@ -65831,7 +65831,27 @@ begin
     return new;
   end if;
 
-  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, or captured-to-withdrawn transitions';
+  -- TRIAGED -> SUPERSEDED (0883). The triage fields stay on the row and the
+  -- triage receipt stays attached; nothing else may name the request.
+  if old.state = 'triaged'
+     and new.state = 'superseded'
+     and new.version = old.version + 1
+     and (to_jsonb(new) - array['state','exit_reason','closed_at','superseded_by','version','updated_at'])
+           is not distinct from
+         (to_jsonb(old) - array['state','exit_reason','closed_at','superseded_by','version','updated_at'])
+     and exists (
+       select 1 from ops.work_request_withdrawal_receipt r
+        where r.work_request_id = old.id and r.base_version = old.version
+          and r.result_version = new.version and r.final_state = 'superseded'
+          and r.exit_reason = new.exit_reason
+          and r.superseded_by is not distinct from new.superseded_by
+     )
+     and current_setting('transaction_isolation') = 'read committed'
+     and cardinality(ops.work_request_supersession_strands(old.id)) = 0 then
+    return new;
+  end if;
+
+  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-superseded transitions';
 end;
 $$;
 
@@ -66353,47 +66373,61 @@ CREATE FUNCTION ops.supersede_sourced_work_request(p_work_request text, p_base_v
     AS $$
 declare
   v_id uuid;
+  v_state text;
   v_succ uuid;
   v_succ_state text;
   v_succ_sourced boolean;
   v_actor uuid;
+  v_strands text[];
   v_now timestamp with time zone := now();
 begin
   if p_exit_reason is null or btrim(p_exit_reason) = '' then
-    raise exception 'a withdrawal must record why';
+    raise exception 'withdrawal_reason_missing: a withdrawal must record why';
   end if;
   select a.id into v_actor from public.actor a where a.slug = p_actor_slug;
   if v_actor is null then
-    raise exception 'unknown actor %', p_actor_slug;
+    raise exception 'unknown_actor: unknown actor %', p_actor_slug;
   end if;
 
-  select w.id into v_id from ops.work_request w
+  select w.id, w.state into v_id, v_state from ops.work_request w
    where w.ref = p_work_request and w.capture_idempotency_key is not null
-     and w.state = 'captured' and w.version = p_base_version
+     and w.state in ('captured','triaged') and w.version = p_base_version
    for update;
   if v_id is null then
-    raise exception 'no captured sourced Work Request % at version %', p_work_request, p_base_version;
+    raise exception 'work_request_not_supersedable: no captured or triaged sourced Work Request % at version %',
+      p_work_request, p_base_version;
   end if;
 
   select w.id, w.state, (w.capture_idempotency_key is not null)
     into v_succ, v_succ_state, v_succ_sourced
     from ops.work_request w where w.ref = p_superseded_by;
   if v_succ is null then
-    raise exception 'no Work Request % to supersede it', p_superseded_by;
+    raise exception 'successor_not_found: no Work Request % to supersede it', p_superseded_by;
   end if;
   -- The four refusals the foreign key does not give.
   if v_succ = v_id then
-    raise exception 'a Work Request cannot supersede itself';
+    raise exception 'successor_is_self: a Work Request cannot supersede itself';
   end if;
   if v_succ_state in ('declined','superseded') then
-    raise exception 'the successor % is itself withdrawn; superseding into a dead row loses the trail', p_superseded_by;
+    raise exception 'successor_withdrawn: the successor % is itself withdrawn; superseding into a dead row loses the trail', p_superseded_by;
   end if;
   if not v_succ_sourced then
-    raise exception 'the successor % is not a sourced Work Request', p_superseded_by;
+    raise exception 'successor_not_sourced: the successor % is not a sourced Work Request', p_superseded_by;
   end if;
   if exists (select 1 from ops.work_request w
               where w.id = v_succ and w.superseded_by = v_id) then
-    raise exception 'that would make a two-row supersession cycle';
+    raise exception 'supersession_cycle: that would make a two-row supersession cycle';
+  end if;
+
+  if v_state = 'triaged' then
+    if current_setting('transaction_isolation') <> 'read committed' then
+      raise exception 'triaged_work_request_requires_read_committed: the census must see writers committed while waiting';
+    end if;
+    v_strands := ops.work_request_supersession_strands(v_id);
+    if cardinality(v_strands) > 0 then
+      raise exception 'triaged_work_request_has_downstream_evidence: % is named by % and a successor cannot inherit it',
+        p_work_request, array_to_string(v_strands, ', ');
+    end if;
   end if;
 
   insert into ops.work_request_withdrawal_receipt
@@ -69935,6 +69969,40 @@ COMMENT ON FUNCTION ops.work_request_evidence_receipt_normalized(p_ref text) IS 
 
 
 --
+-- Name: work_request_evidence_requires_live_request(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.work_request_evidence_requires_live_request() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
+    AS $$
+declare
+  v_reference text := to_jsonb(new)->>tg_argv[0];
+  v_state text;
+begin
+  if v_reference is null then
+    return new;
+  end if;
+  if tg_op = 'UPDATE' and v_reference is not distinct from (to_jsonb(old)->>tg_argv[0]) then
+    return new;
+  end if;
+  if tg_argv[1] = 'uuid' then
+    select w.state into v_state from ops.work_request w
+     where w.id = v_reference::uuid for share;
+  else
+    select w.state into v_state from ops.work_request w
+     where w.ref = v_reference for share;
+  end if;
+  -- Historical name-only references need not have a local Work Request row.
+  if v_state in ('declined', 'superseded') then
+    raise exception 'work_request_evidence_not_live: % names a % Work Request', v_reference, v_state;
+  end if;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: work_request_shape_gate(); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -70025,6 +70093,91 @@ begin
   end if;
 
   return new;
+end;
+$$;
+
+
+--
+-- Name: work_request_supersession_strands(uuid); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.work_request_supersession_strands(p_work_request_id uuid) RETURNS text[]
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
+    AS $_$
+declare
+  v_ref text;
+  v_fk record;
+  v_hit boolean;
+  v_found text[] := array[]::text[];
+begin
+  select w.ref into v_ref from ops.work_request w where w.id = p_work_request_id;
+
+  for v_fk in
+    select format('%I.%I', n.nspname, r.relname) as rel, a.attname::text as col
+      from pg_constraint c
+      join pg_class r on r.oid = c.conrelid
+      join pg_namespace n on n.oid = r.relnamespace
+      join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+     where c.contype = 'f' and c.confrelid = 'ops.work_request'::regclass
+       and cardinality(c.conkey) = 1
+       and (n.nspname || '.' || r.relname, a.attname::text) not in (
+         ('ops.work_request_triage_receipt', 'work_request_id'),
+         ('ops.work_request_joe_answer_receipt', 'work_request_id'),
+         ('ops.work_request_withdrawal_receipt', 'work_request_id'),
+         ('ops.work_request_withdrawal_receipt', 'superseded_by'))
+     order by 1, 2
+  loop
+    execute format('select exists (select 1 from %s where %I = $1)', v_fk.rel, v_fk.col)
+      into v_hit using p_work_request_id;
+    if v_hit then
+      v_found := v_found || (v_fk.rel || '.' || v_fk.col);
+    end if;
+  end loop;
+
+  -- A multi-column key to ops.work_request would escape the loop above; there
+  -- is none today, and one appearing must be read before it is trusted.
+  if exists (select 1 from pg_constraint c
+              where c.contype = 'f' and c.confrelid = 'ops.work_request'::regclass
+                and cardinality(c.conkey) <> 1) then
+    v_found := v_found || 'unreadable multi-column foreign key'::text;
+  end if;
+
+  if exists (select 1 from public.room_dispatch_link x where x.work_request_id = p_work_request_id) then
+    v_found := v_found || 'public.room_dispatch_link.work_request_id'::text;
+  end if;
+  if exists (select 1 from ops.assurance_health_evidence x where x.work_request_id = v_ref) then
+    v_found := v_found || 'ops.assurance_health_evidence.work_request_id'::text;
+  end if;
+  if exists (select 1 from ops.release x where x.work_request_ref = v_ref) then
+    v_found := v_found || 'ops.release.work_request_ref'::text;
+  end if;
+  if exists (select 1 from ops.engineering_stale_contract_fence x where x.work_request_ref = v_ref) then
+    v_found := v_found || 'ops.engineering_stale_contract_fence.work_request_ref'::text;
+  end if;
+
+  return v_found;
+end;
+$_$;
+
+
+--
+-- Name: FUNCTION work_request_supersession_strands(p_work_request_id uuid); Type: COMMENT; Schema: ops; Owner: -
+--
+
+COMMENT ON FUNCTION ops.work_request_supersession_strands(p_work_request_id uuid) IS 'Every column outside the intake receipts that names this Work Request. A triaged request may be superseded only when this is empty. Reads foreign keys from pg_constraint at call time.';
+
+
+--
+-- Name: work_request_triage_receipt_append_only(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.work_request_triage_receipt_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
+    AS $$
+begin
+  raise exception 'ops.work_request_triage_receipt is append-only';
 end;
 $$;
 
@@ -83414,7 +83567,7 @@ CREATE TABLE ops.work_request_triage_receipt (
 -- Name: TABLE work_request_triage_receipt; Type: COMMENT; Schema: ops; Owner: -
 --
 
-COMMENT ON TABLE ops.work_request_triage_receipt IS 'Private, append-only receipt that authorizes the sole Program 6 captured-to-triaged transition. It is not a dispatch or execution record.';
+COMMENT ON TABLE ops.work_request_triage_receipt IS 'Receipt for triaging a sourced Work Request. Append-only, enforced by trigger since 0883. Stays attached to a request superseded from triaged, readable through superseded_by.';
 
 
 --
@@ -102861,6 +103014,27 @@ CREATE OR REPLACE VIEW public.v_investigation AS
 
 
 --
+-- Name: assurance_health_evidence a0_work_request_evidence_requires_live_request; Type: TRIGGER; Schema: ops; Owner: -
+--
+
+CREATE TRIGGER a0_work_request_evidence_requires_live_request BEFORE INSERT OR UPDATE OF work_request_id ON ops.assurance_health_evidence FOR EACH ROW EXECUTE FUNCTION ops.work_request_evidence_requires_live_request('work_request_id', 'ref');
+
+
+--
+-- Name: engineering_stale_contract_fence a0_work_request_evidence_requires_live_request; Type: TRIGGER; Schema: ops; Owner: -
+--
+
+CREATE TRIGGER a0_work_request_evidence_requires_live_request BEFORE INSERT OR UPDATE OF work_request_ref ON ops.engineering_stale_contract_fence FOR EACH ROW EXECUTE FUNCTION ops.work_request_evidence_requires_live_request('work_request_ref', 'ref');
+
+
+--
+-- Name: release a0_work_request_evidence_requires_live_request; Type: TRIGGER; Schema: ops; Owner: -
+--
+
+CREATE TRIGGER a0_work_request_evidence_requires_live_request BEFORE INSERT OR UPDATE OF work_request_ref ON ops.release FOR EACH ROW EXECUTE FUNCTION ops.work_request_evidence_requires_live_request('work_request_ref', 'ref');
+
+
+--
 -- Name: release a_release_maker_session_provenance; Type: TRIGGER; Schema: ops; Owner: -
 --
 
@@ -107355,6 +107529,13 @@ CREATE TRIGGER work_request_shape_gate BEFORE INSERT OR UPDATE ON ops.work_reque
 
 
 --
+-- Name: work_request_triage_receipt work_request_triage_receipt_append_only; Type: TRIGGER; Schema: ops; Owner: -
+--
+
+CREATE TRIGGER work_request_triage_receipt_append_only BEFORE DELETE OR UPDATE ON ops.work_request_triage_receipt FOR EACH ROW EXECUTE FUNCTION ops.work_request_triage_receipt_append_only();
+
+
+--
 -- Name: work_request_withdrawal_receipt work_request_withdrawal_receipt_append_only; Type: TRIGGER; Schema: ops; Owner: -
 --
 
@@ -107387,6 +107568,13 @@ CREATE TRIGGER workflow_caller_history_append_only BEFORE DELETE OR UPDATE ON op
 --
 
 CREATE TRIGGER z_release_readiness_is_typed BEFORE INSERT OR UPDATE OF state, environment, git_sha, provider, provider_version_id, plan_hash, verifier_actor, verifier_evidence_ref, readiness_receipt_id, ready_at ON ops.release FOR EACH ROW EXECUTE FUNCTION ops.release_readiness_is_typed();
+
+
+--
+-- Name: room_dispatch_link a0_work_request_evidence_requires_live_request; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER a0_work_request_evidence_requires_live_request BEFORE INSERT OR UPDATE OF work_request_id ON public.room_dispatch_link FOR EACH ROW EXECUTE FUNCTION ops.work_request_evidence_requires_live_request('work_request_id', 'uuid');
 
 
 --
@@ -118743,6 +118931,9 @@ revoke all on function ops.work_request_criterion_evidence_is_append_only() from
 revoke all on function ops.work_request_evidence_receipt_kind(p_receipt text) from public;
 revoke all on function ops.work_request_evidence_receipt_mismatch(p_receipt text, p_work_request_id uuid) from public;
 revoke all on function ops.work_request_evidence_receipt_normalized(p_ref text) from public;
+revoke all on function ops.work_request_evidence_requires_live_request() from public;
+revoke all on function ops.work_request_supersession_strands(p_work_request_id uuid) from public;
+revoke all on function ops.work_request_triage_receipt_append_only() from public;
 revoke all on function ops.workflow_cutover_board(p_workflow_key text, p_workflow_version integer) from public;
 revoke all on function ops.write_pitr_probe(p_role text) from public;
 revoke all on function ops.write_tour_share_comment(p_session_digest text, p_projection_ref text, p_property_ref text, p_comment text, p_idempotency_key uuid) from public;
@@ -122778,7 +122969,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0877_register_github_burst_guard_control.sql	bb66b4aa92b365cd8f0ca9a0eb3c4d65d304342438d4b277bc583e866f879dc2	2026-10-13 11:50:55.570087+00
 0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql	6f204142df1ea786ee2310548231ea7a31e64b8c034443753892614564fc08a8	2026-10-13 11:50:55.573651+00
 0879_verb_usage_digest.sql	ee2ad2f28337f78685247946262be6869eec9a3e67f2216207f8d302ad7f92e4	2026-10-13 13:39:24.208163+00
-0880_repin_rule_delivery_activation_after_registry_inventory_refresh.sql	0b551b077f799227a3f2b5d302888c28552b32a6914c81dcee7a2df39ca63231	2026-10-13 22:30:00.000000+00
+0880_repin_rule_delivery_activation_after_registry_inventory_refresh.sql	0b551b077f799227a3f2b5d302888c28552b32a6914c81dcee7a2df39ca63231	2026-10-13 22:30:00+00
+0883_supersede_triaged_work_request.sql	5986804baa44e3794c90db3110b23f348d8531cf1a5c6db011d2eee31f1ff450	2026-10-15 17:50:08.713344+00
 \.
 
 
