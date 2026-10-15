@@ -130,7 +130,7 @@ comment on table ops.work_request_triage_receipt is
 -- NO KEY UPDATE lock, so the immutable trigger's census is protected too.
 -- Unchanged references remain writable on historical evidence rows.
 create function ops.work_request_evidence_requires_live_request()
-returns trigger language plpgsql
+returns trigger language plpgsql security definer
 set search_path to 'pg_catalog', 'ops', 'pg_temp' as $fn$
 declare
   v_reference text := to_jsonb(new)->>tg_argv[0];
@@ -156,6 +156,9 @@ begin
   return new;
 end;
 $fn$;
+
+-- Only trigger invocation is admitted. Existing writer grants stay unchanged.
+revoke all on function ops.work_request_evidence_requires_live_request() from public;
 
 create trigger a0_work_request_evidence_requires_live_request
   before insert or update of work_request_id on public.room_dispatch_link
