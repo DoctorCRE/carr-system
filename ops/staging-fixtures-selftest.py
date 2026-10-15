@@ -536,5 +536,144 @@ class TargetTests(unittest.TestCase):
             self.assertIn("libpq target override", stderr.getvalue())
 
 
+class TourFixtureTests(unittest.TestCase):
+    def tour_plan(self):
+        value = plan()
+        value["keys"]["tour"] = "33333333-3333-4333-8333-333333333333"
+        value["names"]["tour"] = f"Synthetic staging QA {RUN} draft tour"
+        value["records"]["tour"] = {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "name": value["names"]["tour"],
+        }
+        return value
+
+    def test_tour_plan_binds_app_created_identity_without_tour_receipt(self):
+        value = self.tour_plan()
+        self.assertNotIn("tour", value["receipts"])
+        tour = fixture.excluded_tour_values(value)
+        self.assertEqual(str(tour.tour_id), value["records"]["tour"]["id"])
+        self.assertEqual(tour.name, value["names"]["tour"])
+        self.assertEqual(str(tour.client_id), value["records"]["client"]["id"])
+        self.assertEqual(tour.property_id, fixture.excluded_tour_values(value).property_id)
+        self.assertEqual(tour.stop_id, fixture.excluded_tour_values(value).stop_id)
+
+    def test_tour_plan_rejects_missing_key_and_mismatched_name(self):
+        for change in ("missing_key", "wrong_name", "wrong_id"):
+            with self.subTest(change=change):
+                value = self.tour_plan()
+                if change == "missing_key": del value["keys"]["tour"]
+                if change == "wrong_name": value["records"]["tour"]["name"] = "Other"
+                if change == "wrong_id": value["records"]["tour"]["id"] = "invalid"
+                with self.assertRaises(fixture.FixtureRefusal):
+                    fixture.excluded_tour_values(value)
+
+    def test_tour_dry_run_uses_private_plan_and_never_connects(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.json"
+            path.write_text(json.dumps(self.tour_plan()))
+            path.chmod(0o600)
+            args = ["staging-fixtures.py", "--tour-plan", str(path),
+                    "--expected-app-sha", APP_SHA, "--expected-carr-sha", CARR_SHA]
+            stdout = io.StringIO()
+            with patch.object(sys, "argv", args), patch.object(sys, "stdout", stdout), \
+                    patch.object(fixture, "validate_provider_binding", side_effect=AssertionError("provider called")):
+                self.assertEqual(fixture.main(), 0)
+            self.assertIn("excluded_tour_stops=1 mutated=false", stdout.getvalue())
+
+    def test_tour_proof_reports_raw_sql_and_no_promotion(self):
+        value = self.tour_plan()
+        readback = {"active_stop_count": 0, "excluded_stop_count": 1,
+                    "route_accepted": False, "route_sequence": None, "route_label": None}
+        proof = fixture.build_tour_fixture_proof(value, {"database": "neondb"}, readback)
+        self.assertEqual(proof["provenance"]["kind"], "raw-sql-fixture")
+        self.assertEqual(proof["fixture"]["mode"], "excluded-tour-stop")
+        self.assertEqual(proof["fixture"]["tour_readback"], readback)
+        self.assertNotIn("receipt", proof["fixture"])
+
+    def test_install_rerun_refusals_and_independent_readback(self):
+        value = self.tour_plan()
+        expected = fixture.excluded_tour_values(value)
+        route_id = uuid.UUID("22222222-2222-4222-8222-222222222222")
+
+        class TourCursor:
+            def __init__(self, db): self.db, self.result = db, None
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def fetchone(self): return self.result
+            def fetchall(self): return self.result
+            def execute(self, sql, args=None):
+                low = " ".join(sql.lower().split())
+                self.db.sql.append(low)
+                point = lambda role: {"latitude": 30.4, "longitude": -87.2,
+                                      "position_role": role, "precision_class": "approximate",
+                                      "source_ref": "synthetic-staging-qa-point-v1"}
+                if low == "set transaction read only": self.result = None
+                elif low.startswith("select session_user,current_user,current_database()"):
+                    self.result = ("neondb_owner", "neondb_owner", "neondb")
+                elif "from public.actor" in low: self.result = [("joe",), ("system",)]
+                elif "from public.client cl" in low:
+                    self.result = (str(expected.client_id), "engaged", None, str(fixture.FIXTURE_ID),
+                                   "Synthetic Staging Fixture", None, None)
+                elif "from ops.tour where" in low:
+                    self.result = (expected.tour_id, expected.name, self.db.tour_status, 1,
+                                   "synthetic-staging-qa-v1", "client", str(expected.client_id), "bound")
+                elif "from ops.tour_route_version where" in low:
+                    self.result = [(route_id, 1, None, point("start"), point("end"),
+                                    "manual", None, None, {}, None, self.db.route_actor, None)]
+                elif "from ops.tour_route_version_acceptance" in low: self.result = (0,)
+                elif any(f"from ops.{table}" in low for table in
+                         ("tour_property_membership", "tour_public_projection", "tour_selection_cart_version",
+                          "tour_field_assertion", "tour_property_coordinate_candidate")):
+                    self.result = (0,)
+                elif "from ops.tour_property where" in low:
+                    self.result = ((expected.property_id, fixture.TOUR_TENANT, self.db.property_status, None)
+                                   if self.db.property_exists else None)
+                elif "from ops.tour_route_stop where route_version_id" in low:
+                    self.result = ([(expected.stop_id, fixture.TOUR_TENANT, route_id, expected.property_id,
+                                     None, None, self.db.stop_state, None, None, False, 0, 0, "unknown",
+                                     fixture.EMPTY_ASSERTION_SET_DIGEST, "system")]
+                                   if self.db.stop_exists else [])
+                elif "from ops.tour_route_stop where property_id" in low: self.result = (0,)
+                elif "insert into ops.tour_property" in low: self.db.property_exists = True
+                elif "insert into ops.tour_route_stop" in low:
+                    if self.db.fail_stop: raise RuntimeError("forced stop insert failure")
+                    self.db.stop_exists = True
+                else: raise AssertionError(f"unexpected Tour SQL: {low}")
+
+        class TourConn:
+            def __init__(self):
+                self.property_exists = self.stop_exists = self.fail_stop = False
+                self.property_status, self.stop_state = "unknown", "excluded"
+                self.tour_status, self.route_actor = "draft", "joe"
+                self.commits = self.rollbacks = 0
+                self.sql = []
+            def cursor(self): return TourCursor(self)
+            def commit(self): self.commits += 1
+            def rollback(self): self.rollbacks += 1
+
+        db = TourConn()
+        self.assertEqual(fixture.install_excluded_tour_fixture(db, value), 1)
+        self.assertEqual(fixture.install_excluded_tour_fixture(db, value), 0)
+        self.assertEqual(db.commits, 2)
+        self.assertTrue(any("insert into ops.tour_property" in sql for sql in db.sql))
+        self.assertTrue(any("insert into ops.tour_route_stop" in sql for sql in db.sql))
+        proof = fixture.read_excluded_tour_fixture(db, value)
+        self.assertEqual((proof["active_stop_count"], proof["excluded_stop_count"]), (0, 1))
+        self.assertIn("set transaction read only", db.sql)
+        for field, changed in (("tour_status", "active"), ("route_actor", "dell"),
+                               ("stop_state", "active"), ("property_status", "active")):
+            with self.subTest(field=field):
+                original = getattr(db, field)
+                setattr(db, field, changed)
+                with self.assertRaises(fixture.FixtureRefusal):
+                    fixture.install_excluded_tour_fixture(db, value)
+                setattr(db, field, original)
+        self.assertEqual(db.commits, 2)
+        db.property_exists = db.stop_exists = False
+        db.fail_stop = True
+        with self.assertRaises(RuntimeError): fixture.install_excluded_tour_fixture(db, value)
+        self.assertGreaterEqual(db.rollbacks, 5)
+
+
 if __name__ == "__main__":
     unittest.main()
