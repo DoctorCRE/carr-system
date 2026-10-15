@@ -45,9 +45,18 @@ def measure():
     oracle, baseline = at(ORIGINAL, path), json.loads(REVIEWED.read_text())
     candidate = json.loads((REPO / path).read_text())
     rules = at(ORIGINAL, 'ops/config/rule-jev-triggers.v1.json')['rules']
+    # A rule retired since the original table has no routing to preserve; a
+    # rule missing from the candidate table while still admitted is a defect.
+    admitted = set(json.loads((REPO / 'ops/config/rule-admission-export.v1.json').read_text())['rules'])
+    current_rules = json.loads((REPO / 'ops/config/rule-jev-triggers.v1.json').read_text())['rules']
+    lost = sorted(rule for rule in rules if rule not in current_rules and rule in admitted)
+    if lost:
+        raise AssertionError(f'admitted rules dropped from the trigger table: {lost}')
     corpus = pii_guard.load_corpus(REPO / 'ops/config/public-source-identities.v1.json')
     results = {'train': [], 'test': []}
     for rule, record in rules.items():
+        if rule not in current_rules:
+            continue
         cues = [cue for cue, probability in record['triggers']['keywords'].items()
                 if probability >= .5 and not re.fullmatch(r"[clvp]-\d+", cue)
                 and not pii_guard.identity_spans(cue, corpus)]

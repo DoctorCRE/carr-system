@@ -1,34 +1,22 @@
 {
  "counts": {
-  "jev_compiled_triggers": 120,
-  "pack_fallback_triggers": 7,
-  "seeded_detector_rule_ids": 52,
-  "seeded_detector_triggers": 18,
+  "jev_compiled_triggers": 119,
+  "pack_fallback_triggers": 9,
+  "seeded_detector_rule_ids": 49,
+  "seeded_detector_triggers": 14,
   "structural_extra_triggers": 2,
-  "triggers": 153
+  "triggers": 150
  },
  "generated_from": {
-  "jev_triggers_sha256": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
-  "map_sha256": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
-  "triage_sha256": "1a5b2d55e5b0b7c4322f82d270b8a9349c56f1bb7e73266968a1d6880a2ead44"
+  "jev_triggers_sha256": "f26d16ebdf35072ee9eee6eee07c4614a6d7131a379a917dbb40667afe87a62f",
+  "map_sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
+  "triage_sha256": "4b4fc044c74627edb8f2832360afdce591cfd626b638f003ef1fb6b0f0f42e71"
  },
  "generated_note": "Compiled by ops/rule-jit-compile.py from ops/config/rule-triage.v1.json's per-rule `detector` fields and ops/config/rule-enforcement-map.json's rule_packs/rule_load_layers. Never hand-edit this file \u2014 run the compiler again after changing either input, and `--check` verifies the two never drift apart.",
  "max_rules_per_trigger": 5,
  "schema": "rule-jit-triggers/v1",
  "slice": "s9",
  "triggers": [
-  {
-   "kind": "bash_family",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\bdispatch\\.py\\s+send\\b",
-   "rule_ids": [
-    "8400cd3d"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "db449490f0c5"
-  },
   {
    "kind": "bash_family",
    "packs": [
@@ -117,8 +105,9 @@
    "rule_ids": [
     "11b2b73b",
     "6172e7d5",
+    "76fcbed6",
     "9e3fb6d0",
-    "c4a284b2"
+    "a9fc3f0e"
    ],
    "source": "pack_fallback",
    "trigger_id": "a7409197dee7"
@@ -142,6 +131,20 @@
   {
    "kind": "content_regex",
    "packs": [
+    "client-deal"
+   ],
+   "pattern": "\\bdeal\\b|\\bloi\\b|\\bletter\\ of\\ intent\\b|\\blead\\b|\\bclient\\b|\\bprospect\\b|\\blandlord\\b|\\blisting\\ agent\\b|\\bsearch\\ packet\\b|\\btour\\b|\\boutreach\\b|\\bcommission\\b|\\bsalesforce\\b|\\bnational\\ account\\b|\\bpractice\\ owner\\b|\\bfranchisee\\b|\\bmarket\\ commentary\\b",
+   "rule_ids": [
+    "07dde434",
+    "08c4eda2",
+    "ac0a6579"
+   ],
+   "source": "pack_fallback",
+   "trigger_id": "d6c3b5c37c8d"
+  },
+  {
+   "kind": "content_regex",
+   "packs": [
     "delegation-council"
    ],
    "pattern": "\\bfable\\b",
@@ -159,9 +162,10 @@
    "pattern": "\\bgit\\b|\\bbranch\\b|\\bworktree\\b|\\bcommit\\b|\\bpush\\b|\\bpull\\ request\\b|\\bci\\b|\\bgate\\b|\\bhook\\b|\\bmigration\\b|\\bschema\\b|\\bdeploy\\b|\\bwrangler\\b|\\btest\\b|\\bselftest\\b|\\bconfig\\ file\\b|\\bbaseline\\b|\\brefactor\\b|\\barchitecture\\ fork\\b",
    "rule_ids": [
     "204391be",
+    "486584d6",
+    "67e48aaf",
     "a2e78f48",
-    "efbdfb1a",
-    "f0f9156e"
+    "c363bd8b"
    ],
    "source": "pack_fallback",
    "trigger_id": "963b8f2da763"
@@ -186,10 +190,10 @@
    "pattern": "\\bparty\\b|\\bvendor\\b|\\bcontact\\b|\\battendee\\b|\\bduplicate\\b|\\bdedupe\\b|\\benrichment\\b|\\bnpi\\b|\\bnppes\\b|\\bintake\\b|\\bnew\\ client\\b|\\bnew\\ lead\\b|\\bnew\\ vendor\\b|\\badd\\-party\\b|\\bverification\\ stamp\\b",
    "rule_ids": [
     "2ca2add2",
+    "578fdd91",
     "5d44d3f3",
     "614c1209",
-    "d26d63b0",
-    "faf1b643"
+    "a9fc3f0e"
    ],
    "source": "pack_fallback",
    "trigger_id": "36433cdd2d40"
@@ -201,11 +205,26 @@
    ],
    "pattern": "\\bscheduled\\b|\\blaunchd\\b|\\bcron\\b|\\bnightly\\b|\\bheartbeat\\b|\\bhealth\\b|\\bunattended\\b|\\broutine\\b|\\bjob\\b|\\bcredential\\b|\\baway\\ mode\\b|\\btombstone\\b|\\bmetric\\b|\\balarm\\b|\\blong\\ job\\b|\\bestimate\\b",
    "rule_ids": [
+    "67e48aaf",
     "740bb505",
     "def3e84e"
    ],
    "source": "pack_fallback",
    "trigger_id": "4390b46cdb6b"
+  },
+  {
+   "kind": "content_regex",
+   "packs": [
+    "delegation-council"
+   ],
+   "pattern": "\\bsubagent\\b|\\bdelegate\\b|\\bfan\\-out\\b|\\bcouncil\\b|\\bchair\\b|\\bred\\ team\\b|\\bexecutor\\b|\\bgrok\\b|\\bcopilot\\b|\\bworkflow\\b|\\bseat\\b|\\bbrief\\b",
+   "rule_ids": [
+    "4a77c35d",
+    "661d7757",
+    "f673326b"
+   ],
+   "source": "pack_fallback",
+   "trigger_id": "cc673e4aec26"
   },
   {
    "kind": "content_regex",
@@ -433,6 +452,18 @@
    ],
    "source": "prompt_cue",
    "trigger_id": "5370274a056f"
+  },
+  {
+   "kind": "prompt_regex",
+   "packs": [
+    "delegation-council"
+   ],
+   "pattern": "\\baccess\\s+restrictions\\b|\\bpersonal\\-scope\\b|\\bagent\\s+access\\b|\\bdata\\s+fences\\b|\\badd\\s+access\\b|\\bcustody\\b",
+   "rule_ids": [
+    "f673326b"
+   ],
+   "source": "jev_compiled",
+   "trigger_id": "5124db1844ad"
   },
   {
    "kind": "prompt_regex",
@@ -1215,6 +1246,19 @@
   },
   {
    "kind": "prompt_regex",
+   "packs": [
+    "records-intake",
+    "source-study"
+   ],
+   "pattern": "\\binternet\\s+research\\-site\\b|\\bresearch\\-site\\s+index\\b|\\badding\\s+removing\\b|\\bresearch\\-site\\b|\\bindex\\s+memory\\b|\\badd\\s+index\\b",
+   "rule_ids": [
+    "a9fc3f0e"
+   ],
+   "source": "jev_compiled",
+   "trigger_id": "f9e64cea1271"
+  },
+  {
+   "kind": "prompt_regex",
    "negative_pattern": "\\bwatch\\-video\\s+skill\\b|\\binsurance\\s+reps\\b|\\bjoe's\\s+ruling\\b",
    "packs": [
     "joe-development"
@@ -1253,19 +1297,6 @@
   },
   {
    "kind": "prompt_regex",
-   "negative_pattern": "\\bvendor\\s+party\\b",
-   "packs": [
-    "client-deal"
-   ],
-   "pattern": "\\bmay\\s+joe\\s+advertise\\s+into\\s+alabama\\b|\\blicensure\\s+grounds\\b|\\blicensed\\s+party\\b|\\balabama\\s+exam\\b|\\bdell's\\b",
-   "rule_ids": [
-    "5697071b"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "5811e2779ed6"
-  },
-  {
-   "kind": "prompt_regex",
    "negative_pattern": "\\bgrok\\s+build\\b",
    "packs": [
     "engineering-git"
@@ -1290,19 +1321,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "50d5f24099f8"
-  },
-  {
-   "kind": "prompt_regex",
-   "negative_pattern": "\\bstaffing\\s+model\\b",
-   "packs": [
-    "delegation-council"
-   ],
-   "pattern": "\\bmodel\\s+choice\\b|\\bwork's\\s+shape\\b|\\bcloud\\s+model\\b|\\bcloud\\s+pick\\b|\\bpick\\s+model\\b|\\bbatches\\b",
-   "rule_ids": [
-    "ede4b241"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "7f7cac8d1070"
   },
   {
    "kind": "prompt_regex",
@@ -1367,19 +1385,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "c3ac9bf9cbb8"
-  },
-  {
-   "kind": "prompt_regex",
-   "negative_pattern": "\\bvisible\\s+step\\b",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\bopens\\s+grill\\-with\\-docs\\b|\\bgrill\\-with\\-docs\\s+work\\b|\\bmedium\\-to\\-large\\s+work\\b|\\bgrill\\-with\\-docs\\b|\\bmedium\\-to\\-large\\b|\\bmoves\\s+wayfinder\\b|\\bstarts\\s+sizing\\b|\\bsizing\\s+step\\b|\\boutgrows\\b|\\bsizing\\b",
-   "rule_ids": [
-    "8400cd3d"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "3af6fc775ffc"
   },
   {
    "kind": "prompt_regex",
@@ -1777,30 +1782,6 @@
   {
    "kind": "verb",
    "packs": [
-    "delegation-council"
-   ],
-   "pattern": "^(?:Agent|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$",
-   "rule_ids": [
-    "ede4b241"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "c373f0cf37e7"
-  },
-  {
-   "kind": "verb",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "^(?:EnterPlanMode|Agent|RemoteTrigger|Workflow|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$",
-   "rule_ids": [
-    "8400cd3d"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "c84d0fe94cac"
-  },
-  {
-   "kind": "verb",
-   "packs": [
     "source-study"
    ],
    "pattern": "^(WebFetch|WebSearch)$",
@@ -1843,18 +1824,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "6aaeb8bad36b"
-  },
-  {
-   "kind": "verb",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "__(?:write-work-shape|report-problem|propose-ready-plan)$",
-   "rule_ids": [
-    "8400cd3d"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "e93e22d1c8c0"
   },
   {
    "kind": "verb",
@@ -1912,7 +1881,6 @@
    "rule_ids": [
     "412d37d3",
     "4399df76",
-    "5697071b",
     "ce12c11e",
     "f2d58a30"
    ],

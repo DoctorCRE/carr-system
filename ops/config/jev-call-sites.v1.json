@@ -228,7 +228,7 @@
       "value": "64 explicit review/diagnosis judgments in 7 days under ad-hoc caller names; they now share one prefix and one budget",
       "sources": ["ops/typesafe_client.py"]
     },
-    {"caller": "rule_trigger_compile", "trigger": "manual: bounded semantic evaluation", "runs_in": "explicit evaluation session", "attribution": "session", "unattended": "off", "hourly_budget": 5, "daily_budget": 10, "owner": "orchestrator", "value": "bounded advisory/eval only; no automatic promotion", "sources": ["ops/rule_trigger_compile.py"]},
+    {"caller": "rule_trigger_compile", "trigger": "manual: bounded semantic evaluation", "runs_in": "explicit evaluation session", "attribution": "session", "unattended": "off", "hourly_budget": 5, "daily_budget": 20, "owner": "orchestrator", "value": "bounded advisory/eval only; no automatic promotion; daily 20 so one approval batch (14 rules, 2026-10-14) compiles inside a day while hourly 5 still bounds a runaway", "sources": ["ops/rule_trigger_compile.py"]},
     {"caller": "timebomb-audit", "trigger": "manual: bounded semantic evaluation", "runs_in": "explicit evaluation session", "attribution": "session", "unattended": "off", "hourly_budget": 5, "daily_budget": 10, "owner": "orchestrator", "value": "bounded advisory/eval only; no automatic promotion", "sources": ["ops/timebomb-audit.py"]},
     {
       "caller": "jevlint_review",
