@@ -55,5 +55,8 @@
     "evals/session-instructions/selftest.py": "5413093c5baf1f51a7d8991bd86e6c6fd9e7a54105d2fef34558c61f227e5e09",
     "evals/session-instructions/expectations.v2.json": "9ddac8cd8f77505b3c3f023742f788e913237a36976b6cfc73a66091ebb98147"
   },
-  "historical_limitation": "Earlier rounds read all recorded answers and the original model-input split leaked. This freeze applies only to the new train-only scorer selection and final offline replay, not to the historical model measurement. No fresh model run or shipping claim."
+  "historical_limitation": "Earlier rounds read all recorded answers and the original model-input split leaked. This freeze applies only to the new train-only scorer selection and final offline replay, not to the historical model measurement. No fresh model run or shipping claim.",
+  "invalidated_by": "PR 1790 review 6200891343",
+  "seal_valid": false,
+  "invalidation_reason": "All historical answers were exposed during earlier scorer development. A later freeze cannot seal them."
 }

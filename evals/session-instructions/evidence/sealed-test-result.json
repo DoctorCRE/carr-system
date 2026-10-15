@@ -12,5 +12,8 @@
   "decision": "inconclusive",
   "test_cases_per_arm": 30,
   "test_runs_per_arm": 150,
-  "post_test_tuning": false
+  "post_test_tuning": false,
+  "invalidated_by": "PR 1790 review 6200891343",
+  "seal_valid": false,
+  "invalidation_reason": "All historical answers were exposed during earlier scorer development. A later freeze cannot seal them."
 }

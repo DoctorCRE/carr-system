@@ -178,5 +178,21 @@
     },
     "pending_operations": [],
     "next_action": "Commit the scoped changes, push fix-forward-1773-session-eval, update PR 1790, and verify the remote head and posted comment."
+  },
+  "fresh_seal_repair": {
+    "objective": "Establish a genuine fresh held-out evaluation for PR 1790",
+    "latest_correction": "Earlier answers informed scorer development. A later train-only reaffirmation cannot seal historical observations.",
+    "constraints": [
+      "Only evals/session-instructions writes",
+      "No model calls in this sandbox",
+      "No browser tests or full ops/ci.sh",
+      "Push quarantine/freeze before creating fresh cases"
+    ],
+    "progress": [
+      "All 60 cases / 52 input groups moved to train",
+      "Scorer unchanged and hash frozen before any fresh case exists"
+    ],
+    "next_action": "Verify and push step 1, then author fresh cases and guarded capture/report commands",
+    "pending_operations": []
   }
 }

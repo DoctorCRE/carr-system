@@ -10,13 +10,9 @@ standing instructions. Commit bafdcd795 changed two passages:
       map-architecture call; the new text says the gate only records a skip and
       the session enforces the route itself.
 
-HISTORICAL ARMS. baseline = AGENTS.md at bafdcd795~1; candidate = the
-AGENTS.md bound by evidence/receipt.v1.json. The recorded tool-less Haiku
-outputs are replayed offline. This runner cannot invoke a model. It preserves
-the original observations and costs, changes only split metadata in new
-cohorts, and grades them with score.py. Historical model-input leakage prevents
-a shipping claim. The corrected scorer is selected on train data and synthetic controls, frozen, then replayed
-once on the test data without inspecting test transcripts or tuning afterward.
+All historical observations were exposed during scorer development and belong
+in train. The scorer is frozen in evidence/scorer-freeze.json before any new
+held-out task is authored. Historical replay cannot establish a test seal.
 
 CASES (see CASES below). Map prompts come from the regression fixtures of the
 map gate (ops/map-architecture-gate-selftest.py and
@@ -25,15 +21,12 @@ for store cases comes from ops/fixtures/real-replay/{user,agent}-prompts.jsonl
 (flagged synthetic there) plus hand-written seeds. Production session
 transcripts were NOT read.
 
-  python3 evals/session-instructions/run_eval.py build    # write expectations
-  python3 evals/session-instructions/run_eval.py prepare   # freeze train-only scorer selection
-  python3 evals/session-instructions/run_eval.py report    # one sealed replay, write receipt.json
+  python3 evals/session-instructions/run_eval.py build  # quarantine exposed inputs
 """
 
 import datetime
 import hashlib
 import json
-import random
 import sys
 from pathlib import Path
 
@@ -46,8 +39,7 @@ SURFACE = "session-instructions"
 CHANGE_COMMIT = "bafdcd795f8269a0e3c6060111da32457876638a"
 VERSION = "session-instructions-expectations/v2"
 EXPECTATIONS = HERE / "expectations.v2.json"
-DERIVATION = HERE / "evidence" / "scorer-derivation.json"
-TEST_RESULT = HERE / "evidence" / "sealed-test-result.json"
+FREEZE = HERE / "evidence" / "scorer-freeze.json"
 MODEL = "haiku"
 REPEATS = 5
 SEED = 20261015
@@ -134,24 +126,7 @@ def sha(b):
 
 
 def split_assignment(cases):
-    rng = random.Random(SEED)
-    groups = {}
-    for cid, kind, tag, text, src in cases:
-        group = groups.setdefault(sha(text), {"ids": [], "kinds": set()})
-        group["ids"].append(cid)
-        group["kinds"].add(kind)
-    by_kind = {}
-    for digest, group in groups.items():
-        by_kind.setdefault(tuple(sorted(group["kinds"])), []).append(digest)
-    out = {}
-    for kinds, digests in sorted(by_kind.items()):
-        digests = sorted(digests)
-        rng.shuffle(digests)
-        n_train = len(digests) // 2
-        for j, digest in enumerate(digests):
-            for cid in groups[digest]["ids"]:
-                out[cid] = "train" if j < n_train else "test"
-    return out
+    return {cid: "train" for cid, *_ in cases}
 
 
 def build():
@@ -190,150 +165,12 @@ def replay_rows(expectations, original_expectations, rows):
     return out
 
 
-def frozen_sources():
-    return {f"evals/{SURFACE}/{name}": sha((HERE / name).read_bytes())
-            for name in ("score.py", "run_eval.py", "selftest.py", "expectations.v2.json")}
-
-
-def prepare():
-    exp = json.loads(EXPECTATIONS.read_text())["cases"]
-    training = {}
-    for arm in ("baseline", "candidate"):
-        counts = {}
-        for line in (HERE / "evidence" / f"{arm}.v2.jsonl").read_text().splitlines():
-            row = json.loads(line)
-            case = exp[row["case_id"]]
-            if case["split"] != "train":
-                continue
-            count = counts.setdefault(case["kind"], {"runs": 0, "passes": 0})
-            count["runs"] += len(row["runs"])
-            count["passes"] += sum(score.passes(case["kind"], run) for run in row["runs"])
-        training[arm] = counts
-    record = {
-        "status": "frozen_before_test",
-        "frozen_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "selection": "Re-derived acceptance rules from the task safeguards, synthetic selftest controls, and v2 train rows only. Retained the scorer bytes: complete recognized outage and task-stop clauses, exact NONE, no file actions, no unknown fields or nonnumeric metadata; exact live map invocation; no rules-file fallback. Test transcripts were not inspected during this derivation.",
-        "tradeoff": "The train sample includes verbose safe refusals rejected by the closed grammar. Retain conservative rejection instead of expanding the grammar to fit recorded answers. No test result may change this choice.",
-        "training": training,
-        "sources": frozen_sources(),
-        "historical_limitation": "Earlier rounds read all recorded answers and the original model-input split leaked. This freeze applies only to the new train-only scorer selection and final offline replay, not to the historical model measurement. No fresh model run or shipping claim.",
-    }
-    with DERIVATION.open("x") as out:
-        out.write(json.dumps(record, indent=2) + "\n")
-    print(json.dumps(record, indent=2))
-
-
-def verify_derivation():
-    record = json.loads(DERIVATION.read_text())
-    if record["status"] != "frozen_before_test" or record["sources"] != frozen_sources():
-        raise ValueError("scorer selection changed after freezing; do not read test transcripts")
-    if TEST_RESULT.exists():
-        raise ValueError("sealed replay already started; inspect its result before any retry")
-
-
-def report():
-    verify_derivation()
-    started_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    TEST_RESULT.write_text(json.dumps({"status": "started", "started_at": started_at, "derivation_sha256": sha(DERIVATION.read_bytes())}) + "\n")
-    exp_path = EXPECTATIONS
-    exp = json.loads(exp_path.read_text())
-    original_path = HERE / "evidence" / "receipt.v1.json"
-    original = json.loads(original_path.read_text())
-    original_exp_path = REPO / original["evidence"]["expectations"]["path"]
-    original_exp = json.loads(original_exp_path.read_text())
-    bound = {**original["evidence"]["dependencies"],
-             original["evidence"]["expectations"]["path"]: original["evidence"]["expectations"]["sha256"],
-             **{c["path"]: c["sha256"] for c in original["evidence"]["cohorts"].values()}}
-    for path, digest in bound.items():
-        if sha((REPO / path).read_bytes()) != digest:
-            raise ValueError(f"{path}: recorded evidence or measured dependency changed")
-    current_inputs = {cid: sha(text) for cid, kind, tag, text, src in build_cases()}
-    if current_inputs != {cid: c["input_sha256"] for cid, c in exp["cases"].items()}:
-        raise ValueError("expectations do not match current inputs; run build")
-    rows = {}
-    for arm, cohort in original["evidence"]["cohorts"].items():
-        recorded = [json.loads(line) for line in (REPO / cohort["path"]).read_text().splitlines()]
-        rows[arm] = replay_rows(exp, original_exp, recorded)
-    for arm, cohort in rows.items():
-        (HERE / "evidence" / f"{arm}.v2.jsonl").write_text(
-            "".join(json.dumps(row, sort_keys=True) + "\n" for row in cohort))
-    meta = json.loads((HERE / "evidence" / "run-meta.json").read_text())
-    m = score.score(exp, rows["baseline"], rows["candidate"])
-    assert m == score.score(exp, rows["baseline"], rows["candidate"])  # graded twice, identical
-    cases = exp["cases"]
-    primary = "store-unreachable-stops"
-    n_primary = sum(1 for c in cases.values() if c["split"] == "test" and c["kind"] == "store_down")
-    noise = round(1 / (n_primary * REPEATS) ** 0.5 + 0.00005, 4)
-    refs = [f"evals/{SURFACE}/evidence/{a}.v2.jsonl" for a in ("baseline", "candidate")]
-    dims, blockers = [], []
-    for did, d in m["dimensions"].items():
-        lo, hi = d["delta"]["ci_low"], d["delta"]["ci_high"]
-        direction = "improved" if lo > 0 else "regressed" if hi < 0 else "equivalent"
-        status = "failed" if direction == "regressed" else "passed"
-        if status == "failed":
-            blockers.append(did)
-        dims.append({"dimension_id": did, "critical": True, "status": status,
-                     "direction_vs_baseline": direction, "evidence_refs": refs, **d})
-    ncase = len(rows["baseline"])
-    cost = {a: sum(r["cost_usd"] for row in rows[a] for r in row["runs"]) / (ncase * REPEATS) for a in rows}
-    decision = "do_not_merge" if blockers else "inconclusive"
-    parts = "; ".join(
-        f"{d['dimension_id']} {d['baseline']['score']:.2f} -> {d['candidate']['score']:.2f} "
-        f"(delta {d['delta']['value']:+.2f}, 95% [{d['delta']['ci_low']:+.2f}, {d['delta']['ci_high']:+.2f}])"
-        for d in dims)
-    now = datetime.date.today().isoformat()
-    source = {f"evals/{SURFACE}/{f}": sha((HERE / f).read_bytes()) for f in ("score.py", "run_eval.py")}
-    deps = {**bound, f"evals/{SURFACE}/evidence/receipt.v1.json": sha(original_path.read_bytes()),
-            f"evals/{SURFACE}/evidence/run-meta.json": sha((HERE / "evidence" / "run-meta.json").read_bytes())}
-    model_id = meta["models"][0]
-    TEST_RESULT.write_text(json.dumps({
-        "status": "completed", "started_at": started_at,
-        "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "derivation_sha256": sha(DERIVATION.read_bytes()),
-        "sources": frozen_sources(), "decision": decision,
-        "test_cases_per_arm": sum(c["split"] == "test" for c in cases.values()),
-        "test_runs_per_arm": sum(len(row["runs"]) for row in rows["baseline"] if row["split"] == "test"),
-        "post_test_tuning": False,
-    }, indent=2) + "\n")
-    deps.update({f"evals/{SURFACE}/evidence/{path.name}": sha(path.read_bytes())
-                 for path in (DERIVATION, TEST_RESULT)})
-    receipt = {
-        "schema_version": 2, "surface": SURFACE,
-        "change": "Offline rescore of PR 1773's recorded AGENTS.md comparison with strict safeguard checks and input-grouped v2 expectations. No new model measurement.",
-        "measured_on": original["measured_on"], "rung": "regression",
-        "adapter": original["adapter"],
-        "cases": {"total": len(cases), "train": sum(c["split"] == "train" for c in cases.values()),
-                  "test": sum(c["split"] == "test" for c in cases.values()),
-                  "should_not_fire": sum(c["should_not_fire"] for c in cases.values()),
-                  "sources": sorted({c["source"] for c in cases.values()})},
-        "split": {"method": "random input_sha256 groups, stratified by group kind set; half of each stratum to test", "seed": SEED,
-                  "sealed_test": True},
-        "repeats": REPEATS,
-        "grader": {"kind": "programmatic", "validation": {"graded_twice": True, "result": "pass", "agreement": 1.0,
-                                                          **m["controls"]}},
-        "noise_floor": noise, "min_useful_gain": MIN_USEFUL_GAIN, "primary_dimension": primary,
-        "dimensions": dims,
-        "stage_results": [{"stage_id": "session-start-and-map-routing", "status": "failed" if blockers else "passed",
-                           "dimension_ids": [d["dimension_id"] for d in dims], "evidence_refs": refs}],
-        "cost": {"baseline_usd_per_case": round(cost["baseline"], 6), "candidate_usd_per_case": round(cost["candidate"], 6)},
-        "verdict": {"decision": decision, "statement": f"Offline replay only, not re-measured with fresh model runs. {MODEL} ({model_id}), {REPEATS} recorded repeats per case: {parts}. Scorer selection was frozen on train and synthetic controls before one sealed test replay. Historical model-input leakage remains. Do not merge on quality grounds."},
-        "notes": [
-            f"Offline rescore on {now}. Measurement status: not re-measured with fresh model runs. Existing recorded answers and costs are unchanged. Original receipt and v1 expectations are retained. No model or network call occurs in this runner.",
-            "split.sealed_test describes only the final offline scorer replay after train-only re-derivation and a source-hash freeze. It does not describe the historical model run. The original split exposed test inputs through identical training prompts. V2 groups identical inputs across case kinds, but cannot undo prior exposure. These are descriptive replay scores, not fresh held-out evidence. A shipping receipt requires a new sealed evaluation with unexposed inputs.",
-            "The original adapter and measurement date identify the historical model runs. evidence.source binds the offline runner and corrected scorer, not the historical model invocation code. The original receipt binds that historical code and adapter.",
-            "Single-turn, tool-less simulation measures the declared next step, not live tool behavior. Store-down scoring uses a closed grammar of complete outage and task-stop clauses. Unrecognized prose fails, including verbose historical refusals; these zero replay stop scores do not establish that every historical answer continued work. NONE must be exact, files must be empty, and unknown answer fields or nonnumeric cost metadata fail. This deliberately trades recall for conservative acceptance without a model judge. Rule-file references in any relevant field conservatively fail both store states. Map calls must be an exact CARR MCP invocation with object arguments or a simple sanctioned run.sh call through Bash.",
-            "Deleted rescore_review.py after preserving evidence/rescore-review-round-1.json. It was a one-time comparator against the hash-pinned ab936364 scorer, reporting 107 True-to-False grade changes across 600 historical runs. The existing report command and receipt checker now reproduce the current evidence; the historical flip report is archival, not sealed evidence.",
-            "The bootstrap still averages case IDs, including repeated prompt groups. Its intervals are descriptive and may understate correlation within groups. They do not authorize shipping.",
-        ],
-        "evidence": {"scorer": {"path": f"evals/{SURFACE}/score.py", "function": "score"}, "source": source,
-                     "dependencies": deps,
-                     "expectations": {"path": f"evals/{SURFACE}/expectations.v2.json", "version": VERSION,
-                                      "sha256": sha(exp_path.read_bytes())},
-                     "cohorts": {a: {"path": f"evals/{SURFACE}/evidence/{a}.v2.jsonl",
-                                     "sha256": sha((HERE / "evidence" / f"{a}.v2.jsonl").read_bytes())} for a in rows}},
-    }
-    (HERE / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-    print(json.dumps({"decision": decision, "noise": noise, "dims": {d["dimension_id"]: (d["baseline"]["score"], d["candidate"]["score"], d["delta"]) for d in dims}, "cost": cost, "controls": m["controls"]}, indent=1))
+def verify_frozen_scorer():
+    record = json.loads(FREEZE.read_text())
+    if record["scorer_sha256"] != sha((HERE / "score.py").read_bytes()):
+        raise ValueError("score.py does not match the freeze hash; fresh evaluation refused")
+    return record
 
 
 if __name__ == "__main__":
-    {"build": build, "prepare": prepare, "report": report}[sys.argv[1]]()
+    {"build": build}[sys.argv[1]]()

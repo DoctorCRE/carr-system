@@ -159,10 +159,10 @@ class SplitControls(unittest.TestCase):
         for cid, kind, tag, text, source in cases:
             groups.setdefault(run_eval.sha(text), set()).add(splits[cid])
         self.assertEqual({len(s) for s in groups.values()}, {1})
-        self.assertEqual(set(splits.values()), {"train", "test"})
+        self.assertEqual(set(splits.values()), {"train"})
         self.assertEqual(splits, run_eval.split_assignment(list(reversed(cases))))
         for kind in ("store_down", "store_up", "map_fire", "map_late", "no_map"):
-            self.assertEqual({splits[cid] for cid, k, *_ in cases if k == kind}, {"train", "test"})
+            self.assertEqual({splits[cid] for cid, k, *_ in cases if k == kind}, {"train"})
 
     def test_replay_only_changes_split(self):
         old = {"cases": {"case": {"split": "train", "input_sha256": "input", "kind": "store_down"}}}
@@ -195,42 +195,17 @@ class SplitControls(unittest.TestCase):
             self.assertEqual({k: v for k, v in case.items() if k != "split"},
                              {k: v for k, v in old["cases"][cid].items() if k != "split"})
 
-    def test_prepare_scores_training_only(self):
+    def test_frozen_scorer_rejects_changes(self):
         with tempfile.TemporaryDirectory() as tmp:
             here = Path(tmp)
-            (here / "evidence").mkdir()
-            expectations = here / "expectations.json"
-            expectations.write_text(json.dumps({"cases": {
-                "train": {"split": "train", "kind": "store_down"},
-                "test": {"split": "test", "kind": "store_down"}}}))
-            for arm in ("baseline", "candidate"):
-                (here / "evidence" / f"{arm}.v2.jsonl").write_text("\n".join(json.dumps(row) for row in [
-                    {"case_id": "train", "runs": [answer()]},
-                    {"case_id": "test", "runs": [{"must_not_be_scored": True}]}]))
-            seal = here / "seal.json"
-            with patch.object(run_eval, "HERE", here), patch.object(run_eval, "EXPECTATIONS", expectations), \
-                    patch.object(run_eval, "DERIVATION", seal), \
-                    patch.object(run_eval, "frozen_sources", return_value={"scorer": "hash"}), \
-                    patch.object(score, "passes", wraps=score.passes) as grader, patch("builtins.print"):
-                run_eval.prepare()
-            self.assertEqual(grader.call_args_list, [unittest.mock.call("store_down", answer())] * 2)
-            self.assertEqual(json.loads(seal.read_text())["training"], {
-                arm: {"store_down": {"runs": 1, "passes": 1}} for arm in ("baseline", "candidate")})
-
-    def test_frozen_selection_required_before_report(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            seal, result = Path(tmp) / "seal.json", Path(tmp) / "result.json"
-            with patch.object(run_eval, "DERIVATION", seal), patch.object(run_eval, "TEST_RESULT", result):
-                for sources in ({}, run_eval.frozen_sources()):
-                    seal.write_text(json.dumps({"status": "frozen_before_test", "sources": sources}))
-                    if not sources:
-                        with self.assertRaisesRegex(ValueError, "changed after freezing"):
-                            run_eval.verify_derivation()
-                    else:
-                        run_eval.verify_derivation()
-                result.write_text('{"status": "started"}')
-                with self.assertRaisesRegex(ValueError, "already started"):
-                    run_eval.report()
+            (here / "score.py").write_text("frozen scorer")
+            freeze = here / "freeze.json"
+            freeze.write_text(json.dumps({"scorer_sha256": run_eval.sha("frozen scorer")}))
+            with patch.object(run_eval, "HERE", here), patch.object(run_eval, "FREEZE", freeze):
+                run_eval.verify_frozen_scorer()
+                (here / "score.py").write_text("modified scorer")
+                with self.assertRaisesRegex(ValueError, "freeze hash"):
+                    run_eval.verify_frozen_scorer()
 
     def test_offline_scoring_with_synthetic_observations(self):
         cases = {kind: {"kind": kind, "split": "test", "should_not_fire": kind in run_eval.QUIET}
