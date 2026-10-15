@@ -4724,6 +4724,23 @@ class CapabilityRecovery(Base):
         self.assertNotIn("~/.config/carr/tokens.env", body)
 
 
+class GitHubBudgetEnvironment(unittest.TestCase):
+    def test_configured_cache_path_reaches_github_reader_without_credentials(self):
+        budget_path = "/tmp/github-read-budget.json"
+        env = rp.child_env({
+            "HOME": "/tmp/home",
+            "CARR_GITHUB_READ_BUDGET": budget_path,
+            "DATABASE_URL": "fixture-dsn",
+            "CARR_DB_PASSWORD": "fixture-password",
+            "GH_TOKEN": "fixture-token",
+        })
+
+        self.assertEqual(rp.GitHub("o/r", env).reader.budget.path, Path(budget_path))
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("CARR_DB_PASSWORD", env)
+        self.assertNotIn("GH_TOKEN", env)
+
+
 class DeployCredential(unittest.TestCase):
     """CLOUDFLARE_API_TOKEN comes from $HOME/.config/carr/tokens.env into the
     wrangler-running steps' env only. Every case runs under a temporary HOME,
