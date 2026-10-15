@@ -10,6 +10,10 @@ python3 ops/disk-reaper.py
 
 Inspect `out/disk-reaper.jsonl`. Each run appends candidates, keep reasons,
 removed paths, allocated bytes removed, process signals, errors, and free space.
+`would_free_bytes` totals eligible bytes in inspection mode. `kept_by_reason`
+groups preserved candidates by reason with `bytes`, `count`, and
+`unmeasured_count`. Unscanned candidates contribute to the count but not the
+byte estimate; their missing sizes remain visible in `unmeasured_count`.
 Allocated bytes are an estimate from `st_blocks`, not a claim about APFS snapshots
 or the volume's physical recovery. The before and after free-space readings show
 the volume's actual result.
@@ -40,8 +44,11 @@ directories remain protected until their creator registers them.
 
 Every removal vetoes uncommitted tracked changes, untracked work, local stashes,
 and commits absent from refreshed remote evidence. Independent clones check all
-local branches and tags. Linked worktrees check their HEAD because their common
-repository retains the other branches. A deleted upstream after a squash merge
+local branches, tags, and stashes. Linked worktrees share a stash store, so a
+stash protects only the worktree whose current branch matches the entry's
+`On <branch>:` or `WIP on <branch>:` prefix. For a detached HEAD, the stash's
+base commit must match that HEAD. Linked worktrees check their HEAD because
+their common repository retains the other branches. A deleted upstream after a squash merge
 requires a matching PR head fetched from GitHub's retained pull ref. A newer
 local tip still vetoes removal.
 

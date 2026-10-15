@@ -261,6 +261,86 @@ class TestReaper(unittest.TestCase):
         self.age(p)
         self.kept(p, 'stash')
 
+    def test_stash_protects_only_its_branch_worktree(self):
+        a, b = self.scratch / 'a', self.scratch / 'b'
+        self.git(self.root, 'worktree', 'add', '-qb', 'topic/a', str(a))
+        self.git(self.root, 'worktree', 'add', '-qb', 'topic/ab', str(b))
+        self.config['locations'][0]['kind'] = 'worktree'
+        for message in ([], ['-m', 'message mentions On topic/ab:']):
+            with self.subTest(message=message):
+                (a / 'file').write_text('stashed on A')
+                self.git(a, 'stash', 'push', '-q', *message)
+                self.age(a)
+                self.age(b)
+                report = self.run_reaper()
+                self.assertEqual(self.row(report, a)['reason'], 'local stash')
+                self.assertEqual(self.row(report, b)['action'], 'would_remove')
+                self.git(a, 'stash', 'drop', '-q')
+        (a / 'file').write_text('retained stash')
+        self.git(a, 'stash', 'push', '-q')
+        self.age(a)
+        self.age(b)
+        report = self.run_reaper(execute=True)
+        self.assertEqual(self.row(report, a)['reason'], 'local stash')
+        self.assertTrue(a.exists())
+        self.assertEqual(self.row(report, b)['action'], 'removed')
+        self.assertFalse(b.exists())
+        self.assertIn('WIP on topic/a:', self.git(a, 'stash', 'list'))
+
+    def test_detached_stash_matches_base_commit(self):
+        a, b = self.scratch / 'a', self.scratch / 'b'
+        self.git(self.root, 'worktree', 'add', '--detach', str(a))
+        (a / 'file').write_text('detached stash')
+        self.git(a, 'stash', 'push', '-qm', 'detached changes')
+        (self.root / 'file').write_text('new published base')
+        self.git(self.root, 'commit', '-qam', 'new base')
+        self.git(self.root, 'push', '-q')
+        self.git(self.root, 'worktree', 'add', '--detach', str(b))
+        self.config['locations'][0]['kind'] = 'worktree'
+        self.age(a)
+        self.age(b)
+        report = self.run_reaper(execute=True)
+        self.assertEqual(self.row(report, a)['reason'], 'local stash')
+        self.assertTrue(a.exists())
+        self.assertEqual(self.row(report, b)['action'], 'removed')
+        self.assertFalse(b.exists())
+
+    def test_summary_groups_kept_bytes_by_reason(self):
+        a, b, c = self.clone('a'), self.clone('b'), self.clone('c')
+        removable = self.clone('removable')
+        for p in (a, b):
+            (p / 'file').write_text('uncommitted')
+        (c / 'file').write_text('stash')
+        self.git(c, 'stash', 'push', '-q')
+        report = self.run_reaper()
+        self.assertEqual(report['would_free_bytes'], self.row(report, removable)['bytes'])
+        self.assertEqual(report['kept_by_reason'], {
+            'uncommitted tracked or untracked work': {
+                'bytes': self.row(report, a)['bytes'] + self.row(report, b)['bytes'],
+                'count': 2, 'unmeasured_count': 0},
+            'local stash': {'bytes': self.row(report, c)['bytes'],
+                            'count': 1, 'unmeasured_count': 0}})
+        saved = reaper.jsonl(self.root / 'out/disk-reaper.jsonl')[-1]
+        self.assertEqual(saved['kept_by_reason'], report['kept_by_reason'])
+
+    def test_independent_clone_keeps_stash_from_another_branch(self):
+        p = self.clone()
+        self.git(p, 'switch', '-qc', 'stash-owner')
+        (p / 'file').write_text('stash belongs to this clone')
+        self.git(p, 'stash', 'push', '-q')
+        self.git(p, 'switch', '-q', 'main')
+        self.age(p)
+        self.kept(p, 'local stash')
+
+    def test_summary_marks_unmeasured_candidates(self):
+        p = self.clone()
+        with patch.object(reaper, 'inventory', side_effect=ValueError('scan failed')):
+            report = self.run_reaper()
+        self.assertTrue(p.exists())
+        self.assertEqual(report['would_free_bytes'], 0)
+        self.assertEqual(report['kept_by_reason'], {
+            'scan failed': {'bytes': 0, 'count': 1, 'unmeasured_count': 1}})
+
     def test_remote_deleted_and_failed_fetch(self):
         p = self.clone()
         self.git(p, 'switch', '-qc', 'feature')

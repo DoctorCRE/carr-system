@@ -323,8 +323,20 @@ class Reaper:
             return "bare repository"
         if git(repo, "status", "--porcelain=v1", "--untracked-files=normal", "--ignore-submodules=none"):
             return "uncommitted tracked or untracked work"
-        if git(repo, "stash", "list"):
-            return "local stash"
+        linked = (repo / ".git").is_file()
+        stashes = git(repo, "stash", "list", "--format=%P%x09%s").splitlines()
+        if stashes:
+            # An independent clone owns its stash store; linked worktrees share it.
+            if not linked:
+                return "local stash"
+            branch = git(repo, "symbolic-ref", "--quiet", "HEAD", allowed=(0, 1)).removeprefix("refs/heads/")
+            head = git(repo, "rev-parse", "HEAD")
+            for stash in stashes:
+                parents, subject = stash.split('\t', 1)
+                origin = re.match(r"^(?:On |WIP on )([^:]+):", subject)
+                if ((branch and origin and origin[1] == branch)
+                        or (not branch and parents.split()[0] == head)):
+                    return "local stash"
         common = path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
         if common not in self.fetched or fresh:
             git(repo, "fetch", "--prune", "--all")
@@ -334,7 +346,6 @@ class Reaper:
             return "no upstream or remote proof for local commits"
         # An independent clone loses every local ref when removed. A linked
         # worktree loses only HEAD; the common repository retains its branches.
-        linked = (repo / ".git").is_file()
         tips = ["HEAD"] if linked else ["HEAD", "--branches", "--tags"]
         if int(git(repo, "rev-list", "--count", *tips, "--not", *remotes)):
             # GitHub keeps pull refs after deleting a merged branch. Prove the
@@ -465,7 +476,8 @@ class Reaper:
         out = self.root / "out"
         out.mkdir(parents=True, exist_ok=True)
         report = {"schema": "disk-reaper/v1", "at": self.clock(), "execute": execute,
-                  "freed_bytes": 0, "rows": [], "errors": [], "processes": []}
+                  "freed_bytes": 0, "would_free_bytes": 0, "kept_by_reason": {},
+                  "rows": [], "errors": [], "processes": []}
         with (out / "disk-reaper.lock").open('a') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -570,6 +582,15 @@ class Reaper:
             except Exception as exc:
                 report["errors"].append(str(exc))
             finally:
+                for row in report["rows"]:
+                    if row["action"] == "would_remove":
+                        report["would_free_bytes"] += row["bytes"]
+                    elif row["action"] == "keep":
+                        group = report["kept_by_reason"].setdefault(row["reason"],
+                            {"bytes": 0, "count": 0, "unmeasured_count": 0})
+                        group["bytes"] += row.get("bytes", 0)
+                        group["count"] += 1
+                        group["unmeasured_count"] += int("bytes" not in row)
                 report["pressure_after"] = self.pressure()
                 if execute:
                     response = ("on breach: owner orchestrator; disk reaper runs immediately; "
