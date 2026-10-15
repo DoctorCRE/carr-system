@@ -380,7 +380,7 @@ class LeakGuardTest(unittest.TestCase):
         self.assertRegex(result.stdout, r'^\[redacted-path:[0-9a-f]{12}\]:1 client-data\n$')
 
     def matches(self, corpus, text):
-        return [rule for _, rule, _ in guard.pii_findings(text, guard.prepare_corpus(corpus))
+        return [rule for _, _, rule, _ in guard.pii_findings(text, guard.prepare_corpus(corpus))
                 if rule == 'client-data']
 
     def test_tokens_are_hashed_with_a_separator(self):
@@ -451,6 +451,35 @@ class LeakGuardTest(unittest.TestCase):
         self.git('add', '-f', 'out/staff.txt')
         with self.assertRaisesRegex(exporter.Refusal, 'tracked'):
             exporter.exclusion_file(self.root, listed)
+
+    def test_finding_spanning_an_added_line_is_judged(self):
+        key = '-----BEGIN RSA PRIVATE KEY-----\n{}\n-----END RSA PRIVATE KEY-----\n'
+        base = self.write_commit('k.pem', key.format('placeholder'))
+        body = base64.b64encode(bytes(range(256)) * 3).decode()
+        head = self.write_commit('k.pem', key.format('\n'.join(body[i:i + 64] for i in range(0, len(body), 64))))
+        result = self.run_guard('--range', base + '..' + head, '--generic-only')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, 'k.pem:1 private-key\n')
+        corpus = self.root / 'corpus.json'
+        corpus.write_text(json.dumps(guard.make_corpus(['Fictional' + ' Person'], '12' * 32)))
+        base = self.write_commit('n.txt', 'owner: Fictional\n')
+        head = self.write_commit('n.txt', 'owner: Fictional\n' + 'Person\n')
+        result = self.run_guard('--range', base + '..' + head, '--corpus', str(corpus))
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, 'n.txt:1 client-data\n')
+
+    def test_mode_only_change_of_a_binary_is_not_refused(self):
+        (self.root / 'b.bin').write_bytes(b'opaque\0content')
+        self.git('add', 'b.bin')
+        self.commit()
+        (self.root / 'b.bin').chmod(0o755)
+        self.git('add', 'b.bin')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        (self.root / 'b.bin').write_bytes(b'opaque\0changed')
+        self.git('add', 'b.bin')
+        result = self.run_guard('--staged', '--generic-only')
+        self.assertEqual(result.stdout, 'b.bin:1 opaque-binary\n')
 
 if __name__ == '__main__':
     unittest.main()

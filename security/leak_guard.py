@@ -142,7 +142,7 @@ def pii_findings(text, corpus):
         for rule, regex in PII.items():
             if any(rule != 'pii-email' or not RESERVED_MAIL.search(match[0].rpartition('@')[2])
                    for match in regex.finditer(line)):
-                yield number, rule, ''
+                yield number, number, rule, ''
         normalized = tokens(line)
         words.extend(normalized)
         numbers.extend([number] * len(normalized))
@@ -167,8 +167,8 @@ def pii_findings(text, corpus):
             longest = max(candidates)
             window = tuple(words[start:start + longest])
             if window in window_cache:
-                for fingerprint in window_cache[window]:
-                    yield numbers[start], 'client-data', fingerprint
+                for width, fingerprint in window_cache[window]:
+                    yield numbers[start], numbers[start + width], 'client-data', fingerprint
                 continue
             digest = prefix.copy()
             digest.update(word.encode())
@@ -177,8 +177,8 @@ def pii_findings(text, corpus):
                 digest.update((TOKEN_SEPARATOR + words[end]).encode())
                 if (end - start + 1 in candidates and client_window(words[start:end + 1])
                         and digest.copy().hexdigest() in hashes):
-                    found.append(digest.hexdigest())
-                    yield numbers[start], 'client-data', digest.hexdigest()
+                    found.append((end - start, digest.hexdigest()))
+                    yield numbers[start], numbers[end], 'client-data', digest.hexdigest()
             if len(window_cache) >= 100000:
                 window_cache.clear()
             window_cache[window] = found
@@ -233,12 +233,13 @@ def change_scope(parent_blobs, added_against):
     return added
 
 
-def in_scope(change, line, rule):
+def in_scope(change, first, last, rule):
+    """A finding counts when any line it spans was added; line 0 is the filename."""
     if rule == 'opaque-binary':
         return True
-    if line == 0:
+    if first == 0:
         return change.named
-    return change.added is None or line in change.added
+    return change.added is None or any(line in change.added for line in range(first, last + 1))
 
 
 def raw_records(output):
@@ -271,6 +272,8 @@ def introduced(root, records, whole=False):
     """Read each introduced blob once and attach the lines and path it introduces."""
     blobs = {}
     for parent_blobs, oid, path in records:
+        if oid in parent_blobs:
+            continue  # a mode-only change introduces no content
         blobs.setdefault(oid, {}).setdefault(path, []).append(parent_blobs)
     diffs = {}
 
@@ -376,7 +379,7 @@ def scan(root, source, corpus, allowed, report_path=None):
     private = root / 'out' / '_to_delete' / 'leak-guard' / str(uuid.uuid4())
     private.mkdir(parents=True, mode=0o700)
     template = private / 'report.tmpl'
-    template.write_text(r'{{range .}}{{printf "{\"line\":%d,\"rule\":%q}\n" .StartLine .RuleID}}{{end}}')
+    template.write_text(r'{{range .}}{{printf "{\"line\":%d,\"end\":%d,\"rule\":%q}\n" .StartLine .EndLine .RuleID}}{{end}}')
     report = private / 'locations.jsonl'
     command = [str(gitleaks()), 'stdin', '--redact=100', '--no-banner', '--no-color',
                '--ignore-gitleaks-allow', '--report-format=template', '--report-template', str(template),
@@ -404,13 +407,13 @@ def scan(root, source, corpus, allowed, report_path=None):
             offset = hit['line'] - starts[index]
             if offset == 0:
                 sensitive_paths.add(changes[index].path)
-            hits.append((index, offset, hit['rule'], ''))
+            hits.append((index, offset, offset + hit['end'] - hit['line'], hit['rule'], ''))
             secret_count += 1
         if (result.returncode == 1) != bool(secret_count):
             raise ValueError('gitleaks verdict/report disagreement')
         # Line 0 is the filename. The reported line stays the blob's line number.
-        findings.update((changes[i].path, max(1, number), rule) for i, number, rule, fingerprint in hits
-                        if in_scope(changes[i], number, rule)
+        findings.update((changes[i].path, max(1, first), rule) for i, first, last, rule, fingerprint in hits
+                        if in_scope(changes[i], first, last, rule)
                         and (changes[i].path, digests[i], rule, fingerprint) not in allowed)
         chunks.clear()
         changes.clear()
@@ -435,12 +438,12 @@ def scan(root, source, corpus, allowed, report_path=None):
         changes.append(change)
         digests.append(digest)
         if opaque:
-            hits.append((index, 1, 'opaque-binary', ''))
+            hits.append((index, 1, 1, 'opaque-binary', ''))
         else:
             if digest not in pii_cache:
                 pii_cache[digest] = list(pii_findings(text, corpus))
-            hits.extend((index, number, rule, fingerprint) for number, rule, fingerprint in pii_cache[digest])
-        hits.extend((index, 0, rule, fingerprint) for _, rule, fingerprint in pii_findings(path, corpus))
+            hits.extend((index, *hit) for hit in pii_cache[digest])
+        hits.extend((index, 0, 0, rule, fingerprint) for _, _, rule, fingerprint in pii_findings(path, corpus))
         chunks.append(secret_input)
         line += secret_input.count(b'\n')
         batch_bytes += len(secret_input)
