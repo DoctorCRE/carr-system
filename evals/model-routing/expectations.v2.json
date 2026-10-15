@@ -1,0 +1,202 @@
+{
+  "version": "model-routing-expectations/v2",
+  "baseline_ref": "9a6d255308abe154913657c3482103a8dae94ae6",
+  "cases": {
+    "train-network-default-off": {
+      "split": "train",
+      "input": {
+        "wire_case": "network-default-off",
+        "network_access": false,
+        "thread_id": null,
+        "sandbox": "workspace-write"
+      },
+      "input_sha256": "04abe9c554605e4bcdea82fc4cc53ea4c90c02f698755ff2540c0706810e148c",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "completed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "workspace-write"
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<task>"
+                }
+              ],
+              "approvalPolicy": "never"
+            }
+          }
+        ]
+      },
+      "source": "production_trace",
+      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default profile had no network capability."
+    },
+    "train-network-opt-in-fresh": {
+      "split": "train",
+      "input": {
+        "wire_case": "network-opt-in-fresh",
+        "network_access": true,
+        "thread_id": null,
+        "sandbox": "read-only"
+      },
+      "input_sha256": "1438051c0d526b605c61a9853604e96a53991821fc1933fc3457bfe0c076987b",
+      "should_not_fire": false,
+      "expected_wire": {
+        "outcome": "completed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "ephemeral": true
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<task>"
+                }
+              ],
+              "approvalPolicy": "never",
+              "sandboxPolicy": {
+                "type": "readOnly",
+                "networkAccess": true
+              }
+            }
+          }
+        ]
+      },
+      "source": "production_trace",
+      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: requested read-only network on a fresh thread."
+    },
+    "train-network-resume-refused": {
+      "split": "train",
+      "input": {
+        "wire_case": "network-resume-refused",
+        "network_access": true,
+        "thread_id": "prior-thread",
+        "sandbox": "read-only"
+      },
+      "input_sha256": "5f0955e8e9f5dd882b4e0cedf2a02161bda1f9a763962854307290dc33267e9e",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "network_access_requires_fresh_thread",
+        "requests": []
+      },
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: a network-enabled thread must be fresh and unresumable."
+    },
+    "test-network-default-off": {
+      "split": "test",
+      "input": {
+        "wire_case": "network-default-off",
+        "network_access": false,
+        "thread_id": null,
+        "sandbox": "workspace-write"
+      },
+      "input_sha256": "04abe9c554605e4bcdea82fc4cc53ea4c90c02f698755ff2540c0706810e148c",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "completed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "workspace-write"
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<task>"
+                }
+              ],
+              "approvalPolicy": "never"
+            }
+          }
+        ]
+      },
+      "source": "production_trace",
+      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default profile had no network capability."
+    },
+    "test-network-opt-in-fresh": {
+      "split": "test",
+      "input": {
+        "wire_case": "network-opt-in-fresh",
+        "network_access": true,
+        "thread_id": null,
+        "sandbox": "read-only"
+      },
+      "input_sha256": "1438051c0d526b605c61a9853604e96a53991821fc1933fc3457bfe0c076987b",
+      "should_not_fire": false,
+      "expected_wire": {
+        "outcome": "completed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "ephemeral": true
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<task>"
+                }
+              ],
+              "approvalPolicy": "never",
+              "sandboxPolicy": {
+                "type": "readOnly",
+                "networkAccess": true
+              }
+            }
+          }
+        ]
+      },
+      "source": "production_trace",
+      "source_ref": "Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: requested read-only network on a fresh thread."
+    },
+    "test-network-resume-refused": {
+      "split": "test",
+      "input": {
+        "wire_case": "network-resume-refused",
+        "network_access": true,
+        "thread_id": "prior-thread",
+        "sandbox": "read-only"
+      },
+      "input_sha256": "5f0955e8e9f5dd882b4e0cedf2a02161bda1f9a763962854307290dc33267e9e",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "network_access_requires_fresh_thread",
+        "requests": []
+      },
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: a network-enabled thread must be fresh and unresumable."
+    }
+  }
+}

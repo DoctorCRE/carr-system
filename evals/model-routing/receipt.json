@@ -1,31 +1,32 @@
 {
   "schema_version": 2,
   "surface": "model-routing",
-  "change": "Migrate legacy Codex pins to families and select the newest available catalog version without losing desk metadata.",
-  "measured_on": "2026-10-09",
+  "change": "Measure Codex catalog routing and the fresh-only ephemeral read-only network boundary.",
+  "measured_on": "2026-10-15",
   "rung": "regression",
   "adapter": {
     "surface": "offline_programmatic",
-    "adapter_id": "codex-registry-catalog-matrix",
-    "adapter_version": "1",
+    "adapter_id": "codex-routing-fresh-network-matrix",
+    "adapter_version": "2",
     "harness_id": "evals/model-routing/score.py",
-    "harness_version": "affc6cc48fedaa206414cbae6762198cee14ba7079b72c97965e9d05f8493df0",
+    "harness_version": "b49a82fb982b14e41d521e951370be3b519153ef7087d27fbf52aba32636e606",
     "provider_id": "none",
     "model_id": "deterministic-no-model",
     "native_session_ref": "01a11f56-a1fd-72f1-87e6-c6f7e2013330",
-    "configuration_fingerprint": "sha256:b2e5e885d2779ed0dcb4cc014b984fb327bb9c4a649d01fb423671bb97b4e260"
+    "configuration_fingerprint": "sha256:228c6babb43d67c93c274b146e0a60c88b3050fe7622a19227ce5191095afe02"
   },
   "cases": {
-    "total": 24,
-    "train": 12,
-    "test": 12,
-    "should_not_fire": 6,
+    "total": 6,
+    "train": 3,
+    "test": 3,
+    "should_not_fire": 4,
     "sources": [
-      "human_judged_hard_case"
+      "human_judged_hard_case",
+      "production_trace"
     ]
   },
   "split": {
-    "method": "seeded stratified exhaustive finite behavior matrix; each split covers every class",
+    "method": "seeded finite registry-routing and wire-protocol behavior matrix; each split covers every class",
     "seed": 1667,
     "sealed_test": true
   },
@@ -42,21 +43,21 @@
   },
   "noise_floor": 0,
   "min_useful_gain": 0.01,
-  "primary_dimension": "model-resolution",
+  "primary_dimension": "fresh-network-boundary",
   "dimensions": [
     {
-      "dimension_id": "model-resolution",
+      "dimension_id": "fresh-network-boundary",
       "critical": true,
       "status": "passed",
       "direction_vs_baseline": "improved",
       "evidence_refs": [
-        "evals/model-routing/evidence/baseline.jsonl",
-        "evals/model-routing/evidence/candidate.jsonl"
+        "evals/model-routing/evidence/v2/baseline.jsonl",
+        "evals/model-routing/evidence/v2/candidate.jsonl"
       ],
       "baseline": {
-        "score": 0.4166666666666667,
-        "ci_low": 0.4166666666666667,
-        "ci_high": 0.4166666666666667
+        "score": 0.3333333333333333,
+        "ci_low": 0.3333333333333333,
+        "ci_high": 0.3333333333333333
       },
       "candidate": {
         "score": 1.0,
@@ -64,34 +65,9 @@
         "ci_high": 1.0
       },
       "delta": {
-        "value": 0.5833333333333333,
-        "ci_low": 0.5833333333333333,
-        "ci_high": 0.5833333333333333
-      }
-    },
-    {
-      "dimension_id": "registry-metadata",
-      "critical": true,
-      "status": "passed",
-      "direction_vs_baseline": "equivalent",
-      "evidence_refs": [
-        "evals/model-routing/evidence/baseline.jsonl",
-        "evals/model-routing/evidence/candidate.jsonl"
-      ],
-      "baseline": {
-        "score": 1.0,
-        "ci_low": 1.0,
-        "ci_high": 1.0
-      },
-      "candidate": {
-        "score": 1.0,
-        "ci_low": 1.0,
-        "ci_high": 1.0
-      },
-      "delta": {
-        "value": 0.0,
-        "ci_low": 0.0,
-        "ci_high": 0.0
+        "value": 0.6666666666666667,
+        "ci_low": 0.6666666666666667,
+        "ci_high": 0.6666666666666667
       }
     }
   ],
@@ -100,12 +76,11 @@
       "stage_id": "routing",
       "status": "passed",
       "dimension_ids": [
-        "model-resolution",
-        "registry-metadata"
+        "fresh-network-boundary"
       ],
       "evidence_refs": [
-        "evals/model-routing/evidence/baseline.jsonl",
-        "evals/model-routing/evidence/candidate.jsonl"
+        "evals/model-routing/evidence/v2/baseline.jsonl",
+        "evals/model-routing/evidence/v2/candidate.jsonl"
       ]
     }
   ],
@@ -115,11 +90,11 @@
   },
   "verdict": {
     "decision": "ship",
-    "statement": "Current catalog routing improves across the finite matrix with preserved registry metadata."
+    "statement": "Finite deterministic measurements confirm fresh-only ephemeral read-only network policy; no model-quality claim."
   },
   "notes": [
-    "Exact finite matrix intervals, no generalization about future catalog entries or model output quality.",
-    "Programmatic runner executes registry migration and catalog selection; no model or external reviewer invocation."
+    "Finite programmatic matrix runs the real baseline and candidate wire implementations against synthetic App Server responses.",
+    "Cases are sourced from the production boot-probe failure and independent resume hard case; no model invocation or output-quality claim."
   ],
   "evidence": {
     "scorer": {
@@ -127,27 +102,27 @@
       "function": "score"
     },
     "source": {
-      "evals/model-routing/score.py": "affc6cc48fedaa206414cbae6762198cee14ba7079b72c97965e9d05f8493df0",
-      "evals/model-routing/make_report.py": "1790d91bacce3d2aadda774b364bc1d2fc23b24d81f7bef52ebbbb4c0cef9f4f"
+      "evals/model-routing/score.py": "b49a82fb982b14e41d521e951370be3b519153ef7087d27fbf52aba32636e606",
+      "evals/model-routing/make_report.py": "41ebe2fc2c0ab6268ae67b724815eeb2eeb1fea1925734f0fbaa6483f1a0cc35"
     },
     "dependencies": {
-      "tools/room-bridge/desks.py": "aee1f91817c76422acb4946dca853ae7e1c1b6393fad688301983a4475cf71f6",
+      "tools/room-bridge/desks.py": "ab5891e98508b315ae23b96ffa5479826d6f012adc5e917494e6cfdd9146eda0",
       "tools/room-bridge/codex_models.py": "49a72e9b9c96f379545f75669f3442628d483d049eccd4f1e45faf8eb5f800d0",
-      "ops/config/engineering-codex-desk.v1.json": "16673d3d6aee3471ff545a119e05173057c0b0228ae7c59846add2fe2a4af03e"
+      "tools/room-bridge/codex_wire.py": "df9e9faa037906030df39d467746a9f0b7fdb47ba6c38402f020f6fedd23f38f"
     },
     "expectations": {
-      "path": "evals/model-routing/expectations.v1.json",
-      "version": "model-routing-expectations/v1",
-      "sha256": "80580d39b7427999e756c6277778147d477d96660a24842c8e8c6d4e687a5249"
+      "path": "evals/model-routing/expectations.v2.json",
+      "version": "model-routing-expectations/v2",
+      "sha256": "cb3544627bf0d47797f2651f394fe816e8a4b341dfff51ee8dd6c1f2862d0107"
     },
     "cohorts": {
       "baseline": {
-        "path": "evals/model-routing/evidence/baseline.jsonl",
-        "sha256": "8c568fff01db3b562de9e72ce48279b4fc2a0bc962220d0a18dfdd8adfdf3c0f"
+        "path": "evals/model-routing/evidence/v2/baseline.jsonl",
+        "sha256": "a2b83a191f1d6ceb338a7af7d3e69623cb2cd31d784918f6cfdee11cf6630075"
       },
       "candidate": {
-        "path": "evals/model-routing/evidence/candidate.jsonl",
-        "sha256": "5a17c7ecace9961c4f5d78eb6683869fba2dcb6b5c91d4697d837e9ac8db3e77"
+        "path": "evals/model-routing/evidence/v2/candidate.jsonl",
+        "sha256": "6582ade2554b4e95e41c1c4e973532b5d792b243707e5f2006461bb874ef1826"
       }
     }
   }
