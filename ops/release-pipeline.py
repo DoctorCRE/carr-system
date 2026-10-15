@@ -1037,6 +1037,10 @@ class Pipeline:
 
     def git(self, *args: str, cwd: Path | None = None, trim_output: bool = True) -> str:
         if args and args[0] == "fetch":
+            # Ordinary fetches keep the shared remote-tracking refs and
+            # FETCH_HEAD untouched. App publication has one explicit,
+            # verified ref refresh below because its unchanged release guard
+            # requires the detached candidate to equal refs/remotes/origin/main.
             args = ("fetch", "--no-write-fetch-head", "--refmap=", *args[1:])
         proc = subprocess.run(["git", "-C", str(cwd or self.repo), *args], env=self.env,
                               stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
@@ -2183,8 +2187,11 @@ class Pipeline:
         self.observed_main = ""
         try:
             repo_dir = lane_repo_dir(self.cfg, lane, self.repo)
-            # Read and fetch an immutable main object, without writing any
-            # remote-tracking ref or another session's FETCH_HEAD.
+            # Read and fetch an immutable main object without writing any
+            # remote-tracking ref or another session's FETCH_HEAD. The app
+            # lane's unchanged exact-main guard needs origin/main refreshed
+            # later, after build and directly before publication; that one
+            # explicit ref update is verified and leaves every HEAD untouched.
             remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
             if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
                 raise Blocked("github_unreadable", "remote main has no exact SHA acknowledgement")
@@ -2806,6 +2813,7 @@ class Pipeline:
         if smoke_on:
             prior_app = self.live_value(lane_cfg, lambda live: served_version("app", live))
             smoke_baseline = self.smoke_run("app", sha, "baseline", app_dir=wt)
+        self.refresh_app_main_ref(repo_dir, wt, sha)
         self.step("app-release", ["node", "scripts/release-production.mjs"], wt, timeout=900,
                   env=self.deploy_env())
         live_identity = None
@@ -2824,6 +2832,44 @@ class Pipeline:
                 "review_rule": head.get("rule"),
                 "reviewed_sha": head.get("reviewed_sha"), "pr_head_sha": head.get("head_sha"),
                 "review_evidence": rev["verifier_evidence"], "post_release": post_release}
+
+    def refresh_app_main_ref(self, repo_dir: Path, wt: Path, sha: str) -> None:
+        """Refresh the shared origin/main ref only after confirming it is sha.
+
+        App's release script deliberately requires HEAD == origin/main. The
+        immutable-SHA fetch earlier in run_lane avoids moving tracking refs,
+        so an app checkout can retain a stale origin/main. This explicit fetch
+        updates that one shared ref for linked worktrees; it never checks out
+        or advances any worktree's HEAD, and publication is refused unless the
+        detached HEAD, fetched ref, and remote main still agree on sha.
+        """
+        if not SHA_RE.fullmatch(sha):
+            raise Blocked("app_main_unverified", "release target is not an exact commit SHA")
+        if self.dry_run:
+            self.step("app-main-ref-refresh", [
+                "git", "-C", str(repo_dir), "fetch", "--no-write-fetch-head", "--refmap=",
+                "origin", "refs/heads/main:refs/remotes/origin/main"], repo_dir)
+            self.out(f"  [dry-run] verify remote main, origin/main, and detached HEAD all equal {sha}")
+            return
+
+        def remote_main() -> str:
+            rows = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
+            if len(rows) != 2 or not SHA_RE.fullmatch(rows[0]) or rows[1] != "refs/heads/main":
+                raise Blocked("app_main_unreadable", "remote main has no exact SHA acknowledgement before app release")
+            return rows[0]
+
+        observed = remote_main()
+        if observed != sha:
+            raise Blocked("app_main_advanced", f"remote main advanced from target {sha[:12]} to {observed[:12]} before app release")
+
+        self.step("app-main-ref-refresh", [
+            "git", "-C", str(repo_dir), "fetch", "--no-write-fetch-head", "--refmap=",
+            "origin", "refs/heads/main:refs/remotes/origin/main"], repo_dir)
+        tracking = self.git("rev-parse", "refs/remotes/origin/main", cwd=repo_dir)
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        after = remote_main()
+        if tracking != sha or head != sha or after != sha:
+            raise Blocked("app_main_changed", "app release requires remote main, refreshed origin/main, and detached HEAD to match the reviewed target")
 
     # -- post-release proof ------------------------------------------------
     def live_value(self, lane_cfg: dict, pick: Callable[[dict], Any]) -> Any:
