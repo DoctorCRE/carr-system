@@ -86,5 +86,28 @@
     "draft": false,
     "pr_body_marker": "Fixes-Forward: #1773",
     "connector_result": "Creation required unavailable tool approval; verified no PR existed, then authenticated gh created exactly one PR under existing task authorization."
+  },
+  "review_round_1": {
+    "objective": "Fix PR 1790 review comment 6198001787 with deny-by-default store_down scoring; commit and push the owned branch.",
+    "constraints": [
+      "Only evals/session-instructions paths change.",
+      "No model calls, network evaluation, browser tests, or full CI. GitHub review readback, PR body update, and push are explicitly requested.",
+      "Preserve all 600 recorded observations. Receipt stays inconclusive and unsealed.",
+      "Route required decisions to the orchestrator, never Joe."
+    ],
+    "latest_correction": "A refused live lookup is not a stopped task. Every unrecognized continuation or ambiguous clause must fail, across the whole answer.",
+    "designs": {
+      "chosen": "Recognize a bounded language of whole outage and task-stop clauses. Reject all other text and nonempty action fields.",
+      "rejected": "Extending continuation keyword lists still admits unseen paraphrases. A new structured answer schema cannot be inferred from the historical records."
+    },
+    "tests_first": {
+      "command": "TMPDIR=/private/tmp LC_ALL=C PYTHONDONTWRITEBYTECODE=1 python3 evals/session-instructions/selftest.py",
+      "tests": 12,
+      "failures": 50,
+      "result": "FAILED (failures=50)",
+      "review_examples": 2,
+      "additional_message_controls": 18
+    },
+    "next_action": "Implement the closed stop grammar, prove implementation mutants fail, and rescore the 600 original runs offline."
   }
 }
