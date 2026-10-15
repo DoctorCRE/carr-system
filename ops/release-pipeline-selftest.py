@@ -150,6 +150,12 @@ class FakeRunner:
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text(failed_out, encoding="utf-8")
             return rp.Result(7, failed_out)
+        is_app_worktree = name == "app-worktree"
+        is_app_worktree_cleanup = (name == "worktree-cleanup" and argv[:5] == [
+            "git", "-C", str(cwd), "worktree", "remove"] and "/app-" in argv[-1])
+        if is_app_worktree or name == "app-main-ref-refresh" or is_app_worktree_cleanup:
+            proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
+            return rp.Result(proc.returncode, proc.stdout + proc.stderr)
         if name == "release-key":
             key = argv[argv.index("--key") + 1]
             return rp.Result(0 if key.endswith("-01") else 2, "")
@@ -3597,9 +3603,10 @@ class AppLane(Base):
                 live["source_commit"] = sha
             return res
         runner.run = run  # type: ignore[method-assign]
-        self.assertEqual(pipe.tick(["app"]), 0)
-        self.assertEqual(runner.names()[:7], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build",
-                                              "smoke-baseline", "app-release", "smoke-post"])
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.names()[:8], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build",
+                                              "smoke-baseline", "app-main-ref-refresh", "app-release",
+                                              "smoke-post"])
         build_index = runner.names().index("app-build")
         self.assertEqual(runner.calls[build_index][1], ["npm", "run", "build"])
         self.assertEqual(runner.envs["app-build"]["DOCTORCRE_SOURCE_COMMIT"], sha)
@@ -3610,6 +3617,63 @@ class AppLane(Base):
         # no ops.release row for membership to attach to.
         self.assertEqual(self.fx.slice_marks, [])
         self.assertNotIn("slice_marker", self.fx.records()[-1])
+
+    def test_immutable_main_fetch_refreshes_stale_tracking_ref_before_exact_main_guard(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+        stale = git(self.fx.repo, "rev-parse", "refs/remotes/origin/main")
+        self.assertNotEqual(candidate, stale)
+        fetch_head = self.fx.repo / ".git/FETCH_HEAD"
+        fetch_head.write_text("another session's fetch evidence\n")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.guard_observations, [(candidate, candidate)])
+        self.assertEqual(git(self.fx.repo, "rev-parse", "HEAD"), self.fx.base)
+        self.assertEqual(git(self.fx.repo, "rev-parse", "refs/remotes/origin/main"), candidate)
+        self.assertEqual(fetch_head.read_text(), "another session's fetch evidence\n")
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_app_release_refuses_main_advance_during_build(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+
+        def advance_main():
+            (other / "src/next.js").write_text("unexpected later main commit\n")
+            git(other, "add", "src/next.js")
+            git(other, "commit", "-q", "-m", "advance main during app build")
+            git(other, "push", "-q", "origin", "HEAD:main")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live, on_build=advance_main)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 1)
+        self.assertNotIn("app-release", runner.names())
+        self.assertEqual(self.fx.records()[-1]["sha"], candidate)
+        self.assertEqual(self.fx.records()[-1]["status"], "failed")
+        self.assertNotEqual(git(self.fx.repo, "ls-remote", "origin", "refs/heads/main").split()[0], candidate)
 
     def test_failed_credential_free_build_never_reaches_publication(self):
         self.fx.commit({"src/worker.js": "1"})
@@ -5156,6 +5220,33 @@ class RealGitRunner(FakeRunner):
         self.calls.append((log.stem.split("-", 1)[1], list(argv)))
         proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
         return rp.Result(proc.returncode, proc.stdout + proc.stderr)
+
+
+class ExactMainAppGuardRunner(RealGitRunner):
+    """Use real local Git state for the app's unchanged exact-main guard."""
+
+    def __init__(self, **kw):
+        self.on_build = kw.pop("on_build", None)
+        super().__init__("", **kw)
+        self.guard_observations = []
+        self.live = kw.get("live")
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        if argv[:2] == ["node", "scripts/release-production.mjs"]:
+            head = git(Path(cwd), "rev-parse", "HEAD")
+            tracking = git(Path(cwd), "rev-parse", "refs/remotes/origin/main")
+            self.guard_observations.append((head, tracking))
+            if head != tracking:
+                self.calls.append((log.stem.split("-", 1)[1], list(argv)))
+                return rp.Result(1, "release guard: HEAD must equal origin/main")
+            if isinstance(self.live, dict):
+                self.live["source_commit"] = head
+                self.live["environment"] = "production"
+            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        if log.stem.endswith("app-build") and self.on_build is not None:
+            self.on_build()
+        return result
 
 
 class SchemaFollowupBase(Base):
