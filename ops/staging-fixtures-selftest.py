@@ -14,8 +14,13 @@ import tempfile
 import unittest
 import uuid
 import datetime as dt
+import copy
+import re
+import ast
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+tempfile.tempdir = str(pathlib.Path(tempfile.gettempdir()).resolve())
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("staging_fixtures", ROOT / "tools/staging-fixtures.py")
@@ -834,5 +839,434 @@ class TourFixtureTests(unittest.TestCase):
         self.assertGreaterEqual(db.rollbacks, 5)
 
 
+def relationship_plan():
+    value = plan()
+    value["names"]["deal"] = f"Synthetic staging QA {RUN} active deal"
+    value["records"]["deal"] = {"id": str(DEAL), "name": value["names"]["deal"]}
+    for number, step in enumerate(("client", "deal", "vendor_party", "vendor", "vendor_entry"), 10):
+        value["keys"][step] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"relationship-test-key:{number}"))
+    value["names"]["vendor"] = f"QA Vendor {value['keys']['vendor_party']}"
+    for number, step in enumerate(("vendor_party", "vendor", "vendor_entry"), 20):
+        value["records"][step] = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"relationship-test-record:{number}")), "name": value["names"]["vendor"]}
+    value["records"]["vendor_entry"]["link_id"] = str(uuid.UUID(int=23))
+    for step, field in (("client", "client_id"), ("deal", "deal_id"), ("vendor_party", "party_id"),
+                        ("vendor", "vendor_id"), ("vendor_entry", "activity_id")):
+        value["receipts"][step] = {field: value["records"][step]["id"]}
+    return value
+
+
+class RelationshipConnection:
+    def __init__(self):
+        self.plan = relationship_plan()
+        p = self.plan
+        self.system = str(uuid.UUID(int=30))
+        self.joe = str(uuid.UUID(int=31))
+        self.identity = ("neondb_owner", "neondb_owner", "neondb")
+        self.rows = {name: [] for name in ("party", "client", "deal", "vendor", "party_link", "party_link_deal", "event", "activity")}
+        common = {"merged_into": None, "deleted_at": None, "version": 1,
+                  "created_by": self.joe, "updated_by": self.joe, "created_at": p["observed_at"]}
+        self.rows["party"] = [dict(common, id=str(PARTY), name="Synthetic Staging Fixture", kind="org",
+            notes_path="fixtures/clean-staging-replacement-v1", city=None, contact_state="active", created_by=self.system),
+            dict(common, id=p["records"]["vendor_party"]["id"], name=p["names"]["vendor"], kind="org", city=None)]
+        self.rows["client"] = [dict(common, id=p["records"]["client"]["id"], party_id=str(PARTY),
+            status="engaged", acquisition_source="referral", acquisition_detail="Explicitly fictional staging QA fixture only")]
+        self.rows["deal"] = [dict(common, id=str(DEAL), client_id=p["records"]["client"]["id"],
+            name=p["names"]["deal"], owner="joe", phase="pending", lane="territory", deal_type="startup", outcome=None)]
+        self.rows["vendor"] = [dict(common, id=p["records"]["vendor"]["id"], party_id=p["records"]["vendor_party"]["id"],
+            category="cpa", stage="prospect_uncontacted", territory=None, deal_history_verified_at=None)]
+        self.rows["activity"] = [{"id": p["records"]["vendor_entry"]["id"], "vendor_id": p["records"]["vendor"]["id"],
+            "kind": "note", "summary": "Synthetic staging QA introduction entry",
+            "detail": "Fictional QA evidence only; no contact, referral, or send occurred."}]
+        self.rows["party_link"] = [{"id": p["records"]["vendor_entry"]["link_id"],
+            "from_party": p["records"]["vendor_party"]["id"], "to_party": str(PARTY), "kind": "can_introduce",
+            "via_party": None, "note": "Synthetic staging QA suggested introduction only; no real-world introduction occurred."}]
+        for step, verb, table in (("client", "new-client", "client"), ("deal", "new-deal", "deal"),
+                ("vendor_party", "add-party", "party"), ("vendor", "new-vendor", "vendor"), ("vendor_entry", "log-activity", "vendor")):
+            self.rows["event"].append({"id": str(uuid.uuid5(uuid.NAMESPACE_URL, step)), "verb": verb,
+                "subject_type": table, "subject_id": p["records"]["vendor" if step == "vendor_entry" else step]["id"],
+                "idempotency_key": p["keys"][step], "new_value": {"activity": p["records"]["vendor_entry"]["id"]}})
+        self.commits = self.rollbacks = self.writes = 0
+        self.sql = []
+        self.fail_insert = False
+        self.actor_rows = None
+        self.omit_inserts = False
+        self.project_mutation = lambda network: network
+        self.saved = copy.deepcopy(self.rows)
+
+    def cursor(self): return RelationshipCursor(self)
+    def commit(self): self.commits += 1; self.saved = copy.deepcopy(self.rows)
+    def rollback(self): self.rollbacks += 1; self.rows = copy.deepcopy(self.saved)
+
+    def snapshot(self):
+        nodes = []
+        for p in self.rows["party"]:
+            role = next((r for r in self.rows["vendor"] if r["party_id"] == p["id"]), None)
+            kind = "vendor" if role else "client"
+            role = role or next(r for r in self.rows["client"] if r["party_id"] == p["id"])
+            nodes.append({"id": "party:" + p["id"], "record_id": role["id"], "kind": kind,
+                          "name": p["name"], "territory": role.get("territory") or p.get("city"), "owner": "joe", "verticals": []})
+        nodes += [{"id": "deal:" + d["id"], "record_id": d["id"], "kind": "deal", "name": d["name"], "verticals": []} for d in self.rows["deal"]]
+        edges = [{"id": "client-deal:" + d["id"], "from": "party:" + next(c["party_id"] for c in self.rows["client"] if c["id"] == d["client_id"]),
+                  "to": "deal:" + d["id"], "kind": "client_deal", "via": None} for d in self.rows["deal"]]
+        edges += [{"id": "link:" + r["id"], "from": "party:" + r["from_party"], "to": "party:" + r["to_party"],
+                   "kind": r["kind"], "via": None, "detail": r["note"], "summary": r["note"][:180]} for r in self.rows["party_link"]]
+        edges += [{"id": f"evidence:{r['referred_by']}:{r['deal_id']}:referred", "from": "party:" + r["referred_by"],
+                   "to": "deal:" + r["deal_id"], "kind": "referred", "via": None, "detail": r["note"]} for r in self.rows["party_link_deal"]]
+        referrals = [{"node_id": "party:" + r["referred_by"], "deals": 1, "won": 0, "lost": 0} for r in self.rows["party_link_deal"]]
+        return self.project_mutation({"nodes": nodes, "edges": edges, "referrals": referrals})
+
+
+class RelationshipCursor:
+    def __init__(self, db): self.db = db; self.result = []
+    def __enter__(self): return self
+    def __exit__(self, *_): return False
+    def fetchone(self): return self.result[0] if self.result else None
+    def fetchall(self): return self.result
+    def execute(self, sql, args=()):
+        low = " ".join(sql.lower().split())
+        args = tuple(str(a) if isinstance(a, uuid.UUID) else a for a in (args or ()))
+        self.db.sql.append((low, args))
+        self.result = []
+        if low.startswith("set transaction") or low.startswith("lock table"): return
+        if low.startswith("select session_user"): self.result = [self.db.identity]; return
+        if "from public.actor" in low:
+            if self.db.actor_rows is not None: self.result = self.db.actor_rows; return
+            self.result = [(self.db.system if "'system'" in low else self.db.joe,)]; return
+        if low.startswith("with live as"): self.result = [(self.db.snapshot(),)]; return
+        if low.startswith("insert into"):
+            if self.db.fail_insert: raise RuntimeError("synthetic insert failure")
+            if self.db.omit_inserts: return
+            match = re.search(r"insert into public\.(\w+)\s*\(([^)]+)\)", low)
+            table, columns = match.groups()
+            row = dict(zip((c.strip() for c in columns.split(',')), args))
+            row["created_at"] = self.db.plan["observed_at"]
+            row.setdefault("version", 1)
+            if table in ("party", "client"): row.setdefault("merged_into", None)
+            if table == "party": row.setdefault("deleted_at", None)
+            if table == "deal": row.setdefault("outcome", None)
+            self.db.rows[table].append(row); self.db.writes += 1
+            return
+        if low.startswith("update public."):
+            table = low.split('.')[1].split()[0]
+            row = next(r for r in self.db.rows[table] if r["id"] == args[-1])
+            row["city" if table == "party" else "territory"] = args[0]
+            row["updated_by"] = args[1]; row["version"] += 1
+            if table == "vendor": row["deal_history_verified_at"] = None
+            self.db.writes += 1; return
+        match = re.search(r"from public\.(\w+) r where (.+?)(?: order by| for update|$)", low)
+        if not match: raise AssertionError(f"unexpected relationship SQL: {low}")
+        table, condition = match.groups()
+        clauses = re.findall(r"r\.(\w+)=%s", condition)
+        rows = self.db.rows[table]
+        selected = []
+        for row in rows:
+            comparisons = [row.get(key) == value for key, value in zip(clauses, args)]
+            if (any(comparisons) if " or " in condition else all(comparisons)):
+                selected.append((copy.deepcopy(row),))
+        self.result = selected
+
+
+class RelationshipFixtureTests(unittest.TestCase):
+    def test_complete_proof_matches_revised_app_logical_rows_receipts_and_hashes(self):
+        db = RelationshipConnection(); fixture.install_relationship_fixture(db, db.plan)
+        proof = fixture.build_relationship_fixture_proof(db.plan, {"database": "neondb"}, fixture.read_relationship_fixture(db, db.plan))
+        namespace = uuid.UUID("439206ab-d73a-5c1b-8a20-531e536e5804")
+        identifier = lambda role: str(uuid.uuid5(namespace, f"relationship:{role}:{RUN}"))
+        note = lambda role: f"Fictional staging QA {role} referral for fixture {RUN}."
+        expected = {
+            "destination_party": {"id": identifier("destination_party"), "name": f"Synthetic staging QA {RUN} referred client", "kind": "org", "city": "Synthetic Staging QA North"},
+            "destination_client": {"id": identifier("destination_client"), "party_id": identifier("destination_party"), "status": "engaged"},
+            "destination_deal": {"id": identifier("destination_deal"), "name": f"Synthetic staging QA {RUN} referred deal", "client_id": identifier("destination_client"),
+                "owner": "joe", "phase": "pending", "lane": "territory", "deal_type": "startup"},
+            "fixed_party": {"id": str(PARTY), "city": "Synthetic Staging QA North"},
+            "owned_vendor": {"id": db.plan["records"]["vendor"]["id"], "party_id": db.plan["records"]["vendor_party"]["id"], "territory": "Synthetic Staging QA South"},
+        }
+        for role, party, to, deal in (("referral", str(PARTY), identifier("destination_party"), identifier("destination_deal")),
+                ("vendor", db.plan["records"]["vendor_party"]["id"], str(PARTY), str(DEAL))):
+            association = role + "_association"; attribution = role + "_attribution"
+            common = {"kind": "referred", "via_party_id": None, "occurred_on": "2026-10-14", "note": note(association), "attribution": "system"}
+            expected[association] = dict(common, id=identifier(association), from_party_id=party, to_party_id=to)
+            expected[attribution] = dict(common, id=identifier(attribution), party_id=party, deal_id=deal)
+        self.assertEqual(proof["rows"], expected)
+        hashes = {role: hashlib.sha256(json.dumps(row, sort_keys=True, separators=(',', ':')).encode()).hexdigest() for role, row in expected.items()}
+        self.assertEqual(proof["row_sha256"], hashes)
+        for role, row in expected.items():
+            field = "city" if role == "fixed_party" else "territory" if role == "owned_vendor" else None
+            table = "party" if role in ("destination_party", "fixed_party") else "client" if role == "destination_client" else "deal" if role == "destination_deal" else "vendor" if role == "owned_vendor" else "party_association" if role.endswith("association") else "deal_attribution"
+            receipt = proof["receipts"][role]
+            self.assertEqual(receipt, {"operation": "update" if field else "insert", "table": table, "row_id": row["id"],
+                "before_sha256": hashes[role] if field else None, "after_sha256": hashes[role]})
+        self.assertEqual(proof["original_note_sha256"], {role: hashlib.sha256(note(role + "_association").encode()).hexdigest() for role in ("referral", "vendor")})
+        self.assertEqual(proof["projection"]["response_sha256"], hashlib.sha256(json.dumps(proof["projection"]["response"], sort_keys=True, separators=(',', ':')).encode()).hexdigest())
+
+    def test_cli_refuses_missing_controls_and_conflicting_modes(self):
+        base = ["staging-fixtures.py", "--relationship-plan", "missing.json"]
+        pins = ["--expected-app-sha", APP_SHA, "--expected-carr-sha", CARR_SHA]
+        for extra in ([], pins + ["--apply"], pins + ["--proof-file", "proof.json"],
+                      pins + ["--invoice-plan", "invoice.json"], pins + ["--tour-plan", "tour.json"],
+                      pins + ["--vendor-reference-data"], pins + ["--aged-invoice"]):
+            with self.subTest(extra=extra), patch.object(sys, "argv", base + extra), \
+                    patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as raised:
+                fixture.main()
+            self.assertEqual(raised.exception.code, 2)
+
+    def test_cli_dry_run_and_source_refusals_never_reach_target(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.json"; path.write_text(json.dumps(relationship_plan())); path.chmod(0o600)
+            args = ["staging-fixtures.py", "--relationship-plan", str(path), "--expected-app-sha", APP_SHA,
+                    "--expected-carr-sha", CARR_SHA]
+            with patch.object(fixture, "validate_target") as target, patch.object(sys, "argv", args), \
+                    patch("sys.stdout", new_callable=io.StringIO) as output:
+                self.assertEqual(fixture.main(), 0)
+                self.assertIn("mutated=false", output.getvalue())
+                target.assert_not_called()
+            for bad in ("z" * 40, "0" * 40):
+                with patch.object(fixture, "validate_target") as target, patch.object(sys, "argv", args[:-1] + [bad]), \
+                        patch("sys.stderr", new_callable=io.StringIO):
+                    self.assertEqual(fixture.main(), 2)
+                    target.assert_not_called()
+
+    def test_cli_target_validation_precedes_connections_and_private_proof(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.json"; path.write_text(json.dumps(relationship_plan())); path.chmod(0o600)
+            proof = pathlib.Path(raw) / "relationship-fixture-proof.json"
+            args = ["staging-fixtures.py", "--relationship-plan", str(path), "--expected-app-sha", APP_SHA,
+                    "--expected-carr-sha", CARR_SHA, "--apply", "--proof-file", str(proof)]
+            connect = Mock()
+            with patch.object(sys, "argv", args), patch.dict(sys.modules, psycopg=SimpleNamespace(connect=connect)), \
+                    patch.object(fixture, "validate_provider_binding") as provider, patch.dict(os.environ, DATABASE_URL="", clear=True), \
+                    patch("sys.stderr", new_callable=io.StringIO):
+                self.assertEqual(fixture.main(), 2)
+                provider.assert_not_called(); connect.assert_not_called()
+                self.assertFalse(proof.exists())
+            events = []
+            writer, reader = Mock(), Mock()
+            writer.__enter__ = Mock(return_value=writer); writer.__exit__ = Mock(return_value=False)
+            reader.__enter__ = Mock(return_value=reader); reader.__exit__ = Mock(return_value=False)
+            target = {"database": "neondb", "endpoint": {"id": "verified"}}
+            with patch.object(sys, "argv", args), patch.dict(sys.modules, psycopg=SimpleNamespace(connect=Mock(side_effect=[writer, reader]))), \
+                    patch.object(fixture, "validate_target", side_effect=lambda *a: events.append("target")), \
+                    patch.object(fixture, "validate_provider_binding", side_effect=lambda *a: events.append("provider") or target), \
+                    patch.object(fixture, "install_relationship_fixture", side_effect=lambda *a: events.append("install") or 9), \
+                    patch.object(fixture, "read_relationship_fixture", side_effect=lambda *a: events.append("read") or {"projection": {}}), \
+                    patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(fixture.main(), 0)
+            self.assertEqual(events, ["target", "provider", "install", "read"])
+            self.assertEqual(json.loads(proof.read_text())["verified_target"], target)
+            self.assertEqual(proof.stat().st_mode & 0o777, 0o600)
+
+    def test_refuses_existing_partial_territories_and_destination_vendor_precedence(self):
+        for table, field in (("party", "city"), ("vendor", "territory")):
+            db = RelationshipConnection(); fixture.install_relationship_fixture(db, db.plan)
+            db.rows[table][0][field] = None; db.saved = copy.deepcopy(db.rows)
+            with self.subTest(table=table), self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+        db = RelationshipConnection(); fixture.install_relationship_fixture(db, db.plan)
+        dest = fixture.relationship_fixture_values(db.plan)["destination"]
+        db.rows["vendor"].append(dict(db.rows["vendor"][0], party_id=dest["party_id"]))
+        with self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+
+    def test_projection_hashes_match_node_serialization_and_consumer_counts(self):
+        projected = fixture._relationship_projection("project", {"snapshot": {"nodes": [], "edges": [], "referrals": []},
+            "observed_at": "2026-10-14T11:15:00.000Z"})
+        expected = ('{"schema":"carr-relationship-network.v1","observed_at":"2026-10-14T11:15:00.000Z",'
+                    '"valid_until":"2026-10-14T11:16:00.000Z","nodes":[],"edges":[],"referrals":[],"suggestions":[]}')
+        self.assertEqual(projected["response_sha256"], hashlib.sha256(expected.encode()).hexdigest())
+        db = RelationshipConnection(); fixture.install_relationship_fixture(db, db.plan)
+        readback = fixture.read_relationship_fixture(db, db.plan)
+        projection = readback["projection_evidence"]
+        self.assertEqual(projection["same_territory_referrals"], 1)
+        self.assertEqual(projection["other_territory_referrals"], 1)
+        self.assertEqual(projection["territory_sha256"], hashlib.sha256(b"Synthetic Staging QA North").hexdigest())
+        self.assertEqual(projection["network_response_sha256"], projection["response_sha256"])
+        self.assertEqual(projection["evidence_detail_sha256"], hashlib.sha256(readback["rows"]["referral_association"]["note"].encode()).hexdigest())
+
+    def test_values_bind_run_and_distinct_destination(self):
+        value = fixture.relationship_fixture_values(relationship_plan())
+        self.assertEqual(value["destination"]["name"], f"Synthetic staging QA {RUN} referred deal")
+        self.assertNotEqual(value["destination"]["party_id"], str(PARTY))
+        self.assertNotEqual(value["destination"]["client_id"], relationship_plan()["records"]["client"]["id"])
+        other = relationship_plan(); other["run"] = "different-run"; other["names"]["deal"] = other["records"]["deal"]["name"] = "Synthetic staging QA different-run active deal"
+        self.assertNotEqual(value["destination"]["id"], fixture.relationship_fixture_values(other)["destination"]["id"])
+
+    def test_refuses_incomplete_or_mismatched_plan(self):
+        for section, key in (("records", "vendor"), ("records", "vendor_party"), ("records", "vendor_entry"),
+                             ("receipts", "vendor"), ("keys", "client")):
+            value = relationship_plan(); del value[section][key]
+            with self.subTest(section=section, key=key), self.assertRaises(fixture.FixtureRefusal):
+                fixture.relationship_fixture_values(value)
+        for step in ("client", "deal", "vendor_party", "vendor", "vendor_entry"):
+            value = relationship_plan(); value["receipts"][step] = {"wrong_id": str(DEAL)}
+            with self.subTest(step=step), self.assertRaises(fixture.FixtureRefusal): fixture.relationship_fixture_values(value)
+
+    def test_install_read_prove_and_repeat_without_effect(self):
+        db = RelationshipConnection(); value = db.plan
+        self.assertEqual(fixture.install_relationship_fixture(db, value), 9)
+        first = copy.deepcopy(db.rows); writes = db.writes
+        self.assertEqual(fixture.install_relationship_fixture(db, value), 0)
+        self.assertEqual(db.rows, first)
+        self.assertEqual(db.writes, writes)
+        readback = fixture.read_relationship_fixture(db, value)
+        proof = fixture.build_relationship_fixture_proof(value, {"database": "neondb"}, readback)
+        self.assertEqual(proof["schema"], "doctorcre-staging-relationship-fixture.v1")
+        self.assertEqual(proof["source_pair"], value["release"])
+        self.assertEqual(proof["verified_target"], {"database": "neondb"})
+        self.assertEqual(len(proof["creation_receipts"]), 7)
+        self.assertEqual(len(proof["update_receipts"]), 2)
+        self.assertEqual(proof["projection_evidence"]["territories"]["inside"]["referral_count"], 1)
+        self.assertEqual(proof["projection_evidence"]["territories"]["outside"]["referral_count"], 1)
+        self.assertEqual(len(proof["projection_evidence"]["nodes"]), 5)
+        self.assertEqual(len(proof["projection_evidence"]["edges"]), 6)
+        self.assertEqual(proof["original_note_sha256"]["referral"], hashlib.sha256(proof["rows"]["referral_association"]["note"].encode()).hexdigest())
+        for receipt in proof["creation_receipts"] + proof["update_receipts"]:
+            self.assertEqual(receipt["row_sha256"], hashlib.sha256(json.dumps(receipt["row"], sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest())
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "relationship-fixture-proof.json"
+            self.assertEqual(fixture.publish_private_proof(path, proof), "created")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(path.read_text()), proof)
+
+    def test_refuses_unowned_ambiguous_and_mismatched_rows_before_writes(self):
+        cases = [("party", "notes_path", "shared"), ("party", "city", "Real City"),
+                 ("client", "id", str(uuid.UUID(int=99))), ("client", "merged_into", str(DEAL)),
+                 ("deal", "owner", "dell"), ("deal", "client_id", str(DEAL)), ("deal", "phase", "closed"),
+                 ("vendor", "territory", "Real Territory"), ("vendor", "category", "lender"),
+                 ("event", "idempotency_key", "other-run"), ("activity", "detail", "Changed original note")]
+        for table, key, bad in cases:
+            db = RelationshipConnection(); db.rows[table][0][key] = bad; db.saved = copy.deepcopy(db.rows)
+            with self.subTest(table=table, key=key), self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+            self.assertEqual(db.writes, 0)
+            self.assertEqual(db.rollbacks, 1)
+        for table in ("client", "vendor", "event"):
+            db = RelationshipConnection(); db.rows[table].append(copy.deepcopy(db.rows[table][0]))
+            with self.subTest(ambiguous=table), self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+            self.assertEqual(db.writes, 0)
+        db = RelationshipConnection(); db.rows["vendor"].append(dict(db.rows["vendor"][0], party_id=str(PARTY)))
+        with self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+        self.assertEqual(db.writes, 0)
+
+    def test_refuses_partial_collision_changed_and_missing_readback(self):
+        db = RelationshipConnection()
+        with self.assertRaises(fixture.FixtureRefusal): fixture.read_relationship_fixture(db, db.plan)
+        fixture.install_relationship_fixture(db, db.plan)
+        complete = copy.deepcopy(db.rows)
+        for table in ("party", "client", "deal", "party_link", "party_link_deal"):
+            db.rows = copy.deepcopy(complete); db.rows[table].pop(); db.saved = copy.deepcopy(db.rows)
+            with self.subTest(partial=table), self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+        for table, field in (("party", "notes_path"), ("client", "party_id"), ("deal", "deal_type"),
+                             ("party_link", "note"), ("party_link_deal", "referred_by")):
+            db.rows = copy.deepcopy(complete); db.rows[table][-1][field] = "collision"; db.saved = copy.deepcopy(db.rows)
+            with self.subTest(collision=table), self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+        db.rows = copy.deepcopy(complete); db.rows["deal"][-1]["id"] = str(uuid.UUID(int=99)); db.saved = copy.deepcopy(db.rows)
+        with self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+
+    def test_refuses_bad_identity_and_rolls_back_database_failures(self):
+        db = RelationshipConnection(); db.identity = ("carr_writer", "carr_writer", "neondb")
+        with self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+        self.assertEqual(db.writes, 0)
+        db = RelationshipConnection(); db.fail_insert = True
+        with self.assertRaises(RuntimeError): fixture.install_relationship_fixture(db, db.plan)
+        self.assertEqual(db.rows, db.saved)
+        self.assertEqual(db.rollbacks, 1)
+
+    def test_refuses_missing_ambiguous_actors_and_failed_insert_readback(self):
+        for actors in ([], [("system",), ("duplicate",)]):
+            db = RelationshipConnection(); db.actor_rows = actors
+            with self.subTest(actors=actors), self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+            self.assertEqual(db.writes, 0)
+        db = RelationshipConnection(); db.omit_inserts = True
+        with self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+        self.assertEqual(db.rows, db.saved)
+        self.assertEqual(db.commits, 0)
+
+    def test_refuses_self_referral_plans_and_deterministic_identity_collisions(self):
+        value = relationship_plan(); value["records"]["vendor_party"]["id"] = str(PARTY)
+        value["receipts"]["vendor_party"]["party_id"] = str(PARTY)
+        with self.assertRaises(fixture.FixtureRefusal): fixture.relationship_fixture_values(value)
+        value = relationship_plan()
+        with patch.object(fixture.uuid, "uuid5", return_value=PARTY), self.assertRaises(fixture.FixtureRefusal):
+            fixture.relationship_fixture_values(value)
+
+    def test_accepts_exact_existing_territory_values_without_updating_them(self):
+        db = RelationshipConnection()
+        db.rows["party"][0]["city"] = "Synthetic Staging QA North"
+        db.rows["vendor"][0]["territory"] = "Synthetic Staging QA South"
+        self.assertEqual(fixture.install_relationship_fixture(db, db.plan), 7)
+        self.assertEqual(db.rows["party"][0]["version"], 1)
+        self.assertEqual(db.rows["vendor"][0]["version"], 1)
+
+    def test_projection_rejects_wrong_nodes_edges_notes_metrics_and_territory(self):
+        mutations = [lambda n: n["nodes"].pop(), lambda n: n["nodes"][0].update(kind="vendor"),
+                     lambda n: n["nodes"][0].update(record_id=str(DEAL)), lambda n: n["edges"].pop(),
+                     lambda n: n["edges"][-1].update(via="party:" + str(PARTY)),
+                     lambda n: n["edges"][-1].update(detail="changed"), lambda n: n.update(referrals=[]),
+                     lambda n: n["nodes"][0].update(territory="Real City")]
+        for mutate in mutations:
+            db = RelationshipConnection(); fixture.install_relationship_fixture(db, db.plan)
+            def change(n): mutate(n); return n
+            db.project_mutation = change
+            with self.subTest(mutation=mutations.index(mutate)), self.assertRaises(fixture.FixtureRefusal): fixture.read_relationship_fixture(db, db.plan)
+
+    def test_projection_failure_before_commit_rolls_back_every_fixture_write(self):
+        db = RelationshipConnection()
+        def broken(n): n["referrals"] = []; return n
+        db.project_mutation = broken
+        with self.assertRaises(fixture.FixtureRefusal): fixture.install_relationship_fixture(db, db.plan)
+        self.assertEqual(db.rows, db.saved)
+        self.assertEqual(db.commits, 0)
+        self.assertEqual(db.rollbacks, 1)
+
+    def test_outside_membership_matches_consumer_across_all_other_territories(self):
+        db = RelationshipConnection(); fixture.install_relationship_fixture(db, db.plan)
+        def additional(n):
+            n["nodes"].append({"id": "party:another", "record_id": "another", "kind": "vendor", "territory": "West"})
+            n["referrals"].append({"node_id": "party:another", "deals": 2, "won": 0, "lost": 0})
+            return n
+        db.project_mutation = additional
+        projection = fixture.read_relationship_fixture(db, db.plan)["projection_evidence"]
+        self.assertEqual(projection["other_territory_referrals"], 2)
+        self.assertEqual(projection["total_referrals"], 3)
+
+    def test_projection_runtime_refuses_and_never_exposes_output(self):
+        for failure in (OSError("synthetic secret"), subprocess.TimeoutExpired("node", 30),
+                        subprocess.CalledProcessError(1, "node", stderr="synthetic secret")):
+            with patch.object(fixture.subprocess, "run", side_effect=failure), \
+                    self.assertRaises(fixture.FixtureRefusal) as raised:
+                fixture._relationship_projection("sql")
+            self.assertNotIn("synthetic secret", str(raised.exception))
+
+
+def mutate_relationship_assertions():
+    source = pathlib.Path(__file__).read_text()
+    tree = ast.parse(source)
+    subject = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "RelationshipFixtureTests")
+    opposites = {"assertEqual": "assertNotEqual", "assertNotEqual": "assertEqual", "assertIn": "assertNotIn",
+        "assertNotIn": "assertIn", "assertFalse": "assertTrue", "assertTrue": "assertFalse",
+        "assert_not_called": "assert_called", "assertRaises": "assertRaises"}
+    targets = [(method.name, node.lineno, node.col_offset, node.func.attr)
+        for method in subject.body if isinstance(method, ast.FunctionDef)
+        for node in ast.walk(method) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and node.func.attr in opposites]
+    survivors = []
+    for method, line, column, assertion in targets:
+        mutant = ast.parse(source)
+        call = next(node for node in ast.walk(mutant) if isinstance(node, ast.Call)
+                    and node.lineno == line and node.col_offset == column)
+        call.func.attr = opposites[assertion]
+        if assertion == "assertRaises":
+            call.args[0] = ast.Name(id="AssertionError", ctx=ast.Load())
+        ast.fix_missing_locations(mutant)
+        namespace = {"__name__": "relationship_assertion_mutant", "__file__": __file__}
+        exec(compile(mutant, __file__, "exec"), namespace)
+        result = unittest.TestResult()
+        namespace["RelationshipFixtureTests"](method).run(result)
+        if result.wasSuccessful(): survivors.append(f"{method}:{line}:{assertion}")
+    sys.modules[SPEC.name] = fixture
+    print(f"Relationship assertion mutations killed={len(targets) - len(survivors)} total={len(targets)}")
+    for survivor in survivors: print("SURVIVED " + survivor)
+    return 1 if survivors else 0
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--mutate-relationship-assertions"]:
+        raise SystemExit(mutate_relationship_assertions())
     unittest.main()
