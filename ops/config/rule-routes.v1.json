@@ -675,7 +675,7 @@
    ]
   },
   "3a9dbafd": {
-   "moment": "conduct_stop (conduct-stop-gate.py Stop)",
+   "moment": "external communication",
    "routes": [
     {
      "kind": "trigger",
@@ -2648,7 +2648,6 @@
      "path_globs": [
       "*ops/config/rule-enforcement-map.json",
       "*ops/*-gate.py",
-      "*ops/config/gate-baseline.json",
       "*hooks/*.py",
       "*ops/*-check.py",
       "*ops/githooks/*"

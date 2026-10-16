@@ -1719,7 +1719,7 @@ class QueueTests(unittest.TestCase):
 
 
     def cli(self, *args):
-        return subprocess.run([sys.executable, str(ENTRY), '--state', str(self.state), *args],
+        return subprocess.run([sys.executable, str(ENTRY), '--state', str(self.state), '--root', str(self.root), *args],
                               text=True, capture_output=True)
 
     def test_legacy_import_recovers_attempted_entries_ignoring_pointers(self):
@@ -1747,7 +1747,7 @@ class QueueTests(unittest.TestCase):
     def test_single_running_agent_owns_the_state(self):
         self.pr(held=True)
         self.q.enqueue(module.REPOS[0], 1, self.approved)
-        p=subprocess.Popen([sys.executable,str(ENTRY),'--state',str(self.state),'run','--no-discover','--poll','0.05'])
+        p=subprocess.Popen([sys.executable,str(ENTRY),'--state',str(self.state),'--root',str(self.root),'run','--no-discover','--poll','0.05'])
         try:
             import time
             time.sleep(.2)

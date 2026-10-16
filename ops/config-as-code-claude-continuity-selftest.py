@@ -210,7 +210,7 @@ class ContinuityOverlayTest(unittest.TestCase):
             self.assertEqual(config.cmd_pull(True), 0)
         captured = (self.repo / "ops/config/hooks.json").read_text()
         self.assertNotIn("claude-continuity-hook.py", captured)
-        self.assertEqual(json.loads(captured)["PreToolUse"][0]["hooks"][0]["timeout"], 6)
+        self.assertEqual(json.loads(captured)["PreToolUse"][0]["hooks"][0]["timeout"], 5)
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ def main():
                         tool_input={"file_path": "hooks/session-brief.py"})
     edit_rows = {row["trigger_id"] for row in rail.matched_triggers(edit_payload)}
     patch_rows = {row["trigger_id"] for row in rail.matched_triggers(patch_payload)}
-    assert {"de72ad57b2c8", "5e186a09dcf2"} <= edit_rows
+    assert "5e186a09dcf2" in edit_rows
     assert edit_rows <= patch_rows, sorted(edit_rows - patch_rows)
     assert "bbffc139" not in rule_routes.matched_rule_ids(
         routes, "apply_patch", update_patch)

@@ -134,12 +134,6 @@ COVERAGE, stated so nobody has to find the edges by hitting them.
   payload; that is a statement about the tuple, not about the world, and the
   matrix labels it that way.
 
-  This is not a new mistake in this file — it is a pattern already present
-  twice: hooks/gate-edit-gate.py and hooks/lint-gate.py both carry NotebookEdit
-  in their own tool lists under the same Write|Edit|MultiEdit matcher, and are
-  equally unreachable for it. That is worth someone's attention separately; it
-  is not R02's to fix.
-
   WHY THE MATCHER IS NOT WIDENED HERE. It would be one word. It is not proposed
   because nothing in this repo establishes that the harness accepts NotebookEdit
   in a matcher: there is no such matcher anywhere to copy, no documentation of
