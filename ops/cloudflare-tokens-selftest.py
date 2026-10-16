@@ -18,6 +18,88 @@ sys.path.insert(0, str(ROOT))
 
 
 class TokenTests(unittest.TestCase):
+    def test_postwrite_failure_restores_private_backup(self):
+        from lib import cloudflare_tokens as cf
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'tokens.env'
+            original = b"CLOUDFLARE_API_TOKEN=original\nOTHER='keep me'\n"
+            path.write_bytes(original)
+            path.chmod(0o600)
+            with patch.object(cf, 'verify', side_effect=['ok', 'failed']):
+                self.assertEqual(cf.install(path, cf.TOKEN_NAMES[0], 'fake-new'), 'failed')
+            self.assertEqual(path.read_bytes(), original)
+            backup = Path(str(path) + '.install-backup')
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            self.assertIn('original', backup.read_text())
+
+    def test_interrupted_install_restores_original(self):
+        from lib import cloudflare_tokens as cf
+        for interruption in (KeyboardInterrupt, SystemExit):
+            with self.subTest(interruption=interruption), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'tokens.env'
+                original = b'CLOUDFLARE_API_TOKEN=original\n'
+                path.write_bytes(original)
+                with patch.object(cf, 'verify', side_effect=['ok', interruption()]):
+                    with self.assertRaises(interruption):
+                        cf.install(path, cf.TOKEN_NAMES[0], 'fake-new')
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_process_death_recovers_before_next_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'tokens.env'
+            original = b'CLOUDFLARE_API_TOKEN=original\n'
+            path.write_bytes(original)
+            program = """
+import os, sys
+from lib import cloudflare_tokens as cf
+calls = 0
+def verify(value, **kwargs):
+    global calls
+    calls += 1
+    if calls == 2:
+        os._exit(73)
+    return 'ok'
+cf.verify = verify
+cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
+"""
+            result = subprocess.run([sys.executable, '-c', program, str(path)],
+                                    cwd=ROOT, env={**os.environ, 'HOME': directory}, timeout=10)
+            self.assertEqual(result.returncode, 73)
+            from lib import cloudflare_tokens as cf
+            with patch.object(cf, 'verify', return_value='failed'):
+                self.assertEqual(cf.install(path, cf.TOKEN_NAMES[0], 'fake-rejected'), 'candidate_failed')
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_nightly_offline_fleet_retries_before_retirement(self):
+        spec = importlib.util.spec_from_file_location('mint_harness', ROOT / 'ops/credential-mint-selftest.py')
+        harness = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = harness
+        spec.loader.exec_module(harness)
+        from lib import cloudflare_tokens as cf
+        with harness.world(roots=('CLOUDFLARE_TOKEN_ROOT',)) as world:
+            calls = []
+            offline = False
+            def transport(machine, payload, **kwargs):
+                calls.append((machine, payload['value']))
+                return {payload['name']: 'unreachable' if offline and machine == 'dell' else 'ok'}
+            with patch.object(cf, 'on_machine', side_effect=transport):
+                world.night()
+                first = world.stored('CLOUDFLARE_API_TOKEN')
+                offline = True
+                world.clock.now = harness.T0 + harness.timedelta(days=85)
+                world.night()
+                self.assertIn(first, world.http.active['cloudflare'])
+                entry = world.saved_state()['credentials']['cloudflare-deploy-token']
+                self.assertTrue(entry['install_pending'])
+                self.assertEqual(entry['previous_child_id'], 'cloudflare-id-1')
+                offline = False
+                calls.clear()
+                world.night()
+                self.assertEqual([m for m, _ in calls], list(cf.MACHINES))
+                self.assertEqual(len(world.http.minted), 2)
+                self.assertNotIn(first, world.http.active['cloudflare'])
+                self.assertFalse(world.saved_state()['credentials']['cloudflare-deploy-token']['install_pending'])
+
     def test_install_and_remote_program(self):
         from lib import cloudflare_tokens as cf
         class Handler(BaseHTTPRequestHandler):
