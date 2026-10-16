@@ -59,13 +59,12 @@ class ProofTests(unittest.TestCase):
     def test_empty_production_fails_closed(self):
         self.assertFalse(proof.ledger_proof({'0001_a.sql': 'a'}, {})['ok'])
 
-    def test_only_dump_envelope_is_normalized(self):
+    def test_dump_envelope_is_normalized_but_structure_is_preserved(self):
         a = dump('CREATE TABLE public.example (id integer);')
         b = a.replace('random_nonce', 'another_nonce').replace('18.1', '18.2')
         self.assertEqual(proof.schema_difference(a, b), [])
         for change in [
             a.replace('integer', 'bigint'),
-            a.replace('neondb_owner', 'other_owner'),
             a.replace('CREATE TABLE', 'GRANT SELECT ON TABLE'),
         ]:
             self.assertTrue(proof.schema_difference(a, change))
@@ -74,6 +73,23 @@ class ProofTests(unittest.TestCase):
         self.assertTrue(proof.schema_difference(dump("SELECT 'a  b';"), dump("SELECT 'a b';")))
         function = "CREATE FUNCTION x() RETURNS text LANGUAGE sql AS $$\n-- Dumped by pg_dump version literal\nSELECT 'yes';\n$$;"
         self.assertTrue(proof.schema_difference(dump(function), dump(function.replace('literal', 'changed'))))
+
+    def test_privileges_compare_only_roles_present_in_both_environments(self):
+        left = dict(roles=['PUBLIC', 'reader', 'source_owner'], privileges=[
+            ['TABLE', 'public.example', '', 'reader', 'SELECT', False],
+            ['TABLE', 'public.example', '', 'source_owner', 'SELECT', True]])
+        right = dict(roles=['PUBLIC', 'reader', 'snapshot_owner'], privileges=[
+            ['TABLE', 'public.example', '', 'reader', 'SELECT', False],
+            ['TABLE', 'public.example', '', 'snapshot_owner', 'SELECT', True]])
+        result = proof.privilege_difference(left, right)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['production_only_roles'], ['source_owner'])
+        self.assertEqual(result['snapshot_only_roles'], ['snapshot_owner'])
+        right['privileges'][0][4] = 'UPDATE'
+        result = proof.privilege_difference(left, right)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['production_only'], [left['privileges'][0]])
+        self.assertEqual(result['snapshot_only'], [right['privileges'][0]])
 
     def test_object_order_does_not_matter(self):
         a = dump('CREATE TABLE public.example (id integer);')
@@ -98,6 +114,8 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(env['PGPASSWORD'], 'placeholder')
         self.assertIn('default_transaction_read_only=on', env['PGOPTIONS'])
         self.assertIn('--schema-only', command)
+        self.assertIn('--no-owner', command)
+        self.assertIn('--no-acl', command)
         self.assertIn('snapshot-id', command)
 
     def test_ci_reports_live_proofs_not_run_on_hosted_runners(self):
@@ -119,7 +137,7 @@ class ProofTests(unittest.TestCase):
         self.assertNotIn('placeholder', str(caught.exception))
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
-    def test_snapshot_reconstruction_excludes_pending_and_detects_drift(self):
+    def test_production_plus_pending_equals_snapshot_and_detects_drift(self):
         shadow = proof.load('fixture_shadow', ROOT / 'ops/migration-shadow.py')
         bins = shadow.find_pg18(None)
         self.assertIsNotNone(bins, 'fixture requires PostgreSQL 18')
@@ -131,34 +149,40 @@ class ProofTests(unittest.TestCase):
                 shutil.copyfile(ROOT / 'tools' / name, root / 'tools' / name)
             scripts = {name: 'select 1;' for names in FROZEN_COLLISIONS.values() for name in names}
             scripts.update({'0900_base.sql': 'create table public.example (id integer);',
-                            '0901_applied.sql': 'alter table public.example add column label text;',
-                            '0902_pending.sql': 'select 1/0;'})
+                            '0901_pending.sql': 'alter table public.example add column label text;'})
             hashes = {}
             for name, sql in scripts.items():
                 (root / 'migrations' / name).write_text(sql)
                 hashes[name] = hashlib.sha256(sql.encode()).hexdigest()
-            base = '''create table public.example (id integer);
+            base = """create table public.example (id integer);
+grant select on public.example to reader;
 create table public.schema_migrations (filename text primary key, sha256 text not null,
 applied_at timestamptz not null default now());
-'''
-            def ledger_insert(names):
-                return ''.join(f"insert into schema_migrations(filename,sha256) values ('{name}','{hashes[name]}');\n" for name in names)
-            snapshot = root / 'snapshot.sql'
-            baseline = sorted(name for name in scripts if name < '0901')
-            snapshot.write_text(base + ledger_insert(baseline))
-            applied = {name: hashes[name] for name in baseline + ['0901_applied.sql']}
-            built = proof.reconstruct(snapshot, applied, bins, root)
-            self.assertTrue(built['ledger_matches'])
+"""
+            production = root / 'production.sql'
+            production.write_text(base)
+            applied = {name: hashes[name] for name in scripts if name < '0901'}
+            grants = dict(roles=['reader', 'reader_group'], memberships=[('reader_group', 'reader', False, True, False)])
+            built = proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
+            self.assertEqual(built['ledger'], hashes)
             expected = root / 'expected.sql'
-            expected.write_text(base + scripts['0901_applied.sql'] + '\n' + ledger_insert(applied))
-            reference = proof.reconstruct(expected, applied, bins, root)
+            ledger = ''.join(f"insert into schema_migrations(filename,sha256) values ('{name}','{digest}');\n"
+                             for name, digest in hashes.items())
+            roles = 'create role reader; create role reader_group; grant reader_group to reader with admin false, inherit true, set false;'
+            expected.write_text(roles + base + scripts['0901_pending.sql'] + '\n' + ledger)
+            reference = proof.build_schema(expected, bins, root)
             self.assertEqual(proof.schema_difference(built['dump'], reference['dump']), [])
+            self.assertTrue(proof.privilege_difference(built['grants'], reference['grants'])['ok'])
             expected.write_text(expected.read_text() + 'alter table public.example alter column id type bigint;')
-            drift = proof.reconstruct(expected, applied, bins, root)
+            drift = proof.build_schema(expected, bins, root)
             self.assertTrue(proof.schema_difference(built['dump'], drift['dump']))
-            ahead = proof.reconstruct(expected, {name: hashes[name] for name in baseline}, bins, root)
-            self.assertFalse(ahead['ledger_matches'])
-            self.assertEqual(ahead['snapshot_only'], ['0901_applied.sql'])
+            expected.write_text(expected.read_text() + 'revoke select on public.example from reader;')
+            revoked = proof.build_schema(expected, bins, root)
+            self.assertFalse(proof.privilege_difference(built['grants'], revoked['grants'])['ok'])
+            (root / 'migrations' / '0902_data_guard.sql').write_text(
+                "do $$ begin if not exists (select 1 from public.example) then raise exception 'missing data preimage'; end if; end $$;")
+            with self.assertRaisesRegex(RuntimeError, 'missing data preimage'):
+                proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
 
 
 if __name__ == '__main__':

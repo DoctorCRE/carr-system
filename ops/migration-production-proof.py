@@ -20,6 +20,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +60,8 @@ def ledger_proof(repository, applied):
 
 def dump_objects(text):
     # Only pg_dump's envelope varies independently of the catalog. Preserve
-    # owners, ACLs, comments, SQL text and function bodies byte for byte.
+    # comments, SQL text and function bodies byte for byte. Both inputs must
+    # already be owner-free and ACL-free pg_dump output.
     literals = re.compile(r'''(?P<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$).*?(?P=tag)|E'(?:\\.|''|[^'])*'|'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|/\*.*?\*/''', re.S)
     masked = literals.sub(lambda match: match[0] if match[0].startswith('--') else re.sub(r'[^\n]', ' ', match[0]), text)
     pieces, current, headers = [], [], 0
@@ -85,7 +87,7 @@ def schema_difference(reconstructed, production):
         return []
     return list(difflib.unified_diff(
         '\n'.join(sorted(left.elements())).split('\n'), '\n'.join(sorted(right.elements())).split('\n'),
-        fromfile='snapshot reconstruction', tofile='production', lineterm=''))
+        fromfile='production plus pending', tofile='committed snapshot', lineterm=''))
 
 
 def checked(command, env, label, timeout=1200):
@@ -122,9 +124,11 @@ exec "$2" "$1/tools/migrate-prod-support.py" neon-dsn --project-id steep-field-4
                    os.environ, 'production status credential resolution', timeout=100).strip()
 
 
-def schema_dump(dsn, bins, env, snapshot=None):
+def schema_dump(dsn, bins, env, snapshot=None, include_acl=False):
     from psycopg.pq import Conninfo
-    command = [bins / 'pg_dump', '--schema-only']
+    command = [bins / 'pg_dump', '--schema-only', '--no-owner']
+    if not include_acl:
+        command.append('--no-acl')
     if snapshot:
         command += ['--snapshot', snapshot]
     dump_env = {key: value for key, value in env.items() if not key.startswith('PG')}
@@ -135,20 +139,79 @@ def schema_dump(dsn, bins, env, snapshot=None):
     return checked(command, dump_env, 'read-only schema dump')
 
 
-def role_catalog(conn):
-    roles = conn.execute("""select rolname, rolsuper, rolinherit, rolcreaterole,
-        rolcreatedb, rolcanlogin, rolreplication, rolbypassrls, rolconnlimit, rolconfig
-        from pg_roles where starts_with(rolname, 'carr_') order by rolname""").fetchall()
-    memberships = conn.execute("""select r.rolname, m.rolname, g.rolname,
+def privilege_catalog(conn):
+    roles = [row[0] for row in conn.execute('select rolname from pg_roles order by rolname')]
+    privileges = conn.execute("""
+        with objects(kind, identity, subobject, acl) as (
+          select case when c.relkind='S' then 'SEQUENCE' else 'RELATION' end,
+                 format('%I.%I', n.nspname, c.relname), '',
+                 coalesce(c.relacl, acldefault(case when c.relkind='S' then 's'::"char" else 'r'::"char" end, c.relowner))
+            from pg_class c join pg_namespace n on n.oid=c.relnamespace
+           where c.relkind in ('r','p','v','m','f','S')
+             and n.nspname not in ('pg_catalog','information_schema')
+             and n.nspname not like 'pg_toast%'
+          union all
+          select 'COLUMN', format('%I.%I', n.nspname, c.relname), a.attname, a.attacl
+            from pg_attribute a join pg_class c on c.oid=a.attrelid
+            join pg_namespace n on n.oid=c.relnamespace
+           where a.attnum>0 and not a.attisdropped and a.attacl is not null
+          union all
+          select 'SCHEMA', quote_ident(nspname), '', coalesce(nspacl, acldefault('n', nspowner))
+            from pg_namespace where nspname not in ('pg_catalog','information_schema')
+             and nspname not like 'pg_toast%' and nspname not like 'pg_temp%'
+          union all
+          select 'ROUTINE', format('%I.%I(%s)', n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)), '',
+                 coalesce(p.proacl, acldefault('f', p.proowner))
+            from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+           where n.nspname not in ('pg_catalog','information_schema')
+          union all
+          select 'TYPE', format('%I.%I', n.nspname, t.typname), '', coalesce(t.typacl, acldefault('T', t.typowner))
+            from pg_type t join pg_namespace n on n.oid=t.typnamespace
+           where n.nspname not in ('pg_catalog','information_schema')
+             and n.nspname not like 'pg_toast%'
+          union all
+          select 'LANGUAGE', quote_ident(lanname), '', coalesce(lanacl, acldefault('l', lanowner)) from pg_language
+          union all
+          select 'FOREIGN DATA WRAPPER', quote_ident(fdwname), '', coalesce(fdwacl, acldefault('F', fdwowner)) from pg_foreign_data_wrapper
+          union all
+          select 'FOREIGN SERVER', quote_ident(srvname), '', coalesce(srvacl, acldefault('S', srvowner)) from pg_foreign_server
+          union all
+          select 'DEFAULT FOR ' || r.rolname, quote_ident(coalesce(n.nspname, '*')), d.defaclobjtype::text, d.defaclacl
+            from pg_default_acl d join pg_roles r on r.oid=d.defaclrole
+            left join pg_namespace n on n.oid=d.defaclnamespace
+        )
+        select distinct kind, identity, subobject,
+               case when a.grantee=0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end,
+               a.privilege_type, a.is_grantable
+          from objects cross join lateral aclexplode(acl) a
+         order by 1,2,3,4,5,6
+    """).fetchall()
+    memberships = conn.execute("""select r.rolname, m.rolname,
         a.admin_option, a.inherit_option, a.set_option
         from pg_auth_members a join pg_roles r on r.oid=a.roleid
-        join pg_roles m on m.oid=a.member join pg_roles g on g.oid=a.grantor
-        where starts_with(r.rolname, 'carr_') or starts_with(m.rolname, 'carr_')
-        order by 1,2,3""").fetchall()
-    return dict(roles=roles, memberships=memberships)
+        join pg_roles m on m.oid=a.member order by 1,2,3,4,5""").fetchall()
+    privileges += [('ROLE', role, '', member, f'MEMBER inherit={inherit} set={set_option}', admin)
+                   for role, member, admin, inherit, set_option in memberships]
+    return dict(roles=['PUBLIC'] + roles, privileges=privileges, memberships=memberships)
 
 
-def reconstruct(snapshot_path, applied, bins, repo=ROOT):
+def privilege_difference(production, snapshot):
+    left_roles, right_roles = set(production['roles']), set(snapshot['roles'])
+    common = left_roles & right_roles
+    def comparable(row):
+        return (row[3] in common
+                and (row[0] != 'ROLE' or row[1] in common)
+                and (not row[0].startswith('DEFAULT FOR ') or row[0][12:] in common))
+    left = {tuple(row) for row in production['privileges'] if comparable(row)}
+    right = {tuple(row) for row in snapshot['privileges'] if comparable(row)}
+    return dict(ok=left == right, common_roles=sorted(common),
+                production_only_roles=sorted(left_roles - right_roles),
+                snapshot_only_roles=sorted(right_roles - left_roles),
+                production_only=[list(row) for row in sorted(left - right)],
+                snapshot_only=[list(row) for row in sorted(right - left)])
+
+
+def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=None):
     import psycopg
     local_pg = load('production_proof_local_pg', ROOT / 'ops/local-pg-ci.py')
     env = local_pg.scrub_cloud_environment(os.environ)
@@ -164,27 +227,29 @@ def reconstruct(snapshot_path, applied, bins, repo=ROOT):
         bootstrap = f'postgres://carr_ci@/postgres?host={socket}'
         dsn = f'postgres://carr_ci@/carr_ci?host={socket}'
         checked([bins / 'createdb', '--maintenance-db', bootstrap, 'carr_ci'], env, 'create disposable database')
-        checked([bins / 'psql', '-X', '-d', dsn, '-v', 'ON_ERROR_STOP=1', '-qc',
-                 'create role neondb_owner;'], env, 'CI role preamble')
-        checked([bins / 'psql', '-X', '-d', dsn, '-v', 'ON_ERROR_STOP=1', '-q', '-f', snapshot_path],
-                dict(env, PGOPTIONS='--client-min-messages=warning'), 'restore committed snapshot')
+        from psycopg import sql
         with psycopg.connect(dsn) as conn:
-            restored = dict(conn.execute('select filename, sha256 from schema_migrations').fetchall())
-        cutoff = ledger_proof(applied, restored)
-        # A snapshot ahead of production cannot be rolled back. Report that
-        # fact and compare its schema, without pretending to reconstruct the cutoff.
-        snapshot_only = sorted(restored.keys() - applied.keys())
-        if cutoff['ok'] and not snapshot_only:
-            checked([sys.executable, repo / 'tools/migrate.py', '--apply', '--yes',
-                     '--through', max(applied)], dict(env, DATABASE_URL=dsn),
-                    'apply production ledger prefix to disposable database')
-        built, schema, roles = read_source(dsn, bins)
-        return dict(dump=schema, roles=roles,
-                    ledger_matches=built == applied, snapshot_only=snapshot_only,
-                    snapshot_checksum_mismatch=cutoff['checksum_mismatch'])
+            for name in sorted(set(grants['roles'] if grants else ()) | {'neondb_owner'}):
+                if name not in {'PUBLIC', 'carr_ci'} and not name.startswith('pg_'):
+                    conn.execute(sql.SQL('create role {}').format(sql.Identifier(name)))
+            for role, member, admin, inherit, set_option in (grants['memberships'] if grants else ()):
+                conn.execute(sql.SQL('grant {} to {} with admin {}, inherit {}, set {}').format(
+                    sql.Identifier(role), sql.Identifier(member), sql.Literal(admin),
+                    sql.Literal(inherit), sql.Literal(set_option)))
+        checked([bins / 'psql', '-X', '-d', dsn, '-v', 'ON_ERROR_STOP=1', '-q', '-f', schema_path],
+                dict(env, PGOPTIONS='--client-min-messages=warning'), 'restore schema into disposable database')
+        if production_ledger is not None:
+            with psycopg.connect(dsn) as conn:
+                with conn.cursor() as cursor:
+                    cursor.executemany('insert into schema_migrations(filename, sha256) values (%s,%s)',
+                                       sorted(production_ledger.items()))
+            checked([sys.executable, repo / 'tools/migrate.py', '--apply', '--yes'],
+                    dict(env, DATABASE_URL=dsn), 'apply pending migrations to disposable production schema')
+        ledger, schema, grants = read_source(dsn, bins)
+        return dict(dump=schema, grants=grants, ledger=ledger)
 
 
-def read_source(dsn, bins=None):
+def read_source(dsn, bins=None, include_acl=False):
     import psycopg
     from psycopg import IsolationLevel
     with psycopg.connect(dsn, options='-c default_transaction_read_only=on -c statement_timeout=120000') as conn:
@@ -197,10 +262,10 @@ def read_source(dsn, bins=None):
             conn.rollback()
             return applied, None, None
         exported = conn.execute('select pg_export_snapshot()').fetchone()[0]
-        production = schema_dump(dsn, bins, os.environ, exported)
-        roles = role_catalog(conn)
+        production = schema_dump(dsn, bins, os.environ, exported, include_acl=include_acl)
+        grants = privilege_catalog(conn)
         conn.rollback()
-    return applied, production, roles
+    return applied, production, grants
 
 
 def live_proof(ledger_only=False):
@@ -209,20 +274,26 @@ def live_proof(ledger_only=False):
     bins = shadow.find_pg18(None) if not ledger_only else None
     if not ledger_only and bins is None:
         raise RuntimeError('PostgreSQL 18 binaries required for schema equivalence')
-    applied, production, roles = read_source(production_dsn(), bins)
+    applied, production, grants = read_source(production_dsn(), bins, include_acl=True)
     result = dict(ledger=ledger_proof(repository, applied))
     if ledger_only or not result['ledger']['ok']:
         return result
-    built = reconstruct(ROOT / 'db/schema.sql', applied, bins)
-    difference = schema_difference(built['dump'], production)
-    result['equivalence'] = dict(
-        ok=built['ledger_matches'] and not difference and built['roles'] == roles,
-        ledger_matches=built['ledger_matches'], snapshot_only=built['snapshot_only'],
-        snapshot_checksum_mismatch=built['snapshot_checksum_mismatch'],
-        schema_diff=difference, reconstructed_roles=built['roles'], production_roles=roles,
-        roles_match=built['roles'] == roles,
+    result['equivalence'] = dict(ok=False,
         snapshot_sha256=hashlib.sha256((ROOT / 'db/schema.sql').read_bytes()).hexdigest(),
-        normalization='pg_dump version banners, random restrict nonce, object ordering only; owners and ACLs retained')
+        normalization='pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; privileges compared separately by common role, without grantor identity')
+    try:
+        reference = build_schema(ROOT / 'db/schema.sql', bins)
+        result['grants'] = dict(privilege_difference(grants, reference['grants']), stage='production before pending')
+        with tempfile.TemporaryDirectory(prefix='production-schema-proof-') as directory:
+            source = Path(directory) / 'production.sql'
+            source.write_text(production)
+            built = build_schema(source, bins, production_ledger=applied, grants=grants)
+        difference = schema_difference(built['dump'], reference['dump'])
+        result['grants'] = dict(privilege_difference(built['grants'], reference['grants']), stage='production plus pending')
+        result['equivalence'].update(ok=built['ledger'] == reference['ledger'] == repository and not difference,
+            ledger_matches=built['ledger'] == reference['ledger'] == repository, schema_diff=difference)
+    except RuntimeError as exc:
+        result['equivalence'].update(error=str(exc))
     return result
 
 
@@ -239,7 +310,7 @@ def main():
     except Exception as exc:
         # Never print a database exception or CalledProcessError containing a DSN.
         result = dict(ok=False, error=type(exc).__name__, detail=str(exc) if type(exc) is RuntimeError else 'proof could not complete; no production writes attempted')
-    result['ok'] = all(item['ok'] for key, item in result.items() if key in {'ledger', 'equivalence'}) if 'ledger' in result else False
+    result['ok'] = all(item['ok'] for key, item in result.items() if key in {'ledger', 'equivalence', 'grants'}) if 'ledger' in result else False
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(result, indent=2) + '\n')
     if 'ledger' in result:
@@ -247,10 +318,14 @@ def main():
     if 'equivalence' in result:
         item = result['equivalence']
         print('equivalence:', 'PASS' if item['ok'] else 'FAIL',
-              f"ledger_matches={item['ledger_matches']} roles_match={item['roles_match']} schema_diff_lines={len(item['schema_diff'])}")
-        print('snapshot-only migrations:', json.dumps(item['snapshot_only']))
-        for line in item['schema_diff'][:8]:
+              f"ledger_matches={item.get('ledger_matches', 'not run')} schema_diff_lines={len(item.get('schema_diff', []))}")
+        if 'error' in item:
+            print(item['error'])
+        for line in item.get('schema_diff', [])[:8]:
             print(line[:1000])
+    if 'grants' in result:
+        print('grants:', 'PASS' if result['grants']['ok'] else 'FAIL',
+              f"production_only={len(result['grants']['production_only'])} snapshot_only={len(result['grants']['snapshot_only'])}")
     if 'detail' in result:
         print(result['detail'])
     print('proof report:', args.report)
