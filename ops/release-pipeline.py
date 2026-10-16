@@ -1196,15 +1196,22 @@ class Pipeline:
         except StepFailed as failure:
             if failure.step != "wrangler-auth":
                 raise
-            # Wrangler throws on token verification rejection. Read the step's
-            # output before classifying it; network errors remain step failures.
+            # Only recognized auth or transport failures may recover without
+            # a source change. Unknown process failures need their own diagnosis.
             try:
                 output = Path(failure.log).read_text(encoding="utf-8", errors="replace")
             except OSError:
-                raise failure
+                output = ""
             who = Result(failure.rc, output, failure.log)
             if not self._auth_rejected(who.out):
-                raise
+                if re.search(r"fetch failed|network unavailable|network error|Cloudflare API unavailable|"
+                             r"\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|"
+                             r"UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET)\b|socket hang up",
+                             who.out, re.IGNORECASE):
+                    raise
+                raise StepFailed("wrangler-execution", failure.rc, failure.log,
+                                 "wrangler whoami failed without a recognized authentication "
+                                 "or transport error") from failure
         if not self.dry_run and self._auth_rejected(who.out):
             raise StepFailed("credential-missing", who.rc or 1, who.log,
                              f"credential rejected: wrangler whoami does not accept {CLOUDFLARE_TOKEN_NAME}",
@@ -1803,7 +1810,6 @@ class Pipeline:
             if digest is not None:
                 rejection["staging_ledger_digest"] = digest
             self.store.save(state)
-        self.store.save(state)
         attempt = int((state[lane].get("dispatches") or {}).get(sha, 0)) + 1
         extra: dict[str, Any] = {}
         diagnosis_key = capability or (f"wrangler-auth:{lane}:{sha}" if step == "wrangler-auth" else None)
