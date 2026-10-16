@@ -491,7 +491,10 @@ def installed_hook_missing_files():
             problems.append((path, f"invalid hook configuration: {exc}"))
             continue
         for script in hook_block_script_paths(block):
-            if not os.path.isfile(script):
+            # Hook commands guard on their checkout's hooks directory and exit
+            # 0 when it is absent, so only a script missing from a present
+            # directory is a hook that will fail.
+            if os.path.isdir(os.path.dirname(script)) and not os.path.isfile(script):
                 problems.append((path, f"installed hook invokes missing file: {script}"))
     return problems
 
