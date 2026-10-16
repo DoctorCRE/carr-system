@@ -92,7 +92,6 @@ if [ "${1:-}" = "--preflight" ]; then
     generators/build-open-items-dashboard.py ops/nightly-verb-probe.py
     bin/smoke-and-record.sh tools/ops-record.py
     tools/health-check.py ops/jev_spend_health.py ops/grok_session.py tools/health_breach.py
-    lib/claude_continuity_spool.py
     # bin/routine-canonical-seam-refusal.sh came off this list on 2026-08-23: the
     # chain stopped launching it when the refusals became tombstones, and a
     # preflight that requires a file no step runs is checking the wrong thing.
@@ -1100,13 +1099,6 @@ step "credential health (reports, never rotates; loops on a finding)" \
 
 step "Monthly system cost view and spike loops" \
      ./run.sh costs --publish --alerts
-
-# Re-sends Claude continuity receipts whose delivery was unknown, in order and
-# under their original keys, through the claude-continuity token (no human
-# credential); refused ones are archived with the store's reason. The row
-# ("continuity spool depth") opens or clears one deduplicated loop.
-step "Claude continuity spool drain" \
-     ./.venv/bin/python tools/health-check.py --section claude-continuity-spool
 
 # Authentication readback only; no model work and no interactive login.
 step "Grok authentication health" \

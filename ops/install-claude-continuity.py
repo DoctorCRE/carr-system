@@ -159,7 +159,7 @@ def verify() -> tuple[bool, str]:
         continuity_config.validate_mcp(_load_json(claude_config_path()), contract, required=True)
     except RuntimeError as exc:
         return False, str(exc)
-    return True, f"all five Claude continuity hooks and dedicated MCP server match; mode={mode_name}"
+    return True, f"Claude continuity hooks and dedicated MCP server match; mode={mode_name}"
 
 
 def main() -> int:

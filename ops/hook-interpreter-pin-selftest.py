@@ -39,10 +39,9 @@ TWO DELIBERATE EXCEPTIONS, both held by other suites and honoured here:
     hooks-selftest.py asserts that literal because PATH is attacker-influenced
     and that pair is what records drift. A fixed absolute path satisfies the
     property this file protects, so it is allowed for exactly that launcher.
-  * ops/config/codex-hooks.json is frozen against a historical commit by
-    ops/context-handoff-gate-selftest.py (Codex hook continuity) and Codex is
-    launched from a terminal whose PATH carries Homebrew. It is left as it is
-    and is NOT covered here; moving it is a separate decision.
+  * ops/config/codex-hooks.json: Codex is launched from a terminal whose PATH
+    carries Homebrew. It is left as it is and is NOT covered here; moving it is
+    a separate decision.
 
 WHAT IS CHECKED, deterministically and without running a hook:
   1. every command in hooks.json that launches a CARR hook or ops script
