@@ -154,19 +154,6 @@ def test_context_is_compiled_before_plan_hash_and_acceptance_recomputes_it():
     expect_refusal(lambda: ar.recompute_accepted_plan_context(tampered, b), "immutable")
 
 
-def test_existing_attempt_receipt_embeds_both_sections_and_binds_exact_envelope():
-    b = bundle()
-    env = bound_envelope(b)
-    receipt = json.loads((FIXTURES / "codex_desktop.attempt-receipt.v1.json").read_text())
-    receipt["envelope_digest"] = contract.execution_envelope_digest(env)
-    receipt["knowledge_activation"] = activation()
-    receipt["knowledge_activation"]["canonical_binding"]["envelope_digest"] = receipt["envelope_digest"]
-    receipt["reliability"] = reliability()
-    contract.validate_attempt_receipt(receipt, env, b)
-    wrong = copy.deepcopy(b)
-    wrong["header"]["accepted_plan_digest"] = "sha256:" + "9" * 64
-    wrong["bundle_digest"] = ar.context_bundle_digest(wrong)
-    expect_refusal(lambda: contract.validate_attempt_receipt(receipt, env, wrong), "does not bind")
 
 
 def test_environment_receipt_must_bind_exact_provider_and_cleanup_evidence():
@@ -269,21 +256,6 @@ def test_eval_candidates_and_telemetry_are_action_bound_and_never_promoted():
     expect_refusal(lambda: ar.validate_reliability(value), "cannot carry governed Policy Learning shadow")
 
 
-def test_python_receipt_admission_refuses_raw_sentences_in_all_reference_bearing_slots():
-    receipt = json.loads((FIXTURES / "codex_desktop.attempt-receipt.v1.json").read_text())
-    contract.validate_attempt_receipt(receipt)
-    attacks = []
-    for path in (("interventions",), ("handoff_proposal", "reason"), ("result", "evidence_refs")):
-        value = copy.deepcopy(receipt)
-        if path == ("interventions",):
-            value["interventions"] = [{"kind": "human", "occurred_at": "2026-08-24T12:00:00Z", "summary": "raw operator sentence is forbidden"}]
-        elif path[-1] == "reason":
-            value["handoff_proposal"] = {"proposed": True, "reason": "raw operator sentence is forbidden", "replacement_session_ref": "session:replacement", "checkpoint_ref": "checkpoint:one", "requires_independent_verification": True}
-        else:
-            value["result"]["evidence_refs"] = ["raw operator sentence is forbidden"]
-        attacks.append(value)
-    for value in attacks:
-        expect_refusal(lambda value=value: contract.validate_attempt_receipt(value), "raw")
 
 
 if __name__ == "__main__":

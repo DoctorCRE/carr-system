@@ -16,7 +16,7 @@
     {"id":"shadow_side_effect_security_refused","evidence":[{"file":"tools/room-bridge/test_activation_reliability.py","assertion":"test_eval_candidates_and_telemetry_are_action_bound_and_never_promoted"},{"file":"tools/test-policy-learning-envelope.py","assertion":"shadow side effects require refusal evidence"}]},
     {"id":"heldout_output_leak_refused","evidence":[{"file":"ops/evidence-activation-db-gate.py","assertion":"held-out expected answer leak"}]},
     {"id":"cross_tenant_refused","evidence":[{"file":"ops/evidence-activation-db-gate.py","assertion":"cross-tenant activation/evaluation read leaked"}]},
-    {"id":"raw_prompt_transcript_tool_sentence_refused","evidence":[{"file":"tools/room-bridge/test_activation_reliability.py","assertion":"test_python_receipt_admission_refuses_raw_sentences"}]},
+    {"id":"raw_prompt_transcript_tool_sentence_refused","evidence":[{"file":"ops/evidence-activation-db-gate.py","assertion":"raw receipt sentence in {field}"}]},
     {"id":"one_wr_canary_joined_path","evidence":[{"file":"ops/evidence-activation-db-gate.py","assertion":"assert_joined_mcp_db_browser_path"},{"file":"mcp-server/test/job-passport-panel.test.mjs","assertion":"joined_activation_reliability_wire_and_model_room_path"}]}
   ]
 }
