@@ -1526,6 +1526,39 @@
       "expectation_note": "New source declaration; verify installation and first live run after source delivery. Machine placement is derived from lib/launchd_scope.py."
     },
     {
+      "label": "com.carr.disk-reaper",
+      "scheduler": "launchd",
+      "program_arguments": [
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/disk-reaper.py",
+        "--execute"
+      ],
+      "required_checkout": "~/carr-system",
+      "interval": {
+        "StartCalendarInterval": [
+          {"Hour": 0, "Minute": 7},
+          {"Hour": 2, "Minute": 7},
+          {"Hour": 4, "Minute": 7},
+          {"Hour": 6, "Minute": 7},
+          {"Hour": 8, "Minute": 7},
+          {"Hour": 10, "Minute": 7},
+          {"Hour": 12, "Minute": 7},
+          {"Hour": 14, "Minute": 7},
+          {"Hour": 16, "Minute": 7},
+          {"Hour": 18, "Minute": 7},
+          {"Hour": 20, "Minute": 7},
+          {"Hour": 22, "Minute": 7}
+        ]
+      },
+      "expected_enabled": true,
+      "expected_installed": true,
+      "log_path": "~/carr-system/out/disk-reaper.log",
+      "log_max_age_seconds": 10800,
+      "owner": "orchestrator",
+      "done_signal": "Successful disk-reaper execution recorded in ~/carr-system/out/disk-reaper.log",
+      "expectation_note": "New source declaration; schedule mirrors the installed launchd plist. Verify installation and first live run after source delivery."
+    },
+    {
       "label": "com.carr.partner-ping",
       "scheduler": "launchd",
       "program_arguments": [
