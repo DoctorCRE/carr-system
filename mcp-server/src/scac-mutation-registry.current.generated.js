@@ -3798,3 +3798,24 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "delegates_to": []
   }
 });
+export const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze({
+  "registry_version": "scac-mutation-registry.v118",
+  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "secdef_execute": [
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    }
+  ]
+});

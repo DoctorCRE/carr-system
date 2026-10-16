@@ -41133,6 +41133,36 @@ end $_$;
 
 
 --
+-- Name: scac_current_grant_contract(); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
+    LANGUAGE sql IMMUTABLE
+    SET search_path TO 'pg_catalog'
+    AS $_$ select $current_grants${
+  "registry_version": "scac-mutation-registry.v118",
+  "registry_digest": "sha256:560e16ad4c5383414b36b74da507481d9e840d8c00e45ced6eed6bce2ac3447d",
+  "secdef_execute": [
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    }
+  ]
+}$current_grants$::jsonb $_$;
+
+
+--
 -- Name: scac_device_benchmark_insert_guard(); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -42600,14 +42630,27 @@ CREATE FUNCTION ops.scac_mutation_catalog_v118_current() RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'pg_catalog', 'public', 'ops', 'pg_temp'
     AS $$
-declare observed_count integer; observed_digest text;
+declare observed_count integer; observed_digest text; registered_count integer;
+  current_grants jsonb := ops.scac_current_grant_contract();
 begin
+  if not exists (
+    select 1 from ops.scac_mutation_registry_version
+     where registry_version=current_grants->>'registry_version'
+       and registry_digest=current_grants->>'registry_digest'
+  ) then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper),
   runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper),
   functions as (select p.oid,n.nspname,p.proname,pg_get_function_identity_arguments(p.oid) args,p.prosecdef,p.prokind,p.provolatile,p.proparallel,p.proconfig,p.proacl,p.proowner from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname not in ('pg_catalog','information_schema') and p.prokind in ('f','p')),
   capabilities as (select f.*,acl.grantee,acl.privilege_type,acl.is_grantable from functions f cross join lateral aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) acl),
   observed as (select 'db-function-acl:'||nspname||'.'||proname||'('||args||'):'||coalesce(r.rolname,'public')||':execute' ingress_key,jsonb_build_object('ingress_key','db-function-acl:'||nspname||'.'||proname||'('||args||'):'||coalesce(r.rolname,'public')||':execute','ingress_kind','db_function_acl','signature',nspname||'.'||proname||'('||args||')','security_definer',prosecdef,'function_kind',prokind,'volatility',provolatile,'parallel',proparallel,'config',coalesce(to_jsonb(proconfig),'[]'::jsonb),'grantee',coalesce(r.rolname,'public'),'privilege','execute','grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where prosecdef and privilege_type='EXECUTE' and grantee<>proowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
-  select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
+  select count(*) filter (where row not in (select value from jsonb_array_elements(current_grants->'secdef_execute'))),
+    'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(
+      jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C")
+        filter (where row not in (select value from jsonb_array_elements(current_grants->'secdef_execute'))),
+      '[]'::jsonb)),'UTF8'),'sha256'),'hex'),
+    count(*) filter (where row in (select value from jsonb_array_elements(current_grants->'secdef_execute')))
+    into observed_count,observed_digest,registered_count from observed;
+  if registered_count<>jsonb_array_length(current_grants->'secdef_execute') then return false; end if;
   if observed_count<>1267 or observed_digest<>'sha256:587e762e80c6691d4a07c5b35e48a259c7b8bdf885d8595ffd0c14928c657efa' then return false; end if;
   with recursive connected(oid) as (select oid from pg_roles where rolname~'^carr_' and rolname<>'carr_ci' union select other.oid from connected c join pg_auth_members m on m.roleid=c.oid or m.member=c.oid join pg_roles other on other.oid=case when m.roleid=c.oid then m.member else m.roleid end where other.rolname<>'carr_ci' and not other.rolsuper), runtime_roles as (select r.oid,r.rolname from pg_roles r where r.oid in(select oid from connected) and not r.rolsuper), capabilities as (select n.nspname,c.relname,c.relkind,c.relowner,acl.grantee,acl.privilege_type,acl.is_grantable from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl where n.nspname not in ('pg_catalog','information_schema') and c.relkind in ('r','p','v','m','f')), observed as (select 'db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type) ingress_key,jsonb_build_object('ingress_key','db-relation-acl:'||nspname||'.'||relname||':'||coalesce(r.rolname,'public')||':'||lower(privilege_type),'ingress_kind','db_relation_acl','relation',nspname||'.'||relname,'relation_kind',relkind,'grantee',coalesce(r.rolname,'public'),'privilege',lower(privilege_type),'grantable',is_grantable) row from capabilities c left join pg_roles r on r.oid=c.grantee where privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE') and grantee<>relowner and (grantee=0 or r.oid in(select oid from runtime_roles)))
   select count(*),'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(coalesce(jsonb_agg(row order by ingress_key collate "C", ops.scac_canonical_json(row) collate "C"),'[]'::jsonb)),'UTF8'),'sha256'),'hex') into observed_count,observed_digest from observed;
@@ -118087,6 +118130,7 @@ revoke all on function ops.scac_bind_trusted_principal(p_server_principal jsonb,
 revoke all on function ops.scac_canonical_json(p_value jsonb) from public;
 revoke all on function ops.scac_capability_token_status(p_token_ref_digest text) from public;
 revoke all on function ops.scac_consume_verified_pop_challenge(p_challenge_id uuid, p_challenge_digest text, p_nonce text, p_pop_verification_digest text, p_consume_idempotency_key uuid) from public;
+revoke all on function ops.scac_current_grant_contract() from public;
 revoke all on function ops.scac_device_benchmark_insert_guard() from public;
 revoke all on function ops.scac_device_benchmark_payload_digest(p_benchmark_kind text, p_device_ref text, p_facts_digest text, p_profile_digest text, p_metrics_digest text, p_passed boolean, p_observed_at text) from public;
 revoke all on function ops.scac_device_enrollment_append_only_guard() from public;
@@ -122927,7 +122971,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0883_repin_rule_delivery_activation_after_reply_control_retirement.sql	e383f40b56662057f7fef50120bc418a69aac318e6061604718dc66d86da0fe5	2026-10-16 08:56:58.106487+00
 0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql	f894c45f77bbfbf74c97ba3debc39ee9c273ae8bc272a66461b6e44bd3223625	2026-10-16 13:48:30.306057+00
 0885_retire_context_rail_control.sql	3f8350f093d958a1d36c8285877a232f6900c0464167eb5ac975dc39e4897d72	2026-10-16 14:38:13.202604+00
-0886_active_rule_scope_backfill.sql	56cd0402c5aa9493666078440c4c04e51d70d38a2f75962e425edecf6bd31851	2026-10-16 22:35:52.838328+00
+0886_active_rule_scope_backfill.sql	b4340e8a0c805d47c433136785a9a488ba1babd47e08da78d27b4437ae61ef0f	2026-10-16 22:45:55.340119+00
 \.
 
 
