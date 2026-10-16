@@ -703,22 +703,46 @@ def merge_codex_continuity_hooks(live, desired):
         is_codex_continuity_hook_command(hook.get("command"))
         for group in groups for hook in group.get("hooks", []))}
     for event in stale | set(CODEX_CONTINUITY_EVENTS):
-        retained = []
         groups = live_hooks.get(event, [])
-        for group in groups if isinstance(groups, list) else []:
+        groups = groups if isinstance(groups, list) else []
+        pending = copy.deepcopy(desired_hooks.get(event, []))
+        retained = []
+        for group in groups:
             if not isinstance(group, dict):
                 retained.append(group)
                 continue
-            non_continuity = [hook for hook in group.get("hooks", [])
-                              if not (isinstance(hook, dict) and
-                                      is_codex_continuity_hook_command(hook.get("command")))]
-            if non_continuity:
+            handlers = group.get("hooks", [])
+            owns_continuity = any(isinstance(hook, dict) and
+                                  is_codex_continuity_hook_command(hook.get("command"))
+                                  for hook in handlers)
+            if owns_continuity:
                 clone = dict(group)
-                clone["hooks"] = non_continuity
+                clone["hooks"] = [hook for hook in handlers
+                                  if not (isinstance(hook, dict) and
+                                          is_codex_continuity_hook_command(hook.get("command")))]
+                if pending:
+                    replacement = pending.pop(0)
+                    if clone["hooks"]:
+                        clone["hooks"] = []
+                        for hook in handlers:
+                            if (isinstance(hook, dict) and
+                                    is_codex_continuity_hook_command(hook.get("command"))):
+                                clone["hooks"].extend(replacement["hooks"])
+                                replacement = {"hooks": []}
+                            else:
+                                clone["hooks"].append(hook)
+                    else:
+                        clone = replacement
+                # Codex keys include the group index. Keep an empty slot on
+                # removal so later unrelated groups retain their trust keys.
                 retained.append(clone)
-        desired_groups = desired_hooks.get(event, [])
-        if isinstance(desired_groups, list):
-            retained.extend(json.loads(json.dumps(desired_groups)))
+            elif not handlers and pending and (
+                    {key: value for key, value in group.items() if key != "hooks"} ==
+                    {key: value for key, value in pending[0].items() if key != "hooks"}):
+                retained.append(pending.pop(0))
+            else:
+                retained.append(group)
+        retained.extend(pending)
         if retained or event in CODEX_CONTINUITY_EVENTS:
             live_hooks[event] = retained
         else:

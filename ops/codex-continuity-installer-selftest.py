@@ -291,7 +291,7 @@ def main() -> int:
         installed = json.loads(codex_live.read_text(encoding="utf-8"))
         assert installed["permissions"] == {"keep": True}
         assert installed["hooks"]["Stop"] == live["hooks"]["Stop"]
-        assert installed["hooks"]["PreCompact"] == [_hook("/other/project/keep.py")]
+        assert installed["hooks"]["PreCompact"] == [_hook("/other/project/keep.py"), {"hooks": []}]
         assert installed["hooks"]["SessionStart"] == unrelated_groups + [continuity_group]
         assert len(app_server.batch_calls) == 1
         assert len(app_server.batch_calls[0]["edits"]) == 1
@@ -394,9 +394,10 @@ def main() -> int:
         assert mod.main() == 0
         removed = json.loads(codex_live.read_text())
         assert removed["hooks"]["PostCompact"] == [_hook("/other/new-hook.py")]
-        assert removed["hooks"]["PreCompact"] == [_hook("/other/project/keep.py")]
+        assert removed["hooks"]["PreCompact"] == [_hook("/other/project/keep.py"), {"hooks": []}]
         assert removed["hooks"]["Stop"] == live["hooks"]["Stop"]
-        assert removed["hooks"]["SessionStart"] == unrelated_groups
+        assert removed["hooks"]["SessionStart"] == unrelated_groups + [
+            {**continuity_group, "hooks": []}]
         assert removed["permissions"] == {"keep": True}
         parsed_config = tomllib.loads(codex_config.read_text(encoding="utf-8"))
         assert parsed_config["model"] == "keep-me" and parsed_config["custom"] == {"value": 7}
