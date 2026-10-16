@@ -2370,10 +2370,7 @@ esac
 if [ "$SCAC_REGISTRY_APPLIED" = t ]; then
   cat >> "$TMP" <<SCAC_REGISTRY_HEADER
 
--- CARR SCAC MUTATION REGISTRY (bin/schema-snapshot.sh) — immutable,
--- internally digest-verified security configuration. The append-only triggers
--- are disabled only while restoring the exact sealed rows and re-enabled
--- before the closing verification block.
+-- CARR SCAC MUTATION REGISTRY (bin/schema-snapshot.sh)
 alter table ops.scac_mutation_registry_version disable trigger scac_mutation_registry_version_sealed;
 alter table ops.scac_mutation_registry_entry disable trigger scac_mutation_registry_entry_sealed;
 SCAC_REGISTRY_HEADER
