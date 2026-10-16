@@ -719,44 +719,33 @@ def merge_codex_continuity_hooks(live, desired):
 
 
 def codex_permissions_source():
-    """Return the canonical default line and managed TOML body, or None."""
+    """Return the managed sandbox setting, or None when absent."""
+    import tomllib
     raw = read(CODEX_PERMISSIONS_REPO)
     if raw is None:
         return None
-    lines = raw.splitlines()
-    if not lines or not re.fullmatch(r'default_permissions\s*=\s*"[^"]+"', lines[0]):
-        raise ValueError("Codex permissions source must begin with default_permissions")
-    return lines[0], "\n".join(lines[1:]).strip() + "\n"
+    if tomllib.loads(raw) != {'sandbox_mode': 'danger-full-access'}:
+        raise ValueError("Codex permissions source must select danger-full-access only")
+    return raw
 
 
 def canonical_codex_permissions(raw):
-    """Read reserved semantic paths, independent of comments and TOML syntax."""
+    """Read managed settings semantically, including retired profile drift."""
     import tomllib
     import tomlkit
     try:
         source = codex_permissions_source()
         if source is None:
             return None
-        default_line, body = source
-        expected = tomllib.loads(default_line + "\n" + body)
-        parsed = tomllib.loads(portable(raw))
-        default = parsed.get('default_permissions')
-        permissions = parsed.get('permissions')
-        if not isinstance(default, str) or default not in expected['permissions'] \
-                or not isinstance(permissions, dict):
+        parsed = tomllib.loads(raw)
+        if 'default_permissions' in parsed or any(
+                name in parsed.get('permissions', {})
+                for name in ('carr_unattended', 'carr_drive_readonly')):
             return None
-        profiles = {}
-        for name in expected['permissions']:
-            profile = permissions.get(name)
-            if not isinstance(profile, dict):
-                return None
-            profiles[name] = profile
-        observed = {'default_permissions': default, 'permissions': profiles}
-        # Equal semantics render in the source's form. Changed values remain
-        # visible to drift checks and pull; unrelated settings stay outside it.
-        if observed == expected:
-            return default_line + "\n\n" + body
-        return tomlkit.dumps(observed)
+        if 'sandbox_mode' not in parsed:
+            return None
+        observed = {'sandbox_mode': parsed['sandbox_mode']}
+        return source if observed == tomllib.loads(source) else tomlkit.dumps(observed)
     except (tomllib.TOMLDecodeError, ValueError, TypeError, AttributeError):
         return None
 
@@ -827,13 +816,11 @@ def codex_permission_syntax(raw):
     return spans, markers
 
 
-def install_codex_permissions(raw, default_line, body):
+def install_codex_permissions(raw, source):
     """Repair reserved semantic paths; preserve every unrelated TOML value."""
     import tomllib
     import tomlkit
-    from tomlkit.items import InlineTable
-
-    expected = tomllib.loads(default_line + "\n" + body)
+    expected = tomllib.loads(source)
     spans, markers = codex_permission_syntax(raw)
     # Marker ownership covers comment lines only, never enclosed user data.
     spans.extend((start, end) for start, end, _ in markers)
@@ -849,27 +836,16 @@ def install_codex_permissions(raw, default_line, body):
         cursor = end
     pieces.append(raw[cursor:])
     document = tomlkit.parse("".join(pieces))
-    document['default_permissions'] = expected['default_permissions']
+    document.pop('default_permissions', None)
+    document['sandbox_mode'] = expected['sandbox_mode']
     permissions = document.get('permissions')
     if permissions is not None:
-        for name in expected['permissions']:
+        for name in ('carr_unattended', 'carr_drive_readonly'):
             permissions.pop(name, None)
         if not permissions:
             del document['permissions']
-        elif isinstance(permissions, InlineTable):
-            # Inline parents are sealed in TOML; open the retained siblings so
-            # canonical profile headers can be declared alongside them.
-            retained = tomlkit.table()
-            for name, value in permissions.items():
-                retained.add(name, value)
-            document['permissions'] = retained
-    planned = (tomlkit.dumps(document).rstrip() + "\n\n" + CODEX_PERMISSIONS_BEGIN
-               + "\n" + body.rstrip() + "\n" + CODEX_PERMISSIONS_END + "\n")
-    parsed = tomllib.loads(planned)
-    if parsed.get('default_permissions') != expected['default_permissions'] or any(
-            parsed.get('permissions', {}).get(name) != profile
-            for name, profile in expected['permissions'].items()):
-        raise ValueError('Codex permission repair did not produce the required profiles/default')
+    planned = tomlkit.dumps(document)
+    tomllib.loads(planned)
     return planned
 
 
@@ -2395,14 +2371,13 @@ def cmd_install(apply):
             print(f"ERROR: no tracked Codex permissions at {CODEX_PERMISSIONS_REPO}. Run `pull` first.")
             return 1
         code_config = read(CODEX_CONFIG)
-        permission_default, permission_body = permission_source
         permission_config = install_codex_permissions(
-            code_config, concrete(permission_default), concrete(permission_body)
+            code_config, permission_source
         )
         if permission_config == code_config:
             print("  Codex CARR permissions already match the repo")
         else:
-            print("  Codex CARR permissions: WILL MAKE THE CURRENT WORKSPACE READ-ONLY")
+            print("  Codex CARR permissions: WILL ENABLE FULL ACCESS WITHOUT A PERMISSION PROFILE")
 
     task_plan = scheduled_task_install_plan()
     if task_plan["modified"]:
