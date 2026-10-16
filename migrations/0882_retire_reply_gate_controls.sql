@@ -1,3 +1,4 @@
+-- rollback: forward-only — re-declaring a retired control means restoring its hook and map entry, then letting ops/sync_control_catalog.py reinsert the row; the repin is undone by the next map-digest repin.
 -- PR #1801 removes these controls, not their prose rules. Keep the binding
 -- foreign key and active-approval trigger intact, as in 0348 and 0881.
 do $retire_reply_gates$
