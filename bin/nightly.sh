@@ -60,6 +60,7 @@ CARR_DB_EXPORTER_URL="${CARR_DB_EXPORTER_URL:-}"
 source "$REPO/bin/step-timeout.zsh"
 
 LAST_STEP_RC=0
+NIGHTLY_RC=0
 step() {
   local label="$1"; shift
   local key="nightly.$(print -r -- "${label%% \(*}" | tr 'A-Z ' 'a-z-' | tr -cd 'a-z0-9.-')"
@@ -67,6 +68,7 @@ step() {
   carr_routine_exec /bin/zsh "$REPO/bin/run-scheduled.sh" "$SERVICE" "$key" \
     "${CARR_STEP_TIMEOUT_ARGV[@]}" "$@" >> "$LOG" 2>&1
   LAST_STEP_RC=$?
+  [ "$LAST_STEP_RC" -eq 0 ] || NIGHTLY_RC="$LAST_STEP_RC"
   return 0
 }
 
@@ -105,4 +107,5 @@ step "mail capture" ./bin/mail-capture.sh
 step "lead stages" python3 ./bin/lead-stage-job.py
 step "verb probe" ./.venv/bin/python ops/nightly-verb-probe.py
 step "pr board" ./run.sh pr-board
+step "nightly ping" env HC_CHAIN_RC="$NIGHTLY_RC" ./bin/hc-ping.sh --nightly
 exit 0
