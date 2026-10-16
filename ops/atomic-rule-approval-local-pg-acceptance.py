@@ -57,6 +57,20 @@ def main() -> int:
         try:
             with conn.cursor() as cur:
                 cur.execute("begin")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is True, "registered current scope grant must pass the live catalog check"
+                cur.execute("savepoint unregistered_scope_grant")
+                cur.execute("grant execute on function ops.amend_rule_scope(uuid,jsonb,text,integer,text,text) to carr_writer")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is False, "an unregistered scope-writer grant must refuse"
+                cur.execute("rollback to savepoint unregistered_scope_grant")
+                cur.execute("release savepoint unregistered_scope_grant")
+                cur.execute("savepoint missing_scope_grant")
+                cur.execute("revoke execute on function ops.amend_rule_scope(uuid,jsonb,text,integer,text,text) from carr_authority")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is False, "a missing registered grant must refuse"
+                cur.execute("rollback to savepoint missing_scope_grant")
+                cur.execute("release savepoint missing_scope_grant")
                 cur.execute("select rolsuper from pg_roles where rolname=current_user")
                 row = cur.fetchone()
                 if row is None or row[0] is not True:
