@@ -204,9 +204,9 @@ def main() -> int:
         duplicate_handler = copy.deepcopy(source)
         duplicate_handler["hooks"]["SessionStart"][1]["hooks"] *= 2
         invalid_sources.append(duplicate_handler)
-        for field, value in (("type", "prompt"), ("timeout", True), ("timeout", "10")):
+        for invalid_field, invalid_value in (("type", "prompt"), ("timeout", True), ("timeout", "10")):
             malformed = copy.deepcopy(source)
-            malformed["hooks"]["SessionStart"][1]["hooks"][0][field] = value
+            malformed["hooks"]["SessionStart"][1]["hooks"][0][invalid_field] = invalid_value
             invalid_sources.append(malformed)
         for invalid in invalid_sources:
             repo_source.write_text(json.dumps(invalid))
