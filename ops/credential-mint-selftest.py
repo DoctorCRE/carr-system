@@ -199,6 +199,9 @@ class FakeCodex:
         self.fail = False
 
     def __call__(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
+        if argv[0] == "ssh":
+            payload = json.loads(kw["input"])
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({payload["name"]: "ok"}), stderr="")
         self.calls.append((list(argv), kw.get("input")))
         return subprocess.CompletedProcess(argv, 1 if self.fail else 0, stdout="", stderr="")
 
@@ -436,10 +439,10 @@ def test_schedule_rotates_only_inside_the_window_and_revokes_the_previous() -> N
         check("the revoke used the root, by id",
               ("DELETE", f"{cm.Cloudflare.API}/user/tokens/cloudflare-id-1", ROOTS["CLOUDFLARE_TOKEN_ROOT"])
               in w.http.calls)
-        check("the rotation's receipts read mint, verify, store, revoke",
+        check("the rotation's receipts read mint, verify, store, fleet install, revoke",
               outcomes(receipts, "cloudflare-deploy-token") ==
               ["mint:minted", "verify:verified", "store:stored_CLOUDFLARE_API_TOKEN",
-               "revoke_previous:revoked"], outcomes(receipts, "cloudflare-deploy-token"))
+               "install:fleet_verified", "revoke_previous:revoked"], outcomes(receipts, "cloudflare-deploy-token"))
 
 
 def test_verify_failure_revokes_the_new_child_and_keeps_the_old() -> None:

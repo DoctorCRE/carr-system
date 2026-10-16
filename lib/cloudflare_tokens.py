@@ -10,7 +10,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from datetime import datetime, timedelta, timezone
 
 from lib.credential_file import read_env_file
-from lib.token_store import write_env_line
+from lib.token_store import verified_write_env_line
 
 TOKEN_NAMES = ('CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_SPEND_GUARD_TOKEN')
 MACHINES = ('studio', 'macbook', 'dell')
@@ -63,13 +63,15 @@ def check_file(path, *, endpoint=VERIFY_URL):
 def install(path, name, value, *, endpoint=VERIFY_URL):
     if name not in TOKEN_NAMES or not isinstance(value, str) or not value or '\n' in value or '\r' in value:
         return 'invalid_input'
-    if verify(value, endpoint=endpoint) != 'ok':
-        return 'candidate_failed'
-    path = Path(path)
-    if path.is_symlink():
-        return 'unsafe_file'
-    write_env_line(path, name, value)
-    return verify(read_env_file(path).get(name), endpoint=endpoint)
+    return verified_write_env_line(Path(path), name, value,
+                                   lambda candidate: verify(candidate, endpoint=endpoint))
+
+
+def sync(name, value, *, runner=subprocess.run):
+    """Install the same candidate everywhere; only positive readback confirms it."""
+    return {machine: on_machine(machine, {'operation': 'install', 'name': name, 'value': value},
+                                runner=runner).get(name, 'unverifiable')
+            for machine in MACHINES}
 
 
 def remote_source(*, export=False):

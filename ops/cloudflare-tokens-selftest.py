@@ -22,7 +22,7 @@ class TokenTests(unittest.TestCase):
         from lib import cloudflare_tokens as cf
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'tokens.env'
-            original = b"CLOUDFLARE_API_TOKEN=original\nOTHER='keep me'\n"
+            original = b"CLOUDFLARE_API_TOKEN=original\r\nOTHER='keep me'\r\n"
             path.write_bytes(original)
             path.chmod(0o600)
             with patch.object(cf, 'verify', side_effect=['ok', 'failed']):
@@ -31,6 +31,26 @@ class TokenTests(unittest.TestCase):
             backup = Path(str(path) + '.install-backup')
             self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
             self.assertIn('original', backup.read_text())
+
+    def test_verification_holds_writer_lock_and_preserves_absence(self):
+        from lib import cloudflare_tokens as cf
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'tokens.env'
+            calls = []
+            def verify(value, **kwargs):
+                probe = subprocess.run([sys.executable, '-c',
+                    "import fcntl, sys; f = open(sys.argv[1], 'a'); fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)",
+                    str(path) + '.rotate-credential.lock'], capture_output=True, timeout=10)
+                self.assertNotEqual(probe.returncode, 0)
+                calls.append(value)
+                if len(calls) == 2:
+                    journal = Path(str(path) + '.install-pending')
+                    self.assertEqual(journal.stat().st_mode & 0o777, 0o600)
+                return 'ok' if len(calls) == 1 else 'failed'
+            with patch.object(cf, 'verify', side_effect=verify):
+                self.assertEqual(cf.install(path, cf.TOKEN_NAMES[0], 'fake-new'), 'failed')
+            self.assertFalse(path.exists())
+            self.assertEqual(len(calls), 2)
 
     def test_interrupted_install_restores_original(self):
         from lib import cloudflare_tokens as cf
@@ -69,6 +89,19 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
             with patch.object(cf, 'verify', return_value='failed'):
                 self.assertEqual(cf.install(path, cf.TOKEN_NAMES[0], 'fake-rejected'), 'candidate_failed')
             self.assertEqual(path.read_bytes(), original)
+
+    def test_regular_writer_recovers_before_preserving_other_keys(self):
+        from lib import token_store
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'tokens.env'
+            path.write_text('CLOUDFLARE_API_TOKEN=unconfirmed\n')
+            journal = Path(str(path) + '.install-pending')
+            journal.write_text(json.dumps({'original': 'CLOUDFLARE_API_TOKEN=original\n'}))
+            journal.chmod(0o600)
+            token_store.write_env_line(path, 'OTHER', 'new-other-value')
+            self.assertEqual(token_store.read_env_file(path),
+                             {'CLOUDFLARE_API_TOKEN': 'original', 'OTHER': 'new-other-value'})
+            self.assertFalse(journal.exists())
 
     def test_nightly_offline_fleet_retries_before_retirement(self):
         spec = importlib.util.spec_from_file_location('mint_harness', ROOT / 'ops/credential-mint-selftest.py')
@@ -158,7 +191,7 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
         cli = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cli)
         calls = []
-        def transport(machine, payload):
+        def transport(machine, payload, **kwargs):
             calls.append(machine)
             return {payload['name']: 'unreachable' if machine == 'dell' else 'ok'}
         output = io.StringIO()

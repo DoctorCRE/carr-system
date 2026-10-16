@@ -29,6 +29,7 @@ which is how the selftests point the whole store at a scratch directory.
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import re
 import shlex
@@ -37,7 +38,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from lib.credential_file import carr_config, read_env_file
 
@@ -117,6 +118,7 @@ def _writer_lock(path: str) -> Iterator[None]:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
             raise OSError(f"credential lock {lock_path} is not a private regular file")
+        os.fchmod(fd, 0o600)
         fcntl.flock(fd, fcntl.LOCK_EX)
         try:
             yield
@@ -132,36 +134,99 @@ def write_env_line(path: str | os.PathLike[str], key: str, value: str) -> None:
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, mode=0o700, exist_ok=True)
     os.chmod(directory, 0o700)
-    line = f"{key}={shlex.quote(value)}"
-
     with _writer_lock(path):
-        existing: list[str] = []
-        if os.path.exists(path):
-            with open(path, encoding="utf-8") as handle:
-                existing = handle.read().splitlines()
-        lines: list[str] = []
-        replaced = False
-        for current in existing:
-            match = _KEY_LINE_RE.match(current)
-            if match and match.group(1) == key:
-                if not replaced:
-                    lines.append(line)
-                    replaced = True
-                continue
-            lines.append(current)
-        if not replaced:
-            lines.append(line)
+        _recover_install(Path(path))
+        _write_env_line_unlocked(path, key, value)
 
-        fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".token-store.")
+
+def _write_env_line_unlocked(path: str, key: str, value: str) -> None:
+    line = f"{key}={shlex.quote(value)}"
+    existing: list[str] = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as handle:
+            existing = handle.read().splitlines()
+    lines: list[str] = []
+    replaced = False
+    for current in existing:
+        match = _KEY_LINE_RE.match(current)
+        if match and match.group(1) == key:
+            if not replaced:
+                lines.append(line)
+                replaced = True
+            continue
+        lines.append(current)
+    if not replaced:
+        lines.append(line)
+
+    _atomic_bytes(Path(path), ("\n".join(lines) + "\n").encode("utf-8"))
+
+
+def _atomic_bytes(path: Path, data: bytes) -> None:
+    fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".token-store.")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(str(path.parent))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def verified_write_env_line(path: Path, key: str, value: str,
+                            verify: Callable[[str | None], str]) -> str:
+    """Recover interrupted writes, then install/read back or restore under one lock.
+
+    The pending journal is durable before replacement. Process death leaves it
+    for the next installation to recover; completed transactions retain a 0600
+    backup. No other writer can interleave with readback or rollback.
+    """
+    path = Path(path)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
+    pending = Path(str(path) + ".install-pending")
+    backup = Path(str(path) + ".install-backup")
+    with _writer_lock(str(path)):
+        if any(p.is_symlink() for p in (path, pending, backup)):
+            return "unsafe_file"
+
+        _recover_install(path)
+        if verify(value) != "ok":
+            return "candidate_failed"
+        original = path.read_bytes().decode("utf-8") if path.exists() else None
+        _atomic_bytes(pending, json.dumps({"original": original}).encode("utf-8"))
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write("\n".join(lines) + "\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
-            os.replace(tmp_path, path)
-            _fsync_directory(directory)
+            _write_env_line_unlocked(str(path), key, value)
+            installed = read_env_file(path).get(key)
+            result = verify(installed) if installed == value else "failed"
+            if result != "ok":
+                _restore_install(path, original)
         except BaseException:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+            _restore_install(path, original)
+            os.replace(pending, backup)
+            _fsync_directory(str(path.parent))
             raise
+        os.replace(pending, backup)
+        _fsync_directory(str(path.parent))
+        return result
+
+
+def _restore_install(path: Path, original: str | None) -> None:
+    if original is None:
+        path.unlink(missing_ok=True)
+        _fsync_directory(str(path.parent))
+    else:
+        _atomic_bytes(path, original.encode("utf-8"))
+
+
+def _recover_install(path: Path) -> None:
+    pending = Path(str(path) + ".install-pending")
+    if pending.is_symlink():
+        raise OSError("unsafe credential installation journal")
+    if pending.exists():
+        original = json.loads(pending.read_text(encoding="utf-8"))["original"]
+        _restore_install(path, original)
+        os.replace(pending, Path(str(path) + ".install-backup"))
+        _fsync_directory(str(path.parent))

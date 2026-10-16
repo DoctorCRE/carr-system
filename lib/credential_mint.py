@@ -85,7 +85,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
-from lib import token_store
+from lib import cloudflare_tokens, token_store
 from lib.credential_file import carr_config
 from lib.github_app_config import CONFIG_PATH as GITHUB_APP_CONFIG, read_config
 from lib.machine_role import is_primary
@@ -604,7 +604,7 @@ class Minter:
             "child_id": child_id,
             "minted_at": _iso(minted),
             "expires_at": _iso(minted + timedelta(days=int(grant.ttl_days or 0))),
-            "install_pending": child.install is not None,
+            "install_pending": child.install is not None or child.store_name in cloudflare_tokens.TOKEN_NAMES,
             "previous_child_id": (entry or {}).get("child_id"),
         }
         state["minting"].pop(child.credential, None)
@@ -642,6 +642,15 @@ class Minter:
     def _finish_install(self, grant: GrantPlan, adapter: Provider, root: str, child: ChildPlan,
                         entry: dict[str, Any], state: dict[str, Any], *, retried: bool) -> str:
         name = child.credential
+        if child.store_name in cloudflare_tokens.TOKEN_NAMES:
+            value = token_store.read(str(child.store_name))
+            states = cloudflare_tokens.sync(str(child.store_name), value, runner=self.run) if value else {}
+            if not states or any(states.get(machine) != "ok" for machine in cloudflare_tokens.MACHINES):
+                entry["install_pending"] = True
+                self._receipt(name, grant.name, "install", "fleet_unconfirmed_previous_kept_retry_next_night")
+                return "install_failed"
+            entry["install_pending"] = False
+            self._receipt(name, grant.name, "install", "fleet_verified" + ("_on_retry" if retried else ""))
         if child.install is not None:
             value = token_store.read(str(child.store_name))
             if value is None or not INSTALLERS[child.install](value, self.run):

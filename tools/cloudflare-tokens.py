@@ -55,9 +55,8 @@ def main(argv=None):
         print('FAIL source unavailable, unverified or invalid; no targets updated')
         return 1
     failed = False
-    for machine in cf.MACHINES:
-        for name, value in values.items():
-            state = cf.on_machine(machine, {'operation': 'install', 'name': name, 'value': value}).get(name, 'unverifiable')
+    for name, value in values.items():
+        for machine, state in cf.sync(name, value).items():
             print(f'{machine} {name} {state}')
             failed |= state != 'ok'
     return int(failed)
