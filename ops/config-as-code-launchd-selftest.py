@@ -215,7 +215,7 @@ def check_and_install_cases() -> list[bool]:
     """Drive the refusal through cmd_check and cmd_install, not only the helpers."""
     out: list[bool] = []
     saved = {name: getattr(mod, name) for name in (
-        "REPO", "REPO_HERE", "SETTINGS", "CLAUDE_CONTINUITY_MODE_FILE", "CLAUDE_MCP_CONFIG",
+        "HOME", "REPO", "REPO_HERE", "SETTINGS", "CLAUDE_CONTINUITY_MODE_FILE", "CLAUDE_MCP_CONFIG",
         "TASKS_SRC", "TASKS_REPO", "TASKS_QUARANTINE", "LAUNCHD_SRC", "LAUNCHD_REPO",
         "LAUNCHD_ALT_REPO", "HOOKS_REPO", "CODEX_HOOKS_SRC", "CODEX_CONFIG",
         "PREREQUISITE_CHECK")}
@@ -264,6 +264,7 @@ def check_and_install_cases() -> list[bool]:
                 "StartInterval": 600}).decode())
             (launchd / "com.carr.planted.plist").write_text(planted, encoding="utf-8")
             (launchd / "com.carr.good.plist").write_text(good, encoding="utf-8")
+            mod.HOME = str(home)
             mod.REPO = mod.REPO_HERE = str(repo)
             mod.SETTINGS = str(home / ".claude" / "settings.json")
             mod.CLAUDE_CONTINUITY_MODE_FILE = str(home / ".config/carr/claude-continuity-mode.json")
@@ -279,6 +280,15 @@ def check_and_install_cases() -> list[bool]:
             mod.CODEX_CONFIG = str(home / ".codex" / "config.toml")
             mod.PREREQUISITE_CHECK = lambda _repo: []
             mod.subprocess.run = stub_run
+            agents = Path(mod.LAUNCHD_SRC)
+            agents.mkdir(parents=True, exist_ok=True)
+            orphan = agents / "com.carr.removed-template.plist"
+            orphan.write_text(plist("com.carr.removed-template"))
+            with contextlib.redirect_stdout(io.StringIO()) as retired_dry:
+                mod.cmd_install(False)
+            out.append(check("install dry run discovers a removed launchd template",
+                             "would retire  com.carr.removed-template.plist" in retired_dry.getvalue()
+                             and orphan.exists(), retired_dry.getvalue()[-500:]))
             with contextlib.redirect_stdout(io.StringIO()) as install_out:
                 install_rc = mod.cmd_install(True)
             agents = Path(mod.LAUNCHD_SRC)
@@ -292,6 +302,9 @@ def check_and_install_cases() -> list[bool]:
                             for c in launchctl_calls),
                 (install_rc, install_out.getvalue()[-800:]),
             ))
+            out.append(check("install retires removed templates in its apply path",
+                             not orphan.exists()
+                             and len(list((home / "Library/LaunchAgents-quarantine").rglob(orphan.name))) == 1))
             with contextlib.redirect_stdout(io.StringIO()) as check_out:
                 check_rc = mod.cmd_check()
             text = check_out.getvalue()
@@ -316,6 +329,134 @@ def check_and_install_cases() -> list[bool]:
         mod.subprocess.run = real_run
         for name, value in saved.items():
             setattr(mod, name, value)
+    return out
+
+
+def retired_launchd_cases() -> list[bool]:
+    """Retired definitions reconcile against a temp HOME and fake launchctl."""
+    out = []
+    saved = {name: getattr(mod, name) for name in
+             ("HOME", "LAUNCHD_SRC", "LAUNCHD_REPO", "LAUNCHD_ALT_REPO")}
+    real_run = mod.subprocess.run
+    with tempfile.TemporaryDirectory(prefix="carr-retired-launchd-") as tmp:
+        home = Path(tmp)
+        agents = home / "Library/LaunchAgents"
+        templates = home / "repo/ops/launchd"
+        agents.mkdir(parents=True)
+        templates.mkdir(parents=True)
+        calls = []
+        loaded = {}
+        mode = "normal"
+
+        def fake_launchctl(args, **kwargs):
+            calls.append(list(args))
+            label = args[-1].rsplit("/", 1)[-1]
+            if args[1] == "bootout":
+                if mode == "bootout-failed":
+                    return SimpleNamespace(returncode=5, stdout="", stderr="busy")
+                if mode != "still-loaded":
+                    loaded.pop(label, None)
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            assert args[1] == "print", args
+            if mode == "inspect-failed":
+                return SimpleNamespace(returncode=1, stdout="", stderr="permission denied")
+            if label in loaded:
+                return SimpleNamespace(returncode=0, stdout=f"path = {loaded[label]}\n", stderr="")
+            return SimpleNamespace(returncode=113, stdout="",
+                                   stderr=f'Could not find service "{label}"')
+
+        try:
+            mod.HOME = str(home)
+            mod.LAUNCHD_SRC = str(agents)
+            mod.LAUNCHD_REPO = str(templates)
+            mod.LAUNCHD_ALT_REPO = {"com.carr.alternate.plist": str(home / "alternate.plist")}
+            mod.subprocess.run = fake_launchctl
+            names = ("com.carr.retired", "com.carr.current", "com.carr.alternate",
+                     "com.vendor.personal", "local.carr-progress-board", "com.carr.held",
+                     "com.carr.cliproxyapi", "com.carr.fix-train")
+            for label in names:
+                (agents / f"{label}.plist").write_text(plist(label))
+            (templates / "com.carr.current.plist").write_text(plist("com.carr.current"))
+            hold = home / ".config/carr/launchd-hold"
+            hold.parent.mkdir(parents=True)
+            hold.write_text("com.carr.held deliberate machine-local hold\n")
+            live = agents / "com.carr.retired.plist"
+            loaded["com.carr.retired"] = str(live)
+            with contextlib.redirect_stdout(io.StringIO()) as dry:
+                failures = mod.reconcile_retired_launchd(False)
+            out.append(check("retirement dry run lists only owned missing templates without effects",
+                             failures == [] and "would retire  com.carr.retired.plist" in dry.getvalue()
+                             and dry.getvalue().count("would retire") == 1 and not calls
+                             and live.exists() and not (home / "Library/LaunchAgents-quarantine").exists(),
+                             dry.getvalue()))
+            with contextlib.redirect_stdout(io.StringIO()):
+                failures = mod.reconcile_retired_launchd(True)
+            quarantined = list((home / "Library/LaunchAgents-quarantine").rglob(live.name))
+            out.append(check("removed template boots out, verifies absent, and preserves bytes in quarantine",
+                             failures == [] and not live.exists() and len(quarantined) == 1
+                             and quarantined[0].read_text() == plist("com.carr.retired")
+                             and [c[1] for c in calls] == ["print", "bootout", "print"]
+                             and "com.carr.retired" not in loaded, (failures, calls)))
+            out.append(check("current, alternate, machine-local, held and non-carr plists stay untouched",
+                             all((agents / f"{label}.plist").read_text() == plist(label)
+                                 for label in names[1:])))
+            calls.clear()
+            with contextlib.redirect_stdout(io.StringIO()):
+                failures = mod.reconcile_retired_launchd(True)
+            out.append(check("retirement rerun has no effects", failures == [] and calls == []))
+            live.write_text(plist("com.carr.retired", "/usr/bin/false"))
+            with contextlib.redirect_stdout(io.StringIO()):
+                failures = mod.reconcile_retired_launchd(True)
+            copies = list((home / "Library/LaunchAgents-quarantine").rglob(live.name))
+            out.append(check("later retirement preserves both quarantined copies without overwrite",
+                             failures == [] and len(copies) == 2
+                             and {p.read_text() for p in copies} ==
+                             {plist("com.carr.retired"), plist("com.carr.retired", "/usr/bin/false")}))
+            for mode in ("inspect-failed", "bootout-failed", "still-loaded", "foreign", "self"):
+                live.write_text(plist("com.carr.retired"))
+                loaded["com.carr.retired"] = str(home / "foreign.plist") if mode == "foreign" else str(live)
+                calls.clear()
+                prior = os.environ.get(mod.ACTIVE_LAUNCHD_LABEL_ENV)
+                if mode == "self":
+                    os.environ[mod.ACTIVE_LAUNCHD_LABEL_ENV] = "com.carr.retired"
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        failures = mod.reconcile_retired_launchd(True)
+                finally:
+                    if prior is None:
+                        os.environ.pop(mod.ACTIVE_LAUNCHD_LABEL_ENV, None)
+                    else:
+                        os.environ[mod.ACTIVE_LAUNCHD_LABEL_ENV] = prior
+                out.append(check(f"retirement fails closed for {mode}",
+                                 failures == [live.name] and live.exists()
+                                 and len(list((home / "Library/LaunchAgents-quarantine").rglob(live.name))) == 2,
+                                 (failures, calls)))
+            loaded.clear()
+            mode = "normal"
+            for description, body in (("non-carr internal label", plist("com.vendor.personal")),
+                                      ("malformed plist", "not a plist"),
+                                      ("non-dictionary plist", plistlib.dumps(["bad"]).decode())):
+                live.write_text(body)
+                calls.clear()
+                with contextlib.redirect_stdout(io.StringIO()):
+                    failures = mod.reconcile_retired_launchd(True)
+                out.append(check(f"retirement rejects {description} before launchctl",
+                                 failures == [live.name] and live.read_text() == body and not calls))
+            live.unlink()
+            live.symlink_to(agents / "com.vendor.personal.plist")
+            with contextlib.redirect_stdout(io.StringIO()):
+                failures = mod.reconcile_retired_launchd(True)
+            out.append(check("retirement refuses symlink definitions", failures == [live.name]
+                             and live.is_symlink() and not calls))
+            mod.LAUNCHD_REPO = str(home / "unavailable")
+            with contextlib.redirect_stdout(io.StringIO()):
+                failures = mod.reconcile_retired_launchd(True)
+            out.append(check("missing template directory cannot retire the entire fleet",
+                             failures == [mod.LAUNCHD_REPO] and live.is_symlink() and not calls))
+        finally:
+            mod.subprocess.run = real_run
+            for name, value in saved.items():
+                setattr(mod, name, value)
     return out
 
 
@@ -792,6 +933,7 @@ def main() -> int:
             and plistlib.loads(converted.encode())["RunAtLoad"] is True,
             mod.refused_launchd_templates(str(repo)),
         ))
+    cases.extend(retired_launchd_cases())
     cases.extend(smoke_job_refusal_cases())
     cases.extend(failed_reload_retry_cases())
     cases.extend(handoff_script_cases())
