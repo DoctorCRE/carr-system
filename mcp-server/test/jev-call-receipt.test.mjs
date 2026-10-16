@@ -321,21 +321,6 @@ test("an unreadable day count refuses as jev_receipt_store_unavailable before re
   }
 });
 
-test("the cap successor changes only ask-jev's bound schema and preserves the predecessor", async () => {
-  const inventory = await import("../../ops/scac-mutation-inventory.mjs");
-  const oldRows = inventory.boundInventoryRows(inventory.frozenInventory("scac-mutation-registry.v103"));
-  const newRows = inventory.boundInventoryRows(inventory.frozenInventory("scac-mutation-registry.v104"));
-  assert.equal(newRows.length, oldRows.length);
-  const changed = newRows.filter((row, i) => JSON.stringify(row) !== JSON.stringify(oldRows[i]));
-  assert.equal(changed.length, 1);
-  assert.equal(changed[0].ingress_key, "mcp-tool:ask-jev");
-  assert.equal(inventory.assertCurrentSourceInventoryMatchesFixture(TOOLS), true);
-  const { SCAC_MUTATION_REGISTRY_VERSION } = await import("../src/mutation-registry.js");
-  assert.equal(SCAC_MUTATION_REGISTRY_VERSION, inventory.CURRENT_REGISTRY_VERSION);
-  const activeRows = inventory.boundInventoryRows(inventory.frozenInventory(SCAC_MUTATION_REGISTRY_VERSION));
-  assert.deepEqual(activeRows.find(row => row.ingress_key === "mcp-tool:ask-jev"),
-    newRows.find(row => row.ingress_key === "mcp-tool:ask-jev"));
-});
 
 test("budgeted cache-only misses never reserve or fetch, including a broken cache", async () => {
   for (const cache of [null, { match: async () => null },

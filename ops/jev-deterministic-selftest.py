@@ -400,10 +400,10 @@ class DeterministicTests(unittest.TestCase):
         self.assertTrue({'ci_sh_reseal','inventory_reseal','gate_rebless'} <= {name for _,name,_ in result})
         self.assertEqual(tolls.owed({'files':{'edited':['README.md']}},client=NoModel()),[])
 
-    def test_tolls_follow_sealed_source_locators_outside_server(self):
+    def test_external_script_edits_do_not_reseal_historical_contracts(self):
         tolls=load('jev_change_tolls')
         result=tolls.owed({'files':{'edited':['bin/deploy-worker.sh']}},client=NoModel())
-        self.assertIn('inventory_reseal',[name for _,name,_ in result])
+        self.assertNotIn('inventory_reseal',[name for _,name,_ in result])
 
     def test_notebook_uses_exact_error_or_artifact_not_topic_overlap(self):
         notebook = load('jev_notebook')

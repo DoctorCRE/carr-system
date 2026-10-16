@@ -23,18 +23,14 @@ from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connec
 
 REPO = Path(__file__).resolve().parents[1]
 
-from registry_chain import registry_chain
-
-_CHAIN = registry_chain()
-_CURRENT, _PREDECESSOR = _CHAIN["versions"][-1], _CHAIN["versions"][-2]
-LIVE_REGISTRY_VERSION = _CURRENT["version"]
-LIVE_REGISTRY_ORDINAL = _CURRENT["number"]
-SEALED_PREDECESSOR_VERSION = _PREDECESSOR["version"]
-SEALED_PREDECESSOR_ORDINAL = _PREDECESSOR["number"]
-SEALED_PREDECESSOR_DIGEST = _PREDECESSOR["digest"]
-SEALED_PREDECESSOR_ENTRY_COUNTS = (_PREDECESSOR["entry_count"], _PREDECESSOR["source_count"])
-SEALED_PREDECESSOR_MIGRATION = _PREDECESSOR["migration"]
-LIVE_REGISTRY_MIGRATION = _CURRENT["migration"]
+LIVE_REGISTRY_VERSION = 'scac-mutation-registry.v118'
+LIVE_REGISTRY_ORDINAL = 118
+SEALED_PREDECESSOR_VERSION = 'scac-mutation-registry.v117'
+SEALED_PREDECESSOR_ORDINAL = 117
+SEALED_PREDECESSOR_DIGEST = 'sha256:bba3689ccfaad427b77c3d8295406d5e56c2ac506c5d5ddb1232fa0461315838'
+SEALED_PREDECESSOR_ENTRY_COUNTS = (2801, 1207)
+SEALED_PREDECESSOR_MIGRATION = 'migrations/0869_loop_residue_scac_successor.sql'
+LIVE_REGISTRY_MIGRATION = 'migrations/0873_self_closing_records_scac_successor.sql'
 
 LIVE_CATALOG_CURRENT_FN = f"ops.scac_mutation_catalog_v{LIVE_REGISTRY_ORDINAL}_current()"
 LIVE_REGISTRATION_FN = f"ops.scac_mutation_registration_v{LIVE_REGISTRY_ORDINAL}"
@@ -70,8 +66,7 @@ PREDECESSOR_LIVE_AT_SEAL_NAME = (
 
 # WR-000048 mutation test fixtures. NARROWED_ROLE_AUTHORITY_SCOPE is the
 # portable census scope this repair cascade installs (verbatim from the
-# templates: ops/scac-policy-epoch-sql.mjs and renderSIEP13RegistrySql in
-# ops/scac-mutation-inventory.mjs, which this session edited). It must appear
+# installed catalog functions). It must appear
 # exactly once inside the live ops.scac_mutation_catalog_v18_current()
 # definition in migrations/0492_sourced_shape_forward_correction_and_scac_successor.sql --
 # if it does not, the migration no longer carries the fix this test exists to

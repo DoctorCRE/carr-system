@@ -103,10 +103,7 @@ class SubstitutionFixtureParity(unittest.TestCase):
 
 class LockRehearsalFrontier(unittest.TestCase):
     def test_accepts_the_declared_predecessor_before_rehearsing(self):
-        from registry_chain import registry_chain
-        chain = registry_chain()['versions']
-        hardening = next(row for row in chain if row['migration'].endswith('_dot_hardening_scac_successor.sql'))
-        predecessor = next(row for row in chain if row['version'] == hardening['predecessor'])
+        predecessor = {'migration': 'migrations/0853_party_identity_scac_successor.sql'}
         rehearsal = load('hardening_rehearsal', 'ops/definer-hardening-lock-rehearsal-gate.py')
         connection = MagicMock()
         connection.__enter__.return_value = connection

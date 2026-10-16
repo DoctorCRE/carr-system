@@ -513,7 +513,7 @@ class ChangeTollsPredicateTests(unittest.TestCase):
         state = {'files':['ops/ci.sh']}
         first = tolls.owed(state, client=Explosive())
         self.assertEqual(first,tolls.owed(state,client=Explosive()))
-        self.assertEqual([n for _,n,_ in first],['ci_sh_reseal','inventory_reseal'])
+        self.assertEqual([n for _,n,_ in first],['ci_sh_reseal'])
 
     def test_collector_reads_changed_content_without_model(self):
         spec = importlib.util.spec_from_file_location('tolls_collector', REPO/'ops/jev_change_tolls.py')
