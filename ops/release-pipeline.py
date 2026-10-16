@@ -935,7 +935,7 @@ class Pipeline:
         src_venv = self.repo / ".venv"
         src_python = src_venv / "bin" / "python"
         if not self.dry_run and not src_python.exists():
-            raise StepFailed("venv-link", 1, "",
+            raise StepFailed("venv-source-missing", 1, "",
                              f"{src_venv} has no bin/python — this pipeline checkout's own venv "
                              f"is missing or incomplete, so linking it into the release worktree "
                              f"would only produce a dangling symlink whose health read then "
@@ -1538,7 +1538,7 @@ class Pipeline:
 
     def failed_prerequisite_ready(self, step: str) -> bool:
         """Probe environment failures without replaying a release or its diagnosis."""
-        if step == "venv-link":
+        if step == "venv-source-missing":
             return (self.repo / ".venv/bin/python").exists()
         if step not in {"credential-missing", "wrangler-auth"}:
             return False
