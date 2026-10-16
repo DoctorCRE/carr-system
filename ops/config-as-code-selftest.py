@@ -75,144 +75,55 @@ def commands(doc):
 
 
 def permission_review_regressions():
-    """Every review fixture checks semantic preservation and repeat-run repair."""
+    """Installs migrate sandboxed configs while preserving unrelated values."""
     import tomllib
-    default, body = mod.codex_permissions_source()
-    expected = tomllib.loads(default + "\n" + body)
-    fixtures = {
-        "1-marker-in-string": default + "\nnotes = '''\n" + mod.CODEX_PERMISSIONS_BEGIN
-            + '\nexample="keep"\n' + mod.CODEX_PERMISSIONS_END
-            + "\n'''\n[permissions.carr_unattended]\nextends=\":workspace\"\n",
-        "2-header-in-string": "notes = '''\n[example]\nx=1\n'''\nmodel=\"fixture\"\n"
-            + '[permissions.carr_unattended]\nextends=":workspace"\n',
-        "2-indented-header": '  [permissions.carr_unattended]\nextends=":workspace"\n',
-        "2-quoted-default": '\'default_permissions\' = \'old\'\nmodel="keep"\n',
-        "3-nested-array": default + '\n[permissions.carr_unattended]\nvalues=[\n'
-            + '["a", "b"],\n["c"], # continuation\n]\n[other]\nvalue=42\n',
-        "4-inline-profile": default + '\n[permissions]\n'
-            + 'carr_unattended={extends=":read-only",network={enabled=false}}\n'
-            + 'custom={description="keep"}\n[other]\nvalue=42\n',
-        "4-root-inline": default + '\npermissions={carr_unattended={extends=":workspace"},'
-            + 'custom={description="keep"}}\n[other]\nvalue=42\n',
-        "4-dotted-profile": default + '\n[permissions]\ncarr_unattended.extends=":workspace"\n'
-            + 'custom.description="keep"\n[other]\nvalue=42\n',
-        "4-root-dotted": default + '\npermissions.carr_unattended.extends=":workspace"\n'
-            + 'permissions.custom.description="keep"\n[other]\nvalue=42\n',
-    }
-    # These valid documents must never be accepted from marker text alone.
-    examples = default + "\nnotes = '''\n" + mod.CODEX_PERMISSIONS_BEGIN + "\n" + body + mod.CODEX_PERMISSIONS_END + "\n'''\n"
-    assert mod.canonical_codex_permissions(examples) is None
-    missing_default = mod.CODEX_PERMISSIONS_BEGIN + "\n" + body + mod.CODEX_PERMISSIONS_END + "\n"
-    assert mod.canonical_codex_permissions(missing_default) is None
-    fixtures['1-marker-with-user-data'] = (default + "\n" + mod.CODEX_PERMISSIONS_BEGIN
-        + '\nnotes="keep" # user comment\n' + mod.CODEX_PERMISSIONS_END
-        + '\n[permissions.carr_unattended]\nextends=":workspace"\n[other]\nvalue=42\n')
-    fixtures['3-user-nested-array'] = (default + '\n[permissions.carr_unattended]\nextends=":workspace"\n'
-        + '[permissions.custom]\nvalues=[\n["a", "b"],\n["c"],\n] # keep array\n'
-        + "notes=\"\"\"\n[not.a.header]\n\"\"\"\n[other]\nvalue=42\n")
-    failures = []
-    for name, raw in fixtures.items():
+    source = mod.codex_permissions_source()
+    fixtures = [
+        '',
+        'sandbox_mode="workspace-write"\n',
+        'default_permissions="carr_unattended"\n[permissions.carr_unattended]\nextends=":workspace"\n',
+        "'default_permissions'='old'\n[ 'permissions' . 'carr_unattended' ]\nextends=':workspace'\n",
+        'permissions={carr_unattended={extends=":workspace"},custom={description="keep"}}\n',
+        '[permissions]\ncarr_unattended.extends=":workspace"\ncustom.description="keep"\n',
+        'permissions.carr_drive_readonly.extends=":read-only"\n',
+        'notes=\'\'\'\n[permissions.carr_unattended]\nexample="keep"\n\'\'\'\n',
+        mod.CODEX_PERMISSIONS_BEGIN + '\nnotes="keep"\n' + mod.CODEX_PERMISSIONS_END + '\n',
+        '[permissions.carr_unattended]\nextends=":workspace"\n'
+        '[permissions.carr_unattended]\nextends=":read-only"\n',
+    ]
+    for raw in fixtures:
+        result = mod.install_codex_permissions(raw, source)
+        after = tomllib.loads(result)
+        assert after['sandbox_mode'] == 'danger-full-access'
+        assert 'default_permissions' not in after
+        assert not set(after.get('permissions', {})) & {'carr_unattended', 'carr_drive_readonly'}
         try:
             before = tomllib.loads(raw)
-            result = mod.install_codex_permissions(raw, default, body)
-            after = tomllib.loads(result)
-            assert after['default_permissions'] == expected['default_permissions']
-            for profile, value in expected['permissions'].items():
-                assert after['permissions'][profile] == value
-            def unrelated(doc):
-                doc.pop('default_permissions', None)
-                permissions = doc.get('permissions', {})
-                for profile in expected['permissions']:
-                    permissions.pop(profile, None)
-                if not permissions:
-                    doc.pop('permissions', None)
-                return doc
-            assert unrelated(before) == unrelated(after), 'unrelated values changed'
-            assert mod.install_codex_permissions(result, default, body) == result, 'not idempotent'
-            assert mod.canonical_codex_permissions(result) == mod.portable(default + "\n\n" + body)
-            print(f"PASS permission review {name}")
-        except Exception as exc:
-            failures.append(name)
-            print(f"FAIL permission review {name}: {type(exc).__name__}: {exc}")
-    assert not failures, f"permission review regressions: {failures}"
+        except tomllib.TOMLDecodeError:
+            before = {}
+        for doc in (before, after):
+            doc.pop('default_permissions', None)
+            doc.pop('sandbox_mode', None)
+            for name in ('carr_unattended', 'carr_drive_readonly'):
+                doc.get('permissions', {}).pop(name, None)
+            if not doc.get('permissions'):
+                doc.pop('permissions', None)
+        assert before == after, 'unrelated values changed'
+        assert mod.install_codex_permissions(result, source) == result
+        assert mod.canonical_codex_permissions(result) == source
+    assert mod.canonical_codex_permissions('"sandbox_mode"="danger-full-access"\n') == source
+    assert mod.canonical_codex_permissions('sandbox_mode="workspace-write"\n') != source
+    assert mod.canonical_codex_permissions('default_permissions="old"\n' + source) != source
+    assert mod.canonical_codex_permissions('notes="sandbox_mode"\n') is None
+    print('PASS full-access migration, drift detection, unrelated settings, and repeat install')
 
 
 def main():
     permission_review_regressions()
     import tomllib
-    default, body = mod.codex_permissions_source()
-    # Codex may rewrite TOML syntax and discard comments without changing the
-    # installed permissions. Read the same reserved paths the installer owns.
-    import tomlkit
-    expected_permissions = mod.portable(default + "\n\n" + body)
-    markerless = mod.concrete(default + "\n\n" + body)
-    assert mod.canonical_codex_permissions(markerless) == expected_permissions
-    values = tomllib.loads(markerless)
-    rewritten = tomlkit.dumps({
-        'notes': mod.CODEX_PERMISSIONS_BEGIN + '\nexample only',
-        'default_permissions': values['default_permissions'],
-        'permissions': {
-            'custom': {'description': 'keep me'},
-            **{name: dict(reversed(list(profile.items())))
-               for name, profile in reversed(list(values['permissions'].items()))},
-        },
-    })
-    assert mod.canonical_codex_permissions(rewritten) == expected_permissions
-    quoted = markerless.replace('[permissions.carr_unattended]',
-                                "[ 'permissions' . 'carr_unattended' ]")
-    assert mod.canonical_codex_permissions(quoted) == expected_permissions
-    values['permissions']['carr_unattended']['network']['enabled'] = False
-    drifted = mod.canonical_codex_permissions(tomlkit.dumps(values))
-    assert isinstance(drifted, str) and drifted != expected_permissions
-    assert tomllib.loads(drifted)['permissions']['carr_unattended']['network']['enabled'] is False
-    values['default_permissions'] = 'carr_drive_readonly'
-    assert tomllib.loads(mod.canonical_codex_permissions(tomlkit.dumps(values)))[
-        'default_permissions'] == 'carr_drive_readonly'
-    del values['permissions']['carr_drive_readonly']
-    assert mod.canonical_codex_permissions(tomlkit.dumps(values)) is None
-    print('PASS semantic permission reads survive comment/syntax rewrites and detect drift')
-    raw = ('model = "fixture"\n' + default + '\n'
-           '[permissions.carr_unattended]\nextends = ":read-only"\n'
-           '[permissions.carr_unattended.network]\nenabled = false\n'
-           '[permissions.custom]\ndescription = "keep me"\n'
-           '[permissions.carr_drive_readonly]\nextends = ":workspace"\n'
-           '[permissions.carr_drive_readonly.filesystem]\n"." = "write"\n'
-           '[other]\nvalue = 42\n')
-    planned = mod.install_codex_permissions(raw, default, body)
-    parsed = tomllib.loads(planned)
-    assert parsed['permissions']['custom']['description'] == 'keep me'
-    assert parsed['other']['value'] == 42
-    assert parsed['model'] == 'fixture'
-    assert parsed['permissions']['carr_unattended']['network']['enabled'] is True
-    assert mod.install_codex_permissions(planned, default, body) == planned
-    quoted = raw.replace('[permissions.carr_unattended]', '[ "permissions" . "carr_unattended" ]')
-    assert tomllib.loads(mod.install_codex_permissions(quoted, default, body))['other']['value'] == 42
-    # Recover a config already damaged by an older nightly append.
-    duplicated = raw + "\n" + mod.CODEX_PERMISSIONS_BEGIN + "\n" + body + mod.CODEX_PERMISSIONS_END + "\n"
-    repaired = mod.install_codex_permissions(duplicated, default, body)
-    tomllib.loads(repaired)
-    assert mod.install_codex_permissions(repaired, default, body) == repaired
-    multiline = 'notes = \'\'\'\n[permissions.carr_unattended]\nexample = "keep"\n\'\'\'\n' + raw
-    fixed = mod.install_codex_permissions(multiline, default, body)
-    assert tomllib.loads(fixed)['notes'] == tomllib.loads(multiline)['notes']
-    print('markerless permissions reconciled; valid TOML; repeat unchanged')
     merged = mod.merge_codex_carr_hooks(LIVE, DESIRED)
     names = commands(merged)
     again = mod.merge_codex_carr_hooks(merged, DESIRED)
-    live_permissions = (
-        'default_permissions = "carr_unattended"\n\n'
-        f'{mod.CODEX_PERMISSIONS_BEGIN}\n'
-        '[permissions.carr_unattended]\n'
-        'extends = ":workspace"\n\n'
-        '[permissions.carr_unattended.workspace_roots]\n'
-        f'"{mod.REPO}" = true\n\n'
-        '[permissions.carr_unattended.network]\n'
-        'enabled = true\n\n'
-        '[permissions.carr_drive_readonly.filesystem]\n'
-        f'"{mod.REPO}" = "write"\n'
-        f'{mod.CODEX_PERMISSIONS_END}\n'
-    )
-    portable_permissions = mod.canonical_codex_permissions(live_permissions)
     empty_codex_snapshot = mod.carr_owned_hooks_document({}, ["Stop"])
     call_mode_source = mod.launchd_repo_path("com.carr.call-mode.plist")
     ordinary_launchd_source = mod.launchd_repo_path("com.carr.example.plist")
@@ -266,17 +177,7 @@ def main():
             json.dumps(desired_codex, indent=2) + "\n", encoding="utf-8"
         )
         (config / "codex-permissions.toml").write_text(
-            'default_permissions = "carr_unattended"\n\n'
-            '[permissions.carr_unattended]\n'
-            'extends = ":workspace"\n\n'
-            '[permissions.carr_unattended.workspace_roots]\n'
-            '"{{REPO}}" = true\n\n'
-            '[permissions.carr_unattended.network]\n'
-            'enabled = true\n\n'
-            '[permissions.carr_drive_readonly.filesystem]\n'
-            '"{{REPO}}" = "write"\n',
-            encoding="utf-8",
-        )
+            'sandbox_mode = "danger-full-access"\n', encoding="utf-8")
         Path(mod.CODEX_CONFIG).write_text(
             'model = "test"\n'
             'default_permissions = "carr_drive_readonly"\n',
@@ -942,12 +843,6 @@ def main():
         ("stale CARR hook removed", all("/carr-system/hooks/old" not in name for name in names)),
         ("desired CARR hook installed once", names.count("/Users/booko/carr-system/hooks/completion-evidence-gate.py") == 1),
         ("second merge is idempotent", again == merged),
-        ("live Codex permission paths become portable tokens",
-         portable_permissions is not None
-         and '"{{REPO}}" = "write"' in portable_permissions
-         and 'default_permissions = "carr_unattended"' in portable_permissions
-         and '[permissions.carr_unattended.network]' in portable_permissions
-         and 'enabled = true' in portable_permissions),
         ("Call Mode LaunchAgent resolves to its tracked tool source",
          call_mode_source.endswith(
              "/tools/dictation-rig/launchd/com.carr.call-mode.plist")),
@@ -975,13 +870,11 @@ def main():
          configured_rc == 0 and configured_check == 0),
         ("configured Codex writes only the desired managed hooks",
          configured_hooks == desired_codex),
-        ("configured Codex preserves existing config and adds managed permissions",
-         'model = "test"' in configured_toml
-         and mod.CODEX_PERMISSIONS_BEGIN in configured_toml
-         and mod.CODEX_PERMISSIONS_END in configured_toml),
-        ("configured Codex replaces the restrictive default with scoped unattended access",
-         configured_toml.count('default_permissions = "carr_unattended"') == 1
-         and 'default_permissions = "carr_drive_readonly"' not in configured_toml),
+        ("configured Codex preserves existing config and enables full access",
+         tomllib.loads(configured_toml)['model'] == 'test'
+         and tomllib.loads(configured_toml)['sandbox_mode'] == 'danger-full-access'
+         and 'default_permissions' not in tomllib.loads(configured_toml)
+         and 'permissions' not in tomllib.loads(configured_toml)),
         ("fresh primary install renders all tracked scheduled-task definitions",
          primary_task_install_rc == 0 and primary_task_rendered
          and "WRITE  scheduled task task-01" in primary_task_out.getvalue()),
