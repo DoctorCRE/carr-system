@@ -29,7 +29,7 @@ Nothing is written to production logs or caches. `selftest.py` checks that.
    misses (trigger vocabulary without the action), 13 positives.
 
 `split.json` freezes every case id to train or test before any edit;
-`selftest.py` fails if it moves. `expectations.v3.json` freezes each case's
+`selftest.py` fails if it moves. `expectations.v4.json` freezes each case's
 grading labels (expected and allowed rules, envelope or human cohort, input
 hash). A change to the routes cannot move its own denominator: grading reads
 the frozen labels, and a relabel is a new expectations version.

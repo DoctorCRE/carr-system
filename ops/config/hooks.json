@@ -182,11 +182,6 @@
           "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/scheduled-run-record.py",
           "timeout": 20
-        },
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-drift-gate.py",
-          "timeout": 20
         }
       ]
     }

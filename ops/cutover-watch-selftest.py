@@ -124,8 +124,7 @@ case("diff_snapshot: acceptance_rows count alone (no set change) does not speak"
 # ---------------------------------------------------------------------------
 
 # Every DSN name this script must NEVER reach for. Deliberately the same
-# forbidden shape rule-delivery-shadow-ledger.py and
-# ops/routine-credential-boundary-selftest.py already police — one list, not
+# forbidden shape ops/routine-credential-boundary-selftest.py polices — one list, not
 # a second guess at what "authority" means here.
 FORBIDDEN_CREDENTIAL_NAMES = (
     "CARR_DB_WRITER_URL", "CARR_DB_OWNER_URL", "CARR_DB_CADENCE_URL",

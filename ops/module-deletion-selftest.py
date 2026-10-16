@@ -22,9 +22,8 @@ class ModuleDeletionTests(unittest.TestCase):
     def test_retained_contracts_do_not_claim_deleted_implementations(self):
         result = subprocess.run([
             "node", "--input-type=module", "-e",
-            "import {v5ModelRoutingProjection} from './mcp-server/src/model-routing.v5.js';"
             "import {v5CostVarianceProjection} from './mcp-server/src/cost-variance-replan.v5.js';"
-            "console.log(JSON.stringify([v5ModelRoutingProjection(), v5CostVarianceProjection()]));",
+            "console.log(JSON.stringify([v5CostVarianceProjection()]));",
         ], cwd=REPO, check=True, capture_output=True, text=True)
         contracts = json.loads(result.stdout)
         for contract in contracts:

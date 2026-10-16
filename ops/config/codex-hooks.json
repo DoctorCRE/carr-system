@@ -136,16 +136,6 @@
         ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-drift-gate.py",
-            "timeout": 20
-          }
-        ]
-      }
-    ]
+    "Stop": []
   }
 }

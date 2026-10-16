@@ -50,28 +50,11 @@ else
     echo "install-capture-bridge.sh: kept existing $CONFIG (never overwritten)"
 fi
 
-install_agent() {
-    label="$1"
-    plist_src="$TOOL_DIR/launchd/$label.plist"
-    plist_dst="$HOME/Library/LaunchAgents/$label.plist"
-
-    if [ ! -f "$plist_src" ]; then
-        echo "install-capture-bridge.sh: plist not found at $plist_src" >&2
-        exit 1
-    fi
-
-    mkdir -p "$HOME/Library/LaunchAgents"
-    cp "$plist_src" "$plist_dst"
-
-    launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
-    launchctl bootstrap "gui/$(id -u)" "$plist_dst"
-
-    launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1 \
-        && echo "install-capture-bridge.sh: bootstrapped and verified $label" \
-        || echo "install-capture-bridge.sh: WARNING — could not verify $label is loaded"
-}
-
-install_agent "com.carr.capture-watch"
-install_agent "com.carr.capture-poll"
+# The LaunchAgents come from config-as-code, never from a bare copy of this
+# tool's own plists — those spell Joe's home literally and are missing the
+# bin/run-scheduled.sh wrapper that records a durable run result. See
+# install-agent-via-config.sh for the full reasoning and the 2026-08-25 defect.
+sh "$TOOL_DIR/bin/install-agent-via-config.sh" \
+    "com.carr.capture-watch" "com.carr.capture-poll"
 
 echo "install-capture-bridge.sh: done"

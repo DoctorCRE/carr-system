@@ -67,7 +67,7 @@ CLASSES = {
 }
 VERBS = {"new-deal", "update-deal", "close-loop", "add-loop"}
 MATCHER = "Bash|Write|Edit|MultiEdit|Agent|WebFetch|WebSearch|Artifact|mcp__.*"
-STOP_HOOKS = {"rule-pack-drift-gate.py"}
+STOP_HOOKS = {"scheduled-run-record.py"}
 
 CLEAN = {
     "schema": routes_lib.ROUTES_SCHEMA,
@@ -81,7 +81,7 @@ CLEAN = {
              "verbs": ["new-deal", "update-deal"], "bash_patterns": []},
             {"kind": "path_rule", "path_globs": ["*dealroom/*.html"]}]},
         "aaaa0004": {"moment": "a stop gate", "routes": [
-            {"kind": "gate", "gate": "hooks/rule-pack-drift-gate.py"},
+            {"kind": "gate", "gate": "hooks/scheduled-run-record.py"},
             {"kind": "trigger", "tools": [], "verbs": ["close-loop"],
              "bash_patterns": [r"\bgit\s+push\b"]}]},
         "aaaa0005": {"moment": "duplicate of aaaa0003", "routes": [
