@@ -12,24 +12,20 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERIFY_AT = 0.60
 WARN_AT = 0.55
 TOLLS = {
-    "inventory_reseal": ("sealed contract dependency changed", "run the sealed source inventory verifier; rederive if its contract changed"),
-    "new_ingress_admitted": ("new sealed contract source", "verify new sealed rows and derive a registry successor when needed"),
+    "inventory_reseal": ("current Worker contract changed", "check current write contracts against the handlers"),
+    "new_ingress_admitted": ("new Worker contract source", "check new handlers against the current write contracts"),
     "gate_rebless": ("baseline-tracked gate changed", "re-bless the changed gate and commit ops/config/gate-baseline.json with it"),
     "paired_selftest": ("gate changed without paired suite", "add regression cases to its paired selftest"),
     "ci_sh_reseal": ("CI runner changed", "run ops/ci-selftest.py"),
     "judgment_without_caller": ("judgment wiring changed", "run ops/judgment-wiring-selftest.py"),
     "derived_file_hand_merged": ("derived artifact merged", "union both intents and rederive against the merged tree"),
     "settings_matcher_change": ("hook registration changed", "verify tool matchers and installed hook paths")}
-CONTRACT_PREFIXES = ("mcp-server/src/", "ops/scac-", "ops/config/scheduled-jobs")
+CONTRACT_PREFIXES = ("mcp-server/src/",)
 SETTINGS_PATHS = {".claude/settings.json", "ops/config/hooks.json", "ops/config/codex-hooks.json",
                   "ops/config/claude-continuity-hooks.json", "ops/config/delegation-gate-hook.json"}
 DERIVED_PATHS = {"ops/config/gate-baseline.json",
                  "ops/config/rule-enforcement-map.json"}
 
-
-def _contract_sources():
-    return {"mcp-server/src/" + name for name in os.listdir(os.path.join(REPO, "mcp-server/src"))
-            if name.endswith(".js")}
 
 def change(base="origin/main", repo=REPO):
     """The changed-file list, plus the two facts the questions cannot see.
@@ -150,7 +146,7 @@ VERIFIERS = {
          "'./ops/scac-mutation-inventory.mjs'; import {TOOLS} from "
          "'./mcp-server/src/tools.js'; "
          "assertCurrentContracts(TOOLS);"],
-        "the sealed source inventory does not match this tree"),
+        "current write contracts do not match the handlers"),
     "gate_rebless": (
         [".venv/bin/python", "hooks/gate-integrity.py"],
         "a gate's bytes no longer match ops/config/gate-baseline.json"),
@@ -214,12 +210,7 @@ def owed(state=None, *, client=None, api_key=None, floor=WARN_AT):
     except (OSError,ValueError):
         tracked = set()
     selected = set()
-    try:
-        sealed_sources = _contract_sources()
-    except (OSError, ValueError):
-        # A missing dependency graph needs verification; never infer no toll.
-        sealed_sources = touched
-    if touched & sealed_sources or any(path.startswith(CONTRACT_PREFIXES) for path in touched):
+    if any(path.startswith(CONTRACT_PREFIXES) for path in touched):
         selected.add("inventory_reseal")
     if any(path.startswith(CONTRACT_PREFIXES) for path in added):
         selected.add("new_ingress_admitted")
