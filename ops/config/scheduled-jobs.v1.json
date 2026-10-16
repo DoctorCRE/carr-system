@@ -1552,10 +1552,10 @@
       },
       "expected_enabled": true,
       "expected_installed": true,
-      "log_path": "~/carr-system/out/disk-reaper.log",
+      "log_path": "~/carr-system/out/disk-reaper.jsonl",
       "log_max_age_seconds": 10800,
       "owner": "orchestrator",
-      "done_signal": "Successful disk-reaper execution recorded in ~/carr-system/out/disk-reaper.log",
+      "done_signal": "Each run appends one report row to ~/carr-system/out/disk-reaper.jsonl",
       "expectation_note": "New source declaration; schedule mirrors the installed launchd plist. Verify installation and first live run after source delivery."
     },
     {
