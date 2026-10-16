@@ -2,6 +2,7 @@
 """Exercise Codex-only hook installation and persisted trust through CLI dispatch."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import importlib.util
 import json
@@ -147,13 +148,17 @@ class FakeAppServer:
 
 def main() -> int:
     continuity = "/carr-system/ops/codex-continuity-hook.py"
-    source = {"hooks": {
-        "SessionStart": [_hook(continuity, "^(startup|resume|compact)$")],
-    }}
+    source = json.loads((REPO / "ops/config/codex-hooks.json").read_text().replace(
+        "{{REPO}}", "/carr-system"))
+    session_groups = source["hooks"]["SessionStart"]
+    assert len(session_groups) == 3
+    continuity_group = session_groups[1]
+    unrelated_groups = [session_groups[0], session_groups[2]]
     # The live file still carries a continuity hook on an event the adapter
     # retired; install must clear it and keep the unrelated hook beside it.
     live: dict[str, Any] = {
         "hooks": {
+            "SessionStart": unrelated_groups,
             "PreCompact": [_hook("/other/project/keep.py"), _hook(continuity)],
             "Stop": [_hook("/other/project/stop.py")],
         },
@@ -189,6 +194,38 @@ def main() -> int:
         app_server = FakeAppServer(codex_live, codex_config)
         mod.codex_app_server_request = app_server
 
+        invalid_sources = []
+        missing = copy.deepcopy(source)
+        missing["hooks"]["SessionStart"] = unrelated_groups
+        invalid_sources.append(missing)
+        duplicate_group = copy.deepcopy(source)
+        duplicate_group["hooks"]["SessionStart"].append(copy.deepcopy(continuity_group))
+        invalid_sources.append(duplicate_group)
+        duplicate_handler = copy.deepcopy(source)
+        duplicate_handler["hooks"]["SessionStart"][1]["hooks"] *= 2
+        invalid_sources.append(duplicate_handler)
+        for field, value in (("type", "prompt"), ("timeout", True), ("timeout", "10")):
+            malformed = copy.deepcopy(source)
+            malformed["hooks"]["SessionStart"][1]["hooks"][0][field] = value
+            invalid_sources.append(malformed)
+        for invalid in invalid_sources:
+            repo_source.write_text(json.dumps(invalid))
+            mod.sys.argv = ["config-as-code.py", "install-codex-continuity"]
+            assert mod.main() == 1
+            assert codex_live.read_text() == original_hooks
+            assert codex_config.read_text() == original_config
+            assert not app_server.batch_calls
+        repo_source.write_text(json.dumps(source))
+
+        desired, contracts = mod.canonical_codex_continuity_hooks()
+        assert desired == {"hooks": {"SessionStart": [continuity_group]}}
+        assert len(contracts) == 1
+        mixed = copy.deepcopy(source)
+        mixed["hooks"]["SessionStart"][1]["hooks"].append(_hook("/other/mixed.py")["hooks"][0])
+        repo_source.write_text(json.dumps(mixed))
+        assert mod.canonical_codex_continuity_hooks() == (desired, contracts)
+        repo_source.write_text(json.dumps(source))
+
         mod.sys.argv = ["config-as-code.py", "install-codex-continuity"]
         assert mod.main() == 0
         assert codex_live.read_text(encoding="utf-8") == original_hooks
@@ -212,7 +249,7 @@ def main() -> int:
         assert installed["permissions"] == {"keep": True}
         assert installed["hooks"]["Stop"] == live["hooks"]["Stop"]
         assert installed["hooks"]["PreCompact"] == [_hook("/other/project/keep.py")]
-        assert installed["hooks"]["SessionStart"] == source["hooks"]["SessionStart"]
+        assert installed["hooks"]["SessionStart"] == unrelated_groups + [continuity_group]
         assert len(app_server.batch_calls) == 1
         assert len(app_server.batch_calls[0]["edits"]) == 1
         parsed_config = tomllib.loads(codex_config.read_text(encoding="utf-8"))
@@ -316,6 +353,7 @@ def main() -> int:
         assert removed["hooks"]["PostCompact"] == [_hook("/other/new-hook.py")]
         assert removed["hooks"]["PreCompact"] == [_hook("/other/project/keep.py")]
         assert removed["hooks"]["Stop"] == live["hooks"]["Stop"]
+        assert removed["hooks"]["SessionStart"] == unrelated_groups
         assert removed["permissions"] == {"keep": True}
         parsed_config = tomllib.loads(codex_config.read_text(encoding="utf-8"))
         assert parsed_config["model"] == "keep-me" and parsed_config["custom"] == {"value": 7}
