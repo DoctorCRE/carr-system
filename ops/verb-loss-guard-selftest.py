@@ -58,10 +58,10 @@ class LedgerCursor:
 
 
 class LedgerBaselineTests(unittest.TestCase):
-    def deployment(self, **changes):
+    def deployment(self):
         return dict(service="carr-mcp", environment="production", state="complete",
                     verb_count=None, git_sha="a" * 40, provider_version_id="version",
-                    observed_at=datetime.datetime(2026, 10, 16), **changes)
+                    observed_at=datetime.datetime(2026, 10, 16))
 
     def run_reader(self, deployments, registry=True):
         cursor = LedgerCursor(deployments)

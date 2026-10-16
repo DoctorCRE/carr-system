@@ -29,7 +29,7 @@ EXIT CODES, and the shell caller depends on telling them apart:
       which must be allowed to establish the baseline rather than refused forever
   78  no credential in this environment (EX_CONFIG, the convention bin/nightly.sh
       and bin/run-scheduled.sh already use for "not configured here")
-  1   the ledger exists but could not be read — the caller must FAIL CLOSED
+  1   the ledger could not be read or lacks usable baseline evidence — FAIL CLOSED
 
 WHY FAIL CLOSED IS CHEAP HERE, stated so nobody softens it later: the Worker
 being deployed needs Postgres for every verb it serves. A deploy attempted while
@@ -140,11 +140,8 @@ def countless_rows_newer_than_baseline(cur, service, environment, observed_at):
     recurs, because the first failure was already written down in a docstring
     and that did not stop the second.
 
-    Reported, never fatal here. The caller decides — see the STALE BASELINE
-    block in bin/deploy-worker.sh for why it warns loudly rather than refusing:
-    refusing would block a legitimate release on a bookkeeping gap in rows that
-    already exist, which is a control lowering the floor it was meant to raise
-    (decision 91020f79).
+    Count-only reads report staleness on stderr. Registry reads refuse stale
+    evidence because the deployed name set must describe the latest shipment.
     """
     cur.execute(
         """select count(*)
@@ -192,6 +189,20 @@ def main() -> int:
     try:
         with conn, conn.cursor() as cur:
             row = baseline_row(cur, service, environment)
+            if not row:
+                cur.execute(
+                    """select count(*)
+                         from ops.deployment d
+                         join ops.service s on s.id = d.service_id
+                        where s.key = %s
+                          and d.environment = %s
+                          and d.state = any(%s)""",
+                    (service, environment, list(SHIPPED_STATES)))
+                if cur.fetchone()[0]:
+                    print(f"last-deployed-verb-count: shipped deployments of {service} "
+                          f"to {environment} lack a usable verb count; "
+                          "a baseline must be recorded before deployment", file=sys.stderr)
+                    return 1
             stale_newer = (
                 countless_rows_newer_than_baseline(cur, service, environment, row[4])
                 if row else 0)
@@ -200,9 +211,9 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    if not row or row[0] is None:
-        print(f"last-deployed-verb-count: no prior deployment of {service} to "
-              f"{environment} carries a verb count", file=sys.stderr)
+    if not row:
+        print(f"last-deployed-verb-count: no prior shipped deployment of {service} to "
+              f"{environment}", file=sys.stderr)
         return 3
 
     # STDERR, never stdout: the caller reads stdout as the number itself.
