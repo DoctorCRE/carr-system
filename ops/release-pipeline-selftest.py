@@ -3529,24 +3529,29 @@ class CapabilityRecovery(Base):
         self.assertEqual(loops[0], loops[1])
         self.assertEqual(retry.runner.calls, [])
 
-    def test_repaired_token_stays_paused_and_report_names_all_recoveries(self):
+    def test_report_tracks_only_lanes_still_failed_after_token_repair(self):
         sha = self.missing()
         calls = []
         self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=calls).tick(["worker"]), 1)
         notification = calls[0][1]["body"]
         self.assertIn(sha, notification)
         self.assertIn("automatically retries", notification)
-        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-        pipe = self.fx.pipeline(FakeRunner())
+        live = {"sha": self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live, verbs=calls)
         state = pipe.store.load()
         state["app"] = {"failed_sha": "b" * 40, "failed_step": "credential-missing"}
         pipe.store.save(state)
-        self.assertEqual(pipe.tick(["worker"]), 0)
-        self.assertEqual(pipe.runner.calls, [])
         report = rp.report(pipe.store, "2099-01-01")
         for lane, head in (("worker", sha), ("app", "b" * 40)):
             self.assertIn(f"--lane {lane} --sha {head}", report)
         self.assertIn("verif", report.lower())
+        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        report = rp.report(pipe.store, "2099-01-01")
+        self.assertNotIn(f"--lane worker --sha {sha}", report)
+        self.assertIn(f"--lane app --sha {'b' * 40}", report)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in calls], ["add-loop", "add-room-turn"])
 
     def test_loop_operation_key_binds_complete_payload(self):
         first = rp.blocker_loop("CLOUDFLARE_API_TOKEN", "missing from /one")
