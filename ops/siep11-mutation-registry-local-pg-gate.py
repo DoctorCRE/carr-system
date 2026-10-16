@@ -15,7 +15,7 @@ from pathlib import Path
 import psycopg
 
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
-from scac_mutation_db_inventory import project, summarize
+from scac_mutation_db_inventory import project, summarize, validate_current_catalog
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -135,7 +135,7 @@ def main() -> int:
                 "select catalog_projection from ops.scac_mutation_registry_version where registry_version='scac-mutation-registry.v1'"
             ).fetchone()[0]
             expected_categories = {
-                "secdef_execute": sealed_projection["secdef_execute"],
+                "secdef_execute": validate_current_catalog(cur)["categories"]["secdef_execute"],
                 "relation_dml": sealed_projection["relation_dml"],
                 "column_dml": sealed_projection["column_dml"],
                 "job_definitions": JOB_DEFINITION_CATALOG,

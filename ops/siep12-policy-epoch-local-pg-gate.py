@@ -14,7 +14,7 @@ from pathlib import Path
 
 from rule_projection_fixture import seed_reviewed_rule_projection as seed_rule_projection
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
-from scac_mutation_db_inventory import project, project_escalation, project_role_authority, summarize
+from scac_mutation_db_inventory import project, project_escalation, project_role_authority, summarize, validate_current_catalog
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -109,7 +109,7 @@ def scenario_registry_and_ledger(cur, ctx) -> None:
         raise RuntimeError(f"live DB role authority differs from current sealed registry: {role_authority!r}")
     expected_catalog = {
         "categories": {
-            "secdef_execute": current_projection["secdef_execute"],
+            "secdef_execute": validate_current_catalog(cur)["categories"]["secdef_execute"],
             "relation_dml": current_projection["relation_dml"],
             "column_dml": current_projection["column_dml"],
             "job_definitions": {
