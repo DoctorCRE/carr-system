@@ -729,60 +729,6 @@ test("Codex OAuth and surface-isolated local transport share the verified owner 
   assert.equal(oauth.sponsoring_human_slug, "joe");
 });
 
-test("event retries use insert-do-nothing and reject a conflicting deterministic payload", async () => {
-  const event = { id: "ev-1", native_task_id: "task-1", project_id: "p", cwd: "/repo", event_type: "pre_compact", cursor: null, transcript_ref: null };
-  let mode = "insert";
-  const client = { query: async (sql) => {
-    if (sql.includes("select project_id,cwd from codex_continuity_checkpoint")) return { rows: [] };
-    if (sql.includes("insert into codex_continuity_event")) return { rows: mode === "insert" ? [event] : [] };
-    if (sql.includes("from codex_continuity_event where")) return { rows: [{ ...event, event_type: "different" }] };
-    return { rows: [] };
-  } };
-  let writes = 0;
-  const eventTools = codexContinuityTools({
-    ToolError: TestToolError, assertNoCallerAuthorityFields: () => {},
-    withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => { writes += 1; },
-  });
-  const args = { idempotency_key: key, runtime: "codex", native_task_id: "task-1", project_id: "p", cwd: "/repo", event_type: "pre_compact" };
-  await eventTools["codex-record-event"].handler(client, actor, args);
-  mode = "conflict";
-  await assert.rejects(() => eventTools["codex-record-event"].handler(client, actor, { ...args, event_type: "post_compact" }), error => error.payload?.error === "codex_event_key_conflict");
-  assert.equal(writes, 1);
-});
-
-test("event replay treats reordered JSONB cursor keys as the same payload", async () => {
-  const event = { id: "ev-2", native_task_id: "task-1", project_id: "p", cwd: "/repo", event_type: "pre_compact", cursor: { b: 2, a: 1 }, transcript_ref: null };
-  let mode = "insert";
-  const client = { query: async sql => {
-    if (sql.includes("select project_id,cwd from codex_continuity_checkpoint")) return { rows: [] };
-    if (sql.includes("insert into codex_continuity_event")) return { rows: mode === "insert" ? [event] : [] };
-    if (sql.includes("from codex_continuity_event where")) return { rows: [event] };
-    return { rows: [] };
-  } };
-  let writes = 0;
-  const eventTools = codexContinuityTools({
-    ToolError: TestToolError, assertNoCallerAuthorityFields: () => {},
-    withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => { writes += 1; },
-  });
-  const args = { idempotency_key: key, runtime: "codex", native_task_id: "task-1", project_id: "p", cwd: "/repo", event_type: "pre_compact", cursor: { a: 1, b: 2 } };
-  await eventTools["codex-record-event"].handler(client, actor, args);
-  mode = "retry";
-  await eventTools["codex-record-event"].handler(client, actor, args);
-  assert.equal(writes, 2);
-});
-
-test("event rejects a task binding change once a checkpoint exists", async () => {
-  const client = { query: async sql => {
-    if (sql.startsWith("select pg_advisory")) return { rows: [] };
-    if (sql.startsWith("select id,native_task_id,project_id")) return { rows: [{ id: "cp-1", project_id: "p", cwd: "/original", checkpoint_version: 1 }] };
-    if (sql.startsWith("select project_id,cwd from codex_continuity_event")) return { rows: [] };
-    throw new Error("must not insert a mismatched event");
-  } };
-  await assert.rejects(() => tools()["codex-record-event"].handler(client, actor, {
-    idempotency_key: key, runtime: "codex", native_task_id: "task-1", project_id: "p", cwd: "/repo", event_type: "pre_compact",
-  }), error => error.payload?.error === "codex_event_binding_conflict");
-});
-
 test("the first lifecycle event binds checkpoint identity before any checkpoint exists", async () => {
   const client = { query: async sql => {
     if (sql.startsWith("select pg_advisory")) return { rows: [] };
@@ -795,29 +741,6 @@ test("the first lifecycle event binds checkpoint identity before any checkpoint 
     idempotency_key: key, runtime: "codex", native_task_id: "task-1", project_id: "other-project", cwd: "/other",
     expected_version: 0, state,
   }), error => error.payload?.error === "codex_checkpoint_binding_conflict");
-});
-
-test("checkpoint and event writers take the identical tenant-owner-task advisory lock", async () => {
-  const lockParams = [];
-  const client = { query: async (sql, params) => {
-    if (sql.startsWith("select pg_advisory")) { lockParams.push(params); return { rows: [] }; }
-    if (sql.startsWith("select id,native_task_id,project_id") || sql.startsWith("select project_id,cwd from codex_continuity_event")) return { rows: [] };
-    if (sql.startsWith("insert into codex_continuity_checkpoint"))
-      return { rows: [{ id: "cp-1", native_task_id: "task-1", project_id: "p", cwd: "/repo", state, cursor: null, checkpoint_version: 1 }] };
-    if (sql.startsWith("insert into codex_continuity_revision")) return { rows: [] };
-    if (sql.includes("insert into codex_continuity_event"))
-      return { rows: [{ id: "ev-1", native_task_id: "task-2", project_id: "p", cwd: "/repo", event_type: "pre_compact", cursor: null, transcript_ref: null }] };
-    return { rows: [] };
-  } };
-  await tools()["codex-checkpoint"].handler(client, actor, {
-    idempotency_key: key, runtime: "codex", native_task_id: "task-1", project_id: "p", cwd: "/repo",
-    expected_version: 0, state,
-  });
-  await tools()["codex-record-event"].handler(client, actor, {
-    idempotency_key: key, runtime: "codex", native_task_id: "task-2", project_id: "p", cwd: "/repo",
-    event_type: "pre_compact",
-  });
-  assert.deepEqual(lockParams, [["carr-internal:joe:task-1"], ["carr-internal:joe:task-2"]]);
 });
 
 test("recovery returns bounded pending prompt receipts, highwater, omission count and known coverage", async () => {
@@ -944,18 +867,14 @@ test("real PostgreSQL handlers serialize races and isolate tenant, owner, and ta
     assert.equal(cas.filter(result => result.status === "rejected" &&
       result.reason.payload?.error === "codex_checkpoint_version_conflict").length, 1);
 
-    const eventKey = randomUUID();
-    const eventArgs = { ...base, idempotency_key: eventKey, event_type: "user_prompt_submit",
-      cursor: { byte_offset: 10, checkpoint_version: 1 }, transcript_ref: "/integration/rollout.jsonl" };
-    const replay = await Promise.all([
-      invoke("codex-record-event", eventArgs),
-      invoke("codex-record-event", eventArgs),
-    ]);
-    assert.equal(replay[0].event.id, replay[1].event.id);
-    await assert.rejects(() => invoke("codex-record-event", {
-      ...eventArgs, cursor: { byte_offset: 11, checkpoint_version: 1 },
-    }), error => error.payload?.error === "codex_event_key_conflict",
-    "a changed cursor under an accepted event key must be rejected");
+    const seed = await pool.connect();
+    try {
+      await seed.query(`insert into codex_continuity_event
+        (organization_tenant_id,owner_actor_id,native_task_id,project_id,cwd,event_type,cursor,transcript_ref,idempotency_key)
+        values ('carr-internal',$1,$2,'integration','/integration','user_prompt_submit',$3::jsonb,$4,$5)`,
+        [joeOwnerId, task, JSON.stringify({ byte_offset: 10, checkpoint_version: 1 }),
+          "/integration/rollout.jsonl", randomUUID()]);
+    } finally { seed.release(); }
     const recovered = await invoke("codex-read-recovery", base);
     assert.equal(recovered.found, true);
     assert.equal(recovered.unincorporated_user_turns.length, 1);
@@ -973,18 +892,15 @@ test("real PostgreSQL handlers serialize races and isolate tenant, owner, and ta
       ...base, checkpoint_version: 1, expected_digest: historical.revision.digest,
     });
     assert.equal(verifiedHistorical.revision.integrity, "verified");
-    await assert.rejects(() => invoke("codex-record-event", { ...eventArgs, event_type: "pre_compact" }),
-      error => error.payload?.error === "codex_event_key_conflict");
-
     const firstBindingRace = await Promise.allSettled([
-      invoke("codex-record-event", { ...base, native_task_id: bindingTask, project_id: "event-first",
-        cwd: "/event-first", idempotency_key: randomUUID(), event_type: "pre_compact" }),
+      invoke("codex-checkpoint", { ...base, native_task_id: bindingTask, project_id: "first-project",
+        cwd: "/first-project", idempotency_key: randomUUID(), expected_version: 0, state }),
       invoke("codex-checkpoint", { ...base, native_task_id: bindingTask, project_id: "checkpoint-first",
         cwd: "/checkpoint-first", idempotency_key: randomUUID(), expected_version: 0, state }),
     ]);
     assert.equal(firstBindingRace.filter(result => result.status === "fulfilled").length, 1);
     assert.equal(firstBindingRace.filter(result => result.status === "rejected" &&
-      /codex_(event|checkpoint)_binding_conflict/.test(result.reason.payload?.error)).length, 1);
+      /codex_checkpoint_binding_conflict/.test(result.reason.payload?.error)).length, 1);
 
     const foreign = await pool.connect();
     try {
