@@ -259,45 +259,44 @@ test("worst-case capsule reserves all mandatory recovery sections before optiona
     assert.match(capsule, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
-for (const prompt of ["checkpoint_request", "_activation_envelope"]) {
-  test(`${prompt} instructs an accepted registered checkpoint call`, async () => {
-    const rendered = spawnSync("python3", ["-c", `
-import importlib.util,json,sys
+test("the SessionStart activation instructs an accepted registered checkpoint call", async () => {
+  const rendered = spawnSync("python3", ["-c", `
+import importlib.util,json,sys,tempfile
 from pathlib import Path
 path = Path("ops/claude-continuity-hook.py")
 spec = importlib.util.spec_from_file_location("continuity_hook", path)
 hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
-hook.unsent_receipts = lambda: 0
-identity,cursor = json.load(sys.stdin)
-print(getattr(hook, sys.argv[1])(identity,cursor,{"ok":True,"found":False,"checkpoint":None}))
-`, prompt], { cwd: new URL("../../", import.meta.url),
-      input: JSON.stringify([base, state.source_cursor]), encoding: "utf8" });
-    assert.equal(rendered.status, 0, rendered.stderr);
-    const argumentLine = rendered.stdout.split("\n").find(line => line.startsWith("arguments="));
-    assert.ok(argumentLine, "the hook must publish complete MCP arguments as JSON");
-    const args = JSON.parse(argumentLine.slice("arguments=".length));
-    assert.equal(args.binding, undefined);
-    for (const field of TOOLS["claude-checkpoint"].inputSchema.required)
-      assert.ok(Object.hasOwn(args, field), `missing required field ${field}`);
-    assert.equal(args.session_id, base.session_id);
-    assert.equal(args.transcript_path_digest, base.transcript_path_digest);
-    assert.equal(args.expected_version, 0);
-    assert.equal(args.compaction_generation, 0);
-    assert.ok(args.idempotency_key);
-    assert.deepEqual(args.state.source_cursor, { byte_offset: 1234 });
-    args.state.objective = state.objective;
-    args.state.next_action = state.next_action;
-    await assertRegisteredToolInput("claude-checkpoint", TOOLS["claude-checkpoint"], args);
-    const client = memoryClient();
-    const accepted = await tools()["claude-checkpoint"].handler(client, actor, args);
-    assert.equal(accepted.ok, true);
-    assert.equal(accepted.checkpoint.checkpoint_version, 1);
-    const recovered = await tools()["claude-read-recovery"].handler(client, actor, base);
-    assert.equal(recovered.found, true);
-    assert.equal(recovered.checkpoint.state.objective, state.objective);
-  });
-}
+identity,offset = json.load(sys.stdin)
+with tempfile.NamedTemporaryFile() as transcript:
+  transcript.write(b"x" * offset); transcript.flush()
+  print(hook.activation(identity, Path(transcript.name), {"ok":True,"found":False,"checkpoint":None}))
+`], { cwd: new URL("../../", import.meta.url),
+    input: JSON.stringify([base, state.source_cursor.byte_offset]), encoding: "utf8" });
+  assert.equal(rendered.status, 0, rendered.stderr);
+  const argumentLine = rendered.stdout.split("\n").find(line => line.startsWith("arguments="));
+  assert.ok(argumentLine, "the hook must publish complete MCP arguments as JSON");
+  const args = JSON.parse(argumentLine.slice("arguments=".length));
+  assert.equal(args.binding, undefined);
+  for (const field of TOOLS["claude-checkpoint"].inputSchema.required)
+    assert.ok(Object.hasOwn(args, field), `missing required field ${field}`);
+  assert.equal(args.session_id, base.session_id);
+  assert.equal(args.transcript_path_digest, base.transcript_path_digest);
+  assert.equal(args.expected_version, 0);
+  assert.equal(args.compaction_generation, 0);
+  assert.ok(args.idempotency_key);
+  assert.deepEqual(args.state.source_cursor, { byte_offset: 1234 });
+  args.state.objective = state.objective;
+  args.state.next_action = state.next_action;
+  await assertRegisteredToolInput("claude-checkpoint", TOOLS["claude-checkpoint"], args);
+  const client = memoryClient();
+  const accepted = await tools()["claude-checkpoint"].handler(client, actor, args);
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.checkpoint.checkpoint_version, 1);
+  const recovered = await tools()["claude-read-recovery"].handler(client, actor, base);
+  assert.equal(recovered.found, true);
+  assert.equal(recovered.checkpoint.state.objective, state.objective);
+});
 
 test("the reported nested binding shape is refused by the registered schema", async () => {
   await assert.rejects(() => assertRegisteredToolInput("claude-checkpoint", TOOLS["claude-checkpoint"], {

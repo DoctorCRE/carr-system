@@ -135,7 +135,7 @@ if [ "${1:-}" = "--preflight" ]; then
   say ""
   say "  gates, as Dell will run them:"
   for t in guard git-writer-gate \
-           context-handoff-gate corpus-render-gate config-as-code migrate-dell; do
+           corpus-render-gate config-as-code migrate-dell; do
     F="$TMP/home/carr-system/ops/$t-selftest.py"
     [ -f "$F" ] || { print -r -- "    note  $t — not in the clone"; continue; }
     # CARR_VAULT is passed through deliberately. The scratch HOME has no Drive
@@ -506,10 +506,9 @@ run_check() {
 }
 run_check "egress guard"     "ops/guard-selftest.py"
 run_check "git-writer gate"  "ops/git-writer-gate-selftest.py"
-# Added after the two gates below shipped (2026-08-10), later than this script.
+# Added after the gate below shipped (2026-08-10), later than this script.
 # Step 3 installs every gate in the repo's hooks block, so a verify list that
 # lags the hooks block certifies a machine it has not fully checked.
-run_check "context-handoff"  "ops/context-handoff-gate-selftest.py"
 run_check "corpus-render"    "ops/corpus-render-gate-selftest.py"
 
 if $PY "$REPO/ops/config-as-code.py" check </dev/null >/tmp/mig-drift.log 2>&1; then

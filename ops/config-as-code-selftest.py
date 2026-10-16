@@ -49,7 +49,7 @@ def copy_continuity_contract(repo: Path) -> None:
 
 DESIRED = {"hooks": {
     "Stop": [{"hooks": [{
-        "type": "command", "command": "/Users/booko/carr-system/hooks/context-handoff-gate.py", "timeout": 15,
+        "type": "command", "command": "/Users/booko/carr-system/hooks/scheduled-run-record.py", "timeout": 15,
     }]}],
 }}
 LIVE = {
@@ -814,7 +814,7 @@ def main():
         ("unrelated Stop hook preserved", "/Users/booko/other/hooks/keep.py" in names),
         ("mixed group keeps unrelated hook", "/Users/booko/other/hooks/mixed.py" in names),
         ("stale CARR hook removed", all("/carr-system/hooks/old" not in name for name in names)),
-        ("desired CARR hook installed once", names.count("/Users/booko/carr-system/hooks/context-handoff-gate.py") == 1),
+        ("desired CARR hook installed once", names.count("/Users/booko/carr-system/hooks/scheduled-run-record.py") == 1),
         ("second merge is idempotent", again == merged),
         ("Call Mode LaunchAgent resolves to its tracked tool source",
          call_mode_source.endswith(

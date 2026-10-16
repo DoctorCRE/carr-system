@@ -95,7 +95,6 @@ step "fetch allowlist" ./.venv/bin/python ops/fetch-allowlist.py
 step "corpus push" ./.venv/bin/python tools/corpus-sync.py --push
 step "vendor level drift" ./.venv/bin/python ops/vendor-level-drift-check.py
 step "system costs" ./run.sh costs --publish --alerts
-step "Claude continuity spool drain" ./.venv/bin/python tools/health-check.py --section claude-continuity-spool
 step "Grok authentication health" ./.venv/bin/python tools/health-check.py --section grok-session
 step "health breach response" ./run.sh health --act
 step "defect bridge" ./.venv/bin/python ops/defect-bridge.py
