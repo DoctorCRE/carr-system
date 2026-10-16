@@ -45,8 +45,8 @@ TWO DELIBERATE EXCEPTIONS, both held by other suites and honoured here:
 
 WHAT IS CHECKED, deterministically and without running a hook:
   1. every command in hooks.json that launches a CARR hook or ops script
-     starts with `{{REPO}}/.venv/bin/python`, after any leading VAR=value
-     assignments, except the run-record-gate launcher above;
+     starts with `{{REPO}}/.venv/bin/python`, after an optional missing-file
+     guard and leading VAR=value assignments, except the launcher above;
   2. no command in hooks.json still says `/usr/bin/env python3`;
   3. on this machine, if the venv interpreter exists it reports 3.10 or newer,
      so the pin points at something that can actually run the gates.
@@ -100,7 +100,8 @@ def main():
         unpinned = []
         forbidden = []
         for event, command in rows:
-            body = command[ASSIGNMENT.match(command).end():]
+            invocation = command.rsplit("; fi; ", 1)[-1]
+            body = invocation[ASSIGNMENT.match(invocation).end():]
             if "{{REPO}}/hooks/" in body or "{{REPO}}/ops/" in body:
                 if not body.startswith(PIN):
                     unpinned.append(f"{event}: {command}")
