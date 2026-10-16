@@ -1311,6 +1311,35 @@ class PrerequisiteRecovery(Base):
                 self.assertEqual(verbs, [])
                 self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
 
+    def test_tracked_venv_link_conflict_waits_for_fix_forward_after_restart(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        blob = git(self.fx.repo, "hash-object", "-w", "README.md")
+        git(self.fx.repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},.venv")
+        git(self.fx.repo, "commit", "-q", "-m", "tracked venv conflict")
+        git(self.fx.repo, "push", "-q", "origin", "HEAD:main")
+        sha = git(self.fx.repo, "rev-parse", "HEAD")
+        verbs = []
+        runner = RealGitRunner("")
+        original_run = runner.run
+        def run(argv, **kw):
+            if argv[0] == "ln":
+                runner.calls.append(("venv-link", list(argv)))
+                result = subprocess.run(argv, cwd=kw["cwd"], env=kw["env"], capture_output=True, text=True)
+                kw["log"].parent.mkdir(parents=True, exist_ok=True)
+                kw["log"].write_text(result.stdout + result.stderr)
+                return rp.Result(result.returncode, result.stdout + result.stderr)
+            return original_run(argv, **kw)
+        runner.run = run
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "venv-link")
+        self.assertIn("File exists", Path(self.fx.records()[-1]["log"]).read_text())
+        for _ in range(2):
+            retry = FakeRunner()
+            self.assertEqual(self.fx.pipeline(retry, verbs=verbs).tick(["worker"]), 0)
+            self.assertEqual(retry.calls, [])
+            self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
     def test_missing_venv_is_probed_before_any_release_step_then_recovers(self):
         python = self.fx.repo / ".venv/bin/python"
         python.unlink()
@@ -3882,7 +3911,7 @@ class FailClosedVenv(Base):
         runner = FakeRunner()
         self.assertEqual(self.fx.pipeline(runner).tick(["worker"]), 1)
         rec = self.fx.records()[-1]
-        self.assertEqual(rec["step"], "venv-link")
+        self.assertEqual(rec["step"], "venv-source-missing")
         self.assertIn(".venv", rec.get("detail", ""))
         self.assertIn("bin/python", rec.get("detail", ""))
         # the real `ln -s` never ran — no dangling symlink was created.
