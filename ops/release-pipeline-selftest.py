@@ -1268,6 +1268,37 @@ class PrerequisiteRecovery(Base):
                     self.assertEqual(fx.state()[lane]["failed_sha"], sha)
                     self.assertEqual(len(verbs), 3)
 
+    def test_second_auth_transport_failure_retains_first_diagnosis_across_restarts(self):
+        for lane in ("worker", "app"):
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                cfg = fx.config()
+                cfg[lane]["enabled"] = True
+                verbs = []
+                def pipeline(runner):
+                    pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                    if lane == "app":
+                        pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                    return pipe
+                first = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "network unavailable"})
+                self.assertEqual(pipeline(first).tick([lane]), 1)
+                original_turn = verbs[0][1]
+                for _ in range(2):
+                    runner = FakeRunner(outputs={"wrangler-auth": "network unavailable"})
+                    original_run = runner.run
+                    def run(argv, **kw):
+                        if kw["log"].stem.endswith("wrangler-auth"):
+                            runner.fail_at = ("wrangler-auth" if "wrangler-auth" in runner.names() else None)
+                        return original_run(argv, **kw)
+                    runner.run = run
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(runner.names(), ["wrangler-auth", "wrangler-auth"])
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-auth")
+                    self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                self.assertEqual(verbs, [("add-room-turn", original_turn)])
+                self.assertEqual(fx.state()[lane]["dispatches"][sha], 1)
+
     def test_code_failures_still_require_a_fix_forward_merge(self):
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         pipe = self.fx.pipeline(FakeRunner())
