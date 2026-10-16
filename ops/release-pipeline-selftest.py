@@ -1239,6 +1239,35 @@ class PrerequisiteRecovery(Base):
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
         self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
 
+    def test_auth_probe_install_failure_reaches_diagnosis_after_restart(self):
+        for lane in ("worker", "app"):
+            for fail_at in ("wrangler-install", None):
+                with self.subTest(lane=lane, fail_at=fail_at), tempfile.TemporaryDirectory() as tmp:
+                    fx = Fixture(Path(tmp))
+                    sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                    cfg = fx.config()
+                    cfg[lane]["enabled"] = True
+                    verbs = []
+                    def pipeline(runner):
+                        pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                        if lane == "app":
+                            pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                        return pipe
+                    (fx.cred / "tokens.env").write_text("")
+                    self.assertEqual(pipeline(FakeRunner()).tick([lane]), 1)
+                    (fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+                    shutil.rmtree(fx.repo / "out/release-pipeline/toolchain")
+                    runner = FakeRunner(fail_at=fail_at)
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-install")
+                    self.assertEqual(fx.records()[-1]["step"], "wrangler-install")
+                    self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn", "add-room-turn"])
+                    retry = FakeRunner()
+                    self.assertEqual(pipeline(retry).tick([lane]), 0)
+                    self.assertEqual(retry.calls, [])
+                    self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                    self.assertEqual(len(verbs), 3)
+
     def test_code_failures_still_require_a_fix_forward_merge(self):
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         pipe = self.fx.pipeline(FakeRunner())
