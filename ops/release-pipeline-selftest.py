@@ -12,7 +12,7 @@ What is pinned, one test class each:
   batching         N merges since the last release ship as ONE release of the
                    latest SHA
   stop on failure  a nonzero step stops the lane, records step/rc/log, enqueues
-                   exactly one diagnosis turn, and the same SHA is never retried
+                   exactly one diagnosis turn; code failures wait for a new SHA
   staging guard    a failed staging step never reaches promotion
   kill switch      config flag, local override file, per-lane flag
   lock             a second concurrent tick runs nothing
@@ -1226,6 +1226,30 @@ class PrerequisiteRecovery(Base):
         self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
         self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn"])
+
+    def test_auth_transport_failure_recovers_after_a_successful_probe(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "network unavailable"})
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "wrangler-auth")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
+    def test_code_failures_still_require_a_fix_forward_merge(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        pipe = self.fx.pipeline(FakeRunner())
+        for step in ("app-build", "npm-ci", "wrangler-install", "staging", "migrate-apply", "smoke-post"):
+            with self.subTest(step=step):
+                pipe.store.save({"worker": {"failed_sha": sha, "failed_step": step}})
+                runner, verbs = FakeRunner(), []
+                self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(verbs, [])
+                self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
 
     def test_missing_venv_is_probed_before_any_release_step_then_recovers(self):
         python = self.fx.repo / ".venv/bin/python"
@@ -2463,6 +2487,19 @@ class ReleaseTarget(Base):
         self.assertEqual((rec["status"], rec["sha"]), ("shipped", target))
         return rec
 
+    def test_repaired_credential_retries_failed_canary_below_unverified_head(self):
+        target = self.fx.commit({"mcp-server/src/z.js": "1"})
+        head = self.fx.commit({"mcp-server/src/a.js": "1"})
+        gh = FakeGitHub(canary={target: self.GREEN, head: ("in_progress", None)})
+        (self.fx.cred / "tokens.env").write_text("")
+        self.assertEqual(self.fx.pipeline(FakeRunner(), github=gh).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], target)
+        runner = FakeRunner()
+        self.assertEqual(self.fx.pipeline(runner, github=gh).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+        self.assert_shipped(*self.ship(gh), target)
+
     def test_head_in_progress_ships_the_older_green_commit(self):
         z = self.fx.commit({"mcp-server/src/z.js": "1"})
         a = self.fx.commit({"mcp-server/src/a.js": "1"})
@@ -3498,7 +3535,7 @@ class CapabilityRecovery(Base):
         self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=calls).tick(["worker"]), 1)
         notification = calls[0][1]["body"]
         self.assertIn(sha, notification)
-        self.assertIn("clear-failed", notification)
+        self.assertIn("automatically retries", notification)
         (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
         pipe = self.fx.pipeline(FakeRunner())
         state = pipe.store.load()
@@ -3692,7 +3729,7 @@ class DeployCredential(unittest.TestCase):
                 self.assertIn("ops/release-pipeline.py report", body)
                 self.assertIn(f"clear-failed --lane {lane} --sha {sha}",
                               rp.report(store, "2099-01-01"))
-                self.assertNotIn("every tick", body)
+                self.assertIn("automatically retries", body)
                 self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
                 live = {"sha": self.fx.base}
                 runner = FakeRunner(live=live)

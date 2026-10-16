@@ -941,8 +941,7 @@ class Pipeline:
                              f"would only produce a dangling symlink whose health read then "
                              f"reports psycopg/openpyxl as MISSING, reading like a code bug when "
                              f"it is really this machine's environment. Fix the venv at "
-                             f"{self.repo} (a missing venv never heals itself; retrying the same "
-                             f"SHA will not help).")
+                             f"{self.repo}; the next scheduled run checks for its repair before retrying.")
         self.step("venv-link", ["ln", "-s", str(src_venv), str(wt / ".venv")], self.repo)
         self.step("npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], mcp, timeout=1800)
 
@@ -1537,6 +1536,19 @@ class Pipeline:
         self.finish_release_proof(proof, state, lane)
         self.out(f"release-pipeline[{lane}]: reconciled durable release {proof['sha'][:12]}")
 
+    def failed_prerequisite_ready(self, step: str) -> bool:
+        """Probe environment failures without replaying a release or its diagnosis."""
+        if step == "venv-link":
+            return (self.repo / ".venv/bin/python").exists()
+        if step not in {"credential-missing", "wrangler-auth"}:
+            return False
+        try:
+            self.wrangler_auth()
+        except StepFailed as failure:
+            self.out(f"  prerequisite still unavailable: {failure.step}; log {failure.log or '-'}")
+            return False
+        return True
+
     def run_lane(self, lane: str) -> int:
         self.observations.clear()
         self.dependency_evidence.clear()
@@ -1553,6 +1565,7 @@ class Pipeline:
         lane_state = state.setdefault(lane, {})
         sha = base = ""
         self.observed_main = ""
+        recovered_failure = ""
         try:
             repo_dir = lane_repo_dir(self.cfg, lane, self.repo)
             # Read and fetch an immutable main object without writing any
@@ -1591,9 +1604,11 @@ class Pipeline:
                 self.reconcile_staging_failure(state, lane, base, repo_dir)
                 lane_state = state.setdefault(lane, {})
             if sha == lane_state.get("failed_sha"):
-                self.out(f"release-pipeline[{lane}]: {sha[:12]} failed at "
-                         f"{lane_state.get('failed_step')}; waiting for a fix-forward merge")
-                return 0
+                if not self.failed_prerequisite_ready(lane_state.get("failed_step", "")):
+                    self.out(f"release-pipeline[{lane}]: {sha[:12]} failed at "
+                             f"{lane_state.get('failed_step')}; waiting for prerequisite repair or a fix-forward merge")
+                    return 0
+                recovered_failure = sha
             try:
                 self.git("merge-base", "--is-ancestor", base, sha, cwd=repo_dir)
             except StepFailed:
@@ -1610,7 +1625,9 @@ class Pipeline:
                     self.out(f"release-pipeline[{lane}]: main is {head[:12]}; newest green canary "
                              f"target is {sha[:12]}")
                 failed = lane_state.get("failed_sha")
-                if failed and self._at_or_before(sha, failed, repo_dir):
+                recovered = sha == failed and (recovered_failure == sha
+                    or self.failed_prerequisite_ready(lane_state.get("failed_step", "")))
+                if failed and self._at_or_before(sha, failed, repo_dir) and not recovered:
                     self.out(f"release-pipeline[{lane}]: target {sha[:12]} is at or before the failed "
                              f"{failed[:12]} ({lane_state.get('failed_step')}); waiting for a green "
                              "fix-forward")
@@ -1700,14 +1717,12 @@ class Pipeline:
                     entry = next(c for c in inventory["credentials"] if c["name"] == "cloudflare-deploy-token")
                     checked_path = expand(self.cfg.get("credential_dir", "~/.config/carr")) / CLOUDFLARE_TOKEN_FILE
                     remedy = entry["replacement_plan"].replace(entry["probe"]["path"], str(checked_path))
-                recovery = (f"The {lane} lane failed for SHA {failed_sha} and will not retry it. "
-                            "After repairing and verifying the credential, run "
-                            "ops/release-pipeline.py report to read every currently failed lane, "
-                            "its full SHA and its exact clear-failed command. Other lanes may fail "
-                            "on this same credential after this notification. Run the reported "
-                            "command for each lane paused by this credential; the next tick retries "
-                            "those SHAs. "
-                            "A fix-forward merge with a new main SHA also resumes the lane."
+                recovery = (f"The {lane} lane failed for SHA {failed_sha}. "
+                            "The next scheduled run probes the credential and automatically retries "
+                            "once it is accepted. While the probe fails, no release is attempted. "
+                            "Use ops/release-pipeline.py report to read every currently failed lane "
+                            "and its full SHA. Other lanes may fail on this same credential after "
+                            "this notification."
                             if failed_sha else "")
                 pending[capability] = {"lane": lane, "args": blocker_loop(
                     capability, detail, remedy=remedy, recovery=recovery)}
