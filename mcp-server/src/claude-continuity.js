@@ -1,15 +1,13 @@
 // Bounded record-backed continuity for native Claude sessions. Transcript
-// bodies remain local; the Worker stores semantic checkpoints and immutable
-// lifecycle receipts bound to an authenticated surface principal and leaf.
+// bodies remain local; the Worker stores semantic checkpoints bound to an
+// authenticated surface principal and leaf.
 import { organizationTenantForActor } from "./identity.js";
-import { canonicalJson } from "./artifact-trust.js";
 
 const RUNTIME = "claude";
 const MAX_VERSION = Number.MAX_SAFE_INTEGER;
-const STATE_BYTES = 24000, CURSOR_BYTES = 2000, TELEMETRY_BYTES = 4000, CAPSULE_BYTES = 3200, TEXT = 4000;
+const STATE_BYTES = 24000, CURSOR_BYTES = 2000, CAPSULE_BYTES = 3200, TEXT = 4000;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
-const EVENT_TYPES = new Set(["user_prompt_submit", "post_tool_use", "pre_compact", "stop"]);
 const STATE_FIELDS = new Set([
   "objective", "acceptance", "latest_corrections", "constraints", "decisions",
   "completed_work", "unresolved_defects", "artifacts", "verification",
@@ -115,7 +113,6 @@ function common(args, ToolError) {
     modelId: optionalText(args.model_id, "model_id", ToolError, 200),
   };
 }
-function canonicalDbJson(value) { return canonicalJson(JSON.parse(JSON.stringify(value))); }
 async function lockLeaf(c, tenant, actor, owner, key) {
   await c.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [
     `${tenant}:${actor.slug}:${owner}:${key.sessionId}:${key.transcriptPathDigest}`]);
@@ -312,50 +309,6 @@ export function claudeContinuityTools({ withEnvelope, writeEvent, ToolError, ass
         return { ok: true, found: true, checkpoint, capsule,
           capsule_bytes: new TextEncoder().encode(capsule).byteLength,
           conflict_policy: "current user instruction; otherwise later verified source cursor and observed_at; surface equal or incomparable conflict before irreversible action" };
-      },
-    },
-    "claude-record-event": {
-      write: true,
-      description: "Record one immutable idempotent Claude lifecycle receipt. Telemetry never infers semantic completion or replays an external effect.",
-      inputSchema: { type: "object", additionalProperties: false, properties: { ...commonProperties,
-        idempotency_key: { type: "string" }, event_type: { type: "string", enum: [...EVENT_TYPES] },
-        cursor: { type: "object" }, transcript_digest: { type: "string" }, observed_at: { type: "string" },
-        telemetry: { type: "object" }, checkpoint_version: { type: "integer", minimum: 0 },
-      }, required: [...commonRequired, "idempotency_key", "event_type", "cursor", "observed_at"] },
-      handler: async (c, actor, args) => {
-        guard(args); requireNativeClaude(actor, ToolError); const key = common(args, ToolError);
-        if (!EVENT_TYPES.has(args.event_type)) fail(ToolError, "claude_event_type_invalid");
-        const cursor = boundedJson(args.cursor, "cursor", ToolError, CURSOR_BYTES);
-        const telemetry = boundedJson(args.telemetry, "telemetry", ToolError, TELEMETRY_BYTES, true);
-        const observedAt = text(args.observed_at, "observed_at", ToolError, 100);
-        const transcriptDigest = args.transcript_digest == null ? null : digest(args.transcript_digest, "transcript_digest", ToolError);
-        const checkpointVersion = args.checkpoint_version ?? 0;
-        if (!Number.isSafeInteger(checkpointVersion) || checkpointVersion < 0) fail(ToolError, "claude_event_checkpoint_version_invalid");
-        return withEnvelope(c, actor, "claude-record-event", args, async () => {
-          const tenant = organizationTenantForActor(actor), owner = actor.sponsoring_human_slug;
-          const principalActorId = await actorId(c, actor, ToolError);
-          await lockLeaf(c, tenant, actor, owner, key);
-          const leaf = await bindLeaf(c, tenant, principalActorId, owner, key, ToolError);
-          const params = [tenant, principalActorId, leaf.id, args.event_type, JSON.stringify(cursor), transcriptDigest,
-            observedAt, telemetry == null ? null : JSON.stringify(telemetry), checkpointVersion, args.idempotency_key];
-          const inserted = await c.query(`insert into claude_continuity_event
-            (organization_tenant_id,surface_principal_actor_id,leaf_id,event_type,cursor,transcript_digest,
-             observed_at,telemetry,checkpoint_version,idempotency_key)
-            values ($1,$2,$3,$4,$5::jsonb,$6,$7::timestamptz,$8::jsonb,$9,$10)
-            on conflict (organization_tenant_id,surface_principal_actor_id,idempotency_key) do nothing returning *`, params);
-          let event = inserted.rows[0];
-          if (!event) {
-            event = (await c.query(`select * from claude_continuity_event where organization_tenant_id=$1
-              and surface_principal_actor_id=$2 and idempotency_key=$3`, [tenant, principalActorId, args.idempotency_key])).rows[0];
-            const same = event && event.leaf_id === leaf.id && event.event_type === args.event_type &&
-              canonicalDbJson(event.cursor) === canonicalDbJson(cursor) && canonicalDbJson(event.telemetry) === canonicalDbJson(telemetry) &&
-              event.transcript_digest === transcriptDigest && Number(event.checkpoint_version) === checkpointVersion;
-            if (!same) fail(ToolError, "claude_event_key_conflict");
-          }
-          await writeEvent(c, actor, "claude-record-event", "claude_continuity_event", event.id,
-            { field: "event_type", new: { event_type: args.event_type }, idempotency_key: args.idempotency_key });
-          return { ok: true, event };
-        });
       },
     },
   };

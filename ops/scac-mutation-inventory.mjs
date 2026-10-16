@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { SCAC_MUTATION_OPERATIONS, SCAC_MUTATION_REGISTRY_VERSION } from "../mcp-server/src/scac-mutation-registry.current.generated.js";
@@ -534,6 +534,19 @@ export function assertCurrentContracts(tools) {
   return true;
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  if (process.argv[2] === "--write-current-grants") {
+    const source = readFileSync(process.argv[3], "utf8");
+    const match = source.match(/\$current_grants\$([\s\S]*?)\$current_grants\$/);
+    if (!match) throw new Error("migration has no current grant contract");
+    const contract = JSON.parse(match[1]);
+    if (contract.registry_version !== CURRENT_REGISTRY_VERSION ||
+        !/^sha256:[0-9a-f]{64}$/.test(contract.registry_digest) ||
+        !Array.isArray(contract.secdef_execute))
+      throw new Error("malformed current grant contract");
+    const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
+    const current = readFileSync(path, "utf8").replace(/\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = [\s\S]*$/, "");
+    writeFileSync(path, `${current.trimEnd()}\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze(${JSON.stringify(contract, null, 2)});\n`);
+  }
   const { TOOLS } = await import("../mcp-server/src/tools.js");
   assertCurrentContracts(TOOLS);
   console.log("current MCP contracts: OK");

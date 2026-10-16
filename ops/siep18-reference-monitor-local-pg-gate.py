@@ -19,6 +19,7 @@ from psycopg.types.json import Jsonb
 
 from rule_projection_fixture import seed_reviewed_rule_projection as seed_rule_projection
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
+from scac_mutation_db_inventory import validate_current_catalog
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -30,7 +31,7 @@ SEALED_PREDECESSOR_ORDINAL = 117
 SEALED_PREDECESSOR_DIGEST = 'sha256:bba3689ccfaad427b77c3d8295406d5e56c2ac506c5d5ddb1232fa0461315838'
 SEALED_PREDECESSOR_ENTRY_COUNTS = (2801, 1207)
 SEALED_PREDECESSOR_MIGRATION = 'migrations/0869_loop_residue_scac_successor.sql'
-LIVE_REGISTRY_MIGRATION = 'migrations/0873_self_closing_records_scac_successor.sql'
+LIVE_REGISTRY_MIGRATION = 'migrations/0886_active_rule_scope_backfill.sql'
 
 LIVE_CATALOG_CURRENT_FN = f"ops.scac_mutation_catalog_v{LIVE_REGISTRY_ORDINAL}_current()"
 LIVE_REGISTRATION_FN = f"ops.scac_mutation_registration_v{LIVE_REGISTRY_ORDINAL}"
@@ -954,6 +955,7 @@ def main() -> int:
                 raise RuntimeError(
                     f"{LIVE_REGISTRY_VERSION} registry is absent or authority-expanding: {registry!r}"
                 )
+            validate_current_catalog(cur)
             expected_grant_snapshot = registry[3].get("runtime_dml_grants")
             if not isinstance(expected_grant_snapshot, dict) or \
                set(expected_grant_snapshot) != {"count", "digest"} or \

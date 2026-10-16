@@ -119,8 +119,10 @@ class LedgerBaselineTests(unittest.TestCase):
 
 class VerbLossGuardTests(unittest.TestCase):
     def setUp(self):
-        self.retired = [name for entry in json.loads(LEDGER.read_text())["retirements"]
-                        for name in entry["verbs"]]
+        entries = json.loads(LEDGER.read_text())["retirements"]
+        self.retired = [name for entry in entries for name in entry["verbs"]]
+        self.pr1806 = next(entry["verbs"] for entry in entries
+                           if entry["reference"].endswith("/1806"))
 
     def run_guard(self, names, deployed):
         with tempfile.TemporaryDirectory() as raw:
@@ -149,7 +151,7 @@ class VerbLossGuardTests(unittest.TestCase):
         self.assertFalse(set(names[:36]).intersection(self.retired))
         for deployed in (377, names):
             with self.subTest(baseline="count" if deployed == 377 else "names"):
-                result = self.run_guard(names[36:], deployed)
+                result = self.run_guard([name for name in names[36:] if name not in self.retired], deployed)
                 self.assertNotEqual(result.returncode, 0,
                                     "already-shipped retirements excused 36 unlisted removals")
                 self.assertEqual(result.stdout, "")
@@ -197,11 +199,11 @@ class VerbLossGuardTests(unittest.TestCase):
         after_sha = subprocess.check_output(
             ["git", "rev-parse", "6015711f5"], cwd=REPO, text=True).strip()
         after = baseline.source_registry(after_sha, 377)
-        self.assertEqual(set(before["verbs"]) - set(after["verbs"]), set(self.retired))
+        self.assertEqual(set(before["verbs"]) - set(after["verbs"]), set(self.pr1806))
         self.assertEqual(before["git_sha"], sha)
-        result = self.run_guard(after["verbs"], before["verbs"])
+        result = self.run_guard([name for name in after["verbs"] if name not in self.retired], before["verbs"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        result = self.run_guard(after["verbs"][36:], after["verbs"])
+        result = self.run_guard([name for name in after["verbs"][36:] if name not in self.retired], after["verbs"])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unlisted verb loss", result.stderr)
         with self.assertRaisesRegex(ValueError, "does not match"):
@@ -214,9 +216,9 @@ class VerbLossGuardTests(unittest.TestCase):
     def test_ledger_has_exact_names_removed_by_pr_1806(self):
         patch = subprocess.check_output(
             ["git", "show", "6015711f5", "--", "mcp-server/src"], cwd=REPO, text=True)
-        self.assertEqual(len(self.retired), 36)
-        self.assertEqual(len(set(self.retired)), 36)
-        for name in self.retired:
+        self.assertEqual(len(self.pr1806), 36)
+        self.assertEqual(len(set(self.pr1806)), 36)
+        for name in self.pr1806:
             self.assertIn('"' + name + '"', patch)
 
 
