@@ -27,7 +27,7 @@ class AdmissionEvalTests(unittest.TestCase):
 
     def test_live_sites_remain_paid_and_transport_is_recorded(self):
         client = evaluation._load(ROOT)
-        for site in ('jev_deal_read', 'jev_model_route', 'jevlint_review', 'seat_health'):
+        for site in ('jev_deal_read', 'jev_model_route', 'jevlint_review'):
             case = {'site': site, 'session': True}
             with self.subTest(site=site), tempfile.TemporaryDirectory() as scratch:
                 self.assertFalse(evaluation.label(case))

@@ -859,37 +859,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         self.assertEqual([(f["key"], f["hard_error"]) for f in ns["_FINDINGS"]],
                          [("verb_usage", False)])
 
-    def test_builds_health_records_failure_and_prints_marker_last(self):
-        import contextlib, io
-        for line, expected in (("OK build duration", 0), ("WARN build duration", 1),
-                               ("UNAVAILABLE build duration", 1)):
-            ns = self.all_namespace()
-            ns.update(CANONICAL_SECTION="builds", _build_duration_row=lambda: (line, expected))
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                self.assertEqual(ns["_canonical_health"](), expected)
-            self.assertEqual(output.getvalue().splitlines()[-1], "HEALTH_COMPLETE")
-            self.assertEqual(len(ns["_FINDINGS"]), expected)
-            if expected:
-                self.assertEqual(ns["_FINDINGS"][0]["key"], "build_duration")
-                self.assertEqual(ns["_FINDINGS"][0]["hard_error"], line.startswith("UNAVAILABLE"))
 
-    def test_seat_rows_red_on_fail_and_stale_red_only(self):
-        # STALE-RED (no probe row for over 72 h with the host online or
-        # unknown) feeds the ai_seat_health red; young STALE and SKIP do not.
-        import io, contextlib
-        for line, expected in (("STALE-RED grok last=never no probe row · on breach: x", 1),
-                               ("FAIL grok latency=1s layer=auth · on breach: x", 1),
-                               ("STALE grok last=2026-10-11 · on breach: x", 0),
-                               ("SKIP grok: host mac-studio offline · on breach: x", 0)):
-            with self.subTest(line=line):
-                ns = self.all_namespace()
-                ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
-                ns["_seat_health_rows"] = lambda: [line]
-                with contextlib.redirect_stdout(io.StringIO()):
-                    self.assertEqual(ns["_canonical_health"](), expected)
-                self.assertEqual([row["key"] for row in ns["_FINDINGS"]],
-                                 ["ai_seat_health"] * expected)
 
     def test_all_health_sections_report_cap_failure_with_other_checks_clean(self):
         import io, contextlib

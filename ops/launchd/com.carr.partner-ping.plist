@@ -36,26 +36,12 @@
   <key>Label</key>
   <string>com.carr.partner-ping</string>
 
-  <!-- Program 4 follow-up: the two flags below (spelled out in
-       ProgramArguments, not here: a double hyphen is illegal inside an XML
-       comment, the same defect PR #97 fixed once already for the scheduled
-       flag on notes-sweep's own plist). The heartbeat interval flag throttles
-       the succeeded row to at most one per 1800s (30 min) — recording all
-       ~720 fires/day would be pure noise from a healthy channel; a failure is
-       still recorded immediately regardless (see ops/config/services.json's
-       own note on this service's retuned cadence). The also-heartbeat flag
-       rides this same 2-minute wake to record an INDEPENDENT presence signal
-       for carr-local-edge-node — the registered fact that this Mac is awake
-       and launchd is actually firing agents (PROP-010) — on the same
-       throttle, whether or not the buzz query itself succeeds. -->
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
     <string>{{REPO}}/bin/run-scheduled.sh</string>
     <string>--heartbeat-interval</string>
     <string>1800</string>
-    <string>--also-heartbeat</string>
-    <string>carr-local-edge-node</string>
     <string>partner-ping</string>
     <string>launchd.run</string>
     <string>{{REPO}}/.venv/bin/python</string>

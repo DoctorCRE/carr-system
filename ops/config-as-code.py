@@ -703,22 +703,46 @@ def merge_codex_continuity_hooks(live, desired):
         is_codex_continuity_hook_command(hook.get("command"))
         for group in groups for hook in group.get("hooks", []))}
     for event in stale | set(CODEX_CONTINUITY_EVENTS):
-        retained = []
         groups = live_hooks.get(event, [])
-        for group in groups if isinstance(groups, list) else []:
+        groups = groups if isinstance(groups, list) else []
+        pending = copy.deepcopy(desired_hooks.get(event, []))
+        retained = []
+        for group in groups:
             if not isinstance(group, dict):
                 retained.append(group)
                 continue
-            non_continuity = [hook for hook in group.get("hooks", [])
-                              if not (isinstance(hook, dict) and
-                                      is_codex_continuity_hook_command(hook.get("command")))]
-            if non_continuity:
+            handlers = group.get("hooks", [])
+            owns_continuity = any(isinstance(hook, dict) and
+                                  is_codex_continuity_hook_command(hook.get("command"))
+                                  for hook in handlers)
+            if owns_continuity:
                 clone = dict(group)
-                clone["hooks"] = non_continuity
+                clone["hooks"] = [hook for hook in handlers
+                                  if not (isinstance(hook, dict) and
+                                          is_codex_continuity_hook_command(hook.get("command")))]
+                if pending:
+                    replacement = pending.pop(0)
+                    if clone["hooks"]:
+                        clone["hooks"] = []
+                        for hook in handlers:
+                            if (isinstance(hook, dict) and
+                                    is_codex_continuity_hook_command(hook.get("command"))):
+                                clone["hooks"].extend(replacement["hooks"])
+                                replacement = {"hooks": []}
+                            else:
+                                clone["hooks"].append(hook)
+                    else:
+                        clone = replacement
+                # Codex keys include the group index. Keep an empty slot on
+                # removal so later unrelated groups retain their trust keys.
                 retained.append(clone)
-        desired_groups = desired_hooks.get(event, [])
-        if isinstance(desired_groups, list):
-            retained.extend(json.loads(json.dumps(desired_groups)))
+            elif not handlers and pending and (
+                    {key: value for key, value in group.items() if key != "hooks"} ==
+                    {key: value for key, value in pending[0].items() if key != "hooks"}):
+                retained.append(pending.pop(0))
+            else:
+                retained.append(group)
+        retained.extend(pending)
         if retained or event in CODEX_CONTINUITY_EVENTS:
             live_hooks[event] = retained
         else:
@@ -964,20 +988,23 @@ def canonical_codex_continuity_hooks():
     hooks = document.get("hooks") if isinstance(document, dict) else None
     if not isinstance(hooks, dict):
         raise RuntimeError(f"{CODEX_HOOKS_REPO} must contain a hooks object")
-    desired = {"hooks": {event: hooks.get(event, [])
-                          for event in CODEX_CONTINUITY_EVENTS}}
+    desired = {"hooks": {}}
     contracts = []
     for event in CODEX_CONTINUITY_EVENTS:
-        groups = desired["hooks"][event]
-        if (not isinstance(groups, list) or len(groups) != 1 or
-                not isinstance(groups[0], dict)):
-            raise RuntimeError(f"{event} must contain exactly one continuity group")
-        group = groups[0]
-        handlers = group.get("hooks")
-        if (not isinstance(handlers, list) or len(handlers) != 1 or
-                not isinstance(handlers[0], dict)):
+        groups = hooks.get(event, [])
+        if not isinstance(groups, list):
+            raise RuntimeError(f"{event} must contain a continuity group array")
+        matches = [
+            (group, handler)
+            for group in groups if isinstance(group, dict)
+            and isinstance(group.get("hooks"), list)
+            for handler in group["hooks"] if isinstance(handler, dict)
+            and is_codex_continuity_hook_command(handler.get("command"))
+        ]
+        if len(matches) != 1:
             raise RuntimeError(f"{event} must contain exactly one continuity handler")
-        handler = handlers[0]
+        group, handler = matches[0]
+        desired["hooks"][event] = [{**group, "hooks": [handler]}]
         if (handler.get("type") != "command" or
                 not isinstance(handler.get("command"), str) or
                 not isinstance(handler.get("timeout"), int) or

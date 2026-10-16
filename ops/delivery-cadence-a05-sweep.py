@@ -15,7 +15,7 @@ defeated the whole point). This script does not need to know that distinction
 itself -- it only ever acts on status == "missed", from whichever reason_id
 produced it.
 
-Same call path ops/timebomb-audit.py and tools/cutover-watch.py use: a
+Same call path the runtime verb client use: a
 subprocess to `run.sh call <verb> '<json>'`, never the generic MCP call-verb
 passthrough. That path authenticates as the partner-sponsored local machine
 credential -- the V5-A05 "system" seat -- so the write below is admitted; and

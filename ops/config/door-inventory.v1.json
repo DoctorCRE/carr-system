@@ -229,6 +229,30 @@
       "class": "one_shot",
       "reason": "Applied ORDER 38's doctrine-ownership stamp to ORDER 30 phase 2's file set; the stamped markdown is retired.",
       "evidence": "f163962f (ORDER 40); gated behind recovery in e2b6f3ff (#519)"
+    },
+    {
+      "path": "pipelines/radar/build-license-pool.py",
+      "class": "hand_tool",
+      "reason": "A person runs it on the browser-filtered DOH transport TSV to build the radar license pool.",
+      "evidence": "pipelines/radar/build-license-pool.py module docstring and CLI usage"
+    },
+    {
+      "path": "pipelines/radar/build-pecos-pool.py",
+      "class": "hand_tool",
+      "reason": "A person runs it on a downloaded quarterly CMS enrollment extract to build the radar PECOS pool.",
+      "evidence": "pipelines/radar/build-pecos-pool.py module docstring and CLI usage"
+    },
+    {
+      "path": "pipelines/radar/enrich-pecos-nppes.py",
+      "class": "hand_tool",
+      "reason": "A person runs it to fill practice geography in the PECOS pool using NPPES.",
+      "evidence": "pipelines/radar/enrich-pecos-nppes.py module docstring and CLI usage"
+    },
+    {
+      "path": "ops/build-duration-check.py",
+      "class": "hand_tool",
+      "reason": "A person requests one report of unusually slow completed GitHub runs; workflow timeouts bound running jobs.",
+      "evidence": "ops/build-duration-check.py module docstring and main CLI"
     }
   ]
 }

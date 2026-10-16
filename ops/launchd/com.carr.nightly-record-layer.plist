@@ -4,43 +4,17 @@
 <dict>
   <key>Label</key><string>com.carr.nightly-record-layer</string>
 
-  <!-- THE SAME SCRIPT THE SCHEDULED TASK RUNS (rule a8c55a47: a manual path and
-       an automated path that do the same job must be the same code). This agent
-       adds a second RUNNER, never a second implementation. bin/nightly.sh
-       refuses a second completed run in the same day, so whichever fires first
-       wins and the other exits 0 with a SKIP line in out/nightly.log.
-
-       WHY IT EXISTS. The Claude Code scheduled task fires at 02:05 only when
-       the app is open in a logged-in session. On 2026-08-09 the Mac booted at
-       02:16 — after the window, still at the login screen — so the chain did
-       not run until Joe logged in at 06:59, and the health check reported a
-       5.0h schedule drift. `sudo pmset repeat wakeorpoweron MTWRFSU 01:55:00`
-       was ALREADY set and could not fix it: powering a Mac on is not the same
-       as having a session to run in.
-
-       WHAT THIS DOES AND DOES NOT FIX. It removes the dependency on the Claude
-       Code app being open, which is the ordinary failure: Mac asleep, Joe still
-       logged in, wakepoweron brings it up at 01:55, launchd fires at 02:05. It
-       does NOT fix a cold boot with nobody logged in — a LaunchAgent has no
-       session then either, and the only thing that would is a LaunchDaemon in
-       /Library/LaunchDaemons, which needs sudo. The scheduled task remains as
-       the fallback that catches those mornings on wake. -->
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
     <string>{{REPO}}/bin/nightly.sh</string>
   </array>
 
-  <!-- 02:05 daily, matching the scheduled task's cron `0 2 * * *` plus its
-       jitter. SEVEN DAYS: the record layer has no weekend stand-down — the
-       generated files must be true whenever either partner opens them, and
-       every Cowork and phone session reads them. -->
   <key>StartCalendarInterval</key>
   <array>
     <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>5</integer></dict>
   </array>
 
-  <!-- Catch up if the machine was off at 02:05 rather than skipping the day. -->
   <key>RunAtLoad</key><false/>
 
   <key>StandardOutPath</key><string>{{REPO}}/out/nightly-launchd.log</string>

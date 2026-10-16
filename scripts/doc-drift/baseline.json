@@ -1463,21 +1463,6 @@
       "target": "Media/linkedin-engagement-engine.md"
     },
     {
-      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
-      "kind": "path",
-      "target": "Management/record-layer/runbook.md"
-    },
-    {
-      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
       "file": "ops/scheduled-tasks/notes-sweep-hourly.SKILL.md",
       "kind": "path",
       "target": "tasks/notes-sweep-hourly.SKILL.md"

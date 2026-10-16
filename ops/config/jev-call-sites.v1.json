@@ -11,20 +11,6 @@
   },
   "sites": [
     {
-      "caller": "seat_health",
-      "trigger": "Once per UTC day: prove Jev returns the exact fixture answer; this explicitly authorized health probe makes no routing judgment.",
-      "runs_in": "Daily nightly-record-layer chain through ops/seat-health.py",
-      "attribution": "session_or_job",
-      "unattended": "allowed",
-      "hourly_budget": 1,
-      "daily_budget": 1,
-      "owner": "orchestrator",
-      "value": "One paid ask-jev task verifies provider, admission, model and exact answer; failures skip this seat and open one recovery loop.",
-      "sources": [
-        "ops/seat_health.py"
-      ]
-    },
-    {
       "caller": "rule_trigger_delivery",
       "trigger": "UserPromptSubmit on a human prompt (machine envelopes are skipped): one ranking + one batched binding request over pack rules the compiled triggers did not match",
       "runs_in": "interactive Claude and Codex sessions via hooks/rule-pack-preuse-reselection.py; Flash via tools/flash-run.py (once per scripted task) and tools/flash-prompt-rules.py (once per interactive message), which rank the whole active corpus through judge_budgeted",
@@ -82,8 +68,8 @@
     },
     {
       "caller": "jev_code_review",
-      "trigger": "PostToolUse Write/Edit/apply_patch with <=400 added lines and a signature match; weekly timebomb-audit regions",
-      "runs_in": "interactive sessions via hooks/lint-gate.py; launchd com.carr.timebomb-audit",
+      "trigger": "PostToolUse Write/Edit/apply_patch with <=400 added lines and a signature match",
+      "runs_in": "interactive sessions via hooks/lint-gate.py",
       "attribution": "session_or_job",
       "unattended": "off",
       "hourly_budget": 0,
@@ -274,20 +260,6 @@
       "value": "bounded advisory/eval only; no automatic promotion; daily 20 so one approval batch (14 rules, 2026-10-14) compiles inside a day while hourly 5 still bounds a runaway",
       "sources": [
         "ops/rule_trigger_compile.py"
-      ]
-    },
-    {
-      "caller": "timebomb-audit",
-      "trigger": "manual: bounded semantic evaluation",
-      "runs_in": "explicit evaluation session",
-      "attribution": "session",
-      "unattended": "off",
-      "hourly_budget": 5,
-      "daily_budget": 10,
-      "owner": "orchestrator",
-      "value": "bounded advisory/eval only; no automatic promotion",
-      "sources": [
-        "ops/timebomb-audit.py"
       ]
     },
     {
