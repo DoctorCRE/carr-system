@@ -10,6 +10,7 @@ import unittest
 REPO = Path(__file__).resolve().parent.parent
 LEDGER = REPO / "ops/config/retired-verbs.v1.json"
 spec = importlib.util.spec_from_file_location("baseline", REPO / "ops/last-deployed-verb-count.py")
+assert spec and spec.loader
 baseline = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(baseline)
 
