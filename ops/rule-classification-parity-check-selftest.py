@@ -165,8 +165,25 @@ def main() -> int:
     stale_partial_export = with_rule(EXPORT_BASE, "204391be",
                                      {"enforcement_class": "judgment_advisory",
                                       "state": "admitted"})
+    removed_why = ("Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 "
+                   "purge ruling; the rule stays in force as prose guidance.")
+    removed_map = copy.deepcopy(MAP_BASE)
+    removed_map["rule_controls"]["dddddddd"] = {
+        "category": "judgment_advisory", "enforcement_class": "judgment_ambient",
+        "why_unenforceable": removed_why}
+    plain_judgment_map = copy.deepcopy(MAP_BASE)
+    plain_judgment_map["rule_controls"]["dddddddd"] = {
+        "category": "judgment_advisory", "enforcement_class": "judgment_ambient",
+        "why_unenforceable": "Framing judgment for a specific kind of proposal."}
+    machine_export = with_rule(EXPORT_BASE, "dddddddd",
+                               {"enforcement_class": "machine_enforceable", "state": "admitted"})
     cases = [
         case_unit_buckets(),
+        case("a removed-gate rule may lead the export until production re-syncs",
+             removed_map, machine_export, expect_ok=True, expect_compared=3),
+        case("a judgment rule without the removed-gate record still fails",
+             plain_judgment_map, machine_export, expect_ok=False,
+             expect_mismatch_ids=["dddddddd"]),
         case("matching buckets pass", MAP_BASE, EXPORT_BASE,
              expect_ok=True, expect_compared=2),
         case("divergent bucket fails and names the rule",

@@ -5,7 +5,7 @@
 do $rule_delivery_0883$
 declare
   v_old constant text := '9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac';
-  v_new constant text := 'd76c2fdbca05669516ed3bc48aec4d66e46ea627d9b07723c30575d08f7d9157';
+  v_new constant text := '6a1c929bb30845a975953c80201c5250b4529990e4160356280cbacd0af24af6';
   v_ids constant text[] := array[
     '113b3833','25fcddee','3fa17fa0','49533583',
     '557838a5','57d13061','72e06bdf','c66dc739'
