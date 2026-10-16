@@ -221,7 +221,7 @@ def declaration(task: str, explicit: list[str] | None) -> list[str]:
     patterns = list(explicit or [])
     for line in task.splitlines():
         match = re.match(r'^\s*Writes:\s*(.*)$', line, re.I)
-        if match:
+        if match and match[1].strip().lower() != 'none':
             lexer = shlex.shlex(match[1].replace('`', ''), posix=True)
             lexer.whitespace += ','
             lexer.whitespace_split = True
