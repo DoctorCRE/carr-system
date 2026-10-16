@@ -911,6 +911,29 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(any('update-branch' in str(a) for a in self.load()['calls']))
         self.assertTrue(self.data['prs'][module.REPOS[0]+'#2']['draft'])
 
+    def test_retargeted_draft_refresh_retries_after_unknown_across_restart(self):
+        for restart in (False, True):
+            with self.subTest(restart=restart):
+                n = 3 if restart else 2
+                self.pr(n=n, base='branch-1', draft=True)
+                self.data['retarget_state'] = 'unknown'
+                self.save()
+                self.assertFalse(self.q.refresh(module.REPOS[0], 'branch-1'))
+                self.load()
+                child = self.data['prs'][f'{module.REPOS[0]}#{n}']
+                self.assertEqual(child['base']['ref'], 'main')
+                self.assertEqual(child['head']['sha'], self.approved)
+                child['mergeable_state'] = 'behind'
+                self.save()
+                if restart:
+                    self.restart()
+                self.assertTrue(self.q.refresh(module.REPOS[0], 'branch-1'))
+                updates = [a for a in self.load()['calls'] if f'/pulls/{n}/update-branch' in str(a)]
+                self.assertEqual(len(updates), 1)
+                self.assertEqual(self.data['prs'][f'{module.REPOS[0]}#{n}']['head']['sha'], self.updated)
+                self.q.discover()
+                self.assertEqual(self.q.db.execute('SELECT COUNT(*) FROM entries').fetchone()[0], 0)
+
     def test_crash_after_merge_reconciles_main_and_refreshes(self):
         self.pr()
         self.q.enqueue(module.REPOS[0], 1, self.approved)

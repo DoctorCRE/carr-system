@@ -788,10 +788,13 @@ class Queue:
 
     def refresh(self, repo, merged_branch):
         complete = True
+        retargeted = {row['pr'] for row in bounded_items('snapshot', self.db.execute(
+            "SELECT DISTINCT pr FROM actions WHERE kind='retarget' AND repo=? AND expected_base=? AND payload='main'",
+            (repo, merged_branch)))}
         for summary in bounded_items('snapshot', self.pages(f'repos/{repo}/pulls?state=open&per_page=100')):
             if self.stopped:
                 return False
-            if summary['base']['ref'] != merged_branch:
+            if summary['base']['ref'] != merged_branch and summary['number'] not in retargeted:
                 continue
             n = summary['number']
             try:
