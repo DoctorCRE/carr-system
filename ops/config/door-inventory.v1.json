@@ -81,12 +81,6 @@
       "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
     },
     {
-      "path": "ops/rule-recall-benchmark.py",
-      "class": "one_shot",
-      "reason": "Measured full-text rule availability on the unchanged 72-case test split before replacement recall was trusted.",
-      "evidence": "0330c01f (#1611)"
-    },
-    {
       "path": "pipelines/backfill_lease_event.py",
       "class": "hand_tool",
       "reason": "Manual ORDER 19(d) repair of structured lease dates from the preserved raw date shim; it is invoked directly rather than by a runtime job.",

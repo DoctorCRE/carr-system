@@ -38,7 +38,6 @@ _ISOLATED = tempfile.mkdtemp(prefix="preuse-selftest-")
 os.environ.setdefault("CARR_RULE_ROUTE_DEDUPE_DIR", os.path.join(_ISOLATED, "route-dedupe"))
 os.environ.setdefault("CARR_RULE_BOOT_STATE_DIR", os.path.join(_ISOLATED, "boot-state"))
 contract = load("rule_delivery_preuse_test", REPO / "lib/rule_delivery_preuse.py")
-drift = load("rule_pack_drift_preuse_test", REPO / "hooks/rule-pack-drift-gate.py")
 
 # The route rail (ROUTE TRIGGERS) has its own section at the end of this file.
 # Every earlier section pins behaviour that existed before the route file, so
@@ -373,210 +372,7 @@ def check_failure_cases(label: str, call: dict, response: dict, missing_cause: s
 check_failure_cases("scheduled rail", payload(), selector_result(),
                     "selector did not return every scheduled rule", rail.FAILURE_CONTEXT)
 
-# Stop telemetry credits only a platform-proven receipt bound to the exact tool call.
-def claude_tool_call() -> dict:
-    return {"type": "assistant", "message": {"role": "assistant", "content": [{
-        "type": "tool_use", "id": "tool-exact", "name": "Bash",
-        "input": before["tool_input"],
-    }]}, "sessionId": "session-exact"}
-
-
-def claude_attachment(text: str) -> dict:
-    return {
-        "type": "attachment", "sessionId": "session-exact",
-        "attachment": {
-            "type": "hook_additional_context", "hookEvent": "PreToolUse",
-            "hookName": "PreToolUse:Bash", "toolUseID": "tool-exact",
-            "content": [text],
-        },
-    }
-
-
-def codex_tool_call(tool: str = "functions.exec") -> dict:
-    return {"type": "response_item", "payload": {
-        "type": "function_call", "call_id": "tool-exact", "name": tool,
-        "arguments": json.dumps(before["tool_input"], sort_keys=True,
-                                separators=(",", ":")),
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-def codex_custom_tool_call(*, name: str = "exec", wrapper: str = "response_item",
-                           raw: object | None = None) -> dict:
-    tool_input = before["tool_input"] if raw is None else raw
-    if wrapper == "event_msg":
-        return {"type": "event_msg", "payload": {
-            "type": "custom_tool_call", "name": name,
-            "arguments": tool_input,
-        }}
-    return {"type": "response_item", "payload": {
-        "type": "custom_tool_call", "id": "ctc-exact", "status": "completed",
-        "call_id": "tool-exact", "name": name,
-        "input": (json.dumps(tool_input, sort_keys=True, separators=(",", ":"))
-                  if not isinstance(tool_input, str) else tool_input),
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-def codex_context(text: str) -> dict:
-    return {"type": "response_item", "payload": {
-        "type": "message", "role": "developer",
-        "content": [{"type": "input_text", "text": text}],
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-claude_records = [claude_tool_call(), claude_attachment(context(output))]
-mode, loaded, _ = drift.delivery_state(claude_records)
-check("Claude exact hook envelope credits scheduled automation",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-
-codex_output = rail.process(payload(tool="functions.exec", client="codex"), runner=Runner())
-codex_records = [codex_tool_call(), codex_context(context(codex_output))]
-mode, loaded, _ = drift.delivery_state(codex_records)
-check("Codex exact developer context credits scheduled automation",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-codex_bash_output = rail.process(payload(tool="Bash", client="codex"), runner=Runner())
-mode, loaded, _ = drift.delivery_state([
-    codex_tool_call("Bash"), codex_context(context(codex_bash_output)),
-])
-check("Codex Bash alias receives and proves the same receipt",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-
-TRIGGERS, MEMBERS, _ = drift.load_packs()
-for label, records in [
-    ("Claude success", claude_records),
-    ("Codex function success", codex_records),
-    ("Codex response-item custom exec success",
-     [codex_custom_tool_call(), codex_context(context(codex_output))]),
-]:
-    evaluated = drift.evaluate(records, TRIGGERS, MEMBERS)
-    check(f"{label} structurally requires and loads scheduled automation",
-          evaluated["needed"] == ["scheduled-automation"]
-          and evaluated["loaded"] == ["scheduled-automation"]
-          and evaluated["missing"] == [], evaluated)
-
-custom_needed = drift.evaluate([codex_custom_tool_call()], TRIGGERS, MEMBERS)
-check("Codex custom-tool background call structurally requires scheduled automation",
-      custom_needed["needed"] == ["scheduled-automation"]
-      and custom_needed["loaded"] == []
-      and custom_needed["missing"] == ["scheduled-automation"], custom_needed)
-
-for label, records in [
-    ("Claude no receipt", [claude_tool_call()]),
-    ("Claude selector failure", [claude_tool_call(), {
-        "type": "attachment", "sessionId": "session-exact",
-        "attachment": {
-            "type": "hook_additional_context", "hookEvent": "PreToolUse",
-            "hookName": "PreToolUse:Bash", "toolUseID": "tool-exact",
-            "content": [rail.FAILURE_CONTEXT],
-        },
-    }]),
-    ("Codex function no receipt", [codex_tool_call()]),
-    ("Codex response-item custom exec no receipt", [codex_custom_tool_call()]),
-    ("Codex event custom exec_command cannot claim an uncorrelated receipt",
-     [codex_custom_tool_call(name="exec_command", wrapper="event_msg"),
-      codex_context(context(codex_output))]),
-]:
-    evaluated = drift.evaluate(records, TRIGGERS, MEMBERS)
-    check(f"{label} stays needed and missing",
-          evaluated["needed"] == ["scheduled-automation"]
-          and evaluated["loaded"] == []
-          and evaluated["missing"] == ["scheduled-automation"], evaluated)
-
-for label, record in [
-    ("unknown custom alias", codex_custom_tool_call(name="other")),
-    ("unstructured custom wrapper prose", codex_custom_tool_call(
-        raw="tools.exec_command({run_in_background: true})")),
-]:
-    evaluated = drift.evaluate([record], TRIGGERS, MEMBERS)
-    check(f"{label} does not create a structured background requirement",
-          evaluated["needed"] == [] and evaluated["missing"] == [], evaluated)
-
-for label, records in [
-    ("copied user context", [claude_tool_call(), {
-        "type": "user", "message": {"role": "user", "content": context(output)}}]),
-    ("wrong Claude hook name", [claude_tool_call(), {
-        **claude_attachment(context(output)),
-        "attachment": {**claude_attachment(context(output))["attachment"],
-                       "hookName": "PreToolUse:Read"}}]),
-    ("wrong tool id", [claude_tool_call(), {
-        **claude_attachment(context(output)),
-        "attachment": {**claude_attachment(context(output))["attachment"],
-                       "toolUseID": "tool-other"}}]),
-    ("tampered receipt", [claude_tool_call(), claude_attachment(
-        context(output).replace("scheduled-automation", "engineering-git", 1))]),
-    ("Codex user role", [codex_tool_call(), {
-        **codex_context(context(codex_output)),
-        "payload": {**codex_context(context(codex_output))["payload"], "role": "user"}}]),
-]:
-    found = drift.delivery_state(records)
-    check(f"{label} does not count as loaded", found[1] == [], found)
-
-malformed = receipt(output)
-malformed["unexpected"] = True
-found = drift.delivery_state([
-    claude_tool_call(),
-    claude_attachment(json.dumps(malformed, sort_keys=True, separators=(",", ":"))),
-])
-check("extra-key additionalContext does not count as loaded",
-      found[1] == [], found)
-
-with tempfile.TemporaryDirectory(prefix="malformed-receipt-stop-") as stop_tmp:
-    stop_transcript = Path(stop_tmp) / "session.jsonl"
-    standing_call = {"type": "assistant", "message": {"role": "assistant", "content": [{
-        "type": "tool_use", "id": "standing-exact", "name": "mcp__carr__standing_context",
-        "input": {},
-    }]}, "sessionId": "session-exact"}
-    standing_value = {"rule_delivery": {
-        "mode": "enforced", "declared_packs": [], "would_omit": EXPECTED_IDS,
-    }}
-
-    def standing_result(value):
-        return {"type": "user", "message": {"role": "user", "content": [{
-            "type": "tool_result", "tool_use_id": "standing-exact", "content": value,
-        }]}, "sessionId": "session-exact"}
-
-    for malformed_schema in ({}, []):  # type: object
-        malformed_receipt = receipt(output)
-        malformed_receipt["schema"] = malformed_schema
-        for label, malformed_record in (
-                ("hook attachment", claude_attachment(json.dumps(malformed_receipt))),
-                ("service marker", standing_result({**standing_value, "schema": malformed_schema}))):
-            stop_records = [standing_call, standing_result(standing_value),
-                            claude_tool_call(), malformed_record]
-            stop_transcript.write_text("".join(json.dumps(record) + "\n" for record in stop_records))
-            audits: list[dict] = []
-            saved_audit, saved_stdin = drift.audit, sys.stdin
-            drift.audit = audits.append
-            sys.stdin = io.StringIO(json.dumps({
-                "hook_event_name": "Stop", "session_id": "session-exact",
-                "cwd": str(REPO), "transcript_path": str(stop_transcript),
-            }))
-            stdout = io.StringIO()
-            try:
-                with contextlib.redirect_stdout(stdout):
-                    rc = drift.main()
-            finally:
-                drift.audit, sys.stdin = saved_audit, saved_stdin
-            verdict = json.loads(stdout.getvalue() or "{}")
-            check(f"Stop blocks missing pack with {label} schema {malformed_schema!r}",
-                  rc == 0 and verdict.get("decision") == "block"
-                  and "scheduled-automation" in verdict.get("reason", "")
-                  and len(audits) == 1
-                  and audits[0].get("missing") == ["scheduled-automation"]
-                  and not audits[0].get("error"), (verdict, audits))
-
-for record_type, message_role in (("user", "user"), ("assistant", "user"),
-                                  ("user", "assistant")):
-    forged = claude_tool_call()
-    forged["type"] = record_type
-    forged["message"]["role"] = message_role
-    found = drift.delivery_state([forged, claude_attachment(context(output))])
-    check(f"Claude {record_type}/{message_role} tool-call provenance refuses",
-          found[1] == [], found)
-
-# Config parity and shadow-window source identity travel with the rail.
+# Config parity and delivery source identity travel with the rail.
 claude = json.loads((REPO / "ops/config/hooks.json").read_text())
 codex = json.loads((REPO / "ops/config/codex-hooks.json").read_text())["hooks"]
 command = "hooks/rule-pack-preuse-reselection.py"
@@ -601,10 +397,10 @@ check("Claude wires the same rule-delivery module once at the partner-message se
 check("Codex wires the same rule-delivery module once at the partner-message seam",
       len(codex_prompt_rows) == 1)
 check("new rail participates in the epoch source digest",
-      "hooks/rule-pack-preuse-reselection.py" in rail.WINDOW_SOURCE_PATHS)
+      "hooks/rule-pack-preuse-reselection.py" in rail.DELIVERY_SOURCE_PATHS)
 check("the compiled trigger table participates in the epoch source digest too",
-      "ops/config/rule-jit-triggers.v1.json" in rail.WINDOW_SOURCE_PATHS
-      and "ops/rule-jit-compile.py" in rail.WINDOW_SOURCE_PATHS)
+      "ops/config/rule-jit-triggers.v1.json" in rail.DELIVERY_SOURCE_PATHS
+      and "ops/rule-jit-compile.py" in rail.DELIVERY_SOURCE_PATHS)
 
 # Claude-only compaction-scoped dedupe. Codex and disabled Claude retain the
 # exact historical output path; active dedupe requires the continuity config
@@ -1137,52 +933,6 @@ check("semantic receipt uses authoritative text and keeps the Jev probability",
                         "binding_model": "jev-test-binder"}})
 check("semantic receipt validates through the shared rule-delivery interface",
       contract.validate_semantic_receipt(semantic_row, repo=REPO))
-
-semantic_claude_attachment = {
-    "type": "attachment", "sessionId": "session-prompt",
-    "attachment": {
-        "type": "hook_additional_context", "hookEvent": "UserPromptSubmit",
-        "hookName": "UserPromptSubmit", "content": [context(semantic_output)],
-    },
-}
-semantic_claude_prompt = {
-    "type": "user", "sessionId": "session-prompt",
-    "message": {"role": "user", "content": "we need to improve this source"},
-}
-mode, loaded, _ = drift.delivery_state([
-    semantic_claude_prompt, semantic_claude_attachment])
-check("Claude Stop telemetry credits only the validated semantic hook envelope",
-      mode == "shadow" and loaded == semantic_packs, (mode, loaded))
-
-replayed_prompt = copy.deepcopy(semantic_claude_prompt)
-cast(dict[str, object], replayed_prompt["message"])["content"] = (
-    "a different later request")
-mode, loaded, _ = drift.delivery_state([replayed_prompt, semantic_claude_attachment])
-check("Claude cannot replay a valid semantic receipt onto a different prompt",
-      mode is None and loaded == [], (mode, loaded))
-
-codex_semantic = rail.process(
-    prompt_payload(client="codex"),
-    runner=Runner(gen_selector_result(packs=semantic_packs, ids=[semantic_id])),
-    adviser=fake_adviser)
-check("Codex semantic receipt binds the native turn",
-      json.loads(context(codex_semantic))["turn_id"] == "turn-prompt")
-codex_semantic_context = codex_context(context(codex_semantic))
-codex_semantic_context["payload"]["internal_chat_message_metadata_passthrough"] = {
-    "turn_id": "turn-prompt"}
-mode, loaded, _ = drift.delivery_state([codex_semantic_context])
-check("Codex Stop telemetry credits the validated semantic developer context",
-      mode == "shadow" and loaded == semantic_packs, (mode, loaded))
-
-forged_semantic = copy.deepcopy(semantic_row)
-forged_semantic["probabilities"][semantic_id] = 0.01
-forged_attachment = copy.deepcopy(semantic_claude_attachment)
-cast(dict[str, object], forged_attachment["attachment"])["content"] = [
-    json.dumps(forged_semantic)]
-mode, loaded, _ = drift.delivery_state([
-    semantic_claude_prompt, forged_attachment])
-check("tampered semantic context cannot claim a loaded pack",
-      mode is None and loaded == [], (mode, loaded))
 
 no_bind_runner = Runner()
 no_bind_output = rail.process(
