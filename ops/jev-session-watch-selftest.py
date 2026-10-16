@@ -335,9 +335,7 @@ class TranscriptHelperTests(unittest.TestCase):
 class BoundaryBatchTests(SemanticTestCase):
     def test_main_desk_test_mapping_is_local_in_real_replay(self):
         repo = OPS.parent
-        case = next(json.loads(line) for line in
-                    (repo / "ops/fixtures/real-replay/file-edits.jsonl").read_text().splitlines()
-                    if json.loads(line)["id"] == "f47899fdbe4b")
+        case = {'id': 'f47899fdbe4b', 'tool_input': {'file_path': '{{REPO}}/tools/room-bridge/desk_cli.py', 'new_string': '    if args.seat:\n        entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)\n    if getattr(args, "room_listen", None):\n        entry = registry_ext.set_room_listen(args.name, args.room_listen, path=reg.path)\n    if args.profile:\n        entry = registry_ext.set_profile(args.name, args.profile, path=reg.path)', 'old_string': '    if args.seat:\n        entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)\n    if args.profile:\n        entry = registry_ext.set_profile(args.name, args.profile, path=reg.path)', 'replace_all': False}, 'tool_name': 'Edit'}
         tool_input = {key: value.replace("{{REPO}}", str(repo)) if isinstance(value, str)
                       else value for key, value in case["tool_input"].items()}
         # Main added a real desk-permissions test after the original snapshot.
@@ -351,11 +349,6 @@ class BoundaryBatchTests(SemanticTestCase):
                                           judge_module=FakeJudge(),
                                           receipt_path=os.path.join(tmp, "receipt.jsonl"))
         self.assertTrue(any(row["check"] == "test_picker" for row in out))
-        snapshot = (repo / "ops/fixtures/real-replay/verdict-snapshot.tsv").read_text()
-        expected = [line.split("\t") for line in snapshot.splitlines()
-                    if line.startswith("jev-supervisor.py\tPostToolUse")
-                    and "\tedits:f47899fdbe4b\t" in line]
-        self.assertEqual(expected, [])  # allow: local test mapping has no unavailable-model announcement
         self.assertTrue(all(row["check"] != "boundary_judgment" for row in out))
 
     def test_replacing_existing_function_is_not_duplicate_creation(self):

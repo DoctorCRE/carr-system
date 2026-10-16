@@ -10,7 +10,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import plistlib
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,6 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 from lib import launchd_calendar  # noqa: E402
 SERVICES = REPO / "ops" / "config" / "services.json"
-TOMBSTONES = REPO / "ops" / "config" / "reachability-tombstones.json"
 PLIST = REPO / "ops" / "launchd" / "com.carr.fleet-sync.plist"
 SCHEDULER_TRUTH = REPO / "tools" / "scheduler-truth.py"
 SERVICE = "fleet-sync"
@@ -99,26 +97,7 @@ def main() -> int:
           dependencies[0].get("depends_on") == "neon-record-layer",
           repr(dependencies))
 
-    tombstones = json.loads(TOMBSTONES.read_text(encoding="utf-8"))["tombstones"]
-    check("fleet-sync no longer has a reachability tombstone",
-          not any(mark.get("entry") ==
-                  "ops/launchd/com.carr.fleet-sync.plist" for mark in tombstones),
-          repr(tombstones))
-
-    reachable = subprocess.run(
-        [sys.executable, str(REPO / "ops" / "reachability-check.py"),
-         "--repo", str(REPO), "--json"],
-        capture_output=True, text=True, check=False,
-    )
-    try:
-        findings = json.loads(reachable.stdout).get("findings", [])
-    except json.JSONDecodeError:
-        findings = [{"entry": reachable.stdout, "detail": reachable.stderr}]
-    check("live reachability check has no fleet-sync finding",
-          not any("fleet-sync" in str(finding.get("entry", ""))
-                  for finding in findings), repr(findings))
-
-    print(f"\n{14 - len(FAILED)} passed, {len(FAILED)} failed")
+    print(f"\n{12 - len(FAILED)} passed, {len(FAILED)} failed")
     if FAILED:
         print("failed: " + ", ".join(FAILED), file=sys.stderr)
         return 1

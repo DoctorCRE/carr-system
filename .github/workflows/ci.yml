@@ -118,12 +118,11 @@ jobs:
       matrix:
         # 2026-10-01 run 36928008916: this combined group took 310s (unit
         # 228s, types 36s, secret 33s, other classes 13s), below ten minutes.
-        # Keep gates, real-fixture replay and migration in separate jobs. Every class
+        # Keep gates and migration in separate jobs. Every class
         # must appear in exactly one group (ops/ci-selftest.py verifies this).
         classes:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
           - "gates"
-          - "replay"
           - "migration"
     # Both PR 1121 and PR 1406 exhausted a 20-minute migration job while
     # their separate database acceptance passed. Preserve measured headroom

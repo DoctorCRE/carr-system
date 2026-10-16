@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-boot-gate.py",
+            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
             "timeout": 5,
             "additionalContextLimit": 5000
           }
@@ -34,27 +34,12 @@
         ]
       },
       {
-        "matcher": "mcp__.*__teach",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/rule-shape-gate.py",
-            "timeout": 10
-          }
-        ]
-      },
-      {
         "matcher": "^(apply_patch|functions\\.apply_patch)$",
         "hooks": [
           {
             "type": "command",
             "command": "/usr/bin/env python3 {{REPO}}/hooks/record-home-gate.py",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/close-before-open-gate.py",
-            "timeout": 15
           }
         ]
       },
@@ -75,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-boot-gate.py",
+            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
             "timeout": 5,
             "additionalContextLimit": 5000
           }
@@ -120,8 +105,14 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/gate-integrity.py",
+            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/gate-integrity.py",
             "timeout": 15,
+            "additionalContextLimit": 5000
+          },
+          {
+            "type": "command",
+            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
+            "timeout": 5,
             "additionalContextLimit": 5000
           }
         ]
@@ -181,27 +172,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/map-architecture-gate.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/completion-evidence-gate.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/ledger-sweep.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/chat-lint-gate.py",
-            "timeout": 15
-          },
-          {
-            "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-pack-drift-gate.py",
+            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-drift-gate.py",
             "timeout": 20
           }
         ]

@@ -134,11 +134,7 @@ commands and arbitrary existing paths need explicit registration. The adapter
 returns successfully if cleanup cannot proceed, and reports the preservation
 reason to stderr.
 
-Hook registration is an installation step. This PR does not change client
-settings, the gate baseline, or `dispatch.py`. The adapter is declared as an
-unwired client-event wrapper in `ops/config/gate-declarations.json`, paired with the disk
-reaper selftest. Installing hook wiring requires updating that declaration and
-regenerating its hook projections.
+Hook registration belongs in the native client hook JSON under `ops/config/`.
 
 ## Install on both Macs
 

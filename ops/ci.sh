@@ -34,7 +34,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-CLASS_ORDER="pushfloor unit types contract gates replay secret dependency migration binding artifact freshness"
+CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness"
 
 class_desc() {
   case "$1" in
@@ -44,7 +44,6 @@ class_desc() {
     types)      echo "seeded shape mistake in a data hand-off" ;;
     contract)   echo "seeded auth/schema contract break" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
-    replay)     echo "real-fixture gate verdict regression" ;;
     secret)     echo "seeded credential in the tree" ;;
     dependency) echo "seeded unpinned or vulnerable dependency" ;;
     migration)  echo "seeded bad migration / trigger permission" ;;
@@ -80,28 +79,6 @@ LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/carr-ci.XXXXXX")"
 trap 'rm -rf "$LOGDIR"' EXIT
 
 "$PY" ops/ci-quarantine.py validate || exit 1
-
-gates_name_the_move() {  # gates_name_the_move <failed check names...>
-  local named=0 f
-  for f in "$@"; do
-    case "$f" in
-      gate-integrity)
-        printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-          "re-bless IN THE SAME COMMIT (rule c0b38d80): hooks/gate-integrity.py --bless, then commit ops/config/gate-baseline.json together with the gate you edited" >&2
-        named=1 ;;
-      enforcement-coverage-check|rule-enforcement-map-check)
-        printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-          "register the control you added: run ops/$f.py directly — it prints the exact row it wants and where it goes" >&2
-        named=1 ;;
-      *-selftest.py)
-        printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-          "$f is the PAIRED suite for the gate of the same name: a gate and its selftest change in the same commit, or the pair has stopped meaning anything" >&2
-        named=1 ;;
-    esac
-  done
-  [ "$named" = "1" ] || printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-    "each check above names its own remedy in its output — read the failing check's own output above, not just this summary line" >&2
-}
 
 INHERIT_ASKED=0
 inherited_abort() {
@@ -220,9 +197,6 @@ tree_fingerprint() {
 
 check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0
-  run_quiet "$LOGDIR/gate-declarations.log" "$PY" lib/gate_declarations.py --check \
-    || { failures="$failures gate-declarations"; tail -15 "$LOGDIR/gate-declarations.log" >&2; }
-
   export CARR_HOOK_FIXTURE=1
 
   local tree_before; tree_before="$(tree_fingerprint)"
@@ -316,15 +290,15 @@ PYEOF
       failures="$failures $sbase"; fail_tail "$LOGDIR/gate-$sbase.log"
     fi
   done; fi
-  run_quiet "$LOGDIR/gate-integrity.log" "$PY" hooks/gate-integrity.py --strict \
+  run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
     || { inherited_abort gate-integrity "$PY" hooks/gate-integrity.py --strict
-         failures="$failures gate-integrity"; tail -12 "$LOGDIR/gate-integrity.log" >&2; }
+         failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
 
   "$PY" ops/boot-budget-check.py
 
-  for inv in enforcement-coverage-check audit-queue-freshness-check map-row-evidence-check \
-             rule-enforcement-map-check rule-load-layer-check rule-classification-parity-check \
-             reachability-check selftest-git-isolation-check \
+  for inv in audit-queue-freshness-check \
+             rule-load-layer-check rule-classification-parity-check \
+             selftest-git-isolation-check \
              scheduler-cutover-coverage-gate \
              sync-core-rule-ids rule-route-coverage \
              sync-rule-boot-classes migration-order-gate \
@@ -356,38 +330,10 @@ PYEOF
 
   if [ -n "$failures" ]; then
     bad gates "failed:$failures"
-    gates_name_the_move $failures
   elif [ -n "$skiplist" ]; then
-    ok gates "$count suites + baseline integrity · NOT RUN:$skiplist"
+    ok gates "$count suites + safety hook installation · NOT RUN:$skiplist"
   else
-    ok gates "$count selftest suites + baseline integrity"
-  fi
-}
-
-check_replay() {
-  export CARR_HOOK_FIXTURE=1
-  local tree_before="$(tree_fingerprint)"
-  if [ -f ops/gate-replay.py ]; then
-    "$PY" "$CI_TIMEOUT_HELPER" 900 "$PY" ops/gate-replay.py >"$LOGDIR/gate-gate-replay.log" 2>&1
-    local rrc=$?
-    if [ "$rrc" -eq 78 ]; then
-      skip replay "NOT CONFIGURED (exit 78): gate-replay.py"
-      printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
-        gate-replay.py "$(tail -1 "$LOGDIR/gate-gate-replay.log" 2>/dev/null)" >&2
-    elif [ "$rrc" -ne 0 ]; then
-      inherited_abort gate-replay "$PY" ops/gate-replay.py
-      bad replay "gate-replay failed (exit $rrc)"; tail -40 "$LOGDIR/gate-gate-replay.log" >&2
-    else
-      grep -E '^gate-replay: [0-9]+ invocations|^  verdicts: |^gate-replay: OK' \
-        "$LOGDIR/gate-gate-replay.log" >&2
-      ok replay "real-fixture verdicts match the committed snapshot"
-    fi
-  else
-    skip replay "ops/gate-replay.py not present"
-  fi
-
-  if [ "$(tree_fingerprint)" != "$tree_before" ]; then
-    bad replay "tree-mutated-by-replay"
+    ok gates "$count selftest suites + safety hook installation"
   fi
 }
 
@@ -444,12 +390,6 @@ check_pushfloor() {
     printf '        \033[31m%s\033[0m — %s\n' "$1" "$2" >&2
   }
 
-  run_quiet "$LOGDIR/pushfloor-gate-integrity.log" \
-    "$PY" hooks/gate-integrity.py --strict \
-    || { tail -12 "$LOGDIR/pushfloor-gate-integrity.log" >&2
-         floor_fail gate-integrity \
-           "a gate moved without its baseline. Re-bless what you changed and stage it in the SAME commit: python3 hooks/gate-integrity.py --bless <gate> && git add ops/config/gate-baseline.json"; }
-
   run_quiet "$LOGDIR/pushfloor-no-client-deliverables.log" \
     "$PY" ops/no-client-deliverables-gate.py \
     || { tail -12 "$LOGDIR/pushfloor-no-client-deliverables.log" >&2
@@ -482,16 +422,6 @@ check_pushfloor() {
       || { tail -15 "$LOGDIR/pushfloor-migration-structure.log" >&2
            floor_fail migration-structure \
              "reserve a forward migration number and repair every reference before push"; }
-  fi
-
-  if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(mcp-server/src/|hooks/completion-evidence-gate\.py$)'; then
-    ran="$ran registry-coverage"
-    run_quiet "$LOGDIR/pushfloor-registry-coverage.log" \
-      "$PY" ops/completion-evidence-gate-selftest.py --registry-only \
-      || { tail -12 "$LOGDIR/pushfloor-registry-coverage.log" >&2
-           floor_fail registry-coverage \
-             "classify the registry's new writes in the completion gate and retain read exclusions"; }
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
@@ -535,7 +465,7 @@ check_pushfloor() {
 
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(gate-baseline|rule-enforcement-map|delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -543,7 +473,7 @@ check_pushfloor() {
 
     for touched_gate in $(printf '%s\n' "$gate_surface" | grep -E '^hooks/[^/]+\.py$' | grep -v -- '-selftest\.py$' || true); do
       base="$(basename "$touched_gate" .py)"
-      paired="$("$PY" lib/gate_declarations.py --paired "$touched_gate" 2>/dev/null || true)"
+      paired="ops/$base-selftest.py"
       if [ -f "$paired" ]; then
         run_quiet "$LOGDIR/pushfloor-$base-selftest.log" "$PY" "$paired" \
           || { tail -15 "$LOGDIR/pushfloor-$base-selftest.log" >&2
@@ -569,14 +499,6 @@ check_pushfloor() {
         || { tail -12 "$LOGDIR/pushfloor-$ibase.log" >&2
              floor_fail "$ibase" "run it alone to iterate: .venv/bin/python $iso"; }
     done
-
-    if [ -f ops/enforcement-coverage-check.py ]; then
-      run_quiet "$LOGDIR/pushfloor-enforcement-coverage.log" \
-        "$PY" ops/enforcement-coverage-check.py \
-        || { tail -15 "$LOGDIR/pushfloor-enforcement-coverage.log" >&2
-             floor_fail enforcement-coverage \
-               "a blessed gate is named by no control. Add it to the enforcement map, or record it in ops/config/enforcement-coverage-backlog.json with a reason."; }
-    fi
 
 
     if [ -n "$unclassified" ] && [ -n "$ONLY" ] && ! selected gates; then
@@ -697,7 +619,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
        run_quiet "$LOGDIR/invoice-tracker-transaction.log" \
        node --test mcp-server/test/invoice-tracker-transaction.test.mjs; then
     tail -30 "$LOGDIR/invoice-tracker-transaction.log" >&2
-    bad migration "the registered invoice receipt replay and atomic rollback proof failed"
+    bad migration "the registered invoice receipt and atomic rollback proof failed"
     return
   fi
   local tour_pg_proof tour_pg_log

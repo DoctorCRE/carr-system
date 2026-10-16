@@ -224,12 +224,13 @@
   "reviewed_base_inventory": {
     "excluded_rule_surface": "intro_politics",
     "path": "ops/config/rule-enforcement-map.json",
-    "sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
+    "sha256": "6a1c929bb30845a975953c80201c5250b4529990e4160356280cbacd0af24af6",
     "standing_source_count": 208
   },
   "reviewed_source_manifest": {
     "path": "audits/guidance-migration-manifest.v1.tsv",
-    "sha256": "647757cbec9613347670d56fc1fc7c281ce6d9e48146a6f5caaef70d29ed8f91"
+    "sha256": "eaf20ad979cc9970680910910d0284298a92aed988590c0f73a1ed4dd7815371"
   },
-  "schema": "guidance-situation-curation-review/v1"
+  "schema": "guidance-situation-curation-review/v1",
+  "_repin_note_2026_10_16_reply_gates": "PR #1801 removes 19 automated gates under Joe's 2026-10-15 purge ruling and reclassifies their 42 rules as judgment_ambient prose guidance; all active rule IDs are preserved. The reviewed migration manifest gained one row per rule, appended as an orchestrator-approved batch with no human review recorded. The doctrine situation mappings are unchanged; these digests identify the updated inventory and manifest without approving any proposed rule or mapping."
 }

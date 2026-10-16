@@ -9,8 +9,8 @@
  },
  "generated_from": {
   "jev_triggers_sha256": "f26d16ebdf35072ee9eee6eee07c4614a6d7131a379a917dbb40667afe87a62f",
-  "map_sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
-  "triage_sha256": "4b4fc044c74627edb8f2832360afdce591cfd626b638f003ef1fb6b0f0f42e71"
+  "map_sha256": "6a1c929bb30845a975953c80201c5250b4529990e4160356280cbacd0af24af6",
+  "triage_sha256": "e96ff4e7ec57ffb37f8b7e55b05b5cf75d28412d5a90581b6a644c411fd1e74b"
  },
  "generated_note": "Compiled by ops/rule-jit-compile.py from ops/config/rule-triage.v1.json's per-rule `detector` fields and ops/config/rule-enforcement-map.json's rule_packs/rule_load_layers. Never hand-edit this file \u2014 run the compiler again after changing either input, and `--check` verifies the two never drift apart.",
  "max_rules_per_trigger": 5,
@@ -137,7 +137,8 @@
    "rule_ids": [
     "07dde434",
     "08c4eda2",
-    "ac0a6579"
+    "ac0a6579",
+    "c315befa"
    ],
    "source": "pack_fallback",
    "trigger_id": "d6c3b5c37c8d"
@@ -162,10 +163,10 @@
    "pattern": "\\bgit\\b|\\bbranch\\b|\\bworktree\\b|\\bcommit\\b|\\bpush\\b|\\bpull\\ request\\b|\\bci\\b|\\bgate\\b|\\bhook\\b|\\bmigration\\b|\\bschema\\b|\\bdeploy\\b|\\bwrangler\\b|\\btest\\b|\\bselftest\\b|\\bconfig\\ file\\b|\\bbaseline\\b|\\brefactor\\b|\\barchitecture\\ fork\\b",
    "rule_ids": [
     "204391be",
+    "43e2ef76",
     "486584d6",
-    "67e48aaf",
-    "a2e78f48",
-    "c363bd8b"
+    "4e104d4c",
+    "67e48aaf"
    ],
    "source": "pack_fallback",
    "trigger_id": "963b8f2da763"
@@ -205,9 +206,11 @@
    ],
    "pattern": "\\bscheduled\\b|\\blaunchd\\b|\\bcron\\b|\\bnightly\\b|\\bheartbeat\\b|\\bhealth\\b|\\bunattended\\b|\\broutine\\b|\\bjob\\b|\\bcredential\\b|\\baway\\ mode\\b|\\btombstone\\b|\\bmetric\\b|\\balarm\\b|\\blong\\ job\\b|\\bestimate\\b",
    "rule_ids": [
+    "1f3a7372",
+    "590b11e1",
     "67e48aaf",
     "740bb505",
-    "def3e84e"
+    "847f9995"
    ],
    "source": "pack_fallback",
    "trigger_id": "4390b46cdb6b"
@@ -221,6 +224,7 @@
    "rule_ids": [
     "4a77c35d",
     "661d7757",
+    "d7f74c93",
     "f673326b"
    ],
    "source": "pack_fallback",
@@ -253,7 +257,7 @@
     "0c1bac27",
     "113b3833",
     "179be4b8",
-    "1c21263c"
+    "19ebbeb3"
    ],
    "source": "pack_fallback",
    "trigger_id": "33efd5146cbe"

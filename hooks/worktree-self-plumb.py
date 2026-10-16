@@ -62,10 +62,6 @@ the advertised tip. A superseded PR closes only after its merged successor is
 read back. Dry runs and action receipts go to out/orch. The shared maintenance
 lock remains out/worktree-reap.lock.
 
-hooks/*.py are covered by the gate-integrity.py baseline (rule: a session
-that adds or edits a hook re-blesses the baseline in the same commit) — this
-file was blessed alongside its addition; see ops/config/gate-baseline.json.
-
 FAIL-SOFT, ALWAYS. A boot-time convenience must never fail or block a
 session: any error anywhere in here is swallowed and the hook prints
 nothing, same discipline as hooks/session-brief.py's own nightly/loose-work

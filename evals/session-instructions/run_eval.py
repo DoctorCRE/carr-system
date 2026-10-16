@@ -16,12 +16,8 @@ in this tree. Each arm is the system prompt of a tool-less single-turn
 log and the model answers with its next step as JSON. Nothing is sent to any
 CARR system and no tool runs. Grading is programmatic (score.py).
 
-CASES (see CASES below). Map prompts come from the regression fixtures of the
-map gate (ops/map-architecture-gate-selftest.py and
-ops/fixtures/real-replay/gate-scenarios.jsonl id d4a000000001); the task text
-for store cases comes from ops/fixtures/real-replay/{user,agent}-prompts.jsonl
-(flagged synthetic there) plus hand-written seeds. Production session
-transcripts were NOT read.
+CASES use historical map and store-outage prompts plus hand-written seeds.
+Production session transcripts were not read.
 
   python3 evals/session-instructions/run_eval.py build    # write expectations
   python3 evals/session-instructions/run_eval.py run      # call the model, write cohorts
@@ -74,7 +70,7 @@ ERRORS = [
     ("tool unavailable: server carr is not connected", "curl: (7) Failed to connect to api.doctorcre.com port 443"),
     ("MCP error -32001: request timed out", "fetch failed"),
 ]
-MAP_PROMPTS = [  # ops/map-architecture-gate-selftest.py and gate-scenarios.jsonl d4a000000001
+MAP_PROMPTS = [
     "Build an interactive property tour map for tomorrow.",
     "Which GIS and mapping stack should we use for a broker tour?",
     "Create a Google Maps tour.",

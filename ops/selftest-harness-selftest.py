@@ -40,9 +40,9 @@ def captured(fn):
 
 
 # ------------------------------------------------ the legacy code, verbatim
-# Copied from the common pattern in e.g. ops/unread-artifact-gate-selftest.py
+# Copied from the common pattern in e.g. ops/lint-gate-selftest.py
 # (check) and its main() footer, and the limit-N footer variant from
-# ops/rule-resort-weekly-selftest.py. Only `failures` is made a parameter.
+# ops/rule-triage-selftest.py. Only `failures` is made a parameter.
 
 def legacy_run(outcomes: list, limit: int | None = None) -> int:
     failures: list[str] = []

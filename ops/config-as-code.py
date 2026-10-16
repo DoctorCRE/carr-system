@@ -457,7 +457,7 @@ def tracked_text_match(label, live, repo_text):
 
 
 def hook_block_script_paths(block):
-    """Every absolute .py path a hooks block's commands invoke, real and sorted.
+    """Every absolute script path a hooks block's commands invoke, real and sorted.
 
     The extraction half shared by hook_scripts_untracked (which asks git about
     the LIVE block) and cmd_install's missing-script refusal (which asks the
@@ -468,34 +468,39 @@ def hook_block_script_paths(block):
             continue
         for grp in groups:
             for hook in (grp or {}).get("hooks", []) or []:
-                for tok in re.findall(r"(/[^\s'\"]+\.py)", hook.get("command", "") or ""):
-                    paths.add(os.path.realpath(concrete(tok)))
+                command = os.path.expandvars(concrete(hook.get("command", "") or ""))
+                # Project hooks select the canonical checkout in a shell-local r.
+                root = re.search(r'r="([^"$]+)"', command)
+                if root:
+                    command = command.replace("$r/", root.group(1) + "/")
+                for tok in re.findall(r"(/[^\s'\"]+\.(?:py|sh|mjs|js))(?=[\s'\"]|$)", command):
+                    paths.add(os.path.realpath(tok))
     return sorted(paths)
 
 
+def installed_hook_missing_files():
+    """Audit installed client and project hook commands before source deletions ship."""
+    problems = []
+    for path in (SETTINGS, CODEX_HOOKS_SRC, os.path.join(REPO, ".claude", "settings.json")):
+        raw = read(path)
+        if raw is None:
+            continue
+        try:
+            block = json.loads(raw).get("hooks", {})
+        except (ValueError, AttributeError) as exc:
+            problems.append((path, f"invalid hook configuration: {exc}"))
+            continue
+        for script in hook_block_script_paths(block):
+            # Hook commands guard on their checkout's hooks directory and exit
+            # 0 when it is absent, so only a script missing from a present
+            # directory is a hook that will fail.
+            if os.path.isdir(os.path.dirname(script)) and not os.path.isfile(script):
+                problems.append((path, f"installed hook invokes missing file: {script}"))
+    return problems
+
+
 def hook_scripts_untracked():
-    """Hook scripts that settings.json points at but git does not track.
-
-    THE GAP THIS CLOSES, found 2026-08-09. This tool verifies that the hooks
-    BLOCK inside settings.json matches the repo. It never checked whether the
-    SCRIPTS that block points at are committed. Those are different failures and
-    only one of them was covered: on this machine the live settings referenced
-    hooks/conduct-stop-gate.py, hooks/conduct_patterns.py and
-    hooks/escalation-gate.py, all created the same afternoon and none of them in
-    git. The check reported "OK — repo matches machine" the whole time, and it
-    was telling the truth about the only thing it was looking at.
-
-    WHY IT MATTERS RATHER THAN BEING TIDINESS. A hook that exists only in one
-    working tree is one `git clean`, one disk failure or one fresh clone from
-    being gone, and the settings block that survives will then point at files
-    that are not there. It also cannot reach Dell: he pulls the repo, so an
-    untracked gate binds Joe's sessions and silently binds nothing of his, which
-    is the twin-parity failure rule 61c64d91 exists to prevent. The 2026-08-08
-    wipe proved the settings block is worth versioning; the scripts it invokes
-    are the other half of the same control.
-
-    Returns a list of (path, why) — repo-relative where possible.
-    """
+    """Check that native hook commands name tracked files that exist."""
     block = raw_live_hooks_block()
     if not block:
         return []
@@ -1710,6 +1715,7 @@ def _cmd_check(holds):
         if not launchd_off_reason(name, read(launchd_repo_path(name)), holds)
     ]
     drift = missing + untracked + different + disallowed + refused + pending_reloads
+    drift += installed_hook_missing_files()
     if not drift and not unversioned:
         prerequisite_report = prerequisite_failure_report(PREREQUISITE_CHECK(REPO))
         if prerequisite_report:
@@ -1796,6 +1802,8 @@ def cmd_pull(apply):
         return 1
     wrote = 0
     for label, live, repo_path in configured_pairs:
+        if repo_path in (HOOKS_REPO, CODEX_HOOKS_REPO):
+            continue
         if live is None:
             print(f"  SKIP  {label} (not on this machine; left in the repo)")
             continue
@@ -2276,7 +2284,7 @@ def cmd_install(apply):
 
     src = read(HOOKS_REPO)
     if src is None:
-        print(f"ERROR: no tracked hooks block at {HOOKS_REPO}. Run `pull` first.")
+        print(f"ERROR: no native hooks block at {HOOKS_REPO}. Restore it from the repository.")
         return 1
 
     try:
@@ -2341,7 +2349,7 @@ def cmd_install(apply):
     else:
         codex_src = read(CODEX_HOOKS_REPO)
         if codex_src is None:
-            print(f"ERROR: no tracked Codex hooks at {CODEX_HOOKS_REPO}. Run `pull` first.")
+            print(f"ERROR: no native Codex hooks at {CODEX_HOOKS_REPO}. Restore it from the repository.")
             return 1
         codex_body = concrete(codex_src)
         try:
@@ -2354,6 +2362,11 @@ def cmd_install(apply):
             live_codex = json.loads(live_codex_raw) if live_codex_raw is not None else {}
         except Exception as exc:
             print(f"ERROR: {CODEX_HOOKS_SRC} is not valid JSON ({exc}) — refusing to touch it.")
+            return 1
+        absent = [p for p in hook_block_script_paths(desired_codex.get("hooks"))
+                  if not os.path.isfile(p)]
+        if absent:
+            print("ERROR: Codex hooks invoke missing scripts: " + ", ".join(absent))
             return 1
         merged_codex = merge_codex_carr_hooks(live_codex, desired_codex)
         desired_events = (desired_codex.get("hooks") or {}).keys()
@@ -2585,16 +2598,6 @@ def cmd_install(apply):
             shutil.copy2(code_config_backup, CODEX_CONFIG)
             print(f"ERROR: Codex config write produced invalid TOML ({exc}) — restored backup")
             return 1
-    # NO RESTART NEEDED, and the old message here said otherwise for months.
-    # Live-tested 2026-08-09 with two independent confirmations: git-writer-gate
-    # and gate-edit-gate were both installed MID-SESSION and both fired in a
-    # session that started before either existed. Claude Code reads the hooks
-    # block per tool call, not once at session start. This matters — the old
-    # wording implied every other running session stayed unguarded until it was
-    # restarted, which would have made a gate install nearly useless on a machine
-    # running five sessions. The opposite is true: an install takes effect
-    # everywhere immediately. Rule 97326357 — a claim about a surface becomes
-    # doctrine only after a live test from that surface.
     if launchd_activation_failures:
         print("ERROR: LaunchAgent install/reload failed for: "
               + ", ".join(launchd_activation_failures))
@@ -2613,7 +2616,7 @@ def cmd_install(apply):
 def config_selftest():
     """Regression proof that Codex install touches only CARR-owned tuples."""
     desired = {"hooks": {"Stop": [{"hooks": [{
-        "type": "command", "command": "/Users/booko/carr-system/hooks/completion-evidence-gate.py", "timeout": 15,
+        "type": "command", "command": "/Users/booko/carr-system/hooks/context-handoff-gate.py", "timeout": 15,
     }]}]}}
     live = {"hooks": {"Stop": [
         {"hooks": [{"type": "command", "command": "/Users/booko/other/hooks/keep.py", "timeout": 5}]},
@@ -2631,7 +2634,7 @@ def config_selftest():
         ("mixed unrelated Codex hook preserved", "/Users/booko/other/hooks/mixed.py" in commands),
         ("stale CARR hook removed", "/Users/booko/carr-system/hooks/old.py" not in commands),
         ("desired CARR hook installed once", commands.count(
-            "/Users/booko/carr-system/hooks/completion-evidence-gate.py") == 1),
+            "/Users/booko/carr-system/hooks/context-handoff-gate.py") == 1),
         ("unrelated top-level key preserved", merged.get("user_setting") == {"keep": True}),
         ("CARR snapshot exact", carr_owned_hooks_document(merged, ["Stop"]) == desired),
     ]

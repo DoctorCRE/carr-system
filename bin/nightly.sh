@@ -1487,53 +1487,6 @@ tombstone "incident sweep" \
   "authority capability — 0117 withholds resolved_at and root_cause from carr_jobs, so closing needs the owner credential through break-glass" \
   "that credential is provisioned here and the break-glass close path is restored to this line"
 
-# WHAT THE ENFORCEMENT STACK COST LAST WEEK, printed where the rest of the
-# night's reporting already lands. 13 hook processes fire per Bash tool call and
-# 11 per turn on this machine; until 2026-08-23 nobody could say what that cost
-# or which of those gates had caught anything real, because live refusals and
-# selftest fixtures were written to the same file. They are separate streams now
-# and hooks/hook-meter-run.py records one line per firing, so this prints per-
-# gate p95 latency, live denies, turn reopens and the 7-day trend.
-#
-# IT REPORTS AND NEVER ACTS, including the retire-candidate list, which is a
-# list of gates to LOOK at — a gate whose deterrent is working looks exactly
-# like a gate nobody needs. It exits 0 even when a provisional budget is
-# exceeded (--strict is for a human at a terminal), because a chain step that
-# goes red on a latency number would be the check that teaches people to stop
-# reading the chain.
-#
-# NO NEW SCHEDULED JOB: this is the council's "piggyback on what already runs",
-# and one more step on a chain that is already awake is the whole cost.
-step "hook telemetry rollup (reports, never retires)"  ./.venv/bin/python ops/hook-telemetry-rollup.py --days 7
-
-# ── RULE REPLAY + WEEKLY RE-SORT (WR-000019 slice S12, Obedience & Autonomy,
-# 2026-08-27) ─────────────────────────────────────────────────────────────
-# The measurement loop that makes the 219-rule rulebook a MANAGED population
-# rather than a fixed one. Every night, ops/rule-replay-nightly.py scores the
-# prior day's real transcripts for this repo against the rules that were live
-# for each turn -- reusing hooks/rule-pack-preuse-reselection.py's own
-# trigger matcher and ops/gate-lifecycle-report.py's own read_rows()/
-# is_true_positive() rather than a second copy of either. It writes one row
-# per (session, fired rule-signal) plus a summary row to
-# out/rule-replay-nightly.jsonl, and stages -- never files -- defect
-# proposals to out/rule-replay-defect-proposals.jsonl for the two named
-# failure-class signatures (shadow writing-check findings, materially
-# under-delegated sessions); a human morning session reviews and files them
-# through record-defect with its own fresh idempotency_key, same reasoning
-# as this file's own "WHAT IS LEFT FOR A HUMAN" note two steps up.
-step "rule replay (nightly transcript scoring, deterministic, reports only)" \
-    ./.venv/bin/python ops/rule-replay-nightly.py --since-hours 24
-
-# The weekly re-sort report reads that ledger plus gate-lifecycle-report.py's
-# own build() (imported, not duplicated) plus the JIT shadow ledger, and
-# proposes exact ops/config/rule-triage.v1.json / gate-lifecycle.json edits
-# for a PR -- nothing here self-applies. The Monday-only cadence is guarded
-# INSIDE the script itself (same convention bin/notes-sweep-post.sh's own
-# business-hours guard uses), so this step call is unconditional every
-# night and a non-Monday run prints SKIP and exits 0.
-step "rule re-sort (weekly proposals: gate/jit/core moves, reports only)" \
-    ./.venv/bin/python ops/rule-resort-weekly.py --days 7
-
 if [ "$seam_blocked" -gt 0 ]; then
   say "===== $seam_blocked step(s) BLOCKED on a missing canonical seam — not counted as failures ====="
 fi

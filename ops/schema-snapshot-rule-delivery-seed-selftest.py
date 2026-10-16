@@ -70,6 +70,12 @@ REGISTRY_INVENTORY_REPIN_MIGRATION = (
 REGISTRY_INVENTORY_REPIN_MIGRATION_SOURCE = (
     ROOT / "migrations" / REGISTRY_INVENTORY_REPIN_MIGRATION
 ).read_text(encoding="utf-8")
+REPLY_CONTROL_REPIN_MIGRATION = (
+    "0883_repin_rule_delivery_activation_after_reply_control_retirement.sql"
+)
+REPLY_CONTROL_REPIN_MIGRATION_SOURCE = (
+    ROOT / "migrations" / REPLY_CONTROL_REPIN_MIGRATION
+).read_text(encoding="utf-8")
 SOURCE_MERGE_MIGRATION_SOURCE = (
     ROOT / "migrations" / SOURCE_MERGE_MIGRATION
 ).read_text(encoding="utf-8")
@@ -114,6 +120,7 @@ UNFILED_BUG_REPIN_DIGEST = "dc78a38699e5fb0178761cc479268c30ed84a382036fcca575cb
 HELD_CONTROL_REPIN_DIGEST = "7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b10cfc7ba959384f"
 BURST_CONTROL_REPIN_DIGEST = "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6"
 REGISTRY_INVENTORY_REPIN_DIGEST = "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac"
+REPLY_CONTROL_REPIN_DIGEST = "6a1c929bb30845a975953c80201c5250b4529990e4160356280cbacd0af24af6"
 EXPECTED_TARGETS = [
     "25fcddee", "3fa17fa0", "72e06bdf", "581cb3fe", "113b3833",
     "57d13061", "c66dc739", "49533583", "557838a5",
@@ -226,6 +233,9 @@ burst_control_repin_ledger_applied = bool(
 registry_inventory_repin_ledger_applied = bool(
     re.search(rf"^{re.escape(REGISTRY_INVENTORY_REPIN_MIGRATION)}\t", SNAPSHOT, re.M)
 )
+reply_control_repin_ledger_applied = bool(
+    re.search(rf"^{re.escape(REPLY_CONTROL_REPIN_MIGRATION)}\t", SNAPSHOT, re.M)
+)
 cutover_ready_ledger_applied = bool(
     re.search(rf"^{re.escape(CUTOVER_READY_MIGRATION)}\t", SNAPSHOT, re.M)
 )
@@ -275,7 +285,8 @@ expected_snapshot_targets = (
 )
 assert [row[0] for row in snapshot_targets] == expected_snapshot_targets
 expected_snapshot_digest = (
-    REGISTRY_INVENTORY_REPIN_DIGEST if registry_inventory_repin_ledger_applied
+    REPLY_CONTROL_REPIN_DIGEST if reply_control_repin_ledger_applied
+    else REGISTRY_INVENTORY_REPIN_DIGEST if registry_inventory_repin_ledger_applied
     else BURST_CONTROL_REPIN_DIGEST if burst_control_repin_ledger_applied
     else HELD_CONTROL_REPIN_DIGEST if held_control_repin_ledger_applied
     else UNFILED_BUG_REPIN_DIGEST if unfiled_bug_repin_ledger_applied
@@ -322,6 +333,11 @@ assert REGISTRY_INVENTORY_REPIN_DIGEST in REGISTRY_INVENTORY_REPIN_MIGRATION_SOU
 assert BURST_CONTROL_REPIN_DIGEST in REGISTRY_INVENTORY_REPIN_MIGRATION_SOURCE
 assert all(
     short_id in REGISTRY_INVENTORY_REPIN_MIGRATION_SOURCE for short_id in CURRENT_EXPECTED_TARGETS
+)
+assert REPLY_CONTROL_REPIN_DIGEST in REPLY_CONTROL_REPIN_MIGRATION_SOURCE
+assert REGISTRY_INVENTORY_REPIN_DIGEST in REPLY_CONTROL_REPIN_MIGRATION_SOURCE
+assert all(
+    short_id in REPLY_CONTROL_REPIN_MIGRATION_SOURCE for short_id in CURRENT_EXPECTED_TARGETS
 )
 assert OLD_DIGEST in REFRESH_MIGRATION_SOURCE and DIGEST in REFRESH_MIGRATION_SOURCE
 assert THIRD_DIGEST in SECOND_REFRESH_MIGRATION_SOURCE
