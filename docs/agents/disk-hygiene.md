@@ -109,7 +109,7 @@ job samples pressure every two hours; an explicit invocation samples immediately
 Record ownership when creating a directory, using the session's native ID:
 
 ```sh
-python3 hooks/session-scratch-reap.py --session "$CODEX_SESSION_ID" --register /private/tmp/my-scratch
+python3 ops/session-scratch-reap.py --session "$CODEX_SESSION_ID" --register /private/tmp/my-scratch
 ```
 
 The hook stores ownership with the directory's device and inode in
@@ -123,7 +123,7 @@ The adapter accepts native JSON events on stdin. Wire the same command to Stop
 and SessionEnd through the client hook installer:
 
 ```sh
-python3 "$HOME/carr-system/hooks/session-scratch-reap.py"
+python3 "$HOME/carr-system/ops/session-scratch-reap.py"
 ```
 
 Stop and SessionEnd delete only scratch registered to that `session_id`. They

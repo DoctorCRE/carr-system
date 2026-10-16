@@ -1202,11 +1202,6 @@
       ],
       "paired_selftest": "ops/session-presence-hook-selftest.py"
     },
-    "session-scratch-reap.py": {
-      "role": "wrapper",
-      "note": "Unwired client-event wrapper for ops/disk-reaper.py. Registration and Stop cleanup run through the shared engine in ops/disk-reaper-selftest.py; this adapter does not produce enforcement verdicts.",
-      "paired_selftest": "ops/disk-reaper-selftest.py"
-    },
     "settings-change-gate.py": {
       "role": "gate",
       "wirings": [

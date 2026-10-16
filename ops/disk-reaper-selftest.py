@@ -28,7 +28,7 @@ if spec is None or spec.loader is None:
 reaper = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = reaper
 spec.loader.exec_module(reaper)
-hook = reaper.module("tested_scratch_hook", SOURCE / "hooks/session-scratch-reap.py")
+hook = reaper.module("tested_scratch_hook", SOURCE / "ops/session-scratch-reap.py")
 
 
 class Pulls:
