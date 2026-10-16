@@ -205,7 +205,7 @@ class RecallContract(unittest.TestCase):
         self.assertEqual(report.public_sections([section]), [{
             "id": section["id"], "version": 1, "observed_read_calls": 0,
             "status": "no_observed_read_request"}])
-        folder = ROOT / "out/orch/rulerecall"
+        folder = ROOT / "ops/fixtures/rule-recall-report"
         data = json.loads((folder / "rule-data.json").read_text())
         self.assertNotIn("unread_documents", data)
         for row in data["sections"]:
