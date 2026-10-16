@@ -286,230 +286,55 @@ case "$RULE_DELIVERY_DIGEST_REPIN_APPLIED" in
   *) echo "schema-snapshot: could not read the rule-delivery digest-repin ledger state" >&2; exit 1 ;;
 esac
 
-SOURCE_MERGE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0471_source_merge_catalog_registry_successor.sql')" \
-  2>/dev/null)"
-case "$SOURCE_MERGE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the source-merge registry ledger state" >&2; exit 1 ;;
-esac
 
-CODEX_CONTINUITY_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0481_codex_continuity_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CODEX_CONTINUITY_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Codex continuity registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_CONTINUITY_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0486_claude_continuity_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_CONTINUITY_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude continuity registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_STARTUP_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0487_claude_startup_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_STARTUP_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude startup registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_ACTOR_HYDRATION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0488_claude_actor_hydration_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_ACTOR_HYDRATION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude actor hydration registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_CONFIG_PRESERVATION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0489_claude_config_preservation_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_CONFIG_PRESERVATION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude config-preservation registry ledger state" >&2; exit 1 ;;
-esac
 
-CODEX_COMPACTION_CHECKPOINT_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0490_codex_compaction_checkpoint_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CODEX_COMPACTION_CHECKPOINT_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Codex compaction-checkpoint registry ledger state" >&2; exit 1 ;;
-esac
 
-BACKUP_GUARD_STATUS_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0491_backup_guard_status_registry_activation.sql')" \
-  2>/dev/null)"
-case "$BACKUP_GUARD_STATUS_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the backup guard/status registry ledger state" >&2; exit 1 ;;
-esac
 
-SOURCED_SHAPE_FORWARD_CORRECTION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0492_sourced_shape_forward_correction_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$SOURCED_SHAPE_FORWARD_CORRECTION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the sourced shape forward-correction registry ledger state" >&2; exit 1 ;;
-esac
 
-INCIDENT_WORK_REQUEST_LINK_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0493_incident_work_request_link_scac_successor.sql')" \
-  2>/dev/null)"
-case "$INCIDENT_WORK_REQUEST_LINK_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the incident/work-request registry ledger state" >&2; exit 1 ;;
-esac
 
-CONTINUITY_ARCHIVE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0494_codex_continuity_archive_registry.sql')" \
-  2>/dev/null)"
-case "$CONTINUITY_ARCHIVE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the continuity-archive registry ledger state" >&2; exit 1 ;;
-esac
 
-R06_HOOKS_CORRECTNESS_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0495_r06_hooks_correctness_scac_successor.sql')" \
-  2>/dev/null)"
-case "$R06_HOOKS_CORRECTNESS_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the R06 hooks-correctness registry ledger state" >&2; exit 1 ;;
-esac
 
-DOCTORCRE_PORTFOLIO_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0496_doctorcre_portfolio_hierarchy_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DOCTORCRE_PORTFOLIO_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the DoctorCRE portfolio registry ledger state" >&2; exit 1 ;;
-esac
 
-R07_REPO_HYGIENE_JANITOR_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0497_r07_repo_hygiene_janitor_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$R07_REPO_HYGIENE_JANITOR_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the R07 repo-hygiene janitor registry ledger state" >&2; exit 1 ;;
-esac
 
-V5_F09_WORKFLOW_TRUTH_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0498_f09_workflow_truth_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$V5_F09_WORKFLOW_TRUTH_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the V5-F09 workflow truth registry ledger state" >&2; exit 1 ;;
-esac
 
-V5_SCHEDULED_JOB_ADMISSION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0501_scheduled_job_admission_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$V5_SCHEDULED_JOB_ADMISSION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the V5 scheduled job admission registry ledger state" >&2; exit 1 ;;
-esac
 
-GATE_ZERO_OUTCOME_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0503_gate_zero_outcome_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$GATE_ZERO_OUTCOME_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Gate Zero outcome registry ledger state" >&2; exit 1 ;;
-esac
 
-FOUNDATION_ASSURANCE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0512_foundation_assurance_scac_successor.sql')" \
-  2>/dev/null)"
-case "$FOUNDATION_ASSURANCE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the foundation-assurance registry ledger state" >&2; exit 1 ;;
-esac
 
-DEAL_FIELD_PROVENANCE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0516_deal_field_change_provenance_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DEAL_FIELD_PROVENANCE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the deal-field provenance registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000110. 0518 is the registry successor half of the atomic (0517,0518)
 # group, so probing the SUCCESSOR and not the domain migration is what says
 # the v29 registry surface exists. A snapshot taken between the two would be
 # taken inside a transaction that has not committed, which cannot happen.
-PROGRAM_CONTROLLER_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0518_program_controller_seams_scac_successor.sql')" \
-  2>/dev/null)"
-case "$PROGRAM_CONTROLLER_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the program controller registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000111/112/113. 0522 is the registry successor half of the atomic
 # (0519,0520,0521,0522) group, so probing the SUCCESSOR and not any of the three
 # domain migrations is what says the v30 registry surface exists. A snapshot
 # taken between them would be taken inside a transaction that has not
 # committed, which cannot happen.
-PRODUCER_TRIO_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0522_producer_trio_scac_successor.sql')" \
-  2>/dev/null)"
-case "$PRODUCER_TRIO_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the producer trio registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000114. 0524 is the registry successor half of the atomic (0523,0524)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v31 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-DOC_CONVERSATION_WRITE_DOORS_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0524_doc_conversation_write_doors_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DOC_CONVERSATION_WRITE_DOORS_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Doc conversation write-door registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000115. 0526 is the registry successor half of the atomic (0525,0526)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v32 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-DOC_CONVERSATION_LIST_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0526_doc_conversation_list_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DOC_CONVERSATION_LIST_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Doc conversation list registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000116. 0528 is the registry successor half of the atomic (0527,0528)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v33 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-NOTIFICATION_PREFERENCES_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0528_notification_preferences_scac_successor.sql')" \
-  2>/dev/null)"
-case "$NOTIFICATION_PREFERENCES_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the notification preference registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000119. 0532 is the registry successor half of the atomic (0531,0532)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v35 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-DISPATCH_SPINE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0532_room_dispatch_spine_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DISPATCH_SPINE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the dispatch spine registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000125. 0532a and 0532b are one atomic suffix after the already-applied
 # v35 predecessor. A snapshot may expose v36 only when the registry successor
@@ -522,13 +347,6 @@ case "$WR125_DOMAIN_APPLIED" in
   t|f) ;;
   *) echo "schema-snapshot: could not read the WR125 ownership ledger state" >&2; exit 1 ;;
 esac
-WR125_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0532b_ready_plan_amendment_scac_successor.sql')" \
-  2>/dev/null)"
-case "$WR125_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the WR125 SCAC ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000130. 0539 advances the registry after 0538 assurance binding.
 WR130_ASSURANCE_APPLIED="$("$PSQL" -Atqc \
@@ -538,33 +356,12 @@ case "$WR130_ASSURANCE_APPLIED" in
   t|f) ;;
   *) echo "schema-snapshot: could not read the WR130 assurance ledger state" >&2; exit 1 ;;
 esac
-WR130_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0539_canonical_ownership_assurance_scac_successor.sql')" \
-  2>/dev/null)"
-case "$WR130_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the WR130 SCAC ledger state" >&2; exit 1 ;;
-esac
-WR132_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0541_release_readiness_scac_successor.sql')" \
-  2>/dev/null)"
-case "$WR132_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the WR132 SCAC ledger state" >&2; exit 1 ;;
-esac
 MODEL_ROLE_STORE_APPLIED="$("$PSQL" -Atqc \
   "select exists (select 1 from schema_migrations where filename='0542_model_role_store.sql')" \
   2>/dev/null)"
 case "$MODEL_ROLE_STORE_APPLIED" in
   t|f) ;;
   *) echo "schema-snapshot: could not read the Model Room role-store ledger state" >&2; exit 1 ;;
-esac
-MODEL_ROLE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0543_model_role_store_scac_successor.sql')" \
-  2>/dev/null)"
-case "$MODEL_ROLE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Model Room SCAC ledger state" >&2; exit 1 ;;
 esac
 
 WR130_HOTFIX_REGISTRY_APPLIED="$("$PSQL" -Atqc \
@@ -1389,13 +1186,6 @@ fi
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v34 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-SESSION_IDENTITY_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0530_session_identity_scac_successor.sql')" \
-  2>/dev/null)"
-case "$SESSION_IDENTITY_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the session identity registry ledger state" >&2; exit 1 ;;
-esac
 
 # pg_dump renders timestamptz in the server session timezone; pin it so the
 # Production and disposable-local paths serialize identical instants alike.
