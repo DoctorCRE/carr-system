@@ -29,14 +29,20 @@ spec.loader.exec_module(evidence)
 REPO = 'jbookout/carr-system'
 ALLOWED_REPOS = (REPO, 'jbookout/doctorcre-app', 'jbookout/software-factory')
 MAX_ATTEMPTS = 3  # Initial run plus two job-only retries; job timeouts unchanged.
+# Retryable jobs in other repositories: (workflow name, path) -> job names.
+APP_JOBS = {
+    'jbookout/doctorcre-app': {('e2e', '.github/workflows/e2e.yml'): frozenset({'journeys'})},
+}
+GREEN = ('success', 'skipped', 'neutral')
 
 
 class Refusal(RuntimeError):
     pass
 
 
-def admit(run, job, pr, head):
-    if (run.get('name') != 'CI' or run.get('path') != '.github/workflows/ci.yml'
+def admit(run, job, pr, head, repo=REPO):
+    shapes = {('CI', '.github/workflows/ci.yml'): None} if repo == REPO else APP_JOBS.get(repo, {})
+    if ((run.get('name'), run.get('path')) not in shapes
             or run.get('event') != 'pull_request' or run.get('status') != 'completed'
             or run.get('conclusion') not in ('failure', 'cancelled')
             or run.get('head_sha') != head or pr.get('state') != 'open'
@@ -48,10 +54,24 @@ def admit(run, job, pr, head):
     if (job.get('run_id') != run.get('id') or job.get('status') != 'completed'
             or job.get('conclusion') not in ('failure', 'cancelled')):
         raise Refusal('job must belong to this run and be failed/cancelled')
+    if repo != REPO:
+        if job.get('name') not in shapes[(run['name'], run['path'])]:
+            raise Refusal('only a listed app job may be rerun')
+        return {'head': head, 'job': job['name']}
     groups = {'ops/ci.sh --strict --only ' + g: g for g in evidence.class_groups()}
     if job.get('name') not in groups:
         raise Refusal('only a named CI class job may be rerun')
     return groups[job['name']]
+
+
+def hosted_checks(remote, group):
+    """An app job has no carr-system class to run locally; every other check at its head stands in."""
+    latest = {}
+    for check in remote.api(f"commits/{group['head']}/check-runs?per_page=100")['check_runs']:
+        if check['name'] != group['job'] and check['id'] > latest.get(check['name'], {}).get('id', 0):
+            latest[check['name']] = check
+    if not latest or any(c['status'] != 'completed' or c['conclusion'] not in GREEN for c in latest.values()):
+        raise Refusal('other hosted checks at this head are not all green; no remote retry consumed')
 
 
 def rerun(remote, run_id, job_id, head, policy, checks, dispatch):
@@ -61,12 +81,12 @@ def rerun(remote, run_id, job_id, head, policy, checks, dispatch):
         head = snapshot[2].get('head', {}).get('sha')
         if not head:
             raise Refusal('PR head unavailable; no dispatch')
-    group = admit(*snapshot, head)
+    group = admit(*snapshot, head, remote.repo)
     checks(group)
     authorize_metered_execution(policy, 'github-actions-remote-ci',
                                {'candidate_sha': head, 'local_checks_green': True})
     current = remote.snapshot(run_id, job_id)
-    admit(*current, head)
+    admit(*current, head, remote.repo)
     if current != snapshot:
         raise Refusal('run, job or PR changed during local checks; no dispatch')
     dispatch(run_id, job_id, current[0]['run_attempt'], head)
@@ -144,7 +164,8 @@ def main():
                     raise Refusal('dispatch refused or uncertain; reservation retained')
                 print(f'CI job retry submitted: run {run_id}, job {job_id}, next attempt {attempt + 1}/{MAX_ATTEMPTS}')
             head = local_head if args.repo == REPO else None
-            rerun(remote,args.run_id,args.job,head,policy,local_checks,dispatch)
+            checks = local_checks if args.repo == REPO else (lambda group: hosted_checks(remote, group))
+            rerun(remote,args.run_id,args.job,head,policy,checks,dispatch)
         return 0
     except (Refusal, MeteringRefusal) as exc:
         print(f'CI rerun refused: {exc}', file=sys.stderr)
