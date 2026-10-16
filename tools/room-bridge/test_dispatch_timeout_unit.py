@@ -16,6 +16,7 @@ import desks
 import dispatch
 import write_ownership
 from test_codex_models_unit import catalog_fixture
+from ops.git_env import fixture_env
 
 
 class DispatchTimeoutTests(unittest.TestCase):
@@ -40,11 +41,14 @@ class DispatchTimeoutTests(unittest.TestCase):
         for stream in (False, True):
             with self.subTest(stream=stream), tempfile.TemporaryDirectory() as tmp, catalog_fixture():
                 root = Path(tmp)
+                subprocess.run(['git', 'init', '-q', str(root)],
+                               env=fixture_env(), check=True)
                 reg = desks.Registry(root / 'desks.json')
                 reg.register('timeout', 'codex-session', family='sol', effort='high', cwd=tmp)
                 fake = root / 'codex'
                 fake.write_text(f'#!{sys.executable}\n' + '''
 import json, os, pathlib, time
+pathlib.Path(__file__).with_suffix('.pid').write_text(str(os.getpid()))
 thread = '11111111-1111-4111-8111-111111111111'
 root = pathlib.Path(os.environ['CODEX_HOME']) / 'sessions' / '2026' / '10' / '16'
 root.mkdir(parents=True)
@@ -63,15 +67,16 @@ print(json.dumps({'type': 'thread.started', 'thread_id': thread}), flush=True)
 time.sleep(30)
 ''')
                 fake.chmod(0o755)
-                env = {**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}'}
-                with patch.object(write_ownership, 'LEDGER', root / 'claims.jsonl'), \
-                     patch.object(write_ownership, 'open_prs', return_value=('fixture/repo', [])), \
-                     contextlib.redirect_stdout(io.StringIO()):
+                env = fixture_env({**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}'})
+                with contextlib.redirect_stdout(io.StringIO()):
                     row = dispatch.dispatch('timeout', 'repair', registry=reg, env=env,
                         writes=['src/*'], results_path=root / 'results.jsonl',
                         codex_timeout_s=0.5, stream_output=stream)
                     self.assertEqual(row['status'], 'timed_out')
-                    self.assertEqual(row['ownership_state'], 'released', row)
+                    with self.assertRaises(ProcessLookupError):
+                        os.killpg(int(fake.with_suffix('.pid').read_text()), 0)
+                    with write_ownership.checkout_writer(tmp):
+                        pass
                     self.assertIn('last event response_item.message', row['detail'])
                     self.assertIn('hook failures in rollout tail: 3', row['detail'])
                     self.assertEqual(row['thread_id'], '11111111-1111-4111-8111-111111111111')
