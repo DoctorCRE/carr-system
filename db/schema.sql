@@ -122779,7 +122779,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql	6f204142df1ea786ee2310548231ea7a31e64b8c034443753892614564fc08a8	2026-10-13 11:50:55.573651+00
 0879_verb_usage_digest.sql	ee2ad2f28337f78685247946262be6869eec9a3e67f2216207f8d302ad7f92e4	2026-10-13 13:39:24.208163+00
 0880_repin_rule_delivery_activation_after_registry_inventory_refresh.sql	0b551b077f799227a3f2b5d302888c28552b32a6914c81dcee7a2df39ca63231	2026-10-13 22:30:00+00
-0882_retire_reply_gate_controls.sql	4c85924b05bd35f8e5a3d1f9cf66223394d9e77f19845fc4138d714442eff744	2026-10-16 07:20:38.283554+00
+0882_retire_reply_gate_controls.sql	fbf4467f57cefb743da016d72cdb987e1bf0ddcc814029bfe531f73c49462c5f	2026-10-16 07:32:52.562235+00
+0883_repin_rule_delivery_activation_after_reply_control_retirement.sql	b252ef6935baa5a08eb7d48dcd208d8b39a999be01d86a2eb119bc189ca0714e	2026-10-16 07:32:52.570583+00
 \.
 
 

@@ -49,6 +49,9 @@ BURST_CONTROL_REPIN = (
 REGISTRY_INVENTORY_REPIN = (
     REPO / "migrations" / "0880_repin_rule_delivery_activation_after_registry_inventory_refresh.sql"
 )
+REPLY_CONTROL_REPIN = (
+    REPO / "migrations" / "0883_repin_rule_delivery_activation_after_reply_control_retirement.sql"
+)
 PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
 CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
 # The chain has a fourth link as of 2026-09-01. Reinstating canonical_edit into
@@ -92,6 +95,9 @@ POST_0875_ACTIVATION_DIGEST = "7738c682bbddc1d634a61da4cea04910d9f21baa248fcc17b
 POST_0878_ACTIVATION_DIGEST = "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6"
 # Fourteen approved rules entering the map and four leaving it moved it again;
 # 0880 carries the guarded forward repin from the post-0878 digest.
+POST_0880_ACTIVATION_DIGEST = "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac"
+# Retiring the reply-gate controls (PR #1801) moved the map again; 0883
+# carries the guarded forward repin from the post-0880 digest.
 ACTIVATION_TO_TEST_REF = (
     "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; "
     "ops/rule-pack-preuse-reselection-selftest.py"
@@ -570,9 +576,19 @@ def main() -> int:
             """select count(*), count(*) filter (where map_digest=%s),
                       array_agg(short_id order by short_id)
                  from ops.rule_delivery_activation_target""",
+            (POST_0880_ACTIVATION_DIGEST,),
+        )
+        check("registry inventory refresh repins the exact targets to the post-0880 reviewed map",
+              one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
+        # Replay the reply-control retirement repin (0883) from that exact preimage.
+        cur.execute(REPLY_CONTROL_REPIN.read_text(encoding="utf-8"), prepare=False)
+        cur.execute(
+            """select count(*), count(*) filter (where map_digest=%s),
+                      array_agg(short_id order by short_id)
+                 from ops.rule_delivery_activation_target""",
             (current_map_digest,),
         )
-        check("registry inventory refresh repins the exact targets to the current reviewed map",
+        check("reply-control retirement repins the exact targets to the current reviewed map",
               one(cur) == (len(EXPECTED_IDS), len(EXPECTED_IDS), sorted(EXPECTED_IDS)))
         cur.execute("""insert into actor (slug,kind,display_name) values ('joe','human','Joe')
                        on conflict (slug) do nothing returning id""")

@@ -70,7 +70,9 @@ REGISTRY_INVENTORY_REPIN_MIGRATION = (
 REGISTRY_INVENTORY_REPIN_MIGRATION_SOURCE = (
     ROOT / "migrations" / REGISTRY_INVENTORY_REPIN_MIGRATION
 ).read_text(encoding="utf-8")
-REPLY_CONTROL_REPIN_MIGRATION = "0882_retire_reply_gate_controls.sql"
+REPLY_CONTROL_REPIN_MIGRATION = (
+    "0883_repin_rule_delivery_activation_after_reply_control_retirement.sql"
+)
 REPLY_CONTROL_REPIN_MIGRATION_SOURCE = (
     ROOT / "migrations" / REPLY_CONTROL_REPIN_MIGRATION
 ).read_text(encoding="utf-8")
