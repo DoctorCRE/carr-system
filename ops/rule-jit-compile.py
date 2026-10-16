@@ -29,7 +29,7 @@ INPUTS, all read-only and already reviewed elsewhere:
                                           jit_trigger_hint content. An optional
                                           top-level `fallback_narrowing` object
                                           (written only by
-                                          ops/rule-delivery-adjudication-apply.py)
+                                          reviewed triage input)
                                           strips proven false-positive keywords
                                           out of a pack's fallback pattern.
   ops/config/rule-enforcement-map.json — read-only for two things: `rule_packs`
@@ -233,14 +233,7 @@ def trigger_id(kind: str, pattern: str) -> str:
 
 
 def pack_keyword_pattern(pack: dict, exclude_terms: set[str]) -> str | None:
-    """Rebuild the exact regex hooks/rule-pack-drift-gate.py's load_packs()
-    would compile for this pack, minus any proven false-positive terms.
-
-    Reusing the identical word-boundary construction keeps the fallback
-    trigger's semantics recognizable as "the same pack, minus what
-    adjudication narrowed" rather than a second, subtly different keyword
-    matcher living beside the drift gate's.
-    """
+    """Compile pack keywords minus the reviewed false-positive terms."""
     words = [t for t in pack.get("triggers", []) if str(t).strip()
              and str(t).strip().lower() not in exclude_terms]
     if not words:

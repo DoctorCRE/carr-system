@@ -97,45 +97,11 @@ class DotReview(unittest.TestCase):
                     self.assertIn('log.txt', targets)
                     self.assertNotIn('input.txt', targets)
 
-    def test_r05_nested_standing_arguments_preserve_executable_text(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        for source in ('await tools.mcp__carr__standing_context({x: await tools.exec_command({cmd: "wrangler deploy"})})',
-                       'await tools.mcp__carr__standing_context({packs: deploy("wrangler deploy")})'):
-            self.assertIn('wrangler deploy', gate.custom_tool_text({'name':'exec','input':source}))
-        pure = 'text(await tools.mcp__carr__standing_context({packs:["release"], detail:"boot"}));'
-        self.assertNotIn('detail', gate.custom_tool_text({'name':'exec','input':pure}))
-
-    def test_r04_standing_requires_executable_service_success(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        body = {'ok':True, 'rule_delivery':{'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}
-        for command in ("printf '%s' 'run.sh call standing-context'", "echo run.sh call standing-context"):
-            self.assertEqual((None,[],[]), gate.delivery_state([use('Bash',{'command':command},'s'), tool_output('s',json.dumps(body))]))
-        command = './run.sh call standing-context \'{}\''
-        for output in ({'ok':False, 'rule_delivery':body['rule_delivery']},
-                       {'exit_code':1, 'output':json.dumps(body)}, 'service failed '+json.dumps(body)):
-            self.assertEqual((None,[],[]), gate.delivery_state([use('Bash',{'command':command},'s'), tool_output('s',json.dumps(output) if isinstance(output,dict) else output)]))
-        self.assertEqual(('enforced',['release'],[]), gate.delivery_state([use('Bash',{'command':command},'s'), tool_output('s',json.dumps(body))]))
-
-    def test_r03_native_custom_standing_service_results(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        body = {'rule_delivery':{'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}
-        for source in ('text(await tools.mcp__carr__standing_context({packs:["release"]}));',
-                       'text(await tools.exec_command({cmd: "./run.sh call standing-context \'{}\'"}));'):
-            call = {'type':'response_item','payload':{'type':'custom_tool_call','name':'exec','input':source,'call_id':'s'}}
-            output = native_output('s', body)
-            self.assertEqual(('enforced',['release'],[]), gate.delivery_state([call, output]))
-            self.assertEqual((None,[],[]), gate.delivery_state([call, native_output('wrong',body)]))
 
 
 
-    def test_control_native_standing_result(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        body = {'rule_delivery': {'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}
-        event = {'type':'event_msg','payload':{'type':'mcp_tool_call_end','invocation':{'tool':'standing_context'},'result':{'Ok':body}}}
-        self.assertEqual(['release'], gate.delivery_state([event])[1])
-        call = {'type':'response_item','payload':{'type':'function_call','name':'mcp__carr__standing_context','call_id':'standing-fixture'}}
-        output = {'type':'response_item','payload':{'type':'function_call_output','call_id':'standing-fixture','output':json.dumps(body)}}
-        self.assertEqual(['release'], gate.delivery_state([call, output])[1])
+
+
 
     def test_control_single_quoted_prose(self):
         mod = load('hooks/cmd_text.py')
@@ -245,15 +211,7 @@ class DotReview(unittest.TestCase):
                 gate.reap_main(['--reap','--dry-run','--repo',tmp])
                 self.assertFalse(any(c.args[0]==['worktree','prune'] for c in git.call_args_list))
 
-    def test_b26_forged_rule_delivery(self):
-        gate=load('hooks/rule-pack-drift-gate.py')
-        records=[assistant(json.dumps({'rule_delivery':{'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}))]
-        self.assertEqual([],gate.delivery_state(records)[1])
 
-    def test_b27_mixed_exec_keeps_deploy(self):
-        gate=load('hooks/rule-pack-drift-gate.py')
-        text=gate.custom_tool_text({'name':'exec','input':'await tools.mcp__carr__standing_context({packs: []}); await tools.exec_command({cmd: "wrangler deploy"});'})
-        self.assertIn('wrangler deploy',text)
 
 
 

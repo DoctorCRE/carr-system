@@ -32,10 +32,6 @@ adapter calls the production selection function itself:
                     gold of every layer, since routes cover every layer. The
                     current boot and historical layer-zero map are scored
                     beside it;
-  drift_shadow      hooks/rule-pack-drift-gate.py as shipped: mode shadow
-                    loads nothing;
-  drift_if_acting   the same gate's evaluate(): the packs it says the turn
-                    needed, delivered as those packs' pack-layer rules;
   boot_layer0       historical enforcement-map layer-zero selection.
   boot_always_on    current Joe-scoped always-on ids from rule-classes.v1.json,
                     the class contract used by standing-context's live boot.
@@ -100,7 +96,7 @@ EVAL_SESSION = "rule-delivery-eval"
 GUARDED_OUT_FILES = (
     "rule-trigger-delivery.jsonl", "rule-prompt-delivered.json",
     "jev-rule-select.jsonl", "jev-rule-select-cache.json", "jev-judge.jsonl",
-    "rule-delivery-shadow.jsonl", "jev-calls.jsonl",
+    "jev-calls.jsonl",
 )
 
 PACK_LAYER = "pack"
@@ -222,12 +218,12 @@ def universes(meta, names, *, boot_ids=None):
     everything = set(meta)
     layer0 = {rid for rid, row in meta.items() if row["layer"] == "layer0"}
     table = {"prompt_compiled": pack, "prompt_full": pack, "jit_pretooluse": pack,
-             "drift_shadow": pack, "drift_if_acting": pack, "boot_layer0": layer0,
+             "boot_layer0": layer0,
              "boot_always_on": set(boot_ids or ()),
              "layered_triggers": everything,
              "system_moment": everything,
              "system_moment_packlayer": pack,
-             "system_moment_plus_drift": everything, "system_scoped_boot": everything,
+             "system_scoped_boot": everything,
              # The doctrine search door delivers doctrine only; it owes no rule.
              "doctrine_search": set()}
     return {name: table.get(name, everything) for name in names}
@@ -388,21 +384,6 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
             rules.update(table)
         return {"rules": rules, "packs": {p for r in rules for p in meta.get(r, {}).get("packs", [])}}
 
-    drift = _load(os.path.join(repo, "hooks", "rule-pack-drift-gate.py"), "drift_gate_eval")
-    triggers, members, _digest = drift.load_packs()
-
-    def drift_needed(case):
-        return drift.evaluate(_synthetic_turn(case), triggers, members)["needed"]
-
-    def drift_shadow(case):
-        drift_needed(case)  # the gate still runs; in shadow it loads nothing
-        return {"rules": set(), "packs": set()}
-
-    def drift_acting(case):
-        needed = set(drift_needed(case))
-        rules = {rid for pack in needed for rid in members.get(pack, []) if rid in pack_layer}
-        return {"rules": rules, "packs": needed}
-
     def boot(case):
         return {"rules": set(layer0), "packs": set()}
 
@@ -415,8 +396,6 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
          "applies": lambda case: bool(case["tool_calls"])},
         {"name": "layered_triggers", "select": layered, "jev": False,
          "applies": lambda case: bool(case["tool_calls"])},
-        {"name": "drift_shadow", "select": drift_shadow, "jev": False},
-        {"name": "drift_if_acting", "select": drift_acting, "jev": False},
         {"name": "boot_layer0", "select": boot, "jev": False},
         {"name": "boot_always_on", "select": live_boot, "jev": False},
     ]
@@ -474,7 +453,7 @@ def run_adapters(cases, adapters, *, workers=1):
     return deliveries, errors
 
 
-SYSTEM_ROWS = ("system_moment", "system_moment_packlayer", "system_moment_plus_drift",
+SYSTEM_ROWS = ("system_moment", "system_moment_packlayer",
                "system_scoped_boot")
 
 
@@ -493,7 +472,6 @@ def add_system_rows(deliveries):
                                of every layer;
       system_moment_packlayer  the same deliveries, charged only for
                                pack-layer gold (the layer those paths serve);
-      system_moment_plus_drift the same plus the drift observer acting;
       system_scoped_boot       the moment paths plus the current always-on
                                boot. Historical reports without that adapter
                                retain their legacy layer-zero interpretation.
@@ -501,17 +479,14 @@ def add_system_rows(deliveries):
     prompt = deliveries.get("prompt_full") or deliveries.get("prompt_compiled") or {}
     jit = deliveries.get("jit_pretooluse") or {}
     boot = deliveries.get("boot_always_on") or deliveries.get("boot_layer0") or {}
-    drift = deliveries.get("drift_if_acting") or {}
     rows = {name: {} for name in SYSTEM_ROWS}
-    for case_id in set(prompt) | set(boot) | set(drift):
+    for case_id in set(prompt) | set(boot):
         moment = set(prompt.get(case_id, {}).get("rules") or ())
         moment |= jit.get(case_id, {}).get("rules") or set()
         doctrine = set(prompt.get(case_id, {}).get("doctrine") or ())
         doctrine |= jit.get(case_id, {}).get("doctrine") or set()
         rows["system_moment"][case_id] = {"rules": moment, "packs": None, "doctrine": doctrine}
         rows["system_moment_packlayer"][case_id] = {"rules": moment, "packs": None}
-        rows["system_moment_plus_drift"][case_id] = {
-            "rules": moment | (drift.get(case_id, {}).get("rules") or set()), "packs": None}
         rows["system_scoped_boot"][case_id] = {
             "rules": moment | (boot.get(case_id, {}).get("rules") or set()), "packs": None,
             "doctrine": doctrine | (boot.get(case_id, {}).get("doctrine") or set())}
@@ -774,7 +749,7 @@ def render_markdown(report, statements=None, *, top=10, paths=None):
     statements = statements or {}
     order = paths or [p for p in SYSTEM_ROWS + ("prompt_full",
                                   "prompt_compiled", "jit_pretooluse",
-                                  "layered_triggers", "drift_shadow", "drift_if_acting",
+                                  "layered_triggers",
                                   "boot_always_on", "boot_layer0",
                                   "doctrine_search")
                       if p in report["paths"]]

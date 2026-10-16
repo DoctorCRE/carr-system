@@ -627,7 +627,7 @@ def validate_route_receipt(row: object, *, repo: Path) -> bool:
     from lib.rule_delivery_preuse import (  # local: keeps this module import-light
         DELIVERY_KEYS, IDENTITY_KEYS, RULE_KEYS, TRIGGER_TABLE_RELATIVE, receipt_id,
         valid_local_identity)
-    from lib.rule_delivery_shadow import file_sha256, source_sha256
+    from lib.rule_delivery_preuse import file_sha256, source_sha256
     if not isinstance(row, dict) or set(row) != ROUTE_RECEIPT_KEYS:
         return False
     if row.get("schema") != ROUTE_RECEIPT_SCHEMA or row.get("client") not in {"claude", "codex"}:
