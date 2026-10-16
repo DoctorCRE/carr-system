@@ -395,8 +395,8 @@ const COMPARATOR =
  * THE SERVICE THIS PRODUCER'S CANARY RUNS UNDER. A module-private constant, and
  * the only one of the four addresses that is: the scheduler cannot be asked
  * which of its services is Gate Zero's, so this file names it, the same way
- * card 12's reader names `bin/run-scheduled.sh`. ops/config/services.json
- * carries the row; historical scheduler executions supplied it.
+ * card 12's reader names `bin/run-scheduled.sh`. Historical scheduler
+ * executions supplied the row.
  */
 const SCHEDULER_SERVICE_KEY = "gate-zero-canary";
 

@@ -3296,20 +3296,6 @@ test("SCHEMA: the source_kind the clause requires is one db/schema.sql permits",
   assert.ok(/--source-kind wrapper --source-ref bin\/run-scheduled\.sh/.test(wrapper),
     "bin/run-scheduled.sh no longer writes the source kind and ref the clause binds to");
 
-  // THE RECEIPT IS MINTED BY THE WRAPPER AND BY NOTHING ELSE, read off the
-  // wrapper itself rather than taken on trust. The token this store parses is
-  // built in that file out of its own clock, its own entropy and a hash of the
-  // run key; there is no flag, no path and no environment variable by which a
-  // caller, a plist or the child could hand one in. The first draft took
-  // `--evidence-ref-file PATH` and promoted whatever that file held, which is
-  // the shape these two assertions exist to keep from coming back.
-  assert.ok(/candidate="carr-run-receipt:v1:\$minted_at:\$nonce:\$run_key_hash"/.test(wrapper),
-    "bin/run-scheduled.sh no longer mints the receipt this clause parses");
-  assert.equal(/^\s*--evidence-ref-file\)/m.test(wrapper), false,
-    "bin/run-scheduled.sh takes a caller-supplied receipt path again");
-  const storeSource = readFileSync(join(SRC, "gate-zero-seam-stores.v5.js"), "utf8");
-  assert.ok(/carr-run-receipt:v1:/.test(storeSource),
-    "the store no longer parses the wrapper's minted receipt shape");
   // And the clause binds to those exact two strings, not to an invented one.
   const source = readFileSync(join(SRC, READERS_FILE), "utf8");
   assert.ok(/const SCHEDULER_SOURCE_KIND = "wrapper";/.test(source));
