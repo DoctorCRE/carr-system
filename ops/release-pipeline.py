@@ -1806,25 +1806,27 @@ class Pipeline:
         self.store.save(state)
         attempt = int((state[lane].get("dispatches") or {}).get(sha, 0)) + 1
         extra: dict[str, Any] = {}
-        if capability:
+        diagnosis_key = capability or (f"wrangler-auth:{lane}:{sha}" if step == "wrangler-auth" else None)
+        if diagnosis_key:
             pending = state.setdefault("pending_diagnoses", {})
-            diagnosed = capability in state.get("diagnosed_capabilities", {})
-            if not diagnosed and capability not in pending and sha:
-                pending[capability] = {"lane": lane, "sha": sha, "args": queue_turn(
+            diagnosed = diagnosis_key in state.get("diagnosed_capabilities", {})
+            if not diagnosed and diagnosis_key not in pending and sha:
+                pending[diagnosis_key] = {"lane": lane, "sha": sha, "args": queue_turn(
                     lane, sha, step, rc, log, str(self.store.records_path),
                     db_ahead_of_worker=self.db_ahead_of_worker, do_migration=self.do_migration,
                     run_id=self.run_id, attempt=attempt)}
             # Save the failed SHA and first turn together, before even filing
             # the loop: a crash after its acknowledgement cannot lose diagnosis.
             self.store.save(state)
-            self.file_blocker(state, lane, capability, detail, extra, failed_sha=sha)
+            if capability:
+                self.file_blocker(state, lane, capability, detail, extra, failed_sha=sha)
             if diagnosed:
-                extra["dispatch_skipped"] = "capability_already_diagnosed"
+                extra["dispatch_skipped"] = "capability_already_diagnosed" if capability else "prerequisite_already_diagnosed"
                 extra["dispatched"] = False
                 self.out(f"release-pipeline[{lane}]: no fix session dispatched; "
-                         "the capability's first diagnosis was already delivered")
-            elif capability in pending:
-                self.deliver_diagnosis(state, capability, extra)
+                         "the prerequisite's first diagnosis was already delivered")
+            elif diagnosis_key in pending:
+                self.deliver_diagnosis(state, diagnosis_key, extra)
             ok = extra.get("dispatched", False)
         else:
             self.store.save(state)
@@ -1840,7 +1842,7 @@ class Pipeline:
                            "run_dir": str(self.run_dir), "executed": list(self.executed),
                            "dispatched": ok, "run_id": self.run_id,
                            **({"post_release": self.post_release} if self.post_release else {}), **extra})
-        if not capability and not ok:
+        if not diagnosis_key and not ok:
             self.out(f"release-pipeline[{lane}]: diagnosis dispatch FAILED: {res}")
         return 1
 
