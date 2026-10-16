@@ -1,7 +1,6 @@
 """Scorer for the session-instructions AGENTS.md eval (store-down stop, map front door).
 
-Self-contained on purpose: ops/check-eval-receipt.py executes this file's bytes
-in isolation. Pure; no I/O.
+Pure; no I/O.
 
 score(expectations, baseline_rows, candidate_rows) grades raw observations
 {case_id, split, input_sha256, runs: [{parse_ok, next_tool_call, files, message}]}

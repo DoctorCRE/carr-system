@@ -1,5 +1,4 @@
 {
-  "baseline_ref": "2106816ed392fe7bcac30d171d8c115cba10735f",
   "inputs": {
     "evals/rule-delivery/evidence/candidate.jsonl": "965094c8e226eb69fd68be208952bfd0d37127951965c33a7d228ff0956b13f9",
     "evals/rule-delivery/expectations.v3.json": "95f5aa5ab29ac117829afd9dd6b9a5beecdd029a8c8c82860b31b59e9e7d19f7",

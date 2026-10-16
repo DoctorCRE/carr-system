@@ -33,7 +33,7 @@ GRADER (programmatic, expected rule ids per case):
 RECEIPT EVIDENCE: --observe writes one raw observation per case (what was
 delivered, no grades); score_receipt() grades a baseline and a candidate
 observation cohort against the frozen expectations and is the scorer
-ops/check-eval-receipt.py re-runs. make_report.py produces both.
+compares current observations.
 
 Usage:
   run_eval.py --variant baseline --split train

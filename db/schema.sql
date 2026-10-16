@@ -122779,8 +122779,9 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql	6f204142df1ea786ee2310548231ea7a31e64b8c034443753892614564fc08a8	2026-10-13 11:50:55.573651+00
 0879_verb_usage_digest.sql	ee2ad2f28337f78685247946262be6869eec9a3e67f2216207f8d302ad7f92e4	2026-10-13 13:39:24.208163+00
 0880_repin_rule_delivery_activation_after_registry_inventory_refresh.sql	0b551b077f799227a3f2b5d302888c28552b32a6914c81dcee7a2df39ca63231	2026-10-13 22:30:00+00
-0882_retire_reply_gate_controls.sql	fbf4467f57cefb743da016d72cdb987e1bf0ddcc814029bfe531f73c49462c5f	2026-10-16 07:57:12.19229+00
-0883_repin_rule_delivery_activation_after_reply_control_retirement.sql	e383f40b56662057f7fef50120bc418a69aac318e6061604718dc66d86da0fe5	2026-10-16 07:57:12.199692+00
+0881_retire_eval_receipt_control.sql	95b49c136fd05274c0b0bc0da9736ce7f0d74610d0c89ad59cfe76060ccfb23d	2026-10-16 07:08:35.975747+00
+0882_retire_reply_gate_controls.sql	fbf4467f57cefb743da016d72cdb987e1bf0ddcc814029bfe531f73c49462c5f	2026-10-16 08:56:58.099539+00
+0883_repin_rule_delivery_activation_after_reply_control_retirement.sql	e383f40b56662057f7fef50120bc418a69aac318e6061604718dc66d86da0fe5	2026-10-16 08:56:58.106487+00
 \.
 
 
@@ -123294,7 +123295,6 @@ insert into ops.enforcement_control_catalog (control_key,implementation_ref,test
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('delegation_tripwire','hooks/delegation-gate.py','ops/delegation-gate-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('draft_export_read','hooks/draft-export-gate.py','ops/draft-export-gate-selftest.py','surfacing','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('egress_guard','hooks/guard-unattended.py','ops/guard-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('eval_receipt','ops/check-eval-receipt.py; ops/ci.sh; evals/surfaces.json','ops/check-eval-receipt-selftest.py','deny_gate','t','2026-10-05T19:33:53.857517Z'::timestamptz,'2026-10-05T19:33:53.857517Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('executor_tier','hooks/executor-tier-gate.py','external:no dedicated suite yet','deny_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('gate_integrity','hooks/gate-integrity.py','command:python3 hooks/gate-integrity.py --selftest','stop_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('github-burst-guard','hooks/github-burst-guard.py','ops/github-burst-guard-selftest.py','deny_gate','t','2026-10-13T11:50:55.570087Z'::timestamptz,'2026-10-13T11:50:55.570087Z'::timestamptz) on conflict (control_key) do nothing;

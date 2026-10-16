@@ -279,9 +279,6 @@ const OUTCOME_HASH = /^sha256:[0-9a-f]{64}$/;
  * `merge` is in the list spelled the way source-merge-controller.yml spells the
  * job.
  *
- *   .github/workflows/automerge-pilot.yml:25   Plan against current GitHub evidence
- *   .github/workflows/automerge-pilot.yml:91   Read-only exact merge-ref verification
- *   .github/workflows/automerge-pilot.yml:178  Conditional squash merge from protected main
  *   .github/workflows/backup-nightly.yml:116   pg_dump -> age-encrypt -> artifact
  *   .github/workflows/ci.yml:89                ops/ci.sh --strict
  *   .github/workflows/db-acceptance.yml:71     local-db-ci --class migration
@@ -314,9 +311,6 @@ const OUTCOME_HASH = /^sha256:[0-9a-f]{64}$/;
  */
 const DECLARED_CHECK_NAMES = Object.freeze([
   "check",
-  "Plan against current GitHub evidence",
-  "Read-only exact merge-ref verification",
-  "Conditional squash merge from protected main",
   "pg_dump -> age-encrypt -> artifact",
   "ops/ci.sh --strict",
   "ops/ci.sh --strict --only pushfloor unit types contract secret dependency binding artifact freshness",
@@ -330,7 +324,6 @@ const DECLARED_CHECK_NAMES = Object.freeze([
   "main canary",
   "Resolve exact-tree PR evidence",
   "merge",
-  "measure",
   "CI flake proposals",
   "Backup artifact",
 ]);

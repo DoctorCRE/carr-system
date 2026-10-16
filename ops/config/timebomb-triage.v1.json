@@ -36,15 +36,6 @@
    "triaged_on": "2026-09-24",
    "verdict": "false_positive"
   },
-  "ops/automerge_pilot.py#1bd781dac30badad": {
-   "hash": "1bd781dac30badad",
-   "path": "ops/automerge_pilot.py",
-   "reason": "expiry is read from config and the code raises loudly when it lapses, rather than failing silently",
-   "seeded_line": 129,
-   "triaged_by": "timebomb-audit-seed",
-   "triaged_on": "2026-09-24",
-   "verdict": "false_positive"
-  },
   "ops/control-plane-db-gate.py#710865ccae2e7760": {
    "hash": "710865ccae2e7760",
    "path": "ops/control-plane-db-gate.py",

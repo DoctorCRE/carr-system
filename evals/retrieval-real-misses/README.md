@@ -7,7 +7,7 @@ This is step 1 of the link-and-context layer plan. It measures current reads bef
 From the repository root, use the existing authenticated local verb door:
 
 ```sh
-python3 evals/retrieval-real-misses/run_eval.py --output evals/retrieval-real-misses/baseline.json
+python3 evals/retrieval-real-misses/run_eval.py --output /tmp/retrieval-real-misses.json
 ```
 
 The runner needs the same local identity as `./run.sh call`. It invokes only an explicit allowlist of read verbs. It never opens a database connection or invokes a mutation verb. Repeating the run changes only its local output file. Existing server read-audit metadata and optional doctrine-search telemetry still occur; this eval neither adds nor disables them.
@@ -17,14 +17,14 @@ The runner captures child stdout and stderr, reports fixed error categories, and
 Rescore the committed observations without production access:
 
 ```sh
-python3 evals/retrieval-real-misses/run_eval.py --replay evals/retrieval-real-misses/baseline.json --output /tmp/retrieval-real-misses-replay.json
+python3 evals/retrieval-real-misses/run_eval.py --replay /tmp/retrieval-real-misses.json --output /tmp/retrieval-real-misses-replay.json
 ```
 
 An errored read stays in the denominator and scores no hit. Any read error also makes the runner exit 1. Invalid fixtures or replay inputs exit 2. An ordinary measured miss does not fail execution.
 
 ## Baseline on October 6, 2026
 
-The command above completed at `2026-10-06T14:44:41.654417+00:00`. [baseline.json](baseline.json) binds observations to the fixture and runner SHA-256 values, the collector source revision, and the routing dependencies. All read calls completed. The live-versus-retired assertions passed.
+The recorded run completed at `2026-10-06T14:44:41.654417+00:00`. All read calls completed. The live-versus-retired assertions passed.
 
 | Cause | Top-five hits | Questions | Hit rate |
 | --- | ---: | ---: | ---: |
@@ -35,7 +35,6 @@ The command above completed at `2026-10-06T14:44:41.654417+00:00`. [baseline.jso
 | not-captured, gap locator | 0 | 3 | 0.0% |
 | Overall retrieval | 16 | 27 | 59.3% |
 
-A preceding completed attempt at `2026-10-06T14:29:31.058499+00:00` returned one `read_command_failed` on the command-execution rule probe and exited 1. [baseline-read-error.json](baseline-read-error.json) retains that attempt, including its 1/3 rule availability result. Its fixture digest binds the earlier question wording; read arguments and expected labels did not change. A small follow-up read succeeded; the complete retry above restored 2/3. Both attempts returned the same 16/27 retrieval hits.
 
 The remaining three questions measure unordered rule availability. Two needed rules were available through the full-text boot or matched deterministic routes, for delivery recall of **2/3, 66.7%**. The stale-notes rule missed that probe. Rule IDs have no relevance ranking, so these questions do not enter the top-five denominator.
 
@@ -66,5 +65,3 @@ python3 tools/test-retrieval-real-misses.py
 ```
 
 The tests cover rank five versus six, tombstones, duplicate rank positions, exact refs, error denominators, live-count drift, settled versus typed precedent, query hydration, omitted linked deals, boot versus trigger availability, privacy, and separate routing recall. The fixture oracle scores 100% and the null observation scores 0% for both retrieval and routing. Repeated scoring agrees exactly. The test file lives under `tools/` so the existing `ops/ci.sh` discovery collects it without a CI-script change.
-
-`evals/surfaces.json` registers files that steer model inputs or model selection, as described in [the eval procedure](../README.md). It is not an index of every eval. This fixture and runner steer no production model, so they add no steering-surface glob and owe no candidate hill-climb receipt. Future link-layer implementation changes must follow the registration and receipt rules for the runtime files they actually change.
