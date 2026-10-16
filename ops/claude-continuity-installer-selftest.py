@@ -97,6 +97,71 @@ class InstallerTest(unittest.TestCase):
         self.assertNotIn("token", json.dumps(continuity).lower())
         self.assertIn("continuity-stdio-proxy.mjs", json.dumps(continuity))
 
+    def test_pre_1817_canonical_commands_upgrade_and_refresh_receipt(self):
+        command = ("CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 "
+                   f"{ROOT}/ops/claude-continuity-hook.py")
+        for retired in (False, True):
+            with self.subTest(retired=retired):
+                live = copy.deepcopy(self.unrelated)
+                events = ["PreCompact", "SessionStart"]
+                if retired:
+                    events += ["UserPromptSubmit", "PostToolUse", "Stop"]
+                for event in events:
+                    entry = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
+                    if event == "SessionStart":
+                        entry["matcher"] = "^(startup|compact|resume)$"
+                    live["hooks"].setdefault(event, []).append(entry)
+                self.settings.write_text(json.dumps(live))
+                self.mode.parent.mkdir(parents=True, exist_ok=True)
+                self.mode.write_text(json.dumps({"schema_version": 1, "mode": "inject",
+                                               "config_digest": "sha256:" + "0" * 64}))
+                before = self.settings.read_bytes(), self.mode.read_bytes()
+                dry = self.invoke("install", "--mode", "inject")
+                self.assertEqual(dry.returncode, 0, dry.stderr)
+                self.assertEqual((self.settings.read_bytes(), self.mode.read_bytes()), before)
+                result = self.invoke("install", "--mode", "inject", "--apply")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.invoke("verify").returncode, 0)
+                upgraded = json.loads(self.settings.read_text())
+                self.assertNotIn(command, [hook["command"] for entries in upgraded["hooks"].values()
+                    for entry in entries if isinstance(entry, dict)
+                    for hook in entry.get("hooks", []) if "command" in hook])
+                self.assert_unrelated_preserved(upgraded)
+                self.assertFalse(set(events[2:]) & set(upgraded["hooks"]))
+                first = self.settings.read_bytes(), self.mode.read_bytes()
+                self.assertEqual(self.invoke("install", "--mode", "inject", "--apply").returncode, 0)
+                self.assertEqual((self.settings.read_bytes(), self.mode.read_bytes()), first)
+
+    def test_prior_command_tampering_refuses_with_exit_one_and_no_writes(self):
+        command = ("CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 "
+                   f"{ROOT}/ops/claude-continuity-hook.py")
+        original_mcp = self.claude_config.read_bytes()
+        self.mode.parent.mkdir(parents=True, exist_ok=True)
+        self.mode.write_text('{"stale":"receipt"}')
+        original_mode = self.mode.read_bytes()
+        for event, mutation in [
+            ("SessionStart", lambda entry: entry.update(matcher=".*")),
+            ("PreCompact", lambda entry: entry["hooks"][0].update(timeout=999)),
+            ("Stop", lambda entry: entry["hooks"][0].update(command=command + " --foreign")),
+            ("UnknownEvent", lambda entry: None),
+        ]:
+            live = copy.deepcopy(self.unrelated)
+            entry = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
+            if event == "SessionStart":
+                entry["matcher"] = "^(startup|compact|resume)$"
+            mutation(entry)
+            live["hooks"].setdefault(event, []).append(entry)
+            self.settings.write_text(json.dumps(live))
+            before = self.settings.read_bytes()
+            for action in ("install", "remove"):
+                with self.subTest(event=event, action=action):
+                    result = self.invoke(action, "--apply")
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("noncanonical Claude continuity hook", result.stderr)
+                    self.assertEqual(self.settings.read_bytes(), before)
+                    self.assertEqual(self.mode.read_bytes(), original_mode)
+                    self.assertEqual(self.claude_config.read_bytes(), original_mcp)
+
     def test_mode_digest_is_identical_in_installer_hook_and_dedupe(self):
         installer = load_module("claude_installer_digest", INSTALLER)
         dedupe = load_module("claude_dedupe_digest", ROOT / "lib/claude_rule_delivery_dedupe.py")
