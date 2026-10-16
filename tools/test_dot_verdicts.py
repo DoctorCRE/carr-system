@@ -730,7 +730,7 @@ class BlockerRegressionTests(unittest.TestCase):
 
     def test_13_idle_refill_skips_approved_and_active_loop(self):
         import runpy
-        refill=runpy.run_path(str(ROOT/'out/orch/dot/dot-autofill.py'))
+        refill=runpy.run_path(str(ROOT/'tools/fixtures/dot/dot-autofill.py'))
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'dot';root.mkdir()
             requests=[]
@@ -741,7 +741,7 @@ class BlockerRegressionTests(unittest.TestCase):
 
     def test_20_cached_consumed_receipt_does_not_count_as_work(self):
         import runpy
-        refill=runpy.run_path(str(ROOT/'out/orch/dot/dot-autofill.py'))
+        refill=runpy.run_path(str(ROOT/'tools/fixtures/dot/dot-autofill.py'))
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'dot';root.mkdir()
             with patch('runpy.run_path',return_value={'request':lambda *a,**kw:{'seat':'dot','status':'queued','brief':str(root/'queue/missing.md')}}):
@@ -845,7 +845,7 @@ class LoopRegressionTests(unittest.TestCase):
 
     def test_14_watchdog_uses_authenticated_consumed_completion(self):
         import runpy
-        path=ROOT/'out/orch/dot/dot-thread-age.py'
+        path=ROOT/'tools/fixtures/dot/dot-thread-age.py'
         m=runpy.run_path(str(path)) if path.exists() else {}
         messages=[{'ts':'101.000001','user':'outsider','text':'DOT-REPORT-END'},
                   {'ts':'102.000001','user':'dot-user','text':'part one'},
@@ -862,7 +862,7 @@ class LoopRegressionTests(unittest.TestCase):
     def test_14_autofill_uses_path_gh_without_untracked_wrapper(self):
         from unittest.mock import Mock
         import runpy
-        m = runpy.run_path(str(ROOT / 'out/orch/dot/dot-autofill.py'))
+        m = runpy.run_path(str(ROOT / 'tools/fixtures/dot/dot-autofill.py'))
         with patch.object(subprocess, 'run', return_value=Mock(returncode=0, stdout='[]')) as run:
             self.assertEqual(m['query_prs']('jbookout/carr-system'), [])
         self.assertEqual(run.call_args.args[0][0], 'gh')

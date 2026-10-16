@@ -1,7 +1,7 @@
 # docs/frontier-finding
 
-WR-000046 Frontier Finding evidence: Artifacts A/B/C for migrations
-0454-0471, plus the Artifact C break-glass receipt instrument.
+Break-glass tooling and retained WR-000046 Frontier Finding research for
+migrations 0454-0471.
 
 ## Files
 
@@ -9,27 +9,14 @@ WR-000046 Frontier Finding evidence: Artifacts A/B/C for migrations
   run/restore bundle generator. Libraries only; see below.
 - `breakglass_selftest.py` — the acceptance suite (3)/(3b)/(3c)/(4) against
   a disposable local Postgres. This one DOES run directly.
-- `gen_census_matrix.py` — Artifact B generator (`census-reconciliation-matrix.v1.json`).
-- `gen_frontier_manifest.py` — Artifact A generator, the OBSERVED effect
-  manifest (`frontier-touched-objects.v1.json`).
-- `parse_extract_targets.py` — the independent PARSED extractor for
-  Artifact A's cross-check.
-- `compare_targets.py` / `rerender_observed_comments.py` — the comparison
-  seat's cross-check and rendering-bug patch (`comparison-report.md`).
-- `*.sql`, `*.v1.json`, `*.md` — the evidence: queries, snapshots,
-  manifests, dispositions, and written reports.
+- `breakglass-snapshot.sql` / `census-queries.sql` define the driver's snapshot queries.
+- The retained reports, review transcript, and target dispositions need record-layer import verification before removal.
 
-## Why the first six are libraries, not scripts
+## Import-only libraries
 
-`ops/scac-mutation-inventory.mjs` seals the SCAC mutation registry at v10,
-parked behind the integrity frontier. Any net-new `.py` with a shebang or an
-`if __name__ == "__main__":` block becomes an unreviewed entrypoint against
-that sealed registry (`isScriptEntrypoint()`). So these six are deliberately
-import-only — no shebang, no `__main__`, each exposing
-`main(argv=None) -> int`. Registering them as reviewed entrypoints is
-deferred to the integrity activation program's registry re-pin (WR-000048),
-where the break-glass tooling must be inventoried as reviewed rows, not
-smuggled in by omission.
+The driver and generator expose `main(argv=None) -> int`. They remain
+import-only so the SCAC mutation registry sees the reviewed launcher as
+the entrypoint.
 
 ## Running break-glass
 
