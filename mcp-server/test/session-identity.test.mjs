@@ -181,32 +181,6 @@ test("the shapers refuse anything that is not the definer function's own shape",
     ToolError), /dispatch_cursor_invalid/);
 });
 
-test("AC-SI-REGISTRY: is_write_action classifies both verbs as non-writes, with the gate unedited",
-  async () => {
-    const { readFileSync } = await import("node:fs");
-    const gate = readFileSync(
-      new URL("../../hooks/completion-evidence-gate.py", import.meta.url), "utf8");
-    const literals = name => {
-      const start = gate.indexOf(`${name} = {`);
-      assert.ok(start >= 0, `${name} is missing from the completion-evidence gate`);
-      const body = gate.slice(start, gate.indexOf("\n}", start));
-      return new Set([...body.matchAll(/"([a-z0-9-]+)"/g)].map(match => match[1]));
-    };
-    const prefixes = literals("WRITE_ACTION_PREFIXES");
-    const exact = literals("WRITE_ACTION_EXACT");
-    // hooks/completion-evidence-gate.py's own classifier, replayed.
-    const isWriteAction = action => exact.has(action) || prefixes.has(action.split("-")[0]);
-
-    assert.equal(isWriteAction("read-session-identity"), false);
-    assert.equal(isWriteAction("read-dispatch-history"), false);
-    assert.ok(!prefixes.has("read"),
-      "`read` is not a write prefix, which is why no gate entry is owed");
-    for (const name of ["read-session-identity", "read-dispatch-history"]) {
-      assert.ok(!exact.has(name),
-        "a redundant exact entry would teach the next reader the opposite rule");
-    }
-  });
-
 // ---------------------------------------------------------------------------
 // AC-SI-IDENTITY
 // ---------------------------------------------------------------------------

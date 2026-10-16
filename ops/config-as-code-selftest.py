@@ -119,7 +119,36 @@ def permission_review_regressions():
     print('PASS full-access migration, drift detection, unrelated settings, and repeat install')
 
 
+def installed_hook_file_regressions():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        existing = root / "kept.py"
+        existing.touch()
+        missing = root / "deleted-wrapper.py"
+        paths = [root / "claude.json", root / "codex.json", root / ".claude/settings.json"]
+        paths[2].parent.mkdir()
+        for path in paths:
+            path.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{
+                "command": f"python3 {missing} -- python3 {existing}"
+            }]}]}}))
+        with patch.object(mod, "SETTINGS", str(paths[0])), patch.object(
+                mod, "CODEX_HOOKS_SRC", str(paths[1])), patch.object(mod, "REPO", directory):
+            problems = mod.installed_hook_missing_files()
+            assert len(problems) == 3, problems
+            assert all(str(missing) in reason for _, reason in problems)
+            missing.touch()
+            assert mod.installed_hook_missing_files() == []
+            existing.unlink()
+            assert len(mod.installed_hook_missing_files()) == 3
+        with patch.dict(os.environ, {"HOME": directory}):
+            block = {"SessionStart": [{"hooks": [{"command":
+                'r="${HOME}"; exec python3 "$r/deleted-wrapper.py"'}]}]}
+            assert mod.hook_block_script_paths(block) == [str(missing.resolve())]
+    print("PASS installed Claude, Codex, and project hooks reject missing wrappers")
+
+
 def main():
+    installed_hook_file_regressions()
     permission_review_regressions()
     import tomllib
     merged = mod.merge_codex_carr_hooks(LIVE, DESIRED)

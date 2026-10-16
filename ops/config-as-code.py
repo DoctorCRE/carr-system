@@ -457,7 +457,7 @@ def tracked_text_match(label, live, repo_text):
 
 
 def hook_block_script_paths(block):
-    """Every absolute .py path a hooks block's commands invoke, real and sorted.
+    """Every absolute script path a hooks block's commands invoke, real and sorted.
 
     The extraction half shared by hook_scripts_untracked (which asks git about
     the LIVE block) and cmd_install's missing-script refusal (which asks the
@@ -468,9 +468,32 @@ def hook_block_script_paths(block):
             continue
         for grp in groups:
             for hook in (grp or {}).get("hooks", []) or []:
-                for tok in re.findall(r"(/[^\s'\"]+\.py)", hook.get("command", "") or ""):
-                    paths.add(os.path.realpath(concrete(tok)))
+                command = os.path.expandvars(concrete(hook.get("command", "") or ""))
+                # Project hooks select the canonical checkout in a shell-local r.
+                root = re.search(r'r="([^"$]+)"', command)
+                if root:
+                    command = command.replace("$r/", root.group(1) + "/")
+                for tok in re.findall(r"(/[^\s'\"]+\.(?:py|sh|mjs|js))(?=[\s'\"]|$)", command):
+                    paths.add(os.path.realpath(tok))
     return sorted(paths)
+
+
+def installed_hook_missing_files():
+    """Audit installed client and project hook commands before source deletions ship."""
+    problems = []
+    for path in (SETTINGS, CODEX_HOOKS_SRC, os.path.join(REPO, ".claude", "settings.json")):
+        raw = read(path)
+        if raw is None:
+            continue
+        try:
+            block = json.loads(raw).get("hooks", {})
+        except (ValueError, AttributeError) as exc:
+            problems.append((path, f"invalid hook configuration: {exc}"))
+            continue
+        for script in hook_block_script_paths(block):
+            if not os.path.isfile(script):
+                problems.append((path, f"installed hook invokes missing file: {script}"))
+    return problems
 
 
 def hook_scripts_untracked():
@@ -1689,6 +1712,7 @@ def _cmd_check(holds):
         if not launchd_off_reason(name, read(launchd_repo_path(name)), holds)
     ]
     drift = missing + untracked + different + disallowed + refused + pending_reloads
+    drift += installed_hook_missing_files()
     if not drift and not unversioned:
         prerequisite_report = prerequisite_failure_report(PREREQUISITE_CHECK(REPO))
         if prerequisite_report:
