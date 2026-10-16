@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -38,6 +39,19 @@ def check(name, ok, detail=""):
 
 def main():
     import tempfile
+    with tempfile.TemporaryDirectory(prefix="merge-path-") as scratch:
+        probe = (
+            "import os, sys; "
+            f"sys.path.insert(0, {HERE!r}); "
+            "import run_eval; "
+            "command = 'cd ' + os.getcwd() + ' && git status --short'; "
+            "assert run_eval.read_only_command(command), command"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], cwd=scratch,
+                                capture_output=True, text=True)
+        check("read-only command allowed from a path containing merge",
+              result.returncode == 0, result.stderr or result.stdout)
+
     with tempfile.TemporaryDirectory() as scratch:
         train_row = {"prompt_id": "train-case", "split": "train", "prompt": "train", "detail": {}}
         test_row = {"prompt_id": "test-case", "split": "test", "prompt": "test", "detail": {}}
