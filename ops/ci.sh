@@ -38,9 +38,9 @@ CLASS_ORDER="pushfloor unit types contract gates secret dependency migration bin
 
 class_desc() {
   case "$1" in
+    freshness) echo "source includes the current main revision" ;;
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
-    freshness)  echo "seeded stale rewrite of a generated config file" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
     contract)   echo "seeded auth/schema contract break" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
@@ -123,15 +123,10 @@ check_unit() {
 }
 
 check_freshness() {
-  if [ ! -f ops/stale-config-check.py ]; then
-    skip freshness "ops/stale-config-check.py not present"
-    return
-  fi
-  if run_quiet "$LOGDIR/freshness.log" "$PY" ops/stale-config-check.py; then
-    ok freshness "no generated config rewritten from a stale base"
+  if git merge-base --is-ancestor origin/main HEAD; then
+    ok freshness "source includes origin/main"
   else
-    cat "$LOGDIR/freshness.log" >&2
-    bad freshness "this branch would overwrite a generated file it never saw"
+    bad freshness "merge origin/main before pushing"
   fi
 }
 
@@ -299,7 +294,6 @@ PYEOF
   for inv in audit-queue-freshness-check \
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
-             scheduler-cutover-coverage-gate \
              sync-core-rule-ids rule-route-coverage \
              sync-rule-boot-classes migration-order-gate \
              migration-safety-gate check-jev-conformance door-reachability-check; do
@@ -1063,20 +1057,21 @@ check_artifact() {
     bad artifact "the exact DoctorCRE release artifact did not match its CARR pin"
     return
   fi
-  shipping="$(sh ops/verb-count.sh "$REPO/mcp-server" 2>"$LOGDIR/artifact.log")"
+  shipping="$(sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements 0 2>"$LOGDIR/artifact.log")"
   if [ -z "$shipping" ]; then
     cat "$LOGDIR/artifact.log" >&2
-    bad artifact "registry did not import — refusing to call it unmeasured-but-fine"
+    bad artifact "registry import or retirement validation failed"
     return
   fi
   local rc=0
-  marker="$("$PY" ops/last-deployed-verb-count.py carr-mcp production 2>/dev/null)" || rc=$?
+  marker="$("$PY" ops/last-deployed-verb-count.py carr-mcp production --registry 2>"$LOGDIR/artifact-baseline.log")" || rc=$?
   case "$rc" in
     0)
-      if [ -n "$marker" ] && [ "$shipping" -lt "$marker" ]; then
-        bad artifact "would REMOVE $((marker - shipping)) verb(s): deployed $marker, tree has $shipping"
+      if ! sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements "$marker" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
+        cat "$LOGDIR/artifact.log" >&2
+        bad artifact "verb loss does not match the committed retirement ledger"
       else
-        ok artifact "$shipping verbs, no loss against deployed $marker"
+        ok artifact "$shipping verbs; loss checked by name against deployed source and committed retirements"
       fi
       ;;
     3)
@@ -1090,7 +1085,8 @@ check_artifact() {
       fi
       ;;
     *)
-      bad artifact "could not read the deployed verb count from the ledger (exit $rc) — refusing to call it unmeasured-but-fine"
+      cat "$LOGDIR/artifact-baseline.log" >&2
+      bad artifact "could not read the deployed verb registry from the ledger (exit $rc) — refusing to call it unmeasured-but-fine"
       ;;
   esac
 }

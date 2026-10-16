@@ -30,7 +30,7 @@ spec = importlib.util.spec_from_file_location(
 assert spec and spec.loader
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-NIGHTLY_SOURCE = (Path(REPO) / "ops/scheduled-tasks/nightly-record-layer.SKILL.md").read_text(
+TASK_SOURCE = (Path(REPO) / "ops/scheduled-tasks/calendar-fetch-daily.SKILL.md").read_text(
     encoding="utf-8")
 # The fixture below tests config reconciliation. Machine dependencies have their
 # own hermetic suite and must not be inferred from a temporary HOME.
@@ -238,7 +238,7 @@ def main():
             f"task-{number:02d}": f"---\nname: task-{number:02d}\n---\nCARR managed {number}\n"
             for number in range(1, 17)
         }
-        primary_tasks["nightly-record-layer"] = NIGHTLY_SOURCE
+        primary_tasks["calendar-fetch-daily"] = TASK_SOURCE
         for name, body in primary_tasks.items():
             (tasks / f"{name}.SKILL.md").write_text(body, encoding="utf-8")
         original_primary = mod.IS_PRIMARY
@@ -252,8 +252,8 @@ def main():
             for name, body in primary_tasks.items()
         )
         nightly_task_rendered = (
-            Path(mod.TASKS_SRC) / "nightly-record-layer" / "SKILL.md"
-        ).read_text(encoding="utf-8") == mod.concrete(NIGHTLY_SOURCE)
+            Path(mod.TASKS_SRC) / "calendar-fetch-daily" / "SKILL.md"
+        ).read_text(encoding="utf-8") == mod.concrete(TASK_SOURCE)
 
         mod.IS_PRIMARY = False
         secondary_task_source = Path(mod.TASKS_SRC)
@@ -638,72 +638,6 @@ def main():
         )
         mod.IS_PRIMARY = original_primary
 
-        # THE GATE ZERO SCHEDULER CANARY IS EXPECTED INSTALLED, and the point of
-        # asserting it is that the opposite was true yesterday. The plist was
-        # held in DEFINITION_ONLY from 2026-09-11 so that STARTING A SCHEDULE
-        # stayed a human act; Joe's activation approval took that act on
-        # 2026-09-12, and `step:scheduler-active-receipt` — the Gate Zero
-        # predecessor the canary exists for — can only be answered by launchd
-        # firing on its own, never by a hand dispatch through the wrapper. So a
-        # revert that quietly put the canary back on the hold list would leave
-        # that predecessor permanently unanswerable while every check stayed
-        # green. This pins the release the way tick_released pins the 2026-08-26
-        # control-plane cutover.
-        #
-        # TWO HALVES, because the flag alone proves nothing about the installer:
-        # the plist must also be PLANNED as an ordinary write. The plan is taken
-        # from a DRY RUN deliberately — the fixtures above record twice over what
-        # happens when a selftest lets `launchctl load` really run against a temp
-        # HOME that is deleted moments later, and the question here is what the
-        # reconciler INTENDS, which the dry run answers in full.
-        canary_plist = "com.carr.gate-zero-canary.plist"
-        canary_released = canary_plist not in mod.launchd_hold.DEFINITION_ONLY
-        # This tests hold reconciliation against the built fixture programs.
-        # Rendering the real checkout path makes a feature clone fail and a
-        # canonical checkout pass for reasons outside this test's subject.
-        (launchd / canary_plist).write_text(
-            (Path(REPO) / "ops" / "launchd" / canary_plist).read_text(encoding="utf-8").replace(
-                "{{REPO}}", str(repo)),
-            encoding="utf-8")
-        # The wrapper and the canary script itself: missing_targets() skips any
-        # agent whose program was never built, so without these the plan would
-        # read SKIP for a reason that has nothing to do with the hold.
-        for program in ("bin/run-scheduled.sh", "bin/gate-zero-canary.sh"):
-            built = repo / program
-            built.parent.mkdir(parents=True, exist_ok=True)
-            built.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        mod.IS_PRIMARY = True
-        with contextlib.redirect_stdout(io.StringIO()) as canary_out:
-            canary_plan_rc = mod.cmd_install(False)
-        canary_output = canary_out.getvalue()
-        # AND THE MIRROR OF THE JANITOR CASE BELOW: an installed copy of a HELD
-        # agent is a refusal ("DEFINITION ONLY, MUST NOT BE INSTALLED") however
-        # exactly its bytes match the repo, because the gate on it had not
-        # passed. A released agent's installed copy is ordinary configuration,
-        # so the same fixture — the concrete render sitting in LaunchAgents —
-        # must now be an ordinary tracked pair and no refusal at all. Nothing is
-        # loaded to prove this: cmd_check only reads.
-        live_canary = Path(mod.LAUNCHD_SRC) / canary_plist
-        live_canary.write_text(
-            mod.concrete((launchd / canary_plist).read_text(encoding="utf-8")),
-            encoding="utf-8")
-        canary_labels = [label for label, _live, _repo in mod.pairs()]
-        canary_installed_allowed = mod.definition_only_installed_plists()
-        with contextlib.redirect_stdout(io.StringIO()) as canary_check_out:
-            mod.cmd_check()
-        canary_check_output = canary_check_out.getvalue()
-        mod.IS_PRIMARY = original_primary
-        canary_planned = (
-            canary_plan_rc == 0
-            and f"would write  {live_canary}" in canary_output
-            and f"SKIP  {canary_plist}" not in canary_output
-            and canary_installed_allowed == []
-            and f"launchd {canary_plist}" in canary_labels
-            and "DEFINITION ONLY, MUST NOT BE INSTALLED" not in canary_check_output
-        )
-        live_canary.unlink()
-        (launchd / canary_plist).unlink()
-
         # core.hooksPath IS NO-TOUCH, and this is the one setting in this file
         # whose blast radius is the whole machine rather than the repository it
         # is read from: it lives in the single .git/config every worktree shares.
@@ -917,7 +851,7 @@ def main():
         ("fresh primary install renders all tracked scheduled-task definitions",
          primary_task_install_rc == 0 and primary_task_rendered
          and "WRITE  scheduled task task-01" in primary_task_out.getvalue()),
-        ("nightly consumer installs as an exact concrete render of canonical source",
+        ("scheduled consumer installs as an exact concrete render of canonical source",
          nightly_task_rendered),
         ("fresh primary scheduled-task install leaves check clean",
          primary_task_check_rc == 0),
@@ -955,10 +889,6 @@ def main():
          and "DEFINITION ONLY com.carr.synthetic-definition-only:" in launchd_out.getvalue()),
         ("control-plane tick released from definition-only hold (cutover 2026-08-26)",
          tick_released),
-        ("the Gate Zero scheduler canary is released from the definition-only "
-         "hold (Joe's activation approval, 2026-09-12)", canary_released),
-        ("the installer plans the canary as an ordinary launchd write, and "
-         "reports it neither skipped nor wrongly installed", canary_planned),
         ("apply leaves an UNSET core.hooksPath byte-identical",
          hooks_path_untouched["unset"]),
         ("apply leaves a non-default RELATIVE core.hooksPath byte-identical",

@@ -65,10 +65,8 @@ MARKER = "carr-launchd-interval-seconds"
 
 # The hourly jobs, each at its own minute. See the module docstring for why.
 HOURLY_MINUTE: dict[str, int] = {
-    "com.carr.canonical-dirty-watchdog": 7,
     "com.carr.cc-version-sentinel": 19,
     "com.carr.fleet-sync": 31,
-    "com.carr.gate-zero-canary": 43,
     "com.carr.notes-sweep": 53,
 }
 

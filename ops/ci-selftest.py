@@ -143,6 +143,40 @@ def run(args, env=None, shell_cmd=None, timeout=600):
     p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
 
+def test_freshness_requires_main_without_a_second_config_checker():
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        (root / "ops/config").mkdir(parents=True)
+        (root / "ops/ci.sh").write_bytes(CI.read_bytes())
+        shutil.copy2(REPO / "ops/ci-quarantine.py", root / "ops/ci-quarantine.py")
+        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
+        (root / "ops/config/ci-check-scope.json").write_text('{}')
+        env = fixture_env()
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=root, env=env, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+        git("init", "-q")
+        git("config", "user.email", "fixture@example.invalid")
+        git("config", "user.name", "Fixture")
+        (root / "source.txt").write_text("first\n")
+        git("add", "source.txt")
+        git("commit", "-qm", "first")
+        first = git("rev-parse", "HEAD")
+        git("update-ref", "refs/remotes/origin/main", first)
+        def freshness():
+            return subprocess.run(["/bin/bash", str(root / "ops/ci.sh"), "--strict", "--only", "freshness"],
+                                  cwd=root, env=env, capture_output=True, text=True, timeout=15)
+        result = freshness()
+        check("freshness runs without a duplicate config checker", result.returncode == 0, result.stdout + result.stderr)
+        (root / "source.txt").write_text("second\n")
+        git("commit", "-qam", "second")
+        git("update-ref", "refs/remotes/origin/main", git("rev-parse", "HEAD"))
+        git("checkout", "-q", "--detach", first)
+        result = freshness()
+        check("freshness refuses source that lacks main", result.returncode == 1
+              and "merge origin/main before pushing" in result.stdout, result.stdout + result.stderr)
+
+
 def test_no_green_without_running():
     for sh in ("zsh", "sh", "bash"):
         exe = shutil.which(sh)
@@ -947,7 +981,8 @@ def main(argv=None):
     if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
         test_every_test_file_in_the_tree_is_collected()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
-    for fn in (test_no_green_without_running,
+    for fn in (test_freshness_requires_main_without_a_second_config_checker,
+               test_no_green_without_running,
                test_strict_turns_skip_into_failure,
                test_unknown_class_refuses,
                test_migration_refuses_non_loopback,

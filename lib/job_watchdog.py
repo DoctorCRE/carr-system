@@ -1121,7 +1121,7 @@ class Effects:
                            "idempotency_key": "scheduled-jobs-clear:" + f["loop_id"],
                            "resolution": "done", "outcome":
                            "A complete scheduled-job scan no longer finds " + f["key"] +
-                           "; checked live machine evidence against ops/config/scheduled-jobs.v1.json."}
+                           "; checked live machine evidence against the native launchd definitions."}
                 result = command([str(SOURCE / "run.sh"), "call", "close-loop", json.dumps(payload)], self.config)
                 closed = json.loads(result[result.find("{"):])
                 if closed.get("ok") is not True:

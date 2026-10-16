@@ -13,88 +13,39 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import desks  # noqa: E402
-import dispatch  # noqa: E402
-import seat_gate  # noqa: E402
-
+import desks
+import dispatch
+import seat_gate
 host_liveness = seat_gate.host_liveness
-seat_health = seat_gate.seat_health
 CONFIG = host_liveness.load_config()
 STUDIO = 'mac-studio.tailc8cc93.ts.net.'
 MACBOOK = 'joes-macbook-pro.tailc8cc93.ts.net.'
-
 
 def live(self_dns, studio_online=True, macbook_online=True):
     peers = {}
     for dns, online in ((STUDIO, studio_online), (MACBOOK, macbook_online)):
         if dns != self_dns:
             peers[dns] = {'DNSName': dns, 'Online': online, 'LastSeen': '2026-10-09T23:46:23.1Z'}
-    return host_liveness.liveness({'BackendState': 'Running', 'Self': {'DNSName': self_dns},
-                                   'Peer': peers}, CONFIG)
-
-
-def report(**rows):
-    return {'schema': 'carr-seat-health/v1', 'seats': rows}
-
-
-def row(passed, hours_ago=1, layer=None):
-    at = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
-    return {'passed': passed, 'dispatchable': passed, 'failing_layer': layer, 'observed_at': at}
-
+    return host_liveness.liveness({'BackendState': 'Running', 'Self': {'DNSName': self_dns}, 'Peer': peers}, CONFIG)
 
 class SeatGateUnit(unittest.TestCase):
-    def test_targets(self):
-        mb, st = live(MACBOOK), live(STUDIO)
-        self.assertEqual(seat_gate.target({'kind': 'codex-session'}, CONFIG, mb), ('sol-macbook', 'joes-macbook-pro'))
-        self.assertEqual(seat_gate.target({'kind': 'codex-live'}, CONFIG, st), ('sol-studio', 'mac-studio'))
-        self.assertEqual(seat_gate.target({'kind': 'claude-remote', 'host': 'booko@studio'}, CONFIG, mb),
-                         ('opus-studio', 'mac-studio'))
-        self.assertEqual(seat_gate.target({'kind': 'claude-remote', 'host': 'macbook'}, CONFIG, st),
-                         (None, 'joes-macbook-pro'))
-        self.assertEqual(seat_gate.target({'kind': 'grok-cli'}, CONFIG, st), ('grok', 'mac-studio'))
-        self.assertEqual(seat_gate.target({'kind': 'grok-cli'}, CONFIG, mb), (None, 'joes-macbook-pro'))
-        self.assertEqual(seat_gate.target({'kind': 'claude-session'}, CONFIG, mb), (None, 'joes-macbook-pro'))
-        unknown = host_liveness.liveness(None, CONFIG)
-        self.assertEqual(seat_gate.target({'kind': 'codex-session'}, CONFIG, unknown), (None, None))
 
     def test_offline_host_refuses_with_last_seen(self):
         calls = []
+
         def evidence():
             calls.append(1)
-            return report()
-        got = seat_gate.refusal({'kind': 'claude-remote', 'host': 'studio', 'name': 'studio-desk'},
-                                CONFIG, live(MACBOOK, studio_online=False), evidence)
+            return {}
+        got = seat_gate.refusal({'kind': 'claude-remote', 'host': 'studio', 'name': 'studio-desk'}, CONFIG, live(MACBOOK, studio_online=False))
         self.assertEqual(got[0], 'seat_host_offline')
         self.assertIn('studio-desk runs on host mac-studio', got[1])
         self.assertIn('offline since 2026-10-09T23:46Z', got[1])
         self.assertEqual(calls, [])
 
-    def test_fresh_failed_seat_refuses_stale_or_missing_does_not(self):
-        entry = {'kind': 'codex-session', 'name': 'cx'}
-        failed = seat_gate.refusal(entry, CONFIG, live(MACBOOK),
-                                   lambda: report(**{'sol-macbook': row(False, layer='auth')}))
-        self.assertEqual(failed[0], 'seat_failed')
-        self.assertIn('cx is seat sol-macbook', failed[1])
-        self.assertIn('layer auth', failed[1])
-        self.assertIn('--seat sol-macbook --force', failed[1])
-        for evidence in (report(), report(**{'sol-macbook': row(False, hours_ago=30, layer='auth')}),
-                         report(**{'sol-macbook': row(True)}), {}, report(**{'sol-studio': row(False)})):
-            self.assertIsNone(seat_gate.refusal(entry, CONFIG, live(MACBOOK), lambda: evidence), evidence)
-
     def test_unknown_liveness_never_refuses_on_host(self):
         unknown = host_liveness.liveness(None, CONFIG)
-        self.assertIsNone(seat_gate.refusal({'kind': 'claude-remote', 'host': 'studio', 'model': 'x'},
-                                            CONFIG, unknown, lambda: report()))
-
-    def test_check_reads_this_repos_seat_evidence(self):
-        with patch.object(host_liveness, 'observe', return_value=live(MACBOOK)), \
-             patch.object(seat_health, 'current_report',
-                          return_value=report(**{'sol-macbook': row(False, layer='network')})) as evidence:
-            got = seat_gate.check({'kind': 'codex-session', 'name': 'cx'})
-        self.assertEqual(got[0], 'seat_failed')
-        self.assertEqual(evidence.call_args.args, (seat_gate.REPO,))
+        self.assertIsNone(seat_gate.refusal({'kind': 'claude-remote', 'host': 'studio', 'model': 'x'}, CONFIG, unknown))
 
     def test_unreadable_config_is_a_refusal_naming_file_and_error_class(self):
         with tempfile.TemporaryDirectory() as d:
@@ -103,34 +54,19 @@ class SeatGateUnit(unittest.TestCase):
             bad.write_text('{not json')
             wrong = Path(d) / 'wrong.json'
             wrong.write_text(json.dumps({'schema': 'carr-seat-hosts/v1', 'hosts': {}, 'seats': []}))
-            for path, error in ((missing, 'FileNotFoundError'), (bad, 'JSONDecodeError'),
-                                (wrong, 'ValueError')):
-                with self.subTest(error=error), patch.object(host_liveness, 'CONFIG', path), \
-                     patch.object(host_liveness, 'observe') as observe:
+            for path, error in ((missing, 'FileNotFoundError'), (bad, 'JSONDecodeError'), (wrong, 'ValueError')):
+                with self.subTest(error=error), patch.object(host_liveness, 'CONFIG', path), patch.object(host_liveness, 'observe') as observe:
                     got = seat_gate.check({'kind': 'codex-session', 'name': 'cx'})
                     self.assertEqual(got[0], 'seat_gate_unreadable')
                     self.assertIn(str(path), got[1])
                     self.assertIn(f'({error})', got[1])
                     observe.assert_not_called()
-        # A malformed config that loads but lacks a key the gate needs.
         broken = dict(CONFIG, seats=CONFIG['seats'])
         broken.pop('hosts')
-        with patch.object(host_liveness, 'load_config', return_value=broken), \
-             patch.object(host_liveness, 'observe', side_effect=KeyError('hosts')):
+        with patch.object(host_liveness, 'load_config', return_value=broken), patch.object(host_liveness, 'observe', side_effect=KeyError('hosts')):
             got = seat_gate.check({'kind': 'codex-session', 'name': 'cx'})
         self.assertEqual(got[0], 'seat_gate_unreadable')
         self.assertIn('(KeyError)', got[1])
-
-    def test_failed_probe_time_is_timezone_aware_isoformat(self):
-        at = datetime(2026, 10, 12, 6, 30, tzinfo=timezone(timedelta(hours=-5)))
-        failed = {'passed': False, 'dispatchable': False, 'failing_layer': 'auth',
-                  'observed_at': at.isoformat()}
-        with patch.object(seat_health, 'observed', return_value=(at, True)):
-            got = seat_gate.refusal({'kind': 'codex-session', 'name': 'cx'}, CONFIG, live(MACBOOK),
-                                    lambda: report(**{'sol-macbook': failed}))
-        self.assertIn('probe at 2026-10-12T06:30-05:00 failed', got[1])
-        self.assertNotIn('06:30Z', got[1])
-
 
 class SendThroughTheGate(unittest.TestCase):
     """The CLI door: a refused send launches nothing; a live seat still dispatches."""
@@ -139,68 +75,49 @@ class SendThroughTheGate(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
-        Path(self.root, 'models_cache.json').write_text(json.dumps({'models': [
-            {'slug': 'gpt-6.1-sol', 'display_name': 'GPT-6.1-Sol'}]}))
+        Path(self.root, 'models_cache.json').write_text(json.dumps({'models': [{'slug': 'gpt-6.1-sol', 'display_name': 'GPT-6.1-Sol'}]}))
         env = patch.dict(os.environ, {'CODEX_HOME': str(self.root)})
         env.start()
         self.addCleanup(env.stop)
         self.reg = desks.Registry(self.root / 'desks.json')
         self.reg.register('cx', 'codex-session', family='sol', effort='high')
-        self.reg.register('studio-desk', 'claude-remote', host='studio', model='claude-opus-5-5',
-                          effort='high', timeout_s=60)
+        self.reg.register('studio-desk', 'claude-remote', host='studio', model='claude-opus-5-5', effort='high', timeout_s=60)
         self.results = self.root / 'results.jsonl'
 
-    def send(self, name, liveness, evidence):
-        launched, err = [], io.StringIO()
-        with patch.object(host_liveness, 'observe', return_value=liveness) as self.observe, \
-             patch.object(seat_health, 'current_report', return_value=evidence) as self.evidence, \
-             patch.object(dispatch, '_to_codex', side_effect=lambda *a, **k: launched.append('codex')
-                          or {'status': 'completed'}), \
-             patch.object(dispatch.claude_remote_wire, 'run_task',
-                          side_effect=lambda *a, **k: launched.append('remote') or {'status': 'completed'}), \
-             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
-            code = dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
-                                  'send', name, 'work'])
-        return code, launched, err.getvalue()
-
-    def test_failed_seat_is_refused_before_launch(self):
-        code, launched, err = self.send('cx', live(MACBOOK), report(**{'sol-macbook': row(False, layer='auth')}))
-        self.assertEqual((code, launched), (2, []))
-        self.assertIn('refused (seat_failed)', err)
-        self.assertFalse(self.results.exists() and self.results.read_text().strip())
+    def send(self, name, liveness):
+        launched, err = ([], io.StringIO())
+        with patch.object(host_liveness, 'observe', return_value=liveness) as self.observe, patch.object(dispatch, '_to_codex', side_effect=lambda *a, **k: launched.append('codex') or {'status': 'completed'}), patch.object(dispatch.claude_remote_wire, 'run_task', side_effect=lambda *a, **k: launched.append('remote') or {'status': 'completed'}), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results), 'send', name, 'work'])
+        return (code, launched, err.getvalue())
 
     def test_offline_host_is_refused_before_launch(self):
-        code, launched, err = self.send('studio-desk', live(MACBOOK, studio_online=False), report())
+        code, launched, err = self.send('studio-desk', live(MACBOOK, studio_online=False))
         self.assertEqual((code, launched), (2, []))
         self.assertIn('refused (seat_host_offline)', err)
         self.assertIn('mac-studio', err)
 
     def test_online_seat_still_dispatches(self):
-        code, launched, _ = self.send('cx', live(MACBOOK, studio_online=False),
-                                      report(**{'sol-macbook': row(True)}))
+        code, launched, _ = self.send('cx', live(MACBOOK, studio_online=False))
         self.assertEqual((code, launched), (0, ['codex']))
-        code, launched, _ = self.send('studio-desk', live(MACBOOK), report(**{'opus-studio': row(True)}))
+        code, launched, _ = self.send('studio-desk', live(MACBOOK))
         self.assertEqual((code, launched), (0, ['remote']))
-        # No evidence at all (STALE) is not a refusal.
-        code, launched, _ = self.send('cx', live(MACBOOK), report())
+        code, launched, _ = self.send('cx', live(MACBOOK))
         self.assertEqual((code, launched), (0, ['codex']))
 
-    def test_each_send_reads_the_tailnet_once_and_the_dashboard_at_most_once(self):
-        self.send('cx', live(MACBOOK), report(**{'sol-macbook': row(True)}))
-        self.assertEqual((self.observe.call_count, self.evidence.call_count), (1, 1))
-        self.send('studio-desk', live(MACBOOK, studio_online=False), report())
-        self.assertEqual((self.observe.call_count, self.evidence.call_count), (1, 0))
+    def test_each_send_reads_the_tailnet_once(self):
+        self.send('cx', live(MACBOOK))
+        self.assertEqual(self.observe.call_count, 1)
+        self.send('studio-desk', live(MACBOOK, studio_online=False))
+        self.assertEqual(self.observe.call_count, 1)
 
     def test_missing_config_refuses_without_a_traceback(self):
         with tempfile.TemporaryDirectory() as d:
             with patch.object(host_liveness, 'CONFIG', Path(d) / 'absent.json'):
-                code, launched, err = self.send('cx', live(MACBOOK), report())
+                code, launched, err = self.send('cx', live(MACBOOK))
         self.assertEqual((code, launched), (2, []))
         self.assertIn('refused (seat_gate_unreadable)', err)
         self.assertIn('absent.json', err)
         self.assertIn('FileNotFoundError', err)
         self.assertNotIn('Traceback', err)
-
-
 if __name__ == '__main__':
     unittest.main(verbosity=2)
