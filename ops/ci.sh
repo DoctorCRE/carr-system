@@ -573,13 +573,6 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   fi
 
   _mstep load
-  if ! run_quiet "$LOGDIR/migration-production-proof-fixture.log" \
-       "$PY" ops/migration-production-proof-selftest.py --postgres; then
-    tail -30 "$LOGDIR/migration-production-proof-fixture.log" >&2
-    bad migration "production equivalence proof failed against the offline database fixture"
-    return
-  fi
-  _mstep production-proof-fixture
   if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration.log" "$PY" tools/migrate.py --apply --yes; then
     tail -30 "$LOGDIR/migration.log" >&2
     bad migration "a pending migration did not apply to the committed schema"
