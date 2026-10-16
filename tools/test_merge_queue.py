@@ -1268,11 +1268,11 @@ class QueueTests(unittest.TestCase):
     def test_single_running_agent_owns_the_state(self):
         self.pr(held=True)
         self.q.enqueue(module.REPOS[0], 1, self.approved)
-        p=subprocess.Popen([sys.executable,str(ENTRY),'--state',str(self.state),'run','--no-discover','--poll','0.05'])
+        p=subprocess.Popen([sys.executable,str(ENTRY),'--state',str(self.state),'--root',str(self.root),'run','--no-discover','--poll','0.05'])
         try:
             import time
             time.sleep(.2)
-            result=self.cli('run','--no-discover','--poll','0.05')
+            result=self.cli('--root',str(self.root),'run','--no-discover','--poll','0.05')
             self.assertNotEqual(result.returncode,0)
             self.assertIsNone(p.poll())
         finally:
