@@ -20,7 +20,7 @@ nothing to production logs or caches (log_path=os.devnull, no session id).
 GRADER (programmatic, expected rule ids per case):
   expected  = gold - disputed - boot-delivered rules, restricted to rules the
               trigger layer owes (a trigger/path route, or pack-layer member).
-              Frozen per case in expectations.v3.json (--freeze-expectations)
+              Frozen per case in expectations.v4.json (--freeze-expectations)
               and graded from there, so a change to the routes cannot move its
               own denominator; a drift from the live derivation needs a new
               expectations version.
@@ -50,6 +50,7 @@ import math
 import os
 import random
 import re
+import shlex
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,8 +59,8 @@ sys.path.insert(0, REPO)
 
 V2_CASES = os.path.join(REPO, "ops", "fixtures", "rule-delivery-eval", "cases.v2.json")
 HARD_CASES = os.path.join(HERE, "hard_cases.v1.json")
-EXPECTATIONS = os.path.join(HERE, "expectations.v3.json")
-EXPECTATIONS_VERSION = "rule-delivery-expectations/v3"
+EXPECTATIONS = os.path.join(HERE, "expectations.v4.json")
+EXPECTATIONS_VERSION = "rule-delivery-expectations/v4"
 PENDING_GOLD = os.path.join(HERE, "pending_gold.v1.json")
 RUNS = os.path.join(HERE, "runs")
 CHARS_PER_TOKEN = 4.0
@@ -120,14 +121,45 @@ READ_ONLY_HEAD = re.compile(
     r"^(?:ls|cat|head|tail|wc|grep|rg|pwd|date|which|stat|file|echo|cd|"
     r"sed -n|git (?:status|log|diff|show|rev-parse|--version|branch --show-current|"
     r"branch --list)|find(?!.*(?:-delete|-exec)))\b")
-MUTATING = re.compile(r"[>]|\b(?:rm|mv|cp|push|merge|commit|checkout|reset|curl|tee|kill|"
-                      r"install|mkdir|touch|chmod)\b|git branch -[dD]")
+MUTATING_COMMANDS = {"rm", "mv", "cp", "push", "merge", "commit", "checkout", "reset",
+                     "curl", "tee", "kill", "install", "mkdir", "touch", "chmod"}
+GIT_MUTATING_SUBCOMMANDS = {"push", "merge", "commit", "checkout", "reset"}
+GIT_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+
+
+def _mutating_segment(segment):
+    """Inspect command words while ignoring paths and other argument text."""
+    if ">" in segment:
+        return True
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        return True
+    if not words:
+        return False
+    executable = os.path.basename(words[0])
+    if executable in MUTATING_COMMANDS:
+        return True
+    if executable != "git":
+        return False
+    args = words[1:]
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option in GIT_OPTIONS_WITH_VALUE:
+            index += 2
+        elif option.startswith("-"):
+            index += 1
+        else:
+            return (option in GIT_MUTATING_SUBCOMMANDS
+                    or option == "branch" and any(arg in ("-d", "-D") for arg in args[index + 1:]))
+    return False
 
 
 def read_only_command(command):
     """True when every &&/;/| segment of a recorded Bash command is a plain read."""
     segments = [s.strip() for s in re.split(r"&&|;|\|\|?|\n", command) if s.strip()]
-    return bool(segments) and not MUTATING.search(command) and all(
+    return bool(segments) and not any(_mutating_segment(s) for s in segments) and all(
         READ_ONLY_HEAD.match(s) for s in segments)
 
 

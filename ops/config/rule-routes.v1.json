@@ -185,10 +185,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -300,8 +297,8 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
-      "start-capability-project"
+      "propose-ready-plan",
+      "review-heavy-build-plan"
      ],
      "bash_patterns": []
     }
@@ -336,7 +333,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
       "log-decision",
       "review-heavy-build-plan",
       "update-loop",
@@ -460,9 +456,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
-      "prepare-capability-project",
-      "start-capability-project",
       "write-work-shape"
      ],
      "bash_patterns": []
@@ -504,8 +497,6 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -558,11 +549,7 @@
      "tools": [
       "WebSearch"
      ],
-     "verbs": [
-      "begin-capability-project",
-      "prepare-capability-project",
-      "start-capability-project"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -1323,8 +1310,6 @@
      "verbs": [
       "accept-workflow",
       "advance-workflow-cutover-stage",
-      "assign-execution-route",
-      "issue-execution-envelope",
       "open-workflow-cutover-plan",
       "record-workflow-caller"
      ],
@@ -1536,8 +1521,6 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -1827,9 +1810,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -1976,10 +1957,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bclaude\\s+-p\\b"
      ]
@@ -2486,7 +2464,6 @@
      "tools": [],
      "verbs": [
       "accept-ready-plan",
-      "begin-capability-project",
       "propose-ready-plan",
       "register-engineering-slice-plan",
       "review-heavy-build-plan",
@@ -2664,11 +2641,9 @@
       "mcp__*__create_scheduled_task"
      ],
      "verbs": [
-      "begin-capability-project",
       "propose-ready-plan",
       "register-engineering-slice-plan",
       "review-heavy-build-plan",
-      "start-capability-project",
       "write-work-shape"
      ],
      "bash_patterns": []
@@ -2698,7 +2673,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "issue-execution-envelope",
       "record-finding"
      ],
      "bash_patterns": []
@@ -2786,9 +2760,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bclaude\\s+-p\\b"
      ]
@@ -2994,8 +2966,6 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -3478,8 +3448,6 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -3559,10 +3527,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bdispatch\\.py\\s+send\\b"
      ]
