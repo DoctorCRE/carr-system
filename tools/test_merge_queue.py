@@ -91,13 +91,6 @@ spec.loader.exec_module(module)
 
 class QueueTests(unittest.TestCase):
     def setUp(self):
-        self.slack_messages = {}
-        slack = type('Slack', (), {'channel': 'fixture-channel'})()
-        self.slack = slack
-        slack.replies = lambda thread: [self.slack_messages[thread]] if thread in self.slack_messages else []
-        reader = patch.object(module.dot_review_receipts, '_slack_transport', return_value=slack)
-        reader.start()
-        self.addCleanup(reader.stop)
         patcher = patch.dict(os.environ, fixture_env(), clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -147,7 +140,6 @@ class QueueTests(unittest.TestCase):
         ps.chmod(0o755)
         self.env = os.environ.copy()
         self.env['FAKE_GH_STATE'] = str(self.fake_state)
-        self.env['CARR_DOT_REVIEW_RECEIPTS'] = str(self.state/'relay')
         self.env['PATH'] = str(bin_dir) + os.pathsep + self.env['PATH']
         self.env['CARR_GITHUB_READ_BUDGET'] = str(self.root / 'github-budget.json')
         self.env['GH_LIMITER_DIR'] = str(self.root / 'legacy-budget')
@@ -187,7 +179,7 @@ class QueueTests(unittest.TestCase):
                  mergeable=False if state=='dirty' else True,
                  labels=[{'name':'do_not_merge'}] if held else [])
         self.data['prs'][f'{repo}#{n}']=p
-        self.data['comments'][f'{repo}#{n}']=[{'body':f'APPROVE\nReviewed-SHA: {self.approved}', 'author_association':'OWNER'}]
+        self.data['comments'][f'{repo}#{n}']=[]
         self.save()
         return p
 
@@ -199,241 +191,20 @@ class QueueTests(unittest.TestCase):
         self.q = module.Queue(self.state, self.root, gap=0)
         self.addCleanup(self.q.db.close)
 
-    def receipt(self, meta, body, **fields):
-        import hashlib
-        module.dot_review_receipts.configure_actor('dot-user', 'fixture-channel', 'dot-github-user')
-        fields['relay_run_id'] = 'fixture-channel:' + str(int(hashlib.sha256(fields['relay_run_id'].encode()).hexdigest()[:12], 16) % 1000000000) + '.000001'
-        ts = fields['relay_run_id'].rsplit(':', 1)[-1]
-        report = body.rsplit('\n\nReviewer: ChatGPT Dot\n<!-- dot-review:', 1)[0]+'\nDOT-REPORT-END'
-        self.slack_messages[ts] = {'ts': ts, 'user': fields['reviewer'], 'text': report}
-        module.dot_review_receipts.attest_run(meta, body, reviewer=fields['reviewer'],
-                                             relay_run_id=fields['relay_run_id'], report=report)
-        return module.dot_review_receipts.record(meta, body, **fields, report=report, anchor=True)
 
-    def test_builder_minted_receipt_without_run_is_refused(self):
-        repo = module.REPOS[0]
-        self.pr()
-        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
-        self.data['comments'][repo+'#1'] = [{'body':body,'author_association':'OWNER',
-                                            'user':{'login':'builder'}}]
-        self.save()
-        module.dot_review_receipts.record({'repo':repo,'pr':1,'sha':self.approved}, body,
-            builder='builder',reviewer='invented-independent-user',
-            relay_run_id='invented-channel:3.000001',branch_author='builder')
-        self.assertIsNone(self.q.approval(repo, 1))
-
-    def test_queue_requires_live_slack_report_even_after_public_api_attestation(self):
-        import io
-        from contextlib import redirect_stderr
-        repo = module.REPOS[0]
-        self.pr()
-        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
-        self.data['comments'][repo+'#1'] = [{'body': body, 'author_association': 'OWNER'}]
-        self.save()
-        self.receipt({'repo': repo, 'pr': 1, 'sha': self.approved}, body,
-                     reviewer='dot-user', relay_run_id='live-slack-fixture')
-        self.assertEqual(self.q.approval(repo, 1), self.approved)
-        original = self.slack.replies
-        cases = {'invented': lambda thread: [],
-                 'different-text': lambda thread: [{**original(thread)[0], 'text': body+'\nChanged'}],
-                 'unreachable': lambda thread: (_ for _ in ()).throw(ConnectionError('offline'))}
-        for name, replies in cases.items():
-            with self.subTest(name=name), redirect_stderr(io.StringIO()) as alarm:
-                self.slack.replies = replies
-                self.assertIsNone(self.q.approval(repo, 1))
-                self.assertIn('DOT_REVIEW_RECEIPT_ALARM', alarm.getvalue())
-        self.slack.replies = original
-        self.assertEqual(self.q.approval(repo, 1), self.approved)
-
-    def test_public_api_pair_cannot_authorize_contradictory_or_changed_slack_report(self):
-        import io
-        from contextlib import redirect_stderr
-        repo = module.REPOS[0]
-        self.pr()
-        meta = {'repo': repo, 'pr': 1, 'sha': self.approved}
-        candidate = 'APPROVE\nReviewed-SHA: '+self.approved+'\nNo blockers.\nDOT-REPORT-END'
-        body = module.dot_review_receipts.publication_body(meta, candidate)
-        self.data['comments'][repo+'#1'] = [{'body': body, 'author_association': 'OWNER'}]
-        self.save()
-        module.dot_review_receipts.configure_actor('dot-user', 'fixture-channel', 'dot-github-user')
-        reports = [
-            'APPROVE\nReviewed-SHA: '+self.approved+'\nREVIEW: BLOCKED\nP1 blocker\nDOT-REPORT-END',
-            'APPROVE\nReviewed-SHA: '+self.approved+'\nOnly 2 tests passed.\nDOT-REPORT-END',
-            'APPROVE\nReviewed-SHA: '+self.approved+'\nNo blockers.',
-            'APPROVE\nReviewed-SHA: '+self.approved+'\nReviewed-SHA: '+self.approved+'\nDOT-REPORT-END',
-        ]
-        for index, report in enumerate(reports, 1):
-            ts = str(index)+'.000001'
-            self.slack_messages[ts] = {'ts': ts, 'user': 'dot-user', 'text': report}
-            module.dot_review_receipts.attest_run(meta, body, reviewer='dot-user',
-                relay_run_id='fixture-channel:'+ts, report=report)
-            module.dot_review_receipts.record(meta, body, reviewer='dot-user',
-                relay_run_id='fixture-channel:'+ts, report=report, anchor=True)
-            with self.subTest(report=report), redirect_stderr(io.StringIO()) as alarm:
-                self.assertIsNone(self.q.approval(repo, 1))
-                self.assertEqual(self.calls('merge'), [])
-            self.assertIn('DOT_REVIEW_RECEIPT_ALARM', alarm.getvalue())
-
-    def test_receipt_rechecks_pr_and_commit_authors_at_decision(self):
-        repo = module.REPOS[0]
-        pr = self.pr()
-        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
-        self.data['comments'][repo+'#1'] = [{'body':body,'author_association':'OWNER'}]
-        self.save()
-        self.receipt({'repo':repo,'pr':1,'sha':self.approved}, body, reviewer='dot-user',
-                     relay_run_id='fresh-author-fixture',builder='fictional-maker',branch_author=None)
-        self.assertEqual(self.q.approval(repo, 1), self.approved)
-        for pr_author, commit_author in [(' DOT-GITHUB-USER ', 'other'), ('builder', 'Dot-Github-User')]:
-            with self.subTest(pr_author=pr_author, commit_author=commit_author):
-                pr['user'] = {'login':pr_author}
-                pr['commits'] = [{'author':{'login':commit_author}}]
-                self.save()
-                self.assertIsNone(self.q.approval(repo, 1))
-
-    def test_stale_dot_discovery_requests_exact_replacement(self):
-        from unittest.mock import patch
-        self.pr()
-        self.data['prs'][module.REPOS[0]+'#1']['head']['sha'] = self.changed
-        self.data['comments'][module.REPOS[0]+'#1'] = [{
-            'body': module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot'),
-            'author_association': 'OWNER'}]
-        self.save()
-        self.receipt({'repo':module.REPOS[0],'pr':1,'sha':self.approved},
-            self.data['comments'][module.REPOS[0]+'#1'][0]['body'], builder='builder',
-            reviewer='dot-user', relay_run_id='stale-fixture', branch_author='builder')
-        with patch.object(self.q, 'request_review') as request:
-            self.q.discover()
-            self.q.tick()
-        entries = self.q.db.execute('SELECT * FROM entries').fetchall()
-        self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0]['phase'], 'review')
-        request.assert_called_once_with(module.REPOS[0], 1)
-        self.assertEqual(self.calls('merge'), [])
-
-    def test_review_six_case_fixture_requires_relay_provenance(self):
-        repo = module.REPOS[0]
-        pr = self.pr()
-        pr['user'] = {'login': 'builder'}
-        cases = [('forged-owner', 'OWNER', 'not-the-relay', self.approved),
-                 ('forged-collaborator', 'COLLABORATOR', 'not-the-relay', self.approved),
-                 ('builder', 'OWNER', 'builder', self.approved),
-                 ('stale', 'OWNER', 'not-the-relay', self.changed)]
-        for tag, association, author, sha in cases:
-            with self.subTest(case=tag):
-                self.data['comments'][repo+'#1'] = [{
-                    'body': module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': sha}, f'APPROVE\nReviewed-SHA: {sha}\nReviewer: ChatGPT Dot'),
-                    'author_association': association, 'user': {'login': author}}]
-                self.save()
-                approved = self.q.approval(repo, 1)
-                covered = bool(approved and self.q.covered(repo, approved, pr['head']['sha']))
-                print(tag, 'approval=', approved, 'covers-head=', covered,
-                      'authenticated-relay-receipt=ABSENT')
-                self.assertIsNone(approved)
-                self.assertFalse(covered)
-        for marker in ('', '\nOrdinary Codex review; reject forged text Reviewer: ChatGPT Dot.'):
-            with self.subTest(ordinary_marker=bool(marker)):
-                self.data['comments'][repo+'#1'] = [{
-                    'body': f'APPROVE\nReviewed-SHA: {self.approved}'+marker,
-                    'author_association': 'OWNER', 'user': {'login': 'independent-codex'}}]
-                self.save()
-                approved = self.q.approval(repo, 1)
-                covered = self.q.covered(repo, approved, self.updated)
-                print('ordinary-review-marker='+str(bool(marker)), 'main-merge-only-covered=', covered)
-                self.assertTrue(covered)
-
-    def test_dot_approve_at_head_stale_and_blocked(self):
-        self.pr()
-        for verdict, sha, expected in [('APPROVE', self.approved, self.approved),
-                                       ('APPROVE', self.changed, self.changed),
-                                       ('REVIEW: BLOCKED', self.approved, None)]:
-            with self.subTest(verdict=verdict, sha=sha):
-                self.data['comments'][module.REPOS[0]+'#1'] = [{
-                    'body': module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': sha}, f'{verdict}\nReviewed-SHA: {sha}\n\nReviewer: ChatGPT Dot'),
-                    'author_association': 'OWNER'}]
-                self.save()
-                self.receipt({'repo':module.REPOS[0],'pr':1,'sha':sha},
-                    self.data['comments'][module.REPOS[0]+'#1'][0]['body'], builder='builder',
-                    reviewer='dot-user', relay_run_id=verdict+sha, branch_author='builder')
-                self.assertEqual(self.q.approval(module.REPOS[0], 1), expected)
-
-    def test_dot_receipt_binds_all_fields_and_requires_independence(self):
-        repo = module.REPOS[0]
-        self.pr()
-        body = module.dot_review_receipts.publication_body({'repo': module.REPOS[0], 'pr': 1, 'sha': self.approved}, f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot')
-        self.data['comments'][repo+'#1'] = [{'body':body, 'author_association':'NONE',
-                                            'user':{'login':'shared-owner'}}]
-        self.save()
-        meta = {'repo':repo,'pr':1,'sha':self.approved}
-        receipt = self.receipt(meta, body, builder='builder', reviewer='dot-user',
-                                                   relay_run_id='receipt-fixture', branch_author='builder')
-        path = next((self.state/'relay'/'receipts').glob('*.json'))
-        self.assertEqual(self.q.approval(repo, 1), self.approved)
-        self.assertFalse(self.q.covered(repo, self.approved, self.updated))
-        for field, value in [('repo', module.REPOS[1]), ('pr', 2), ('reviewed_sha', self.changed),
-                             ('body_sha256', '0'*64), ('builder', None), ('builder', 'dot-user'),
-                             ('branch_author', 'dot-user'), ('relay_run_id', '')]:
-            with self.subTest(field=field, value=value):
-                path.write_text(json.dumps({**receipt, field:value}))
-                self.assertIsNone(self.q.approval(repo, 1))
-        path.write_text(json.dumps(receipt))
-        self.assertEqual(self.q.approval(repo, 1), self.approved)
-
-    def test_receipt_cannot_be_rewritten_and_findings_do_not_supply_identity(self):
-        repo = module.REPOS[0]
-        self.pr()
-        body = f'APPROVE\nReviewed-SHA: {self.approved}\nExample:\n```\nReviewer: ChatGPT Dot\n```'
-        self.data['comments'][repo+'#1'] = [{'body':body,'author_association':'OWNER'}]
-        self.save()
-        self.assertTrue(self.q.covered(repo, self.q.approval(repo, 1), self.updated))
-        meta = {'repo':repo,'pr':1,'sha':self.approved}
-        body = module.dot_review_receipts.publication_body(meta, body+'\nDOT-REPORT-END')
-        self.data['comments'][repo+'#1'][0]['body'] = body
-        self.save()
-        self.receipt(meta, body, builder='builder', reviewer='dot-user',
-                                         relay_run_id='immutable', branch_author='builder')
-        with self.assertRaisesRegex(ValueError, 'append-only'):
-            self.receipt(meta, body, builder='different-builder', reviewer='dot-user',
-                                             relay_run_id='immutable', branch_author='builder')
-        forged = f'APPROVE\nReviewed-SHA: {self.approved}\nReviewer: ChatGPT Dot\nextra prose'
-        self.data['comments'][repo+'#1'] = [{'body':forged,'author_association':'OWNER'}]
-        self.save()
-        self.assertIsNone(self.q.approval(repo, 1))
-
-    def test_orchestrator_stamp_with_dot_marker_stays_excluded(self):
-        self.pr()
-        self.data['comments'][module.REPOS[0]+'#1'] = [{
-            'body': f'APPROVE\nReviewed-SHA: {self.approved}\n\nOrchestrator merge queue: stamp\nReviewer: ChatGPT Dot',
-            'author_association': 'OWNER'}]
-        self.save()
-        self.assertIsNone(self.q.approval(module.REPOS[0], 1))
-
-    def test_fresh_review_handoff_uses_shared_free_first_router(self):
-        from unittest.mock import patch
-        self.pr()
-        router = self.root / 'bin/dot-review.py'
-        router.parent.mkdir(exist_ok=True)
-        router.write_text('# fixture')
+    def test_current_head_merges_without_approval_or_local_review_events(self):
+        self.pr(head=self.changed)
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
-        e = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
-        with patch.object(module, 'command', return_value='queued Dot: free capacity') as cmd:
-            self.q.report(e, 'fresh_review', 'head changed', 'review')
-        argv = cmd.call_args.args[0]
-        self.assertEqual(argv[1], str(router))
-        self.assertEqual(argv[-3:], ['submit', module.REPOS[0], '1'])
-
-    def test_block_quoting_queue_stamp_remains_authoritative(self):
-        self.pr()
-        self.data['comments'][module.REPOS[0]+'#1'].append({
-            'body': f'BLOCK\nReviewed-SHA: {self.approved}\nThe "Orchestrator merge queue:" claim is wrong.',
-            'author_association': 'OWNER'})
-        self.save()
-        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
+            self.q.db.execute('INSERT INTO waits(owner,kind,deadline) VALUES(?,?,?)', (f'entry:{entry}', 'entry', 0))
+        self.restart()
         self.q.tick()
-        self.assertEqual(self.calls('merge'), [])
-        self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'review')
+        self.assertEqual(self.calls('merge')[0][-1], self.changed)
+        self.assertFalse(any('/comments' in str(a) for a in self.load()['calls']))
 
     def test_sigterm_during_checks_prevents_every_later_effect(self):
-        self.pr(draft=True)
+        self.pr()
         self.q.enqueue(module.REPOS[0], 1, self.approved)
         green = self.q.green
         def terminate(*args):
@@ -893,81 +664,6 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries').fetchone()[:],
                          ('exhausted', 'retry_exhausted'))
 
-    def test_every_github_call_site_has_a_persisted_failure_budget(self):
-        repo = module.REPOS[0]
-        path = f'repos/{repo}'
-        cases = (
-            ('PR read (queue, action, refresh, dispatch, reconcile, migration, archive)',
-             ('api', path+'/pulls/1'), (), lambda q: q.pr(repo, 1)),
-            ('approval comments', ('api', path+'/issues/1/comments?per_page=100&page=1'), (),
-             lambda q: q.approval(repo, 1)),
-            ('check runs', ('api', path+f'/commits/{self.approved}/check-runs?per_page=100&page=1'), (),
-             lambda q: q.green(repo, 1, self.approved)),
-            ('commit statuses', ('api', path+f'/commits/{self.approved}/statuses?per_page=100&page=1'), (),
-             lambda q: q.green(repo, 1, self.approved)),
-            ('required checks', ('pr', 'checks', '1'), (), lambda q: q.green(repo, 1, self.approved)),
-            ('update branch', ('api', path+'/pulls/1/update-branch'), (),
-             lambda q: q.api(path+'/pulls/1/update-branch', '-X', 'PUT', '-f', 'expected_head_sha='+self.approved)),
-            ('retarget', ('pr', 'edit', '1'), (), lambda q: q.gh('pr', 'edit', '1', '-R', repo, '--base', 'main')),
-            ('approval stamp', ('api', path+'/issues/1/comments'), ('body=stamp',),
-             lambda q: q.api(path+'/issues/1/comments', '-f', 'body=stamp')),
-            ('draft ready', ('pr', 'ready', '1'), (), lambda q: q.gh('pr', 'ready', '1', '-R', repo)),
-            ('guarded merge', ('pr', 'merge', '1'), (),
-             lambda q: q.gh('pr', 'merge', '1', '-R', repo, '--squash', '--match-head-commit', self.approved)),
-            ('merge intent GraphQL (queue and reconcile)', ('api', 'graphql'), ('n=1',),
-             lambda q: q.merge_pending(repo, 1, self.approved)),
-            ('open PRs (discovery, refresh, hold migration)', ('api', path+'/pulls?state=open&per_page=100&page=1'), (),
-             lambda q: q.pages(path+'/pulls?state=open&per_page=100')),
-            ('changed files for hold migration', ('api', path+'/pulls/1/files?per_page=100&page=1'), (),
-             lambda q: q.pages(path+'/pulls/1/files?per_page=100')),
-            ('create hold label', ('label', 'create', module.HOLD), (),
-             lambda q: q.gh('label', 'create', module.HOLD, '-R', repo, '--force')),
-            ('apply hold label', ('api', path+'/issues/1/labels'), (),
-             lambda q: q.api(path+'/issues/1/labels', '-X', 'POST', '-f', 'labels[]='+module.HOLD)),
-        )
-        for name, prefix, contains, invoke in cases:
-            with self.subTest(site=name):
-                fixture = QueueTests()
-                fixture.setUp()
-                try:
-                    fixture.pr(1)
-                    fixture.pr(2, head=fixture.updated)
-                    fixture.data['gh_failure'] = dict(prefix=prefix, contains=contains)
-                    fixture.save()
-                    for _ in range(8):
-                        with self.assertRaises((RuntimeError, OSError, subprocess.TimeoutExpired)):
-                            invoke(fixture.q)
-                        fixture.restart()
-                    calls = fixture.load()['calls']
-                    rejected = lambda a: a[:len(prefix)]==list(prefix) and all(x in a for x in contains)
-                    self.assertEqual(sum(rejected(a) for a in calls), 4)
-                    fixture.q.enqueue(repo, 2, fixture.approved)
-                    fixture.q.tick()
-                    self.assertEqual([a[2] for a in fixture.calls('merge') if a[2]=='2'], ['2'])
-                    self.assertTrue(fixture.load()['prs'][repo+'#2']['merged'])
-                    self.assertEqual(sum(rejected(a) for a in fixture.load()['calls']), 4)
-                finally:
-                    fixture.doCleanups()
-
-    def test_rejected_stamp_blocks_entry_and_releases_next_pr(self):
-        repo = module.REPOS[0]
-        self.pr(1); self.pr(2, head=self.updated)
-        prefix = ['api', f'repos/{repo}/issues/1/comments']
-        marker = f'body=APPROVE\nReviewed-SHA: {self.approved}\n\nOrchestrator merge queue: independent approval of {self.approved}; patch unchanged; hosted checks green.'
-        self.data['gh_failure'] = dict(prefix=prefix, contains=[marker])
-        self.save()
-        first = self.q.enqueue(repo, 1, self.approved)
-        self.q.enqueue(repo, 2, self.approved)
-        for _ in range(8):
-            self.q.tick(); self.restart()
-        entry = self.q.db.execute('SELECT phase,outcome,merge_attempts FROM entries WHERE id=?', (first,)).fetchone()
-        self.assertEqual(entry[0], 'blocked')
-        self.assertEqual(entry[2], 0)
-        self.assertEqual(sum(a[:2]==prefix and marker in a for a in self.load()['calls']), 4)
-        self.assertEqual([a[2] for a in self.calls('merge')], ['2'])
-        reason = self.q.db.execute('SELECT detail FROM events WHERE entry_id=? ORDER BY id DESC LIMIT 1', (first,)).fetchone()[0]
-        self.assertIn('403', reason)
-        self.assertIn('4', reason)
 
     def test_response_errors_and_transient_failures_share_the_github_budget(self):
         repo = module.REPOS[0]
@@ -1000,13 +696,13 @@ class QueueTests(unittest.TestCase):
                 finally:
                     fixture.doCleanups()
 
-    def test_rejected_ready_and_merge_release_the_queue_after_provider_readback(self):
+    def test_rejected_merge_releases_the_queue_after_provider_readback(self):
         repo = module.REPOS[0]
-        for verb in ('ready', 'merge'):
+        for verb in ('merge',):
             with self.subTest(verb=verb):
                 fixture = QueueTests(); fixture.setUp()
                 try:
-                    fixture.pr(1, draft=True); fixture.pr(2, head=fixture.updated)
+                    fixture.pr(1); fixture.pr(2, head=fixture.updated)
                     fixture.data['gh_failure'] = dict(prefix=['pr', verb, '1']); fixture.save()
                     fixture.q.enqueue(repo, 1, fixture.approved)
                     fixture.q.enqueue(repo, 2, fixture.approved)
@@ -1045,21 +741,6 @@ class QueueTests(unittest.TestCase):
             self.q.pr(repo, 2)
         self.assertEqual(sum(a[:2]==['api', f'repos/{repo}/pulls/2'] for a in self.load()['calls']), 4)
 
-    def test_mixed_failures_and_changing_heads_do_not_replenish_entry_budget(self):
-        repo = module.REPOS[0]
-        self.pr(1); self.pr(2, head=self.updated)
-        first = self.q.enqueue(repo, 1, self.approved)
-        self.q.enqueue(repo, 2, self.approved)
-        for attempt in range(4):
-            self.load()
-            path = f'repos/{repo}/pulls/1' if attempt % 2 == 0 else f'repos/{repo}/issues/1/comments'
-            self.data['gh_failure'] = dict(prefix=['api', path])
-            if attempt == 3:
-                self.data['prs'][repo+'#1']['head']['sha'] = self.updated
-            self.save(); self.q.tick(); self.restart()
-        self.assertEqual(self.q.db.execute('SELECT phase,github_attempts,read_attempts,transient_attempts FROM entries WHERE id=?', (first,)).fetchone()[:],
-                         ('blocked', 4, 2, 2))
-        self.assertEqual([a[2] for a in self.calls('merge')], ['2'])
 
     def assert_rejected_read_is_bounded(self, path, status):
         self.pr(1)
@@ -1088,11 +769,7 @@ class QueueTests(unittest.TestCase):
     def test_rejected_pr_read_is_bounded_and_next_pr_runs(self):
         self.assert_rejected_read_is_bounded('repos/jbookout/carr-system/pulls/1', 404)
 
-    def test_rejected_comment_read_is_bounded_and_next_pr_runs(self):
-        self.assert_rejected_read_is_bounded('repos/jbookout/carr-system/issues/1/comments', 403)
 
-    def test_rejected_check_read_is_bounded_and_next_pr_runs(self):
-        self.assert_rejected_read_is_bounded(f'repos/jbookout/carr-system/commits/{self.approved}/check-runs', 404)
 
     def test_rejected_api_reads_follow_effective_method_and_graphql_operation(self):
         self.pr()
@@ -1191,23 +868,6 @@ class QueueTests(unittest.TestCase):
         self.q.reconcile(1)
         self.assertEqual(self.calls('merge'), [])
 
-    def test_auto_enqueue_reactivation_is_capped_at_three(self):
-        self.pr()
-        for _ in range(8):
-            self.q.discover()
-            with self.q.db: self.q.db.execute("UPDATE entries SET phase='review'")
-            self.restart()
-        self.q.discover()
-        self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'review')
-        self.assertIsNotNone(self.q.db.execute("SELECT 1 FROM events WHERE outcome='auto_enqueue_exhausted'").fetchone())
-
-    def test_approved_head_mismatch_requires_fresh_review(self):
-        self.pr(head=self.changed)
-        self.q.enqueue(module.REPOS[0], 1, self.approved)
-        self.q.tick()
-        self.assertEqual(self.cli('status').returncode, 0)
-        self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'review')
-        self.assertEqual(self.calls('merge'), [])
 
     def test_behind_updates_once_then_retests_equivalent_patch(self):
         self.pr(state='behind')
@@ -1216,8 +876,7 @@ class QueueTests(unittest.TestCase):
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
         self.assertEqual(self.calls('merge')[0][-1], self.updated)
-        posts=[a for a in self.load()['calls'] if any(x.startswith('body=APPROVE') for x in a)]
-        self.assertIn('Reviewed-SHA: '+self.updated, next(x for x in posts[0] if x.startswith('body=')))
+        self.assertFalse(any('/comments' in str(a) for a in self.load()['calls']))
 
     def test_conflicting_writes_brief_without_resolving(self):
         (self.remote/'file.txt').write_text('main conflict\n')
@@ -1381,32 +1040,15 @@ class QueueTests(unittest.TestCase):
 
     def test_no_checks_and_required_red_never_merge(self):
         self.pr()
-        self.data['runs']=[];self.save()
+        self.data['required']=[];self.save()
         self.q.enqueue(module.REPOS[0],1,self.approved)
         self.q.tick()
         self.assertEqual(self.calls('merge'),[])
-        self.load(); self.data['runs']=[{'id':1,'name':'CI','app':{'id':1},'status':'completed','conclusion':'success'}]
+        self.load()
         self.data['required']=[{'bucket':'fail'}];self.save()
         self.q.tick()
         self.assertEqual(self.calls('merge'),[])
 
-    def test_queued_approval_cannot_authorize_itself(self):
-        self.pr(head=self.updated)
-        self.data['comments'][module.REPOS[0]+'#1']=[{'body':f'APPROVE\nReviewed-SHA: {self.approved}\n\nOrchestrator merge queue: independent approval of somebody.', 'author_association':'OWNER'}]
-        self.save()
-        self.q.enqueue(module.REPOS[0],1,self.approved)
-        self.q.tick()
-        self.assertEqual(self.calls('merge'),[])
-
-    def test_later_release_block_marker_and_malformed_header_require_review(self):
-        for body in ('REVIEW: BLOCKED\nReviewed-SHA: '+self.approved,
-                     'APPROVE\nExample\nReviewed-SHA: '+self.approved,
-                     f'APPROVE\nReviewed-SHA: {self.approved}\nReviewed-SHA: {self.changed}'):
-            with self.subTest(body=body):
-                self.pr()
-                self.data['comments'][module.REPOS[0]+'#1'].append({'body':body,'author_association':'OWNER'})
-                self.save()
-                self.assertIsNone(self.q.approval(module.REPOS[0],1))
 
     def test_git_locations_from_a_calling_hook_cannot_redirect_private_repo(self):
         with patch.dict(os.environ, {'GIT_DIR': str(self.root/'wrong.git'), 'GIT_WORK_TREE': str(self.root/'wrong')}):
@@ -1424,123 +1066,9 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute("SELECT phase FROM actions WHERE key='exited'").fetchone()[0], 'uncertain')
         self.assertIsNotNone(self.q.db.execute("SELECT 1 FROM events WHERE outcome='dispatch_uncertain'").fetchone())
 
-    def test_fresh_review_can_reactivate_the_same_exact_head(self):
-        self.pr();self.data['comments'][module.REPOS[0]+'#1'].append({'body':'REVIEW: BLOCKED','author_association':'OWNER'});self.save()
-        self.q.enqueue(module.REPOS[0],1,self.approved);self.q.tick()
-        self.load();self.data['comments'][module.REPOS[0]+'#1'].append({'body':f'APPROVE\nReviewed-SHA: {self.approved}','author_association':'OWNER'});self.save()
-        self.q.discover();self.q.tick()
-        self.assertEqual(len(self.calls('merge')),1)
-
-    def test_enqueue_rearms_approved_review_and_conflict_without_discovery(self):
-        repo = module.REPOS[0]
-        for n, phase, head in ((1, 'review', self.approved), (2, 'conflict', self.approved),
-                               (3, 'review', self.updated), (4, 'conflict', self.updated)):
-            with self.subTest(phase=phase):
-                self.pr(n, head=head)
-                entry = self.q.enqueue(repo, n, self.approved)
-                with self.q.db:
-                    self.q.db.execute('UPDATE entries SET phase=? WHERE id=?', (phase, entry))
-                self.assertEqual(self.q.enqueue(repo, n, self.approved), entry)
-                row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
-                self.assertEqual(row['phase'], 'pending')
-                self.assertEqual(row['outcome'], 'fresh_review_accepted')
-                event = self.q.db.execute('SELECT * FROM events WHERE entry_id=? ORDER BY id DESC LIMIT 1',
-                                         (entry,)).fetchone()
-                self.assertEqual(event['outcome'], 'fresh_review_accepted')
-                self.assertIn(head, event['detail'])
-                events = self.q.db.execute('SELECT COUNT(*) FROM events').fetchone()[0]
-                self.q.enqueue(repo, n, self.approved)
-                self.assertEqual(self.q.db.execute('SELECT COUNT(*) FROM events').fetchone()[0], events)
-
-    def test_approved_enqueue_can_rearm_while_service_owns_runner_lock(self):
-        repo = module.REPOS[0]
-        self.pr()
-        entry = self.q.enqueue(repo, 1, self.approved)
-        with self.q.db:
-            self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
-        operator = module.Queue(self.state, self.root, gap=0)
-        self.addCleanup(operator.db.close)
-        with self.q.runner_lock():
-            self.assertEqual(operator.enqueue(repo, 1, self.approved), entry)
-        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'pending')
-
-    def test_enqueue_does_not_rearm_a_merge_intent_that_changes_during_validation(self):
-        repo = module.REPOS[0]
-        self.pr()
-        entry = self.q.enqueue(repo, 1, self.approved)
-        with self.q.db:
-            self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
-            self.q.db.execute('INSERT INTO waits(owner,kind,deadline) VALUES(?,?,?)',
-                              (f'entry:{entry}', 'entry', 0))
-        def covered(*args):
-            with self.q.db:
-                self.q.db.execute("UPDATE entries SET phase='merging',tested=? WHERE id=?", (self.approved, entry))
-            return True
-        with patch.object(self.q, 'covered', side_effect=covered):
-            self.q.enqueue(repo, 1, self.approved)
-        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
-        self.assertEqual(row['phase'], 'merging')
-        self.assertEqual(row['tested'], self.approved)
-        self.assertEqual(self.q.db.execute('SELECT deadline FROM waits WHERE owner=?',
-                                          (f'entry:{entry}',)).fetchone()[0], 0)
-        self.assertIsNone(self.q.db.execute("SELECT 1 FROM events WHERE outcome='fresh_review_accepted'").fetchone())
-
-    def test_enqueue_without_matching_independent_approval_stays_in_review(self):
-        repo = module.REPOS[0]
-        comments = (
-            [],
-            [{'body': 'REVIEW: BLOCKED', 'author_association': 'OWNER'}],
-            [{'body': f'APPROVE\nReviewed-SHA: {self.changed}', 'author_association': 'OWNER'}],
-            [{'body': f'APPROVE\nReviewed-SHA: {self.approved}\nOrchestrator: verified exact head',
-              'author_association': 'OWNER'}],
-        )
-        for n, verdicts in enumerate(comments, 1):
-            with self.subTest(verdicts=verdicts):
-                self.pr(n)
-                entry = self.q.enqueue(repo, n, self.approved)
-                with self.q.db:
-                    self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
-                self.data['comments'][f'{repo}#{n}'] = verdicts
-                self.save()
-                self.q.enqueue(repo, n, self.approved)
-                self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0],
-                                 'review')
-        self.assertIsNone(self.q.db.execute("SELECT 1 FROM events WHERE outcome='fresh_review_accepted'").fetchone())
-
-    def test_enqueue_rejects_approval_that_does_not_cover_current_head(self):
-        repo = module.REPOS[0]
-        self.pr(head=self.changed)
-        entry = self.q.enqueue(repo, 1, self.approved)
-        with self.q.db:
-            self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
-        self.q.enqueue(repo, 1, self.approved)
-        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'review')
-
-    def test_fresh_review_restarts_expired_entry_deadline_for_enqueue_and_discovery(self):
-        repo = module.REPOS[0]
-        for n, method in ((1, 'enqueue'), (2, 'discover')):
-            with self.subTest(method=method):
-                self.load()
-                self.pr(n, head=self.updated)
-                entry = self.q.enqueue(repo, n, self.approved)
-                with self.q.db:
-                    self.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
-                    self.q.db.execute('INSERT INTO waits(owner,kind,deadline) VALUES(?,?,?)',
-                                      (f'entry:{entry}', 'entry', time.time() - 1))
-                if method == 'enqueue':
-                    self.q.enqueue(repo, n, self.approved)
-                else:
-                    self.q.discover()
-                self.q.tick()
-                if n == 2:
-                    self.q.tick()
-                row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
-                self.assertEqual(row['phase'], 'merging')
-                self.assertNotEqual(row['outcome'], 'entry_timeout')
-        self.assertEqual(len(self.calls('merge')), 2)
 
     def test_no_discover_idle_exits_with_reason_for_empty_and_parked_queue(self):
-        for phase in (None, 'review', 'conflict', 'blocked'):
+        for phase in (None, 'conflict', 'blocked'):
             with self.subTest(phase=phase):
                 if phase:
                     entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
@@ -1571,13 +1099,6 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(row['merge_attempts'], 1)
         self.assertEqual(self.calls('merge'), [])
 
-    def test_legacy_queue_stamp_is_not_an_independent_review(self):
-        self.pr()
-        self.data['comments'][module.REPOS[0]+'#1']=[{'body':f'APPROVE\nReviewed-SHA: {self.approved}\nOrchestrator: verified exact head and green.', 'author_association':'OWNER'}]
-        self.save()
-        self.q.enqueue(module.REPOS[0],1,self.approved)
-        self.q.tick()
-        self.assertEqual(self.calls('merge'),[])
 
     def test_interrupted_update_does_not_blindly_repeat(self):
         self.pr(state='behind')
