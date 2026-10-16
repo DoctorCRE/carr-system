@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from contextlib import contextmanager
 import re
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,16 @@ def fixture(template):
 
 
 class HookCommands(unittest.TestCase):
+    def test_installer_discovers_only_the_invoked_script(self):
+        installer = runpy.run_path(str(REPO / 'ops/config-as-code.py'))
+        command_target = runpy.run_path(str(REPO / 'ops/hook-deletion-check.py'))['command_target']
+        root = Path(installer['REPO']).resolve()
+        for source, event, template in commands():
+            with self.subTest(source=source, event=event, command=template):
+                block = {event: [{'hooks': [{'command': template}]}]}
+                self.assertEqual(installer['hook_block_script_paths'](block),
+                                 [str(command_target(template, root).resolve())])
+
     def test_all_configured_hooks_have_an_explicit_missing_script_policy(self):
         policy = json.loads((REPO / 'ops/config/delegation-gate-hook.json').read_text())['missing_script_policy']
         safety = set(policy['safety'])
