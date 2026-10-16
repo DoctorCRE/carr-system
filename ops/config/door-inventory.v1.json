@@ -93,6 +93,12 @@
       "evidence": "0330c01f (#1611)"
     },
     {
+      "path": "pipelines/backfill_lease_event.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 19(d) repair of structured lease dates from the preserved raw date shim; it is invoked directly rather than by a runtime job.",
+      "evidence": "pipelines/backfill_lease_event.py module docstring and CLI usage"
+    },
+    {
       "path": "pipelines/build-pretour-packet.py",
       "class": "hand_tool",
       "reason": "A session runs it by name to render a CARR pre-tour packet in the Ferris format for a space search.",
@@ -109,6 +115,12 @@
       "class": "one_shot",
       "reason": "Lifted dated contact events out of existing narrative rows once, the Option B capture fix of 2026-08-01.",
       "evidence": "d3a9f6bb"
+    },
+    {
+      "path": "pipelines/import_brokers.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 27(b) import of the brokers workbook into existing party records; it is not a scheduled runtime importer.",
+      "evidence": "pipelines/import_brokers.py module docstring and main entry point"
     },
     {
       "path": "pipelines/import_clients_active.py",
