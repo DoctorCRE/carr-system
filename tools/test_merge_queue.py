@@ -946,6 +946,14 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'done')
         self.assertIn('confirmed', (self.q.db.execute("SELECT detail FROM events WHERE outcome='merged' ORDER BY id DESC").fetchone()[0]))
 
+    def test_board_events_request_publication_without_github_refresh(self):
+        with self.q.db:
+            self.q.event(module.REPOS[0], 123, 'queued', 'Approved test head')
+        self.q.flush_events()
+        calls = (self.root / 'tools/progress_board.calls').read_text()
+        self.assertIn("'--publish-only'", calls)
+        self.assertEqual(self.q.db.execute('SELECT published FROM events').fetchone()[0], 1)
+
     def test_board_failure_does_not_stop_merges_and_is_logged(self):
         os.environ['BOARD_FAIL']='1'
         self.pr()

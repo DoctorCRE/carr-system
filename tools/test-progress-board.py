@@ -1242,6 +1242,34 @@ class AllRepositoriesBoard(BoardCase):
 
 
 class PublishAndAnswers(BoardCase):
+    def test_queue_task_publishes_without_refreshing_github_or_inventory(self):
+        self.run_board("init", "carr-v5", "--title", "Queue test")
+        inventory = {"schema": "system-work-external.v2", "pages": ["saved-page"]}
+        remote = {"snapshot": {"version": 7, "snapshot_json": {"external_inventory": inventory}},
+                  "questions": []}
+        calls = []
+
+        def caller(verb, args):
+            calls.append(verb)
+            if verb == "read-progress-board":
+                return {"ok": True, **remote}
+            if verb == "publish-board-snapshot":
+                self.assertEqual(args["base_version"], 7)
+                self.assertEqual(args["snapshot"]["external_inventory"], inventory)
+                self.assertEqual(args["snapshot"]["tasks"]["pr-1433"]["stage"], "ci")
+                remote["snapshot"] = {"version": 8, "snapshot_json": args["snapshot"]}
+                return {"ok": True}
+            raise AssertionError(verb)
+
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root), "PROGRESS_BOARD_LOCAL_ONLY": ""}), \
+             patch.object(BOARD, "render", side_effect=AssertionError("queue event refreshed every PR")), \
+             patch("system_work_cache.cached_github", side_effect=AssertionError("queue event refreshed inventory")), \
+             patch.object(BOARD, "call_verb", caller):
+            BOARD.main(["task", "carr-v5", "pr-1433", "--title", "PR #1433", "--executor", "Merge queue",
+                        "--repo", "jbookout/carr-system", "--pr", "1433", "--status", "review", "--stage", "ci", "--publish-only"])
+        self.assertEqual(calls, ["read-progress-board", "publish-board-snapshot", "read-progress-board"])
+        self.assertEqual(self.read_state("carr-v5")["tasks"]["pr-1433"]["stage"], "ci")
+
     def test_publish_uses_remote_version_and_checks_readback(self):
         self.run_board("init", "demo", "--title", "Demo")
         self.run_board("ask", "demo", "q1", "--question", "Choose route?", "--default", "Proceed",
