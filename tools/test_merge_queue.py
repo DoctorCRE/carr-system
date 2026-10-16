@@ -69,6 +69,7 @@ if a[0]=='api':
   elif bits[-1].startswith('statuses'): emit([d.get('statuses',[])])
   else: raise AssertionError(a)
   sys.exit()
+if a[:2]==['pr','view']: emit(d['board_pr']); sys.exit()
 if a[:2]==['pr','checks']: emit(d.get('required',[{'bucket':'pass'}])); sys.exit()
 if a[:2]==['pr','ready']:
  repo=a[a.index('-R')+1];d['prs'][repo+'#'+a[2]]['draft']=False; save();sys.exit()
@@ -946,7 +947,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'done')
         self.assertIn('confirmed', (self.q.db.execute("SELECT detail FROM events WHERE outcome='merged' ORDER BY id DESC").fetchone()[0]))
 
-    def test_board_events_request_publication_without_github_refresh(self):
+    def test_board_events_request_targeted_publication(self):
         with self.q.db:
             self.q.event(module.REPOS[0], 123, 'queued', 'Approved test head')
         self.q.flush_events()
@@ -965,6 +966,15 @@ class QueueTests(unittest.TestCase):
         self.assertIn('progress_board_write_failed',(self.state/'queue.log').read_text())
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0],'done')
 
+    def board_observation(self, pending=False):
+        self.load()
+        self.data['board_pr'] = {
+            'state': 'OPEN', 'isDraft': False, 'headRefOid': self.approved,
+            'author': {'login': 'jbookout'}, 'mergeCommit': None, 'comments': [],
+            'statusCheckRollup': ([{'name': 'CI', 'status': 'IN_PROGRESS', 'conclusion': None}]
+                                  if pending else [])}
+        self.save()
+
     def test_real_board_cli_creates_and_updates_queue_cards(self):
         board_root = self.root / 'board-output'
         env = {'PROGRESS_BOARD_ROOT': str(board_root), 'PROGRESS_BOARD_LOCAL_ONLY': '1',
@@ -973,6 +983,8 @@ class QueueTests(unittest.TestCase):
             module.command([sys.executable, str(ROOT / 'tools/progress_board.py'),
                             'init', 'carr-v5', '--title', 'Queue test'])
             self.q.root = ROOT
+            os.environ['PROGRESS_BOARD_SKIP_GH'] = ''
+            self.board_observation()
             for repo in module.REPOS:
                 with self.q.db:
                     self.q.event(repo, 123, 'queued', 'Approved test head')
@@ -985,6 +997,7 @@ class QueueTests(unittest.TestCase):
                 self.assertEqual(tasks[card]['status'], 'review')
                 self.assertEqual(tasks[card]['executor'], 'Merge queue')
                 self.assertEqual(tasks[card]['title'], f'{repo.split("/")[-1]} PR #123')
+            self.board_observation(pending=True)
             with self.q.db:
                 self.q.event(module.REPOS[0], 123, 'waiting_ci', 'Hosted checks pending')
             self.q.flush_events()
@@ -992,6 +1005,24 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(card['stage'], 'ci')
             self.assertEqual(card['note'], 'Merge queue: waiting_ci. Hosted checks pending')
             self.assertEqual(self.q.db.execute('SELECT COUNT(*) FROM events WHERE published=1').fetchone()[0], 4)
+
+    def test_real_board_failed_pr_read_leaves_event_unpublished(self):
+        board_root = self.root / 'board-output'
+        env = {'PROGRESS_BOARD_ROOT': str(board_root), 'PROGRESS_BOARD_LOCAL_ONLY': '1',
+               'PROGRESS_BOARD_SKIP_GH': '1', 'PROGRESS_BOARD_SKIP_PROBE': '1'}
+        with patch.dict(os.environ, env):
+            module.command([sys.executable, str(ROOT / 'tools/progress_board.py'),
+                            'init', 'carr-v5', '--title', 'Queue test'])
+            os.environ['PROGRESS_BOARD_SKIP_GH'] = ''
+            self.q.root = ROOT
+            self.data['gh_failure'] = {'prefix': ['pr', 'view'], 'status': 403}
+            self.save()
+            with self.q.db:
+                self.q.event(module.REPOS[0], 123, 'waiting_ci', 'Delayed event')
+            self.q.flush_events()
+            self.assertEqual(self.q.db.execute('SELECT published FROM events').fetchone()[0], 0)
+            self.assertEqual(json.loads((board_root / 'boards/carr-v5.json').read_text())['tasks'], {})
+            self.assertIn('progress_board_write_failed', (self.state / 'queue.log').read_text())
 
     def test_real_board_queue_events_preserve_existing_card_metadata(self):
         board_root = self.root / 'board-output'
@@ -1007,7 +1038,9 @@ class QueueTests(unittest.TestCase):
                 module.command(board_cli + ['task', 'carr-v5', card, *fields,
                                             '--status', 'review', '--repo', repo, '--pr', '123'])
             self.q.root = ROOT
+            os.environ['PROGRESS_BOARD_SKIP_GH'] = ''
             for outcome, stage in (('waiting_ci', 'ci'), ('blocked_review', 'review')):
+                self.board_observation(pending=stage == 'ci')
                 for repo in module.REPOS:
                     with self.q.db:
                         self.q.event(repo, 123, outcome, 'Queue update')

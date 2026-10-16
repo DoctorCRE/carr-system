@@ -2298,6 +2298,19 @@ def command_task(args: argparse.Namespace) -> None:
     if args.expected_task is not None and not isinstance(expected, dict):
         raise SystemExit("--expected-task must be a task object")
     receipt = {"applied": False, "before": None, "after": None}
+    affected = None
+    info = None
+    if args.publish_only:
+        prior = read_state(args.project).get("tasks", {}).get(args.task_id, {})
+        number = args.pr if args.pr is not None else prior.get("pr")
+        if number is not None:
+            affected = (safe_repo(args.repo or prior.get("repo") or DEFAULT_PR_REPO), int(number))
+            info = validated_pr(gh_json(
+                ["pr", "view", str(affected[1]), "--repo", affected[0], "--json",
+                 "state,isDraft,headRefOid,author,mergeCommit,statusCheckRollup,comments,reviewDecision,mergeable"],
+                timeout=15))
+            if info is None:
+                raise RuntimeError("affected PR read returned a malformed payload; board not published")
     def change(state):
         before = copy.deepcopy(state.get("tasks", {}).get(args.task_id))
         receipt["before"] = before
@@ -2306,7 +2319,20 @@ def command_task(args: argparse.Namespace) -> None:
                 for key, value in expected.items()):
             receipt["after"] = before
             return False
-        update_task(state, args)
+        task_args = args
+        if affected is not None:
+            task_args = copy.copy(args)
+            # Queue stages describe historical events, not manual stage floors.
+            task_args.stage = None
+            if before:
+                task_args.status = None
+        update_task(state, task_args)
+        if affected is not None:
+            task = state["tasks"][args.task_id]
+            if pr_key(task) != affected:
+                raise RuntimeError("affected PR identity changed during read; board not published")
+            task.pop("manual_stage", None)
+            sync_pr_task(task, info, stamp())
         receipt["applied"] = True
         receipt["after"] = copy.deepcopy(state["tasks"][args.task_id])
     applied = mutate(args.project, change, refresh=not (args.defer_refresh or args.publish_only))
@@ -2505,7 +2531,7 @@ def parser() -> argparse.ArgumentParser:
     publication = task.add_mutually_exclusive_group()
     publication.add_argument("--defer-refresh", action="store_true", help="save the task without refreshing or publishing the board")
     publication.add_argument("--publish-only", action="store_true",
-                             help="publish the saved board without refreshing PRs or external inventory from GitHub")
+                             help="refresh only this task PR and publish saved facts for other cards and external inventory")
     task.add_argument("--note")
     task.add_argument("--evidence")
     task.add_argument("--delivery-target", choices=("worker", "app", "workstation", "database", "manual"),

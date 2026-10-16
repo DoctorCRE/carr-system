@@ -1242,8 +1242,16 @@ class AllRepositoriesBoard(BoardCase):
 
 
 class PublishAndAnswers(BoardCase):
-    def test_queue_task_publishes_without_refreshing_github_or_inventory(self):
+    def publish_queue_event(self, info, event_stage="merged", error=None):
         self.run_board("init", "carr-v5", "--title", "Queue test")
+        prior = self.read_state("carr-v5")
+        prior["tasks"] = {
+            "pr-1433": {"title": "PR #1433", "executor": "Merge queue", "repo": "jbookout/carr-system",
+                        "pr": 1433, "status": "review", "stage": "review", "pr_phase": "Ready to merge",
+                        "pr_head": SHA_A, "pr_checks": {"old": "SUCCESS"}, "review_verdict": "APPROVE"},
+            "other": {"title": "Other", "repo": "jbookout/doctorcre-app", "pr": 1433,
+                      "status": "review", "stage": "review", "pr_head": SHA_A, "review_verdict": "APPROVE"}}
+        self.write_state("carr-v5", prior)
         inventory = {"schema": "system-work-external.v2", "pages": ["saved-page"]}
         remote = {"snapshot": {"version": 7, "snapshot_json": {"external_inventory": inventory}},
                   "questions": []}
@@ -1256,19 +1264,58 @@ class PublishAndAnswers(BoardCase):
             if verb == "publish-board-snapshot":
                 self.assertEqual(args["base_version"], 7)
                 self.assertEqual(args["snapshot"]["external_inventory"], inventory)
-                self.assertEqual(args["snapshot"]["tasks"]["pr-1433"]["stage"], "ci")
                 remote["snapshot"] = {"version": 8, "snapshot_json": args["snapshot"]}
                 return {"ok": True}
             raise AssertionError(verb)
 
         with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root), "PROGRESS_BOARD_LOCAL_ONLY": ""}), \
              patch.object(BOARD, "render", side_effect=AssertionError("queue event refreshed every PR")), \
+             patch.object(BOARD, "gh_json", return_value=info, side_effect=error) as github, \
              patch("system_work_cache.cached_github", side_effect=AssertionError("queue event refreshed inventory")), \
              patch.object(BOARD, "call_verb", caller):
-            BOARD.main(["task", "carr-v5", "pr-1433", "--title", "PR #1433", "--executor", "Merge queue",
-                        "--repo", "jbookout/carr-system", "--pr", "1433", "--status", "review", "--stage", "ci", "--publish-only"])
+            argv = ["task", "carr-v5", "pr-1433", "--title", "PR #1433", "--executor", "Merge queue",
+                    "--repo", "jbookout/carr-system", "--pr", "1433", "--status", "review",
+                    "--stage", event_stage, "--publish-only"]
+            if error or info is None:
+                with self.assertRaises((RuntimeError, SystemExit)):
+                    BOARD.main(argv)
+                self.assertEqual(calls, [])
+                self.assertEqual(self.read_state("carr-v5"), prior)
+                return
+            BOARD.main(argv)
+        github.assert_called_once()
+        command = github.call_args.args[0]
+        self.assertEqual(command[:6], ["pr", "view", "1433", "--repo", "jbookout/carr-system", "--json"])
         self.assertEqual(calls, ["read-progress-board", "publish-board-snapshot", "read-progress-board"])
-        self.assertEqual(self.read_state("carr-v5")["tasks"]["pr-1433"]["stage"], "ci")
+        self.assertEqual(self.read_state("carr-v5")["tasks"]["other"], prior["tasks"]["other"])
+        return remote["snapshot"]["snapshot_json"]["tasks"]["pr-1433"]
+
+    def queue_pr(self, **fields):
+        return {"state": "OPEN", "isDraft": False, "headRefOid": "b" * 40,
+                "author": {"login": "jbookout"}, "mergeCommit": None, "comments": [],
+                "statusCheckRollup": [{"name": "CI", "status": "IN_PROGRESS", "conclusion": None}],
+                **fields}
+
+    def test_queue_event_refreshes_changed_head_before_publication(self):
+        old_approval = {"body": f"APPROVE\nReviewed-SHA: {SHA_A}", "author": {"login": "jbookout"},
+                        "authorAssociation": "OWNER", "createdAt": "2026-10-01T00:00:00Z"}
+        card = self.publish_queue_event(self.queue_pr(comments=[old_approval]))
+        self.assertEqual((card["status"], card["stage"], card["pr_phase"]), ("running", "ci", "CI"))
+        self.assertEqual(card["pr_head"], "b" * 40)
+        self.assertEqual(card["review_verdict"], "Not recorded")
+        self.assertEqual(card["pr_checks"], "0 pass · 1 pending · 0 fail")
+
+    def test_delayed_waiting_ci_event_publishes_current_merge(self):
+        card = self.publish_queue_event(self.queue_pr(state="MERGED", mergeCommit={"oid": SHA_M},
+                                                       statusCheckRollup=[]), event_stage="ci")
+        self.assertEqual((card["status"], card["stage"], card["pr_phase"]), ("done", "merged", "Merged"))
+        self.assertEqual(self.read_state("carr-v5")["tasks"]["pr-1433"]["merge_sha"], SHA_M)
+
+    def test_queue_event_read_failure_cannot_publish_saved_facts(self):
+        self.publish_queue_event(None, error=RuntimeError("GitHub unavailable"))
+
+    def test_queue_event_malformed_read_cannot_publish_saved_facts(self):
+        self.publish_queue_event(None)
 
     def test_publish_uses_remote_version_and_checks_readback(self):
         self.run_board("init", "demo", "--title", "Demo")
