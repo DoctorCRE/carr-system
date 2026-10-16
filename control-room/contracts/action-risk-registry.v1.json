@@ -13,26 +13,21 @@
   "NONE": "updates an existing row with no version check \u2014 two callers can silently lose each other's work. THE GAP."
  },
  "counts": {
-  "human_boundary": 28,
-  "append_only": 163,
-  "optimistic_concurrency": 45,
-  "NONE": 17,
-  "read_only": 120,
+  "human_boundary": 32,
+  "append_only": 36,
+  "read_only": 38,
+  "optimistic_concurrency": 19,
+  "NONE": 12,
   "upsert_last_writer_wins": 4
  },
  "the_gap": [
-  "admit-rule",
   "complete-action",
   "detach-decision",
   "end-deal-review",
   "link-parties",
-  "log-outreach",
   "measure-placement",
-  "merge-vendor-rows",
   "register-template",
-  "resolve-candidate",
   "resolve-conflict",
-  "resolve-post-call-candidate",
   "set-next-action",
   "set-next-step",
   "triage-item",
@@ -57,19 +52,6 @@
    },
    "does": "HUMAN-ONLY: accept one exact immutable ready-plan outcome-feedback hash"
   },
-  "accept-portfolio-revision": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY: accept one exact DoctorCRE v5 portfolio accepted digest"
-  },
   "accept-ready-plan": {
    "protection": "human_boundary",
    "write": true,
@@ -83,36 +65,10 @@
    },
    "does": "HUMAN-ONLY: accept one exact immutable ready-plan hash and make the sole triaged-to-ready transition"
   },
-  "accept-ready-plan-amendment": {
+  "accept-workflow": {
    "protection": "human_boundary",
    "write": true,
    "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY: accept one exact reviewed same-Work-Request plan successor at the database safe point"
-  },
-  "accept-tour-route-version": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only acceptance of a route version; it is not public or client promotion"
-  },
-  "accept-workflow": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -122,75 +78,10 @@
    },
    "does": "Authority acceptance of a completed workflow run"
   },
-  "acknowledge-board-answer": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Mark a sponsor-owned answer Received after the named asker or orchestrator has stored it in its inbox"
-  },
-  "acknowledge-dispatch": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one acknowledgement row for a dispatch at one stage -- received when the turn lands in a desk window, acknowledged when the acting session takes it up"
-  },
-  "acknowledge-notification": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Mark one notification addressed to the acting actor as read"
-  },
-  "acknowledge-ready-plan-amendment": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record the authenticated actor's acknowledgement of one durable ready-plan amendment notice"
-  },
-  "activate-context-bundle": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Compile and bind bounded canonical knowledge to one accepted plan"
-  },
   "activate-guidance-registry": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -201,9 +92,9 @@
    "does": "Activate the typed Guidance Registry after its 5\u201310-item constitution and complete coverage pass"
   },
   "activate-rule": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -239,32 +130,6 @@
    },
    "does": "Append context or an answer to a deal's immutable thread"
   },
-  "add-doc-conversation-turn": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one turn to a Doc conversation"
-  },
-  "add-industry-event": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 1,
-    "upserts": 0
-   },
-   "does": "Record a healthcare CRE industry event such as a conference, association meeting, trade show, or networking event"
-  },
   "add-loop": {
    "protection": "append_only",
    "write": true,
@@ -277,19 +142,6 @@
     "upserts": 0
    },
    "does": "Open a new loop \u2014 a Joe/Dell task (kind open_loop), a partner handoff (team_loop), a cross-brain interrupt (action_required), or a parked idea (kind idea, which"
-  },
-  "add-meeting-note": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append an attributed note to a shared meeting, or a new revision of an existing note under a compare-and-swap on its latest revision"
   },
   "add-party": {
    "protection": "append_only",
@@ -317,45 +169,6 @@
    },
    "does": "Capture a deal's premises: the building (matched by exact address or created), its space rows (suite, SF, basis), the premises linkage, and the counterparty spi"
   },
-  "add-research-site": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Add a useful research source to the index so future research checks it first"
-  },
-  "add-room-turn": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one raw turn to a partner room \u2014 the shared, human-watchable transcript the partner line and the council talks write into (Idea 78)"
-  },
-  "adjudicate-incident": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "A partner's judgment about what an incident IS: its severity, who holds it, and whether it is the same operational event as another incident"
-  },
   "adjudicate-investigation-branch": {
    "protection": "append_only",
    "write": true,
@@ -369,23 +182,10 @@
    },
    "does": "Owner-only branch judgment after evidence is present"
   },
-  "admit-engineering-slice": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Admit one eligible DAG slice from the exact accepted plan"
-  },
   "admit-rule": {
-   "protection": "NONE",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 2,
@@ -395,49 +195,10 @@
    },
    "does": "Normalize and admit one PROPOSED rule into executable authority"
   },
-  "advance-leads": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Run the lead stage job over captured local mail and calendar activities"
-  },
-  "advance-workflow-cutover-stage": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Q116, partner authority only: advance an active cutover plan exactly one step forward through read_legacy -> build_projection -> shadow_compare -> single_write_"
-  },
-  "amend-closed-loop": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 1,
-    "deletes": 0,
-    "inserts": 1,
-    "upserts": 0
-   },
-   "does": "Correct a CLOSED loop's outcome, append-only \u2014 never rewrite history"
-  },
   "amend-rule": {
-   "protection": "optimistic_concurrency",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": true,
    "sql": {
     "updates": 1,
@@ -445,176 +206,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Correct the WORDS of a rule in place, keeping its id, created_at, taught_by and quote"
-  },
-  "answer-board-question": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Partner answers the current revision"
-  },
-  "answer-work-request-for-joe": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY, DIRECT HUMAN ONLY (no sponsored-agent route): record Joe's answer on one needs_joe Work Request and make its sole allowed transition, needs_joe to t"
-  },
-  "append-tour-cheat-sheet-revision": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append an internal-only cheat-sheet autosave; content is never returned publicly"
-  },
-  "append-tour-coordinate-candidate": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one rights-bound, unpromoted coordinate candidate"
-  },
-  "append-tour-entrance-verification-receipt": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only append of one immutable human entrance-verification receipt"
-  },
-  "append-tour-field-assertion": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one immutable, authority-reviewed, provenance-bound Tour property field assertion"
-  },
-  "append-tour-property-identifier-assertion": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only append of one rights-bound canonical property identifier assertion"
-  },
-  "append-tour-rights-receipt": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one immutable, versioned provider/policy rights receipt for Tour evidence and fact use"
-  },
-  "append-tour-route-stop": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one active, held, or excluded route stop; property identity remains separate"
-  },
-  "append-tour-route-stop-transition": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one explicit old-to-new stop transition before route acceptance"
-  },
-  "append-tour-route-version": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one immutable route version; provider input is a safe normalized request only"
-  },
-  "append-tour-selection-cart-version": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one immutable internal selection-cart version"
-  },
-  "append-tour-source-evidence": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one immutable Tour source-evidence record bound to an exact provider, policy, and rights receipt"
+   "does": "Correct the WORDS of an existing rule in place, keeping its id, created_at, taught_by, quote and activation history"
   },
   "applicable-rules": {
    "protection": "read_only",
@@ -629,36 +221,10 @@
    },
    "does": "Compile the active admitted rule set for a finite workflow, surface and tier"
   },
-  "approve-lead-draft": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "One-tap approval of the displayed first-contact draft"
-  },
-  "approve-lead-move": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Apply a displayed weak-evidence lead stage proposal after a human confirms it"
-  },
   "approve-retrieval-proposals": {
-   "protection": "optimistic_concurrency",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": true,
    "sql": {
     "updates": 0,
@@ -669,9 +235,9 @@
    "does": "HUMAN-ONLY atomic batch approval"
   },
   "approve-rule": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -679,46 +245,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Approve one captured system rule as a technical-check act (decision cbe91287, Joe, 2026-10-12: his approval is removed from everything the system can do itself)"
-  },
-  "ask-board-question": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Ask one named board question"
-  },
-  "ask-jev": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Ask Jev (TypeSafe) through the Worker and record a server-timestamped, append-only receipt of the call before the answers are returned"
-  },
-  "assign-profile": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Staff a named agent profile: set or clear the model behind the name, move its desk, or change its status (active / unstaffed / parked)"
+   "does": "Approve one captured rule in a single human act"
   },
   "attach-to-campaign": {
    "protection": "optimistic_concurrency",
@@ -733,31 +260,31 @@
    },
    "does": "Bind published content to the campaign it belongs to \u2014 the link that makes 259 metrics answerable"
   },
-  "bind-rule-context-contract": {
-   "protection": "append_only",
+  "attest-capability-project": {
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
+   "binds_both_partners": true,
+   "base_version_required": true,
    "sql": {
     "updates": 0,
     "deletes": 0,
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Append one Joe-authorized typed V5-F05 projection for a durable rule"
+   "does": "Persist an independent pass or fail against the frozen current candidate"
   },
-  "bind-slice-criterion-evidence": {
-   "protection": "append_only",
+  "begin-capability-project": {
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
+   "binds_both_partners": true,
+   "base_version_required": true,
    "sql": {
     "updates": 0,
     "deletes": 0,
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Automated slice-marker seat only: bind ONE criterion that was registered 'unbound', only to a kind the server derives as allowed from the criterion's wording (d"
+   "does": "Perform the separate claimed\u2192in_progress transition for the persisted current capability session"
   },
   "bind-work-request-criterion-evidence": {
    "protection": "append_only",
@@ -772,32 +299,6 @@
    },
    "does": "Technical-check completion for sponsored actors: bind ONE acceptance criterion of a ready sourced Work Request to ONE server receipt tied to that request"
   },
-  "bot-brief": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Return the server-derived, versioned bootstrap brief for one named agent profile"
-  },
-  "cadence-status": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read-only V5-A05 cadence status for one subject: current, missed, or no_receipt_on_record, mirroring evaluateCadenceReceipt over ops"
-  },
   "call-verb": {
    "protection": "append_only",
    "write": true,
@@ -810,45 +311,6 @@
     "upserts": 0
    },
    "does": "Invoke ANY live verb by name \u2014 the deploy-gap passthrough"
-  },
-  "cancel-capability-session": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Abandon the one open build session on a capability project and return that project to ready, so a row left mid-flight can be worked again"
-  },
-  "cancel-pending-deal": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "cancel-workflow-cutover-plan": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Partner authority only: cancel an active cutover plan at any stage before retirement"
   },
   "capability-program": {
    "protection": "read_only",
@@ -902,19 +364,6 @@
    },
    "does": "Write SEVERAL sections of one document atomically \u2014 all commit or none do (the half-applied-rename preventer; P2's known gap, closed in P3)"
   },
-  "claim-card": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The claimable candidate reservoir: who Joe or Dell could turn into a lead today, nearest lease window first"
-  },
   "claim-doctrine-sections": {
    "protection": "append_only",
    "write": true,
@@ -927,97 +376,6 @@
     "upserts": 0
    },
    "does": "Claim sections before a long edit (P3): a cooperative, expiring hint that warns other writers off before they spend tokens on overlapping work"
-  },
-  "claim-lead": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 1,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Claim an unowned New lead for the authenticated human"
-  },
-  "claim-meeting-processing": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Claim, renew or release the single processing lease for a shared meeting"
-  },
-  "claude-checkpoint": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Persist a bounded model-issued Claude milestone checkpoint with explicit CAS"
-  },
-  "claude-read-recovery": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the exact bound Claude leaf and a Worker-capped recovery capsule"
-  },
-  "claude-record-event": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record one immutable idempotent Claude lifecycle receipt"
-  },
-  "close-defect": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Close ONE defect on evidence of its fix that the server already holds: a commit or pull request recorded as merged and shipped (a release slice member), or a se"
-  },
-  "close-incident": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Close one operational incident with an outcome"
   },
   "close-investigation": {
    "protection": "append_only",
@@ -1044,58 +402,6 @@
     "upserts": 0
    },
    "does": "Close a loop \u2014 done, or deliberately dropped"
-  },
-  "codex-checkpoint": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Persist one bounded semantic checkpoint for one server-verified native Codex task"
-  },
-  "codex-read-recovery": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the current bounded recovery checkpoint or exactly one historical revision for one native Codex task, scoped to the authenticated actor and tenant"
-  },
-  "codex-record-event": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record a separate idempotent native Codex lifecycle/cursor receipt"
-  },
-  "commit-winning-property": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
   },
   "compare-lease-terms": {
    "protection": "read_only",
@@ -1124,9 +430,9 @@
    "does": "Mark YOUR open ball on a subject DONE \u2014 the thing actually happened"
   },
   "complete-capability-project": {
-   "protection": "optimistic_concurrency",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": true,
    "sql": {
     "updates": 0,
@@ -1135,19 +441,6 @@
     "upserts": 0
    },
    "does": "Close only the current project from its frozen candidate plus a stored independent PASS attestation, then expose exactly the next ordered Work Request"
-  },
-  "complete-doc-suggestion-scan": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record that the Doc producer examined every turn through the current conversation head"
   },
   "confirm-merge": {
    "protection": "human_boundary",
@@ -1162,58 +455,6 @@
    },
    "does": "HUMAN-confirmed merge of two duplicate parties: sets merged_into on the loser so it becomes a pointer to the survivor"
   },
-  "confirm-slice-completions": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Partner authority only: confirm many slices complete in one act"
-  },
-  "correct-memory": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Correct a memory without rewriting history"
-  },
-  "correct-party-identity": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Correct a party's IDENTITY from a verified finding: name spelling, firm (org) and state"
-  },
-  "correspondence-readiness": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "What DoctorCRE's governed correspondence (V5-J103) can do right now, from the record layer: per partner, how many mailbox consents are in force or revoked, how "
-  },
   "counterparty-history": {
    "protection": "read_only",
    "write": false,
@@ -1227,23 +468,10 @@
    },
    "does": "Counterparty intelligence: every deal where we have faced this listing agent, landlord, owner, or property manager, and what happened"
   },
-  "create-doc-conversation": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Start a Doc conversation"
-  },
   "create-national-account": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -1254,9 +482,9 @@
    "does": "Create one national-account parent org/client and assign its accountable partner"
   },
   "create-national-market-deal": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -1266,62 +494,10 @@
    },
    "does": "Create one market transaction under a national account: reuse or create the named franchisee sub-client under the parent org, then create exactly one deal and o"
   },
-  "create-tour-domain": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Create a draft Tour bound to one client or work subject; no publication or promotion"
-  },
-  "create-tour-public-projection-draft": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Create an empty facts-only Tour public-projection draft for one immutable route membership set"
-  },
-  "current-work-item": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "What is being worked right now: every Work Request a person or session is actually holding, each with its owner, the predicate that would make it done, and its "
-  },
-  "current-work-requests": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read at most 20 current, shared, sourced Program 6 Work Requests that still admit a bounded human next action"
-  },
   "deactivate-guidance-registry": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -1357,23 +533,10 @@
    },
    "does": "The Deal Room home read: Salesforce-linked work records plus their active/parked operating state, national-account portfolio summaries, current partner identity"
   },
-  "decide-doc-suggestion": {
+  "decide-guidance-import-batch": {
    "protection": "human_boundary",
    "write": true,
    "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Choose Act, Discuss, Snooze or Dismiss for one version of one Doc suggestion"
-  },
-  "decide-guidance-import-batch": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -1383,23 +546,10 @@
    },
    "does": "Joe-only authority decision for one staged typed-guidance import batch"
   },
-  "decide-meeting-action": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "A signed-in partner accepts or declines a proposed meeting action at the revision they read"
-  },
   "decline-candidate": {
-   "protection": "optimistic_concurrency",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": true,
    "sql": {
     "updates": 1,
@@ -1408,19 +558,6 @@
     "upserts": 0
    },
    "does": "Record that a HUMAN looked at a candidate and said no"
-  },
-  "decline-work-request": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Withdraw one sourced Work Request captured in error by declining it, recording why"
   },
   "detach-decision": {
    "protection": "NONE",
@@ -1436,9 +573,9 @@
    "does": "Take a decision back off a record it was wrongly attached to"
   },
   "disable-legacy-schedule": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -1500,19 +637,6 @@
    },
    "does": "Rewrite the standing paragraph at the top of one loops section"
   },
-  "effective-ready-plan": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the one database-derived effective ready plan and immutable same-Work-Request lineage"
-  },
   "end-deal-review": {
    "protection": "NONE",
    "write": true,
@@ -1525,84 +649,6 @@
     "upserts": 0
    },
    "does": "Complete or abandon an open agenda and return its reviewed/skipped counts"
-  },
-  "end-meeting": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "A signed-in partner ends a shared meeting"
-  },
-  "engineering-passport": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the canonical typed Engineering Passport projection"
-  },
-  "engineering-passport-source": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the exact current accepted Work Request and plan binding required to construct an initial Engineering Slice Plan"
-  },
-  "engineering-writer-runtime-preflight": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the effective database identity and the exact Engineering admission privileges through the Worker's DATABASE_URL_WRITER binding"
-  },
-  "evaluate-artifact-deletion": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Evaluate whether one stored artifact MAY be deleted, from the installed retention policy, the server-stamped custody clock, its holds and its registered derivat"
-  },
-  "export-email-domains": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The email DOMAINS on record for clients and leads \u2014 never the addresses"
   },
   "find": {
    "protection": "read_only",
@@ -1643,32 +689,6 @@
    },
    "does": "\"What precedent exists for a fork shaped like this?\" \u2014 searches recorded RULING HISTORY plus activated typed precedents"
   },
-  "find-rule": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Find proposed, active, or retired rules by their words when the id is unknown"
-  },
-  "forget-memory": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Forget a memory by suppressing it from recall while retaining its evidence and audit history"
-  },
   "get-call-context": {
    "protection": "read_only",
    "write": false,
@@ -1695,19 +715,6 @@
    },
    "does": "Read one complete open Deal Room work record: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, curren"
   },
-  "get-incident": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "One incident's whole evidence trail: the row itself, every recorded fact with its source, every hypothesis kept separately from the facts (a guess must never si"
-  },
   "get-investigation": {
    "protection": "read_only",
    "write": false,
@@ -1720,71 +727,6 @@
     "upserts": 0
    },
    "does": "Read the complete durable reasoning trace for one investigation: signal, owner, branches, worker evidence packets, adjudications, and termination"
-  },
-  "governance-queue": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read every pending decision in one payload: rules admitted and awaiting approve-rule, guidance import batches staged and awaiting decide-guidance-import-batch, "
-  },
-  "incident-board": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Every open operational incident with its severity, state, age, owner, how many times it has recurred, and the ledger's own next step \u2014 the live answer to 'what "
-  },
-  "initialize-assignment": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "initialize-property-negotiation": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "initialize-prospect-relationship": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
   },
   "integrity-digest": {
    "protection": "read_only",
@@ -1812,71 +754,6 @@
    },
    "does": "List only the active allowlisted hypothesis edges available from one node kind for this investigation's signal type"
   },
-  "invoice-close-queue": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Invoice close proposals awaiting a confident deal match, and applied/undone invoice closes with reason, evidence and undo identifiers"
-  },
-  "issue-tour-share-grant": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only digest-only share_grant operation"
-  },
-  "last-new-lead-search": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Most recent completed new-lead search, with timestamp and outcome"
-  },
-  "lead-approval-queue": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "First-contact drafts and proposed stage moves, with exact approval identifiers"
-  },
-  "lead-board": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The complete, safe worked-lead board"
-  },
   "lead-hot": {
    "protection": "read_only",
    "write": false,
@@ -1890,45 +767,6 @@
    },
    "does": "Scored, unsuppressed leads (score, lane, est_lease_event, next_action_date)"
   },
-  "lead-stage-preview": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Dry run: list evidence-backed lead moves and weak proposals without changing business records or preparing drafts"
-  },
-  "link-incident-work-request": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Attach one same-tenant public Work Request to an incident as contextual evidence"
-  },
-  "link-lead-client": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 1,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Confirm one lead belongs to an existing client, by exact IDs and an explicit human choice"
-  },
   "link-parties": {
    "protection": "NONE",
    "write": true,
@@ -1941,110 +779,6 @@
     "upserts": 0
    },
    "does": "Record an intro-graph edge (a party_link row): who knows whom, who can introduce whom, who REFERRED whom"
-  },
-  "link-salesforce-reference": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "list-doc-conversations": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "List the Doc conversations the signed-in actor may see: the ones they created and the ones granted to them and not revoked, pinned first then most recently upda"
-  },
-  "list-doc-suggestions": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read Doc suggestions visible to the signed-in partner, with each original contribution, current version, and producer coverage state"
-  },
-  "list-industry-events": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "List tenant-scoped healthcare CRE industry events for the Events tab, ordered by start time"
-  },
-  "list-my-codex-sessions": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "List bounded first-hand native Codex checkpoint bindings for the authenticated human sponsor"
-  },
-  "list-progress-boards": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "List published progress boards visible to the authenticated tenant and sponsor, with publication time and task counts by status"
-  },
-  "list-research-sites": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The research-site index: sources worth checking FIRST for a research topic, each tagged with what it is good for"
-  },
-  "list-shipped-releases": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read: complete production releases (release_key, git_sha, completed_at, member_count) completed at or after `since` (ISO timestamp; all when omitted), oldest fi"
   },
   "list-verbs": {
    "protection": "read_only",
@@ -2099,9 +833,9 @@
    "does": "Record a SETTLED decision and its rationale \u2014 the thing that stops it being relitigated next session"
   },
   "log-outreach": {
-   "protection": "NONE",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 3,
@@ -2150,32 +884,6 @@
    },
    "does": "Mandatory first read for any CARR map, GIS, route, day-trip, or Tour request"
   },
-  "mark-slice-completion": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Q153, partner authority only: append status=complete for a registered slice_id"
-  },
-  "mark-slice-progress": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Q153: append an in_progress or blocked mark for a registered slice_id, so a future session reads what's done and what's left"
-  },
   "measure-placement": {
    "protection": "NONE",
    "write": true,
@@ -2190,9 +898,9 @@
    "does": "Record what one placement actually did \u2014 including, and especially, that it could not be measured"
   },
   "merge-vendor-rows": {
-   "protection": "NONE",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 6,
@@ -2201,19 +909,6 @@
     "upserts": 0
    },
    "does": "HUMAN-confirmed merge of two vendor rows that ride the SAME party \u2014 a duplicate role, not a duplicate person"
-  },
-  "morning-brief": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The record-native morning brief for the authenticated Joe or Dell context"
   },
   "new-client": {
    "protection": "append_only",
@@ -2229,9 +924,9 @@
    "does": "Create a client over a party; mints the next C-ref (roster_ref)"
   },
   "new-deal": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -2293,32 +988,6 @@
    },
    "does": "Read deterministic analytical signals awaiting investigation"
   },
-  "notification-feed": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the acting actor's own notification feed and unread count"
-  },
-  "observe-memory": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record an evidence-backed memory candidate"
-  },
   "open-campaign": {
    "protection": "append_only",
    "write": true,
@@ -2331,32 +1000,6 @@
     "upserts": 0
    },
    "does": "Open a campaign: the object that says what a run of content is FOR, so its results can later be judged instead of admired"
-  },
-  "open-cre-assignment": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "open-incident": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Open an operational incident, or attach this occurrence to the one already open for the same failure"
   },
   "open-investigation": {
    "protection": "append_only",
@@ -2384,19 +1027,6 @@
    },
    "does": "Open one hypothesis branch from an allowlisted diagnostic route"
   },
-  "open-workflow-cutover-plan": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Q116 step 1, partner authority only: open a workflow-migration plan at stage=read_legacy for a registered workflow identity"
-  },
   "patch-deal-field": {
    "protection": "append_only",
    "write": true,
@@ -2410,18 +1040,18 @@
    },
    "does": "Patch one Deal Room cell using its last-seen event as the field base"
   },
-  "pending-slice-completion-proposals": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
+  "prepare-capability-project": {
+   "protection": "human_boundary",
+   "write": true,
+   "binds_both_partners": true,
+   "base_version_required": true,
    "sql": {
     "updates": 0,
     "deletes": 0,
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Read: every slice whose latest automated completion proposal a partner could confirm now (not held, not complete, no mark since the proposal), each re-evaluated"
+   "does": "Freeze exactly one candidate for independent verification"
   },
   "prepare-conversation": {
    "protection": "read_only",
@@ -2449,19 +1079,6 @@
    },
    "does": "Produce a document RECORD and its fill plan for one deal from a registered template: pulls the deal, client, premises, newest our-side negotiation round and lea"
   },
-  "prepare-tour-route-version": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append a complete immutable manual route version by reordering the accepted route's existing stop IDs"
-  },
   "presence-lease": {
    "protection": "upsert_last_writer_wins",
    "write": true,
@@ -2474,32 +1091,6 @@
     "upserts": 1
    },
    "does": "Acquire or refresh this actor's field-level Deal Room presence for about three seconds"
-  },
-  "project-room-queue": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one shape-checked carr-build projection receipt through the locked Hermes machine identity"
-  },
-  "promote-memory": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Promote one candidate memory after a human confirms it"
   },
   "promote-pool": {
    "protection": "optimistic_concurrency",
@@ -2514,32 +1105,6 @@
    },
    "does": "Promote a candidate_pool row into a real lead: mints the party, mints the next L-ref, copies the identity, contact and est-lease-event stamps across, points the"
   },
-  "propose-doc-correction": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Propose a typed correction to one suggestion at its displayed version"
-  },
-  "propose-meeting-action": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Add a numbered action to a shared meeting's action stream, or revise a pending one"
-  },
   "propose-outcome-feedback": {
    "protection": "optimistic_concurrency",
    "write": true,
@@ -2553,19 +1118,6 @@
    },
    "does": "Propose evidence-bound outcome feedback for one accepted sourced ready plan; it completes nothing"
   },
-  "propose-portfolio-revision": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Propose one inert DoctorCRE v5 portfolio revision: the 21 master milestones with complete typed metadata, the four child programs with their own versions and ap"
-  },
   "propose-ready-plan": {
    "protection": "optimistic_concurrency",
    "write": true,
@@ -2578,19 +1130,6 @@
     "upserts": 0
    },
    "does": "Append one immutable, bounded ready-plan proposal to a triaged Work Request"
-  },
-  "propose-ready-plan-amendment": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append one immutable same-Work-Request ready-plan successor proposal with its closed heavy-build contract"
   },
   "propose-retrieval-concept": {
    "protection": "append_only",
@@ -2644,175 +1183,6 @@
    },
    "does": "Propose retirement of a concept, phrase, or mapping without mutating active curation"
   },
-  "propose-slice-completion": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Automated slice-marker seat only: PROPOSE that a registered slice_id is complete"
-  },
-  "publish-board-snapshot": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Publish the current progress board view for the signed-in app"
-  },
-  "raise-delivery-cadence-alert": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Raise a V5-A05 escalation candidate"
-  },
-  "read-action-class-gate": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The deterministic future-action gate (V5-D01) for ONE action_class: whether an unattended action of that class is currently allowed"
-  },
-  "read-action-class-successors": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "List registered action-class successor entries (V5-D01), optionally filtered to one action_class"
-  },
-  "read-action-context": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the authenticated actor's durable V5-F05 rule universe and derive a digest-bound applicability and coverage receipt"
-  },
-  "read-assurance-health": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read DoctorCRE V5-A01 assurance health for one exact workflow/work-request scope"
-  },
-  "read-attempt-reliability": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read canonical authority-derived reliability posture for one tenant-scoped AttemptReceipt"
-  },
-  "read-benchmark-manifest": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the versioned benchmark inputs and recorded measurements"
-  },
-  "read-board-answers": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read new answers for the authenticated sponsor and one asker reference after a numeric cursor; reading alone does not mark Received"
-  },
-  "read-context-activation": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the redacted, exact context activation projection for one Work Request and binding"
-  },
-  "read-correspondence-thread": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The provenance-preserving read of one correspondence thread (V5-J103): every adapter read receipt stored for one native identity in YOUR sponsor's own mailbox, "
-  },
-  "read-cre-lifecycle": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
   "read-deal-reconciliation": {
    "protection": "read_only",
    "write": false,
@@ -2825,58 +1195,6 @@
     "upserts": 0
    },
    "does": "Read the minimal all-deal reconciliation record"
-  },
-  "read-dispatch-history": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Return the dispatch history for one session, newest first, with each stage carrying the evidence it came from and any stage this substrate cannot prove returned"
-  },
-  "read-doc-activity": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Newest-first autonomous changes from the existing event spine: actor, partner scope, record, reason, original entry evidence and guarded deal-field undo eligibi"
-  },
-  "read-doc-conversation": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read one Doc conversation the acting actor may see: its identity, its turns in sequence order, and the effective access list"
-  },
-  "read-doc-outcome-cards": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read actor- and tenant-scoped, page-atomic DoctorCRE outcome cards"
   },
   "read-doctrine": {
    "protection": "read_only",
@@ -2891,84 +1209,6 @@
    },
    "does": "Read a whole doctrine document \u2014 one round trip, snapshot-served"
   },
-  "read-execution-environment-providers": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the governed execution-environment provider registry, conformance posture, operator surface, and rollback state"
-  },
-  "read-global-boundaries": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read DoctorCRE v5's settled global boundaries (V5-S01) as the live server evaluates them: the policy digest and the eight decision source-evidence digests; the "
-  },
-  "read-invoice-tracker": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Invoice tracker v1: closed uninvoiced deals and all invoiced commission entries, including received entries"
-  },
-  "read-jev-call-receipt-integrity": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Audit the server-side Jev call log for tampering that the store detects but cannot prevent: how many receipts exist, how many have no matching ask-jev row in th"
-  },
-  "read-jev-call-receipts": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the calling actor's credited Jev call receipts for one session, oldest first, from `since` (default: 24 hours before the server's clock)"
-  },
-  "read-journey-one-clock": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the recorded Journey One start, pauses, deadline and history for a clock scope"
-  },
   "read-loop": {
    "protection": "read_only",
    "write": false,
@@ -2981,279 +1221,6 @@
     "upserts": 0
    },
    "does": "Read ONE loop and its current version"
-  },
-  "read-meeting": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read one shared meeting: identity, processing lease, every note revision, every action with its revision history and dispatch, the numbered stream after a seque"
-  },
-  "read-model-role": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the stored versions of a role description"
-  },
-  "read-notification-preferences": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the acting actor's own notification preferences and whether quiet hours cover this moment"
-  },
-  "read-portfolio": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read one DoctorCRE v5 portfolio: its current revision, the digest recomputed from the stored rows, structural validity, every child binding with its own version"
-  },
-  "read-profiles": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "The named-agent roster: every persistent agent identity (Builder, Designer, Reviewer, Doc) with its charter as a skills list, the model currently staffing it, i"
-  },
-  "read-progress-board": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the published board and its current questions with durable Sent, Received and Applied answer state"
-  },
-  "read-record-source-authority": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 F01 read"
-  },
-  "read-resource-dashboard": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the full DoctorCRE resource-metering provider matrix: neon, github, cloudflare, local_compute, model_route -- one entry each, always present"
-  },
-  "read-room": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read a partner room's turns after a cursor, oldest first \u2014 the poll half of the partner line and the spectator view's source"
-  },
-  "read-room-latest": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Open the newest Model Room window without walking its entire history"
-  },
-  "read-room-queue": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the current non-archived carr-build Queue projection"
-  },
-  "read-salesforce-action-evidence": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "read-salesforce-action-evidence: V5-RW02 attended Salesforce reconciliation record-layer seam; no provider call"
-  },
-  "read-salesforce-autonomy-counter": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "read-salesforce-autonomy-counter: V5-RW02 consecutive clean attended runs for one kind, read from the server-side run ledger (decision 493de438: 5 in a row make"
-  },
-  "read-session-identity": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Look up sessions by name or ID and return canonical identity, parent lineage, native-host id, work state and freshness, filtered to what the acting actor may se"
-  },
-  "read-slice-completion": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Q153: read the current (most recent) explicit completion mark for one slice_id (marked:false when never marked), plus done_state: registration, each criterion's"
-  },
-  "read-tour-feedback": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read client shortlist and comments for one sealed Tour projection"
-  },
-  "read-tour-pdf-render": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read sanitized internal PDF render/QC state"
-  },
-  "read-tour-public-projection": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read one tenant-scoped approved Tour public projection with its reviewed public values and bounded provenance"
-  },
-  "read-tour-selection-cart": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the latest authenticated internal selection cart for a Tour"
-  },
-  "read-tour-sharing-library": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authenticated internal sharing library by immutable projection"
-  },
-  "read-v5-a02-rule-enforcement-coverage": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read DoctorCRE V5-A02's server-derived coverage of every active rule"
   },
   "read-work-shape": {
    "protection": "read_only",
@@ -3268,23 +1235,10 @@
    },
    "does": "Read the current append-only implementation-shape decision for a canonical Work Request"
   },
-  "ready-plan-amendment-discovery": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read durable actor-owned ready-plan amendment notices with bounded keyset pagination"
-  },
   "reassign-deal": {
-   "protection": "optimistic_concurrency",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": true,
    "sql": {
     "updates": 1,
@@ -3293,58 +1247,6 @@
     "upserts": 0
    },
    "does": "Move a deal onto the client it actually belongs to"
-  },
-  "rebind-slice-criterion-evidence": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Partner authority only: bind, rebind or explicitly unbind (evidence_kind='unbound') a criterion that was registered 'unbound'"
-  },
-  "recall-memory": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Recall promoted memories relevant to a context, combining shared memories with the authenticated partner's personal scope"
-  },
-  "record-artifact-preservation-hold": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY, AUTHORITY-ONLY"
-  },
-  "record-board-answer-applied": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Mark a Received answer Applied only with a concrete effect reference"
   },
   "record-branch-evidence": {
    "protection": "append_only",
@@ -3359,58 +1261,6 @@
    },
    "does": "Attach a worker evidence packet to an open branch"
   },
-  "record-cadence-receipt": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record that a subject's V5-A05 assurance cadence checked in"
-  },
-  "record-commission-receipt": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record full receipt of one already invoiced CARR commission with its payment date"
-  },
-  "record-corporate-artifact": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Persist one immutable, source-agnostic corporate artifact identity (Salesforce export, OneDrive official copy, object-storage bytes, email, etc"
-  },
-  "record-correspondence-adapter-consent": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY"
-  },
   "record-counter": {
    "protection": "append_only",
    "write": true,
@@ -3423,58 +1273,6 @@
     "upserts": 0
    },
    "does": "Log a negotiation round: whose paper (side), the economics (rate REQUIRES its basis \u2014 never a bare number), TI, free rent, term, PLUS what that side CLAIMED abo"
-  },
-  "record-deal-axis": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-deal-closing": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-deal-execution": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-deal-invoice": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Capture a dated invoice fact from local mail"
   },
   "record-defect": {
    "protection": "append_only",
@@ -3489,71 +1287,6 @@
    },
    "does": "File ONE defect: a claim the system made that was not true, with what WAS true beside it"
   },
-  "record-diligence-outcome": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-dispatch-link": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record the explicit link between a room turn, named by its msg_id, and the session it was dispatched to, at the moment the turn is appended"
-  },
-  "record-document-identity": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Persist and read back one versioned document identity \u2014 Neon operating identity, object-storage draft/sealed bytes, OneDrive official executed copy \u2014 with its p"
-  },
-  "record-evidence-subject-link": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-executed-lease": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record the current executed lease/abstract that CARR actually holds for a deal"
-  },
   "record-finding": {
    "protection": "append_only",
    "write": true,
@@ -3566,227 +1299,6 @@
     "upserts": 0
    },
    "does": "Land ONE open-source research or enrichment finding as a record_flag row"
-  },
-  "record-lead-contact": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record derived contact evidence from a local mail or calendar reader"
-  },
-  "record-lifecycle-correction": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-lifecycle-fact": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-lifecycle-reconciliation": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-loi-acceptance": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-loi-submission": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-meeting-action-outcome": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Reconcile an accepted meeting action against the canonical record: it becomes done (or delegated) only when the existing verb's own committed envelope row is fo"
-  },
-  "record-parsed-proposal": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Persist one reviewable proposal parsed from a stored artifact, with a reversible, history-preserving link to it and its derivative-source registration"
-  },
-  "record-partner-lifecycle-fact": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-release-slice-members": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Automated slice-marker seat only: record merged commits attributed to DoctorCRE v5 catalog slices as members of one complete production release (release_key)"
-  },
-  "record-representation-agreement": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "record-resource-observation": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Write door for the local, credential-less resource collector: append one observation for one provider (neon, github, cloudflare, local_compute, model_route)"
-  },
-  "record-rule-enforcement-fallback": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Joe-authority-only V5-A02 fallback receipt for one rule"
-  },
-  "record-salesforce-duplicate-check": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "record-salesforce-duplicate-check: V5-RW02 attended Salesforce reconciliation record-layer seam; no provider call"
-  },
-  "record-salesforce-page-stop": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "record-salesforce-page-stop: V5-RW02 attended Salesforce reconciliation record-layer seam; no provider call"
-  },
-  "record-salesforce-run-outcome": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "record-salesforce-run-outcome: V5-RW02 records ONE attended Salesforce run's outcome for one kind (clean, corrected, failed, refused, stopped; a stop names its "
-  },
-  "record-salesforce-write-readback": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "record-salesforce-write-readback: V5-RW02 attended Salesforce reconciliation record-layer seam; no provider call"
   },
   "record-signal": {
    "protection": "append_only",
@@ -3801,149 +1313,6 @@
    },
    "does": "Record a signal produced by deterministic code"
   },
-  "record-source-observation": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Judge one source observation of one field against the INSTALLED policy and the stored current state, and persist exactly one of: an accepted transition with its"
-  },
-  "record-tour-map-promotion-receipt": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record an immutable verified-human Tour map promotion decision bound to exact projection, dataset, route, provider-rights, component, mobile, native-navigation,"
-  },
-  "record-tour-pdf-human-review": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only human review receipt for a completed QC run"
-  },
-  "record-tour-pdf-render-result": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-bound server renderer receipt after exact R2 readback and deterministic QC"
-  },
-  "record-workflow-caller": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Caller inventory: upsert one caller's migration status for one workflow identity (done/remaining/blocked/superseded/retired)"
-  },
-  "register-action-class-successor": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY (partner authority)"
-  },
-  "register-derivative-source-link": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Bind one derived record to the exact stored artifact it came from, under the authenticated producer identity, before that derivative is complete"
-  },
-  "register-engineering-slice-plan": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Register one typed Engineering Slice Plan as an immutable projection of the exact accepted sourced plan"
-  },
-  "register-record-source-authority-policy": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY, AUTHORITY-ONLY"
-  },
-  "register-slice-checkable-done": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Q153, partner authority only: register, once, the checkable_done criteria that define 'done' for a slice_id, each with one evidence binding: 'acceptance' (+work"
-  },
-  "register-slice-criteria-from-catalog": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Automated slice-marker seat only (the local machine actor): register a DoctorCRE v5 slice's checkable_done criteria exactly as the current slice-catalog doctrin"
-  },
   "register-template": {
    "protection": "NONE",
    "write": true,
@@ -3956,19 +1325,6 @@
     "upserts": 0
    },
    "does": "Register (or re-version) a CARR template so prepare-document can fill it"
-  },
-  "register-tour-property": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only registration of one canonical Tour property together with its first rights-bound identifier assertion (0565)"
   },
   "release-doctrine-claims": {
    "protection": "append_only",
@@ -3983,45 +1339,6 @@
    },
    "does": "Release claims you hold \u2014 the done-editing half of claim-doctrine-sections"
   },
-  "remove-research-site": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Take a source out of the research-site index (dead, moved, or not useful)"
-  },
-  "rename-doc-conversation": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Rename, pin, unpin, archive or unarchive a Doc conversation under a compare-and-swap on its version"
-  },
-  "render-context-activation": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Render ephemeral, exact frozen context revisions for a fresh governed session"
-  },
   "report-problem": {
    "protection": "append_only",
    "write": true,
@@ -4035,23 +1352,10 @@
    },
    "does": "Capture one operational problem from the current deterministic situation source"
   },
-  "request-tour-pdf-render": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Request an immutable PDF render from a sealed facts-only projection and pinned render inputs"
-  },
   "resolve-candidate": {
-   "protection": "NONE",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 2,
@@ -4072,7 +1376,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Resolve an open Deal Room cell conflict only while its recorded field value is still current, by applying value a or b through the normal field patch/event path"
+   "does": "Resolve an open Deal Room cell conflict in one call by applying value a or b through the normal field patch/event path"
   },
   "resolve-doctrine-rules": {
    "protection": "read_only",
@@ -4088,9 +1392,9 @@
    "does": "Resolve which doctrine sections are OPERATIVE given the live edge graph (P3): live OVERRIDES/SUPERSEDES suppress their targets, EXCEPTION_TO reports as a scoped"
   },
   "resolve-post-call-candidate": {
-   "protection": "NONE",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 3,
@@ -4099,19 +1403,6 @@
     "upserts": 0
    },
    "does": "Human-only resolution for one Call Mode proposal"
-  },
-  "restore-tour-cheat-sheet-revision": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Restore a cheat sheet by appending a new internal-only revision"
   },
   "retire-doctrine-section": {
    "protection": "optimistic_concurrency",
@@ -4127,9 +1418,9 @@
    "does": "Retire a section (status='retired'): it leaves snapshots and search but its history stays queryable forever"
   },
   "retire-retrieval-curation": {
-   "protection": "optimistic_concurrency",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": true,
    "sql": {
     "updates": 0,
@@ -4140,30 +1431,17 @@
    "does": "HUMAN-ONLY guarded retirement of approved retrieval curation"
   },
   "retire-rule": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
-    "updates": 0,
+    "updates": 1,
     "deletes": 0,
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Joe-authority retirement of a proposed or active rule through one database transaction"
-  },
-  "retire-workflow-cutover-plan": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Q116 last step, partner authority only: the ONLY door to stage=retired"
+   "does": "Withdraw a rule \u2014 proposed OR active \u2014 by setting status='retired'"
   },
   "revert-deal-field": {
    "protection": "append_only",
@@ -4204,162 +1482,6 @@
    },
    "does": "Mark one deal reviewed or skipped in an open agenda"
   },
-  "review-engineering-slice": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record one independent typed reviewer fact against a persisted Engineering Slice Receipt"
-  },
-  "review-heavy-build-plan": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record a fresh-context independent review of one exact heavy-build admission and immutable plan"
-  },
-  "review-memory": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Review one memory and its complete evidence/provenance before promotion"
-  },
-  "review-portfolio-revision": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Record one independent review of an exact DoctorCRE v5 portfolio accepted digest"
-  },
-  "revise-board-question": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Revise an existing question by its current revision"
-  },
-  "revoke-correspondence-adapter-consent": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY"
-  },
-  "revoke-salesforce-read-consent": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "HUMAN-ONLY"
-  },
-  "revoke-tour-rights-receipt": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Append an immutable revocation successor for one Tour rights receipt"
-  },
-  "revoke-tour-share-grant": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only digest-only share_grant_revocation operation"
-  },
-  "rotate-tour-share-grant": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Authority-only digest-only share_grant_rotation operation"
-  },
-  "run-migration-shadow": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "DoctorCRE v5 J102 CRE lifecycle"
-  },
-  "schedule-board": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read known scheduled jobs for the verified partner: scheduler evidence, last run receipt, next expected deadline or queued time, freshness, and supported action"
-  },
   "score-campaign": {
    "protection": "optimistic_concurrency",
    "write": true,
@@ -4373,19 +1495,6 @@
    },
    "does": "Close a campaign with a VERDICT against the criterion it was opened with \u2014 the act that turns a pile of metrics into an answer"
   },
-  "seal-tour-public-projection": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Atomically insert the complete selected public fact set and its immutable approval seal"
-  },
   "search-doctrine": {
    "protection": "read_only",
    "write": false,
@@ -4398,19 +1507,6 @@
     "upserts": 0
    },
    "does": "Deterministic doctrine search: weighted title/body FTS unioned with human-approved situation concepts"
-  },
-  "search-tour-properties": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Search facts-only property candidates in the initial five Florida counties"
   },
   "set-doctrine-refs": {
    "protection": "optimistic_concurrency",
@@ -4426,9 +1522,9 @@
    "does": "Replace a section's outbound links and typed edges in one atomic act"
   },
   "set-lead": {
-   "protection": "optimistic_concurrency",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": true,
    "sql": {
     "updates": 2,
@@ -4475,7 +1571,7 @@
     "inserts": 1,
     "upserts": 0
    },
-   "does": "Set ONE open ball on a subject (replaces that owner's previous open one; the other partner's stays untouched)"
+   "does": "Set YOUR one open ball on a subject (replaces your previous open one; Dell's stays untouched \u2014 one ball per person per subject)"
   },
   "set-next-step": {
    "protection": "NONE",
@@ -4490,32 +1586,6 @@
    },
    "does": "Append a new current next step"
   },
-  "set-notification-preference": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Set the acting actor's own notification preferences under a compare-and-swap on base_version, with a fresh idempotency key"
-  },
-  "set-slice-mark-hold": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Partner authority only: action='hold' appends a held in_progress or blocked mark (overriding or unmarking any mark, including complete) -- while held, no automa"
-  },
   "set-work-shape-disposition": {
    "protection": "optimistic_concurrency",
    "write": true,
@@ -4529,19 +1599,6 @@
    },
    "does": "Explicitly decide whether a Work Request needs shape analysis before implementation"
   },
-  "share-doc-conversation": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Hand another partner access to a Doc conversation, or take that access back"
-  },
   "source-attribution": {
    "protection": "read_only",
    "write": false,
@@ -4554,19 +1611,6 @@
     "upserts": 0
    },
    "does": "Prospecting ROI: per source lane, the funnel pool -> promoted -> leads -> clients -> deals -> commissions"
-  },
-  "source-merge-authority": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Resolve one merge-only authority packet from the settled decision, Joe-accepted plan-hash file scope, and current unsuperseded Engineering receipt/reviewer gene"
   },
   "stale-records": {
    "protection": "read_only",
@@ -4607,6 +1651,19 @@
    },
    "does": "THE SESSION BRIEFING VERB (the #219 design, P6 of the doctrine-store build): everything a session must load before working, served from the store \u2014 the taught r"
   },
+  "start-capability-project": {
+   "protection": "human_boundary",
+   "write": true,
+   "binds_both_partners": true,
+   "base_version_required": true,
+   "sql": {
+    "updates": 0,
+    "deletes": 0,
+    "inserts": 0,
+    "upserts": 0
+   },
+   "does": "Create the server-persisted build session for only the current ready project and perform the actual ready\u2192claimed transition"
+  },
   "start-deal-review": {
    "protection": "append_only",
    "write": true,
@@ -4619,19 +1676,6 @@
     "upserts": 0
    },
    "does": "Start a Team Book or national-account agenda"
-  },
-  "start-meeting": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Start, or rejoin, the ONE shared non-recording meeting for a native source identity (a Teams/Zoom meeting, a calendar event, or an app-minted ad-hoc id)"
   },
   "state-as-of": {
    "protection": "read_only",
@@ -4646,36 +1690,10 @@
    },
    "does": "\"What did the record SAY about this on date X?\" \u2014 replays the field-level change log for one record up to an instant"
   },
-  "suggest-doc-work": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Suggest one obligation from a recorded Doc turn"
-  },
-  "supersede-work-request": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Withdraw one sourced Work Request captured in error by superseding it into the request that replaces it, recording why"
-  },
   "teach": {
-   "protection": "append_only",
+   "protection": "human_boundary",
    "write": true,
-   "binds_both_partners": false,
+   "binds_both_partners": true,
    "base_version_required": false,
    "sql": {
     "updates": 0,
@@ -4683,7 +1701,7 @@
     "inserts": 2,
     "upserts": 0
    },
-   "does": "Write a rule from the human's own words (status: proposed \u2014 after exact enforcement is built and verified, approve-rule atomically activates the enforced policy"
+   "does": "Write a rule from the human's own words (status: proposed \u2014 after exact enforcement is built and verified, one explicit human approve-rule act atomically activa"
   },
   "today-triage": {
    "protection": "read_only",
@@ -4698,19 +1716,6 @@
    },
    "does": "What needs attention now: due next-actions (next_action"
   },
-  "triage-incident": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Move one detected operational incident into triaged with a concrete next action and a provisional business impact assessment"
-  },
   "triage-item": {
    "protection": "NONE",
    "write": true,
@@ -4724,45 +1729,6 @@
    },
    "does": "Close the loop on ONE inbox item a human has looked at: say what it became"
   },
-  "undo-invoice-close": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Restore the phase and invoice date before an invoice close"
-  },
-  "undo-lead-move": {
-   "protection": "human_boundary",
-   "write": true,
-   "binds_both_partners": true,
-   "base_version_required": true,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Undo the latest applied lead stage move"
-  },
-  "unfinished-work": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Every unfinished system design and build item, or search the complete Live library"
-  },
   "update-deal": {
    "protection": "optimistic_concurrency",
    "write": true,
@@ -4774,7 +1740,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Field-level change to a deal (deal_type, phase, segment, outcome, notes_path, salesforce_id, city, lane, invoiced_on)"
+   "does": "Field-level change to a deal (phase, segment, outcome, notes_path, salesforce_id)"
   },
   "update-decision": {
    "protection": "NONE",
@@ -4802,19 +1768,6 @@
    },
    "does": "Record what a HUMAN says happened to a prepared document \u2014 sets document status: draft -> handed_to_joe -> sent"
   },
-  "update-industry-event": {
-   "protection": "optimistic_concurrency",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": true,
-   "sql": {
-    "updates": 1,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Update a tenant-scoped healthcare CRE industry event with optimistic concurrency"
-  },
   "update-lead": {
    "protection": "optimistic_concurrency",
    "write": true,
@@ -4826,7 +1779,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Field-level change to a lead (score, score_reason, owner, stage, lane, segment, source_type, source_detail, suppressed, est_lease_event, next_action_date, notes"
+   "does": "Field-level change to a lead (stage, lane, segment, source_type, source_detail, suppressed, est_lease_event, next_action_date, notes_path, notes, event_source, "
   },
   "update-loop": {
    "protection": "optimistic_concurrency",
@@ -4867,19 +1820,6 @@
    },
    "does": "Field-level change to a vendor (stage, seeking, offers, referral_active, territory, out_of_market)"
   },
-  "whats-new": {
-   "protection": "append_only",
-   "write": true,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Everything changed since the authenticated partner last marked a what's-new answer seen, grouped by deal and newest first"
-  },
   "who-do-we-know": {
    "protection": "read_only",
    "write": false,
@@ -4904,20 +1844,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Read one same-tenant safe Work Request card, live, waiting on Joe, or withdrawn"
-  },
-  "workflow-cutover-board": {
-   "protection": "read_only",
-   "write": false,
-   "binds_both_partners": false,
-   "base_version_required": false,
-   "sql": {
-    "updates": 0,
-    "deletes": 0,
-    "inserts": 0,
-    "upserts": 0
-   },
-   "does": "Read the active cutover plan, its stage history, and caller counts (done/remaining/blocked/superseded/retired) for one workflow identity, plus an independently "
+   "does": "Read one same-tenant safe captured Work Request card"
   },
   "write-doctrine-section": {
    "protection": "optimistic_concurrency",
