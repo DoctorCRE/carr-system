@@ -1299,6 +1299,75 @@ class PrerequisiteRecovery(Base):
                 self.assertEqual(verbs, [("add-room-turn", original_turn)])
                 self.assertEqual(fx.state()[lane]["dispatches"][sha], 1)
 
+    def test_auth_probe_execution_failure_gets_its_own_diagnosis_after_restart(self):
+        for lane in ("worker", "app"):
+            for output in ("SyntaxError: Unexpected token", "Error [ERR_MODULE_NOT_FOUND]",
+                           "unrecognized process failure", ""):
+                with self.subTest(lane=lane, output=output), tempfile.TemporaryDirectory() as tmp:
+                    fx = Fixture(Path(tmp))
+                    sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                    cfg = fx.config()
+                    cfg[lane]["enabled"] = True
+                    verbs = []
+                    def pipeline(runner):
+                        pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                        if lane == "app":
+                            pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                        return pipe
+                    (fx.cred / "tokens.env").write_text("")
+                    self.assertEqual(pipeline(FakeRunner()).tick([lane]), 1)
+                    (fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+                    runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": output})
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(runner.names(), ["wrangler-auth"])
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-execution")
+                    failure = fx.records()[-1]
+                    self.assertEqual((failure["step"], failure["rc"]), ("wrangler-execution", 7))
+                    self.assertEqual(Path(failure["log"]).read_text(), output)
+                    self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn", "add-room-turn"])
+                    self.assertIn("wrangler-execution", json.dumps(verbs[-1][1]))
+                    for _ in range(2):
+                        retry = FakeRunner()
+                        self.assertEqual(pipeline(retry).tick([lane]), 0)
+                        self.assertEqual(retry.calls, [])
+                        self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                    self.assertEqual(len(verbs), 3)
+
+    def test_first_transport_failure_save_keeps_diagnosis_across_restarts(self):
+        class Interrupted(BaseException):
+            pass
+        for lane in ("worker", "app"):
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                cfg = fx.config()
+                cfg[lane]["enabled"] = True
+                verbs = []
+                def pipeline():
+                    runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "fetch failed"})
+                    pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                    if lane == "app":
+                        pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                    return pipe, runner
+                pipe, _ = pipeline()
+                save = pipe.store.save
+                def interrupt_after_failed_save(state):
+                    save(state)
+                    if state.get(lane, {}).get("failed_step") == "wrangler-auth":
+                        raise Interrupted()
+                pipe.store.save = interrupt_after_failed_save
+                with self.assertRaises(Interrupted):
+                    pipe.tick([lane])
+                self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                self.assertEqual(verbs, [])
+                for _ in range(2):
+                    retry, runner = pipeline()
+                    self.assertEqual(retry.tick([lane]), 0)
+                    self.assertEqual(runner.names(), ["wrangler-auth"])
+                self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+                self.assertEqual(fx.state()[lane]["dispatches"][sha], 1)
+                self.assertEqual(fx.state()["pending_diagnoses"], {})
+
     def test_code_failures_still_require_a_fix_forward_merge(self):
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         pipe = self.fx.pipeline(FakeRunner())
