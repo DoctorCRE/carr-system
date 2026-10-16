@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""Offline contracts for the local production baseline proofs."""
+import importlib.util
+import hashlib
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('production_proof', ROOT / 'ops/migration-production-proof.py')
+assert spec is not None and spec.loader is not None
+proof = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = proof
+spec.loader.exec_module(proof)
+from migration_number_contract import FROZEN_COLLISIONS
+POSTGRES = '--postgres' in sys.argv
+if POSTGRES:
+    sys.argv.remove('--postgres')
+
+
+def dump(body, owner='neondb_owner'):
+    return f'''-- PostgreSQL database dump
+\\restrict random_nonce
+-- Dumped from database version 18.1
+-- Dumped by pg_dump version 18.1
+--
+-- Name: example; Type: TABLE; Schema: public; Owner: {owner}
+--
+{body}
+\\unrestrict random_nonce
+-- PostgreSQL database dump complete
+'''
+
+
+class ProofTests(unittest.TestCase):
+    def test_pending_suffix_passes(self):
+        result = proof.ledger_proof({'0001_a.sql': 'a', '0003_c.sql': 'c'}, {'0001_a.sql': 'a'})
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['pending'], ['0003_c.sql'])
+
+    def test_ledger_rejects_missing_changed_and_backfilled_files(self):
+        result = proof.ledger_proof(
+            {'0001_a.sql': 'wrong', '0002_backfill.sql': 'b', '0003_c.sql': 'c'},
+            {'0001_a.sql': 'a', '0003_c.sql': 'c', '0004_missing.sql': 'd'})
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['missing'], ['0004_missing.sql'])
+        self.assertEqual(result['checksum_mismatch'], ['0001_a.sql'])
+        self.assertEqual(result['out_of_order'], ['0002_backfill.sql'])
+
+    def test_same_number_pending_is_not_a_forward_suffix(self):
+        self.assertFalse(proof.ledger_proof(
+            {'0001_a.sql': 'a', '0001_b.sql': 'b'}, {'0001_a.sql': 'a'})['ok'])
+
+    def test_empty_production_fails_closed(self):
+        self.assertFalse(proof.ledger_proof({'0001_a.sql': 'a'}, {})['ok'])
+
+    def test_only_dump_envelope_is_normalized(self):
+        a = dump('CREATE TABLE public.example (id integer);')
+        b = a.replace('random_nonce', 'another_nonce').replace('18.1', '18.2')
+        self.assertEqual(proof.schema_difference(a, b), [])
+        for change in [
+            a.replace('integer', 'bigint'),
+            a.replace('neondb_owner', 'other_owner'),
+            a.replace('CREATE TABLE', 'GRANT SELECT ON TABLE'),
+        ]:
+            self.assertTrue(proof.schema_difference(a, change))
+
+    def test_function_bodies_and_constraint_whitespace_are_preserved(self):
+        self.assertTrue(proof.schema_difference(dump("SELECT 'a  b';"), dump("SELECT 'a b';")))
+        function = "CREATE FUNCTION x() RETURNS text LANGUAGE sql AS $$\n-- Dumped by pg_dump version literal\nSELECT 'yes';\n$$;"
+        self.assertTrue(proof.schema_difference(dump(function), dump(function.replace('literal', 'changed'))))
+
+    def test_object_order_does_not_matter(self):
+        a = dump('CREATE TABLE public.example (id integer);')
+        b = a.replace('Name: example', 'Name: second').replace('public.example', 'public.second')
+        self.assertEqual(proof.schema_difference(a + b, b + a), [])
+
+    def test_hosted_refuses_before_credential_resolution(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'ops/migration-production-proof.py')],
+                                env=dict(os.environ, GITHUB_ACTIONS='true'), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('LOCAL-ONLY', result.stdout)
+
+    def test_dump_credentials_stay_in_environment_with_read_only_enforced(self):
+        with patch.object(proof, 'checked', return_value='dump') as run:
+            proof.schema_dump('postgres://reader:placeholder@localhost:5433/example?options=-c%20default_transaction_read_only%3Doff',  # ci-secret-scan: allow synthetic placeholder
+                              Path('/bin'), {}, 'snapshot-id')
+        command, env, label = run.call_args.args
+        self.assertNotIn('placeholder', str(command))
+        self.assertEqual(env['PGHOST'], 'localhost')
+        self.assertEqual(env['PGPORT'], '5433')
+        self.assertEqual(env['PGDATABASE'], 'example')
+        self.assertEqual(env['PGPASSWORD'], 'placeholder')
+        self.assertIn('default_transaction_read_only=on', env['PGOPTIONS'])
+        self.assertIn('--schema-only', command)
+        self.assertIn('snapshot-id', command)
+
+    def test_ci_reports_live_proofs_not_run_on_hosted_runners(self):
+        source = (ROOT / 'ops/ci.sh').read_text()
+        start = source.index('  excluded_reason()')
+        end = source.index('  local eligible=', start)
+        script = 'scope="$1"; PY="$2"; CARR_CI_PORTABLE_ONLY=0\n' + source[start:end] + '\nexcluded_reason migration-production-proof.py\n'
+        result = subprocess.run(['bash', '-c', script, 'scope-fixture',
+                                 str(ROOT / 'ops/config/ci-check-scope.json'), sys.executable],
+                                env=dict(os.environ, GITHUB_ACTIONS='true'), capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('LOCAL-ONLY:', result.stdout)
+
+    def test_failed_subprocess_diagnostics_redact_credentials(self):
+        response = subprocess.CompletedProcess([], 1, b'', b'password=placeholder postgres://reader:placeholder@localhost/example')  # ci-secret-scan: allow synthetic placeholder
+        with patch.object(proof.subprocess, 'run', return_value=response):
+            with self.assertRaises(RuntimeError) as caught:
+                proof.checked(['pg_dump'], {'PGPASSWORD': 'placeholder'}, 'fixture dump')
+        self.assertNotIn('placeholder', str(caught.exception))
+
+    @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
+    def test_snapshot_reconstruction_excludes_pending_and_detects_drift(self):
+        shadow = proof.load('fixture_shadow', ROOT / 'ops/migration-shadow.py')
+        bins = shadow.find_pg18(None)
+        self.assertIsNotNone(bins, 'fixture requires PostgreSQL 18')
+        with tempfile.TemporaryDirectory(prefix='baseline-fixture-') as directory:
+            root = Path(directory)
+            (root / 'tools').mkdir()
+            (root / 'migrations').mkdir()
+            for name in ['migrate.py', 'migration_number_contract.py']:
+                shutil.copyfile(ROOT / 'tools' / name, root / 'tools' / name)
+            scripts = {name: 'select 1;' for names in FROZEN_COLLISIONS.values() for name in names}
+            scripts.update({'0900_base.sql': 'create table public.example (id integer);',
+                            '0901_applied.sql': 'alter table public.example add column label text;',
+                            '0902_pending.sql': 'select 1/0;'})
+            hashes = {}
+            for name, sql in scripts.items():
+                (root / 'migrations' / name).write_text(sql)
+                hashes[name] = hashlib.sha256(sql.encode()).hexdigest()
+            base = '''create table public.example (id integer);
+create table public.schema_migrations (filename text primary key, sha256 text not null,
+applied_at timestamptz not null default now());
+'''
+            def ledger_insert(names):
+                return ''.join(f"insert into schema_migrations(filename,sha256) values ('{name}','{hashes[name]}');\n" for name in names)
+            snapshot = root / 'snapshot.sql'
+            baseline = sorted(name for name in scripts if name < '0901')
+            snapshot.write_text(base + ledger_insert(baseline))
+            applied = {name: hashes[name] for name in baseline + ['0901_applied.sql']}
+            built = proof.reconstruct(snapshot, applied, bins, root)
+            self.assertTrue(built['ledger_matches'])
+            expected = root / 'expected.sql'
+            expected.write_text(base + scripts['0901_applied.sql'] + '\n' + ledger_insert(applied))
+            reference = proof.reconstruct(expected, applied, bins, root)
+            self.assertEqual(proof.schema_difference(built['dump'], reference['dump']), [])
+            expected.write_text(expected.read_text() + 'alter table public.example alter column id type bigint;')
+            drift = proof.reconstruct(expected, applied, bins, root)
+            self.assertTrue(proof.schema_difference(built['dump'], drift['dump']))
+            ahead = proof.reconstruct(expected, {name: hashes[name] for name in baseline}, bins, root)
+            self.assertFalse(ahead['ledger_matches'])
+            self.assertEqual(ahead['snapshot_only'], ['0901_applied.sql'])
+
+
+if __name__ == '__main__':
+    unittest.main()
