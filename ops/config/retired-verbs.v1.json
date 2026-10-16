@@ -42,6 +42,13 @@
         "transition-evaluation-case",
         "transition-execution-environment-provider"
       ]
+    },
+    {
+      "reference": "https://github.com/jbookout/carr-system/pull/1810",
+      "verbs": [
+        "claude-record-event",
+        "codex-record-event"
+      ]
     }
   ]
 }

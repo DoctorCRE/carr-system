@@ -1,3 +1,4 @@
+import { canonicalJson } from "./artifact-trust.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { bindReferralDeal } from "./relationship-network.js";
@@ -333,7 +334,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["record-lead-contact", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || (verb === "update-lead" && args.stage_review) || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "review-heavy-build-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "codex-record-event" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["record-lead-contact", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || (verb === "update-lead" && args.stage_review) || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "review-heavy-build-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
   if (prior.rows.length) {
@@ -1981,10 +1982,29 @@ const RULE_ENFORCEMENT_FALLBACK_REFUSALS = Object.freeze(new Set([
   "rule_enforcement_fallback_receipts_append_only",
 ]));
 
-function validateRuleScope(scope) {
+const RULE_SELECTION_FIELDS = [
+  "operation", "operations", "tool", "tools", "verb", "verbs",
+  "command", "command_pattern", "command_patterns", "bash_patterns",
+  "path", "path_pattern", "path_patterns", "path_globs",
+  "task", "tasks", "topic", "topics", "moment", "binding_moment", "applies_to",
+];
+const GENERIC_RULE_SELECTION = /^(?:\*|all|any|always|global|shared|personal|development|all (?:coding )?sessions|every session)$/i;
+
+export function hasUsableRuleScope(scope) {
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return false;
+  const specific = value => typeof value === "string" && !!value.trim() &&
+    !GENERIC_RULE_SELECTION.test(value.trim());
+  return RULE_SELECTION_FIELDS.some(key => specific(scope[key]) ||
+    (Array.isArray(scope[key]) && scope[key].some(specific)));
+}
+
+export function validateRuleScope(scope, { requireUsable = false } = {}) {
   if (scope !== undefined && (scope === null || typeof scope !== "object" || Array.isArray(scope)))
     throw new ToolError({ error: "invalid_object", field: "scope",
       hint: "scope must be a JSON object, e.g. {} or {\"section\":\"...\"}; omit scope to use the existing default" });
+  if (requireUsable && !hasUsableRuleScope(scope))
+    throw new ToolError({ error: "rule_scope_required", field: "scope",
+      hint: "scope must name an operation, tool, verb, command/path pattern, specific task/topic, or binding moment" });
 }
 
 async function resolveRuleId(c, value, field = "rule_id") {
@@ -6595,7 +6615,7 @@ export const TOOLS = {
   // re-litigated; rules simply never got the same affordance.
   "amend-rule": {
     write: true, authorityOnly: true,
-    description: "Correct the WORDS of a rule in place, keeping its id, created_at, taught_by and quote. THE LINE: amend = same rule, better words; teach + retire = a different rule. A PROPOSED rule's statement, human_quote (fill-only) and scope may all be corrected directly, no authority principal required beyond the write itself. An ACTIVE rule's quote, scope, audience and enforcement preimage stay frozen — changing any of them would make the old approval receipt appear to bless new substance — but its STATEMENT ALONE may now be amended (WR-000019 slice S10) through a Joe-authority-guarded, receipted path (ops.amend_rule_statement): an append-only ops.rule_amendment_receipt hashes the prior words, and the enforced rule keeps reciting under its old approval. To change an active rule's scope, quote or audience, still teach and approve a corrected replacement, then retire this one. Requires base_version from a fresh read; a conflict is never retried blind.",
+    description: "Amend a rule in place, preserving its id, created_at, taught_by, quote and audience. Proposed rules may correct statement, fill an absent human_quote, or replace scope. Active rules may correct statement and add new scope keys while preserving every stored scope key and value, including provenance. Active changes require Joe authority and an immutable amendment receipt. Supply the full merged scope, a reason, idempotency_key and base_version from a fresh read. Non-additive active scope rewrites and active quote changes refuse. Retired rules are immutable.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string" },
@@ -6642,41 +6662,38 @@ export const TOOLS = {
       const changed = [];
       if (nextStatement !== row.statement) changed.push("statement");
       if (nextQuote !== row.human_quote) changed.push("human_quote");
-      if (JSON.stringify(nextScope) !== JSON.stringify(row.scope)) changed.push("scope");
+      if (canonicalJson(nextScope) !== canonicalJson(row.scope)) changed.push("scope");
       if (!changed.length) throw new ToolError({ error: "no_change",
         hint: "nothing was written; the rule already reads exactly this way" });
 
       if (row.status === "active") {
-        // The old approval's preimage — quote, scope, audience, enforcement —
-        // stays frozen exactly as before. Only the ONE axis the versioned
-        // amendment path exists to correct (statement) may move; a request
-        // that also touches scope or quote still refuses, same as always.
-        if (changed.includes("scope"))
+        if (changed.includes("scope") && !Object.entries(row.scope).every(([key, value]) =>
+          Object.hasOwn(nextScope, key) && canonicalJson(nextScope[key]) === canonicalJson(value)))
           throw new ToolError({ error: "active_rule_scope_frozen", rule_id: args.rule_id,
-            hint: "scope is part of the approval preimage and stays frozen on an active rule; teach the corrected rule, approve it, and retire this one to change scope" });
+            hint: "an active scope backfill must preserve every existing key and value; pass the stored scope merged with new selection keys" });
         if (changed.includes("human_quote"))
           throw new ToolError({ error: "active_rule_quote_frozen", rule_id: args.rule_id,
             hint: "the partner's words are testimony, not prose, and stay fixed once a rule is active" });
 
-        // changed is now exactly ["statement"] — ops.amend_rule_statement,
-        // guarded like ops.approve_rule (Joe authority, refuses a retired
-        // rule), writes the receipt and updates rule.statement atomically.
-        const amended = await c.query(
-          "select ops.amend_rule_statement($1,$2,$3,$4) as result",
-          [args.rule_id, nextStatement, args.idempotency_key, reason]);
+        const amended = changed.includes("scope")
+          ? await c.query("select ops.amend_rule_scope($1,$2::jsonb,$3,$4,$5,$6) as result",
+              [args.rule_id, JSON.stringify(nextScope), nextStatement, args.base_version,
+                args.idempotency_key, reason])
+          : await c.query("select ops.amend_rule_statement($1,$2,$3,$4) as result",
+              [args.rule_id, nextStatement, args.idempotency_key, reason]);
         const result = amended.rows[0]?.result;
         if (!result || !result.ok)
           throw new ToolError({ error: "rule_amendment_failed", rule_id: args.rule_id });
 
         await writeEvent(c, actor, "amend-rule", "rule", args.rule_id, {
-          field: "statement",
-          old: { statement: row.statement },
-          new: { statement: nextStatement },
+          field: changed.join(","),
+          old: { statement: row.statement, scope: row.scope },
+          new: { statement: nextStatement, scope: nextScope },
           agent_rationale: reason,
           idempotency_key: args.idempotency_key });
 
         return { ok: true, rule_id: args.rule_id, status: "active",
-                 changed: ["statement"], version: result.rule_version_after, reason,
+                 changed, version: result.rule_version_after, reason,
                  replayed: !!result.replayed,
                  amendment_receipt_id: result.amendment_receipt_id,
                  note: "amended under Joe authority and receipted; the rule stays active and keeps reciting under its old approval" };

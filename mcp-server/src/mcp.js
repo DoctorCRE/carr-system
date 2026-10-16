@@ -287,10 +287,10 @@ export const PROFILES = {
   // Native lifecycle credentials are purpose-bound server-side. They expose
   // only their own record surface even if a caller asks for ?profile=full.
   "codex-continuity": new Set([
-    "codex-checkpoint", "codex-read-recovery", "codex-record-event",
+    "codex-checkpoint", "codex-read-recovery",
   ]),
   "claude-continuity": new Set([
-    "claude-checkpoint", "claude-read-recovery", "claude-record-event",
+    "claude-checkpoint", "claude-read-recovery",
   ]),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
