@@ -130,19 +130,34 @@ def has_overlay(hooks: object) -> bool:
 
 
 def _strip_retired(hooks: dict, contract: Contract) -> None:
-    """Drop exact adapter entries left under events the contract no longer wires.
+    """Remove only the canonical adapter hooks left under events the contract no longer wires.
 
-    Only an entry whose every command is the canonical adapter command goes; a
-    tampered or wrapping entry still reaches validate_hooks and is refused.
+    Matching is by hook identity (type command plus the exact canonical command
+    string); every other member of the same group, prompt hooks included, stays.
+    A tampered or wrapping continuity hook is left in place for validate_hooks to
+    refuse.
     """
-    canonical = {command for entries in contract.hooks.values()
-                 for entry in entries for command in _commands(entry)}
+    canonical = [hook for entries in contract.hooks.values() for entry in entries
+                 for hook in entry.get("hooks", []) if isinstance(hook, dict)]
+    commands = {hook.get("command") for hook in canonical}
+
+    def owned(hook: object) -> bool:
+        return (isinstance(hook, dict) and hook.get("type") == "command"
+                and hook.get("command") in commands and hook in canonical)
+
     for event in [event for event in hooks if event not in contract.hooks]:
         entries = hooks[event]
         if not isinstance(entries, list):
             continue
-        kept = [entry for entry in entries if not (
-            mentions_continuity(entry) and set(_commands(entry)) <= canonical)]
+        kept = []
+        for entry in entries:
+            members = entry.get("hooks") if isinstance(entry, dict) else None
+            if not isinstance(members, list) or not any(owned(hook) for hook in members):
+                kept.append(entry)
+                continue
+            remaining = [hook for hook in members if not owned(hook)]
+            if remaining:
+                kept.append({**entry, "hooks": remaining})
         if kept:
             hooks[event] = kept
         else:

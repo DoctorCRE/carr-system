@@ -225,6 +225,40 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(self.invoke("verify").returncode, 0)
         self.assert_unrelated_preserved(upgraded)
 
+    def test_retired_cleanup_keeps_foreign_hooks_on_the_same_events(self):
+        self.assertEqual(self.invoke("install", "--apply").returncode, 0)
+        live = json.loads(self.settings.read_text())
+        command = live["hooks"]["PreCompact"][-1]["hooks"][0]["command"]
+        owned = {"type": "command", "command": command, "timeout": 10}
+        prompt = {"type": "prompt", "prompt": "Preserve this unrelated prompt hook"}
+        foreign_command = {"type": "command", "command": "/usr/local/bin/keep-me.sh", "timeout": 3}
+        live["hooks"]["Stop"] = [{"hooks": [owned, prompt]}]
+        live["hooks"]["UserPromptSubmit"] = [{"hooks": [foreign_command]}, {"hooks": [owned]}]
+        live["hooks"]["PostToolUse"] = [{"matcher": "Bash", "hooks": [foreign_command, owned]}]
+        self.settings.write_text(json.dumps(live), encoding="utf-8")
+        result = self.invoke("install", "--apply")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = json.loads(self.settings.read_text())["hooks"]
+        self.assertEqual(after["Stop"], [{"hooks": [prompt]}])
+        self.assertEqual(after["UserPromptSubmit"], [{"hooks": [foreign_command]}])
+        self.assertEqual(after["PostToolUse"], [{"matcher": "Bash", "hooks": [foreign_command]}])
+        self.assertEqual(self.invoke("verify").returncode, 0)
+        live = json.loads(self.settings.read_text())
+        live["hooks"]["Stop"] = [{"hooks": [owned, prompt]}]
+        self.settings.write_text(json.dumps(live), encoding="utf-8")
+        self.assertEqual(self.invoke("remove", "--apply").returncode, 0)
+        self.assertEqual(json.loads(self.settings.read_text())["hooks"]["Stop"], [{"hooks": [prompt]}])
+
+    def test_tampered_retired_entry_is_refused_without_writing(self):
+        self.assertEqual(self.invoke("install", "--apply").returncode, 0)
+        live = json.loads(self.settings.read_text())
+        command = live["hooks"]["PreCompact"][-1]["hooks"][0]["command"]
+        live["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": command, "timeout": 999}]}]
+        self.settings.write_text(json.dumps(live), encoding="utf-8")
+        before = self.settings.read_bytes()
+        self.assertNotEqual(self.invoke("install", "--apply").returncode, 0)
+        self.assertEqual(self.settings.read_bytes(), before)
+
     def test_tampered_matcher_command_or_timeout_fails_closed(self):
         self.assertEqual(self.invoke("install", "--apply").returncode, 0)
         canonical = json.loads(self.settings.read_text())

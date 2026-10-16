@@ -7,7 +7,8 @@
   "_repin_note_2026_10_12_unfiled_bug": "The unfiled_bug Stop-gate control was registered and rule 19ebbeb3 was bound to it. None of the eight activation-target contracts changed; migration 0871 moves their guarded map-digest preimage forward.",
   "_repin_note_2026_10_13_github_burst_guard": "The github-burst-guard control_catalog entry was registered (migration 0877 installs it). No rule_controls, rule_load_layers or active_rule_ids entry changed, so none of the eight activation-target contracts changed; migration 0878 moves their guarded map-digest preimage forward from the post-0875 digest.",
   "_repin_note_2026_10_13_registry_inventory": "Fourteen approved rules entered the reviewed map as judgment pack rules and four left it (9b081605 and 5697071b retired; ede4b241 and 8400cd3d still proposed). None of the eight activation-target contracts changed; migration 0880 moves their guarded map-digest preimage forward.",
-  "base_map_sha256": "6a1c929bb30845a975953c80201c5250b4529990e4160356280cbacd0af24af6",
+  "_repin_note_2026_10_16_context_rail": "PR #1810 deletes hooks/context-handoff-gate.py and retires its context_rail control (migration 0885); no rule was bound to it. None of the eight activation-target contracts changed; migration 0886 moves their guarded map-digest preimage forward.",
+  "base_map_sha256": "d6426a186b40822880d9a816a8ebf977f2b2c50b9f9c7cd1b3898763856fb7b7",
   "schema": "rule-delivery-activation-overlay/v1",
   "targets": [
     {

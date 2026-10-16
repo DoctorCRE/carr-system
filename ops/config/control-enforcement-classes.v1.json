@@ -4,7 +4,6 @@
     "candidate_match": "judgment_ambient",
     "canonical_edit": "deny_gate",
     "client_asset_packet": "deny_gate",
-    "context_rail": "stop_gate",
     "control-plane-workflow-manifest": "deny_gate",
     "costar_lane": "deny_gate",
     "deal_guard": "transactional_schema",

@@ -268,8 +268,7 @@
       "friction": "No prompt-time ceremony for ordinary work.",
       "implementation": [
         "session-brief.py",
-        "delegation-gate.py",
-        "context-handoff-gate.py"
+        "delegation-gate.py"
       ],
       "meaning": "A task-start or phase-boundary rail supplies state, routing, or reminders; it is not a universal operation denial.",
       "test": [
@@ -397,15 +396,6 @@
       ],
       "test": [
         "ops/client-asset-controls-selftest.py"
-      ]
-    },
-    "context_rail": {
-      "failure_mode": "Stop block",
-      "implementation": [
-        "hooks/context-handoff-gate.py"
-      ],
-      "test": [
-        "ops/context-handoff-gate-selftest.py"
       ]
     },
     "control-plane-workflow-manifest": {
