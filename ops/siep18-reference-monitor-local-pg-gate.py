@@ -66,8 +66,7 @@ PREDECESSOR_LIVE_AT_SEAL_NAME = (
 
 # WR-000048 mutation test fixtures. NARROWED_ROLE_AUTHORITY_SCOPE is the
 # portable census scope this repair cascade installs (verbatim from the
-# templates: ops/scac-policy-epoch-sql.mjs and renderSIEP13RegistrySql in
-# ops/scac-mutation-inventory.mjs, which this session edited). It must appear
+# installed catalog functions). It must appear
 # exactly once inside the live ops.scac_mutation_catalog_v18_current()
 # definition in migrations/0492_sourced_shape_forward_correction_and_scac_successor.sql --
 # if it does not, the migration no longer carries the fix this test exists to
