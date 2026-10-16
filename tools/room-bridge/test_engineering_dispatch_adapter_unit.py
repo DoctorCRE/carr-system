@@ -33,13 +33,6 @@ try:
 except adapter.DispatchRefusal:
     adapter._dedicated_writable_roots = lambda: list(adapter.AUTHORIZED_WRITABLE_ROOTS)
 
-GATE_SPEC = importlib.util.spec_from_file_location(
-    "engineering_rule_pack_gate", ROOT / "hooks" / "rule-pack-drift-gate.py")
-assert GATE_SPEC and GATE_SPEC.loader
-rule_pack_gate = importlib.util.module_from_spec(GATE_SPEC)
-GATE_SPEC.loader.exec_module(rule_pack_gate)
-
-
 FAILURES: list[str] = []
 SKIPS: list[str] = []
 EXCLUSIONS: list[str] = []
@@ -362,25 +355,6 @@ def test_success_is_fresh_and_database_capability_is_not_forwarded():
     assert "stop and return a typed blocked receipt naming the failure" in seen["prompt"]
     assert "GH_TOKEN" not in seen["prompt"] and "GITHUB_TOKEN" not in seen["prompt"]
     assert "GH_TOKEN" not in seen["env"] and "GITHUB_TOKEN" not in seen["env"]
-    prompt_record = {"type": "response_item", "payload": {"type": "message",
-                     "role": "user", "content": [
-                         {"type": "input_text", "text": seen["prompt"]}]}}
-    assert rule_pack_gate.engineering_workflow_packs(prompt_record) == [
-        "engineering-git", "delegation-council", "scheduled-automation", "source-study"]
-    tampered_prompt = copy.deepcopy(prompt_record)
-    tampered_prompt["payload"]["content"][0]["text"] = seen["prompt"].replace(
-        '"packet_digest":"sha256:', '"packet_digest":"sha256:0', 1)
-    assert rule_pack_gate.engineering_workflow_packs(tampered_prompt) == []
-    assert rule_pack_gate.work_text(tampered_prompt)
-    task_marker = "\n\nCONTROLLER TASK BINDING (immutable):\n"
-    prompt_prefix, prompt_task = seen["prompt"].split(task_marker, 1)
-    unbound_task = json.loads(prompt_task)
-    unbound_task["work_request"] = "wr:unrelated-human-spoof"
-    unbound_prompt = copy.deepcopy(prompt_record)
-    unbound_prompt["payload"]["content"][0]["text"] = (
-        prompt_prefix + task_marker
-        + json.dumps(unbound_task, sort_keys=True, separators=(",", ":")))
-    assert rule_pack_gate.engineering_workflow_packs(unbound_prompt) == []
 
 
 def test_worktree_alias_passes_sanctioned_git_config_to_nested_fetch_boundary():

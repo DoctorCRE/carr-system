@@ -1567,7 +1567,6 @@ def mutant_tree(root, replacements):
     shutil.copyfile(os.path.join(REPO, "lib", "hook_runtime.py"), os.path.join(tree, "lib", "hook_runtime.py"))
     shutil.copy2(os.path.join(REPO, "hooks", "rule-boot-gate.py"), os.path.join(tree, "hooks"))
     shutil.copy2(os.path.join(REPO, "hooks", "grok_invocation.py"), os.path.join(tree, "hooks"))
-    shutil.copy2(os.path.join(REPO, "lib", "rule_recall.py"), os.path.join(tree, "lib"))
     with open(os.path.join(REPO, "lib", "rule_boot_gate.py"), encoding="utf-8") as fh:
         source = fh.read()
     for before, after in replacements:
