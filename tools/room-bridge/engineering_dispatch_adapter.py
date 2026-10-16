@@ -244,8 +244,9 @@ def main() -> int:
     result: dict
     try:
         if sys.argv[1:] == ["--preflight"]:
-            _dedicated_codex_desk(desks.Registry(DEDICATED_REGISTRY_PATH))
-            result = {"ok": True}
+            entry = _dedicated_codex_desk(desks.Registry(DEDICATED_REGISTRY_PATH))
+            result = {"ok": True, "desk": {key: entry[key] for key in
+                ("name", "kind", "family", "effort", "cwd", "sandbox", "add_dirs")}}
         elif sys.argv[1:] == ["--install-desk"]:
             result = {"ok": True, "desk": install_dedicated_codex_desk(desks.Registry(DEDICATED_REGISTRY_PATH))}
         elif not sys.argv[1:]:
