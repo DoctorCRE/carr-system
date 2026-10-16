@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 SOURCES = ('ops/config/hooks.json', 'ops/config/codex-hooks.json',
@@ -50,11 +51,13 @@ class HookCommands(unittest.TestCase):
         installer = runpy.run_path(str(REPO / 'ops/config-as-code.py'))
         command_target = runpy.run_path(str(REPO / 'ops/hook-deletion-check.py'))['command_target']
         root = Path(installer['REPO']).resolve()
-        for source, event, template in commands():
-            with self.subTest(source=source, event=event, command=template):
-                block = {event: [{'hooks': [{'command': template}]}]}
-                self.assertEqual(installer['hook_block_script_paths'](block),
-                                 [str(command_target(template, root).resolve())])
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HOME': home}):
+            for source, event, template in commands():
+                with self.subTest(source=source, event=event, command=template):
+                    target_root = Path(home) / 'carr-system' if source == '.claude/settings.json' else root
+                    block = {event: [{'hooks': [{'command': template}]}]}
+                    self.assertEqual(installer['hook_block_script_paths'](block),
+                                     [str(command_target(template, target_root).resolve())])
 
     def test_all_configured_hooks_have_an_explicit_missing_script_policy(self):
         policy = json.loads((REPO / 'ops/config/delegation-gate-hook.json').read_text())['missing_script_policy']
