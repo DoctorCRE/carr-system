@@ -964,20 +964,23 @@ def canonical_codex_continuity_hooks():
     hooks = document.get("hooks") if isinstance(document, dict) else None
     if not isinstance(hooks, dict):
         raise RuntimeError(f"{CODEX_HOOKS_REPO} must contain a hooks object")
-    desired = {"hooks": {event: hooks.get(event, [])
-                          for event in CODEX_CONTINUITY_EVENTS}}
+    desired = {"hooks": {}}
     contracts = []
     for event in CODEX_CONTINUITY_EVENTS:
-        groups = desired["hooks"][event]
-        if (not isinstance(groups, list) or len(groups) != 1 or
-                not isinstance(groups[0], dict)):
-            raise RuntimeError(f"{event} must contain exactly one continuity group")
-        group = groups[0]
-        handlers = group.get("hooks")
-        if (not isinstance(handlers, list) or len(handlers) != 1 or
-                not isinstance(handlers[0], dict)):
+        groups = hooks.get(event, [])
+        if not isinstance(groups, list):
+            raise RuntimeError(f"{event} must contain a continuity group array")
+        matches = [
+            (group, handler)
+            for group in groups if isinstance(group, dict)
+            and isinstance(group.get("hooks"), list)
+            for handler in group["hooks"] if isinstance(handler, dict)
+            and is_codex_continuity_hook_command(handler.get("command"))
+        ]
+        if len(matches) != 1:
             raise RuntimeError(f"{event} must contain exactly one continuity handler")
-        handler = handlers[0]
+        group, handler = matches[0]
+        desired["hooks"][event] = [{**group, "hooks": [handler]}]
         if (handler.get("type") != "command" or
                 not isinstance(handler.get("command"), str) or
                 not isinstance(handler.get("timeout"), int) or
