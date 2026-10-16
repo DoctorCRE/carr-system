@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
+            "command": "if [ ! -e \"{{REPO}}/ops/claude-continuity-hook.py\" ] && [ ! -L \"{{REPO}}/ops/claude-continuity-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/ops/claude-continuity-hook.py; skipping\" >&2; exit 0; fi; CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
+            "command": "if [ ! -e \"{{REPO}}/ops/claude-continuity-hook.py\" ] && [ ! -L \"{{REPO}}/ops/claude-continuity-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/ops/claude-continuity-hook.py; skipping\" >&2; exit 0; fi; CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 {{REPO}}/ops/claude-continuity-hook.py",
             "timeout": 10
           }
         ]

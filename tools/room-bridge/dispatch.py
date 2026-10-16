@@ -136,6 +136,55 @@ def _codex_events(stdout: str) -> list[dict]:
     return out
 
 
+def _codex_timeout_activity(output, thread, env):
+    """Describe a bounded rollout tail without copying private session content."""
+    if isinstance(output, bytes):
+        output = output.decode('utf-8', errors='replace')
+    events = _codex_events(output or '')
+    started = next((e for e in events if e.get('type') == 'thread.started'), {})
+    thread_id = started.get('thread_id') or thread
+    activity = {'source': 'executor_output', 'last_event_type':
+                events[-1].get('type') if events else 'unavailable', 'hook_failures': 0}
+    if not isinstance(thread_id, str) or not re.fullmatch(r'[0-9a-fA-F-]{36}', thread_id):
+        return thread_id, activity
+    home = Path((env or os.environ).get('CODEX_HOME') or Path.home() / '.codex')
+    try:
+        path = next((home / 'sessions').glob(f'*/*/*/rollout-*-{thread_id}.jsonl'), None)
+        if path is None:
+            return thread_id, activity
+        with path.open('rb') as rollout:
+            rollout.seek(0, os.SEEK_END)
+            offset = max(0, rollout.tell() - 2 * 1024 * 1024)
+            rollout.seek(offset)
+            if offset:
+                rollout.readline()
+            tail = rollout.read(2 * 1024 * 1024).decode('utf-8', errors='replace')
+    except OSError:
+        return thread_id, activity
+    rows = [row for row in _codex_events(tail) if isinstance(row.get('payload'), dict)]
+    if not rows:
+        return thread_id, activity
+    last = rows[-1]
+    payload = last.get('payload') or {}
+    activity = {'source': 'rollout', 'last_event_type': '.'.join(filter(None, (
+        last.get('type'), payload.get('type')))), 'hook_failures': 0,
+        'tail_truncated': offset > 0}
+    for row in rows:
+        message = row.get('payload') or {}
+        if message.get('type') != 'message' or message.get('role') != 'user':
+            continue
+        content = message.get('content')
+        if not isinstance(content, list):
+            continue
+        texts = [part['text'] for part in content
+                 if isinstance(part, dict) and isinstance(part.get('text'), str)]
+        if any(text.lstrip().startswith('<hook_prompt ') and
+               re.search(r"\[errno \d+\]|can't open file|\b(?:failed|error)\b", text, re.I)
+               for text in texts):
+            activity['hook_failures'] += 1
+    return thread_id, activity
+
+
 def _run_codex_process(argv, env, timeout, on_executor, stream_output, **options):
     """Track a dedicated process group, including children surviving a CLI exit."""
     receipt_read, receipt_write = os.pipe()
@@ -194,6 +243,9 @@ def _run_codex_process(argv, env, timeout, on_executor, stream_output, **options
         except subprocess.TimeoutExpired:
             pass
         if isinstance(exc, subprocess.TimeoutExpired):
+            if reader is not None:
+                reader.join(timeout=2)
+                exc.output = ''.join(chunks)
             exc.termination_confirmed = write_ownership.process_terminated(identity, group=True)
         raise
     finally:
@@ -339,7 +391,12 @@ def _to_codex(
         except FileNotFoundError:
             return {"status": "failed", "detail": "codex is not on PATH", 'termination_confirmed': True}
         except subprocess.TimeoutExpired as exc:
-            return {"status": "timed_out", "detail": f"no answer in {limit_s:.0f}s",
+            thread_id, activity = _codex_timeout_activity(exc.output, thread, env)
+            detail = (f"no answer in {limit_s:.0f}s; last event {activity['last_event_type']}; "
+                      f"hook failures in {activity['source'].replace('_', ' ')} tail: "
+                      f"{activity['hook_failures']}")
+            return {"status": "timed_out", "detail": detail,
+                    'thread_id': thread_id, 'resumed': bool(thread), 'last_activity': activity,
                     **({'termination_confirmed': exc.termination_confirmed}
                        if hasattr(exc, 'termination_confirmed') else {})}
 

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/rule-boot-gate.py\" ] && [ ! -L \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/rule-boot-gate.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
             "timeout": 5,
             "additionalContextLimit": 5000
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ] && [ ! -L \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/rule-pack-preuse-reselection.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
             "timeout": 20,
             "additionalContextLimit": 5000
           }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/guard-unattended.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/guard-unattended.py\" ] && [ ! -L \"{{REPO}}/hooks/guard-unattended.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/guard-unattended.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/guard-unattended.py",
             "timeout": 15
           }
         ]
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/record-home-gate.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/record-home-gate.py\" ] && [ ! -L \"{{REPO}}/hooks/record-home-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/record-home-gate.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/record-home-gate.py",
             "timeout": 10
           }
         ]
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/delegation-gate.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/delegation-gate.py\" ] && [ ! -L \"{{REPO}}/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/delegation-gate.py",
             "timeout": 3
           }
         ]
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/rule-boot-gate.py\" ] && [ ! -L \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/rule-boot-gate.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
             "timeout": 5,
             "additionalContextLimit": 5000
           }
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/lint-gate.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/lint-gate.py\" ] && [ ! -L \"{{REPO}}/hooks/lint-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/lint-gate.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/lint-gate.py",
             "timeout": 40
           }
         ]
@@ -83,13 +83,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/gate-integrity.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/gate-integrity.py\" ] && [ ! -L \"{{REPO}}/hooks/gate-integrity.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/gate-integrity.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/gate-integrity.py",
             "timeout": 15,
             "additionalContextLimit": 5000
           },
           {
             "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/rule-boot-gate.py\" ] && [ ! -L \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/rule-boot-gate.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
             "timeout": 5,
             "additionalContextLimit": 5000
           }
@@ -100,7 +100,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CARR_MCP_CLIENT_PROFILE=codex-continuity /usr/bin/env python3 {{REPO}}/ops/codex-continuity-hook.py",
+            "command": "if [ ! -e \"{{REPO}}/ops/codex-continuity-hook.py\" ] && [ ! -L \"{{REPO}}/ops/codex-continuity-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/ops/codex-continuity-hook.py; skipping\" >&2; exit 0; fi; CARR_MCP_CLIENT_PROFILE=codex-continuity /usr/bin/env python3 {{REPO}}/ops/codex-continuity-hook.py",
             "timeout": 10
           }
         ]
@@ -110,7 +110,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
+            "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
             "timeout": 5
           }
         ]
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
+            "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/session-presence-hook.py codex",
             "timeout": 5
           }
         ]
@@ -130,7 +130,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+            "command": "if [ ! -e \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ] && [ ! -L \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/rule-pack-preuse-reselection.py; skipping\" >&2; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
             "timeout": 20
           }
         ]

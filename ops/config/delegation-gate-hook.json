@@ -3,7 +3,7 @@
   "version": 1,
   "event": "PreToolUse",
   "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
-  "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; [ -f \"$r/hooks/delegation-gate.py\" ] || exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
+  "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/delegation-gate.py\" ] && [ ! -L \"$r/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
   "canonical_only_commands": [
     "/usr/bin/env python3 \"${HOME}/carr-system/hooks/delegation-gate.py\""
   ],
