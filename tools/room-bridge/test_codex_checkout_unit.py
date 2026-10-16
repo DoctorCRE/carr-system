@@ -45,9 +45,6 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.reg = desks.Registry(self.root / 'desks.json')
         self.reg.register('cx', 'codex-session', cwd=str(self.source), family='sol', effort='high')
         self.results = self.root / 'results.jsonl'
-        authority = patch.object(dispatch.write_ownership, 'LEDGER', self.root / 'claims.jsonl')
-        authority.start()
-        self.addCleanup(authority.stop)
         self.codex_calls = []
         canonical = patch('codex_checkout.CANONICAL_REPO', self.source)
         canonical.start()
@@ -129,22 +126,6 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertNotIn('GIT_DIR', executor_env)
         self.assertNotIn('GIT_WORK_TREE', executor_env)
         self.assertNotIn('GIT_CONFIG_COUNT', executor_env)
-
-    def test_failed_clone_keeps_claim_until_dispatcher_death(self):
-        with patch.object(dispatch.write_ownership, 'open_prs',
-                          return_value=('jbookout/carr-system', [])) as prs, \
-             patch.object(dispatch.subprocess, 'run', side_effect=self.execute):
-            with self.assertRaisesRegex(desks.DeskError, 'origin clone'):
-                dispatch.dispatch('cx', 'repair', registry=self.reg, results_path=self.results,
-                                  env=self.env, writes=['tools/*.py'], checkout='missing-branch')
-        self.assertEqual(prs.call_args.args[0], str(self.source))
-        row = json.loads(self.results.read_text().splitlines()[-1])
-        self.assertEqual(row['status'], 'failed')
-        self.assertEqual(row['writes'], ['tools/*.py'])
-        self.assertEqual(row['ownership_state'], 'held')
-        self.assertIn('stuck', row['ownership_detail'])
-        self.assertNotIn('launch_marker', row)
-        self.assertEqual(self.codex_calls, [])
 
     def test_non_noreply_canonical_author_refuses(self):
         self.git('config', 'user.email', 'author@example.com')

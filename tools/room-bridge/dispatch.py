@@ -27,6 +27,7 @@ A headless Codex run is synchronous, so its line carries the actual result.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import argparse
 import errno
 import json
@@ -60,7 +61,6 @@ import codex_wire  # noqa: E402  — Codex worked out this protocol, see the mod
 import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
-import execution_contract  # noqa: E402 — portable Job Passport v1 seam
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
 TOOLS_ROOT = HERE.parent
@@ -138,34 +138,18 @@ def _codex_events(stdout: str) -> list[dict]:
 
 def _run_codex_process(argv, env, timeout, on_executor, stream_output, **options):
     """Track a dedicated process group, including children surviving a CLI exit."""
-    receipt_read, receipt_write = os.pipe()
-    gate_read, gate_write = os.pipe()
-    try:
-        proc = subprocess.Popen([sys.executable, str(HERE / 'ownership_executor.py'),
-                                 str(receipt_write), str(gate_read), *argv],
-                                env=env, stdin=subprocess.DEVNULL, **options,
-                                start_new_session=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT if stream_output else subprocess.PIPE,
-                                text=True, pass_fds=(receipt_write, gate_read))
-    except BaseException:
-        os.close(receipt_read)
-        os.close(gate_write)
-        raise
-    finally:
-        os.close(receipt_write)
-        os.close(gate_read)
-    identity = {}
+    proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, **options,
+                            start_new_session=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT if stream_output else subprocess.PIPE,
+                            text=True, pass_fds=(() if write_ownership.CHECKOUT_FD is None
+                                                else (write_ownership.CHECKOUT_FD,)))
+    identity = {**write_ownership.process_owner(), 'pid': proc.pid, 'pgid': proc.pid,
+                'start_time': write_ownership.process_start(proc.pid), 'kind': 'process_group'}
     chunks = []
     reader = None
     try:
-        if not select.select([receipt_read], [], [], 5)[0]:
-            raise RuntimeError('executor identity handshake timed out')
-        identity = json.loads(os.read(receipt_read, 4096))
-        if identity.get('pid') != proc.pid or identity.get('pgid') != proc.pid or not identity.get('start_time'):
-            raise RuntimeError('executor kernel identity unavailable')
         if on_executor:
             on_executor(identity)
-        os.write(gate_write, b'1')
         if stream_output:
             def relay():
                 with proc.stdout:
@@ -197,8 +181,6 @@ def _run_codex_process(argv, env, timeout, on_executor, stream_output, **options
             exc.termination_confirmed = write_ownership.process_terminated(identity, group=True)
         raise
     finally:
-        os.close(receipt_read)
-        os.close(gate_write)
         if reader is None or not reader.is_alive():
             proc.stdout.close()
         if proc.stderr is not None:
@@ -526,66 +508,37 @@ def dispatch(
             **({key: entry[key] for key in ("family", "model", "effort")}
                if entry["kind"] in codex_models.CODEX_KINDS else {})}
     declared_writes = write_ownership.declaration(original_task, writes)
-    ownership = {}
-    write_ownership.check_results_path(results_path)
-    if declared_writes:
-        if entry['kind'] not in codex_models.CODEX_KINDS:
-            raise DeskError('unsupported_owned_adapter',
-                            'owned dispatch requires a Codex adapter with verifiable termination recovery')
-        ownership = write_ownership.reserve(base,
-                                             cwd or entry.get("cwd") or str(Path.cwd()), declared_writes)
-        try:
-            _record(results_path, ownership)
-        except BaseException:
-            write_ownership.release(msg_id, reason='results path rejected')
-            raise
-    else:
-        print("warning: no write set declared; pass --writes or add Writes: to the brief",
-              file=sys.stderr, flush=True)
+    if declared_writes and entry['kind'] not in codex_models.CODEX_KINDS:
+        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex adapter')
 
     if entry["kind"] in codex_models.CODEX_KINDS:
         print(f"executor: {entry['model']} / {entry['effort']} (family {entry['family']}, desk {name})",
               file=sys.stderr, flush=True)
 
-    def executor_bound(bound):
-        ownership.update(bound)
-        _record(results_path, {**base, **ownership, 'status': 'running'})
-
-    try:
-        if checkout is not None:
-            prepared = codex_checkout.prepare(checkout, cwd or entry.get('cwd') or str(Path.cwd()), env)
-            env = scrubbed_env(env)
-            base.update(prepared)
-            task = codex_checkout.instruction(prepared) + task
-            if fresh or cwd or not entry.get('thread_id'):
-                entry = {**entry, **prepared, 'cwd': prepared['checkout_workspace']}
-                if cwd:
-                    cwd = prepared['checkout_workspace']
-        request = {'entry': entry, 'task': task, 'msg_id': msg_id, 'env': env,
-                   'fresh': fresh, 'cwd': cwd, 'retrieval': retrieval,
-                   'live_desktop': live_desktop, 'codex_timeout_s': codex_timeout_s,
-                   'config_overrides': config_overrides, 'stream_output': stream_output,
-                   'claim_id': msg_id if ownership else None}
-        if ownership:
-            outcome = write_ownership.launch(msg_id, request, on_bound=executor_bound)
-        else:
-            outcome = _execute(request)
-        if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
-                or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
-            registry.remember_thread(name, outcome['thread_id'])
-    except BaseException:
-        if ownership:
-            ownership.update(write_ownership.release(msg_id, reason='executor raised'))
-            _record(results_path, {**base, **ownership, 'status': 'failed', 'detail': 'executor raised'})
-        raise
-
-    if ownership:
-        ownership.update(write_ownership.release(msg_id, reason=outcome.get('detail') or outcome['status']))
+    if checkout is not None:
+        prepared = codex_checkout.prepare(checkout, cwd or entry.get('cwd') or str(Path.cwd()), env)
+        env = scrubbed_env(env)
+        base.update(prepared)
+        task = codex_checkout.instruction(prepared) + task
+        if fresh or cwd or not entry.get('thread_id'):
+            entry = {**entry, **prepared, 'cwd': prepared['checkout_workspace']}
+            if cwd:
+                cwd = prepared['checkout_workspace']
+    request = {'entry': entry, 'task': task, 'msg_id': msg_id, 'env': env,
+               'fresh': fresh, 'cwd': cwd, 'retrieval': retrieval,
+               'live_desktop': live_desktop, 'codex_timeout_s': codex_timeout_s,
+               'config_overrides': config_overrides, 'stream_output': stream_output,
+               'claim_id': msg_id if declared_writes else None}
+    workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
+    with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
+        outcome = _execute(request, on_executor=bind)
+    if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
+            or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
+        registry.remember_thread(name, outcome['thread_id'])
 
     row = {
         **base,
         **outcome,
-        **ownership,
         'status': outcome['status'],
         **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
@@ -628,35 +581,6 @@ def acknowledge_received(dispatch_ref: str, *, desk: str, log_offset: int,
         "stage": DESK_ACK_STAGE,
         "evidence": evidence,
     })
-
-
-def dispatch_envelope(
-    name: str,
-    envelope: dict,
-    task: str,
-    *,
-    dispatch_fn=None,
-    receipt_sink=None,
-    **dispatch_kwargs,
-) -> dict:
-    """Compatibility seam for a server-issued ExecutionEnvelope v1.
-
-    The legacy ``dispatch`` signature and local NDJSON row are deliberately
-    untouched.  This wrapper validates the portable envelope, delegates over
-    the exact same path (or an injected fake in tests), and returns a redacted
-    AttemptReceipt.  It neither derives authority nor persists a transcript;
-    future server admission/audit slices own those responsibilities.
-    """
-    execution_contract.validate_execution_envelope(envelope)
-    if not isinstance(task, str) or not task.strip():
-        raise execution_contract.ContractError("runtime task must be a non-empty string")
-    fn = dispatch_fn or dispatch
-    row = fn(name, task, **dispatch_kwargs)
-    receipt = execution_contract.receipt_from_dispatch_row(envelope, row)
-    execution_contract.validate_attempt_receipt(receipt, envelope)
-    if receipt_sink is not None:
-        receipt_sink(receipt)
-    return {"dispatch": row, "attempt_receipt": receipt}
 
 
 # ---------------------------------------------------------------------------
@@ -926,13 +850,6 @@ def main(argv: list[str]) -> int:
     sp = sub.add_parser("stop", help="take a desk down")
     sp.add_argument("name")
     sub.add_parser("where", help="print how to find and name THIS session's socket")
-    rc = sub.add_parser('reconcile', help='verify and recover held ownership claims; unknown writers stay stuck')
-    rc.add_argument('--claim', help='one job msg_id; otherwise examine held claims')
-    rc.add_argument('--limit', type=int, default=20, help='maximum claims per call (1..100)')
-    rc.add_argument('--older-than-hours', type=float, metavar='H',
-                    help='sweep only claims whose writer is verifiably gone or that are older '
-                         'than H hours; a young claim with a live writer is left alone')
-
     s = sub.add_parser("send", help="dispatch one task to one desk")
     s.add_argument("name")
     s.add_argument("task")
@@ -957,11 +874,6 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
-        if a.cmd == 'reconcile':
-            claims = write_ownership.reconcile(a.claim, limit=a.limit,
-                                               older_than_hours=a.older_than_hours)
-            print(json.dumps({'ledger': str(write_ownership.LEDGER), 'claims': claims}, indent=2))
-            return 1 if any(row['ownership_state'] == 'held' for row in claims) else 0
         if a.cmd == "where":
             return _cmd_where()
 

@@ -479,33 +479,6 @@ class Queue:
                 os.fsync(f.fileno())
             with self.db:
                 self.db.execute('UPDATE events SET logged=1 WHERE id=?', (ev['id'],))
-        board_contract = hashlib.sha256(
-            Path(__file__).read_bytes() + (self.root / 'tools/progress_board.py').read_bytes()).hexdigest()
-        for ev in bounded_items('snapshot', self.db.execute('SELECT * FROM events WHERE published=0 ORDER BY id').fetchall()):
-            if not ev['published']:
-                stage = 'merged' if ev['outcome'] in ('merged', 'already_merged') else ('ci' if ev['outcome'] == 'waiting_ci' else 'review')
-                health = 'healthy' if ev['outcome'] in ('queued', 'merged', 'updated', 'retargeted') else 'question'
-                card = ('app-pr-' if ev['repo'] == REPOS[1] else
-                        'factory-pr-' if ev['repo'] == REPOS[2] else 'pr-') + str(ev['pr'])
-                try:
-                    self.bounded_operation(['progress-board', board_contract], False, lambda: command([sys.executable, str(self.root / 'tools/progress_board.py'), 'task', 'carr-v5', card,
-                             '--title', f"{ev['repo'].split('/')[-1]} PR #{ev['pr']}", '--executor', 'Merge queue', '--creation-defaults', '--publish-only',
-                             '--repo', ev['repo'], '--pr', str(ev['pr']), '--status', 'review', '--stage', stage,
-                             '--health', health, '--note', f"Merge queue: {ev['outcome']}. {ev['detail']}"],
-                            cwd=self.root, timeout=BOUNDS['board']['seconds'], diagnostics=True), 'Progress board command failed',
-                            entry_budget=False, scope='progress-board')
-                except (Cancelled, GitHubReadPaused):
-                    return
-                except (RuntimeError, subprocess.TimeoutExpired, OSError) as exc:
-                    exhausted = isinstance(exc, (GitHubExhausted, WaitExpired)) or getattr(exc, 'github_attempts', 0) >= MAX_ATTEMPTS
-                    with (self.state / 'queue.log').open('a') as f:
-                        f.write(json.dumps({'event_id': ev['id'],
-                                            'outcome': 'progress_board_write_exhausted' if exhausted else 'progress_board_write_failed',
-                                            'detail': str(exc),
-                                            'retry': 'attempts exhausted; queue continues' if exhausted else 'next poll; queue continues'}) + '\n')
-                    break
-                with self.db:
-                    self.db.execute('UPDATE events SET published=1 WHERE id=?', (ev['id'],))
 
     def git(self, repo, *args, data=None):
         d = self.state / 'repos' / (repo.split('/')[-1] + '.git')

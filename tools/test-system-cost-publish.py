@@ -111,7 +111,6 @@ class CostPublication(unittest.TestCase):
             with patch.object(costs, 'ROOT', root), patch.object(costs, 'collect', return_value=report), patch.object(costs, 'read_tokens', return_value={}), \
                  patch.object(board, 'REPO_ROOT', root), patch.dict(os.environ, {'PROGRESS_BOARD_ROOT': str(root / 'out')}), \
                  patch.object(board, 'call_verb', side_effect=verb), \
-                 patch.object(board, 'refresh_and_publish', side_effect=lambda project: board.publish_board(project)), \
                  redirect_stdout(io.StringIO()):
                 result = costs.main(['--config', str(config), '--output', str(root / 'custom/costs.json'), '--publish'])
             self.assertEqual(result, 0)
@@ -129,7 +128,6 @@ class CostPublication(unittest.TestCase):
             config.write_text('{}')
             output = root / 'system-costs.json'
             with patch.dict(os.environ, {'PROGRESS_BOARD_ROOT': str(root)}), \
-                 patch.object(board, 'refresh_and_publish'), \
                  patch.object(costs, 'ROOT', root), patch.object(costs, 'collect', return_value=report), patch.object(costs, 'read_tokens', return_value={}):
                 import argparse
                 board.command_init(argparse.Namespace(project='system-costs', title='Existing board title'))
@@ -152,7 +150,6 @@ class CostPublication(unittest.TestCase):
                 original_init(args)  # Another collector wins its exclusive create.
                 original_init(args)  # The current create gets the existing-board refusal.
             with patch.dict(os.environ, {'PROGRESS_BOARD_ROOT': str(root)}), \
-                 patch.object(board, 'refresh_and_publish'), \
                  patch.object(costs, 'ROOT', root), patch.object(costs, 'collect', return_value=report), patch.object(costs, 'read_tokens', return_value={}), \
                  patch.object(board, 'command_init', side_effect=concurrent_init), \
                  patch.object(board, 'publish_board') as publish, redirect_stdout(io.StringIO()):

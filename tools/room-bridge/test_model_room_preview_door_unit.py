@@ -53,9 +53,9 @@ def test_model_room_mode_serves_the_real_bundle_and_the_wire_turn():
         page = urlopen(url, timeout=5).read().decode()
         assert "<title>Observatory · The Deal Room</title>" in page
         wire = json.loads(urlopen(url.replace("/room.html", "/api/room/turns"), timeout=30).read())
-    assert wire["latest_seq"] == "8"
-    assert [turn["kind"] for turn in wire["turns"]] == ["receipt"] * 8
-    assert wire["rehearsal"] == {"mode": "synthetic_read_only_rehearsal", "projection_digest": DIGEST}
+    assert wire["latest_seq"] == "1"
+    assert [turn["kind"] for turn in wire["turns"]] == ["receipt"]
+    assert json.loads(wire["turns"][0]["body"])["job_passport"]["payload"]["projection_digest"] == DIGEST
     assert refused(url), "preview server still answering after the capture"
 
 

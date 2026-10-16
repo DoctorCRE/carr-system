@@ -84,7 +84,7 @@ BLOCKER_EXCERPT_LIMIT = 192
 ALL_REPOS_BOARD = "all-repos"
 GITHUB_OWNER = "jbookout"
 CORE_REPOS = ("jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")
-RECENT_MERGED = timedelta(days=7)
+RECENT_MERGED = timedelta(days=14)
 # The repository this tool reads its release config, review rules and verbs
 # from. The launchd wrapper binds it explicitly, so a copy of the tool run from
 # anywhere else still reads the canonical checkout.
@@ -695,7 +695,7 @@ def rest_pr(raw: Any) -> dict[str, Any]:
         "url": raw.get("html_url"), "createdAt": raw.get("created_at"), "updatedAt": raw.get("updated_at"),
         "state": "MERGED" if merged else raw["state"].upper(), "isDraft": raw["draft"],
         "headRefOid": raw["head"]["sha"], "headRefName": raw["head"].get("ref", ""),
-        "author": {"login": raw["user"]["login"]}, "mergedAt": raw.get("merged_at"),
+        "author": {"login": raw["user"]["login"]}, "mergedAt": raw.get("merged_at"), "closedAt": raw.get("closed_at"),
         # An open PR's merge_commit_sha is a test merge, never a delivered commit.
         "mergeCommit": {"oid": raw["merge_commit_sha"]} if merged and raw.get("merge_commit_sha") else None,
         "mergeable": ("MERGEABLE" if raw.get("mergeable") is True else
@@ -1630,7 +1630,8 @@ def assemble_all_repos(prior: dict[str, Any],
         "version": 2, "project": ALL_REPOS_BOARD, "title": "All repositories", "kind": "all-repos",
         "created_at": prior.get("created_at") or at,
         "updated_at": max((str(t.get("updated_at") or "") for t in tasks.values()), default=at) or at,
-        "tasks": tasks, "questions": {}, "deliverables": [], "notes": [], "repos": rows,
+        "tasks": tasks, "questions": prior.get("questions", {}), "deliverables": prior.get("deliverables", []),
+        "notes": prior.get("notes", []), "task_notes": prior.get("task_notes", {}), "repos": rows,
         "github_sync": {"checked_at": at, "failed": failed, "stale": bool(failed),
                         "last_verified_at": at if not failed else previous_sync.get("last_verified_at")},
     }
@@ -1644,46 +1645,24 @@ def assemble_all_repos(prior: dict[str, Any],
 DERIVED_STATE = ("status", "stage", "pr_phase", "blocked_reason", "next_action")
 
 
-def manual_block_holds(task: dict[str, Any], info: dict[str, Any], derived_status: str) -> bool:
-    """A blocked note the orchestrator wrote stays until GitHub shows it
-    cleared: the PR merged or closed, or a new head was pushed that is not
-    itself blocked. (Legacy blocks without a source count as manual.)"""
-    if task.get("status") != "blocked" or task.get("blocked_source", "manual") != "manual":
-        return False
-    if not task.get("blocked_reason"):
-        return False
-    if str(info.get("state") or "").upper() in {"MERGED", "CLOSED"}:
-        return False
-    pinned = str(task.get("blocked_head") or task.get("pr_head") or "")
-    moved = bool(pinned) and str(info.get("headRefOid") or "") != pinned
-    return not (moved and derived_status != "blocked")
-
-
 def sync_pr_task(task: dict[str, Any], info: dict[str, Any], at: str) -> bool:
     """Bring one PR card to GitHub's state. Returns True if anything changed."""
     status, stage, phase = derived_pr_state(info, task_repo(task))
-    floor = task.get("manual_stage")
     current = task_stage(task)
-    if current == "live":
+    if current == "live" and info["state"] == "MERGED":
         status, stage = "done", "live"
-    elif floor in PIPELINE_STAGES and PIPELINE_STAGES.index(stage) < PIPELINE_STAGES.index(floor):
-        stage = floor  # never move a card back past a later stage set by hand
     target: dict[str, Any] = {"status": status, "stage": stage, "pr_phase": phase,
                               "blocked_reason": None, "next_action": None, "blocked_source": None}
-    if manual_block_holds(task, info, status):
-        target.update({"status": "blocked", "blocked_reason": task["blocked_reason"],
-                       "next_action": task.get("next_action"), "blocked_source": "manual",
-                       "blocked_head": task.get("blocked_head") or task.get("pr_head") or info.get("headRefOid")})
-    elif status == "blocked" and current != "live":
+    if status == "blocked":
         block = derived_block(info, phase)
         if block:
             target.update({"blocked_reason": block[0], "next_action": block[1], "blocked_source": "github"})
-    if target["blocked_source"] != "manual":
-        target["blocked_head"] = None
     facts: dict[str, Any] = {"pr_checks": checks_summary(info), "pr_head": info.get("headRefOid") or "",
                              "review_verdict": review_verdict(info, task_repo(task))}
     if info.get("_legacy_terminal"):
         facts = {"pr_head": task.get("pr_head") or info.get("headRefOid") or ""}
+    facts.update({"github_state": info["state"], "merged_at": info.get("mergedAt"),
+                  "closed_at": info.get("closedAt")})
     if merge_sha(info):
         facts["merge_sha"] = merge_sha(info)
     stamped = any(task.get(field) != target.get(field) for field in DERIVED_STATE)
@@ -1804,6 +1783,7 @@ def render(project: str) -> None:
         build_all_repos()
         return
     generation, initial = begin_refresh(project)
+    retain_recent_cards(initial, {})
     tasks = initial.get("tasks", {}).values()
     assert GITHUB_PASS is not None
     GITHUB_PASS.seed(tasks)
@@ -1836,6 +1816,30 @@ def render(project: str) -> None:
     (board_dir() / f"{safe_project(project)}.html").unlink(missing_ok=True)
 
 
+def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]]) -> int:
+    """Expire old GitHub cards and watchdog projections while retaining their notes."""
+    cutoff = now_utc() - RECENT_MERGED
+    expired = []
+    for task_id, task in state.get("tasks", {}).items():
+        generated = task_id.startswith("wd-") and task.get("pr") is None
+        if task.get("pr") is None and not generated:
+            continue
+        info = facts.get(pr_key(task), {}) if task.get("pr") is not None else {}
+        terminal = info.get("state") or task.get("github_state")
+        closed = parse_time(info.get("mergedAt") or info.get("closedAt")
+                            or task.get("merged_at") or task.get("closed_at"))
+        if not generated and (terminal not in {"MERGED", "CLOSED"} or closed is None or closed >= cutoff):
+            continue
+        content = {key: task[key] for key in ("title", "note", "summary", "question_ids", "reason")
+                   if task.get(key)}
+        if content:
+            state.setdefault("task_notes", {})[task_id] = content
+        expired.append(task_id)
+    for task_id in expired:
+        del state["tasks"][task_id]
+    return len(expired)
+
+
 def apply_sync(state: dict[str, Any],
                fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]],
                evidence: dict[tuple[str, int], str | None] | None = None) -> bool:
@@ -1864,6 +1868,8 @@ def apply_sync(state: dict[str, Any],
             changed = True
         if delivered_live(task, task_repo(task), at, (evidence or {}).get(key)):
             changed = True
+    if retain_recent_cards(state, {key: info for key, (info, error) in fetched.items() if info and not error}):
+        changed = True
     if fetched and not os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         raw_sync = state.get("github_sync")
         previous: dict[str, Any] = raw_sync if isinstance(raw_sync, dict) else {}
@@ -1877,32 +1883,14 @@ def local_only() -> bool:
     return bool(os.environ.get("PROGRESS_BOARD_LOCAL_ONLY"))
 
 
-def refresh_and_publish(project: str, *, sync: bool = True) -> None:
-    """Every mutation reaches the app board, the only board UI. A failed
-    publication is loud: the local state is kept and the retry is named."""
-    if sync:
-        render(project)
-    if local_only():
-        log(f"{project}: saved locally; not published to the app board (PROGRESS_BOARD_LOCAL_ONLY is set)")
-        return
-    try:
-        publish_board(project, refresh_inventory=sync)
-    except RuntimeError as exc:
-        raise SystemExit(f"progress-board: {project} saved locally but not published to the app board: {exc}. "
-                         f"Retry: tools/progress_board.py render {project} --publish")
-
-
-def mutate(project: str, change: Callable[[dict[str, Any]], bool | None], *, refresh: bool = True) -> bool:
-    """Read, change and write one board as a single locked transaction, then
-    refresh and publish it."""
+def mutate(project: str, change: Callable[[dict[str, Any]], bool | None]) -> bool:
+    """Save a local note, question or task without publishing."""
     with board_lock(project):
         state = read_state(project)
         if change(state) is False:
             return False
         state["updated_at"] = stamp()
         write_json(state)
-    if refresh:
-        refresh_and_publish(project)
     return True
 
 
@@ -2015,7 +2003,10 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
                       "pr": task.get("pr"), "repo": task.get("repo"), "updated_at": task.get("updated_at")}
             for task_id, task in all_tasks.items() if is_retired(task)},
         "deliverables": list(state.get("deliverables") or [])[:24],
-        "notes": list(state.get("notes") or [])[:50],
+        "notes": [*list(state.get("notes") or []),
+                  *({"text": str(note.get("title") or task_id) + "\n" + note["note"]}
+                    for task_id, note in state.get("task_notes", {}).items()
+                    if not task_id.startswith("wd-") and isinstance(note.get("note"), str) and note["note"])],
         "decisions": decisions,
         "ledger": executor_ledger(all_tasks),
         "repos": list(state.get("repos") or []),
@@ -2084,6 +2075,7 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
         inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
         if inventory is not None:
             snapshot["external_inventory"] = inventory
+    snapshot = fit_snapshot(snapshot)
     if remote_snapshot is None or remote_snapshot.get("snapshot_json") != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
@@ -2287,10 +2279,6 @@ def command_init(args: argparse.Namespace) -> None:
     }
     with board_lock(args.project):
         create_json(state)
-    if getattr(args, "costs", None) is not None:
-        publish_board(args.project, costs=args.costs)
-    else:
-        refresh_and_publish(args.project)
 
 
 def command_task(args: argparse.Namespace) -> None:
@@ -2298,19 +2286,6 @@ def command_task(args: argparse.Namespace) -> None:
     if args.expected_task is not None and not isinstance(expected, dict):
         raise SystemExit("--expected-task must be a task object")
     receipt = {"applied": False, "before": None, "after": None}
-    affected = None
-    info = None
-    if args.publish_only:
-        prior = read_state(args.project).get("tasks", {}).get(args.task_id, {})
-        number = args.pr if args.pr is not None else prior.get("pr")
-        if number is not None:
-            affected = (safe_repo(args.repo or prior.get("repo") or DEFAULT_PR_REPO), int(number))
-            info = validated_pr(gh_json(
-                ["pr", "view", str(affected[1]), "--repo", affected[0], "--json",
-                 "state,isDraft,headRefOid,author,mergeCommit,statusCheckRollup,comments,reviewDecision,mergeable"],
-                timeout=15))
-            if info is None:
-                raise RuntimeError("affected PR read returned a malformed payload; board not published")
     def change(state):
         before = copy.deepcopy(state.get("tasks", {}).get(args.task_id))
         receipt["before"] = before
@@ -2319,25 +2294,10 @@ def command_task(args: argparse.Namespace) -> None:
                 for key, value in expected.items()):
             receipt["after"] = before
             return False
-        task_args = args
-        if affected is not None:
-            task_args = copy.copy(args)
-            # Queue stages describe historical events, not manual stage floors.
-            task_args.stage = None
-            if before:
-                task_args.status = None
-        update_task(state, task_args)
-        if affected is not None:
-            task = state["tasks"][args.task_id]
-            if pr_key(task) != affected:
-                raise RuntimeError("affected PR identity changed during read; board not published")
-            task.pop("manual_stage", None)
-            sync_pr_task(task, info, stamp())
+        update_task(state, args)
         receipt["applied"] = True
         receipt["after"] = copy.deepcopy(state["tasks"][args.task_id])
-    applied = mutate(args.project, change, refresh=not (args.defer_refresh or args.publish_only))
-    if applied and args.publish_only:
-        refresh_and_publish(args.project, sync=False)
+    applied = mutate(args.project, change)
     if args.receipt:
         print(json.dumps(receipt, separators=(",", ":")))
 
@@ -2495,7 +2455,6 @@ def command_note(args: argparse.Namespace) -> None:
     def add(state: dict[str, Any]) -> None:
         notes = state.setdefault("notes", [])
         notes.insert(0, {"text": text[:2000], "created_at": stamp()})
-        del notes[50:]
     mutate(args.project, add)
 
 
@@ -2528,10 +2487,6 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--lane", choices=("status", "needs-joe"))
     task.add_argument("--expected-task", help="update only if these task fields still match this JSON object")
     task.add_argument("--receipt", action="store_true", help="print the locked before/after task mutation receipt")
-    publication = task.add_mutually_exclusive_group()
-    publication.add_argument("--defer-refresh", action="store_true", help="save the task without refreshing or publishing the board")
-    publication.add_argument("--publish-only", action="store_true",
-                             help="refresh only this task PR and publish saved facts for other cards and external inventory")
     task.add_argument("--note")
     task.add_argument("--evidence")
     task.add_argument("--delivery-target", choices=("worker", "app", "workstation", "database", "manual"),

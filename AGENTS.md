@@ -224,14 +224,13 @@ when claiming an improvement. Current cases and scorers live in `evals/`.
 
 ## Progress board
 
-For work >5 steps or >30 min, update the board via `tools/progress_board.py`
-after each step; record Joe questions with defaults, and give a blocked task
-`--reason` and `--next-action`. Every `init`, `task`, `ask`, `answer`,
-`deliver` and `note` writes `out/boards/<project>.json` under a per-board lock
-and publishes it; the only board UI is https://app.doctorcre.com/progress-board
-(`?board=<project>`, or `?board=all-repos` for every jbookout PR). A failed
-publish exits nonzero with the local state kept and names the retry
-(`render <project> --publish`); `PROGRESS_BOARD_LOCAL_ONLY=1` skips publishing
+Keep human notes and questions with `tools/progress_board.py`. Local mutations
+save `out/boards/<project>.json` under a per-board lock. The scheduled renderer
+reads GitHub and release facts and publishes independently. Board writes and
+publication never gate source delivery. The only board UI is
+https://app.doctorcre.com/progress-board (`?board=<project>` or `?board=all-repos`).
+A failed scheduled publish keeps local notes and questions for the next render.
+`PROGRESS_BOARD_LOCAL_ONLY=1` skips publishing
 and says so. There is no static HTML copy. The launchd job runs
 `ops/progress-board-render.sh` from a repository checkout, which binds
 `CARR_REPO_ROOT` and the repo's `.venv` Python; never run an extracted copy.
