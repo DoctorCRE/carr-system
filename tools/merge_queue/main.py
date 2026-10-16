@@ -479,6 +479,8 @@ class Queue:
                 os.fsync(f.fileno())
             with self.db:
                 self.db.execute('UPDATE events SET logged=1 WHERE id=?', (ev['id'],))
+        board_contract = hashlib.sha256(
+            Path(__file__).read_bytes() + (self.root / 'tools/progress_board.py').read_bytes()).hexdigest()
         for ev in bounded_items('snapshot', self.db.execute('SELECT * FROM events WHERE published=0 ORDER BY id').fetchall()):
             if not ev['published']:
                 stage = 'merged' if ev['outcome'] in ('merged', 'already_merged') else ('ci' if ev['outcome'] == 'waiting_ci' else 'review')
@@ -486,7 +488,7 @@ class Queue:
                 card = ('app-pr-' if ev['repo'] == REPOS[1] else
                         'factory-pr-' if ev['repo'] == REPOS[2] else 'pr-') + str(ev['pr'])
                 try:
-                    self.bounded_operation(['progress-board'], False, lambda: command([sys.executable, str(self.root / 'tools/progress_board.py'), 'task', 'carr-v5', card,
+                    self.bounded_operation(['progress-board', board_contract], False, lambda: command([sys.executable, str(self.root / 'tools/progress_board.py'), 'task', 'carr-v5', card,
                              '--title', f"{ev['repo'].split('/')[-1]} PR #{ev['pr']}", '--executor', 'Merge queue', '--creation-defaults',
                              '--repo', ev['repo'], '--pr', str(ev['pr']), '--status', 'review', '--stage', stage,
                              '--health', health, '--note', f"Merge queue: {ev['outcome']}. {ev['detail']}"],
@@ -789,6 +791,8 @@ class Queue:
         for summary in bounded_items('snapshot', self.pages(f'repos/{repo}/pulls?state=open&per_page=100')):
             if self.stopped:
                 return False
+            if summary['base']['ref'] != merged_branch:
+                continue
             n = summary['number']
             try:
                 p = self.pr(repo, n)

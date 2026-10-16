@@ -791,7 +791,7 @@ class QueueTests(unittest.TestCase):
 
     def assert_merged_entry_reconciles_and_refreshes(self, status, phase):
         self.pr()
-        self.pr(2, state='behind')
+        self.pr(2, state='behind', base='branch-1')
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
@@ -885,7 +885,8 @@ class QueueTests(unittest.TestCase):
         self.pr(state='dirty', head=self.changed)
         self.data['prs'][module.REPOS[0]+'#1']['base']['sha']=self.main
         self.save()
-        self.q.refresh(module.REPOS[0], 'just-merged')
+        self.q.enqueue(module.REPOS[0], 1, self.changed)
+        self.q.tick()
         briefs=list((self.root/'out/orch/queue/codex').glob('*.txt'))
         self.assertEqual(len(briefs), 1)
         self.assertIn('file.txt', briefs[0].read_text())
@@ -893,7 +894,7 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.calls('merge'), [])
 
     def test_held_is_skipped_by_queue_discover_and_refresh(self):
-        self.pr(state='behind', held=True)
+        self.pr(state='behind', held=True, base='just-merged')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
         self.q.tick()
         self.q.discover()
@@ -986,6 +987,31 @@ class QueueTests(unittest.TestCase):
                     self.assertEqual(tasks[card]['stage'], stage)
                     self.assertEqual(tasks[card]['note'], f'Merge queue: {outcome}. Queue update')
             self.assertEqual(self.q.db.execute('SELECT COUNT(*) FROM events WHERE published=1').fetchone()[0], 6)
+
+    def test_board_repaired_command_recovers_without_live_state_reset(self):
+        script = self.root / 'tools/progress_board.py'
+        working = script.read_text()
+        script.write_text("import sys\nsys.exit(1)\n")
+        self.q.enqueue(module.REPOS[0], 123, self.approved)
+        for _ in range(module.MAX_ATTEMPTS):
+            self.q.flush_events()
+        script.write_text(working)
+        self.restart()
+        self.q.flush_events()
+        self.assertEqual(self.q.db.execute('SELECT published FROM events').fetchone()[0], 1)
+
+    def test_unrelated_unknown_pr_does_not_delay_next_queued_merge(self):
+        self.pr()
+        self.pr(2, head=self.updated)
+        self.pr(99, state='unknown')
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.q.enqueue(module.REPOS[0], 2, self.updated)
+        self.q.tick()
+        self.q.tick()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 2)
+        self.assertFalse(any(a[1] == f'repos/{module.REPOS[0]}/pulls/99'
+                             for a in self.load()['calls'] if a[0] == 'api'))
 
     def test_board_stderr_survives_retry_exhaustion_and_restart(self):
         script = self.root / 'tools/progress_board.py'
@@ -1256,12 +1282,13 @@ class QueueTests(unittest.TestCase):
         self.assertTrue((self.state/'legacy-import.json').exists())
 
     def test_outdated_draft_with_blocked_status_is_refreshed(self):
-        self.pr(state='blocked', draft=True)
+        self.pr(state='blocked', draft=True, base='just-merged')
+        self.data['retarget_state'] = 'blocked'; self.save()
         self.q.refresh(module.REPOS[0], 'just-merged')
         self.assertTrue(any('update-branch' in str(a) for a in self.load()['calls']))
 
     def test_unknown_pr_does_not_prevent_other_postmerge_updates(self):
-        self.pr(1,state='unknown');self.pr(2,state='behind')
+        self.pr(1,state='unknown',base='just-merged');self.pr(2,state='behind',base='just-merged')
         self.q.refresh(module.REPOS[0], 'just-merged')
         self.assertTrue(any('/pulls/2/update-branch' in str(a) for a in self.load()['calls']))
 
