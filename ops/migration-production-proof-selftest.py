@@ -23,20 +23,49 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(result['pending'], ['0003_c.sql'])
 
     def test_ledger_rejects_missing_changed_and_backfilled_files(self):
-        result = proof.ledger_proof(
-            {'0001_a.sql': 'wrong', '0002_backfill.sql': 'b', '0003_c.sql': 'c'},
-            {'0001_a.sql': 'a', '0003_c.sql': 'c', '0004_missing.sql': 'd'})
-        self.assertFalse(result['ok'])
-        self.assertEqual(result['missing'], ['0004_missing.sql'])
-        self.assertEqual(result['checksum_mismatch'], ['0001_a.sql'])
-        self.assertEqual(result['out_of_order'], ['0002_backfill.sql'])
+        for repository, applied in [
+            ({'0001_a.sql': 'a'}, {'0001_a.sql': 'a', '0004_unknown.sql': 'd'}),
+            ({'0001_a.sql': 'wrong'}, {'0001_a.sql': 'a'}),
+            ({'0001_a.sql': 'a', '0002_backfill.sql': 'b', '0003_c.sql': 'c'},
+             {'0001_a.sql': 'a', '0003_c.sql': 'c'}),
+        ]:
+            with self.subTest(applied=applied):
+                self.assertFalse(proof.ledger_proof(repository, applied)['ok'])
 
-    def test_same_number_pending_is_not_a_forward_suffix(self):
+    def test_same_number_earlier_hole_refuses(self):
         self.assertFalse(proof.ledger_proof(
-            {'0001_a.sql': 'a', '0001_b.sql': 'b'}, {'0001_a.sql': 'a'})['ok'])
+            {'0001_a.sql': 'a', '0001_b.sql': 'b'}, {'0001_b.sql': 'b'})['ok'])
+
+    def test_partial_strict_atomic_group_refuses(self):
+        repository = {name: digest for name, sql, digest in proof.migrate.load_migrations()}
+        applied = {name: digest for name, digest in repository.items()
+                   if name <= '0872_self_closing_records.sql'}
+        result = proof.ledger_proof(repository, applied)
+        self.assertFalse(result['ok'])
+        self.assertIn('partial strict atomic migration group', result['error'])
 
     def test_empty_production_fails_closed(self):
         self.assertFalse(proof.ledger_proof({'0001_a.sql': 'a'}, {})['ok'])
+
+    def test_snapshot_drift_refuses(self):
+        migrations = proof.migrate.load_migrations()
+        applied = {name: digest for name, sql, digest in migrations}
+        snapshot = (ROOT / 'db/schema.sql').read_text()
+        filename = next(iter(applied))
+        row = next(line for line in snapshot.splitlines() if line.startswith(filename + '\t'))
+        for kind, drifted in [
+            ('edited', snapshot.replace(applied[filename], '0' * 64, 1)),
+            ('missing', snapshot.replace(row + '\n', '', 1)),
+            ('extra', snapshot.replace(row, row + '\n9999_unknown.sql\t' + '0' * 64 + '\tfixture', 1)),
+        ]:
+            with self.subTest(kind=kind), \
+                 patch.object(proof, 'production_dsn') as credentials, \
+                 patch.object(proof.migrate, 'load_migrations', return_value=migrations), \
+                 patch.object(Path, 'read_text', return_value=drifted):
+                with self.assertRaisesRegex(RuntimeError, 'ledger'):
+                    proof.live_proof()
+                credentials.assert_not_called()
+
 
     def test_hosted_refuses_before_credential_resolution(self):
         result = subprocess.run([sys.executable, str(ROOT / 'ops/migration-production-proof.py')],

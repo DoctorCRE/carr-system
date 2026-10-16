@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Local-only, read-only production migration ledger proof.
 
-Release pipeline preflight may call this command before any apply.
-No production DDL, schema dump, ledger bootstrap, or permission changes occur.
-Hosted CI exercises migration-production-proof-selftest.py instead.
+No production writes occur. Hosted CI runs offline fixtures instead.
 """
 # ci: runs-outside-ci — live production reads are local-only gates
 # doctrine: scripted-release-pipeline
@@ -13,7 +11,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
+import runpy
 import subprocess
 import sys
 
@@ -24,22 +22,16 @@ import migrate
 from lib.secret_redaction import redact_text, sensitive_env_values
 
 
-def number(name):
-    match = re.match(r'^(\d+)', name)
-    if not match:
-        raise ValueError('invalid ledger filename')
-    return int(match[1])
-
-
 def ledger_proof(repository, applied):
-    highest = max((number(name) for name in applied), default=-1)
-    pending = sorted(repository.keys() - applied.keys())
-    missing = sorted(applied.keys() - repository.keys())
-    changed = sorted(name for name in applied.keys() & repository.keys() if applied[name] != repository[name])
-    out_of_order = [name for name in pending if number(name) <= highest]
-    return dict(ok=bool(applied) and not (missing or changed or out_of_order),
-                applied=len(applied), highest=highest, pending=pending, missing=missing,
-                checksum_mismatch=changed, out_of_order=out_of_order)
+    migrations = [(name, '', digest) for name, digest in sorted(repository.items())]
+    try:
+        if not applied:
+            raise ValueError('production migration ledger is empty')
+        migrate.validate_applied_ledger(migrations, applied)
+    except ValueError as exc:
+        return dict(ok=False, error=str(exc))
+    return dict(ok=True, applied=len(applied),
+                pending=[name for name, sql, digest in migrate.pending_migrations(migrations, applied)])
 
 
 def checked(command, env, label, timeout=1200):
@@ -90,9 +82,14 @@ def read_source(dsn):
 
 
 def live_proof():
-    repository = {name: digest for name, sql, digest in migrate.load_migrations()}
-    applied = read_source(production_dsn())
-    return dict(ledger=ledger_proof(repository, applied))
+    migrations = migrate.load_migrations()
+    validate_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_problems']
+    problems = validate_snapshot({name: sql for name, sql, digest in migrations},
+                                (ROOT / 'db/schema.sql').read_text())
+    if problems:
+        raise RuntimeError('; '.join(problems))
+    return dict(ledger=ledger_proof({name: digest for name, sql, digest in migrations},
+                                   read_source(production_dsn())))
 
 
 def main():
