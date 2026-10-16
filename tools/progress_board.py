@@ -1877,15 +1877,16 @@ def local_only() -> bool:
     return bool(os.environ.get("PROGRESS_BOARD_LOCAL_ONLY"))
 
 
-def refresh_and_publish(project: str) -> None:
+def refresh_and_publish(project: str, *, sync: bool = True) -> None:
     """Every mutation reaches the app board, the only board UI. A failed
     publication is loud: the local state is kept and the retry is named."""
-    render(project)
+    if sync:
+        render(project)
     if local_only():
         log(f"{project}: saved locally; not published to the app board (PROGRESS_BOARD_LOCAL_ONLY is set)")
         return
     try:
-        publish_board(project)
+        publish_board(project, refresh_inventory=sync)
     except RuntimeError as exc:
         raise SystemExit(f"progress-board: {project} saved locally but not published to the app board: {exc}. "
                          f"Retry: tools/progress_board.py render {project} --publish")
@@ -2069,16 +2070,20 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
             'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
 
 
-def publish_board(project: str, *, costs=None) -> dict[str, int]:
+def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
     snapshot = board_snapshot(state, costs=costs)
-    if board == "carr-v5":
+    if board == "carr-v5" and refresh_inventory:
         from system_work_cache import cached_github
         snapshot["external_inventory"] = publish_external_inventory(cached_github(board_dir() / "system-work-github-cache.json",
             Path.home() / "carr-system/out/orch/dot/job13/report-G.md"))
+    elif board == "carr-v5" and remote_snapshot:
+        inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
+        if inventory is not None:
+            snapshot["external_inventory"] = inventory
     if remote_snapshot is None or remote_snapshot.get("snapshot_json") != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
@@ -2293,6 +2298,19 @@ def command_task(args: argparse.Namespace) -> None:
     if args.expected_task is not None and not isinstance(expected, dict):
         raise SystemExit("--expected-task must be a task object")
     receipt = {"applied": False, "before": None, "after": None}
+    affected = None
+    info = None
+    if args.publish_only:
+        prior = read_state(args.project).get("tasks", {}).get(args.task_id, {})
+        number = args.pr if args.pr is not None else prior.get("pr")
+        if number is not None:
+            affected = (safe_repo(args.repo or prior.get("repo") or DEFAULT_PR_REPO), int(number))
+            info = validated_pr(gh_json(
+                ["pr", "view", str(affected[1]), "--repo", affected[0], "--json",
+                 "state,isDraft,headRefOid,author,mergeCommit,statusCheckRollup,comments,reviewDecision,mergeable"],
+                timeout=15))
+            if info is None:
+                raise RuntimeError("affected PR read returned a malformed payload; board not published")
     def change(state):
         before = copy.deepcopy(state.get("tasks", {}).get(args.task_id))
         receipt["before"] = before
@@ -2301,10 +2319,25 @@ def command_task(args: argparse.Namespace) -> None:
                 for key, value in expected.items()):
             receipt["after"] = before
             return False
-        update_task(state, args)
+        task_args = args
+        if affected is not None:
+            task_args = copy.copy(args)
+            # Queue stages describe historical events, not manual stage floors.
+            task_args.stage = None
+            if before:
+                task_args.status = None
+        update_task(state, task_args)
+        if affected is not None:
+            task = state["tasks"][args.task_id]
+            if pr_key(task) != affected:
+                raise RuntimeError("affected PR identity changed during read; board not published")
+            task.pop("manual_stage", None)
+            sync_pr_task(task, info, stamp())
         receipt["applied"] = True
         receipt["after"] = copy.deepcopy(state["tasks"][args.task_id])
-    mutate(args.project, change, refresh=not args.defer_refresh)
+    applied = mutate(args.project, change, refresh=not (args.defer_refresh or args.publish_only))
+    if applied and args.publish_only:
+        refresh_and_publish(args.project, sync=False)
     if args.receipt:
         print(json.dumps(receipt, separators=(",", ":")))
 
@@ -2495,7 +2528,10 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--lane", choices=("status", "needs-joe"))
     task.add_argument("--expected-task", help="update only if these task fields still match this JSON object")
     task.add_argument("--receipt", action="store_true", help="print the locked before/after task mutation receipt")
-    task.add_argument("--defer-refresh", action="store_true", help="save the task without refreshing or publishing the board")
+    publication = task.add_mutually_exclusive_group()
+    publication.add_argument("--defer-refresh", action="store_true", help="save the task without refreshing or publishing the board")
+    publication.add_argument("--publish-only", action="store_true",
+                             help="refresh only this task PR and publish saved facts for other cards and external inventory")
     task.add_argument("--note")
     task.add_argument("--evidence")
     task.add_argument("--delivery-target", choices=("worker", "app", "workstation", "database", "manual"),

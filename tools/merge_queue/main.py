@@ -489,7 +489,7 @@ class Queue:
                         'factory-pr-' if ev['repo'] == REPOS[2] else 'pr-') + str(ev['pr'])
                 try:
                     self.bounded_operation(['progress-board', board_contract], False, lambda: command([sys.executable, str(self.root / 'tools/progress_board.py'), 'task', 'carr-v5', card,
-                             '--title', f"{ev['repo'].split('/')[-1]} PR #{ev['pr']}", '--executor', 'Merge queue', '--creation-defaults',
+                             '--title', f"{ev['repo'].split('/')[-1]} PR #{ev['pr']}", '--executor', 'Merge queue', '--creation-defaults', '--publish-only',
                              '--repo', ev['repo'], '--pr', str(ev['pr']), '--status', 'review', '--stage', stage,
                              '--health', health, '--note', f"Merge queue: {ev['outcome']}. {ev['detail']}"],
                             cwd=self.root, timeout=BOUNDS['board']['seconds'], diagnostics=True), 'Progress board command failed',
