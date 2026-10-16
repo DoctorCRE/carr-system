@@ -10,7 +10,7 @@ migrations 0454-0471.
 - `breakglass_selftest.py` — the acceptance suite (3)/(3b)/(3c)/(4) against
   a disposable local Postgres. This one DOES run directly.
 - `breakglass-snapshot.sql` / `census-queries.sql` define the driver's snapshot queries.
-- The retained reports, review transcript, and target dispositions need record-layer import verification before removal.
+- The research notes, review trail, reports and dispositions were imported into the record layer (doctrine document `frontier-finding-evidence`); their repo copies are staged under `_to_delete/frontier-finding/` for removal.
 
 ## Import-only libraries
 
