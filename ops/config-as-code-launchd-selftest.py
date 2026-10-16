@@ -345,7 +345,7 @@ def retired_launchd_cases() -> list[bool]:
         agents.mkdir(parents=True)
         templates.mkdir(parents=True)
         calls = []
-        loaded = {}
+        loaded: dict[str, str] = {}
         mode = "normal"
 
         def fake_launchctl(args, **kwargs):
