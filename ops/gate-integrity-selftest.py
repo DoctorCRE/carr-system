@@ -4,6 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+import contextlib
+import io
+import tempfile
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location('safety_hooks', REPO / 'hooks/gate-integrity.py')
@@ -30,6 +34,51 @@ class SafetyHooks(unittest.TestCase):
     def test_missing_command(self):
         document = {'PreToolUse': [{'hooks': [{'command': 'python {{REPO}}/hooks/absent.py'}]}]}
         self.assertTrue(any('missing hook script:' in error for error in gate.check(document, 'codex')))
+
+
+class BaselineIntegrity(unittest.TestCase):
+    def test_blessed_content_detects_changes_missing_and_unblessed_gates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hooks = root / 'hooks'
+            hooks.mkdir()
+            script = hooks / 'guard-unattended.py'
+            script.write_text('original guard')
+            contract = root / 'hooks.json'
+            contract.write_text('{}')
+            (root / 'ops/config').mkdir(parents=True)
+            for name in ['hooks', 'codex-hooks']:
+                (root / f'ops/config/{name}.json').write_text('{}')
+            baseline = root / 'baseline.json'
+            with patch.multiple(gate, REPO=root, HOOKS=hooks, BASELINE=baseline,
+                                GATED=['guard-unattended.py'],
+                                CONTRACTS={'hooks.json': contract}), \
+                    patch.object(gate, 'dirty_gate_files', return_value=[]), \
+                    patch.object(gate.sys, 'argv', ['gate-integrity.py', '--strict']), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gate.bless(), 0)
+                self.assertEqual(gate.check_baseline(), [])
+                with patch.object(gate, 'check', return_value=[]):
+                    self.assertEqual(gate.main(), 0)
+                script.write_text('changed guard')
+                with patch.object(gate, 'check', return_value=[]):
+                    self.assertEqual(gate.main(), 1)
+                self.assertTrue(any('CHANGED: hooks/guard-unattended.py' in error
+                                    for error in gate.check_baseline()))
+                script.unlink()
+                self.assertTrue(any('MISSING: hooks/guard-unattended.py' in error
+                                    for error in gate.check_baseline()))
+                script.write_text('original guard')
+                contract.write_text('{"changed": true}')
+                self.assertTrue(any('CHANGED: ops/config/hooks.json' in error
+                                    for error in gate.check_baseline()))
+                data = json.loads(baseline.read_text())
+                data['hashes'] = {}
+                baseline.write_text(json.dumps(data))
+                self.assertTrue(any('UNBLESSED: hooks/guard-unattended.py' in error
+                                    for error in gate.check_baseline()))
+                baseline.unlink()
+                self.assertTrue(gate.check_baseline())
 
 
 if __name__ == '__main__':
