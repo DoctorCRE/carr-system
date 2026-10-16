@@ -159,6 +159,12 @@
       "evidence": "pipelines/radar/build-license-pool-from-raw.py docstring (lookback fixed aa241723, #1206)"
     },
     {
+      "path": "security/install_hook.py",
+      "class": "hand_tool",
+      "reason": "Part of the pinned leak-guard bundle (security/bundle.json); a person runs it once per worktree to point core.hooksPath at the repo pre-push hook, which then runs the guard.",
+      "evidence": "39778c41 (#1590); security/bundle.json pins its bytes"
+    },
+    {
       "path": "tools/apply-graph-colors.py",
       "class": "hand_tool",
       "reason": "A person runs it with Obsidian closed to add Graph-System area colours to the vault's graph settings.",

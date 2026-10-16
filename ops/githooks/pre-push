@@ -29,6 +29,14 @@
 OWNER_EMAIL="64207374+jbookout@users.noreply.github.com"
 PROTECTED="refs/heads/main"
 
+REFS="$(cat)"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+# The leak guard excludes only what this push's receiver (its URL, $2) advertises.
+CARR_PUSH_RECEIVER="${2:-${1:-origin}}"
+export CARR_PUSH_RECEIVER
+printf '%s\n' "$REFS" | python3 "$REPO_ROOT/security/leak_guard.py" \
+  --root "$REPO_ROOT" --pre-push --remote "$CARR_PUSH_RECEIVER" || exit 1
+
 # Deliberate escape hatch. Set it for one command, never export it in a profile:
 #   CARR_ALLOW_MAIN_PUSH=1 git push
 if [ "$CARR_ALLOW_MAIN_PUSH" = "1" ]; then
@@ -40,7 +48,6 @@ fi
 # which was fine when nothing after it needed the refs. The quality gate now
 # derives the pushed COMMIT RANGE from them, so both readers replay this
 # variable instead of the pipe.
-REFS="$(cat)"
 
 printf '%s\n' "$REFS" | while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$remote_ref" = "$PROTECTED" ] || continue
