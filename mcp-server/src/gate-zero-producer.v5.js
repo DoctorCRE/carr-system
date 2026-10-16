@@ -396,7 +396,7 @@ const COMPARATOR =
  * the only one of the four addresses that is: the scheduler cannot be asked
  * which of its services is Gate Zero's, so this file names it, the same way
  * card 12's reader names `bin/run-scheduled.sh`. ops/config/services.json
- * carries the row; ops/launchd/com.carr.gate-zero-canary.plist runs it.
+ * carries the row; historical scheduler executions supplied it.
  */
 const SCHEDULER_SERVICE_KEY = "gate-zero-canary";
 

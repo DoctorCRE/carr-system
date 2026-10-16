@@ -78,8 +78,8 @@ class LeadStageJobTests(unittest.TestCase):
 class ScheduleTest(unittest.TestCase):
     def test_job_follows_local_mail_capture(self):
         chain=(Path(__file__).resolve().parents[1]/"bin/nightly.sh").read_text()
-        capture=chain.index('step "mail capture (extract + match, writes nothing)"')
-        job=chain.index('step "lead stages (evidence and approval drafts)"')
+        capture=chain.index('step "mail capture"')
+        job=chain.index('step "lead stages"')
         self.assertGreater(job,capture)
         self.assertIn('bin/lead-stage-job.py',chain[job:job+140])
 

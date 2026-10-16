@@ -627,7 +627,7 @@ class Pipeline:
     # -- plumbing ---------------------------------------------------------
     def _call_verb(self, verb: str, args: dict) -> tuple[bool, Any]:
         """The sanctioned Bash door (run.sh call <verb>), same as
-        tools/cutover-watch.py; never the generic call-verb passthrough."""
+        the runtime verb client; never the generic call-verb passthrough."""
         env = {k: v for k, v in self.env.items() if k in ("HOME", "PATH", "LANG")}
         try:
             proc = subprocess.run([str(self.repo / "run.sh"), "call", verb, json.dumps(args)],

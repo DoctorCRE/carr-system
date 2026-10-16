@@ -55,7 +55,6 @@ runpy.run_path(path, run_name="__main__")
         source = (ROOT / "bin/nightly.sh").read_text()
         self.assertTrue('step "Grok authentication health"' in source)
         self.assertTrue('tools/health-check.py --section grok-session' in source)
-        self.assertTrue('tools/health-check.py ops/jev_spend_health.py ops/grok_session.py' in source)
 
     def test_transports_are_independent_and_never_echo_private_output(self):
         with tempfile.TemporaryDirectory() as directory:

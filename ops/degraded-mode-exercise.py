@@ -141,18 +141,6 @@ def main() -> int:
     check("names the unreachable ledger as the cause",
           "unreachable ledger" in p.stdout, p.stdout[-200:])
 
-    # ── 4. the reconciler must still do the part it CAN do ───────────────────
-    # Degrading honestly is not the same as giving up. Four of scheduler-truth's
-    # five sources are local files and launchctl; only the fifth needs the
-    # database, so an outage must cost exactly that fifth and nothing else.
-    print("\ntools/scheduler-truth.py — four local sources, one remote")
-    p = run([PY, os.path.join(REPO, "tools", "scheduler-truth.py")])
-    check("still reconciles the four sources that do not need a database",
-          "plist(s) in the repo" in p.stdout, p.stdout[:200])
-    check("reports the registry as uncomparable rather than as agreeing",
-          "could not be compared" in p.stdout, p.stdout[-400:])
-    no_false_green("scheduler-truth", p.stdout)
-
     # ── 5. the health check must name its degraded source ────────────────────
     # This is the one with history. The schedule-drift row fell back to a trimmed
     # log twice and reported a drift that never happened, so the fallback is only

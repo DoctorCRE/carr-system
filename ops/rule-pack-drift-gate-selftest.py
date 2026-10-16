@@ -86,25 +86,6 @@ def synthetic_user(text: str, kind: str | None = None) -> dict:
     return record
 
 
-def scheduled_user(repo: Path = REPO) -> dict:
-    source = (repo / "ops/scheduled-tasks/nightly-record-layer.SKILL.md").read_text()
-    body = source.split("---\n", 2)[2].lstrip().replace("{{REPO}}", str(repo))
-    preamble = (
-        "This is an automated run of a scheduled task. The user is not present "
-        "to answer questions. For implementation details, execute autonomously "
-        "without asking clarifying questions — make reasonable choices and note "
-        "them in your output. \"write\" actions (e.g. MCP tools that send, post, "
-        "create, update, or delete), only take them if the task file asks for that "
-        "specific action. When in doubt, producing a report of what you found is "
-        "the correct output."
-    )
-    return synthetic_user(
-        '<scheduled-task name="nightly-record-layer" '
-        'file="/Users/booko/.claude/scheduled-tasks/nightly-record-layer/SKILL.md">\n'
-        f"{preamble}\n\n{body}</scheduled-task>"
-    )
-
-
 def assistant_tool(name: str, payload: dict) -> dict:
     return {"type": "assistant", "message": {"role": "assistant", "content": [
         {"type": "tool_use", "id": "t1", "name": name, "input": payload}]}}
@@ -493,78 +474,6 @@ for legacy_marker in (
     check(f"legacy-shaped user text remains observable: {legacy_marker}",
           "engineering-git" in adversarial["needed"], str(adversarial))
 
-# A source-owned scheduled workflow declares its semantic pack explicitly. Its
-# long static instructions name many other domains, but only actions chosen by
-# the session after the boundary may expand the needed set.
-nightly = run([
-    scheduled_user(),
-    assistant_tool("mcp__carr__standing-context", {"packs": ["scheduled-automation"]}),
-    standing_context_result("shadow", ["scheduled-automation"], ["424ba0cc"]),
-    assistant_tool("Bash", {
-        "command": 'cd ~/carr-system && ./bin/nightly.sh >/dev/null 2>&1; '
-                   'echo "direct script exit=$?"'}),
-    assistant_tool("Bash", {"command": "cd ~/carr-system && ./run.sh health"}),
-])
-check("nightly scheduled workflow produces a genuinely scoped event",
-      nightly["needed"] == ["scheduled-automation"], str(nightly))
-check("nightly canonical selector result has no missing pack",
-      nightly["missing"] == [], str(nightly))
-
-nightly_alias = run([
-    scheduled_user(),
-    assistant_tool("mcp__carr__standing-context", {"packs": ["automation"]}),
-    standing_context_result("shadow", ["automation"], ["424ba0cc"], ["automation"]),
-])
-check("unknown nightly alias cannot satisfy the canonical workflow pack",
-      nightly_alias["loaded"] == []
-      and nightly_alias["missing"] == ["scheduled-automation"], str(nightly_alias))
-
-nightly_drift = run([
-    scheduled_user(),
-    assistant_tool("mcp__carr__standing-context", {"packs": ["scheduled-automation"]}),
-    standing_context_result("shadow", ["scheduled-automation"], ["424ba0cc"]),
-    assistant_tool("Bash", {"command": "git commit -m drift"}),
-])
-check("source-owned scheduled scope does not hide later real drift",
-      "engineering-git" in nightly_drift["missing"], str(nightly_drift))
-
-tampered = scheduled_user()
-tampered["message"]["content"][0]["text"] = tampered["message"]["content"][0][
-    "text"].replace("seven generated files", "seventeen generated files", 1)
-tampered_result = run([tampered])
-check("changed scheduled instructions lose authoritative static-text exclusion",
-      len(tampered_result["needed"]) > 1, str(tampered_result))
-
-with tempfile.TemporaryDirectory() as directory:
-    fixture = Path(directory)
-    task_path = fixture / "ops/scheduled-tasks/nightly-record-layer.SKILL.md"
-    task_path.parent.mkdir(parents=True)
-    map_path = fixture / "ops/config/rule-enforcement-map.json"
-    map_path.parent.mkdir(parents=True)
-    shutil.copyfile(REPO / "ops/config/rule-enforcement-map.json", map_path)
-    original_source = (REPO / task_path.relative_to(fixture)).read_text()
-    old_repo, old_map = getattr(gate, "REPO"), getattr(gate, "MAP")
-    try:
-        setattr(gate, "REPO", str(fixture))
-        setattr(gate, "MAP", str(map_path))
-        for label, declaration in (
-            ("unknown", "scheduled-automatio"),
-            ("empty", ""),
-            ("duplicate", "scheduled-automation,scheduled-automation"),
-        ):
-            task_path.write_text(
-                original_source.replace(
-                    "RULE-DELIVERY PACKS: scheduled-automation",
-                    f"RULE-DELIVERY PACKS: {declaration}", 1),
-                encoding="utf-8")
-            record = scheduled_user(fixture)
-            check(f"{label} scheduled pack declaration fails closed",
-                  gate.scheduled_workflow_packs(record) == []
-                  and bool(gate.work_text(record)))
-    finally:
-        setattr(gate, "REPO", old_repo)
-        setattr(gate, "MAP", old_map)
-
 # ── a turn with no pack signal at all writes nothing ────────────────────────
 quiet = run([user("what time is it"), assistant_tool("Bash", {"command": "date -u"})])
 check("a turn implying no pack and loading none is silent",
@@ -942,9 +851,6 @@ source_digest = gate.source_sha256(REPO)
 map_digest = gate.file_sha256(REPO / "ops/config/rule-enforcement-map.json")
 check("shadow source identity is a sha256", len(source_digest) == 64, source_digest)
 check("reviewed map identity is a sha256", len(map_digest) == 64, map_digest)
-check("nightly consumer is part of the strict shadow source identity",
-      "ops/scheduled-tasks/nightly-record-layer.SKILL.md" in WINDOW_SOURCE_PATHS,
-      str(WINDOW_SOURCE_PATHS))
 check("engineering-slice workflow is part of the strict shadow source identity",
       "ops/scheduled-tasks/engineering-slice.SKILL.md" in WINDOW_SOURCE_PATHS,
       str(WINDOW_SOURCE_PATHS))
@@ -983,19 +889,10 @@ with tempfile.TemporaryDirectory() as directory:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(REPO / relative, target)
     before = source_sha256(copy)
-    nightly_copy = copy / "ops/scheduled-tasks/nightly-record-layer.SKILL.md"
-    nightly_copy.parent.mkdir(parents=True, exist_ok=True)
-    if not nightly_copy.exists():
-        shutil.copyfile(REPO / "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
-                        nightly_copy)
-    nightly_copy.write_text(nightly_copy.read_text() + "\n", encoding="utf-8")
-    after_nightly = source_sha256(copy)
-    check("nightly consumer drift changes the epoch source digest",
-          after_nightly != before)
     adapter_copy = copy / "tools/room-bridge/engineering_dispatch_adapter.py"
     adapter_copy.write_text(adapter_copy.read_text() + "\n", encoding="utf-8")
     check("engineering dispatch contract drift changes the epoch source digest",
-          source_sha256(copy) != after_nightly)
+          source_sha256(copy) != before)
 
 # Arbitrary exception detail (including credentials) is never persisted.
 with tempfile.TemporaryDirectory() as directory:
@@ -1466,7 +1363,7 @@ def _spy_open(file, *args, **kwargs):
 
 _builtins.open = io.open = _spy_open
 try:
-    for case_records in (flat, turns[0] + turns[1], [scheduled_user()]):
+    for case_records in (flat, turns[0] + turns[1]):
         run(case_records)
         reference_evaluate(case_records)
 finally:

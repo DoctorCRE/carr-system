@@ -11,7 +11,7 @@ Exit 0 means every clause it can check read-only checks out; exit 1 names
 which did not. A missing receipt history ("no_receipt_on_record") is NOT a
 failure -- see checkable_done 1's own note below.
 
-Same call path ops/timebomb-audit.py and ops/delivery-cadence-a05-sweep.py use: a
+Same call path ops/delivery-cadence-a05-sweep.py use: a
 subprocess to `run.sh call <verb> '<json>'`, never the generic MCP call-verb
 passthrough.
 """

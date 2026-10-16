@@ -325,9 +325,6 @@ class DotReview(unittest.TestCase):
             result = score._grade_impl({'lang':'py','test':'check(False, "must fail")'}, 'raise SystemExit(0)', tmp, 5)
         self.assertFalse(result['pass'], result)
 
-    def test_b31_ipv6_disposable_dsn(self):
-        gate = load("ops/gate-zero-scheduler-canary-gate.py")
-        self.assertEqual('postgresql://carr_jobs:pw@[::1]:5432/carr_ci', gate.jobs_dsn('postgresql://carr_ci:pw@[::1]:5432/carr_ci', 'pw'))
 
     def test_e01_nearby_candidates_keep_code(self):
         review = load("ops/jev_code_review.py")

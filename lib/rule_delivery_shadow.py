@@ -36,7 +36,6 @@ WINDOW_SOURCE_PATHS = (
     "ops/config/rule-jit-triggers.v1.json",
     "ops/rule-jit-compile.py",
     "ops/scheduled-tasks/engineering-slice.SKILL.md",
-    "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
     "ops/rule-delivery-cutover.py",
     "ops/rule-delivery-shadow-eligibility.py",
     "ops/rule-delivery-shadow-ledger.py",
