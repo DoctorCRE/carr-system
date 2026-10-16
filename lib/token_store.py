@@ -97,7 +97,7 @@ def store(name: str, value: str) -> Path:
     return dest.path
 
 
-_KEY_LINE_RE = re.compile(r"^([A-Z][A-Z0-9_]*)=")
+_KEY_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)=")
 
 
 def _fsync_directory(path: str) -> None:
