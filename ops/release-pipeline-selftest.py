@@ -1209,6 +1209,41 @@ class StopOnFailure(Base):
         self.assertEqual(self.fx.records()[-1]["step"], "verify-live")
 
 
+class PrerequisiteRecovery(Base):
+    def test_rejected_token_is_probed_until_repaired_without_redispatch(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        rejected = "Authentication error [code: 10000]"
+        first = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": rejected})
+        self.assertEqual(self.fx.pipeline(first, verbs=verbs).tick(["worker"]), 1)
+        for _ in range(2):
+            runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": rejected})
+            self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+            self.assertEqual(runner.names(), ["wrangler-auth"])
+            self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn"])
+
+    def test_missing_venv_is_probed_before_any_release_step_then_recovers(self):
+        python = self.fx.repo / ".venv/bin/python"
+        python.unlink()
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=verbs).tick(["worker"]), 1)
+        runner = FakeRunner()
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        python.write_text("#!/bin/sh\nexit 0\n")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
+
 class PostReleaseProof(Base):
     """After every production release the live system is proven by
     ops/release-smoke.py: a journey that passed before the release and fails
@@ -3637,7 +3672,7 @@ class DeployCredential(unittest.TestCase):
         self.assertNotIn("loop_filed", self.fx.records()[-1])
         self.assertIn("CLOUDFLARE_API_TOKEN", self.fx.state()["filed_blockers"])
 
-    def test_token_restoration_requires_the_notified_clearance_for_both_lanes(self):
+    def test_token_restoration_automatically_retries_both_lanes(self):
         for lane in ("worker", "app"):
             with self.subTest(lane=lane):
                 self.write_tokens("")
@@ -3659,14 +3694,6 @@ class DeployCredential(unittest.TestCase):
                               rp.report(store, "2099-01-01"))
                 self.assertNotIn("every tick", body)
                 self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-                paused = FakeRunner()
-                paused_pipe = self.pipeline(paused, app=lane == "app")
-                if lane == "app":
-                    paused_pipe.http = lambda _u: {"source_commit": self.fx.base, "environment": "production"}
-                self.assertEqual(paused_pipe.tick([lane]), 0)
-                self.assertEqual(paused.calls, [])
-                self.assertEqual(self.fx.state()[lane]["failed_sha"], sha)
-                rp.clear_failed(store, lane, sha, "credential restored and verified", repo_dir=self.fx.repo)
                 live = {"sha": self.fx.base}
                 runner = FakeRunner(live=live)
                 pipe = self.pipeline(runner, app=lane == "app")
@@ -3707,22 +3734,7 @@ class DeployCredential(unittest.TestCase):
         self.assertIn("every currently failed lane", loops[0]["body"])
 
         self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-        paused = FakeRunner()
-        self.assertEqual(pipeline(paused).tick(["worker", "app"]), 0)
-        self.assertEqual(paused.calls, [])
         store = rp.Store(self.fx.repo / "out/release-pipeline")
-        # Recovery must come from current state even after the failure's day.
-        recovery = rp.report(store, "2099-01-01")
-        commands = [shlex.split(line.strip()) for line in recovery.splitlines()
-                    if line.strip().startswith("ops/release-pipeline.py clear-failed ")]
-        self.assertEqual(len(commands), 2)
-        self.assertEqual({cmd[cmd.index("--lane") + 1] for cmd in commands}, set(live))
-        for cmd in commands:
-            self.assertEqual(cmd[cmd.index("--sha") + 1], sha)
-            rp.clear_failed(store, cmd[cmd.index("--lane") + 1],
-                            cmd[cmd.index("--sha") + 1], cmd[cmd.index("--reason") + 1],
-                            repo_dir=self.fx.repo)
-
         worker_live = {"sha": self.fx.base}
         runner = FakeRunner(live=worker_live)
         original_run = runner.run
