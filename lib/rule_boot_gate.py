@@ -1171,32 +1171,6 @@ def _utf16_len(text):
     return len(text.encode("utf-16-le", "surrogatepass")) // 2
 
 
-def boot_rule_ids(text):
-    """The rule ids whose full text a boot page carries (Part 1 headings)."""
-    return re.findall(r"^### ([0-9a-f]{8})(?: \(personal\))?$", text, re.M)
-
-
-def boot_delivery(pages):
-    """The rule ids one context received in full, or None.
-
-    `pages` maps page number to the boot answers ONE context read (one
-    session, one agent, one compaction epoch). Delivery needs every page of
-    one digest, the same page count and total_chars on each, and page texts
-    whose JavaScript lengths add up to total_chars: the gate's own test."""
-    if not pages:
-        return None
-    first = next(iter(pages.values()))
-    meta = (first.get("digest"), first.get("pages_total"), first.get("total_chars"))
-    if any((p.get("digest"), p.get("pages_total"), p.get("total_chars")) != meta
-           or not _is_page(p, n) for n, p in pages.items()):
-        return None
-    if set(pages) != set(range(1, int(meta[1] or 0) + 1)):
-        return None
-    if sum(_utf16_len(p["text"]) for p in pages.values()) != int(meta[2]):
-        return None
-    return [rid for n in sorted(pages) for rid in boot_rule_ids(pages[n]["text"])]
-
-
 def _is_page(boot, page):
     """A boot answer is page `page` read in full: it names that page and a
     digest, and carries the page's text."""
@@ -1390,20 +1364,6 @@ def observe(payload):
                     "page(s). Fetch the pages the gate names.")
         _touch(folder, f"p{page}")
         _put(folder, f"c{page}", str(_utf16_len(boot["text"])))
-        _put(folder, f"r{page}", json.dumps(boot_rule_ids(boot["text"])))
-        confirmed = _pages(_markers(folder), "c")
-        if total > 0 and confirmed == set(range(1, total + 1)) and not _short_text(folder, arm):
-            try:
-                from lib.rule_recall import log_delivery
-                ids = []
-                for n in range(1, total + 1):
-                    with open(os.path.join(folder, f"r{n}"), encoding="utf-8") as handle:
-                        ids.extend(json.load(handle))
-                if ids:
-                    log_delivery(os.path.join(REPO, "out", "rule-boot-delivery.jsonl"),
-                                 f"boot:{session_id}:{agent_id or 'main'}:{_stand_in(arm)}", ids)
-            except (OSError, ValueError):
-                pass
         _clear_stale(folder, page)
         return None
     folder = _fetch_dir(session_id, agent_id, _stand_in(arm))

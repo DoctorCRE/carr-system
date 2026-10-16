@@ -597,14 +597,11 @@
       ]
     },
     "pack_delivery": {
-      "_note": "NOT YET CLAIMED BY ANY RULE, and that is deliberate. Nine rules whose control is `session_boot` move to this one at the enforcement flip (see load_layer_flip_owed). While shadow mode leaves recitation intact, session_boot is still what carries them, and naming a control that is not yet carrying the rule is what rule ab814a26 forbids.",
-      "failure_mode": "Stop block naming the pack the turn's own work needed, once ops.rule_delivery_policy says enforced; a recorded observation until then",
+      "failure_mode": "PreToolUse delivers the binding rule text before the action",
       "implementation": [
-        "hooks/rule-pack-drift-gate.py",
         "hooks/rule-pack-preuse-reselection.py"
       ],
       "test": [
-        "ops/rule-pack-drift-gate-selftest.py",
         "ops/rule-load-layer-check-selftest.py",
         "ops/rule-pack-preuse-reselection-selftest.py"
       ]
@@ -778,7 +775,6 @@
   },
   "default_category": "judgment_advisory",
   "layer0_shared_cap": 35,
-  "load_layer_flip_owed": "AT THE ENFORCEMENT FLIP, NOT BEFORE: eight rules whose `control` is session_boot move to a pack, so their delivery stops being the boot recitation \u2014 25fcddee, 3fa17fa0, 72e06bdf, 113b3833, 57d13061, c66dc739, 49533583, 557838a5. Their control must change to the pack compiler in the SAME change that flips the mode, and not while shadow mode leaves recitation intact: claiming a control that is not yet carrying the rule is exactly what rule ab814a26 forbids.",
   "load_layer_note": "THE DELIVERY HALF of the enforcement recategorization (2026-08-23 rules council, both chairs unanimous). `rule_controls` above says HOW a rule is enforced; this says WHEN its text is delivered to a session. layer0 = recited at every boot, and nothing task-specific belongs here (rule 1fddcffb). control = an installed deny/stop/schema control prints the rule at the moment it binds, so boot recitation is belt-and-suspenders; ops/rule-load-layer-check.py REFUSES this value for any rule whose enforcement_class is not built, which is what stops 'scoped' from meaning 'silently dropped'. pack = delivered when the observed work matches a pack's triggers. A wildcard pack is refused by the same check: grok's warning was that shipping wildcard tags and calling it scoping is how rules go silent on an undeclared session.",
   "rule_controls": {
     "015183f5": {

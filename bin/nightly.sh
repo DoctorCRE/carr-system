@@ -1040,17 +1040,6 @@ step "control-plane registry drift (reports, never installs)" ./.venv/bin/python
 # Same contract as its sibling: 0 whether or not it finds a gap, 78 = SKIP.
 step "rule-admission drift (reports, never admits)" ./.venv/bin/python ops/rule-admission-drift.py
 
-# RULE-DELIVERY SHADOW, added 2026-08-23 with the load-layer tags. The 2026-08-23
-# rules council required a week of running the scoped selector beside the full
-# recitation before a single rule stops being recited, and a week of measurement
-# has exactly one failure mode: it stops, and its silence reads as a clean
-# result. That is what happened to the admission contract for months and it is
-# the reason its watch two lines above exists. This one reports the same way —
-# whether the recorder is still writing at all, then what it found — and takes
-# the log half even with no credential, because the log is on this Mac. Same
-# contract as its siblings: 0 whether or not it finds a miss, 78 = SKIP.
-step "rule-delivery shadow (reports, never scopes)" ./.venv/bin/python ops/rule-delivery-shadow-watch.py
-
 # CREDENTIAL MINT, added 2026-10-12 on Joe's ruling (decision cbe91287): minting
 # a credential must not require him. He places ONE root grant per provider once
 # (ops/config/credential-root-grants.v1.json); ops/credential-mint.py then mints,

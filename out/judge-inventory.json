@@ -146,10 +146,6 @@
       "sha256": "3290f211b7f7a6c83bde02ead69305bbff1f06b82512249d2262d0c5bbaf135f"
     },
     {
-      "path": "hooks/rule-pack-drift-gate.py",
-      "sha256": "3800569e2a1c3fc9dc57f26c5532e85a1648c9ae8aac10bef223499b26fea983"
-    },
-    {
       "path": "hooks/rule-pack-preuse-reselection.py",
       "sha256": "5e2eafd6b9ae2eb947c2aeb04e4a42d7b67487845e1451ba60a13d7cd0217ca0"
     },
@@ -180,10 +176,6 @@
     {
       "path": "lib/rule_delivery_preuse.py",
       "sha256": "fd7a624888b5ae176c01777fad4089eaf77c6bd184bfea011062637a712b6cf4"
-    },
-    {
-      "path": "lib/rule_delivery_shadow.py",
-      "sha256": "b39b504ff0bf77819b578a12f97821bc3da2e8226e90b5f17d3a40ccb1cb7417"
     },
     {
       "path": "lib/rule_routes.py",
@@ -936,10 +928,6 @@
     {
       "path": "ops/rule-jit-compile.py",
       "sha256": "2eb77551ddc1d49b73e5f91e7beefd2e8af345996a2aab5ea7218294c7b15f20"
-    },
-    {
-      "path": "ops/rule-pack-drift-gate-selftest.py",
-      "sha256": "658c23b6ebdd358181484f5d6d2bc5ebb915eb83f60e9deee96660f95d44c2b9"
     },
     {
       "path": "ops/rule-pack-preuse-reselection-selftest.py",
@@ -7224,14 +7212,6 @@
       ]
     },
     {
-      "path": "hooks/rule-pack-drift-gate.py",
-      "kind": "reference_or_definition",
-      "lines": [
-        487,
-        894
-      ]
-    },
-    {
       "path": "hooks/rule-pack-preuse-reselection.py",
       "kind": "reference_or_definition",
       "lines": [
@@ -7391,13 +7371,6 @@
         292,
         362,
         388
-      ]
-    },
-    {
-      "path": "lib/rule_delivery_shadow.py",
-      "kind": "reference_or_definition",
-      "lines": [
-        45
       ]
     },
     {
@@ -11157,13 +11130,6 @@
         420,
         421,
         429
-      ]
-    },
-    {
-      "path": "ops/rule-pack-drift-gate-selftest.py",
-      "kind": "test_or_fixture",
-      "lines": [
-        993
       ]
     },
     {
