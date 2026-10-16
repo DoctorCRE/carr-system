@@ -92,7 +92,6 @@ if [ "${1:-}" = "--preflight" ]; then
     generators/build-open-items-dashboard.py ops/nightly-verb-probe.py
     bin/smoke-and-record.sh tools/ops-record.py
     tools/health-check.py ops/jev_spend_health.py ops/grok_session.py tools/health_breach.py
-    lib/claude_continuity_spool.py
     # bin/routine-canonical-seam-refusal.sh came off this list on 2026-08-23: the
     # chain stopped launching it when the refusals became tombstones, and a
     # preflight that requires a file no step runs is checking the wrong thing.
@@ -1026,17 +1025,6 @@ step "control-plane registry drift (reports, never installs)" ./.venv/bin/python
 # Same contract as its sibling: 0 whether or not it finds a gap, 78 = SKIP.
 step "rule-admission drift (reports, never admits)" ./.venv/bin/python ops/rule-admission-drift.py
 
-# RULE-DELIVERY SHADOW, added 2026-08-23 with the load-layer tags. The 2026-08-23
-# rules council required a week of running the scoped selector beside the full
-# recitation before a single rule stops being recited, and a week of measurement
-# has exactly one failure mode: it stops, and its silence reads as a clean
-# result. That is what happened to the admission contract for months and it is
-# the reason its watch two lines above exists. This one reports the same way —
-# whether the recorder is still writing at all, then what it found — and takes
-# the log half even with no credential, because the log is on this Mac. Same
-# contract as its siblings: 0 whether or not it finds a miss, 78 = SKIP.
-step "rule-delivery shadow (reports, never scopes)" ./.venv/bin/python ops/rule-delivery-shadow-watch.py
-
 # CREDENTIAL MINT, added 2026-10-12 on Joe's ruling (decision cbe91287): minting
 # a credential must not require him. He places ONE root grant per provider once
 # (ops/config/credential-root-grants.v1.json); ops/credential-mint.py then mints,
@@ -1097,13 +1085,6 @@ step "credential health (reports, never rotates; loops on a finding)" \
 
 step "Monthly system cost view and spike loops" \
      ./run.sh costs --publish --alerts
-
-# Re-sends Claude continuity receipts whose delivery was unknown, in order and
-# under their original keys, through the claude-continuity token (no human
-# credential); refused ones are archived with the store's reason. The row
-# ("continuity spool depth") opens or clears one deduplicated loop.
-step "Claude continuity spool drain" \
-     ./.venv/bin/python tools/health-check.py --section claude-continuity-spool
 
 # Authentication readback only; no model work and no interactive login.
 step "Grok authentication health" \

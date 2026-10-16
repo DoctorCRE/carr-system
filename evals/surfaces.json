@@ -45,14 +45,12 @@
         "lib/guidance_registry.py",
         "hooks/rule-boot-gate.py",
         "hooks/rule-pack-preuse-reselection.py",
-        "hooks/rule-pack-drift-gate.py",
         "mcp-server/src/rule-*.js",
         "mcp-server/src/core-rule-ids.js",
         "ops/config/rule-routes.v1.json",
         "ops/config/rule-jit-triggers.v1.json",
         "ops/config/rule-classes.v1.json",
         "ops/config/rule-triage.v1.json",
-        "ops/config/rule-delivery-activation-overlay.v1.json",
         "tools/flash-prompt-rules.py"
       ]
     },

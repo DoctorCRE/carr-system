@@ -175,33 +175,12 @@
       ]
     }
   ],
-  "PreCompact": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "CARR_CONTEXT_HOOK_EVENT=PreCompact {{REPO}}/.venv/bin/python {{REPO}}/hooks/context-handoff-gate.py",
-          "timeout": 20
-        }
-      ]
-    }
-  ],
   "Stop": [
     {
       "hooks": [
         {
           "type": "command",
-          "command": "CARR_CONTEXT_HOOK_EVENT=Stop {{REPO}}/.venv/bin/python {{REPO}}/hooks/context-handoff-gate.py",
-          "timeout": 20
-        },
-        {
-          "type": "command",
           "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/scheduled-run-record.py",
-          "timeout": 20
-        },
-        {
-          "type": "command",
-          "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-drift-gate.py",
           "timeout": 20
         }
       ]

@@ -77,28 +77,6 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "CARR_MCP_CLIENT_PROFILE=codex-continuity /usr/bin/env python3 {{REPO}}/ops/codex-continuity-hook.py",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PostCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "CARR_MCP_CLIENT_PROFILE=codex-continuity /usr/bin/env python3 {{REPO}}/ops/codex-continuity-hook.py",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "matcher": "^(startup|resume|clear|compact)$",
@@ -156,27 +134,8 @@
             "timeout": 20
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "CARR_MCP_CLIENT_PROFILE=codex-continuity /usr/bin/env python3 {{REPO}}/ops/codex-continuity-hook.py",
-            "timeout": 10
-          }
-        ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-drift-gate.py",
-            "timeout": 20
-          }
-        ]
-      }
-    ]
+    "Stop": []
   }
 }
