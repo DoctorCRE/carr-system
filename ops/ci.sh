@@ -390,6 +390,10 @@ check_pushfloor() {
          floor_fail no-client-deliverables \
            "a client-deliverable path is tracked. git rm it — this repo is public and must carry no client record."; }
 
+  run_quiet "$LOGDIR/pushfloor-hook-deletion.log" "$PY" ops/hook-deletion-check.py \
+    || { cat "$LOGDIR/pushfloor-hook-deletion.log" >&2
+         floor_fail hook-deletion "unwire hook scripts in a prior PR before deleting or renaming them"; }
+
   if [ -n "$changed" ] && [ -f ops/githooks/path-hygiene-check.py ]; then
     local added
     added="$(git diff --name-only --diff-filter=ACR "$CARR_CI_RANGE" 2>/dev/null || true)"
