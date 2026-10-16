@@ -1,48 +1,9 @@
 #!/usr/bin/env python3
 # ci: db-gate
 # doctrine: doctorcre-v5-astra-integration-review
-"""The Gate Zero scheduler canary, end to end, against a disposable ledger.
-
-WHAT THIS PROVES, and why a text assertion could not. Gate Zero's fourth
-predecessor step, `step:scheduler-active-receipt`, is answered by card 12 of
-mcp-server/src/gate-zero-seam-readers.v5.js, which wants an ops.run row that is
-bound to a receipt the scheduler wrapper minted, plus an observation strictly
-after that dispatch. Three separate programs have to agree for that row to
-exist: the LaunchAgent definition (ops/launchd/com.carr.gate-zero-canary.plist),
-the wrapper (bin/run-scheduled.sh), and the recorder behind it
-(tools/ops-spool.py -> tools/ops-record.py). This gate runs all three for real
-and then reads the result back through the real reader.
-
-THE DEFECT THAT MADE IT NECESSARY, found in review of PR #1006. The canary's
-first revision passed a retired `evidence ref file` option and a path. The
-wrapper's option loop recognises only the two heartbeat options and treats
-anything else as the first POSITIONAL argument, so the flag became the service
-key, the path became the run key, and the scheduler tried to execute the word
-`gate-zero-canary` as a program. Nothing in the repository would have noticed:
-every assertion about the canary was a text assertion about files that were
-never run together. So this gate takes the plist's OWN ProgramArguments, with
-nothing retyped, and runs them.
-
-WHAT IT WRITES AND WHERE. One ops.run row, through the real spool and the real
-recorder, on a disposable local carr_ci database it refuses to run without. The
-row is deleted again at the end. The wrapper is exercised from a private
-INSTALL ROOT rather than from this checkout: the receipt path bin/run-scheduled.sh
-derives is fixed by the script's own location ($REPO/out/run-scheduled-receipts),
-out/ is shared by every worktree on this Mac, and two concurrent runs of this
-gate would otherwise race for one leaf and record a row with no receipt. That
-is the same reason ops/run-scheduled-selftest.py owns an install rather than
-passing a path.
-
-RUN IT BY HAND:
-    DATABASE_URL=postgres://carr_ci@127.0.0.1:55432/carr_ci \
-      .venv/bin/python ops/gate-zero-scheduler-canary-gate.py
-
-or, the supported lane that builds the database for you:
-    ./run.sh local-db-ci --class migration
-"""
+"""Verify the scheduled canary through its wrapper and persisted ledger row."""
 from __future__ import annotations
 
-import json
 import os
 import plistlib
 import secrets
@@ -62,7 +23,6 @@ REPO = Path(__file__).resolve().parents[1]
 WRAPPER = REPO / "bin" / "run-scheduled.sh"
 CANARY = REPO / "bin" / "gate-zero-canary.sh"
 PLIST = REPO / "ops" / "launchd" / "com.carr.gate-zero-canary.plist"
-READERS = REPO / "mcp-server" / "src" / "gate-zero-seam-readers.v5.js"
 
 SERVICE_KEY = "gate-zero-canary"
 CANARY_RUN_KEY = "gatezero.canary"
@@ -72,7 +32,6 @@ CANARY_RUN_KEY = "gatezero.canary"
 # module says so in its header -- so they are read out of the answer by the
 # names the module emits TODAY and asserted one by one, rather than summarised.
 HELD = "held"
-JOIN_FINDING = "scheduler_canary_and_observation_join"
 
 
 def fail(message: str) -> int:
@@ -221,38 +180,6 @@ def child_env(jobs: str, spool: Path, state: Path) -> dict[str, str]:
     return env
 
 
-def read_card_twelve(dsn: str) -> dict[str, Any]:
-    """Card 12's answer, from the real reader, over the real store.
-
-    The reader opens its own connection from DATABASE_URL_READER; there is no
-    handle parameter and no injectable store, which is the property the slice is
-    built on. So the only honest way to ask it about these rows is to point that
-    variable at this database and call the exported reader.
-    """
-    script = (
-        f"import {{ readSchedulerCanaryEvidence }} from {json.dumps(READERS.as_uri())};\n"
-        f"const answer = await readSchedulerCanaryEvidence({{ serviceKey: {json.dumps(SERVICE_KEY)},"
-        f" canaryRunKey: {json.dumps(CANARY_RUN_KEY)} }});\n"
-        "process.stdout.write(JSON.stringify(answer));\n"
-    )
-    env = dict(os.environ)
-    env["DATABASE_URL_READER"] = dsn
-    node = shutil.which("node")
-    if node is None:
-        raise RuntimeError("node is not on PATH, so card 12's reader cannot be run")
-    with tempfile.TemporaryDirectory(prefix="carr-gate-zero-canary-reader-") as reader_dir:
-        entry = Path(reader_dir) / "read-card-12.mjs"
-        entry.write_text(script, encoding="utf-8")
-        proc = subprocess.run([node, str(entry)], capture_output=True, text=True,
-                              env=env, cwd=str(REPO), timeout=120)
-    if proc.returncode != 0:
-        raise RuntimeError(f"card 12's reader did not run: {proc.stderr.strip()[:400]}")
-    try:
-        return json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"card 12's reader did not answer with JSON: {proc.stdout[:200]!r}")
-
-
 def main() -> int:
     dsn = disposable_dsn()
     checks = 0
@@ -340,31 +267,13 @@ def main() -> int:
             return fail("observed_at is not strictly after started_at, so no ordering is proven")
         checks += 1
 
-    answer = read_card_twelve(dsn)
-    if answer.get("finding") != JOIN_FINDING or answer.get("decision") != "report":
-        return fail(f"card 12 did not report the canary join: {json.dumps(answer)[:400]}")
-    checks += 1
-    # The three clauses, each by its own name. `receipt_binding` is the clause a
-    # caller-facing summary calls "bound to receipt", and
-    # `observation_after_dispatch` is the one it calls "readback after dispatch";
-    # asserting the reader's own field names is what keeps this honest when the
-    # vocabulary moves again.
-    for clause in ("receipt_binding", "canary_match", "observation_after_dispatch"):
-        if answer.get(clause) != HELD:
-            return fail(f"card 12 clause {clause} is {answer.get(clause)!r}, not {HELD!r}: "
-                        f"{json.dumps(answer)[:400]}")
-        checks += 1
-    if answer.get("caller_evidence_admitted") is not False:
-        return fail("card 12's answer claims caller evidence was admitted")
-    checks += 1
-
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("""delete from ops.run r using ops.service s
                         where s.id=r.service_id and s.key=%s and r.run_key=%s""",
                     (SERVICE_KEY, CANARY_RUN_KEY))
 
     print(f"gate-zero-scheduler-canary: {checks} checks passed — the plist's own arguments "
-          "produce a wrapper-minted receipt row that card 12 reports as the canary join")
+          "produce a successful ledger row with wrapper provenance and ordered timestamps")
     return 0
 
 

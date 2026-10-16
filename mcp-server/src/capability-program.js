@@ -2,57 +2,11 @@
 // lifecycle. Project definitions and mutable state live in Postgres. This module
 // owns the server-enforced transition and independent-verification boundary.
 
-import { implementationShapeError } from "./work-shape.js";
-
 export const COMPLETION_KINDS = Object.freeze(["built", "extended", "adopted", "declined"]);
 export const DEFAULT_PROGRAM = "carr-ai-engineering-suite-v1";
 
 const textPresent = value => typeof value === "string" && value.trim().length > 0;
-const refsPresent = value => Array.isArray(value) && value.length > 0 && value.every(textPresent);
-const fullSha = value => typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
 const uuid = value => typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-
-// Completion is deliberately evidence-free now. Evidence is submitted once,
-// bound to a persisted candidate, and never accepted again as caller text.
-export function candidateEvidenceError(kind, evidence) {
-  if (!COMPLETION_KINDS.includes(kind)) return { error: "invalid_completion_kind", allowed: COMPLETION_KINDS };
-  const e = evidence && typeof evidence === "object" && !Array.isArray(evidence) ? evidence : {};
-  const missing = [];
-  if (kind === "declined") {
-    if (!uuid(e.decision_ref)) missing.push("decision_ref");
-  } else {
-    if (!textPresent(e.artifact_ref)) missing.push("artifact_ref");
-    if (!fullSha(e.candidate_commit_sha)) missing.push("candidate_commit_sha (40 lowercase hex)");
-    if (!refsPresent(e.acceptance_test_refs)) missing.push("acceptance_test_refs");
-    if (kind === "adopted") {
-      if (!textPresent(e.rollback_ref)) missing.push("rollback_ref");
-      if (!uuid(e.decision_ref)) missing.push("decision_ref");
-    }
-  }
-  return missing.length ? { error: "candidate_evidence_incomplete", completion_kind: kind, missing } : null;
-}
-
-// Legacy public-shape validation stays exported so a malformed request fails at
-// the contract edge. The completion handler below never trusts these strings:
-// it requires the persisted session and independently stored attestation.
-export function completionEvidenceError(kind, evidence) {
-  if (!COMPLETION_KINDS.includes(kind)) return { error: "invalid_completion_kind", allowed: COMPLETION_KINDS };
-  const e = evidence && typeof evidence === "object" && !Array.isArray(evidence) ? evidence : {};
-  const missing = [];
-  if (kind === "declined") {
-    if (!textPresent(e.decision_ref)) missing.push("decision_ref");
-    if (!textPresent(e.independent_verifier_ref)) missing.push("independent_verifier_ref");
-  } else {
-    if (!textPresent(e.artifact_ref)) missing.push("artifact_ref");
-    if (!refsPresent(e.acceptance_test_refs)) missing.push("acceptance_test_refs");
-    if (!textPresent(e.independent_verifier_ref)) missing.push("independent_verifier_ref");
-    if (kind === "adopted") {
-      if (!textPresent(e.rollback_ref)) missing.push("rollback_ref");
-      if (!textPresent(e.decision_ref)) missing.push("decision_ref");
-    }
-  }
-  return missing.length ? { error: "completion_evidence_incomplete", completion_kind: kind, missing } : null;
-}
 
 export function fixedProgramKey(value) {
   return value === undefined || value === null || value === "" || value === DEFAULT_PROGRAM;
@@ -185,21 +139,6 @@ async function loadSession(c, ToolError, sessionId, workRequestId) {
   if (!session || session.work_request_id !== workRequestId) throw new ToolError({ error: "capability_agent_session_not_for_current_project", session_id: sessionId });
   return session;
 }
-
-async function requireDecision(c, ToolError, decisionRef) {
-  if (!uuid(decisionRef)) throw new ToolError({ error: "decision_not_found", decision_ref: decisionRef });
-  const r = await c.query(`select 1 from event where subject_type='decision' and subject_id=$1 and verb='log-decision' limit 1`, [decisionRef]);
-  if (!r.rows.length) throw new ToolError({ error: "decision_not_found", decision_ref: decisionRef });
-}
-
-const candidateEvidenceSchema = {
-  type: "object", additionalProperties: false,
-  properties: {
-    artifact_ref: { type: "string" }, candidate_commit_sha: { type: "string" },
-    acceptance_test_refs: { type: "array", items: { type: "string" } }, decision_ref: { type: "string" },
-    rollback_ref: { type: "string" }, note: { type: "string" },
-  },
-};
 
 const completionEvidenceSchema = {
   type: "object", additionalProperties: false,
@@ -349,81 +288,6 @@ export function capabilityProgramTools({ withEnvelope, writeEvent, ToolError }) 
           projects: args.include_all ? rows.rows.map(programRow) : undefined,
         };
       },
-    },
-    "start-capability-project": {
-      write: true,
-      description: "Create the server-persisted build session for only the current ready project and perform the actual ready→claimed transition. The named executor must be an active CARR actor; arbitrary session strings are not accepted. This does not begin work, merge, deploy, spend or communicate.",
-      inputSchema: { type: "object", additionalProperties: false, properties: { ...projectFields, executor_actor: { type: "string" }, source_commit_sha: { type: "string" }, worktree_ref: { type: "string" }, scope_ref: { type: "string" } }, required: ["idempotency_key","sequence","base_version","executor_actor","source_commit_sha","worktree_ref"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "start-capability-project", args, async () => {
-        requireFixedProgram(args, ToolError);
-        const row = await requireCurrent(c, ToolError, args.sequence, args.base_version);
-        if (row.state !== "ready") throw new ToolError({ error: "invalid_state_transition", from: row.state, to: "claimed", required_from: "ready" });
-        const shape = row.shape_disposition === "required"
-          ? (await c.query(`select work_request_version from ops.work_shape_revision where work_request_id=$1 order by version desc limit 1`, [row.id])).rows[0]
-          : null;
-        const shapeError = implementationShapeError(row, shape);
-        if (shapeError) throw new ToolError(shapeError);
-        if (!fullSha(args.source_commit_sha) || !textPresent(args.worktree_ref)) throw new ToolError({ error: "capability_agent_session_identity_invalid", required: ["source_commit_sha (40 lowercase hex)","worktree_ref"] });
-        const executor = (await c.query(`select id, slug from actor where slug=$1 and active=true`, [args.executor_actor])).rows[0];
-        if (!executor) throw new ToolError({ error: "capability_executor_not_active", executor_actor: args.executor_actor });
-        const session = (await c.query(`insert into ops.capability_agent_session (work_request_id, executor_actor_id, created_by_actor_id, source_commit_sha, worktree_ref, scope_ref) values ($1,$2,$3,$4,$5,$6) returning *`, [row.id, executor.id, actor.id, args.source_commit_sha, args.worktree_ref, args.scope_ref || null])).rows[0];
-        const updated = (await c.query(`update ops.work_request set state='claimed', executor_actor=$2, claimed_at=now(), updated_at=now(), version=version+1 where id=$1 returning *`, [row.id, executor.slug])).rows[0];
-        await writeEvent(c, actor, "start-capability-project", "ops_work_request", row.id, { field: "state", old: { state: "ready" }, new: { state: "claimed", executor_actor: executor.slug, capability_agent_session_id: session.id }, human_quote: args.human_quote || null, idempotency_key: args.idempotency_key });
-        return { ok: true, project: programRow(updated), capability_session: { id: session.id, state: session.state, executor_actor: executor.slug, source_commit_sha: session.source_commit_sha, worktree_ref: session.worktree_ref }, session_brief: sessionBrief(updated) };
-      }),
-    },
-    "begin-capability-project": {
-      write: true,
-      description: "Perform the separate claimed→in_progress transition for the persisted current capability session. It cannot create or substitute a session.",
-      inputSchema: { type: "object", additionalProperties: false, properties: { ...projectFields, capability_agent_session_id: { type: "string" } }, required: ["idempotency_key","sequence","base_version","capability_agent_session_id"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "begin-capability-project", args, async () => {
-        requireFixedProgram(args, ToolError);
-        const row = await requireCurrent(c, ToolError, args.sequence, args.base_version);
-        if (row.state !== "claimed") throw new ToolError({ error: "invalid_state_transition", from: row.state, to: "in_progress", required_from: "claimed" });
-        const session = await loadSession(c, ToolError, args.capability_agent_session_id, row.id);
-        if (session.state !== "claimed") throw new ToolError({ error: "invalid_capability_agent_session_state", from: session.state, to: "in_progress" });
-        await c.query(`update ops.capability_agent_session set state='in_progress', started_at=now(), version=version+1 where id=$1`, [session.id]);
-        const updated = (await c.query(`update ops.work_request set state='in_progress', started_at=now(), updated_at=now(), version=version+1 where id=$1 returning *`, [row.id])).rows[0];
-        await writeEvent(c, actor, "begin-capability-project", "ops_work_request", row.id, { field: "state", old: { state: "claimed", capability_agent_session_id: session.id }, new: { state: "in_progress", capability_agent_session_id: session.id }, human_quote: args.human_quote || null, idempotency_key: args.idempotency_key });
-        return { ok: true, project: programRow(updated), capability_session: { id: session.id, state: "in_progress" } };
-      }),
-    },
-    "prepare-capability-project": {
-      write: true,
-      description: "Freeze exactly one candidate for independent verification. The candidate is bound to the persisted session and may never be changed. This does not accept completion or advance the queue.",
-      inputSchema: { type: "object", additionalProperties: false, properties: { ...projectFields, capability_agent_session_id: { type: "string" }, completion_kind: { type: "string", enum: COMPLETION_KINDS }, candidate_evidence: candidateEvidenceSchema }, required: ["idempotency_key","sequence","base_version","capability_agent_session_id","completion_kind","candidate_evidence"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "prepare-capability-project", args, async () => {
-        requireFixedProgram(args, ToolError);
-        const row = await requireCurrent(c, ToolError, args.sequence, args.base_version);
-        if (row.state !== "in_progress") throw new ToolError({ error: "invalid_state_transition", from: row.state, to: "verification", required_from: "in_progress" });
-        if (!permittedCompletion(row.disposition, args.completion_kind)) throw new ToolError({ error: "completion_disposition_mismatch", disposition: row.disposition, completion_kind: args.completion_kind });
-        const evidenceError = candidateEvidenceError(args.completion_kind, args.candidate_evidence);
-        if (evidenceError) throw new ToolError(evidenceError);
-        if (args.completion_kind === "declined" || args.completion_kind === "adopted") await requireDecision(c, ToolError, args.candidate_evidence.decision_ref);
-        const session = await loadSession(c, ToolError, args.capability_agent_session_id, row.id);
-        if (session.state !== "in_progress" || session.candidate_evidence) throw new ToolError({ error: "candidate_already_prepared_or_session_not_running", session_state: session.state });
-        const prepared = (await c.query(`update ops.capability_agent_session set state='verification', candidate_kind=$2, candidate_evidence=$3::jsonb, prepared_at=now(), version=version+1 where id=$1 returning *`, [session.id, args.completion_kind, JSON.stringify(args.candidate_evidence)])).rows[0];
-        const updated = (await c.query(`update ops.work_request set state='verification', updated_at=now(), version=version+1 where id=$1 returning *`, [row.id])).rows[0];
-        await writeEvent(c, actor, "prepare-capability-project", "ops_work_request", row.id, { field: "state", old: { state: "in_progress", capability_agent_session_id: session.id }, new: { state: "verification", capability_agent_session_id: session.id, candidate_fingerprint: prepared.candidate_fingerprint }, human_quote: args.human_quote || null, idempotency_key: args.idempotency_key });
-        return { ok: true, project: programRow(updated), capability_session: { id: prepared.id, state: prepared.state, candidate_fingerprint: prepared.candidate_fingerprint }, advanced: false };
-      }),
-    },
-    "attest-capability-project": {
-      write: true,
-      description: "Persist an independent pass or fail against the frozen current candidate. The server rejects an executor attesting its own work and records both the evidence and source now, never at completion time.",
-      inputSchema: { type: "object", additionalProperties: false, properties: { ...projectFields, capability_agent_session_id: { type: "string" }, outcome: { type: "string", enum: ["pass","fail"] }, verification_evidence_ref: { type: "string" }, source_ref: { type: "string" }, note: { type: "string" } }, required: ["idempotency_key","sequence","base_version","capability_agent_session_id","outcome","verification_evidence_ref","source_ref"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "attest-capability-project", args, async () => {
-        requireFixedProgram(args, ToolError);
-        const row = await requireCurrent(c, ToolError, args.sequence, args.base_version);
-        if (row.state !== "verification") throw new ToolError({ error: "invalid_state_transition", from: row.state, to: "attested", required_from: "verification" });
-        if (!textPresent(args.verification_evidence_ref) || !textPresent(args.source_ref)) throw new ToolError({ error: "attestation_evidence_incomplete", required: ["verification_evidence_ref","source_ref"] });
-        const session = await loadSession(c, ToolError, args.capability_agent_session_id, row.id);
-        if (session.state !== "verification" || !session.candidate_fingerprint) throw new ToolError({ error: "capability_agent_session_not_ready_for_attestation", session_state: session.state });
-        if (actor.id === session.executor_actor_id) throw new ToolError({ error: "capability_self_attestation_forbidden", capability_agent_session_id: session.id });
-        const attestation = (await c.query(`insert into ops.capability_verification (build_session_id, work_request_id, verifier_actor_id, outcome, verification_evidence_ref, source_ref, candidate_fingerprint, note) values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`, [session.id, row.id, actor.id, args.outcome, args.verification_evidence_ref, args.source_ref, session.candidate_fingerprint, args.note || null])).rows[0];
-        await writeEvent(c, actor, "attest-capability-project", "ops_work_request", row.id, { field: "capability_attestation", new: { capability_agent_session_id: session.id, attestation_id: attestation.id, outcome: attestation.outcome, candidate_fingerprint: session.candidate_fingerprint }, human_quote: args.human_quote || null, idempotency_key: args.idempotency_key });
-        return { ok: true, attestation: { id: attestation.id, outcome: attestation.outcome, candidate_fingerprint: attestation.candidate_fingerprint }, advanced: false };
-      }),
     },
     "complete-capability-project": {
       write: true,
