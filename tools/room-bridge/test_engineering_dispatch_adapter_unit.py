@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline checks for the controller's job request and result."""
 import copy
+import io
 import json
 import sys
 import subprocess
@@ -22,6 +23,44 @@ class JobTests(unittest.TestCase):
         self.result = {**copy.deepcopy(self.job),
             "checks": [{"check_ref": "check:dispatch", "state": "blocked", "evidence_refs": []}],
             "outcome": {"status": "blocked"}}
+
+    def test_preflight_output_passes_controller_contract(self):
+        desk = {"name": "engineering-codex", "kind": "codex-session",
+            "family": "gpt-6.1-sol", "effort": "xhigh", "cwd": str(adapter.REPO),
+            "sandbox": "workspace-write", "add_dirs": [], "thread_id": "private-thread"}
+        output = io.StringIO()
+        with patch.object(adapter, "_dedicated_codex_desk", return_value=desk), \
+             patch.object(sys, "argv", ["adapter", "--preflight"]), \
+             patch.object(sys, "stdout", output):
+            self.assertEqual(adapter.main(), 0)
+        controller = adapter.REPO / "mcp-server/bin/run-engineering-dispatch.mjs"
+        script = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const {EventEmitter} = require("node:events");
+const source = fs.readFileSync(process.argv[1], "utf8");
+const preflight = source.slice(source.indexOf("function preflightDedicatedDesk()"),
+    source.indexOf("async function main()"));
+const stdout = fs.readFileSync(0, "utf8");
+const context = {
+    PYTHON: "python", ADAPTER: "adapter", DESK: "engineering-codex", safeAdapterEnv: () => ({}),
+    ControllerError: class extends Error { constructor(payload) { super(JSON.stringify(payload)); } },
+    spawn: () => {
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        process.nextTick(() => { child.stdout.emit("data", stdout); child.emit("close", 0); });
+        return child;
+    },
+};
+vm.runInNewContext(preflight + "preflightDedicatedDesk()", context)
+    .catch(error => { console.error(error.message); process.exitCode = 1; });
+"""
+        result = subprocess.run(["node", "-e", script, str(controller)],
+            input=output.getvalue(), text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(output.getvalue()), {"ok": True,
+            "desk": {key: desk[key] for key in
+                ("name", "kind", "family", "effort", "cwd", "sandbox", "add_dirs")}})
 
     def test_one_request_and_result(self):
         self.assertEqual(adapter.validate_job(self.job), self.job)
