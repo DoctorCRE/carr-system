@@ -317,6 +317,17 @@ Only for the registered Codex validator of WR-000070 slice R06: read
 before assignment validation or execution. Resolve its current dispatcher intent
 and server-issued runbook; all bindings and refusal conditions remain mandatory.
 
+## How every job runs: pstack and Pocock skills
+
+Every task, all required:
+
+1. Size it first. One obvious change: build it. Medium or large: run `/grill-with-docs` before writing code. Bigger than one session: map it with `/wayfinder`.
+2. Work in `/poteto-mode` (pstack). Subtract before you add. Use a tool the way its own docs say, and build no proof, receipt or harness machinery nobody asked for.
+3. Code changes go test-first with `/tdd`. A bug starts with `/diagnosing-bugs`.
+4. Before the PR, run the design and debt pass below.
+
+Claude gets these from the enabled `pstack` and `mattpocock-skills` plugins; Codex from `~/.agents/skills/`. If a skill is missing, say so in the report rather than skipping it.
+
 ## Before every PR: design and debt pass
 
 Before opening or updating any pull request, apply both skills to the diff:
@@ -329,4 +340,3 @@ than claim the pass. The PR body's `Design and debt pass` section gives one
 line per skill: what it changed, or why nothing did.
 This section is the canonical policy for both client entry points.
 
-Rigorous engineering work uses `/poteto-mode` from [pstack](plugins/pstack/skills/poteto-mode/SKILL.md).

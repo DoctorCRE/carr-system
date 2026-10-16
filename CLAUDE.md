@@ -108,6 +108,8 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
+Every job follows [how every job runs](AGENTS.md#how-every-job-runs-pstack-and-pocock-skills): size it, `/grill-with-docs` or `/wayfinder` when it is big, `/poteto-mode`, `/tdd`, then the design and debt pass.
+
 ### Issue tracker
 
 Issues are CARR Work Requests in the record layer (`report-problem`, `work-request-card`), not GitHub Issues. See `docs/agents/issue-tracker.md`.
