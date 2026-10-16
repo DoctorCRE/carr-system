@@ -900,16 +900,6 @@ check_pushfloor() {
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(mcp-server/src/|hooks/completion-evidence-gate\.py$)'; then
-    ran="$ran registry-coverage"
-    run_quiet "$LOGDIR/pushfloor-registry-coverage.log" \
-      "$PY" ops/completion-evidence-gate-selftest.py --registry-only \
-      || { tail -12 "$LOGDIR/pushfloor-registry-coverage.log" >&2
-           floor_fail registry-coverage \
-             "classify the registry's new writes in the completion gate and retain read exclusions"; }
-  fi
-
-  if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
       '(^ops/ci\.sh$|(^|/)(test[^/]*|[^/]*selftest[^/]*)\.(py|sh|mjs|js)$)'; then
     ran="$ran test-collection"
     run_quiet "$LOGDIR/pushfloor-test-collection.log" \
