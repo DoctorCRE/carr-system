@@ -1717,6 +1717,109 @@ COMMENT ON FUNCTION ops.advance_workflow_cutover_stage(p_plan_id uuid, p_to_stag
 
 
 --
+-- Name: amend_rule_scope(uuid, jsonb, text, integer, text, text); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'ops', 'public', 'pg_temp'
+    AS $$
+declare
+  v_actor_slug text;
+  v_actor_id uuid;
+  v_rule public.rule%rowtype;
+  v_prior ops.rule_amendment_receipt%rowtype;
+  v_receipt ops.rule_amendment_receipt%rowtype;
+  v_new_statement text := btrim(coalesce(p_new_statement,''));
+  v_prior_hash text;
+  v_new_hash text;
+  v_legacy_note text;
+  v_contract jsonb;
+  v_contract_hash text;
+  v_amended_at timestamptz := now();
+begin
+  v_actor_slug := ops.authority_actor_slug();
+  if v_actor_slug <> 'joe' then
+    raise exception 'scope amendment requires Joe authority';
+  end if;
+  select id into v_actor_id from public.actor
+   where slug=v_actor_slug and kind='human' and active;
+  if v_actor_id is null then raise exception 'authority actor is not an active human'; end if;
+  if btrim(coalesce(p_idempotency_key,''))='' or btrim(coalesce(p_reason,''))='' then
+    raise exception 'amendment idempotency key and rationale are required';
+  end if;
+  if v_new_statement='' then raise exception 'a rule cannot be amended to empty text'; end if;
+  if p_new_scope is null or jsonb_typeof(p_new_scope)<>'object' then
+    raise exception 'invalid_object: scope must be a JSON object';
+  end if;
+  if p_base_version is null then raise exception 'version_conflict: fresh base_version required'; end if;
+
+  -- Share the statement writer's lock and receipt namespace.
+  perform pg_advisory_xact_lock(hashtextextended('rule-amendment:'||p_idempotency_key,0));
+  select * into v_prior from ops.rule_amendment_receipt where idempotency_key=p_idempotency_key;
+  if found then
+    if v_prior.rule_id is distinct from p_rule_id
+       or v_prior.new_scope is distinct from p_new_scope
+       or v_prior.new_statement is distinct from v_new_statement
+       or v_prior.rule_version_before is distinct from p_base_version
+       or v_prior.rationale is distinct from btrim(p_reason)
+       or v_prior.amended_by is distinct from v_actor_id then
+      raise exception 'rule amendment idempotency key was reused with different input';
+    end if;
+    select * into v_rule from public.rule where id=p_rule_id for update;
+    if not found or v_rule.status<>'active'
+       or v_rule.version is distinct from v_prior.rule_version_after
+       or v_rule.statement is distinct from v_prior.new_statement
+       or v_rule.scope is distinct from v_prior.new_scope then
+      raise exception 'rule amendment replay refused: current rule no longer matches the immutable amendment';
+    end if;
+    return jsonb_build_object('ok',true,'replayed',true,'rule_id',p_rule_id,
+      'rule_version_before',v_prior.rule_version_before,'rule_version_after',v_prior.rule_version_after,
+      'amendment_receipt_id',v_prior.id);
+  end if;
+
+  select * into v_rule from public.rule where id=p_rule_id for update;
+  if not found then raise exception 'rule not found'; end if;
+  if v_rule.status<>'active' then raise exception 'scope backfill requires an active rule'; end if;
+  if v_rule.version is distinct from p_base_version then
+    raise exception 'version_conflict: fresh base_version required';
+  end if;
+  if not ops.rule_scope_is_additive(v_rule.scope,p_new_scope) then
+    raise exception 'active_rule_scope_frozen: preserve every stored scope key and value';
+  end if;
+  if v_rule.scope=p_new_scope then raise exception 'scope amendment is a no-op'; end if;
+
+  v_prior_hash := encode(public.digest(v_rule.statement,'sha256'),'hex');
+  v_new_hash := encode(public.digest(v_new_statement,'sha256'),'hex');
+  v_legacy_note := ops.legacy_rule_admission_note(v_rule.id,v_rule.status,v_rule.activated_at);
+  v_contract := jsonb_build_object(
+    'rule_id',v_rule.id,'rule_version_before',v_rule.version,'rule_version_after',v_rule.version+1,
+    'prior_statement_hash',v_prior_hash,'new_statement_hash',v_new_hash,
+    'prior_scope',v_rule.scope,'new_scope',p_new_scope,
+    'actor_id',v_actor_id,'rationale',btrim(p_reason),'legacy_admission',v_legacy_note,'amended_at',v_amended_at);
+  v_contract_hash := encode(public.digest(v_contract::text,'sha256'),'hex');
+  insert into ops.rule_amendment_receipt
+    (idempotency_key,rule_id,rule_version_before,rule_version_after,prior_statement_hash,
+     new_statement,new_statement_hash,prior_scope,new_scope,amended_by,rationale,
+     legacy_admission,contract_hash,amended_at)
+  values (p_idempotency_key,v_rule.id,v_rule.version,v_rule.version+1,v_prior_hash,
+    v_new_statement,v_new_hash,v_rule.scope,p_new_scope,v_actor_id,btrim(p_reason),
+    v_legacy_note,v_contract_hash,v_amended_at)
+  returning * into v_receipt;
+  insert into ops.authority_receipt
+    (idempotency_key,kind,subject_type,subject_id,actor_id,decision,contract_hash,evidence_refs)
+  values ('amendment:'||p_idempotency_key,'amendment','rule',v_rule.id,v_actor_id,
+    'additive scope backfill: '||btrim(p_reason),v_contract_hash,'{}'::text[]);
+  update public.rule set statement=v_new_statement,scope=p_new_scope
+   where id=v_rule.id and version=p_base_version;
+  if not found then raise exception 'version_conflict: rule amendment raced'; end if;
+  return jsonb_build_object('ok',true,'replayed',false,'rule_id',v_rule.id,
+    'rule_version_before',v_rule.version,'rule_version_after',v_rule.version+1,
+    'amendment_receipt_id',v_receipt.id);
+end $$;
+
+
+--
 -- Name: amend_rule_statement(uuid, text, text, text); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -1760,7 +1863,8 @@ begin
   select * into v_prior from ops.rule_amendment_receipt
    where idempotency_key=p_idempotency_key;
   if found then
-    if v_prior.rule_id is distinct from p_rule_id
+    if v_prior.new_scope is not null
+       or v_prior.rule_id is distinct from p_rule_id
        or v_prior.new_statement is distinct from v_new_statement
        or v_prior.rationale is distinct from btrim(p_reason)
        or v_prior.amended_by is distinct from v_actor_id then
@@ -38850,6 +38954,23 @@ begin
   if tg_op='UPDATE' and old.status='retired' then
     raise exception 'retired rule % is immutable',old.id;
   end if;
+  if tg_op='UPDATE' and old.status='active' and new.scope is distinct from old.scope then
+    if new.status<>'active'
+       or (to_jsonb(new)-array['scope','statement']) is distinct from
+          (to_jsonb(old)-array['scope','statement'])
+       or not ops.rule_scope_is_additive(old.scope,new.scope)
+       or not exists (
+         select 1 from ops.rule_amendment_receipt ar
+          where ar.rule_id=old.id and ar.rule_version_before=old.version
+            and ar.rule_version_after=old.version+1
+            and ar.prior_statement_hash=encode(public.digest(old.statement,'sha256'),'hex')
+            and ar.new_statement=new.statement
+            and ar.prior_scope=old.scope and ar.new_scope=new.scope
+       ) then
+      raise exception 'active_rule_scope_frozen: additive scope change requires an exact authority receipt';
+    end if;
+    return new;
+  end if;
   -- Once the approval receipt exists, the entire rule row is immutable except
   -- for the three exact authority transitions owned below: proposed -> active
   -- in ops.approve_rule, proposed/active -> retired in ops.retire_rule, and
@@ -40013,6 +40134,22 @@ $$;
 --
 
 COMMENT ON FUNCTION ops.rule_pack_index() IS 'The PACK INDEX a Layer 0 boot returns instead of the packs themselves: names and triggers, so an undeclared session knows what exists and what would load it.';
+
+
+--
+-- Name: rule_scope_is_additive(jsonb, jsonb); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.rule_scope_is_additive(p_prior jsonb, p_next jsonb) RETURNS boolean
+    LANGUAGE sql IMMUTABLE
+    SET search_path TO 'pg_catalog'
+    AS $$
+  select case when jsonb_typeof(p_prior)='object' and jsonb_typeof(p_next)='object'
+    then not exists (
+      select 1 from jsonb_each(p_prior) prior
+       where not (p_next ? prior.key) or p_next->prior.key is distinct from prior.value
+    ) else false end
+$$;
 
 
 --
@@ -77753,15 +77890,18 @@ CREATE TABLE ops.rule_amendment_receipt (
     amended_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     legacy_admission text,
+    prior_scope jsonb,
+    new_scope jsonb,
     CONSTRAINT rule_amendment_receipt_contract_hash_check CHECK ((contract_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT rule_amendment_receipt_idempotency_key_check CHECK ((btrim(idempotency_key) <> ''::text)),
     CONSTRAINT rule_amendment_receipt_legacy_admission_check CHECK (((legacy_admission IS NULL) OR (btrim(legacy_admission) <> ''::text))),
     CONSTRAINT rule_amendment_receipt_new_hash_check CHECK ((new_statement_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT rule_amendment_receipt_new_statement_check CHECK ((btrim(new_statement) <> ''::text)),
-    CONSTRAINT rule_amendment_receipt_not_noop CHECK ((prior_statement_hash <> new_statement_hash)),
+    CONSTRAINT rule_amendment_receipt_not_noop CHECK (((prior_statement_hash <> new_statement_hash) OR ((prior_scope IS NOT NULL) AND (new_scope IS NOT NULL) AND (prior_scope <> new_scope)))),
     CONSTRAINT rule_amendment_receipt_prior_hash_check CHECK ((prior_statement_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT rule_amendment_receipt_rationale_check CHECK ((btrim(rationale) <> ''::text)),
     CONSTRAINT rule_amendment_receipt_rule_version_before_check CHECK ((rule_version_before > 0)),
+    CONSTRAINT rule_amendment_receipt_scope_pair CHECK ((((prior_scope IS NULL) AND (new_scope IS NULL)) OR ((prior_scope IS NOT NULL) AND (new_scope IS NOT NULL) AND ops.rule_scope_is_additive(prior_scope, new_scope) AND (prior_scope IS DISTINCT FROM new_scope)))),
     CONSTRAINT rule_amendment_receipt_version_check CHECK ((rule_version_after = (rule_version_before + 1)))
 );
 
@@ -77770,7 +77910,7 @@ CREATE TABLE ops.rule_amendment_receipt (
 -- Name: TABLE rule_amendment_receipt; Type: COMMENT; Schema: ops; Owner: -
 --
 
-COMMENT ON TABLE ops.rule_amendment_receipt IS 'Append-only ledger of statement-only amendments to an already-taught rule (proposed or active). Each row hashes the PRIOR statement (tamper-evident chain) and records the new text, the Joe-authority actor, and the rationale. human_quote, scope, taught_by and every activation/retirement field are untouched by this path -- see ops.amend_rule_statement.';
+COMMENT ON TABLE ops.rule_amendment_receipt IS 'Append-only authorized statement amendments and additive scope backfills. Nullable prior_scope/new_scope identify scope changes without rewriting historical statement receipts.';
 
 
 --
@@ -117318,6 +117458,7 @@ revoke all on function ops.add_meeting_note(p_meeting uuid, p_body text, p_revis
 revoke all on function ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric) from public;
 revoke all on function ops.adopt_legacy_active_rule_v1(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text) from public;
 revoke all on function ops.advance_workflow_cutover_stage(p_plan_id uuid, p_to_stage text, p_evidence_ref text, p_reason text, p_idempotency_key uuid) from public;
+revoke all on function ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text) from public;
 revoke all on function ops.amend_rule_statement(p_rule_id uuid, p_new_statement text, p_idempotency_key text, p_reason text) from public;
 revoke all on function ops.answer_work_request_for_joe(p_work_request text, p_base_version integer, p_answer_text text, p_scope_confirmed boolean, p_evidence_ref text, p_idempotency_key uuid) from public;
 revoke all on function ops.append_doc_conversation_turn(p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid) from public;
@@ -117921,6 +118062,7 @@ revoke all on function ops.revoke_tour_share_grant(p_tenant text, p_share_grant_
 revoke all on function ops.rotate_tour_share_grant(p_tenant text, p_share_grant_id uuid, p_projection_id uuid, p_token_digest text, p_permission_scopes jsonb, p_expires_at timestamp with time zone, p_receipt_digest text, p_actor_id text) from public;
 revoke all on function ops.rule_delivery_audit_counts(p_layer0_shared_cap integer) from public;
 revoke all on function ops.rule_delivery_cutover_preflight(p_curation_proposal_ids uuid[]) from public;
+revoke all on function ops.rule_scope_is_additive(p_prior jsonb, p_next jsonb) from public;
 revoke all on function ops.rw02_action_evidence(p_action_kind text) from public;
 revoke all on function ops.rw02_attended_runs(p_action_kind text) from public;
 revoke all on function ops.rw02_consecutive_clean(p_action_kind text) from public;
@@ -120589,6 +120731,7 @@ grant execute on function ops.activate_guidance_situation_mapping(p_proposed_map
 grant execute on function ops.add_meeting_note(p_meeting uuid, p_body text, p_revises_note_number integer, p_base_revision integer, p_client_instance text, p_idempotency_key uuid) to carr_writer;
 grant execute on function ops.admit_job_cost(p_job_id uuid, p_lease_token uuid, p_route_key text, p_estimated_cost_usd numeric) to carr_jobs;
 grant execute on function ops.advance_workflow_cutover_stage(p_plan_id uuid, p_to_stage text, p_evidence_ref text, p_reason text, p_idempotency_key uuid) to carr_authority;
+grant execute on function ops.amend_rule_scope(p_rule_id uuid, p_new_scope jsonb, p_new_statement text, p_base_version integer, p_idempotency_key text, p_reason text) to carr_authority;
 grant execute on function ops.amend_rule_statement(p_rule_id uuid, p_new_statement text, p_idempotency_key text, p_reason text) to carr_authority;
 grant execute on function ops.answer_work_request_for_joe(p_work_request text, p_base_version integer, p_answer_text text, p_scope_confirmed boolean, p_evidence_ref text, p_idempotency_key uuid) to carr_authority;
 grant execute on function ops.append_doc_conversation_turn(p_conversation uuid, p_role text, p_body text, p_msg_id uuid, p_idempotency_key uuid) to carr_authority;
@@ -122784,6 +122927,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0883_repin_rule_delivery_activation_after_reply_control_retirement.sql	e383f40b56662057f7fef50120bc418a69aac318e6061604718dc66d86da0fe5	2026-10-16 08:56:58.106487+00
 0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql	f894c45f77bbfbf74c97ba3debc39ee9c273ae8bc272a66461b6e44bd3223625	2026-10-16 13:48:30.306057+00
 0885_retire_context_rail_control.sql	3f8350f093d958a1d36c8285877a232f6900c0464167eb5ac975dc39e4897d72	2026-10-16 14:38:13.202604+00
+0886_active_rule_scope_backfill.sql	56cd0402c5aa9493666078440c4c04e51d70d38a2f75962e425edecf6bd31851	2026-10-16 22:35:52.838328+00
 \.
 
 
