@@ -33,9 +33,10 @@ from typing import Any, Callable, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
-from lib.credential_file import credential, read_env_file  # noqa: E402
-from lib.github_reader import GitHubReader, GitHubUnreadable  # noqa: E402
-from lib.secret_redaction import redact_text, sensitive_env_values  # noqa: E402
+from lib.credential_file import SOURCE_BYTES as CREDENTIAL_FILE_SOURCE_BYTES, credential, read_env_file  # noqa: E402
+from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHubReader, GitHubUnreadable  # noqa: E402
+from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
+CONTROLLER_SOURCE_BYTES = Path(__file__).read_bytes()
 CONFIG_PATH = REPO / "ops" / "config" / "release-pipeline.v1.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -53,6 +54,16 @@ CLOUDFLARE_TOKEN_NAME = "CLOUDFLARE_API_TOKEN"
 CLOUDFLARE_TOKEN_FILE = "tokens.env"   # under credential_dir
 TOOLCHAIN_FILES = ("package.json", "package-lock.json")   # mcp-server files that key the token-check wrangler
 CREDENTIAL_INVENTORY_PATH = REPO / "ops/config/credential-inventory.v1.json"
+# Code this process loaded and disk inputs used by its subprocesses; all must
+# match origin/main before a lane can release.
+CONTROLLER_PATHS = ("ops/release-pipeline.py", "ops/config/release-pipeline.v1.json",
+                    "lib/credential_file.py", "lib/github_reader.py", "lib/secret_redaction.py",
+                    "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                    "mcp-server/package.json", "mcp-server/package-lock.json")
+CONTROLLER_STALE = "controller_stale"
+CONTROLLER_UNREADABLE = "controller_unreadable"
+
+
 # ── results and the command runner seam ───────────────────────────────────────
 
 @dataclasses.dataclass
@@ -109,6 +120,8 @@ SMOKE_ALWAYS_ATTRIBUTED = frozenset({"release-identity", "verb-registry", "brows
 SMOKE_OUT = Path("out") / "release-smoke"
 _SMOKE = runpy.run_path(str(REPO / "ops/release-smoke.py"))
 SMOKE_LANE_JOURNEYS: dict[str, tuple[str, ...]] = _SMOKE["LANE_JOURNEYS"]
+SMOKE_SOURCE_BYTES: bytes = _SMOKE["SOURCE_BYTES"]
+DOCTOR_SMOKE_SOURCE_BYTES: bytes = _SMOKE["DOCTOR_SOURCE_BYTES"]
 served_version: Callable[[str, Any], str | None] = _SMOKE["served_version"]
 
 
@@ -233,7 +246,19 @@ class ObservedGitHub:
 # ── configuration, state, records ─────────────────────────────────────────────
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
-    return json.loads(path.read_bytes())
+    source = path.read_bytes()
+    cfg = LoadedConfig(json.loads(source))
+    cfg.source_blob = git_blob(source)
+    return cfg
+
+
+class LoadedConfig(dict):
+    """Parsed values with the provenance of the bytes that supplied them."""
+    source_blob: str
+
+
+def git_blob(source: bytes) -> str:
+    return hashlib.sha1(f"blob {len(source)}\0".encode() + source).hexdigest()
 
 
 def smoke_enabled(lane_cfg: dict) -> bool:
@@ -518,9 +543,12 @@ def blocker_loop(capability: str, detail: str, *, remedy: str = "", recovery: st
     health_repair = capability in {"health_baseline_hard_error", "health_baseline_stalled"}
     if health_repair:
         blocker_detail = f"The authorized release-repair lane must restore and verify the health baseline: {detail}"
+    elif capability == CONTROLLER_STALE:
+        blocker_detail = ("The canonical checkout's owner must commit or move its local changes so fleet-sync "
+                          f"can fast-forward it to origin/main: {detail}")
     else:
         blocker_detail = f"Joe is the provisioning decider for the named unattended credential: {detail}; Joe grants it"
-    repair_lane = health_repair
+    repair_lane = health_repair or capability == CONTROLLER_STALE
     args = {"kind": "open_loop", "owner": "Claude" if repair_lane else "Joe", "domain": "system", "marker": "none",
             "blocker": "other_lane" if repair_lane else "capability", "blocker_detail": blocker_detail,
             **({} if repair_lane else {"residue_kind": "provider_login",
@@ -552,6 +580,7 @@ class Pipeline:
                  http: Callable[[str], Any] = http_json,
                  call_verb: Callable[[str, dict], tuple[bool, Any]] | None = None,
                  slice_marker: Callable[[str, str], dict] | None = None,
+                 controller_blobs: dict[str, str | None] | None = None,
                  dry_run: bool = False, env: dict[str, str] | None = None,
                  today: str | None = None, out: Callable[[str], None] = print,
                  rotate_lost_staging_credentials: tuple[str, ...] = ()):
@@ -561,6 +590,15 @@ class Pipeline:
         # --rotate-lost-credential, and the provisioner alone decides whether
         # that profile is really in the lost-file state. Never set by launchd.
         self.rotate_lost_staging_credentials = tuple(rotate_lost_staging_credentials)
+        self.controller_blobs = dict(controller_blobs) if controller_blobs is not None else {
+            "ops/release-pipeline.py": git_blob(CONTROLLER_SOURCE_BYTES),
+            "lib/credential_file.py": git_blob(CREDENTIAL_FILE_SOURCE_BYTES),
+            "lib/github_reader.py": git_blob(GITHUB_READER_SOURCE_BYTES),
+            "lib/secret_redaction.py": git_blob(REDACTION_SOURCE_BYTES),
+            "ops/release-smoke.py": git_blob(SMOKE_SOURCE_BYTES),
+            "ops/doctorcre-production-smoke.py": git_blob(DOCTOR_SMOKE_SOURCE_BYTES),
+            "ops/config/release-pipeline.v1.json": getattr(cfg, "source_blob", None),
+        }
         self.runner = runner or Runner()
         self.env = env if env is not None else child_env()
         self._github = github or (lambda repo_name: GitHub(repo_name, self.env))
@@ -1231,6 +1269,43 @@ class Pipeline:
 
 
     # -- lanes --------------------------------------------------------------
+    def controller_current(self, state: dict) -> None:
+        """Compare loaded code and current on-disk inputs to immutable main.
+        Unreadable evidence is a retryable hold, never a deployment failure.
+        Recovery state is only cleared in a real tick."""
+        try:
+            remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main").split()
+            if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
+                raise Blocked(CONTROLLER_UNREADABLE, "controller main has no exact SHA acknowledgement")
+            main = remote[0]
+            self.git("fetch", "--quiet", "origin", main)
+            stale = []
+            for path in CONTROLLER_PATHS:
+                entry = self.git("ls-tree", main, "--", path)
+                committed = entry.split()[2] if entry else None
+                loaded = self.controller_blobs.get(path, committed)
+                disk = self.git("hash-object", "--", path) if (self.repo / path).is_file() else None
+                if loaded != committed or disk != committed:
+                    stale.append(path)
+        except (StepFailed, OSError) as exc:
+            raise Blocked(CONTROLLER_UNREADABLE, f"controller freshness read unavailable: {exc}") from exc
+        if stale:
+            raise Blocked(CONTROLLER_STALE,
+                          f"loaded controller or helpers in {self.repo} differ from origin/main "
+                          f"{main[:12]} in {', '.join(stale)}; "
+                          "fleet-sync must fast-forward the checkout and a fresh tick must load it",
+                          capability=CONTROLLER_STALE)
+        if self.dry_run:
+            return
+        changed = bool(state.get("filed_blockers", {}).pop(CONTROLLER_STALE, None))
+        for lane in ("worker", "app"):
+            lane_state = state.get(lane, {})
+            if (lane_state.get("rejection") or {}).get("reason") in (CONTROLLER_STALE, CONTROLLER_UNREADABLE):
+                lane_state.pop("rejection")
+                changed = True
+        if changed:
+            self.store.save(state)
+
     def _at_or_before(self, a: str, b: str, repo_dir: Path) -> bool:
         """True when commit `a` is `b` or an ancestor of it."""
         try:
@@ -1492,6 +1567,7 @@ class Pipeline:
             self.git("fetch", "--quiet", "origin", sha, cwd=repo_dir)
             self.observed_main = sha
             if sha != lane_state.get("last_released_sha"):
+                self.controller_current(state)
                 if not self.dry_run:
                     self.reconcile_release_proof(state, lane, lane_cfg, sha)
                     lane_state = state.setdefault(lane, {})

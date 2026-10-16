@@ -380,12 +380,22 @@ class Fixture:
             slice_marker = lambda key, sha: (self.slice_marks.append((key, sha)) or {"rc": 0})  # noqa: E731
         env = rp.child_env(FIXTURE_ENV)
         env.update({k: FIXTURE_ENV[k] for k in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")})
+        # Fixture source stands in for the modules loaded by a production
+        # process. Capture it at construction, before any simulated sync.
+        loaded = {path: rp.git_blob((self.repo / path).read_bytes())
+                  if (self.repo / path).is_file() else None for path in (
+                      "ops/release-pipeline.py", "lib/credential_file.py",
+                      "lib/github_reader.py", "lib/secret_redaction.py",
+                      "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                      "ops/config/release-pipeline.v1.json")}
+        if isinstance(cfg, rp.LoadedConfig):
+            loaded["ops/config/release-pipeline.v1.json"] = cfg.source_blob
         pipe = rp.Pipeline(cfg or self.config(), repo=self.repo, runner=runner,
                            github=lambda _r: github or FakeGitHub(),
                            http=lambda _u: {"git_sha": {"value": live["sha"]},
                                             "worker_version": {"id": live.get("version", PRIOR)}},
                            call_verb=lambda verb, args: (verbs.append((verb, args)) or (True, {"ok": True})),
-                           slice_marker=slice_marker,
+                           slice_marker=slice_marker, controller_blobs=loaded,
                            dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
         pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}}
         pipe.sleep = lambda _seconds: None
@@ -3142,6 +3152,23 @@ class ClearFailedRetirement(Base):
         with mock.patch.object(self.store, "record", side_effect=record):
             self.clear()
         self.assert_retry_available()
+
+
+class StaleControllerRefusal(Base):
+    def test_stale_controller_bytes_refuse_release_without_burning_target(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "candidate", "ops/release-pipeline.py": "current controller\n"})
+        (self.fx.repo / "ops/release-pipeline.py").write_text("obsolete controller\n")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(pipe.tick(["worker"]), 3)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.records()[-1]["reason"], "controller_stale")
+        self.assertEqual(self.fx.records()[-1]["sha"], sha)
+        state = self.fx.state()["worker"]
+        self.assertFalse(state.get("failed_sha"))
+        self.assertEqual(state["last_released_sha"], self.fx.base)
 
 
 class Blockers(Base):
