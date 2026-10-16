@@ -32,6 +32,19 @@ class VerbLossGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "2")
 
+    def test_post_retirement_377_to_341_unlisted_loss_fails(self):
+        names = json.loads(subprocess.check_output(
+            ["node", "--input-type=module", "-e",
+             "import {TOOLS} from './mcp-server/src/tools.js'; "
+             "console.log(JSON.stringify(Object.keys(TOOLS).sort()))"],
+            cwd=REPO, text=True))
+        self.assertEqual(len(names), 377)
+        self.assertFalse(set(names[:36]).intersection(self.retired))
+        result = self.run_guard(names[36:], 377)
+        self.assertNotEqual(result.returncode, 0,
+                            "already-shipped retirements excused 36 unlisted removals")
+        self.assertEqual(result.stdout, "")
+
     def test_unlisted_missing_verb_fails(self):
         result = self.run_guard(["keep-a"], 2 + len(self.retired))
         self.assertNotEqual(result.returncode, 0)
