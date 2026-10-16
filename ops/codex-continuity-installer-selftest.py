@@ -124,6 +124,9 @@ class FakeAppServer:
                 key = self._quoted_key(edit["keyPath"], r"\.trusted_hash")
                 value = edit["value"]
                 assert re.fullmatch(r"sha256:[0-9a-f]{64}", value)
+                header = re.escape(f"[hooks.state.{json.dumps(key)}]")
+                raw = re.sub(
+                    rf'(?m)^{header}\ntrusted_hash = "sha256:[0-9a-f]{{64}}"\n?', "", raw)
                 raw = (raw.rstrip() + f"\n\n[hooks.state.{json.dumps(key)}]\n"
                        f"trusted_hash = {json.dumps(value)}\n")
             else:
@@ -146,10 +149,47 @@ class FakeAppServer:
                 "filePath": str(self.config_path), "overriddenMetadata": None}
 
 
+def canonical_identity_regression(source: dict) -> None:
+    with tempfile.TemporaryDirectory(prefix="carr-codex-canonical-") as temp:
+        root = Path(temp)
+        hooks = root / "hooks.json"
+        config = root / "config.toml"
+        tracked = root / "source.json"
+        hooks.write_text(json.dumps(source))
+        tracked.write_text(json.dumps(source))
+        config.write_text('model = "keep-me"\n')
+        app_server = FakeAppServer(hooks, config)
+        seeded = app_server._hooks()
+        config.write_text(config.read_text() + "".join(
+            f"\n[hooks.state.{json.dumps(hook['key'])}]\n"
+            f"trusted_hash = {json.dumps(hook['currentHash'])}\n"
+            for hook in seeded))
+        original_state = copy.deepcopy(app_server._config()["hooks"]["state"])
+        unrelated = [hook for hook in app_server._hooks()
+                     if not mod.is_codex_continuity_hook_command(hook["command"])]
+        mod.REPO = str(root)
+        mod.CODEX_HOOKS_REPO = str(tracked)
+        mod.CODEX_HOOKS_SRC = str(hooks)
+        mod.CODEX_CONFIG = str(config)
+        mod.codex_app_server_request = app_server
+        for command in ("install-codex-continuity", "remove-codex-continuity",
+                        "install-codex-continuity"):
+            mod.sys.argv = ["config-as-code.py", command, "--apply"]
+            assert mod.main() == 0
+            observed = [hook for hook in app_server._hooks()
+                        if not mod.is_codex_continuity_hook_command(hook["command"])]
+            assert observed == unrelated, "unrelated canonical hook identities/trust changed"
+            state = app_server._config()["hooks"]["state"]
+            assert all(state[hook["key"]] == original_state[hook["key"]]
+                       for hook in unrelated)
+        assert all(hook["trustStatus"] == "trusted" for hook in app_server._hooks())
+
+
 def main() -> int:
     continuity = "/carr-system/ops/codex-continuity-hook.py"
     source = json.loads((REPO / "ops/config/codex-hooks.json").read_text().replace(
         "{{REPO}}", "/carr-system"))
+    canonical_identity_regression(source)
     session_groups = source["hooks"]["SessionStart"]
     assert len(session_groups) == 3
     continuity_group = session_groups[1]
@@ -210,11 +250,14 @@ def main() -> int:
             invalid_sources.append(malformed)
         for invalid in invalid_sources:
             repo_source.write_text(json.dumps(invalid))
-            mod.sys.argv = ["config-as-code.py", "install-codex-continuity"]
-            assert mod.main() == 1
-            assert codex_live.read_text() == original_hooks
-            assert codex_config.read_text() == original_config
-            assert not app_server.batch_calls
+            for command in ("install-codex-continuity", "remove-codex-continuity"):
+                for flags in ([], ["--apply"]):
+                    mod.sys.argv = ["config-as-code.py", command, *flags]
+                    assert mod.main() == 1
+                    assert codex_live.read_text() == original_hooks
+                    assert codex_config.read_text() == original_config
+                    assert claude_settings.read_bytes() == original_claude
+                    assert not app_server.batch_calls
         repo_source.write_text(json.dumps(source))
 
         desired, contracts = mod.canonical_codex_continuity_hooks()
