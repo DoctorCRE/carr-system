@@ -269,6 +269,7 @@ def read_source(dsn, bins=None, include_acl=False):
 
 
 def live_proof(ledger_only=False):
+    import psycopg
     repository = {name: digest for name, sql, digest in migrate.load_migrations()}
     shadow = load('production_proof_shadow', ROOT / 'ops/migration-shadow.py')
     bins = shadow.find_pg18(None) if not ledger_only else None
@@ -294,6 +295,8 @@ def live_proof(ledger_only=False):
             ledger_matches=built['ledger'] == reference['ledger'] == repository, schema_diff=difference)
     except RuntimeError as exc:
         result['equivalence'].update(error=str(exc))
+    except psycopg.Error as exc:
+        result['equivalence'].update(error=f'disposable reconstruction failed ({exc.sqlstate}): {exc.diag.message_primary}')
     return result
 
 
