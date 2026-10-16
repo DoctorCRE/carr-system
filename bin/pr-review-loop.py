@@ -35,12 +35,10 @@ def inspect(queue, repo, n):
     verdict = ''
     if last:
         body = last.get('body', '')
-        decision = POLICY['REVIEW']['verdict'](body, DOT['review_config'](repo))
-        header = POLICY['REVIEW']['reviewed_header_sha'](body if decision == 'approve' else body.replace('REVIEW: BLOCKED', 'APPROVE', 1))
+        decision = DOT['REVIEW']['verdict'](body, DOT['review_config'](repo))
+        header = DOT['REVIEW']['reviewed_header_sha'](body if decision == 'approve' else body.replace('REVIEW: BLOCKED', 'APPROVE', 1))
         if header:
             current = header == sha
-            if not current and decision == 'approve' and receipt is None:
-                current = queue.covered(repo, header, sha)
             verdict = ('APPROVE' if decision == 'approve' else 'REVIEW: BLOCKED') + ('' if current else '-STALE')
     ready = queue.green(repo, n, sha) and pr.get('mergeable') is True and pr.get('mergeable_state') != 'dirty'
     return {'state': 'open', 'head': sha, 'verdict': verdict, 'ready': ready}

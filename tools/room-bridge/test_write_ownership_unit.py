@@ -67,6 +67,10 @@ class OwnershipTests(unittest.TestCase):
             'ownership_state': 'held', 'launch_marker': 'fixture', 'executor': {'kind': 'unconfirmed'},
             **kwargs}) + '\n')
 
+    def test_writes_none_declares_no_files(self):
+        self.assertEqual([], write_ownership.declaration('Writes: none\nreview PR 240', None))
+        self.assertEqual([], write_ownership.declaration('Writes: None', None))
+
     def test_matching_machine_recovers_dead_executor_after_hostname_rename(self):
         machine = '11111111-1111-4111-8111-111111111111'
         self.active(executor={'kind': 'process_group', 'host': 'before-rename',

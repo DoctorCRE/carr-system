@@ -25,18 +25,13 @@ sys.path.insert(0, str(ROOT / 'ops'))
 sys.path.insert(0, str(ROOT))
 from git_env import scrubbed_env
 from lib.secret_redaction import redacted_tail, sensitive_env_values
-from lib import dot_review_receipts
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
 REPOS = ('jbookout/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory')
 HOLD = 'do_not_merge'
 SHA = re.compile(r'^[0-9a-f]{40}$')
-REVIEW = runpy.run_path(str(ROOT / 'ops/release-pipeline.py'))
-REVIEW_CONFIG = json.loads((ROOT / 'ops/config/release-pipeline.v1.json').read_text())
 WAIT_REGISTRY = json.loads(Path(__file__).with_name('wait_registry.json').read_text())
 BOUNDS = WAIT_REGISTRY['bounds']
-WAIT_SITES = WAIT_REGISTRY['sites']
 MAX_ATTEMPTS = BOUNDS['retry']['attempts']
-AUTO_ENQUEUE_CAP = BOUNDS['auto_enqueue']['attempts']
 CI_WAIT_SECONDS = BOUNDS['ci']['seconds']
 
 
@@ -179,7 +174,6 @@ class Queue:
                             'transient_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'read_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'github_attempts': 'INTEGER NOT NULL DEFAULT 0',
-                            'auto_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'ci_since': 'REAL', 'ci_head': 'TEXT'},
                 'actions': {'attempts': 'INTEGER NOT NULL DEFAULT 0', 'expected_base': 'TEXT',
                             'dispatcher_pid': 'INTEGER', 'dispatcher_identity': 'TEXT', 'receipt': 'TEXT'},
@@ -189,6 +183,9 @@ class Queue:
                 for name, definition in bounded_items('snapshot', columns.items()):
                     if name not in existing:
                         self.db.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+        with self.db:
+            self.db.execute("DELETE FROM waits WHERE owner IN (SELECT 'entry:' || id FROM entries WHERE phase='review' AND tested IS NULL)")
+            self.db.execute("UPDATE entries SET phase='pending' WHERE phase='review' AND tested IS NULL")
         self.last_gh = 0.0
         self.budget = GitHubReadBudget(spacing=gap, lock_timeout=BOUNDS['budget_lock']['seconds'],
                                       cancel=self.check_cancelled)
@@ -445,25 +442,16 @@ class Queue:
     def held(self, p):
         return HOLD in {x['name'] for x in bounded_items('snapshot', p.get('labels', []))}
 
-    def enqueue(self, repo, n, approved, note=''):
-        if repo not in REPOS or n <= 0 or not SHA.fullmatch(approved):
-            raise ValueError('expected authorized repo, positive PR and full approved SHA')
+    def enqueue(self, repo, n, head, note=''):
+        if repo not in REPOS or n <= 0 or not SHA.fullmatch(head):
+            raise ValueError('expected authorized repo, positive PR and full queued SHA')
         with self.db:
             cur = self.db.execute('INSERT OR IGNORE INTO entries(repo,pr,approved,note) VALUES(?,?,?,?)',
-                                  (repo, n, approved, note))
+                                  (repo, n, head, note))
             if cur.rowcount:
-                self.event(repo, n, 'queued', f'Approved head {approved}', cur.lastrowid)
+                self.event(repo, n, 'queued', f'Queued head {head}', cur.lastrowid)
         e = self.db.execute('SELECT * FROM entries WHERE repo=? AND pr=? AND approved=?',
-                            (repo, n, approved)).fetchone()
-        if e['phase'] in ('review', 'conflict') and self.approval(repo, n) == approved:
-            p = self.pr(repo, n)
-            if p['state'] == 'open' and not self.held(p) and self.covered(repo, approved, p['head']['sha']):
-                with self.db:
-                    cur = self.db.execute("UPDATE entries SET phase='pending',outcome='fresh_review_accepted' "
-                                          "WHERE id=? AND phase IN ('review','conflict')", (e['id'],))
-                    if cur.rowcount:
-                        self._clear_reads(e['id'])
-                        self.event(repo, n, 'fresh_review_accepted', f'Independent approval covers {p["head"]["sha"]}', e['id'])
+                            (repo, n, head)).fetchone()
         return e['id']
 
     def event(self, repo, n, outcome, detail, entry_id=None):
@@ -482,24 +470,6 @@ class Queue:
                                    (e['id'],)).fetchone()
             if not prev or tuple(prev) != (outcome, detail):
                 self.event(e['repo'], e['pr'], outcome, detail, e['id'])
-
-        if outcome == 'fresh_review' and phase == 'review':
-            self.request_review(e['repo'], e['pr'])
-
-    def request_review(self, repo, n):
-        router = self.root / 'bin/dot-review.py'
-        if not router.exists():
-            with self.db:
-                self.event(repo, n, 'review_handoff_unavailable', 'Install bin/dot-review.py before dispatching review')
-            return
-        try:
-            receipt = command([sys.executable, str(router), '--orch', str(self.root / 'out/orch'),
-                               'submit', repo, str(n)], timeout=BOUNDS['command']['seconds'])
-            with self.db:
-                self.event(repo, n, 'review_handoff', receipt[-2000:])
-        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
-            with self.db:
-                self.event(repo, n, 'review_handoff_failed', type(exc).__name__ + '; no reviewer dispatch inferred')
 
     def flush_events(self):
         for ev in bounded_items('snapshot', self.db.execute('SELECT * FROM events WHERE logged=0 ORDER BY id').fetchall()):
@@ -558,58 +528,13 @@ class Queue:
                                                        '+refs/heads/main:refs/remotes/origin/main',
                                                        *dict.fromkeys(heads)), 'Git fetch failed')
 
-    def patch(self, repo, head):
-        base = self.git(repo, 'merge-base', 'origin/main', head).strip()
-        diff = self.git(repo, 'diff', '--binary', base, head)
-        ids = command(['git', 'patch-id', '--stable'], data=diff).split()
-        return ids[0] if ids else None
-
-    def covered(self, repo, approved, head):
-        if approved == head:
-            return True
-        if getattr(self, '_dot_reviews', {}).get((repo, approved)):
-            return False
-        self.fetch(repo, approved, head)
-        old = self.patch(repo, approved)
-        return bool(old and old == self.patch(repo, head))
-
-    def approval(self, repo, n):
-        comments = self.pages(f'repos/{repo}/issues/{n}/comments?per_page=100')
-        cfg = REVIEW_CONFIG['app' if repo == REPOS[1] else 'worker']
-        last, receipt = dot_review_receipts.deciding(list(bounded_items('snapshot', comments)),
-                                                    repo, n, policy=REVIEW, config=cfg,
-                                                    api=lambda path: self.pages(path) if '/commits?' in path else self.pr(repo, n))
-        if last and REVIEW['verdict'](last.get('body', ''), cfg) == 'approve':
-            sha = REVIEW['reviewed_header_sha'](last.get('body', ''))
-            if not hasattr(self, '_dot_reviews'):
-                self._dot_reviews = {}
-            self._dot_reviews[(repo, sha)] = receipt is not None
-            return sha
-        return None
 
     def green(self, repo, n, head):
-        path = f'repos/{repo}/commits/{head}'
-        runs = self.api_pages(path + '/check-runs?per_page=100', 'check_runs')
-        statuses = self.pages(path + '/statuses?per_page=100')
-        latest = {}
-        for run in bounded_items('snapshot', runs):
-            key = (run.get('app', {}).get('id'), run['name'])
-            if key not in latest or run['id'] > latest[key]['id']:
-                latest[key] = run
-        contexts = {}
-        for s in bounded_items('snapshot', statuses):
-            if s['context'] not in contexts:
-                contexts[s['context']] = s
-        if not latest and not contexts:
-            return False
-        if any(r['status'] != 'completed' or r['conclusion'] not in ('success', 'skipped', 'neutral')
-               for r in bounded_items('snapshot', latest.values())) or any(s['state'] != 'success' for s in bounded_items('snapshot', contexts.values())):
-            return False
         def validate(checks):
             if not isinstance(checks, list) or any(not isinstance(c, dict) or 'bucket' not in c for c in bounded_items('snapshot', checks)):
                 raise ValueError('GitHub did not return required checks')
         checks = self.gh('pr', 'checks', str(n), '-R', repo, '--required', '--json', 'bucket', decode=True, validate=validate)
-        return all(c['bucket'] in ('pass', 'skipping') for c in bounded_items('snapshot', checks))
+        return bool(checks) and all(c['bucket'] in ('pass', 'skipping') for c in bounded_items('snapshot', checks))
 
     def action(self, kind, repo, n, head, payload, expected_base=None):
         key = f'{kind}:{repo}:{n}:{head}:{payload}'
@@ -691,7 +616,7 @@ class Queue:
         text = (f'Conflict repair for https://github.com/{repo}/pull/{n}\nHead: {head}\n'
                 f'Base: {p["base"]["ref"]} {base}\nConflicting files:\n' + '\n'.join(files) +
                 '\nUse an isolated worktree. Inspect and resolve by a reviewed source change; never force-push. '
-                'Run relevant tests and request fresh review. Do not merge. '
+                'Run relevant tests and push the source fix. Do not merge. '
                 'Do not read credentials, encrypted stores or production dumps. '
                 'Executor: latest GPT Sol, high effort.\n')
         if not brief.exists():
@@ -922,21 +847,14 @@ class Queue:
                 e = None
                 old_entry, self._github_entry = self._github_entry, None
                 try:
-                    approved = self.approval(repo, p['number'])
-                    if not approved:
+                    if p.get('draft'):
                         continue
+                    approved = p['head']['sha']
                     e = self.db.execute('SELECT * FROM entries WHERE repo=? AND pr=? AND approved=?',
                                         (repo, p['number'], approved)).fetchone()
-                    if e is not None and e['auto_attempts'] >= AUTO_ENQUEUE_CAP:
-                        with self.db:
-                            self.event(repo, p['number'], 'auto_enqueue_exhausted', f'Automatic enqueue cap reached for {approved}', e['id'])
-                        continue
-                    entry = self.enqueue(repo, p['number'], approved, 'auto-enqueued from independent review')
+                    entry = self.enqueue(repo, p['number'], approved, 'auto-enqueued from open PR')
                     e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
                     self._github_entry = entry
-                    if e['phase'] == 'pending':
-                        with self.db:
-                            self.db.execute('UPDATE entries SET auto_attempts=auto_attempts+1 WHERE id=?', (entry,))
                 except GitHubReadPaused as exc:
                     with self.db:
                         self.event(repo, p['number'], 'github_paused', str(exc), e['id'] if e else None)
@@ -960,7 +878,7 @@ class Queue:
 
     def _tick_repo(self, queued_repo):
         for e in bounded_items('snapshot', self.db.execute("SELECT * FROM entries WHERE repo=? AND phase IN ('pending','merging','merge_rejected','refreshing') ORDER BY id", (queued_repo,)).fetchall()):
-            repo, n, approved = e['repo'], e['pr'], e['approved']
+            repo, n = e['repo'], e['pr']
             self._github_entry = None if e['phase'] == 'merge_rejected' else e['id']
             try:
                 if time.time() >= self.deadline(f'entry:{e["id"]}', 'entry'):
@@ -989,6 +907,9 @@ class Queue:
                 if p['state'] != 'open':
                     self.report(e, 'closed', 'PR closed without merge', 'done')
                     continue
+                if p.get('draft'):
+                    self.report(e, 'draft', 'Waiting for PR to be marked ready')
+                    continue
                 if self.held(p):
                     self.report(e, 'held', 'do_not_merge label present')
                     continue
@@ -1011,12 +932,6 @@ class Queue:
                         continue
                     return
                 head = p['head']['sha']
-                if self.approval(repo, n) != approved:
-                    self.report(e, 'fresh_review', 'Latest independent verdict does not approve queued head', 'review')
-                    continue
-                if not self.covered(repo, approved, head):
-                    self.report(e, 'fresh_review', f'Patch differs from approved head; review {head}', 'review')
-                    continue
                 if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
                     self.conflict(repo, p)
                     self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
@@ -1044,15 +959,8 @@ class Queue:
                 if self.held(current) or current['head']['sha'] != head or current['base']['ref'] != 'main':
                     self.report(e, 'head_moved', 'Head, base or hold changed during checks')
                     return
-                if self.approval(repo, n) != approved:
-                    self.report(e, 'fresh_review', 'Independent verdict changed during checks', 'review')
-                    return
                 if self.stopped:
                     return
-                marker = f'APPROVE\nReviewed-SHA: {head}\n\nOrchestrator merge queue: independent approval of {approved}; patch unchanged; hosted checks green.'
-                self.api(f'repos/{repo}/issues/{n}/comments', '-f', f'body={marker}')
-                if current.get('draft'):
-                    self.gh('pr', 'ready', str(n), '-R', repo)
                 current = self.pr(repo, n)
                 if self.held(current) or current['head']['sha'] != head or current['base']['ref'] != 'main':
                     return
@@ -1211,7 +1119,7 @@ class Queue:
         for e in bounded_items('snapshot', self.db.execute("SELECT * FROM entries WHERE repo=? AND pr=? AND phase='blocked' AND outcome IN ('action_uncertain_exhausted','wait_exhausted') AND tested IS NULL",
                                  (a['repo'], a['pr'])).fetchall()):
             self.rearm_reads(e['id'])
-            self.report(e, 'action_reconciled', 'Provider action readback complete; resume current head and independent approval checks', 'pending')
+            self.report(e, 'action_reconciled', 'Provider action readback complete; resume current head and hosted CI checks', 'pending')
 
     def import_legacy(self, legacy):
         rows, sources = [], {}
@@ -1398,7 +1306,7 @@ def main():
     enq = sub.add_parser('enqueue')
     enq.add_argument('repo', choices=REPOS)
     enq.add_argument('pr', type=int)
-    enq.add_argument('approved')
+    enq.add_argument('head', help='queued revision; the current head must pass required CI')
     enq.add_argument('note', nargs='?', default='')
     sub.add_parser('status')
     reconcile = sub.add_parser('reconcile')
@@ -1420,7 +1328,7 @@ def main():
     if a.cmd == 'run':
         q.run(a.poll, not a.no_discover, a.legacy)
     elif a.cmd == 'enqueue':
-        print(q.enqueue(a.repo, a.pr, a.approved, a.note))
+        print(q.enqueue(a.repo, a.pr, a.head, a.note))
     elif a.cmd == 'import-legacy':
         q.import_legacy(a.legacy)
     elif a.cmd == 'migrate-holds':

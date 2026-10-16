@@ -5,13 +5,12 @@
 #     python3 ops/gate-replay.py --update
 # and commit it in the same pull request as the change.
 # gate	event	fixture	verdict	reason
-bash-write-gate.py	PreToolUse[Bash]	(all)	counts	allow=319 deny=2
+bash-write-gate.py	PreToolUse[Bash]	(all)	counts	allow=311 deny=2
 bash-write-gate.py	PreToolUse[Bash]	scenarios:5c0000000003	deny	BLOCKED by the CARR bash-write gate: {REPO}/out/delegation-gate-state.json
 bash-write-gate.py	PreToolUse[Bash]	scenarios:5c0000000004	deny	BLOCKED by the CARR bash-write gate: {REPO}/out/delegation-gate-state.json.lock
 blocker-decider-gate.py	PreToolUse[mcp__.*__(record-defect|add-loop)]	(all)	counts	allow=4 deny=1
 blocker-decider-gate.py	PreToolUse[mcp__.*__(record-defect|add-loop)]	scenarios:b2a1c3d4e5f6	deny	BLOCKER-DECIDER GATE — refused. blocker='capability' without a decider is 'not authorized' and 'not possible' filed as the same finding (rul
-canonical-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=1 deny=71
-canonical-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:005d482ca566	deny	CANONICAL EDIT GATE — refused.
+canonical-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=1 deny=70
 canonical-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:010a4c03c18b	deny	CANONICAL EDIT GATE — refused.
 canonical-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:03e198646e6d	deny	CANONICAL EDIT GATE — refused.
 canonical-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:0a64781c385b	deny	CANONICAL EDIT GATE — refused.
@@ -85,7 +84,7 @@ canonical-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:fd26ca56df4b	deny	
 chat-lint-carryover.py	UserPromptSubmit	(all)	counts	allow=6 announce=1
 chat-lint-carryover.py	UserPromptSubmit	scenarios:b2d3e4f5a6b7	announce	Keep replies to one paragraph unless asked for more detail.
 chat-lint-gate.py	Stop	(all)	counts	allow=87
-close-before-open-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=72 deny=1
+close-before-open-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=71 deny=1
 close-before-open-gate.py	PreToolUse[Write|Edit|MultiEdit]	scenarios:b2e5c3d4e5fa	deny	BLOCKED by the CARR close-before-open gate: CLOSE-BEFORE-OPEN: # open work request(s) block a new front: WR-AI-#, WR-AI-#, WR-AI-#, WR-AI-#,
 completion-evidence-gate.py	Stop	(all)	counts	allow=40 reopen=47
 completion-evidence-gate.py	Stop	advisories:0b5544d0632d/claims-done	reopen	COMPLETION EVIDENCE GATE — unaccounted clause [repo]: "Make the scoped change described in the work request, run its selftest," — no receipt
@@ -228,15 +227,14 @@ context-handoff-gate.py	Stop	advisories:fb34ec1f1d75/claims-done	announce	Claude
 context-handoff-gate.py	Stop	advisories:fc80d2b5ad77/reports-evidence	announce	Claude context lifecycle control warning (LIFECYCLE_INVALID); native Claude behavior continues.
 costar-lane-gate.py	PreToolUse[mcp__claude-in-chrome__.*]	(all)	counts	allow=2 deny=1
 costar-lane-gate.py	PreToolUse[mcp__claude-in-chrome__.*]	scenarios:b2a0f1e2d3c4	deny	COSTAR LANE — refused. This is the Chrome extension, and CoStar is driven ONLY in the Claude desktop app's own Browser pane (rule <hex>). Th
-delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	(all)	counts	allow=363 announce=5
+delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	(all)	counts	allow=355 announce=4
 delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:4552f184b8e3	announce	PRE-CHECK #.# — this command looks likely to fail. It has NOT been blocked; run it anyway if you disagree.
-delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:4c08e8152e30	announce	PRE-CHECK #.# — this command looks likely to fail. It has NOT been blocked; run it anyway if you disagree.
 delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:9de030768415	announce	MODEL ROOM ROUTE — read the current rule before this CLI call: Decision `<uuid>` records Joe's route:
 delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:9fcfc2d5b12d	announce	PRE-CHECK #.# — this command looks likely to fail. It has NOT been blocked; run it anyway if you disagree.
 delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:fe264cb28a77	announce	PRE-CHECK #.# — this command looks likely to fail. It has NOT been blocked; run it anyway if you disagree.
 delegation-gate.py	Stop	(all)	counts	allow=87 announce=1
 delegation-gate.py	Stop	scenarios:c3059d17e2ab	announce	DELEGATION TELEMETRY — this session's mechanical-call pattern reached # moment(s) where the retired denial rule would have fired (threshold 
-draft-export-gate.py	PreToolUse[Bash]	(all)	counts	allow=319 announce=1
+draft-export-gate.py	PreToolUse[Bash]	(all)	counts	allow=311 announce=1
 draft-export-gate.py	PreToolUse[Bash]	scenarios:a1000000002b	announce	out/exports/ IS A DRAFT DIRECTORY, NOT THE RECORD. `run.sh export` writes there by default and only CARR_EXPORT_LIVE=# reaches the vault, so
 drift-assertion-gate.py	Stop	(all)	counts	allow=87 reopen=1
 drift-assertion-gate.py	Stop	scenarios:c3d1e2f3a4b5	reopen	DRIFT ASSERTION — you are about to tell Joe that a present state is WRONG, and the decision log has something on this subject.
@@ -252,7 +250,7 @@ executor-tier-gate.py	PreToolUse[Agent]	(all)	counts	allow=4 deny=3
 executor-tier-gate.py	PreToolUse[Agent]	agent:2cd5a04c133c	deny	EXECUTOR NOT NAMED. This Agent call passes no `model`, and `Plan` has no model pinned in a definition file, so it will INHERIT THE PARENT TI
 executor-tier-gate.py	PreToolUse[Agent]	agent:cce5ca978235	deny	EXECUTOR NOT NAMED. This Agent call passes no `model`, and `general-purpose` has no model pinned in a definition file, so it will INHERIT TH
 executor-tier-gate.py	PreToolUse[Agent]	agent:cec1ad97860a	deny	EXECUTOR NOT NAMED. This Agent call passes no `model`, and `Explore` has no model pinned in a definition file, so it will INHERIT THE PARENT
-gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=62 announce=10
+gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=61 announce=10
 gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:0ba2e8a87506	announce	GATE CHANGE ANNOUNCED — hook-meter-run.py is enforcement, and edit just changed it.
 gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:4ea164ba7c1a	announce	GATE CHANGE ANNOUNCED — jev-supervisor.py is enforcement, and edit just changed it.
 gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:50d0da61a891	announce	GATE CHANGE ANNOUNCED — completion-evidence-gate.py is enforcement, and edit just changed it.
@@ -263,37 +261,35 @@ gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:cdbcf60040f0	announce	G
 gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:cdd65a0f0747	announce	GATE CHANGE ANNOUNCED — peer-broadcast-gate.py is enforcement, and edit just changed it.
 gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:d9316125677c	announce	GATE CHANGE ANNOUNCED — guard-unattended.py is enforcement, and edit just changed it.
 gate-edit-gate.py	PreToolUse[Write|Edit|MultiEdit]	edits:fa39d0ae0973	announce	GATE CHANGE ANNOUNCED — executor-tier-gate.py is enforcement, and edit just changed it.
-github-burst-guard.py	PostToolUseFailure[Bash]	(all)	counts	allow=319
-github-burst-guard.py	PostToolUse[Bash]	(all)	counts	allow=319
-github-burst-guard.py	PreToolUse[Bash]	(all)	counts	allow=319 deny=5
+github-burst-guard.py	PostToolUseFailure[Bash]	(all)	counts	allow=311
+github-burst-guard.py	PostToolUse[Bash]	(all)	counts	allow=311
+github-burst-guard.py	PreToolUse[Bash]	(all)	counts	allow=311 deny=5
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b01	deny	GITHUB BURST GUARD: this command is `xargs` fanning gh out over a list with no `sleep #`+ between calls. A burst like that trips GitHub's sh
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b02	deny	GITHUB BURST GUARD: this command is a `for` loop that runs gh on every pass with no `sleep #`+ inside it. A burst like that trips GitHub's s
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b03	deny	GITHUB BURST GUARD: GitHub answered with a rate-limit error # minute(s) ago, and every session, CI watcher and the release pipeline share th
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b04	deny	GITHUB BURST GUARD: a release-pipeline tick or shepherd run that did real work started #s ago. Each tick makes many GitHub calls, and hand-r
 github-burst-guard.py	PreToolUse[Bash]	scenarios:a10000000b05	deny	GITHUB BURST GUARD: GitHub answered with a rate-limit error # minute(s) ago, and every session, CI watcher and the release pipeline share th
-guard-unattended.py	PreToolUse[Bash|WebFetch]	(all)	counts	allow=308 deny=13
+guard-unattended.py	PreToolUse[Bash|WebFetch]	(all)	counts	allow=301 deny=12
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:230bd999bc9a	deny	network send to an unrecognised host (#.#.#.#) — blocked by the CARR unattended guard: the command carries a $-expansion, backtick or proces
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:2f83845bddfc	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:33015ce0899d	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:56bed63903a1	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:620fc166f376	deny	network send to an unrecognised host (#.#.#.#) — blocked by the CARR unattended guard: the command carries a $-expansion, backtick or proces
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:66d774f88124	deny	force push — blocked by the CARR unattended guard
-guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:6dfb251d684c	deny	broad add (-A/--all/./:/) — blocked by the CARR unattended guard. Add explicit paths instead: `git add <path> [<path>...]`.
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:7ed14bfb5b26	deny	private key material — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:995d89a284a1	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e15de7ccac12	deny	network send to an unrecognised host (localhost) — blocked by the CARR unattended guard: the command carries a $-expansion, backtick or proc
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e3c7b98b9e56	deny	private key material — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	scenarios:5c0000000005	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	tool_calls:f53afacc66e2	deny	WebFetch to a non-standard port (#) on a host outside KNOWN_HOSTS — blocked by the CARR guard.
-jev-supervisor.py	PostToolUse	(all)	counts	allow=456 announce=1
+jev-supervisor.py	PostToolUse	(all)	counts	allow=446 announce=1
 jev-supervisor.py	PostToolUse	scenarios:9e7000000001	announce	[jev failure_triage] code_bug: Read the traceback and fix the code at the location it points to.
 jev-supervisor.py	Stop	(all)	counts	allow=87 announce=1
 jev-supervisor.py	Stop	scenarios:e1a5c0de0001	announce	[jev done_claim] unsupported: Completion criteria are not met.
 job-watchdog-digest.py	UserPromptSubmit	(all)	counts	allow=6
 ledger-sweep.py	Stop	(all)	counts	allow=87 announce=1
 ledger-sweep.py	Stop	scenarios:c3f6a7b8c9d0	announce	LEDGER SWEEP — the partner's last turn matched triggers # · OVERRULED A RECOMMENDATION; # · RULED ON HOW SOMETHING IS STRUCTURED from rule <
-lint-gate.py	PostToolUse[Write|Edit|MultiEdit|apply_patch|functions\.apply_patch]	(all)	counts	announce=72
-lint-gate.py	PostToolUse[Write|Edit|MultiEdit|apply_patch|functions\.apply_patch]	edits:005d482ca566	announce	json schema=jev-post-write-review/v# status=skipped reason=no_jev_candidate
+lint-gate.py	PostToolUse[Write|Edit|MultiEdit|apply_patch|functions\.apply_patch]	(all)	counts	announce=71
 lint-gate.py	PostToolUse[Write|Edit|MultiEdit|apply_patch|functions\.apply_patch]	edits:010a4c03c18b	announce	json schema=jev-post-write-review/v# status=skipped reason=no_jev_candidate
 lint-gate.py	PostToolUse[Write|Edit|MultiEdit|apply_patch|functions\.apply_patch]	edits:03e198646e6d	announce	json schema=jev-post-write-review/v# status=skipped reason=no_jev_candidate
 lint-gate.py	PostToolUse[Write|Edit|MultiEdit|apply_patch|functions\.apply_patch]	edits:0a64781c385b	announce	json schema=jev-post-write-review/v# status=skipped reason=no_jev_candidate
@@ -368,18 +364,18 @@ lint-gate.py	PostToolUse[Write|Edit|MultiEdit|apply_patch|functions\.apply_patch
 loose-work-gate.py	Stop	(all)	counts	allow=87
 map-architecture-gate.py	Stop	(all)	counts	allow=87 announce=1
 map-architecture-gate.py	Stop	scenarios:d4a000000001	announce	MAP ARCHITECTURE GATE — call the live `map-architecture` verb now. Read its two current doctrine sections and machine-contract pointer, then
-model-floor-gate.py	PreToolUse[Bash|mcp__claude-in-chrome__.*]	(all)	counts	allow=321 deny=2
+model-floor-gate.py	PreToolUse[Bash|mcp__claude-in-chrome__.*]	(all)	counts	allow=313 deny=2
 model-floor-gate.py	PreToolUse[Bash|mcp__claude-in-chrome__.*]	scenarios:a1000000002a	deny	MODEL FLOOR — THIS RUN LANDED ON SONNET AND REQUIRES OPUS OR BETTER.
 model-floor-gate.py	PreToolUse[Bash|mcp__claude-in-chrome__.*]	scenarios:a1000000002b	deny	MODEL FLOOR — THIS RUN LANDED ON SONNET AND REQUIRES OPUS OR BETTER.
-one-repo-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=72 deny=1
+one-repo-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=71 deny=1
 one-repo-gate.py	PreToolUse[Write|Edit|MultiEdit]	scenarios:b2c2d3e4f5a6	deny	BLOCKED by the CARR one-repo gate: {HOME}/other-repo/script.py
 peer-broadcast-gate.py	PreToolUse[SendMessage]	(all)	counts	allow=2 deny=1
 peer-broadcast-gate.py	PreToolUse[SendMessage]	scenarios:b2b1e2d3c4a5	deny	PEER BROADCAST GATE — refused.
-record-home-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=72 deny=1
+record-home-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=71 deny=1
 record-home-gate.py	PreToolUse[Write|Edit|MultiEdit]	scenarios:b2f6c3d4e5fb	deny	BLOCKED by the CARR record-home gate: 'home:.claude/skills/catchup/SKILL.md' is a PROJECTED RENDER, not a source file. Git owns it through t
-rule-boot-gate.py	PostToolUseFailure[Bash|mcp__.*__standing-context]	(all)	counts	allow=319
-rule-boot-gate.py	PostToolUse[Bash|mcp__.*__standing-context]	(all)	counts	allow=319
-rule-boot-gate.py	PreToolUse[.*]	(all)	counts	deny=144
+rule-boot-gate.py	PostToolUseFailure[Bash|mcp__.*__standing-context]	(all)	counts	allow=311
+rule-boot-gate.py	PostToolUse[Bash|mcp__.*__standing-context]	(all)	counts	allow=311
+rule-boot-gate.py	PreToolUse[.*]	(all)	counts	deny=142
 rule-boot-gate.py	PreToolUse[.*]	agent:2cd5a04c133c	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	agent:3d22d90ff649	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	agent:42d84884c681	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
@@ -387,7 +383,6 @@ rule-boot-gate.py	PreToolUse[.*]	agent:bb9e026b746e	deny	RULE BOOT NOT ARMED: Se
 rule-boot-gate.py	PreToolUse[.*]	agent:c2540cd6159d	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	agent:cce5ca978235	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	agent:cec1ad97860a	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
-rule-boot-gate.py	PreToolUse[.*]	edits:005d482ca566	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	edits:010a4c03c18b	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	edits:03e198646e6d	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	edits:0a64781c385b	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
@@ -496,7 +491,6 @@ rule-boot-gate.py	PreToolUse[.*]	reads:a037ceddd24e	deny	RULE BOOT NOT ARMED: Se
 rule-boot-gate.py	PreToolUse[.*]	reads:b8ee0d8bbf41	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:bdf5a9398fd6	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:c13469956ba1	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
-rule-boot-gate.py	PreToolUse[.*]	reads:c68def4a42cb	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:ca72ecdc9577	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:cb94519aa94d	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:cf9940a2e704	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
@@ -526,7 +520,7 @@ rule-boot-gate.py	PreToolUse[.*]	tool_calls:e173a8c682ff	deny	RULE BOOT NOT ARME
 rule-boot-gate.py	PreToolUse[.*]	tool_calls:f53afacc66e2	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-pack-drift-gate.py	Stop	(all)	counts	allow=87 reopen=1
 rule-pack-drift-gate.py	Stop	scenarios:d4a000000002	reopen	RULE PACK DRIFT — this turn did work you did not load the rules for. Missing pack(s): governance-rules. What named them: governance-rules: d
-rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	(all)	counts	allow=230 announce=183
+rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	(all)	counts	allow=223 announce=181
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	agent:2cd5a04c133c	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	agent:3d22d90ff649	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	agent:42d84884c681	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
@@ -577,7 +571,6 @@ rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdi
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:65ff7a7d05c7	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:66d774f88124	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:6c98982a729a	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
-rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:6dfb251d684c	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:707782be2dfc	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:76aa2716c09d	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:7719cd102bf3	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
@@ -624,7 +617,6 @@ rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdi
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:fccf9ae553aa	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:fcdf98f8ca35	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	bash:fd1835167bc4	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
-rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	edits:005d482ca566	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	edits:010a4c03c18b	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	edits:03e198646e6d	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
 rule-pack-preuse-reselection.py	PreToolUse[Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\.update_plan|mcp__.*]	edits:0a64781c385b	announce	RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this tool call and were NOT delivered; you have not seen them. The t
@@ -718,13 +710,13 @@ rule-shape-gate.py	PreToolUse[mcp__.*__(teach|activate-rule)]	tool_calls:0d9264a
 scheduled-run-record.py	Stop	(all)	counts	allow=87
 session-presence-hook.py	SessionEnd	(all)	counts	allow=1
 session-presence-hook.py	UserPromptSubmit	(all)	counts	allow=6
-settings-change-gate.py	PostToolUse[Bash]	(all)	counts	allow=319
-settings-change-gate.py	PreToolUse[Bash]	(all)	counts	allow=319
+settings-change-gate.py	PostToolUse[Bash]	(all)	counts	allow=311
+settings-change-gate.py	PreToolUse[Bash]	(all)	counts	allow=311
 unfiled-bug-stop-gate.py	Stop	(all)	counts	allow=87 reopen=1
 unfiled-bug-stop-gate.py	Stop	scenarios:e5b100000001	reopen	UNFILED BUG — this turn reports a defect it observed and files nothing for it (rule <hex>: a detected bug is recorded and addressed in the s
 unread-artifact-gate.py	Stop	(all)	counts	allow=87 announce=1
 unread-artifact-gate.py	Stop	scenarios:d4a000000004	announce	UNREAD ARTIFACT — you are describing what a file DOES, and this session never opened it:
 weekend-quiet-gate.py	PreToolUse[PushNotification|mcp__.*__(send_message|create_draft|update_draft)]	(all)	counts	allow=7 deny=1
 weekend-quiet-gate.py	PreToolUse[PushNotification|mcp__.*__(send_message|create_draft|update_draft)]	scenarios:5c0000000001@saturday-unattended	deny	WEEKEND QUIET — refused. It is Saturday, and weekends are off for both partners (rule <hex>). Joe and Dell do not work them, and neither of 
-write-effect-check.py	PostToolUse[Bash]	(all)	counts	allow=319
-write-effect-check.py	PreToolUse[Bash]	(all)	counts	allow=319
+write-effect-check.py	PostToolUse[Bash]	(all)	counts	allow=311
+write-effect-check.py	PreToolUse[Bash]	(all)	counts	allow=311
