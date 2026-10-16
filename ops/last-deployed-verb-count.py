@@ -2,7 +2,7 @@
 """last-deployed-verb-count.py — what the last deploy of this service to this
 environment actually shipped, read from the ledger.
 
-WHY THIS EXISTS. bin/deploy-worker.sh refuses a deploy that would remove verbs,
+WHY THIS EXISTS. bin/deploy-worker.sh refuses unlisted verb loss,
 and it needs a previous number to compare against. That number used to live in
 mcp-server/.last-deployed-verb-count.<env>, a file the deploy wrote and the
 postflight told you to commit. Committing it fails ops/release-manifest-selftest.py
@@ -19,6 +19,8 @@ nothing requires this one.
 
 ONE CODE PATH, TWO CALLERS (rule a8c55a47): the deploy asks this, and so can CI
 or a human. A second copy of the query in shell would be free to drift.
+The ledger stores counts, so verb-count.sh --check-retirements applies the
+committed retirement names with exact count arithmetic for an intended shrink.
 
 EXIT CODES, and the shell caller depends on telling them apart:
   0   a previous deployment exists; its verb count is printed on stdout

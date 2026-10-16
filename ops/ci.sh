@@ -1063,20 +1063,21 @@ check_artifact() {
     bad artifact "the exact DoctorCRE release artifact did not match its CARR pin"
     return
   fi
-  shipping="$(sh ops/verb-count.sh "$REPO/mcp-server" 2>"$LOGDIR/artifact.log")"
+  shipping="$(sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements 0 2>"$LOGDIR/artifact.log")"
   if [ -z "$shipping" ]; then
     cat "$LOGDIR/artifact.log" >&2
-    bad artifact "registry did not import — refusing to call it unmeasured-but-fine"
+    bad artifact "registry import or retirement validation failed"
     return
   fi
   local rc=0
   marker="$("$PY" ops/last-deployed-verb-count.py carr-mcp production 2>/dev/null)" || rc=$?
   case "$rc" in
     0)
-      if [ -n "$marker" ] && [ "$shipping" -lt "$marker" ]; then
-        bad artifact "would REMOVE $((marker - shipping)) verb(s): deployed $marker, tree has $shipping"
+      if ! sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements "$marker" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
+        cat "$LOGDIR/artifact.log" >&2
+        bad artifact "verb loss does not match the committed retirement ledger"
       else
-        ok artifact "$shipping verbs, no loss against deployed $marker"
+        ok artifact "$shipping verbs; loss checked against deployed $marker and committed retirements"
       fi
       ;;
     3)

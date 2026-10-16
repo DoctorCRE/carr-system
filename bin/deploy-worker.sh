@@ -574,7 +574,7 @@ if [ "$TARGET_ENV" != "production" ]; then
   fi
 fi
 
-# ---------- preflight 3: verb count did not shrink ----------
+# ---------- preflight 3: no unlisted verb retirement ----------
 
 # The count moved to ops/verb-count.sh on 2026-08-13 so that CI can run this same
 # guard at MERGE time, not only here at DEPLOY time. Same code, two callers
@@ -611,19 +611,19 @@ PREVIOUS="$("$PY" "$REPO/ops/last-deployed-verb-count.py" carr-mcp "$TARGET_ENV"
   || LEDGER_RC=$?
 case "$LEDGER_RC" in
   0)
-    if [ -n "$PREVIOUS" ] && [ "$SHIPPING" -lt "$PREVIOUS" ]; then
+    if ! sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS" >/dev/null; then
       LOST=$((PREVIOUS - SHIPPING))
-      if [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]; then
-        fail "this deploy would REMOVE $LOST verb(s) from $TARGET_ENV.
+      if [ "$LOST" -le 0 ] || [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]; then
+        fail "this deploy fails the committed verb-retirement guard for $TARGET_ENV.
   last deployed: $PREVIOUS
   about to ship: $SHIPPING
 
-  Source and standalone deploys cannot waive the verb-loss guard. Only an
+  Intended retirements must match ops/config/retired-verbs.v1.json. Only an
   exact prepared typed staging recovery step may temporarily shrink."
       fi
       prepare_typed_recovery_shrink
     else
-      echo "  OK  no verb loss (last deployed to $TARGET_ENV: $PREVIOUS)"
+      echo "  OK  verb loss checked against committed retirements (last deployed to $TARGET_ENV: $PREVIOUS)"
     fi
     if grep -q 'STALE BASELINE' "$BASELINE_STDERR" 2>/dev/null; then
       echo "  !!  the number above is STALE and the guard above is weaker than it looks:" >&2
@@ -631,6 +631,8 @@ case "$LEDGER_RC" in
     fi
     ;;
   3)
+    sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements 0 >/dev/null \
+      || fail "registry import or retirement validation failed."
     echo "  --  no previous deployment recorded for $TARGET_ENV; this run establishes the baseline"
     ;;
   *)

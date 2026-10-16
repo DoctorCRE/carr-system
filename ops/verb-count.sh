@@ -17,11 +17,24 @@
 # it confidently.
 #
 # Usage:  ops/verb-count.sh <worker-dir>      # prints an integer on stdout
+#         ops/verb-count.sh <worker-dir> --check-retirements <deployed-count>
+# The checked form imports the exact names and applies verb-loss-guard.py.
+# CI and deploy use this one implementation, including the committed ledger.
 # Exits non-zero, printing nothing to stdout, when the registry will not import.
 # A refusal to count is never the same as a count of zero: the caller must treat
 # a non-zero exit as "unmeasured", not as "shrank to nothing".
 
 set -eu
+
+CHECK_RETIREMENTS=0
+case "$#" in
+  1) ;;
+  3)
+    [ "$2" = "--check-retirements" ] || exit 64
+    CHECK_RETIREMENTS=1
+    ;;
+  *) echo "usage: verb-count.sh <worker-dir> [--check-retirements <deployed-count>]" >&2; exit 64 ;;
+esac
 
 # The deploy wrapper may count a typed-recovery candidate from a clean,
 # detached historical worktree.  Those worktrees deliberately have no ignored
@@ -62,12 +75,20 @@ ln -s "$RUNTIME_NODE_MODULES" "$IMPORT_ROOT/node_modules"
 COUNT="$(node --preserve-symlinks --input-type=module -e '
 import { pathToFileURL } from "node:url";
 import(pathToFileURL(process.argv[1]).href)
-  .then(m => console.log(Object.keys(m.TOOLS).length))
+  .then(m => console.log(process.argv[2] === "1"
+    ? JSON.stringify(Object.keys(m.TOOLS).sort()) : Object.keys(m.TOOLS).length))
   .catch(e => { console.error(e.message); process.exit(1); });' \
-  "$IMPORT_ROOT/mcp-server/src/tools.js" 2>&1)" || {
+  "$IMPORT_ROOT/mcp-server/src/tools.js" "$CHECK_RETIREMENTS" 2>&1)" || {
   echo "verb-count.sh: the registry did not import — $COUNT" >&2
   exit 1
 }
+
+if [ "$CHECK_RETIREMENTS" = "1" ]; then
+  PY="$SCRIPT_ROOT/.venv/bin/python"
+  [ -x "$PY" ] || PY=python3
+  printf '%s\n' "$COUNT" | "$PY" "$SCRIPT_ROOT/ops/verb-loss-guard.py" "$3"
+  exit $?
+fi
 
 case "$COUNT" in
   ''|*[!0-9]*)
