@@ -1,48 +1,5 @@
 #!/usr/bin/env python3
-"""stale-config-check.py — you may not overwrite a generated file you have not seen.
-
-THE FAILURE, twice on 2026-08-14 and damaging both times.
-
-  ops/ci.sh. Pull request 60 added a type-check class that treated a missing
-  mypy as SKIP. Pull request 65, cut BEFORE 60 existed, replaced the whole class
-  with its own older copy that reported a false failure instead — and merged
-  second, so it won. A machine without mypy then failed CI with "mypy found
-  shape mistakes", which is wrong and misdirects whoever reads it.
-
-  ops/config/gate-baseline.json. Pull request 70 changed a gate and re-blessed
-  its hash in the same commit, exactly as the baseline's own instructions
-  require. A concurrent pull request cut before it blessed from the older base
-  and merged after, carrying the pre-70 hash. Main then shipped a gate whose
-  recorded hash did not match its own file, so every session booted into GATE
-  INTEGRITY FAILURE until somebody re-blessed it by hand.
-
-WHY NOTHING CAUGHT EITHER, and why this is not solvable by reviewing harder.
-Each branch is internally consistent and passes CI alone. The damage does not
-exist until the two are combined on main, and git reports no conflict because
-the second branch rewrote the whole region rather than editing around it. This
-is a LOST UPDATE, not a merge conflict.
-
-WHY ONLY THESE FILES. They are GENERATED — rewritten wholesale by tooling rather
-than edited line by line — so two branches touching them almost never conflict
-textually; they silently overwrite each other. ops/config/gate-baseline.json
-took THIRTY-SIX commits on main in twenty-four hours. A hand-written source file
-would have conflicted loudly and been noticed.
-
-THE RULE: if your branch differs from origin/main for a watched file, the
-newest commit on origin/main touching that file must already be in your
-history. An exact copy of main cannot overwrite unseen bytes, even when
-source was synchronized by cherry-pick rather than a merge.
-
-WHAT THIS DOES NOT CLOSE, stated plainly because a guard oversold is worse than
-none. It runs when CI runs. If main gains a new commit to a watched file AFTER
-this passes and BEFORE the merge button, the same lost update can still happen in
-that window. Closing it completely needs GitHub's own "require branches to be up
-to date before merging" on the ruleset, which forces every pull request to
-rebase whenever main moves at all — real protection at the cost of constant
-churn across every branch, and a call for Joe rather than for this file. This
-check buys the common case, which is a branch cut hours ago against a file that
-changes many times a day.
-"""
+"""Refuse wholesale configuration rewrites based on an obsolete main revision."""
 import os
 import subprocess
 import sys
@@ -50,7 +7,6 @@ import sys
 # Generated files that tooling rewrites wholesale. A path belongs here only if a
 # second writer would OVERWRITE rather than conflict — that is the whole test.
 WATCHED = [
-    "ops/config/gate-baseline.json",
     "ops/config/hooks.json",
     "ops/config/rule-enforcement-map.json",
     "ops/config/services.json",
@@ -131,8 +87,6 @@ def main() -> int:
         "  FIX — take main's version first, then redo your change on top:\n\n"
         f"      git fetch origin main && git merge {BASE}\n"
         "      # then re-run whatever GENERATES the file, rather than hand-merging it:\n"
-        "      #   gate-baseline.json      -> hooks/gate-integrity.py --bless <gate>\n"
-        "      #   rule-enforcement-map    -> bin/sync-enforcement-map.py\n"
         "      #   db/schema.sql           -> bin/schema-snapshot.sh\n\n"
         "  Hand-merging a hash is how one of the two incidents happened. Regenerate.",
         file=sys.stderr)

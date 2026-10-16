@@ -94,7 +94,7 @@ class Controls(unittest.TestCase):
         jobs[1]['conclusion']='failure';jobs[2]['conclusion']='cancelled'
         rc, lines=mod.verdict(jobs,groups)
         self.assertNotEqual(rc,0)
-        self.assertIn('gates: FAILED',lines);self.assertIn('replay: CANCELLED',lines)
+        self.assertIn('gates: FAILED',lines);self.assertIn('migration: CANCELLED',lines)
         for c in groups[0].split(): self.assertIn(c+': PASSED',lines)
         self.assertNotEqual(mod.verdict(jobs[:-1],groups)[0],0)
         self.assertIn('migration: MISSING',mod.verdict(jobs[:-1],groups)[1])

@@ -1289,7 +1289,7 @@ class QueueTests(unittest.TestCase):
 
 
     def cli(self, *args):
-        return subprocess.run([sys.executable, str(ENTRY), '--state', str(self.state), *args],
+        return subprocess.run([sys.executable, str(ENTRY), '--state', str(self.state), '--root', str(self.root), *args],
                               text=True, capture_output=True)
 
     def test_legacy_import_recovers_attempted_entries_ignoring_pointers(self):

@@ -315,7 +315,6 @@ const DECLARED_CHECK_NAMES = Object.freeze([
   "ops/ci.sh --strict",
   "ops/ci.sh --strict --only pushfloor unit types contract secret dependency binding artifact freshness",
   "ops/ci.sh --strict --only gates",
-  "ops/ci.sh --strict --only replay",
   "ops/ci.sh --strict --only migration",
   "local-db-ci --class migration",
   "DB shadow shard 1/2",

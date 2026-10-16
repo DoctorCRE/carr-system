@@ -107,7 +107,7 @@ class FixtureTests(unittest.TestCase):
     def test_committed_rule_binding_fixture_is_pinned_to_its_sources(self):
         fixtures = cal.load_fixtures(cal.FIXTURE_DIR)
         rule = fixtures["rule_binding"]
-        self.assertEqual(rule["version"], "2026-10-15.1")
+        self.assertEqual(rule["version"], "2026-10-16.1")
         cases = rule["cases"]
         self.assertEqual(len(cases), 240 * 195)
         validated = [c for c in cases if c["label_status"] == "validated"]

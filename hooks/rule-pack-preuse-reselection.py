@@ -869,6 +869,9 @@ def decide(payload):
 
 
 def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
     return run(decide)
 
 

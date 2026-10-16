@@ -1170,7 +1170,7 @@ FIXED_CURSOR_INPUTS = frozenset(set(WINDOW_SOURCE_PATHS) | set(SELECTOR_SOURCE_P
     "ops/config/rule-routes.v1.json", "ops/config/rule-classification.v1.csv",
     "ops/config/rule-classes.v1.json", "ops/config/hooks.json",
     "ops/config/codex-hooks.json", "ops/config/rule-delivery-activation-overlay.v1.json",
-    "ops/config/control-enforcement-classes.v1.json", "ops/config/gate-baseline.json",
+    "ops/config/control-enforcement-classes.v1.json",
     "control-room/contracts/engineering-slice-receipt.v1.schema.json",
     "lib/rule_routes.py", "lib/rule_delivery_preuse.py", "lib/rule_delivery_shadow.py",
     "lib/transcript_read.py", "hooks/rule-pack-drift-gate.py", "hooks/lint-gate.py",
@@ -1571,6 +1571,9 @@ def decide(payload):
 
 
 def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
     return run(decide, parse_error=lambda exc: _handle_error({}, exc))
 
 

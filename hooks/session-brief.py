@@ -324,11 +324,6 @@ def _oldest_ref(rows):
 def _has_uncommitted_writes(repo):
     """True when this checkout has this session's own uncommitted tracked writes.
 
-    Reuses the loose-work helpers already in this module (loose_tracked in
-    loose-work-gate.py) rather than reimplementing git status parsing. A
-    session that cannot tell whose file is whose must not act on the whole
-    tree — but the brief can report it.
-
     Returns True when `git status --porcelain --ignore-submodules=dirty` has
     any tracked-modified or added entries (not untracked — untracked is not
     a session's abandoned edit).

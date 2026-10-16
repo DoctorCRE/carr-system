@@ -183,6 +183,12 @@ def compare(map_data: dict, export_data: dict) -> dict:
                           "normalize to a known bucket")
             continue
         compared += 1
+        if (removed_gate_reclassification(detail) and f_bucket == "judgment_advisory"
+                and d_bucket == "machine_enforceable"):
+            # The map leads production here: bin/sync-rule-admission-prod.sh
+            # --apply, run after merge, moves the admission and the next
+            # --export makes the buckets agree through the normal path below.
+            continue
         if rule_id in PARTIAL_ADMISSION_RULES:
             if f_bucket != "judgment_advisory" or d_bucket != "machine_enforceable":
                 errors.append(f"{rule_id} partial-admission exception is stale")
@@ -196,6 +202,17 @@ def compare(map_data: dict, export_data: dict) -> dict:
                 "db_bucket": d_bucket,
             })
     return {"errors": errors, "compared": compared, "mismatches": mismatches}
+
+
+def removed_gate_reclassification(detail: dict) -> bool:
+    """A rule PR 1801 moved from a removed automated gate to judgment_ambient.
+
+    Joe's 2026-10-15 purge ruling removed the gates; the reviewed map records
+    each such rule's why_unenforceable in one fixed sentence, so the exception
+    is read from the map and cannot cover any rule it does not name."""
+    why = detail.get("why_unenforceable") or ""
+    return (detail.get("enforcement_class") == "judgment_ambient"
+            and why.startswith("Automated gate ") and " removed in PR 1801 " in why)
 
 
 def main() -> int:

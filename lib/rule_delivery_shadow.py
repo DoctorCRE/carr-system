@@ -29,7 +29,6 @@ WINDOW_SOURCE_PATHS = (
     "migrations/0321_rule_delivery_policy_seed_repair.sql",
     "ops/config/codex-hooks.json",
     "ops/config/control-enforcement-classes.v1.json",
-    "ops/config/gate-baseline.json",
     "ops/config/hooks.json",
     "ops/config/rule-delivery-activation-overlay.v1.json",
     "ops/config-as-code.py",

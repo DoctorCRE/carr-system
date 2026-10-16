@@ -3421,52 +3421,6 @@ except Exception as e:
     print(f"  ⚠︎ {'egress guard':<18} selftest failed ({type(e).__name__}: {e})")
     rc = 1
 
-# A THIRD INDEPENDENT ROW (2026-08-10, loop #231). The egress row above proves
-# the guard still denies network and render writes. It says nothing about whether
-# the GATES THEMSELVES are still protected, which is a separate claim that was
-# false for three days: gate-edit-gate.py guarded Write/Edit while the shell path
-# was wide open, and its own docstring asserted otherwise. The fixtures for that
-# suite had also gone chronically red — 15/27 — after the gate was downgraded to
-# announce and nobody moved them, so nothing would have reported the regression.
-# A suite nobody runs is not a check, which is why it gets a row here.
-try:
-    _ggt = os.path.join(REPO_ROOT, "ops", "gate-edit-gate-selftest.py")
-    if os.path.exists(_ggt):
-        _p = subprocess.run([sys.executable, _ggt], capture_output=True, text=True, timeout=180)
-        _sum = next((l for l in (_p.stdout or "").splitlines()
-                     if "gate-edit-gate-selftest:" in l), "")
-        _sum = _sum.split(": ", 1)[-1] if _sum else "(no output)"
-        if _p.returncode == 0:
-            print(f"  OK {'gate protection':<18} {_sum} · on breach: a gate can be "
-                  f"changed SILENTLY; python3 ops/gate-edit-gate-selftest.py")
-        else:
-            print(f"  ✗✗ {'gate protection':<18} {_sum} · on breach: a gate can be "
-                  f"changed SILENTLY — the announcement both doors promise is not "
-                  f"firing; python3 ops/gate-edit-gate-selftest.py")
-            rc = 1
-except Exception as e:
-    print(f"  ⚠︎ {'gate protection':<18} selftest failed ({type(e).__name__}: {e})")
-    rc = 1
-
-# Rule coverage is deliberately a category map, not a gate count.  A green
-# result means every active rule is classified once and every non-advisory rule
-# names a concrete control/test; it does NOT claim all rules are hard-blocked.
-try:
-    _rem = os.path.join(REPO_ROOT, "ops", "rule-enforcement-map-check.py")
-    if os.path.exists(_rem):
-        _p = subprocess.run([sys.executable, _rem], capture_output=True, text=True, timeout=45)
-        _line = next((l for l in (_p.stdout or "").splitlines()
-                      if l.startswith("rule-enforcement-map:")), "(no output)")
-        _summary = _line.split(" — ", 1)[-1]
-        if _p.returncode == 0:
-            print(f"  OK {'rule coverage':<18} {_summary}")
-        else:
-            print(f"  ✗✗ {'rule coverage':<18} {_summary} · an active rule is unmapped or a claimed control lacks evidence")
-            rc = 1
-except Exception as e:
-    print(f"  ⚠︎ {'rule coverage':<18} check failed ({type(e).__name__}: {e})")
-    rc = 1
-
 # The Hermes runtime writes its own memory files and injects them into every one
 # of its sessions. They are a second, ungated rule store with no provenance, and
 # they go stale silently when the record layer moves. This is a predicate rather
