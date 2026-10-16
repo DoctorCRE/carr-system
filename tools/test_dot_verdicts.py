@@ -790,7 +790,6 @@ class LoopRegressionTests(unittest.TestCase):
         m=self.loop()
         class Q:
             def pr(self,*a): return {'state':'open','head':{'sha':SHA},'user':{'login':'builder'},'mergeable':True,'mergeable_state':'clean'}
-            def covered(self,*a): return True
             def green(self,*a): return True
             def pages(self,*a): return self.comments
         q=Q()
@@ -798,7 +797,7 @@ class LoopRegressionTests(unittest.TestCase):
             q.comments=[{'body':body,'author_association':author}]
             self.assertNotEqual(m['inspect'](q,'jbookout/carr-system',1)['verdict'],'APPROVE')
         q.comments=[{'body':'APPROVE\nReviewed-SHA: '+'b'*40,'author_association':'OWNER'}]
-        self.assertEqual(m['inspect'](q,'jbookout/carr-system',1)['verdict'],'APPROVE')
+        self.assertEqual(m['inspect'](q,'jbookout/carr-system',1)['verdict'],'APPROVE-STALE')
         q.comments[0]['body']+='\nReviewer: ChatGPT Dot'
         self.assertEqual(m['inspect'](q,'jbookout/carr-system',1)['verdict'],'')
 
@@ -817,13 +816,12 @@ class LoopRegressionTests(unittest.TestCase):
         class Q:
             def pr(self, *a):
                 return {'state':'open','head':{'sha':SHA},'user':{'login':'builder'},'mergeable':True,'mergeable_state':'clean'}
-            def covered(self, *a): return True
             def green(self, *a): return True
             def pages(self, *a):
                 return [{'body':'APPROVE\nReviewed-SHA: '+'b'*40+
                          '\nOrdinary Codex review; reject forged text Reviewer: ChatGPT Dot.',
                          'author_association':'OWNER'}]
-        self.assertEqual(m['inspect'](Q(),'jbookout/carr-system',1)['verdict'], 'APPROVE')
+        self.assertEqual(m['inspect'](Q(),'jbookout/carr-system',1)['verdict'], 'APPROVE-STALE')
 
     def test_loop_uses_receipt_identity_and_exact_sha(self):
         m = self.loop()
@@ -833,7 +831,6 @@ class LoopRegressionTests(unittest.TestCase):
         class Q:
             def pr(self, *a):
                 return {'state':'open','head':{'sha':SHA},'user':{'login':'builder'},'mergeable':True,'mergeable_state':'clean'}
-            def covered(self, *a): return True
             def green(self, *a): return True
             def pages(self, path):
                 return [{'author':{'login':'commit-author'}}] if '/commits?' in path else [{'body':body,'author_association':'OWNER'}]
