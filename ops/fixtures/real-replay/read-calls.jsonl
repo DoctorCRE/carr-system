@@ -35,7 +35,6 @@
 {"id": "b8ee0d8bbf41", "tool_input": {"file_path": "{{REPO}}/ops/scac-mutation-inventory.mjs", "limit": 15, "offset": 15790}, "tool_name": "Read"}
 {"id": "bdf5a9398fd6", "tool_input": {"file_path": "{{REPO}}/migrations/0556_meeting_mode_store.sql", "limit": 452, "offset": 504}, "tool_name": "Read"}
 {"id": "c13469956ba1", "tool_input": {"file_path": "{{REPO}}/migrations/0546_read_doc_outcome_cards_successor.sql"}, "tool_name": "Read"}
-{"id": "c68def4a42cb", "tool_input": {"file_path": "{{REPO}}/ops/schema-snapshot-registry-seed-selftest.py", "limit": 40, "offset": 515}, "tool_name": "Read"}
 {"id": "ca72ecdc9577", "tool_input": {"file_path": "{{REPO}}/mcp-server/src/identity.js", "limit": 25, "offset": 55}, "tool_name": "Read"}
 {"id": "cb94519aa94d", "tool_input": {"file_path": "{{REPO}}/mcp-server/test/resource-observation.test.mjs"}, "tool_name": "Read"}
 {"id": "cf9940a2e704", "tool_input": {"file_path": "{{REPO}}/tools/fleet_sync_sibling_safety.py"}, "tool_name": "Read"}
