@@ -430,11 +430,11 @@ def main():
     # preference, and 08c4eda2 as the precedent replacing 5697071b. Nothing
     # was reclassified.
     # PR #1801 removed 19 automated gates; their 42 rules became judgment_ambient
-    # manifest rows typed from each statement (17 procedure, 14 rubric,
-    # 8 preference, 3 doctrine). Active rule IDs and split types stay fixed.
+    # manifest rows typed from each statement (17 procedure, 16 rubric,
+    # 9 preference). Active rule IDs and split types stay fixed.
     reviewed_counts = {
-        "constraint": 38, "procedure": 92, "doctrine": 15, "rubric": 51,
-        "preference": 23, "precedent": 3, "example": 0,
+        "constraint": 38, "procedure": 92, "doctrine": 12, "rubric": 53,
+        "preference": 24, "precedent": 3, "example": 0,
     }
     split_compile_pass = (
         not reviewed_errors and not reviewed_compile_errors

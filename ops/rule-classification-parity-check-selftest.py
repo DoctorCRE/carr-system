@@ -168,11 +168,15 @@ def main() -> int:
     removed_why = ("Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 "
                    "purge ruling; the rule stays in force as prose guidance.")
     removed_map = copy.deepcopy(MAP_BASE)
-    removed_map["rule_controls"]["dddddddd"] = {
+    removed_controls = removed_map["rule_controls"]
+    assert isinstance(removed_controls, dict)
+    removed_controls["dddddddd"] = {
         "category": "judgment_advisory", "enforcement_class": "judgment_ambient",
         "why_unenforceable": removed_why}
     plain_judgment_map = copy.deepcopy(MAP_BASE)
-    plain_judgment_map["rule_controls"]["dddddddd"] = {
+    plain_controls = plain_judgment_map["rule_controls"]
+    assert isinstance(plain_controls, dict)
+    plain_controls["dddddddd"] = {
         "category": "judgment_advisory", "enforcement_class": "judgment_ambient",
         "why_unenforceable": "Framing judgment for a specific kind of proposal."}
     machine_export = with_rule(EXPORT_BASE, "dddddddd",

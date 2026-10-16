@@ -186,7 +186,7 @@
       "ops/config/rule-selection-corpus.v1.json": "71fb2e258fd8428af1f5bc2ec1ed68285aa0eba2fc966f49e01eab1d763f9845",
       "ops/fixtures/real-replay/bash-commands.jsonl": "ba0fb2fa185f4bbd64a3216fb496b0d2c076a562ebe9d83a6d6080f0c8b6976c",
       "ops/fixtures/real-replay/read-calls.jsonl": "19020114d670f51ccef03cab893c40a7eaa1c58663c962499cdba132361670b9",
-      "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
+      "ops/fixtures/rule-delivery-eval/cases.v2.json": "c5900f0fd5343b78209fb248e018cae322f865540ea1cb30837884b8c70151ed",
       "ops/machine_envelope.py": "749970f4dfb838af4e6cd1e6537988a278fc0006a02b32f665dfd0f943266c3f",
       "ops/rule_delivery_eval.py": "10723a68d807fc54538c5e25cd6eb92f8006abeb0e8741e4249fce26768660f0",
       "ops/rule_trigger_compile.py": "ff27baed857313205eae990ac5b02b9edaab7ff900e7eb0eb67ed0ca6fcbf1c5",
