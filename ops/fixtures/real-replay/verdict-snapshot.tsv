@@ -227,7 +227,7 @@ context-handoff-gate.py	Stop	advisories:fb34ec1f1d75/claims-done	announce	Claude
 context-handoff-gate.py	Stop	advisories:fc80d2b5ad77/reports-evidence	announce	Claude context lifecycle control warning (LIFECYCLE_INVALID); native Claude behavior continues.
 costar-lane-gate.py	PreToolUse[mcp__claude-in-chrome__.*]	(all)	counts	allow=2 deny=1
 costar-lane-gate.py	PreToolUse[mcp__claude-in-chrome__.*]	scenarios:b2a0f1e2d3c4	deny	COSTAR LANE — refused. This is the Chrome extension, and CoStar is driven ONLY in the Claude desktop app's own Browser pane (rule <hex>). Th
-delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	(all)	counts	allow=355 announce=4
+delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	(all)	counts	allow=356 announce=4
 delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:4552f184b8e3	announce	PRE-CHECK #.# — this command looks likely to fail. It has NOT been blocked; run it anyway if you disagree.
 delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:9de030768415	announce	MODEL ROOM ROUTE — read the current rule before this CLI call: Decision `<uuid>` records Joe's route:
 delegation-gate.py	PreToolUse[Bash|Read|Grep|Glob|WebFetch|WebSearch]	bash:9fcfc2d5b12d	announce	PRE-CHECK #.# — this command looks likely to fail. It has NOT been blocked; run it anyway if you disagree.
@@ -282,7 +282,7 @@ guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e15de7ccac12	deny	network sen
 guard-unattended.py	PreToolUse[Bash|WebFetch]	bash:e3c7b98b9e56	deny	private key material — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	scenarios:5c0000000005	deny	recursive/forced delete — blocked by the CARR unattended guard
 guard-unattended.py	PreToolUse[Bash|WebFetch]	tool_calls:f53afacc66e2	deny	WebFetch to a non-standard port (#) on a host outside KNOWN_HOSTS — blocked by the CARR guard.
-jev-supervisor.py	PostToolUse	(all)	counts	allow=446 announce=1
+jev-supervisor.py	PostToolUse	(all)	counts	allow=447 announce=1
 jev-supervisor.py	PostToolUse	scenarios:9e7000000001	announce	[jev failure_triage] code_bug: Read the traceback and fix the code at the location it points to.
 jev-supervisor.py	Stop	(all)	counts	allow=87 announce=1
 jev-supervisor.py	Stop	scenarios:e1a5c0de0001	announce	[jev done_claim] unsupported: Completion criteria are not met.
@@ -375,7 +375,7 @@ record-home-gate.py	PreToolUse[Write|Edit|MultiEdit]	(all)	counts	allow=71 deny=
 record-home-gate.py	PreToolUse[Write|Edit|MultiEdit]	scenarios:b2f6c3d4e5fb	deny	BLOCKED by the CARR record-home gate: 'home:.claude/skills/catchup/SKILL.md' is a PROJECTED RENDER, not a source file. Git owns it through t
 rule-boot-gate.py	PostToolUseFailure[Bash|mcp__.*__standing-context]	(all)	counts	allow=311
 rule-boot-gate.py	PostToolUse[Bash|mcp__.*__standing-context]	(all)	counts	allow=311
-rule-boot-gate.py	PreToolUse[.*]	(all)	counts	deny=142
+rule-boot-gate.py	PreToolUse[.*]	(all)	counts	deny=143
 rule-boot-gate.py	PreToolUse[.*]	agent:2cd5a04c133c	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	agent:3d22d90ff649	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	agent:42d84884c681	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
@@ -491,6 +491,7 @@ rule-boot-gate.py	PreToolUse[.*]	reads:a037ceddd24e	deny	RULE BOOT NOT ARMED: Se
 rule-boot-gate.py	PreToolUse[.*]	reads:b8ee0d8bbf41	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:bdf5a9398fd6	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:c13469956ba1	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
+rule-boot-gate.py	PreToolUse[.*]	reads:c68def4a42cb	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:ca72ecdc9577	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:cb94519aa94d	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
 rule-boot-gate.py	PreToolUse[.*]	reads:cf9940a2e704	deny	RULE BOOT NOT ARMED: SessionStart did not arm the rule gate for this session. Read every page standing-context {"detail":"boot"} names befor
