@@ -199,6 +199,12 @@ LAUNCHD_ALT_REPO = {
         REPO, "tools", "dictation-rig", "launchd", "com.carr.call-mode.plist"
     ),
 }
+# These labels are managed outside this installer: Homebrew's local proxy
+# and the orchestrator's out/orch fix train. Their CARR prefix is not ownership.
+LAUNCHD_MACHINE_LOCAL = frozenset({
+    "com.carr.cliproxyapi.plist",
+    "com.carr.fix-train.plist",
+})
 HOOKS_REPO = os.path.join(REPO, "ops", "config", "hooks.json")
 CODEX_HOOKS_SRC = os.path.join(HOME, ".codex", "hooks.json")
 CODEX_HOOKS_REPO = os.path.join(REPO, "ops", "config", "codex-hooks.json")
@@ -1851,6 +1857,60 @@ def cmd_pull(apply):
     return 0
 
 
+def reconcile_retired_launchd(apply):
+    """Retire unheld CARR definitions absent from both source registries.
+
+    Explicit machine-local exceptions and holds retain their definitions.
+    Labels outside com.carr.*, including local.carr-progress-board, are never owned here.
+    """
+    failures = []
+    if not os.path.isdir(LAUNCHD_REPO):
+        print(f"  RETIRE FAILED  template directory is unavailable: {LAUNCHD_REPO}")
+        return [LAUNCHD_REPO]
+    holds = launchd_hold.read_holds(HOME)
+    for filename in carr_plists():
+        if (filename in LAUNCHD_MACHINE_LOCAL or filename in LAUNCHD_ALT_REPO
+                or os.path.lexists(os.path.join(LAUNCHD_REPO, filename))):
+            continue
+        label = filename.removesuffix(".plist")
+        if launchd_hold.off_reason(label, HOME, holds=holds):
+            continue
+        live = os.path.join(LAUNCHD_SRC, filename)
+        try:
+            if os.path.islink(live) or not os.path.isfile(live):
+                raise ValueError("installed definition is not a regular file")
+            with open(live, "rb") as source:
+                definition = plistlib.load(source)
+            if not isinstance(definition, dict) or definition.get("Label") != label:
+                raise ValueError("plist Label does not match its CARR filename")
+            if not apply:
+                print(f"  would retire  {filename} (no repository template)")
+                continue
+            if os.environ.get(ACTIVE_LAUNCHD_LABEL_ENV) == label:
+                raise ValueError("cannot retire the active installer job; run from an external process")
+            state, detail = launchd_registration(label)
+            if state == "failed" or (state == "loaded" and os.path.realpath(detail) != os.path.realpath(live)):
+                raise ValueError(f"cannot verify installed registration: {detail}")
+            if state == "loaded":
+                stopped = subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
+                                         capture_output=True, text=True, check=False, timeout=15)
+                state, detail = launchd_registration(label)
+                if stopped.returncode or state != "absent":
+                    raise ValueError(f"bootout not verified: {stopped.stderr.strip()} {detail}")
+            quarantine = os.path.join(HOME, "Library", "LaunchAgents-quarantine", "carr-retired")
+            os.makedirs(quarantine, exist_ok=True)
+            # Each retirement reserves a private directory, so repeated runs
+            # cannot replace an earlier recovery copy, even in the same second.
+            recovery = tempfile.mkdtemp(prefix=label + "-", dir=quarantine)
+            destination = os.path.join(recovery, filename)
+            os.rename(live, destination)
+            print(f"  RETIRED  {filename} (verified unloaded) -> {destination}")
+        except (OSError, ValueError, plistlib.InvalidFileException, subprocess.SubprocessError) as exc:
+            print(f"  RETIRE FAILED  {filename}: {exc}")
+            failures.append(filename)
+    return failures
+
+
 def retire_primary_only_plist(filename, live, apply):
     """Unload a primary-only job found on a secondary and move its plist aside.
 
@@ -2458,7 +2518,7 @@ def cmd_install(apply):
         print("  SKIP  scheduled tasks (secondary machines install none; no approved "
               "secondary task scope is configured)")
 
-    launchd_activation_failures = []
+    launchd_activation_failures = reconcile_retired_launchd(apply)
     if apply:
         os.makedirs(LAUNCHD_SRC, exist_ok=True)
     for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
