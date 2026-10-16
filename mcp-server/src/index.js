@@ -394,12 +394,6 @@ function probeActorFor(request, env) {
 // this file uses for every other door. No bearer match answers null and the next
 // door gets its turn.
 //
-// IT ESTABLISHES NO AUTHENTICATED CALL (sixth correction round, 2026-09-15). The
-// previous shape passed this file's dispatch INTO identity.js as a callback so
-// the whole request ran inside a receipt context, and a callback parameter on an
-// exported door is an exported context entry — which is what amendment 8
-// forbids. The context is now reached only by NAME, through
-// `serveAuthenticatedCall`, over a frozen map of the server's own entries.
 // ---------- hermes token (R0 runtime evaluation, 2026-08-16) ----------
 //
 // The fifth door, built on the PROBE_TOKENS/REVIEW_TOKENS pattern above and

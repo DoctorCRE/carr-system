@@ -656,29 +656,6 @@ export function hermesCosActorForToken(authorizationHeader, hermesCosTokensRaw) 
 //   * THIS FILE EXPORTS NO FUNCTION THAT ENTERS AN IDENTITY CONTEXT AND NO
 //     FUNCTION THAT MINTS A BRANDED ACTOR FROM CALLER-SUPPLIED BYTES.
 //
-// WHAT THE FIFTH CORRECTION CLOSES (amendment 9, 2026-09-14), and it is the
-// clause directly above, finally true. The fourth round kept two exports that
-// were each harmless alone and were the whole door together:
-// `reviewActorForToken(header)` MINTED A BRANDED ACTOR, and `dispatchFor(actor)`
-// RETURNED A CALLABLE THAT ENTERS A CONTEXT. A module-initialisation probe
-// composed them and ran its own code inside a `review_agent` context — no seal
-// to beat, no race to win, just two published capabilities and a `.` between
-// them. Both names are deleted. The review door is module-private; the context
-// entry is module-private; and the single exported entry that reaches either,
-// `serveAuthenticatedCall`, takes the REQUEST'S OWN AUTHORIZATION HEADER rather
-// than an actor, so there is no identity for a caller to choose and no
-// dispatcher for a caller to keep. A branded actor, however obtained, now
-// reaches no context at all.
-//
-// WHAT THE SIXTH CORRECTION CLOSES (2026-09-15). That single entry still took a
-// CALLBACK — `run` — and ran it inside the context, so a probe holding the
-// configured bearer ran its own code as `review_agent` without needing an actor
-// or a dispatcher at all. The callback is gone: the entry now takes the NAME of
-// one of the server's own entries, resolved in a frozen map written in this
-// file, and every export refuses a function in every slot rather than ignoring
-// one. The router half — serving the council's ordinary MCP session — is a
-// separate door that enters no context whatsoever.
-//
 // WHAT THE FOURTH CORRECTION CLOSES, and it is the last door. The third round
 // took the review-token map off the caller's side of the door but left a
 // `sealServerReviewTokens(raw)` on the export surface to get the server's map
@@ -910,15 +887,6 @@ function deriveCallIdentity(actor, serverCorrelationId) {
   });
 }
 
-/**
- * THE CONTEXT ENTRY, and it is NOT EXPORTED — amendment 8 in one line, kept and
- * narrowed by amendment 9's fifth correction round. Since `dispatchFor` was
- * deleted there is no exported value anywhere that returns a callable able to
- * reach this: the ONE way into the authenticated call is
- * `serveAuthenticatedCall` below, which authenticates the request's own bearer
- * itself, accepts no identity and no callable from its caller, and runs only an
- * entry this file resolved by name.
- */
 function enterAuthenticatedCall(context, fn) {
   return AUTHENTICATED_CALL.run(context, fn);
 }
@@ -995,107 +963,9 @@ const connectionForGrant = closedCallable((props, currentNativeAgentBindings = n
                                            serverWitness = null) =>
   actorForGrantProps(props, currentNativeAgentBindings, serverWitness));
 
-/**
- * THE SERVER'S TWO DOORS FOR A REVIEW-COUNCIL REQUEST — and the shape of the
- * second one is the whole of amendment 8's sixth correction round.
- *
- * WHAT WAS HERE, AND WHAT THE SIXTH REVIEW DID WITH IT.
- * `serveReviewRequestAuthenticated(header, correlationId, run)` took the
- * request's own bearer — no actor for a caller to choose, which was the fifth
- * round's fix — and then ran `run`, A FUNCTION ITS CALLER SUPPLIED, inside
- * `enterAuthenticatedCall`. A probe holding the configured bearer therefore ran
- * ITS OWN CODE inside a `review_agent` context and read the identity straight
- * back out through the exported reader. Taking the actor off the door narrowed
- * WHOSE context could be entered; it did nothing about WHAT could be run inside
- * one, and amendment 8 forbids any exported context entry, which a callback
- * parameter makes this no matter how the identity is derived.
- *
- * SO A NAME REPLACES THE CALLBACK. `serveAuthenticatedCall` below takes the
- * bearer, the server's correlation id and a NAME, resolves that name in
- * SERVER_ENTRIES — a frozen map written in this file, whose every value is a
- * dynamic import of one of this repository's own modules — and runs THAT inside
- * the context. A name is not code: the widest thing a caller can choose is which
- * of the server's own entries runs, and an unknown name runs nothing. There is no
- * parameter anywhere on this file's export surface that a function may travel
- * through, and every export refuses a function outright rather than ignoring it.
- *
- * WHY THE ENTRY IS NOT `executeRegisteredTool(client, actor, name, args)`, which
- * is the shape the review named. That call needs two things this door must not
- * take from a caller — a DATABASE CLIENT, whose `query` is caller code that
- * would then run inside the context, and a registered verb name — and the one
- * consumer this door exists for, V5-A02's Gate Zero oracle, IS NOT A REGISTERED
- * VERB: emitting it as a durable record is Step B, it is the heavy path, and the
- * authority that may write it is Joe's to rule. So the registry has no name for
- * it yet, and inventing one here would admit an MCP ingress (a sealed-registry
- * successor and its migration) as a side effect of a security fix. The map below
- * is the same contract the review asked for — a NAME the server resolves, never
- * a callable the caller hands over — over the entries that exist today. When the
- * oracle becomes a verb, its entry becomes a registry lookup and the door's
- * signature does not move.
- *
- * NO BEARER MATCH IS `null`, NOT A REFUSAL, on both doors. index.js tries its
- * doors in order; answering null is "this is not a review-council request", and
- * the next door gets its turn.
- */
-
-/** Is this value something a caller could get executed? */
 function callerCode(value) {
   return typeof value === "function";
 }
-
-/**
- * THE SERVER'S OWN ENTRIES, BY NAME. Frozen, module-private, and every value is
- * an import of a path written here — so resolving a name yields code this
- * repository ships and nothing else. `entry` returns the zero-argument callable
- * to run; `args` are deliberately absent from the contract, because the one
- * entry that exists reads no caller input at all (its own arity is its
- * boundary: gate-zero-producer.v5.js refuses any argument synchronously).
- */
-const SERVER_ENTRIES = Object.freeze({
-  // V5-A02's Gate Zero outcome. The name is the PRODUCER SEAM's own token, and
-  // what it resolves to is the seam's HOLDER — gate-zero-assurance.v5.js, which
-  // binds the producer and is the only surface allowed to emit an outcome at
-  // all. Resolving the producer itself here would route around the gate that
-  // decides whether a producer is bound, which is card 9's whole question.
-  "seam:gate-zero-read-only-outcome-producer": async () =>
-    (await import("./gate-zero-assurance.v5.js")).emitGateZeroOutcome,
-});
-
-/** Every name this server will enter an authenticated call for. */
-export const SERVER_ENTRY_NAMES = Object.freeze(Object.keys(SERVER_ENTRIES).sort());
-
-/**
- * THE ONE ENTRY ONTO THE AUTHENTICATED CALL: a bearer, the server's correlation
- * id, and the NAME of one of the server's own entries.
- *
- * The bearer is matched against the review map this module read from the
- * server's environment at initialisation, the receipt identity is derived from
- * what it matched, the context is entered, and the named entry runs inside it.
- * What comes back is that entry's own value. No dispatcher is returned, no
- * context escapes, and the only actor that exists is the one this call
- * authenticated a moment earlier — which never crosses the boundary at all.
- *
- * A FUNCTION IN ANY SLOT IS A REFUSAL, not an argument that happens to be
- * unused: a door that ignored one would still be a door somebody keeps trying.
- *
- * THE CORRELATION ID IS A PARAMETER because it is written per request by
- * correlation.js, onto `env.CORRELATION_ID`, before any door runs. It names a
- * call rather than an authority: supplying one grants nothing, and supplying
- * none removes the only per-call identifier a receipt may be told apart by, so
- * the entry runs with the context CLEARED and can obtain no receipt.
- */
-export const serveAuthenticatedCall = closedCallable(
-  async (authorizationHeader, serverCorrelationId, entryName) => {
-    if (callerCode(authorizationHeader) || callerCode(serverCorrelationId)
-        || callerCode(entryName)) return null;
-    if (typeof entryName !== "string") return null;
-    if (!Object.hasOwn(SERVER_ENTRIES, entryName)) return null;
-    const actor = reviewActorForToken(authorizationHeader);
-    if (actor === null) return null;
-    const entry = await SERVER_ENTRIES[entryName]();
-    return enterAuthenticatedCall(deriveCallIdentity(actor, serverCorrelationId),
-                                  () => entry());
-  });
 
 /**
  * THE ROUTER DOOR: serve a review-council MCP request, or answer null because
@@ -1113,7 +983,7 @@ export const serveAuthenticatedCall = closedCallable(
  * IT ENTERS A CONTEXT FOR EXACTLY ONE SEAT, AND FOR NOBODY ELSE (Step B,
  * 2026-09-13). What stood here entered no context at all, on the reasoning that
  * the authenticated call should be reached only by name through
- * `serveAuthenticatedCall`. That reasoning carried its own expiry date, written
+ * the retired producer entry. That reasoning carried its own expiry date, written
  * a few lines above it: the Gate Zero oracle was not a registered verb yet, and
  * "when the oracle becomes a verb, its entry becomes a registry lookup and the
  * door's signature does not move". Step B is that verb. It is dispatched through
@@ -1142,8 +1012,7 @@ export const serveAuthenticatedCall = closedCallable(
  * call, and what runs inside the context is the server's OWN dispatch, resolved
  * by this file through an import written here. The widest thing a caller can
  * express is a REGISTERED VERB NAME in a JSON-RPC body — a name the server
- * resolves in its own registry, which is the same contract `serveAuthenticatedCall`
- * keeps over SERVER_ENTRIES, over the registry instead of over a map of two.
+ * resolves in its own registry.
  *
  * THE SEAT IS READ, NOT CACHED. The registration is resolved per request through
  * a dynamic import, so a suite that stages a tree with the seat unstaffed gets an

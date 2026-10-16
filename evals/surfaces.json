@@ -118,7 +118,6 @@
         "ops/config/model-floors.json",
         "ops/config/engineering-codex-desk.v1.json",
         "ops/config/codex-permissions.toml",
-        "mcp-server/src/model-routing.v5.js",
         "mcp-server/src/model-role-store.v5.js",
         "tools/room-bridge/desks.py"
       ]
