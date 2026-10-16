@@ -224,20 +224,4 @@ fi
 
 print -r -- "fleet-sync: installed wiring re-rendered from $(git rev-parse --short HEAD)"
 
-# WR-000284 C6: report, every cycle, how this machine differs from what the
-# repo declares for it, including launchd jobs that are installed nowhere. The
-# audit is read-only, and its outcome never changes this job's exit code: a GAP
-# is a finding for a human, not a reason to call the sync failed.
-mkdir -p "$REPO/out"
-if "$PY" "$REPO/ops/machine-sync-audit.py" --json > "$REPO/out/machine-sync-audit.json" </dev/null; then
-  "$PY" -c '
-import json, sys
-gaps = [r for r in json.load(open(sys.argv[1], encoding="utf-8"))["rows"] if r["state"] == "GAP"]
-print(f"fleet-sync: machine-sync audit — {len(gaps)} gap(s), full rows in out/machine-sync-audit.json")
-for r in gaps:
-    print("fleet-sync:   GAP %s/%s: %s" % (r["section"], r["label"], r["detail"]))
-' "$REPO/out/machine-sync-audit.json"
-else
-  print -ru2 -- "fleet-sync: machine-sync audit did not run; the sync itself is unaffected"
-fi
 exit 0

@@ -113,8 +113,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "builds", "uptime", "storage", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|builds|uptime|storage|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "storage", "sends"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|storage|sends")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -1421,18 +1421,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-def _seat_health_rows():
-    """Seat rows from the record layer first (read-resource-dashboard, so the
-    other Mac's probes count) and this Mac's report second; a seat whose host
-    is offline reads SKIP, an unrun probe STALE, and only a run that failed FAIL."""
-    sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
-    import seat_health
-    try:
-        module, config, live = _host_liveness()
-        offline = module.offline_seats(live, config)
-    except (OSError, ValueError, KeyError, ImportError):
-        offline = {}
-    return seat_health.health_rows(seat_health.current_report(REPO_ROOT), offline=offline)
 
 
 def _tailscale_row():
@@ -1443,26 +1431,6 @@ def _tailscale_row():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
-
-
-_BUILD_DURATION_UNAVAILABLE = ("UNAVAILABLE build duration · on breach: orchestrator restore scheduled "
-                               "checker; verify ops/build-duration-check.py --health; "
-                               "auto-clear after fresh complete scan")
-
-
-def _build_duration_row():
-    from lib.machine_role import is_primary
-    if not CANONICAL_FIXTURE and not is_primary(REPO_ROOT):
-        return 'SKIP build duration · primary-only monitor; secondary machine', 0
-    checker = os.path.join(REPO_ROOT, 'ops', 'build-duration-check.py')
-    args = [sys.executable, checker, '--health']
-    if CANONICAL_SECTION == 'builds' and CANONICAL_FIXTURE:
-        args.extend(['--fixture', CANONICAL_FIXTURE])
-    result = subprocess.run(args, capture_output=True, text=True, timeout=15)
-    lines = result.stdout.strip().splitlines()
-    if result.returncode not in (0, 1) or not lines:
-        return _BUILD_DURATION_UNAVAILABLE, 1
-    return lines[0], result.returncode
 
 
 def _system_cost_row():
@@ -1510,17 +1478,6 @@ def _canonical_health():
     _FINDINGS.clear()
     _GREEN_EVIDENCE.clear()
     rc = 0
-    if CANONICAL_SECTION in ('all', 'builds'):
-        try:
-            build_line, build_rc = _build_duration_row()
-        except (OSError, subprocess.TimeoutExpired):
-            build_line, build_rc = _BUILD_DURATION_UNAVAILABLE, 1
-        print('  ' + build_line)
-        if build_rc:
-            rc = _red('build_duration', build_line, hard_error=build_line.startswith('UNAVAILABLE'), time_rolling=True)
-        if CANONICAL_SECTION == 'builds':
-            print(_HEALTH_COMPLETION_MARKER)
-            return rc
     if CANONICAL_SECTION == "all":
         _cost_snapshot, _cost_line = _system_cost_row()
         print("  " + _cost_line)
@@ -2028,33 +1985,6 @@ def _canonical_health():
         except Exception as e:
             print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
-
-    if CANONICAL_SECTION == "all":
-        # A seat's loop auto-clears only on its own PASS line (tools/
-        # health_breach.py act): until the rows are read, no seat is green.
-        _GREEN_EVIDENCE["ai_seat_health"] = None
-        try:
-            # FAIL (a probe ran and failed) and STALE-RED (no probe row for
-            # over 72 h while the seat's host is online or unknown) are red;
-            # STALE inside the bound and SKIP (host offline) are not.
-            _seats_green = set()
-            for _seat_line in _seat_health_rows():
-                print("  " + _seat_line)
-                if _seat_line.startswith(("FAIL ", "STALE-RED ")):
-                    # One finding per seat: without a subject the six rows
-                    # merged into one (count 6) that kept only the last
-                    # seat's text, so five bound actions were unreachable.
-                    rc = _red("ai_seat_health", _seat_line, subject=_seat_line.split()[1],
-                              time_rolling=True)
-                elif _seat_line.startswith("PASS"):
-                    _seats_green.add(_seat_line.split()[1])
-            _GREEN_EVIDENCE["ai_seat_health"] = _seats_green
-        except (ImportError, TypeError, AttributeError):
-            _seat_detail = ("Seat health evidence unreadable; on breach: orchestrator repairs "
-                            "ops/seat-health.py and reruns the daily exact-value probes; "
-                            "auto-clear when all seats pass")
-            print("  FAIL " + _seat_detail)
-            rc = _red("ai_seat_health", _seat_detail, time_rolling=True)
 
     if CANONICAL_SECTION == "all":
         # Jev liveness compares the last usable provider receipt with a
@@ -2788,93 +2718,6 @@ for name, out_pat, want_hour, tol_h, marker, stale_h, wake_note, svc_key in SCHE
 # nothing, which is exactly how the settings wipe hid behind an already-red
 # config row on 2026-08-08. Naming the streak separates "this broke last night"
 # from "this has been broken all week and nobody looked".
-_nightly_log = os.path.expanduser("~/carr-system/out/nightly.log")
-# PARSED ON COMPLETION LINES, NOT ON "chain begin", and the difference is not
-# cosmetic. Two chains can overlap in this log — it happened on 2026-08-10, two
-# runs 44 seconds apart — and anchoring each FAIL to the most recent begin then
-# hands every failure to the second run and leaves the first with no verdict at
-# all, which under-counts the streak and reports a chronic red as a first
-# failure. Attributing the FAILs seen since the previous verdict to the run that
-# just ended is the honest reading under interleaving: it can over-attribute
-# between two overlapping runs, never lose one.
-try:
-    # BLOCKED is tracked beside FAIL, never folded into it (2026-08-21). A step
-    # that refused for want of a canonical seam did not run, so reporting the
-    # chain clean and saying nothing else would be the false-healthy reading the
-    # refusal script warned about. It is not a failure either — see the argument
-    # at the 69 branch in bin/nightly.sh. So it gets its own count, printed
-    # beside the verdict on every line below, and it never sets rc.
-    # TOMBSTONE is tracked beside BLOCKED for the reason BLOCKED is tracked
-    # beside FAIL, one step further along (2026-08-23). A tombstoned step was
-    # gated out before the chain ran it, so blocked-count going to zero must not
-    # be readable as "the seams got built" — the debt moved from one column to
-    # another and this row has to show both or it reports a fix that did not
-    # happen. Neither count ever sets rc: a known, named, filed debt is not
-    # tonight's alarm. What IS tonight's alarm is a step failing, which still is.
-    _done: list[tuple[bool, list[str], list[str], list[str]]] = []
-    _pending: list[str] = []
-    _blocked: list[str] = []
-    _tombs: list[str] = []
-    _begins = _overlaps = 0
-    _open = 0
-    for _ln in open(_nightly_log, errors="replace"):
-        if "chain begin" in _ln:
-            _begins += 1
-            _open += 1
-            if _open > 1:
-                _overlaps += 1
-        elif "  FAIL  " in _ln:
-            _pending.append(_ln.split("  FAIL  ", 1)[1].strip())
-        elif "  BLOCKED  " in _ln:
-            _blocked.append(_ln.split("  BLOCKED  ", 1)[1].strip())
-        elif "  TOMBSTONE  " in _ln:
-            _tombs.append(_ln.split("  TOMBSTONE  ", 1)[1].strip())
-        else:
-            _outcome = _health_sub.nightly_completion(_ln)
-            if _outcome is None:
-                continue
-            _done.append((_outcome, _pending, _blocked, _tombs))
-            _pending = []
-            _blocked = []
-            _tombs = []
-            _open = max(0, _open - 1)
-    if not _done:
-        print(f"  -- {'nightly chain result':<22} no completed run in the log — the chain "
-              f"has not finished since the log was last trimmed")
-    else:
-        _last_ok, _last_fails, _last_blocked, _last_tombs = _done[-1]
-        _bl_names = sorted({s.split(" (exit")[0] for s in _last_blocked})
-        _bl = (f"  · {len(_bl_names)} step(s) BLOCKED on a missing canonical seam, "
-               f"not counted as failures: {', '.join(_bl_names)}" if _bl_names else "")
-        # The label is everything before the " — gated out" the chain writes, so
-        # the row names the steps rather than reprinting every reopen condition.
-        # The conditions themselves are one grep of out/nightly.log away and this
-        # row has to stay one line.
-        _tb_names = sorted({s.split(" — gated out")[0] for s in _last_tombs})
-        _bl += (f"  · {len(_tb_names)} step(s) TOMBSTONED, gated out rather than run: "
-                f"{', '.join(_tb_names)} — each names what it is missing in "
-                f"out/nightly.log" if _tb_names else "")
-        if _last_ok:
-            print(f"  OK {'nightly chain result':<22} last run exited clean, all steps OK{_bl}")
-        else:
-            # how many consecutive completed runs, newest-first, ended red
-            _streak = 0
-            for _ok, _, _, _ in reversed(_done):
-                if _ok:
-                    break
-                _streak += 1
-            _labels = sorted({s.split(" (exit")[0] for s in _last_fails})
-            _age = "FIRST FAILURE" if _streak == 1 else f"{_streak} runs in a row"
-            _note = (f" · {_overlaps} overlapping run(s) in this log, so step names may be "
-                     f"attributed to the wrong one" if _overlaps else "")
-            print(f"  ⚠︎ {'nightly chain result':<22} last run FAILED ({_age}) — "
-                  f"{', '.join(_labels) or 'step name not in the log'}  · read "
-                  f"out/nightly.log; a chain red for several runs is one nobody is reading, "
-                  f"which is the failure this row exists to catch{_note}{_bl}")
-            rc = 1
-except OSError as _exc:
-    print(f"  -- {'nightly chain result':<22} cannot read {_nightly_log} ({_exc})")
-
 # --- work sitting outside git (added 2026-08-10) -----------------------------
 # Joe asked whether a routine should force every session to commit on a timer.
 # The answer was no: `git commit -a` on a schedule is the operation

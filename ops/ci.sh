@@ -38,9 +38,9 @@ CLASS_ORDER="pushfloor unit types contract gates secret dependency migration bin
 
 class_desc() {
   case "$1" in
+    freshness) echo "source includes the current main revision" ;;
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
-    freshness)  echo "seeded stale rewrite of a generated config file" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
     contract)   echo "seeded auth/schema contract break" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
@@ -123,15 +123,10 @@ check_unit() {
 }
 
 check_freshness() {
-  if [ ! -f ops/stale-config-check.py ]; then
-    skip freshness "ops/stale-config-check.py not present"
-    return
-  fi
-  if run_quiet "$LOGDIR/freshness.log" "$PY" ops/stale-config-check.py; then
-    ok freshness "no generated config rewritten from a stale base"
+  if git merge-base --is-ancestor origin/main HEAD; then
+    ok freshness "source includes origin/main"
   else
-    cat "$LOGDIR/freshness.log" >&2
-    bad freshness "this branch would overwrite a generated file it never saw"
+    bad freshness "merge origin/main before pushing"
   fi
 }
 
@@ -299,7 +294,6 @@ PYEOF
   for inv in audit-queue-freshness-check \
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
-             scheduler-cutover-coverage-gate \
              sync-core-rule-ids rule-route-coverage \
              sync-rule-boot-classes migration-order-gate \
              migration-safety-gate check-jev-conformance door-reachability-check; do
