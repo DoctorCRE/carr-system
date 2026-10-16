@@ -329,4 +329,4 @@ than claim the pass. The PR body's `Design and debt pass` section gives one
 line per skill: what it changed, or why nothing did.
 This section is the canonical policy for both client entry points.
 
-Rigorous engineering work uses `/poteto-mode` from [pstack](plugins/pstack/skills/poteto-mode/SKILL.md).
+Rigorous engineering work uses `/poteto-mode` from [pstack](plugins/pstack/skills/poteto-mode/SKILL.md). Every job sizes itself first (`/grill-with-docs` if big, `/wayfinder` past one session) and codes test-first with `/tdd`.

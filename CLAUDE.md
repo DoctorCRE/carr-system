@@ -45,7 +45,7 @@ no credential (the receipted break-glass close stays a human's call) and it is
 not `call-verb` — never reach for that generic passthrough to get at a verb
 the classifier declined; that is working around a denial rather than filing it.
 
-## Build sessions: the five things that stalled the 2026-10-10 orchestrator
+## Build sessions: the four things that stalled the 2026-10-10 orchestrator
 
 Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
 224 Stop turns). Each item is the fix, not the story.
@@ -62,11 +62,9 @@ Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
    142 and a claim left `held`). Declare `--writes` as the exact files, never a
    whole `test/` folder: an overlap with any open non-held PR refuses the job.
    A killed job leaves its claim held; `dispatch.py reconcile --claim <msg_id>`.
-3. **Codex-desk briefs forbid browser-launching tests** (Playwright crashes the
-   sandbox). Say so in the brief.
-4. **The progress board is one per checkout**, resolved from the main working
+3. **The progress board is one per checkout**, resolved from the main working
    tree; a worktree no longer needs its own `init`.
-5. **A Stop gate that holds the turn open is answered with the delta only**, and
+4. **A Stop gate that holds the turn open is answered with the delta only**, and
    if the gate misread a compaction summary or a request for instructions as an
    order, that is the gate's defect: fix the gate, do not reword the reply.
 
@@ -107,6 +105,7 @@ Before operating a rule lifecycle, load
 Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-debt-pass).
 
 ## Agent skills
+
 
 ### Issue tracker
 
