@@ -46,6 +46,25 @@ class JobTests(unittest.TestCase):
             self.job["permitted_work"]["paths"] = paths
             with self.assertRaises(adapter.DispatchRefusal): adapter.validate_job(self.job)
 
+    def test_opaque_references_do_not_bypass_checkout_binding(self):
+        prepared = {"checkout_path": "/private/tmp/room-codex-example/checkout",
+            "checkout_branch": "fix/controller-completion", "checkout_revision": self.job["revision"]}
+        for field, value, error in (
+                ("worktree_ref", "/private/tmp/other/checkout", "different checkout"),
+                ("branch_ref", "fix/other", "different checkout"),
+                ("source_sha", "b" * 40, "revision does not match")):
+            with self.subTest(field=field):
+                result = copy.deepcopy(self.result)
+                result["outcome"]["source_evidence"] = {
+                    "worktree_ref": prepared["checkout_path"], "branch_ref": prepared["checkout_branch"],
+                    "source_sha": self.job["revision"], "evidence_refs": [], field: value}
+                with patch.object(adapter, "_dedicated_codex_desk"), \
+                     patch.object(adapter.codex_checkout, "prepare", return_value=prepared), \
+                     patch.object(adapter.subprocess, "check_output", return_value=self.job["revision"]):
+                    with self.assertRaisesRegex(adapter.DispatchRefusal, error):
+                        adapter.run(self.job, dispatch_fn=lambda *a, **kw: {
+                            "status": "completed", "result": json.dumps(result)})
+
     def test_execution_checks_actual_changed_paths(self):
         for path, refused in (("tools/room-bridge/fix.py", False), ("outside.txt", True)):
             with self.subTest(path=path), tempfile.TemporaryDirectory() as directory:
@@ -73,7 +92,14 @@ class JobTests(unittest.TestCase):
                         with self.assertRaisesRegex(adapter.DispatchRefusal, 'outside permitted work'):
                             adapter.run(job, dispatch_fn=execute)
                     else:
-                        self.assertEqual(adapter.run(job, dispatch_fn=execute), result)
+                        returned = adapter.run(job, dispatch_fn=execute)
+                        source = returned["outcome"]["source_evidence"]
+                        self.assertRegex(source["worktree_ref"], r"^worktree:[0-9a-f]{64}$")
+                        self.assertRegex(source["branch_ref"], r"^branch:[0-9a-f]{64}$")
+                        expected = copy.deepcopy(result)
+                        expected["outcome"]["source_evidence"].update(
+                            worktree_ref=source["worktree_ref"], branch_ref=source["branch_ref"])
+                        self.assertEqual(returned, expected)
 
 
 if __name__ == "__main__": unittest.main()

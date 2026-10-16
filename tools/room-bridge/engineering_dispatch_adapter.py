@@ -7,6 +7,7 @@ No controller credential is passed to the model process.
 from __future__ import annotations
 
 from fnmatch import fnmatchcase
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -206,6 +207,8 @@ def run(job: dict, *, dispatch_fn=dispatch.dispatch, registry: desks.Registry | 
         "Report the work actually performed as a subset of permitted_work. Checks contain check_ref, state "
         "and evidence_refs. Outcome contains status (claimed_complete, failed or blocked), artifact_refs, "
         "evidence_refs, detail and source_evidence (worktree_ref, branch_ref, source_sha, evidence_refs). "
+        "Use the exact checkout path for worktree_ref and its Git branch name for branch_ref; "
+        "the adapter converts them to opaque receipt identifiers after validation. "
         "Do not merge or deploy. Never claim a check passed without its actual output.\n" + json.dumps(job)
     )
     row = dispatch_fn(ENGINEERING_DESK, prompt, env=_safe_child_env(), fresh=True,
@@ -232,6 +235,8 @@ def run(job: dict, *, dispatch_fn=dispatch.dispatch, registry: desks.Registry | 
         raise DispatchRefusal("read-only job changed files")
     if any(not any(fnmatchcase(path, allowed) for allowed in job["permitted_work"]["paths"]) for path in paths):
         raise DispatchRefusal("job changed files outside permitted work")
+    source["worktree_ref"] = "worktree:" + sha256(tree.encode("utf-8")).hexdigest()
+    source["branch_ref"] = "branch:" + sha256(prepared["checkout_branch"].encode("utf-8")).hexdigest()
     return result
 
 
