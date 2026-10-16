@@ -56,14 +56,14 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17
+        image: mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
         env:
           POSTGRES_USER: carr_ci
           POSTGRES_PASSWORD: carr_ci
           POSTGRES_DB: carr_ci
         ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U carr_ci -d carr_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -169,6 +169,14 @@ jobs:
                  create role neondb_owner;
                end if;
              end \$\$;"
+
+      - name: Verify edge incident delivery
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-noise-incident-test.py
+
+      - name: Verify audit attempt and cache integrity
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-failure-audit-test.py
 
       - name: Run this group's check classes
         env:
