@@ -1326,7 +1326,7 @@ class RuleDeliveryEvidenceChain(unittest.TestCase):
         deps = self.r["evidence"]["dependencies"]
         for path, digest in {
             "evals/rule-delivery/hard_cases.v1.json": "00e0060a82b58aacec8ae4861d50460d97c155413bd39fadc39ceedde6681078",
-            "ops/fixtures/rule-delivery-eval/cases.v2.json": "c5900f0fd5343b78209fb248e018cae322f865540ea1cb30837884b8c70151ed",
+            "ops/fixtures/rule-delivery-eval/cases.v2.json": "e49d96e05625b43d0fffa471413b5a89143f42cf8b09f24a5fdf5aed4e5f004f",
             "ops/rule_trigger_compile.py": "ff27baed857313205eae990ac5b02b9edaab7ff900e7eb0eb67ed0ca6fcbf1c5",
         }.items():
             self.assertEqual(deps.get(path), digest, path)
