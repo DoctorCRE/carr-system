@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 MODES = frozenset({"disabled", "shadow", "checkpoint", "inject"})
 ACTIVE_MODES = frozenset({"shadow", "checkpoint", "inject"})
-EVENTS = frozenset({"UserPromptSubmit", "PostToolUse", "PreCompact", "SessionStart", "Stop"})
+EVENTS = frozenset({"PreCompact", "SessionStart"})
 HOOK_BASENAME = "/ops/claude-continuity-hook.py"
 MCP_SERVER_NAME = "carr-continuity"
 MAX_CONFIG_BYTES = 2_000_000
@@ -129,9 +129,31 @@ def has_overlay(hooks: object) -> bool:
             and any(observed_entries(entries) for entries in hooks.values()))
 
 
+def _strip_retired(hooks: dict, contract: Contract) -> None:
+    """Drop exact adapter entries left under events the contract no longer wires.
+
+    Only an entry whose every command is the canonical adapter command goes; a
+    tampered or wrapping entry still reaches validate_hooks and is refused.
+    """
+    canonical = {command for entries in contract.hooks.values()
+                 for entry in entries for command in _commands(entry)}
+    for event in [event for event in hooks if event not in contract.hooks]:
+        entries = hooks[event]
+        if not isinstance(entries, list):
+            continue
+        kept = [entry for entry in entries if not (
+            mentions_continuity(entry) and set(_commands(entry)) <= canonical)]
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+
+
 def add_overlay(document: dict, contract: Contract) -> dict:
     result = copy.deepcopy(document)
     hooks = result.setdefault("hooks", {})
+    if isinstance(hooks, dict):
+        _strip_retired(hooks, contract)
     validate_hooks(hooks, contract, require_complete=False)
     for event, wanted in contract.hooks.items():
         entries = hooks.setdefault(event, [])
@@ -147,6 +169,7 @@ def remove_overlay(document: dict, contract: Contract) -> dict:
     hooks = result.get("hooks")
     if not isinstance(hooks, dict):
         return result
+    _strip_retired(hooks, contract)
     validate_hooks(hooks, contract, require_complete=False)
     for event, wanted in contract.hooks.items():
         entries = hooks.get(event)

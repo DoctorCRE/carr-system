@@ -113,8 +113,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "claude-continuity-spool", "costs", "builds", "uptime", "storage", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|claude-continuity-spool|costs|builds|uptime|storage|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "builds", "uptime", "storage", "sends"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|builds|uptime|storage|sends")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -196,33 +196,6 @@ def _grok_session_row():
                 "owner orchestrator · remediation restore the Grok reader/lock storage · "
                 "verify rerun health · auto-clear on successful read", 1)
 
-
-def _claude_continuity_spool_row(drain):
-    """Continuity spool depth, after an optional drain, with its bound action inline.
-
-    The nightly section drains (re-sends every receipt whose delivery is
-    unknown, under its original key, through the claude-continuity token) and
-    then reports; the `all` view only reports.  Red at the depth/age threshold,
-    green at 0; the row's loop is opened once per episode and auto-clears at 0.
-    """
-    sys.path.insert(0, REPO_ROOT)
-    from datetime import datetime as _dt, timezone as _tz
-    from lib import claude_continuity_spool as continuity_spool
-    try:
-        drained = continuity_spool.drain() if drain else None
-    except (OSError, ValueError) as exc:
-        return (f"UNAVAILABLE {continuity_spool.ROW_NAME} — drain {type(exc).__name__} · "
-                f"{continuity_spool.ACTION}"), 1
-    line = continuity_spool.health_row(run_verb=continuity_spool.run_verb,
-                                       state_path=continuity_spool.loop_state_path(),
-                                       now=_dt.now(_tz.utc), drained=drained)
-    return line, int(not line.startswith("OK"))
-
-
-if CANONICAL_SECTION == "claude-continuity-spool":
-    _spool_line, _spool_rc = _claude_continuity_spool_row(drain=True)
-    print(_spool_line)
-    sys.exit(_spool_rc)
 
 if CANONICAL_SECTION == "jev-spend":
     try:
@@ -1919,16 +1892,6 @@ def _canonical_health():
         if _grok_rc:
             rc = _red("grok_session", _grok_line,
                       hard_error=_grok_line.startswith("UNAVAILABLE"), time_rolling=True)
-
-    if CANONICAL_SECTION == "all":
-        # Report only; the nightly claude-continuity-spool section drains.
-        try:
-            _spool_line, _spool_rc = _claude_continuity_spool_row(drain=False)
-        except Exception as exc:
-            _spool_line, _spool_rc = (f"UNAVAILABLE continuity spool depth — {type(exc).__name__}", 1)
-        print("  " + _spool_line)
-        if _spool_rc:
-            rc = _red("claude_continuity_spool", _spool_line, time_rolling=True)
 
     if CANONICAL_SECTION in ("all", "credentials"):
         # The source log is canonical across worktrees. The row carries its
