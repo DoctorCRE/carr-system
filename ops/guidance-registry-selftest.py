@@ -429,8 +429,10 @@ def main():
     # entered as judgment_ambient rows -- eight procedure, two rubric, three
     # preference, and 08c4eda2 as the precedent replacing 5697071b. Nothing
     # was reclassified.
+    # PR #1801 retains 32 formerly constrained rules as prose procedures after
+    # removing their automatic controls; active rule IDs and split types stay fixed.
     reviewed_counts = {
-        "constraint": 70, "procedure": 85, "doctrine": 12, "rubric": 37,
+        "constraint": 38, "procedure": 117, "doctrine": 12, "rubric": 37,
         "preference": 15, "precedent": 3, "example": 0,
     }
     split_compile_pass = (

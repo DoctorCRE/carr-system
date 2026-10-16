@@ -7,7 +7,7 @@
   "_repin_note_2026_10_12_unfiled_bug": "The unfiled_bug Stop-gate control was registered and rule 19ebbeb3 was bound to it. None of the eight activation-target contracts changed; migration 0871 moves their guarded map-digest preimage forward.",
   "_repin_note_2026_10_13_github_burst_guard": "The github-burst-guard control_catalog entry was registered (migration 0877 installs it). No rule_controls, rule_load_layers or active_rule_ids entry changed, so none of the eight activation-target contracts changed; migration 0878 moves their guarded map-digest preimage forward from the post-0875 digest.",
   "_repin_note_2026_10_13_registry_inventory": "Fourteen approved rules entered the reviewed map as judgment pack rules and four left it (9b081605 and 5697071b retired; ede4b241 and 8400cd3d still proposed). None of the eight activation-target contracts changed; migration 0880 moves their guarded map-digest preimage forward.",
-  "base_map_sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
+  "base_map_sha256": "d76c2fdbca05669516ed3bc48aec4d66e46ea627d9b07723c30575d08f7d9157",
   "schema": "rule-delivery-activation-overlay/v1",
   "targets": [
     {
@@ -82,5 +82,6 @@
       "to_control": "pack_delivery",
       "to_enforcement_class": "stop_gate"
     }
-  ]
+  ],
+  "_repin_note_2026_10_16_reply_gates": "PR #1801 retires reply controls and retains their rules as prose. The eight activation targets are unchanged; migration 0882 repins their exact preimage."
 }

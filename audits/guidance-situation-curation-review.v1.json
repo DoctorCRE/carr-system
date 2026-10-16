@@ -224,12 +224,13 @@
   "reviewed_base_inventory": {
     "excluded_rule_surface": "intro_politics",
     "path": "ops/config/rule-enforcement-map.json",
-    "sha256": "9dff077bb048cd7813b5f50651f5e572eab2aa9c4ecf3c2f7164d3fae026c3ac",
+    "sha256": "d76c2fdbca05669516ed3bc48aec4d66e46ea627d9b07723c30575d08f7d9157",
     "standing_source_count": 208
   },
   "reviewed_source_manifest": {
     "path": "audits/guidance-migration-manifest.v1.tsv",
     "sha256": "647757cbec9613347670d56fc1fc7c281ce6d9e48146a6f5caaef70d29ed8f91"
   },
-  "schema": "guidance-situation-curation-review/v1"
+  "schema": "guidance-situation-curation-review/v1",
+  "_repin_note_2026_10_16_reply_gates": "PR #1801 retires 19 control claims, preserving all active rule IDs. Their rules become prose session guidance. The doctrine situation mappings and reviewed migration manifest are unchanged; this digest identifies the updated inventory without approving the proposed review."
 }
