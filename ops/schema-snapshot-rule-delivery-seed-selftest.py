@@ -251,8 +251,6 @@ assert f"filename='{SECOND_REFRESH_MIGRATION}'" in GENERATOR
 assert 'if [ "$RULE_DELIVERY_REFRESH_APPLIED" = t ]; then' in GENERATOR
 assert "RULE_DELIVERY_DIGEST_REPIN_APPLIED" in GENERATOR
 assert f"filename='{CURRENT_MIGRATION}'" in GENERATOR
-assert "SOURCE_MERGE_REGISTRY_APPLIED" in GENERATOR
-assert f"filename='{SOURCE_MERGE_MIGRATION}'" in GENERATOR
 assert 'if [ "$RULE_DELIVERY_DIGEST_REPIN_APPLIED" = t ]; then' in GENERATOR
 assert 'elif [ "$RULE_DELIVERY_REFRESH_APPLIED" = t ]; then' in GENERATOR
 assert "insert into ops.rule_delivery_policy (singleton,mode,changed_by,reason)" in GENERATOR

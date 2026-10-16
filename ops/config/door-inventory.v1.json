@@ -87,16 +87,16 @@
       "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
     },
     {
-      "path": "ops/registry-chain-postgres-proof.py",
-      "class": "one_shot",
-      "reason": "Proved one successor publication of the registry chain on a disposable database and an isolated source clone.",
-      "evidence": "72b1f088 (Architecture C1, #1609)"
-    },
-    {
       "path": "ops/rule-recall-benchmark.py",
       "class": "one_shot",
       "reason": "Measured full-text rule availability on the unchanged 72-case test split before replacement recall was trusted.",
       "evidence": "0330c01f (#1611)"
+    },
+    {
+      "path": "pipelines/backfill_lease_event.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 19(d) repair of structured lease dates from the preserved raw date shim; it is invoked directly rather than by a runtime job.",
+      "evidence": "pipelines/backfill_lease_event.py module docstring and CLI usage"
     },
     {
       "path": "pipelines/build-pretour-packet.py",
@@ -115,6 +115,12 @@
       "class": "one_shot",
       "reason": "Lifted dated contact events out of existing narrative rows once, the Option B capture fix of 2026-08-01.",
       "evidence": "d3a9f6bb"
+    },
+    {
+      "path": "pipelines/import_brokers.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 27(b) import of the brokers workbook into existing party records; it is not a scheduled runtime importer.",
+      "evidence": "pipelines/import_brokers.py module docstring and main entry point"
     },
     {
       "path": "pipelines/import_clients_active.py",

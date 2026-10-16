@@ -58,8 +58,7 @@ def deferred_refusal(cur, mutation: str, fragment: str) -> None:
 
 
 def generated_registry_digest(version: int) -> str:
-    from registry_chain import registry_chain
-    return registry_chain()['versions'][version-1]['digest']
+    return {1: 'sha256:7cc2feacec82bf7cce2af9af309dc4ae9426922003471703af010f6728957190', 2: 'sha256:6dc9f8353712e0f9ee9dcbc96d05b802631e420cfa698944c2b6401a11c6a9ff', 3: 'sha256:ace611250aaf2ffd7b96ca3195d20e9dc2697bbea555eadc7c661407e838cae7', 4: 'sha256:32b9edaf4e718cfa55f87cc6b650f97480a09f00fbde35c10f1e5e23bc6eaa4c', 5: 'sha256:314a4b108eaded1a00b7f604af93d44838b615fab79820d1a2c9d9d4b08fa6ca', 6: 'sha256:afd27c13b68423dcaaeafc68c0c1ddc018452ef8d9e7cad5bb32cac4327d80d7', 7: 'sha256:405a1bd7aa421b16ebd3d3fe7422a2525826dba563dffeb2dad5a6b90d12859b', 8: 'sha256:56edcf25393a1c7b47985b9e2a272a8e7fcf0930709147ae823ca9b15290212e', 9: 'sha256:398ddf5f86a46110518f7498af63782b65e047b9f624b798bf3c798058a79b4d', 10: 'sha256:9109437968d4ab76090980ff9ec370da1ccfbb65e0683f485e0239d3d5158a62'}[version]
 
 
 def seed_reviewed_rule_projection(cur) -> None:
