@@ -207,13 +207,8 @@ CLAUDE_CONTINUITY_MODE_FILE = os.path.join(
     HOME, ".config", "carr", "claude-continuity-mode.json"
 )
 CLAUDE_MCP_CONFIG = os.path.join(HOME, ".claude.json")
-CODEX_CONTINUITY_EVENTS = ("PreCompact", "PostCompact", "SessionStart", "UserPromptSubmit")
-CODEX_CONTINUITY_APP_EVENTS = {
-    "PreCompact": "preCompact",
-    "PostCompact": "postCompact",
-    "SessionStart": "sessionStart",
-    "UserPromptSubmit": "userPromptSubmit",
-}
+CODEX_CONTINUITY_EVENTS = ("SessionStart",)
+CODEX_CONTINUITY_APP_EVENTS = {"SessionStart": "sessionStart"}
 CODEX_APP_SERVER_TIMEOUT_SECONDS = 15
 CODEX_APP_SERVER_OUTPUT_LIMIT = 4 * 1024 * 1024
 CODEX_PERMISSIONS_REPO = os.path.join(REPO, "ops", "config", "codex-permissions.toml")
@@ -701,7 +696,13 @@ def merge_codex_continuity_hooks(live, desired):
     desired_hooks = desired.get("hooks") if isinstance(desired, dict) else {}
     if not isinstance(desired_hooks, dict):
         desired_hooks = {}
-    for event in CODEX_CONTINUITY_EVENTS:
+    # Also visit live events that still carry a continuity hook, so an install
+    # clears them from events the adapter no longer uses.
+    stale = {event for event, groups in live_hooks.items() if isinstance(groups, list) and any(
+        isinstance(group, dict) and isinstance(hook, dict) and
+        is_codex_continuity_hook_command(hook.get("command"))
+        for group in groups for hook in group.get("hooks", []))}
+    for event in stale | set(CODEX_CONTINUITY_EVENTS):
         retained = []
         groups = live_hooks.get(event, [])
         for group in groups if isinstance(groups, list) else []:
@@ -718,7 +719,10 @@ def merge_codex_continuity_hooks(live, desired):
         desired_groups = desired_hooks.get(event, [])
         if isinstance(desired_groups, list):
             retained.extend(json.loads(json.dumps(desired_groups)))
-        live_hooks[event] = retained
+        if retained or event in CODEX_CONTINUITY_EVENTS:
+            live_hooks[event] = retained
+        else:
+            live_hooks.pop(event, None)
     result["hooks"] = live_hooks
     return result
 
@@ -949,7 +953,7 @@ def codex_app_server_request(method, params):
 
 
 def canonical_codex_continuity_hooks():
-    """Load and validate the four exact rendered hook contracts from the repo."""
+    """Load and validate the exact rendered continuity hook contracts from the repo."""
     source = read(CODEX_HOOKS_REPO)
     if source is None:
         raise RuntimeError(f"no tracked Codex hooks at {CODEX_HOOKS_REPO}")
@@ -990,7 +994,7 @@ def canonical_codex_continuity_hooks():
 
 
 def codex_continuity_hook_entries(contracts, require_trusted=False):
-    """Return the exact four user hook instances observed by Codex itself."""
+    """Return the exact continuity user hook instances observed by Codex itself."""
     response = codex_app_server_request("hooks/list", {"cwds": [REPO]})
     data = response.get("data")
     if not isinstance(data, list) or len(data) != 1 or not isinstance(data[0], dict):
@@ -1119,7 +1123,7 @@ def _restore_codex_continuity_trust(before_config, keys):
 
 
 def persist_codex_continuity_trust(entries, contracts, remove=False):
-    """Atomically upsert or delete only four app-server-derived trust tables."""
+    """Atomically upsert or delete only the continuity app-server-derived trust tables."""
     before = _codex_user_config_layer()
     config = before["config"]
     state = _hook_trust_state(config)
@@ -1152,7 +1156,7 @@ def persist_codex_continuity_trust(entries, contracts, remove=False):
         if remove:
             if any(key in after_state for key in expected):
                 raise RuntimeError("config/batchWrite left continuity trust entries behind")
-            print("  REMOVED   four Codex continuity hook trust entries")
+            print("  REMOVED   Codex continuity hook trust entries")
             return 0
         if any(after_state.get(key) != {"trusted_hash": current_hash}
                for key, current_hash in expected.items()):
@@ -1161,7 +1165,7 @@ def persist_codex_continuity_trust(entries, contracts, remove=False):
         observed = {entry["key"]: entry["currentHash"] for entry in verified}
         if observed != expected:
             raise RuntimeError("hooks/list changed continuity identity during trust installation")
-        print("  TRUSTED   four Codex continuity hooks using authoritative current hashes")
+        print("  TRUSTED   Codex continuity hooks using authoritative current hashes")
         return 0
     except RuntimeError as exc:
         try:
@@ -1230,7 +1234,7 @@ def cmd_install_codex_continuity_mcp(apply=False):
 
 
 def cmd_verify_codex_continuity():
-    """Read-only proof that Codex will automatically execute all four hooks."""
+    """Read-only proof that Codex will automatically execute the continuity hooks."""
     try:
         _, contracts = canonical_codex_continuity_hooks()
         entries = codex_continuity_hook_entries(contracts, require_trusted=True)
@@ -1239,7 +1243,7 @@ def cmd_verify_codex_continuity():
         return 1
     for entry in entries:
         print(f"  TRUSTED   {entry['eventName']}: {entry['currentHash']}")
-    print("  Codex hooks/list confirms all four continuity hooks are trusted")
+    print("  Codex hooks/list confirms the continuity hooks are trusted")
     return 0
 
 
@@ -1272,7 +1276,7 @@ def _write_codex_hooks_text(raw):
 
 
 def cmd_install_codex_continuity(apply, remove=False):
-    """Install only the four CARR continuity hook groups owned by Codex.
+    """Install only the CARR continuity hook groups owned by Codex.
 
     This intentionally has no relationship to the broad machine reconciler:
     it never reads or writes Claude settings, Codex permissions, LaunchAgents,
@@ -1317,7 +1321,7 @@ def cmd_install_codex_continuity(apply, remove=False):
 
     # Removal must capture Codex's exact keys and prior trust state before
     # hooks.json stops exposing them. Its trust deletion is phase one; if the
-    # hook rewrite fails, only those four trust tables are restored. Install is
+    # hook rewrite fails, only those trust tables are restored. Install is
     # the inverse: hooks.json is phase one and is restored if trust phase two
     # refuses.
     entries = None
@@ -2616,7 +2620,7 @@ def cmd_install(apply):
 def config_selftest():
     """Regression proof that Codex install touches only CARR-owned tuples."""
     desired = {"hooks": {"Stop": [{"hooks": [{
-        "type": "command", "command": "/Users/booko/carr-system/hooks/context-handoff-gate.py", "timeout": 15,
+        "type": "command", "command": "/Users/booko/carr-system/hooks/scheduled-run-record.py", "timeout": 15,
     }]}]}}
     live = {"hooks": {"Stop": [
         {"hooks": [{"type": "command", "command": "/Users/booko/other/hooks/keep.py", "timeout": 5}]},
@@ -2634,7 +2638,7 @@ def config_selftest():
         ("mixed unrelated Codex hook preserved", "/Users/booko/other/hooks/mixed.py" in commands),
         ("stale CARR hook removed", "/Users/booko/carr-system/hooks/old.py" not in commands),
         ("desired CARR hook installed once", commands.count(
-            "/Users/booko/carr-system/hooks/context-handoff-gate.py") == 1),
+            "/Users/booko/carr-system/hooks/scheduled-run-record.py") == 1),
         ("unrelated top-level key preserved", merged.get("user_setting") == {"keep": True}),
         ("CARR snapshot exact", carr_owned_hooks_document(merged, ["Stop"]) == desired),
     ]

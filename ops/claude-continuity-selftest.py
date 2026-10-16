@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Deterministic lifecycle checks for the native Claude continuity adapter."""
+"""Checks for the native Claude checkpoint adapter (SessionStart + PreCompact)."""
 from __future__ import annotations
 
 import hashlib
-import hmac
-import importlib.util
 import json
 import os
 import pathlib
@@ -12,421 +10,146 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = ROOT / "ops/claude-continuity-hook.py"
-from git_env import fixture_env
+sys.path.insert(0, str(ROOT))
+from lib import claude_continuity_config as continuity_config  # noqa: E402
 
-GIT_ENV = fixture_env()
-
-
-def load_hook():
-    spec = importlib.util.spec_from_file_location("claude_continuity_hook", HOOK)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+CALLER = """#!/usr/bin/env python3
+import json,os,sys
+name,args=sys.argv[1],json.loads(sys.argv[2])
+with open(os.environ['CALL_LOG'],'a',encoding='utf-8') as out:
+ out.write(json.dumps({'name':name,'args':args,'profile':os.environ.get('CARR_MCP_CLIENT_PROFILE')})+'\\n')
+if os.environ.get('RECOVERY_EMPTY')=='1':
+ print(json.dumps({'ok':True,'found':False,'checkpoint':None,'capsule':None}))
+else:
+ print(json.dumps({'ok':True,'found':True,'checkpoint':{'checkpoint_version':'3','compaction_generation':2},'capsule':'bounded recovery capsule'}))
+"""
 
 
 class ClaudeContinuityHookTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="carr-claude-continuity-")
-        self.root = pathlib.Path(self.temp.name)
+        self.root = pathlib.Path(self.temp.name).resolve()
         self.transcript = self.root / "session-1.jsonl"
         self.transcript.write_text('{"type":"user","message":"local only"}\n', encoding="utf-8")
         self.mode = self.root / "mode.json"
-        self.spool = self.root / "spool"
         self.calls = self.root / "calls.jsonl"
-        self.audit = self.root / "audit.jsonl"
         self.dedupe = self.root / "dedupe"
-        self.caller = self.root / "call.py"
-        self.caller.write_text("""#!/usr/bin/env python3
-import json,os,sys
-name,args=sys.argv[1],json.loads(sys.argv[2])
-with open(os.environ['CALL_LOG'],'a',encoding='utf-8') as out:
- out.write(json.dumps({'name':name,'args':args,'profile':os.environ.get('CARR_MCP_CLIENT_PROFILE')})+'\\n')
-if name=='claude-read-recovery':
- if os.environ.get('RECOVERY_EMPTY')=='1':
-  print(json.dumps({'ok':True,'found':False,'checkpoint':None,'capsule':None}))
- else:
-  print(json.dumps({'ok':True,'found':True,'checkpoint':{'checkpoint_version':os.environ.get('RECOVERY_VERSION','3'),'compaction_generation':os.environ.get('RECOVERY_GENERATION','0')},'capsule':os.environ.get('RECOVERY_CAPSULE','bounded recovery capsule')}))
-else:
- print(json.dumps({'ok':True}))
-""", encoding="utf-8")
-        self.caller.chmod(0o755)
-        self.base_env = {**os.environ,
-            "CARR_CLAUDE_CONTINUITY_MODE_FILE": str(self.mode),
-            "CARR_CLAUDE_CONTINUITY_SPOOL_DIR": str(self.spool),
-            "CARR_CLAUDE_CONTINUITY_SESSION_DIR": str(self.root / "session-state"),
-            "CARR_CLAUDE_CONTINUITY_CALL": str(self.caller),
-            "CARR_CLAUDE_TRANSCRIPT_ROOTS": str(self.root),
-            "CARR_CLAUDE_CONTINUITY_AUDIT": str(self.audit),
-            "CARR_CLAUDE_RULE_DEDUPE_DIR": str(self.dedupe),
-            "CARR_CLAUDE_RULE_DEDUPE_AUDIT": str(self.root / "rule-dedupe-audit.jsonl"),
-            "CALL_LOG": str(self.calls),
-        }
+        caller = self.root / "call.py"
+        caller.write_text(CALLER, encoding="utf-8")
+        caller.chmod(0o755)
+        self.env = {**os.environ,
+                    "CARR_CLAUDE_CONTINUITY_MODE_FILE": str(self.mode),
+                    "CARR_CLAUDE_CONTINUITY_SESSION_DIR": str(self.root / "session-state"),
+                    "CARR_CLAUDE_CONTINUITY_CALL": str(caller),
+                    "CARR_CLAUDE_TRANSCRIPT_ROOTS": str(self.root),
+                    "CARR_CLAUDE_RULE_DEDUPE_DIR": str(self.dedupe),
+                    "CARR_CLAUDE_RULE_DEDUPE_AUDIT": str(self.root / "rule-dedupe-audit.jsonl"),
+                    "CALL_LOG": str(self.calls)}
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def set_mode(self, mode):
-        digest = load_hook().expected_config_digest()
-        self.mode.write_text(json.dumps({"schema_version": 1, "mode": mode,
-                                         "config_digest": digest}), encoding="utf-8")
+    def set_mode(self, mode, digest=None):
+        digest = digest or continuity_config.load(ROOT).config_digest
+        self.mode.write_text(json.dumps({"schema_version": 1, "mode": mode, "config_digest": digest}))
 
-    def run_hook(self, event, **extra):
+    def run_hook(self, event, cwd=None, **extra):
         payload = {"hook_event_name": event, "session_id": "session-1",
-                   "transcript_path": str(self.transcript), "cwd": str(self.root), **extra}
+                   "transcript_path": str(self.transcript), "cwd": str(cwd or self.root), **extra}
         return subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload), text=True,
-                              capture_output=True, env=self.base_env, timeout=10, check=False)
+                              capture_output=True, env=self.env, timeout=20, check=False)
 
-    def call_rows(self):
-        if not self.calls.exists():
-            return []
-        return [json.loads(line) for line in self.calls.read_text().splitlines()]
+    def calls_made(self):
+        return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
 
-    def test_disabled_and_shadow_never_contact_the_store(self):
-        self.assertEqual(self.run_hook("UserPromptSubmit").returncode, 0)
-        self.set_mode("shadow")
-        result = self.run_hook("PreCompact")
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(self.call_rows(), [])
-        audit = [json.loads(line) for line in self.audit.read_text().splitlines()]
-        self.assertEqual(audit[0]["event"], "PreCompact")
-        self.assertEqual(audit[0]["mode"], "shadow")
-        self.assertNotIn("transcript_path", audit[0])
-
-    def test_stale_config_digest_disables_all_activity(self):
-        self.mode.write_text(json.dumps({"schema_version": 1, "mode": "inject",
-                                         "config_digest": "sha256:" + "0" * 64}))
-        result = self.run_hook("SessionStart", source="resume")
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(self.call_rows(), [])
-
-    def test_checkpoint_mode_records_receipts_and_never_blocks_stop(self):
-        self.set_mode("checkpoint")
-        for event in ("UserPromptSubmit", "PreCompact", "Stop"):
-            result = self.run_hook(event)
-            self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, "")
-        rows = self.call_rows()
-        self.assertEqual([row["args"]["event_type"] for row in rows],
-                         ["user_prompt_submit", "pre_compact", "stop"])
-        self.assertTrue(all(row["profile"] == "claude-continuity" for row in rows))
-        self.assertTrue(all("transcript_path" not in row["args"] for row in rows))
-        self.assertTrue(all(len(row["args"]["transcript_path_digest"]) == 64 for row in rows))
-
-    def test_inject_reads_only_on_compact_or_resume_session_start(self):
-        self.set_mode("inject")
-        startup = self.run_hook("SessionStart", source="startup")
-        compact = self.run_hook("SessionStart", source="compact")
-        startup_output = json.loads(startup.stdout)
-        self.assertIn('"expected_version":3', startup_output["hookSpecificOutput"]["additionalContext"])
-        self.assertNotIn("bounded recovery capsule", startup_output["hookSpecificOutput"]["additionalContext"])
-        output = json.loads(compact.stdout)
-        self.assertEqual(output["hookSpecificOutput"]["hookEventName"], "SessionStart")
-        self.assertIn("bounded recovery capsule", output["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual([row["name"] for row in self.call_rows()],
-                         ["claude-read-recovery", "claude-read-recovery"])
-
-    def test_new_session_activation_exposes_exact_first_checkpoint_contract(self):
-        self.set_mode("checkpoint")
-        self.base_env["RECOVERY_EMPTY"] = "1"
-        result = self.run_hook("SessionStart", source="startup")
-        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn('"session_id":"session-1"', context)
-        self.assertIn('"transcript_path_digest":', context)
-        self.assertIn('"project_affinity":', context)
-        self.assertIn("mcp__carr-continuity__claude-checkpoint", context)
-        arguments = json.loads(context.split("arguments=", 1)[1].split("\n", 1)[0])
-        self.assertEqual(arguments["expected_version"], 0)
-        self.assertIn("Never infer completion from telemetry or replay pending effects", context)
-        self.assertLessEqual(len(context.encode()), 4800)
-
-    def test_checkpoint_arguments_preserve_recovered_version_and_generation(self):
-        hook = load_hook()
-        identity = {"runtime": "claude", "session_id": "session-1",
-                    "transcript_path_digest": "a" * 64, "project_affinity": "repo:origin"}
-        response = {"ok": True, "found": True,
-                    "checkpoint": {"checkpoint_version": "3", "compaction_generation": "4"}}
-        for prompt in (hook.checkpoint_request, hook._activation_envelope):
-            context = prompt(identity, {"byte_offset": 1234}, response)
-            args = json.loads(context.split("arguments=", 1)[1].split("\n", 1)[0])
-            self.assertEqual(args["expected_version"], 3)
-            self.assertEqual(args["compaction_generation"], 4)
-            self.assertEqual(args["state"]["source_cursor"], {"byte_offset": 1234})
-            self.assertNotIn("binding", args)
-
-    def test_unavailable_recovery_does_not_guess_a_checkpoint_version(self):
-        hook = load_hook()
-        for prompt in (hook.checkpoint_request, hook._activation_envelope):
-            context = prompt({}, {"byte_offset": 1234}, None)
-            args = json.loads(context.split("arguments=", 1)[1].split("\n", 1)[0])
-            self.assertIsNone(args["expected_version"])
-            self.assertIn("read", context)
-            self.assertIn("recovery first", context)
-
-    def test_startup_before_transcript_creation_emits_verified_pending_cursor(self):
-        self.set_mode("checkpoint")
-        projects = self.root / "projects"
-        project = projects / "-Users-booko-carr-system"
-        project.mkdir(parents=True)
-        self.base_env["CARR_CLAUDE_TRANSCRIPT_ROOTS"] = str(projects)
-        self.transcript = project / "session-1.jsonl"
-
-        result = self.run_hook("SessionStart", source="startup")
-
+    def context(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
-        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn('"expected_version":3', context)
-        arguments = json.loads(context.split("arguments=", 1)[1].split("\n", 1)[0])
-        cursor = arguments["state"]["source_cursor"]
-        self.assertEqual(cursor["byte_offset"], 0)
-        self.assertEqual(cursor["mtime_ns"], 0)
-        self.assertTrue(cursor["startup_pending"])
-        self.assertRegex(cursor["source_digest"], r"^[0-9a-f]{64}$")
-        rows = self.call_rows()
-        self.assertEqual([row["name"] for row in rows], ["claude-read-recovery"])
-        self.assertEqual(rows[0]["args"]["session_id"], "session-1")
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        self.assertEqual(output["hookEventName"], "SessionStart")
+        return output["additionalContext"]
 
-    def test_missing_transcript_fallback_is_startup_only_and_direct_project_only(self):
-        self.set_mode("checkpoint")
-        projects = self.root / "projects"
-        project = projects / "-Users-booko-carr-system"
-        nested = project / "nested"
-        nested.mkdir(parents=True)
-        self.base_env["CARR_CLAUDE_TRANSCRIPT_ROOTS"] = str(projects)
-        self.transcript = project / "session-1.jsonl"
-        resume = self.run_hook("SessionStart", source="resume")
-        self.assertEqual(resume.stdout, "")
-        self.assertEqual(self.call_rows(), [])
+    def arguments(self, context):
+        line = next(line for line in context.splitlines() if line.startswith("arguments="))
+        return json.loads(line[len("arguments="):])
 
-        self.transcript = nested / "session-1.jsonl"
-        startup = self.run_hook("SessionStart", source="startup")
-        self.assertEqual(startup.stdout, "")
-        self.assertEqual(self.call_rows(), [])
+    def test_contract_has_exactly_two_events(self):
+        self.assertEqual(set(continuity_config.load(ROOT).hooks), {"SessionStart", "PreCompact"})
 
-    def test_maximum_subagent_binding_and_worker_capsule_fit_native_limit(self):
+    def test_disabled_or_stale_mode_does_nothing(self):
+        self.assertEqual(self.run_hook("SessionStart", source="compact").stdout, "")
+        self.set_mode("shadow")
+        self.assertEqual(self.run_hook("SessionStart", source="compact").stdout, "")
+        self.set_mode("inject", digest="sha256:" + "0" * 64)
+        result = self.run_hook("SessionStart", source="compact")
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        self.assertEqual(self.calls_made(), [])
+
+    def test_startup_hands_over_the_checkpoint_binding(self):
         self.set_mode("inject")
-        session_id = "s" + "a" * 199
-        agent_id = "g" + "b" * 199
-        subagents = self.root / "subagents"
-        subagents.mkdir()
-        transcript = subagents / f"{agent_id}.jsonl"
-        transcript.write_text("x" * 1_000_000, encoding="utf-8")
-        mandatory = ("Objective:\n- objective sentinel\nCurrent corrections:\n- correction sentinel\n"
-                     "Current constraints:\n- constraint sentinel\n"
-                     "Pending external effects (verify; never replay):\n- pending sentinel\n"
-                     "Next action:\n- next sentinel\n")
-        self.base_env["RECOVERY_CAPSULE"] = mandatory + "x" * (3200 - len(mandatory.encode()))
-        self.spool.mkdir()
-        for index in range(100):
-            (self.spool / f"{index}.json").write_text("{}", encoding="utf-8")
+        context = self.context(self.run_hook("SessionStart", source="startup", model="claude-x"))
+        args = self.arguments(context)
+        digest = hashlib.sha256(str(self.transcript).encode()).hexdigest()
+        self.assertEqual(args["session_id"], "session-1")
+        self.assertEqual(args["transcript_path_digest"], digest)
+        self.assertEqual(args["expected_version"], 3)
+        self.assertEqual(args["compaction_generation"], 2)
+        self.assertEqual(args["state"]["source_cursor"]["byte_offset"], self.transcript.stat().st_size)
+        self.assertIn("claude-checkpoint", context)
+        self.assertNotIn("bounded recovery capsule", context)
+        [call] = self.calls_made()
+        self.assertEqual((call["name"], call["profile"]), ("claude-read-recovery", "claude-continuity"))
+        self.assertEqual(call["args"]["model_id"], "claude-x")
 
-        for source in ("compact", "resume"):
-            for version in (1000, 2 ** 53 - 1):
-                with self.subTest(source=source, version=version):
-                    self.base_env["RECOVERY_VERSION"] = str(version)
-                    self.base_env["RECOVERY_GENERATION"] = str(version)
-                    result = self.run_hook("SessionStart", source=source, session_id=session_id,
-                                           agent_id=agent_id, transcript_path=str(transcript))
-
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertTrue(result.stdout, result.stderr)
-                    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-                    self.assertLessEqual(len(context.encode()), 4800)
-                    self.assertTrue(context.endswith(self.base_env["RECOVERY_CAPSULE"]))
-                    arguments = json.loads(context.split("arguments=", 1)[1].split("\n", 1)[0])
-                    self.assertEqual(arguments["expected_version"], version)
-                    self.assertEqual(arguments["compaction_generation"], version)
-                    self.assertEqual(arguments["session_id"], session_id)
-                    self.assertEqual(arguments["native_agent_id"], agent_id)
-                    self.assertEqual(arguments["state"]["source_cursor"]["byte_offset"], 1_000_000)
-                    for sentinel in ("objective sentinel", "correction sentinel", "constraint sentinel",
-                                     "pending sentinel", "next sentinel"):
-                        self.assertIn(sentinel, context)
-                    hook = load_hook()
-                    cursor = {"byte_offset": 2 ** 63 - 1, "mtime_ns": 2 ** 63 - 1,
-                              "source_digest": "f" * 64}
-                    identity = {key: arguments[key] for key in (
-                        "runtime", "session_id", "transcript_path_digest", "project_affinity",
-                        "parent_session_id", "native_agent_id")}
-                    recovery = {"found": True, "checkpoint": {
-                        "checkpoint_version": version, "compaction_generation": version}}
-                    with mock.patch.object(hook, "unsent_receipts", return_value=100):
-                        envelope = hook._activation_envelope(identity, cursor, recovery)
-                    self.assertLessEqual(len((envelope + "\n\n" +
-                                              self.base_env["RECOVERY_CAPSULE"]).encode()), 4800)
-
-    def test_multibyte_agent_identifier_is_refused_before_recovery(self):
+    def test_compact_injects_capsule_only_in_inject_mode(self):
         self.set_mode("inject")
-        result = self.run_hook("SessionStart", source="compact", agent_id="🧭" * 200)
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("unverified native input ignored", result.stderr)
-        self.assertEqual(self.call_rows(), [])
-
-    def test_precompact_and_compact_resume_reset_rule_delivery_generation(self):
+        self.assertIn("bounded recovery capsule", self.context(self.run_hook("SessionStart", source="compact")))
         self.set_mode("checkpoint")
-        leaf_digest = hashlib.sha256(str(self.transcript.resolve()).encode()).hexdigest()
-        token = hashlib.sha256(f"session-1\0{leaf_digest}".encode()).hexdigest()
+        self.assertNotIn("bounded recovery capsule", self.context(self.run_hook("SessionStart", source="resume")))
+
+    def test_missing_checkpoint_and_outage(self):
+        self.set_mode("inject")
+        self.env["RECOVERY_EMPTY"] = "1"
+        self.assertEqual(self.arguments(self.context(self.run_hook("SessionStart", source="startup")))
+                         ["expected_version"], 0)
+        self.env["CARR_CLAUDE_CONTINUITY_CALL"] = "/definitely/missing"
+        result = self.run_hook("SessionStart", source="compact")
+        self.assertIsNone(self.arguments(self.context(result))["expected_version"])
+        self.assertIn("claude-read-recovery unavailable", result.stderr)
+
+    def test_precompact_and_compact_reset_rule_delivery_generation(self):
+        self.set_mode("checkpoint")
+        leaf = hashlib.sha256(str(self.transcript).encode()).hexdigest()
+        state = self.dedupe / (hashlib.sha256(f"session-1\0{leaf}".encode()).hexdigest() + ".json")
         self.dedupe.mkdir()
-        state_path = self.dedupe / f"{token}.json"
-        state_path.write_text(json.dumps({"schema_version": 1,
-                                          "compaction_generation": 4,
-                                          "digests": ["old-rule-set"]}))
-        self.run_hook("PreCompact")
-        first = json.loads(state_path.read_text())
-        self.assertEqual(first, {"schema_version": 1,
-                                 "compaction_generation": 5, "digests": []})
+        state.write_text(json.dumps({"schema_version": 1, "compaction_generation": 4, "digests": ["old"]}))
+        result = self.run_hook("PreCompact")
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        self.assertEqual(json.loads(state.read_text()),
+                         {"schema_version": 1, "compaction_generation": 5, "digests": []})
         self.run_hook("SessionStart", source="compact")
-        second = json.loads(state_path.read_text())
-        self.assertEqual(second["compaction_generation"], 6)
-        self.assertEqual(second["digests"], [])
+        self.assertEqual(json.loads(state.read_text())["compaction_generation"], 6)
+        self.assertEqual([c["name"] for c in self.calls_made()], ["claude-read-recovery"])
 
-    def test_outage_spools_signed_receipt_but_never_replays_it(self):
-        self.set_mode("checkpoint")
-        self.base_env["CARR_CLAUDE_CONTINUITY_CALL"] = "/definitely/missing"
-        first = self.run_hook("PreCompact")
-        second = self.run_hook("Stop")
-        self.assertEqual((first.returncode, second.returncode), (0, 0))
-        receipts = sorted(self.spool.glob("*.json"))
-        self.assertEqual(len(receipts), 2)
-        key = self.spool.with_suffix(".key").read_bytes()
-        self.assertEqual(len(key), 32)
-        for receipt in receipts:
-            doc = json.loads(receipt.read_text())
-            signature = doc.pop("hmac_sha256")
-            canonical = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-            self.assertTrue(hmac.compare_digest(signature, hmac.new(key, canonical, hashlib.sha256).hexdigest()))
-        self.base_env["CARR_CLAUDE_CONTINUITY_CALL"] = str(self.caller)
-        self.run_hook("SessionStart", source="resume")
-        self.assertEqual(len(list(self.spool.glob("*.json"))), 2,
-                         "recovery never replays pending receipt files")
-
-    def test_project_affinity_survives_worktree_path_change(self):
-        repo = self.root / "repo"
-        subprocess.run(["git", "init", "-q", str(repo)], check=True, env=GIT_ENV)
-        subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.com"], check=True, env=GIT_ENV)
-        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True, env=GIT_ENV)
-        (repo / "a").write_text("a")
-        subprocess.run(["git", "-C", str(repo), "add", "a"], check=True, env=GIT_ENV)
-        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True, env=GIT_ENV)
-        other = self.root / "other-worktree"
-        subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", "-b", "other", str(other)], check=True, env=GIT_ENV)
-        hook = load_hook()
-        with mock.patch.dict(os.environ, GIT_ENV, clear=True):
-            self.assertEqual(hook.project_affinity(repo.resolve()), hook.project_affinity(other.resolve()))
-
-    def test_post_tool_sampling_is_stable_and_requires_native_tool_id(self):
-        hook = load_hook()
-        identity = {"session_id": "session"}
-        self.assertFalse(hook._sample_post_tool({}, identity))
-        values = [hook._sample_post_tool({"tool_use_id": f"tool-{index}"}, identity)
-                  for index in range(1000)]
-        self.assertEqual(values, [hook._sample_post_tool({"tool_use_id": f"tool-{index}"}, identity)
-                                  for index in range(1000)])
-        self.assertGreater(sum(values), 70)
-        self.assertLess(sum(values), 130)
-
-    def test_transcript_must_be_rooted_and_session_or_subagent_bound(self):
-        self.set_mode("checkpoint")
-        wrong = self.root / "other-session.jsonl"
-        wrong.write_text("{}\n")
-        self.transcript = wrong
-        self.assertEqual(self.run_hook("PreCompact").returncode, 0)
-        self.assertEqual(self.call_rows(), [])
-        outside = pathlib.Path(self.temp.name).parent / f"outside-{os.getpid()}.jsonl"
-        outside.write_text("{}\n")
-        try:
-            self.transcript = outside
-            self.assertEqual(self.run_hook("PreCompact").returncode, 0)
-            self.assertEqual(self.call_rows(), [])
-        finally:
-            outside.unlink(missing_ok=True)
-        subdir = self.root / "subagents"
-        subdir.mkdir()
-        self.transcript = subdir / "agent-leaf-7.jsonl"
-        self.transcript.write_text("{}\n")
-        result = self.run_hook("PreCompact", agent_id="leaf-7")
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(self.call_rows()[0]["args"]["parent_session_id"], "session-1")
-
-
-class ClaudeContinuityDeliversTest(ClaudeContinuityHookTest):
-    """Checks on whether the protocol does its job, not only whether it refuses bad input."""
-
-    def grow(self, size):
-        with open(self.transcript, "a", encoding="utf-8") as handle:
-            handle.write("x" * size + "\n")
-
-    def test_a_directory_change_mid_session_does_not_break_the_binding(self):
-        # The failure this replaces: cwd moved, project affinity moved with it,
-        # and every later write was refused for the life of the session.
-        self.set_mode("checkpoint")
-        self.run_hook("UserPromptSubmit")
-        moved = self.root / "elsewhere"
-        moved.mkdir()
-        self.run_hook("UserPromptSubmit", cwd=str(moved))
-        rows = self.call_rows()
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]["args"]["project_affinity"], rows[1]["args"]["project_affinity"],
-                         "a cwd change must not repin the leaf binding")
-        self.assertEqual(rows[1]["args"]["cwd"], str(moved.resolve()),
-                         "the new cwd still travels as telemetry")
-
-    def test_a_deep_session_is_asked_for_a_checkpoint_with_a_fresh_cursor(self):
+    def test_untrusted_input_is_ignored(self):
         self.set_mode("inject")
-        self.base_env["CARR_CLAUDE_CONTINUITY_NUDGE_FIRST"] = "4096"
-        self.base_env["CARR_CLAUDE_CONTINUITY_NUDGE_INTERVAL"] = "4096"
-        self.assertEqual(self.run_hook("UserPromptSubmit").stdout, "",
-                         "a shallow session is never nudged")
-        self.grow(8192)
-        context = json.loads(self.run_hook("UserPromptSubmit").stdout)["hookSpecificOutput"]
-        self.assertEqual(context["hookEventName"], "UserPromptSubmit")
-        body = context["additionalContext"]
-        self.assertIn("claude-checkpoint", body)
-        self.assertIn("expected_version=3", body)
-        self.assertIn('"session_id":"session-1"', body)
-        arguments = json.loads(body.split("arguments=", 1)[1].split("\n", 1)[0])
-        offset = arguments["state"]["source_cursor"]["byte_offset"]
-        self.assertEqual(offset, self.transcript.stat().st_size,
-                         "the ask must carry the cursor as of this prompt, not session start")
+        outside = pathlib.Path(tempfile.mkdtemp()) / "session-1.jsonl"
+        for payload in ({"agent_id": "🧭" * 200}, {"transcript_path": str(outside)},
+                        {"session_id": "other-session"}):
+            result = self.run_hook("SessionStart", source="compact", **payload)
+            self.assertEqual((result.returncode, result.stdout), (0, ""))
+            self.assertIn("unverified native input ignored", result.stderr)
+        self.assertEqual(self.calls_made(), [])
 
-    def test_the_checkpoint_ask_repeats_only_after_real_growth(self):
+    def test_project_affinity_is_pinned_for_the_session(self):
         self.set_mode("inject")
-        self.base_env["CARR_CLAUDE_CONTINUITY_NUDGE_FIRST"] = "4096"
-        self.base_env["CARR_CLAUDE_CONTINUITY_NUDGE_INTERVAL"] = "4096"
-        self.grow(8192)
-        self.assertNotEqual(self.run_hook("UserPromptSubmit").stdout, "")
-        self.grow(16)
-        self.assertEqual(self.run_hook("UserPromptSubmit").stdout, "",
-                         "a nudge per prompt would be nagging, not a trigger")
-        self.grow(8192)
-        self.assertNotEqual(self.run_hook("UserPromptSubmit").stdout, "")
-
-    def test_an_unread_spool_is_announced_instead_of_accumulating_silently(self):
-        self.set_mode("inject")
-        self.base_env["CARR_CLAUDE_CONTINUITY_CALL"] = str(self.root / "absent")
-        self.run_hook("UserPromptSubmit")
-        self.base_env["CARR_CLAUDE_CONTINUITY_CALL"] = str(self.caller)
-        context = json.loads(self.run_hook("SessionStart", source="startup").stdout)
-        self.assertIn("Spool: 1 receipts await nightly drain", context["hookSpecificOutput"]["additionalContext"])
-
-    def test_an_unsampled_tool_event_never_reads_the_transcript(self):
-        self.set_mode("checkpoint")
-        hook = load_hook()
-        unsampled = next(f"tool-{index}" for index in range(1000)
-                         if not hook._sample_post_tool({"tool_use_id": f"tool-{index}"},
-                                                       {"session_id": "session-1"}))
-        self.transcript.unlink()
-        result = self.run_hook("PostToolUse", tool_use_id=unsampled, tool_name="Bash")
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stderr, "", "the sample is decided before the bounded tail read")
-        self.assertEqual(self.call_rows(), [])
+        first = self.arguments(self.context(self.run_hook("SessionStart", source="startup")))
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        second = self.arguments(self.context(self.run_hook("SessionStart", source="compact", cwd=elsewhere)))
+        self.assertEqual(first["project_affinity"], second["project_affinity"])
 
 
 if __name__ == "__main__":

@@ -24,11 +24,8 @@ def continuity_source() -> dict:
                "{{REPO}}/ops/claude-continuity-hook.py")
     plain = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
     return {"hooks": {
-        "UserPromptSubmit": [plain],
-        "PostToolUse": [plain],
         "PreCompact": [plain],
         "SessionStart": [{"matcher": "^(startup|compact|resume)$", **plain}],
-        "Stop": [plain],
     }}
 
 
@@ -109,7 +106,7 @@ class ContinuityOverlayTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             rc = config.cmd_install(True)
         self.assertEqual(rc, 0)
-        self.assertEqual(self.continuity_entry_count(), 5)
+        self.assertEqual(self.continuity_entry_count(), 2)
         self.assertEqual(json.loads(self.settings.read_text())["theme"], "preserve-me")
         self.assertEqual(self.mode.read_bytes(), mode_before)
         self.assertEqual(self.mcp.read_bytes(), mcp_before)
@@ -133,14 +130,14 @@ class ContinuityOverlayTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(config.cmd_install(True), 0)
             self.assertEqual(config.cmd_check(), 0)
-        self.assertEqual(self.continuity_entry_count(), 5)
+        self.assertEqual(self.continuity_entry_count(), 2)
         self.assertEqual(json.loads(self.mode.read_text())["mode"], "disabled")
 
     def test_valid_mode_restores_missing_hooks(self) -> None:
         self.activate(include_hooks=False)
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(config.cmd_install(True), 0)
-        self.assertEqual(self.continuity_entry_count(), 5)
+        self.assertEqual(self.continuity_entry_count(), 2)
         self.assertIn("WILL RESTORE five canonical entries", output.getvalue())
 
     def test_stale_mode_tampered_hook_or_mcp_fails_without_overwrite(self) -> None:

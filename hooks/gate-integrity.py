@@ -30,14 +30,12 @@ CONTRACTS = {
     "codex-hooks.json": REPO / "ops/config/codex-hooks.json",
     "rule-enforcement-map.json": REPO / "ops/config/rule-enforcement-map.json",
     "model-floors.json": REPO / "ops/config/model-floors.json",
-    "session-context-lifecycle.v2.json": REPO / "ops/config/session-context-lifecycle.v2.json",
 }
 
 FLOOR = [
     "guard-unattended.py",      # egress deny
     "record-home-gate.py",      # .md write deny
     "lint-gate.py",             # writing lint
-    "context-handoff-gate.py",  # Stop context-threshold handoff
     "gate-integrity.py",        # this file — it must guard itself
 ]
 

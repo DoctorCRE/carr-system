@@ -230,11 +230,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/context-handoff-gate.py",
-            "timeout": 20
-          },
-          {
-            "type": "command",
             "command": "/usr/bin/env python3 /Users/booko/carr-system/hooks/scheduled-run-record.py",
             "timeout": 20
           }

@@ -148,11 +148,10 @@ class FakeAppServer:
 def main() -> int:
     continuity = "/carr-system/ops/codex-continuity-hook.py"
     source = {"hooks": {
-        "PreCompact": [_hook(continuity)],
-        "PostCompact": [_hook(continuity)],
         "SessionStart": [_hook(continuity, "^(startup|resume|compact)$")],
-        "UserPromptSubmit": [_hook(continuity)],
     }}
+    # The live file still carries a continuity hook on an event the adapter
+    # retired; install must clear it and keep the unrelated hook beside it.
     live: dict[str, Any] = {
         "hooks": {
             "PreCompact": [_hook("/other/project/keep.py"), _hook(continuity)],
@@ -212,13 +211,10 @@ def main() -> int:
         installed = json.loads(codex_live.read_text(encoding="utf-8"))
         assert installed["permissions"] == {"keep": True}
         assert installed["hooks"]["Stop"] == live["hooks"]["Stop"]
-        assert installed["hooks"]["PreCompact"] == [
-            _hook("/other/project/keep.py"), _hook(continuity)]
-        assert installed["hooks"]["PreCompact"][1:] == source["hooks"]["PreCompact"]
-        assert all(installed["hooks"].get(event) == source["hooks"][event]
-                   for event in mod.CODEX_CONTINUITY_EVENTS if event != "PreCompact")
+        assert installed["hooks"]["PreCompact"] == [_hook("/other/project/keep.py")]
+        assert installed["hooks"]["SessionStart"] == source["hooks"]["SessionStart"]
         assert len(app_server.batch_calls) == 1
-        assert len(app_server.batch_calls[0]["edits"]) == 4
+        assert len(app_server.batch_calls[0]["edits"]) == 1
         parsed_config = tomllib.loads(codex_config.read_text(encoding="utf-8"))
         assert parsed_config["model"] == "keep-me" and parsed_config["custom"] == {"value": 7}
         assert parsed_config["released_at"].isoformat() == "2026-09-05T14:30:00+00:00"
@@ -241,13 +237,13 @@ def main() -> int:
         assert len(app_server.batch_calls) == 1
 
         for field, value in (
-            ("eventName", "postCompact"),
+            ("eventName", "preCompact"),
             ("matcher", "injected"),
             ("command", f"/bin/sh -c '{continuity}'"),
             ("handlerType", "prompt"),
             ("timeoutSec", 11),
         ):
-            app_server.hook_overrides = {"preCompact": {field: value}}
+            app_server.hook_overrides = {"sessionStart": {field: value}}
             mod.sys.argv = ["config-as-code.py", "install-codex-continuity", "--apply"]
             assert mod.main() == 1, field
             assert codex_live.read_bytes() == after_first_hooks
@@ -256,7 +252,7 @@ def main() -> int:
         app_server.hook_overrides = {}
 
         duplicate = dict(next(hook for hook in app_server._hooks()
-                              if hook["eventName"] == "preCompact" and
+                              if hook["eventName"] == "sessionStart" and
                               continuity in (hook.get("command") or "")))
         duplicate["key"] += ":duplicate"
         app_server.extra_hooks = [duplicate]
@@ -268,7 +264,7 @@ def main() -> int:
         app_server.extra_hooks = []
 
         injected = dict(duplicate)
-        injected["key"] = f"{codex_live}:pre_compact:injected:0"
+        injected["key"] = f"{codex_live}:session_start:injected:0"
         injected["command"] = f"/bin/sh -c '{continuity}'"
         injected["currentHash"] = "sha256:" + "f" * 64
         injected["trustStatus"] = "untrusted"
@@ -283,7 +279,7 @@ def main() -> int:
         # Rollback is selective; unrelated hooks and trust entries added before
         # removal remain represented after continuity is removed.
         updated = json.loads(codex_live.read_bytes())
-        updated["hooks"]["PostCompact"].append(_hook("/other/new-hook.py"))
+        updated["hooks"].setdefault("PostCompact", []).append(_hook("/other/new-hook.py"))
         codex_live.write_text(json.dumps(updated, indent=2) + "\n")
         before_remove_hooks = codex_live.read_bytes()
         before_remove_config = codex_config.read_bytes()
