@@ -15,8 +15,9 @@ class ReservationTests(unittest.TestCase):
     def test_absolute_slot_and_delay_callers_share_one_schedule(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'budget.json'
-            first = GitHubReadBudget({}, path=path, clock=lambda: 100.0)
-            second = GitHubReadBudget({}, path=path, clock=lambda: 100.0)
+            env = {'GH_LIMITER_DIR': str(Path(temporary) / 'legacy')}
+            first = GitHubReadBudget(env, path=path, clock=lambda: 100.0)
+            second = GitHubReadBudget(env, path=path, clock=lambda: 100.0)
             self.assertEqual(first.reserve('core', with_slot=True), (100.0, 0.0))
             self.assertEqual(second.reserve('core'), 2.0)
             self.assertEqual(first.reserve('core', with_slot=True), (104.0, 4.0))
@@ -26,7 +27,8 @@ class ReservationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'budget.json'
             now = [100.0]
-            budget = GitHubReadBudget({}, path=path, clock=lambda: now[0])
+            env = {'GH_LIMITER_DIR': str(Path(temporary) / 'legacy')}
+            budget = GitHubReadBudget(env, path=path, clock=lambda: now[0])
             with budget.call_slot(timeout=1) as mark_started:
                 self.assertEqual(budget.reserve('core', with_slot=True), (100.0, 0.0))
                 mark_started()
