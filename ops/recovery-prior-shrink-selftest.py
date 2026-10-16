@@ -60,7 +60,7 @@ assert 'DEPLOY_TAG" != "$TYPED_RECOVERY_TAG' in source
 # lower count in staging. This pins the real failure shape: staging can be ahead of the
 # pinned recovery candidate, so current_before and restore_only must be
 # authorized even though both are lower than the live baseline.
-assert 'if ! sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS" >/dev/null; then' in source
+assert 'if ! sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS_REGISTRY" >/dev/null; then' in source
 assert '[ "$LOST" -le 0 ] || [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]' in source
 assert 'prepare_typed_recovery_shrink' in source
 assert 'exact prepared typed recovery step' in source

@@ -1070,14 +1070,14 @@ check_artifact() {
     return
   fi
   local rc=0
-  marker="$("$PY" ops/last-deployed-verb-count.py carr-mcp production 2>/dev/null)" || rc=$?
+  marker="$("$PY" ops/last-deployed-verb-count.py carr-mcp production --registry 2>"$LOGDIR/artifact-baseline.log")" || rc=$?
   case "$rc" in
     0)
       if ! sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements "$marker" >"$LOGDIR/artifact-count.log" 2>"$LOGDIR/artifact.log"; then
         cat "$LOGDIR/artifact.log" >&2
         bad artifact "verb loss does not match the committed retirement ledger"
       else
-        ok artifact "$shipping verbs; loss checked against deployed $marker and committed retirements"
+        ok artifact "$shipping verbs; loss checked by name against deployed source and committed retirements"
       fi
       ;;
     3)
@@ -1091,7 +1091,8 @@ check_artifact() {
       fi
       ;;
     *)
-      bad artifact "could not read the deployed verb count from the ledger (exit $rc) — refusing to call it unmeasured-but-fine"
+      cat "$LOGDIR/artifact-baseline.log" >&2
+      bad artifact "could not read the deployed verb registry from the ledger (exit $rc) — refusing to call it unmeasured-but-fine"
       ;;
   esac
 }

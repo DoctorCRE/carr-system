@@ -19,8 +19,9 @@ nothing requires this one.
 
 ONE CODE PATH, TWO CALLERS (rule a8c55a47): the deploy asks this, and so can CI
 or a human. A second copy of the query in shell would be free to drift.
-The ledger stores counts, so verb-count.sh --check-retirements applies the
-committed retirement names with exact count arithmetic for an intended shrink.
+The --registry form imports names from the exact git_sha recorded at deployment
+and verifies the recorded count. Missing source or inconsistent evidence fails
+closed. A retirement already absent from that source cannot excuse another loss.
 
 EXIT CODES, and the shell caller depends on telling them apart:
   0   a previous deployment exists; its verb count is printed on stdout
@@ -38,11 +39,18 @@ through — that is how the 2026-08-09 verb loss happened, when production went
 from 75 verbs to 66 and nothing objected.
 
 Usage:  last-deployed-verb-count.py <service> <environment>
+        last-deployed-verb-count.py <service> <environment> --registry
 """
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
+import re
+import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -51,6 +59,26 @@ REPO = Path(__file__).resolve().parent.parent
 # aborted row never reached the edge, so its count is not a baseline. `verifying`
 # counts: the code is live, only the golden suite is unproven.
 SHIPPED_STATES = ("complete", "verifying", "rolled_back", "superseded")
+
+
+def source_registry(git_sha: str, count: int) -> dict:
+    """Reconstruct the deployed name set from its immutable ledger binding."""
+    if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha):
+        raise ValueError("deployed source must have a full Git commit SHA")
+    archive = subprocess.run(
+        ["git", "archive", git_sha, "mcp-server"], cwd=REPO,
+        capture_output=True, check=True, timeout=30).stdout
+    with tempfile.TemporaryDirectory(prefix="deployed-registry-") as raw:
+        with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+            source.extractall(raw, filter="data")
+        result = subprocess.run(
+            ["sh", str(REPO / "ops/verb-count.sh"), str(Path(raw) / "mcp-server"), "--names"],
+            capture_output=True, text=True, check=True, timeout=60)
+        names = json.loads(result.stdout)
+    if (not isinstance(names, list) or any(not isinstance(name, str) for name in names)
+            or len(set(names)) != len(names) or len(names) != count):
+        raise ValueError("deployed source registry does not match the ledger verb count")
+    return {"git_sha": git_sha, "verb_count": count, "verbs": names}
 
 
 def load_ops_record():
@@ -132,11 +160,12 @@ def countless_rows_newer_than_baseline(cur, service, environment, observed_at):
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: last-deployed-verb-count.py <service> <environment>",
+    registry = len(sys.argv) == 4 and sys.argv[3] == "--registry"
+    if len(sys.argv) != 3 and not registry:
+        print("usage: last-deployed-verb-count.py <service> <environment> [--registry]",
               file=sys.stderr)
         return 64
-    service, environment = sys.argv[1], sys.argv[2]
+    service, environment = sys.argv[1:3]
 
     try:
         ops = load_ops_record()
@@ -184,7 +213,17 @@ def main() -> int:
               f"{row[4]:%Y-%m-%d} and does not describe what is serving now. "
               "A loss guard comparing against it can pass while verbs disappear "
               "(defect 4077b653).", file=sys.stderr)
-    print(int(row[0]))
+    if registry:
+        if stale_newer:
+            print("last-deployed-verb-count: refusing a stale deployed name set", file=sys.stderr)
+            return 1
+        try:
+            print(json.dumps(source_registry(row[1], int(row[0]))))
+        except (ValueError, OSError, subprocess.SubprocessError, tarfile.TarError) as exc:
+            print(f"last-deployed-verb-count: deployed registry unavailable: {exc}", file=sys.stderr)
+            return 1
+    else:
+        print(int(row[0]))
     return 0
 
 

@@ -17,7 +17,8 @@
 # it confidently.
 #
 # Usage:  ops/verb-count.sh <worker-dir>      # prints an integer on stdout
-#         ops/verb-count.sh <worker-dir> --check-retirements <deployed-count>
+#         ops/verb-count.sh <worker-dir> --names
+#         ops/verb-count.sh <worker-dir> --check-retirements <deployed-registry-json|0>
 # The checked form imports the exact names and applies verb-loss-guard.py.
 # CI and deploy use this one implementation, including the committed ledger.
 # Exits non-zero, printing nothing to stdout, when the registry will not import.
@@ -27,13 +28,16 @@
 set -eu
 
 CHECK_RETIREMENTS=0
+NAMES=0
 case "$#" in
   1) ;;
+  2) [ "$2" = "--names" ] || exit 64; NAMES=1 ;;
   3)
     [ "$2" = "--check-retirements" ] || exit 64
     CHECK_RETIREMENTS=1
+    NAMES=1
     ;;
-  *) echo "usage: verb-count.sh <worker-dir> [--check-retirements <deployed-count>]" >&2; exit 64 ;;
+  *) echo "usage: verb-count.sh <worker-dir> [--names|--check-retirements <deployed-registry-json|0>]" >&2; exit 64 ;;
 esac
 
 # The deploy wrapper may count a typed-recovery candidate from a clean,
@@ -78,7 +82,7 @@ import(pathToFileURL(process.argv[1]).href)
   .then(m => console.log(process.argv[2] === "1"
     ? JSON.stringify(Object.keys(m.TOOLS).sort()) : Object.keys(m.TOOLS).length))
   .catch(e => { console.error(e.message); process.exit(1); });' \
-  "$IMPORT_ROOT/mcp-server/src/tools.js" "$CHECK_RETIREMENTS" 2>&1)" || {
+  "$IMPORT_ROOT/mcp-server/src/tools.js" "$NAMES" 2>&1)" || {
   echo "verb-count.sh: the registry did not import — $COUNT" >&2
   exit 1
 }
@@ -88,6 +92,11 @@ if [ "$CHECK_RETIREMENTS" = "1" ]; then
   [ -x "$PY" ] || PY=python3
   printf '%s\n' "$COUNT" | "$PY" "$SCRIPT_ROOT/ops/verb-loss-guard.py" "$3"
   exit $?
+fi
+
+if [ "$NAMES" = "1" ]; then
+  printf '%s\n' "$COUNT"
+  exit 0
 fi
 
 case "$COUNT" in

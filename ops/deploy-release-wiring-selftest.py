@@ -246,7 +246,7 @@ def main() -> int:
           and "within 24\nhours of the completed bundle" in rollback_runbook,
           "the typed bundle and approval both fail closed when their timing windows expire")
     check("8d. reviewed retirements use the same guard in CI and deploy",
-          'sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS"' in source
+          'sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS_REGISTRY"' in source
           and 'sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements "$marker"'
           in (REPO / "ops/ci.sh").read_text(encoding="utf-8")
           and "ops/config/retired-verbs.v1.json" in source,

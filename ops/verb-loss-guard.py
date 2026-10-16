@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Validate registry names from stdin against the committed retirement ledger.
 
-Called by verb-count.sh --check-retirements for both CI and deploy. The deployed
-ledger records counts, not names, so a shrink must equal all listed retirements.
-Every listed name must be absent, even after deployment establishes a new count.
-A count-only baseline cannot detect a loss masked by a simultaneous addition.
+Called by verb-count.sh --check-retirements for both CI and deploy. Compare
+against the name set reconstructed from the deployment ledger's exact source.
+Only names present in that deployment can be excused by the retirement ledger.
 No shrink override is accepted here. Typed staging recovery remains a separate
 database-bound authorization in deploy-worker.sh.
 """
@@ -17,9 +16,7 @@ import sys
 LEDGER = Path(__file__).resolve().parent / "config/retired-verbs.v1.json"
 
 
-def check_retirements(names: list[str], deployed: int, ledger: dict) -> None:
-    if deployed < 0:
-        raise ValueError("deployed count must be nonnegative")
+def check_retirements(names: list[str], deployed: dict | int, ledger: dict) -> None:
     if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
         raise ValueError("registry must provide a list of verb names")
     if len(names) != len(set(names)):
@@ -40,18 +37,27 @@ def check_retirements(names: list[str], deployed: int, ledger: dict) -> None:
     if present:
         raise ValueError("retired verbs still present in shipping registry: "
                          + ", ".join(sorted(present)))
-    lost = deployed - len(names)
-    if lost > 0 and lost != len(retired):
-        raise ValueError(f"unlisted verb loss or incomplete retirement: deployed {deployed}, "
-                         f"shipping {len(names)}, loss {lost}, listed retirements {len(retired)}")
+    if deployed == 0:
+        deployed = {"verbs": [], "verb_count": 0}
+    if not isinstance(deployed, dict):
+        raise ValueError("deployed verb names are required; a count cannot authorize retirement")
+    previous = deployed.get("verbs")
+    if (not isinstance(previous, list)
+            or any(not isinstance(name, str) or not name for name in previous)
+            or len(set(previous)) != len(previous)
+            or deployed.get("verb_count") != len(previous)):
+        raise ValueError("invalid deployed verb name set or count")
+    unlisted = set(previous) - set(names) - retired
+    if unlisted:
+        raise ValueError("unlisted verb loss: " + ", ".join(sorted(unlisted)))
 
 
 def main() -> int:
     try:
         if len(sys.argv) != 2:
-            raise ValueError("usage: verb-loss-guard.py <deployed-count> (registry names on stdin)")
+            raise ValueError("usage: verb-loss-guard.py <deployed-registry-json|0> (names on stdin)")
         names = json.load(sys.stdin)
-        check_retirements(names, int(sys.argv[1]), json.loads(LEDGER.read_text()))
+        check_retirements(names, json.loads(sys.argv[1]), json.loads(LEDGER.read_text()))
     except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
         print(f"verb-loss-guard: {exc}", file=sys.stderr)
         return 1
