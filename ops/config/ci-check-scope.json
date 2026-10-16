@@ -19,5 +19,5 @@
     }
   ],
   "quarantined": [],
-  "_evidence_note": "Every local_only entry here was proven by a real CI failure, not predicted. Two others that failed the same run were FIXED rather than excluded: test-review-council.py needed zsh installed and its own out/ dirs created, and test-record-home-gate.py had a hardcoded $HOME path. Excluding a check is the last resort, not the first."
+  "_evidence_note": "Each local_only entry names an observed platform limit or an explicit production-access policy. Portable failures are fixed rather than excluded: test-review-council.py needed zsh installed and its own out/ dirs created, and test-record-home-gate.py had a hardcoded $HOME path. Excluding a check is the last resort, not the first."
 }
