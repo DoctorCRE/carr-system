@@ -160,7 +160,7 @@ class Pulls:
 
     def repository(self, root):
         url = git(root, "config", "--get", "remote.origin.url").removesuffix(".git")
-        match = re.fullmatch(r"(?:https://github.com/|git@github.com:)([^/]+/[^/]+)", url)
+        match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:)([^/]+/[^/]+)", url)
         if not match:
             raise RuntimeError("PR evidence unavailable for origin")
         return match[1]
