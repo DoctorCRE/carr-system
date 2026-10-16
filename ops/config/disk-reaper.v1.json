@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "repositories": ["~/carr-system", "~/doctorcre-app", "~/software-factory"],
+  "protected": ["/private/tmp/doctorcre-staging-release-1014", "/private/tmp/carr-v1-agent-control-1015"],
+  "dispatch_results": "~/.config/carr/hermes-dispatch-results.jsonl",
+  "session_directory": "~/.config/carr/session-directory.json",
+  "retention_seconds": {"scratch": 86400, "worktree": 259200, "staged": 604800},
+  "artifact_keep": 2,
+  "pressure": {"free_fraction": 0.15, "free_bytes": 50000000000},
+  "orphan_min_age_seconds": 300,
+  "locations": [
+    {"pattern": "/private/tmp/room-codex-*", "kind": "dispatch"},
+    {"pattern": "/private/tmp/*", "kind": "scratch"},
+    {"pattern": "{repo}/.claude/worktrees/*", "kind": "worktree"},
+    {"pattern": "~/carr-system-fix-*", "kind": "worktree"},
+    {"pattern": "~/worktrees/*", "kind": "worktree"},
+    {"pattern": "~/orch-wt", "kind": "worktree"},
+    {"pattern": "~/.cache/wt-*", "kind": "worktree"},
+    {"pattern": "{repo}/out/wt-*", "kind": "worktree"},
+    {"pattern": "{repo}/out/orch/wt-dirty/*", "kind": "worktree"},
+    {"pattern": "{repo}/out/orch/e2e-*", "kind": "artifact", "series": "{parent}/e2e"},
+    {"pattern": "{repo}/out/release-pipeline/runs/*", "kind": "artifact", "series": "{parent}"},
+    {"pattern": "{repo}/out/release-pipeline/worktrees/*", "kind": "worktree"},
+    {"pattern": "{repo}/out/release-pipeline/worktrees-cleared/*", "kind": "staged"},
+    {"pattern": "{repo}/.claude/worktrees/_to_delete/*", "kind": "staged"},
+    {"pattern": "~/worktrees/_to_delete/*", "kind": "staged"},
+    {"pattern": "~/_to_delete/*/*", "kind": "staged"},
+    {"pattern": "{repo}/_to_delete/*", "kind": "staged"},
+    {"pattern": "/private/tmp/_to_delete/*", "kind": "staged"}
+  ]
+}

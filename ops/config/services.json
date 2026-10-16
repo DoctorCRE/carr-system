@@ -75,6 +75,26 @@
 
   "services": [
     {
+      "key": "disk-reaper",
+      "name": "Retained disk cleanup",
+      "purpose": "Every two hours, remove eligible retained worktrees, released dispatch checkouts, scratch and artifacts after location, Git, PR, ownership and native process safety checks.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "orchestrator",
+      "repo_path": "ops/disk-reaper.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.disk-reaper.plist",
+          "runs_on": "every",
+          "expected_cadence_seconds": 7200,
+          "cadence_grace_seconds": 7200,
+          "notes": "Calendar at minute 07 of every even hour. Run evidence is out/disk-reaper.jsonl; pressure health is out/disk-pressure-health.json. Failed native census preserves candidates. Installation and first live execution remain with the orchestrator."
+        }
+      ]
+    },
+    {
       "key": "orphan-process-reaper",
       "name": "Orphan session process cleanup",
       "purpose": "Every five minutes, observe same-user orphan session shells and stop sustained CPU burners after durable signal intent is recorded. Managed job trees remain protected.",
