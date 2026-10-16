@@ -10,7 +10,9 @@ GRANT = {
     'ingress_kind': 'db_function_acl', 'signature': 'ops.scope_writer()',
     'grantee': 'carr_authority', 'privilege': 'execute', 'grantable': False,
 }
-BASE = {name: [] for name in ('secdef_execute', 'relation_dml', 'column_dml')}
+BASE: dict[str, list[dict[str, object]]] = {
+    name: [] for name in ('secdef_execute', 'relation_dml', 'column_dml')
+}
 BASELINE = {name: {'count': 0, 'digest': digest([])} for name in BASE}
 CONTRACT = {'registry_version': 'fixture.v1', 'registry_digest': 'sha256:' + 'a' * 64,
             'secdef_execute': [GRANT]}
