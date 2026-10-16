@@ -38,11 +38,7 @@ def main(argv=None):
         parser.error('sync requires --stdin or --from-machine')
     try:
         if args.from_machine:
-            code = cf.remote_source().split('payload = json.load(sys.stdin)')[0]
-            code += ('values = read_env_file(Path.home() / ".config/carr/tokens.env")\n'
-                     'selected = {name: values.get(name, "") for name in TOKEN_NAMES}\n'
-                     'if any(state != "ok" for state in check_values(selected).values()): sys.exit(1)\n'
-                     'print(json.dumps(selected))\n')
+            code = cf.remote_source(export=True)
             result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
                                      args.from_machine, 'python3 -c ' + shlex.quote(code)],
                                     capture_output=True, text=True, timeout=40)

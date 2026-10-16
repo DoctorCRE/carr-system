@@ -72,10 +72,10 @@ def install(path, name, value, *, endpoint=VERIFY_URL):
     return verify(read_env_file(path).get(name), endpoint=endpoint)
 
 
-def remote_source():
+def remote_source(*, export=False):
     import lib.credential_file as parser
     import lib.token_store as writer
-    return ('import sys, types\n'
+    program = ('import sys, types\n'
             'package = types.ModuleType("lib"); package.__path__ = []; sys.modules["lib"] = package\n'
             'parser = types.ModuleType("lib.credential_file"); parser.__file__ = "/dev/null"\n'
             'sys.modules["lib.credential_file"] = parser\n'
@@ -83,7 +83,13 @@ def remote_source():
             + 'writer = types.ModuleType("lib.token_store"); sys.modules["lib.token_store"] = writer\n'
             + 'exec(' + repr(Path(writer.__file__).read_text()) + ', writer.__dict__)\n'
             + 'exec(' + repr(Path(__file__).read_text()) + ', globals())\n'
-            + 'payload = json.load(sys.stdin)\n'
+            )
+    if export:
+        return program + ('values = read_env_file(Path.home() / ".config/carr/tokens.env")\n'
+                          'selected = {name: values.get(name, "") for name in TOKEN_NAMES}\n'
+                          'if any(state != "ok" for state in check_values(selected).values()): sys.exit(1)\n'
+                          'print(json.dumps(selected))\n')
+    return (program + 'payload = json.load(sys.stdin)\n'
             + 'path = Path.home() / ".config/carr/tokens.env"\n'
             + 'try:\n'
             + ' result = check_file(path) if payload["operation"] == "check" else {payload["name"]: install(path, payload["name"], payload["value"])}\n'

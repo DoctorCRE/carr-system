@@ -52,6 +52,20 @@ class TokenTests(unittest.TestCase):
                 self.assertEqual(cf.install(path, cf.TOKEN_NAMES[0], 'fake-active', endpoint=endpoint), 'ok')
                 self.assertEqual(cf.read_env_file(path)['UNRELATED'], 'keep me')
                 self.assertEqual(cf.install(path, 'UNRELATED', 'fake-active', endpoint=endpoint), 'invalid_input')
+                self.assertEqual(cf.install(path, cf.TOKEN_NAMES[1], 'fake-active', endpoint=endpoint), 'ok')
+                source_program = cf.remote_source(export=True).replace(cf.VERIFY_URL, endpoint)
+                source_result = subprocess.run([sys.executable, '-c', source_program],
+                                               env={**os.environ, 'HOME': directory},
+                                               capture_output=True, text=True, timeout=10)
+                self.assertEqual(source_result.returncode, 0, source_result.stderr)
+                self.assertEqual(json.loads(source_result.stdout), dict.fromkeys(cf.TOKEN_NAMES, 'fake-active'))
+                self.assertEqual(cf.install(path, cf.TOKEN_NAMES[0], 'fake-active', endpoint=endpoint), 'ok')
+                path.write_text(path.read_text().replace('CLOUDFLARE_API_TOKEN=fake-active', 'CLOUDFLARE_API_TOKEN=fake-revoked'))
+                refused = subprocess.run([sys.executable, '-c', source_program],
+                                         env={**os.environ, 'HOME': directory},
+                                         capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertEqual(refused.stdout, '')
         finally:
             server.shutdown()
             server.server_close()
