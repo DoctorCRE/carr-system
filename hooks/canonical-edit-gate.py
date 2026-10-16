@@ -213,8 +213,6 @@ REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 WT_ROOT = os.path.realpath(os.path.join(REPO, ".claude", "worktrees"))
 LOG = os.path.join(REPO, "out", "conduct-gate.jsonl")
 DEBUG = os.path.join(REPO, "out", "conduct-gate.log")
-GATE_LIFECYCLE_PATH = os.path.join(REPO, "ops", "config", "gate-lifecycle.json")
-LIFECYCLE_KEY = "canonical-edit-gate.py"
 
 # The tool names this gate ACTS on if a payload arrives. NotebookEdit is in the
 # tuple and is NOT delivered by the registered matcher — see the COVERAGE
@@ -225,44 +223,6 @@ LIFECYCLE_KEY = "canonical-edit-gate.py"
 EDIT_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 
 WORKTREE_COMMAND = "./run.sh worktree <name> --from origin/main"
-
-
-def mode():
-    """enforcing | announce | shadow, from ops/config/gate-lifecycle.json.
-
-    WHY THIS EXISTS AT ALL. The re-bless plan offers a staged rollout — this
-    gate has been off the repo for a week and binds on every edit-tool call, so
-    landing it straight into enforcement is the shape that gets a gate switched
-    off in its first day. An offer of "shadow first" that the code cannot honour
-    is worse than not offering it, so it is implemented rather than promised.
-
-    THE MECHANISM IS COPIED, NOT INVENTED. gate-lifecycle.json's `mode` is
-    documentary for every gate but one: hooks/conduct-stop-gate.py reads its own
-    key's mode directly in _shadow_mode_enabled(), and that file's `_doc` records
-    the exception ("Its mode flag is read directly by that new code path"). This
-    is the same pattern, same file, same shape, keyed on this gate's own entry.
-    The repo's OTHER shadow mechanism — rule-pack-drift-gate.py reading
-    ops.rule_delivery_policy out of a standing-context result — is deliberately
-    NOT copied: there is no standing-context result in a PreToolUse edit payload,
-    and a database read on the edit path is a cost this gate has no business
-    paying.
-
-    DEFAULT IS `enforcing`, INCLUDING ON EVERY READ FAILURE, and that direction
-    is chosen rather than inherited. Defaulting to shadow would mean an
-    unreadable or renamed config silently disables enforcement — which is
-    exactly the 2026-08-08 failure where a plugin install wiped a hooks block
-    and left five gates off for a day with nothing to find it by. A missing
-    entry means "nobody staged this gate", and a gate nobody staged enforces.
-    This does not weaken fail-open: a genuine runtime error still leaves main()
-    through its outer handler and still exits 0.
-    """
-    try:
-        with open(GATE_LIFECYCLE_PATH) as fh:
-            data = json.load(fh)
-        value = ((data.get("gates") or {}).get(LIFECYCLE_KEY) or {}).get("mode")
-        return value if value in ("enforcing", "announce", "shadow") else "enforcing"
-    except Exception:
-        return "enforcing"
 
 
 def now():
@@ -475,45 +435,6 @@ def decide(payload):
         "and not in a worktree, say so and let a human decide — do not "
         "route around this gate.\n"
     )
-
-    current = mode()
-    audit({"ts": now(), "hook": "canonical-edit-gate",
-           "classes": ["canonical_tree_edit"],
-           "patterns": ["canonical-edit:tracked-file"],
-           "session": payload.get("session_id"), "path": rel,
-           "mode": current,
-           "decision": {"enforcing": "deny", "announce": "allow-announced",
-                        "shadow": "allow-observed"}[current]})
-
-    if current == "shadow":
-        # Recorded, invisible to the session. The audit row above is the
-        # entire output: this is what a week of "how often would it have
-        # fired, and on what?" looks like before anything is refused.
-        dlog(f"SHADOW(would-deny) {tool} {rel}")
-        sys.exit(0)
-
-    if current == "announce":
-        note = (
-            "CANONICAL EDIT GATE — announced, not refused.\n\n"
-            f"This edit to the tracked canonical file '{rel}' was ALLOWED "
-            "because the gate is in `announce` mode. Under `enforcing` it "
-            "would have been refused. The remedy is the same either way:\n"
-            f"    {WORKTREE_COMMAND}\n"
-            "    cd .claude/worktrees/<name>\n"
-            "Recorded to out/conduct-gate.jsonl."
-        )
-        dlog(f"ANNOUNCE(would-deny) {tool} {rel}")
-        # Structured allow on STDOUT with exit 0 — the same announce shape
-        # gate-edit-gate.py uses, so the two doors cannot drift.
-        print(json.dumps({
-            "systemMessage": note,
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "permissionDecisionReason": note,
-            },
-        }))
-        sys.exit(0)
 
     dlog(f"DENY {tool} {rel}")
     # Exit 2, not JSON: on a build that does not parse the structured

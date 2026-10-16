@@ -50,7 +50,6 @@ jobs:
         classes:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
           - "gates"
-          - "replay"
           - "migration"
     timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
 

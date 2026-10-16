@@ -14,8 +14,6 @@ WARN_AT = 0.55
 TOLLS = {
     "inventory_reseal": ("sealed contract dependency changed", "run the sealed source inventory verifier; rederive if its contract changed"),
     "new_ingress_admitted": ("new sealed contract source", "verify new sealed rows and derive a registry successor when needed"),
-    "gate_rebless": ("baseline-tracked gate changed", "re-bless the changed gate and commit ops/config/gate-baseline.json with it"),
-    "paired_selftest": ("gate changed without paired suite", "add regression cases to its paired selftest"),
     "ci_sh_reseal": ("CI runner changed", "run ops/ci-selftest.py"),
     "judgment_without_caller": ("judgment wiring changed", "run ops/judgment-wiring-selftest.py"),
     "derived_file_hand_merged": ("derived artifact merged", "union both intents and rederive against the merged tree"),
@@ -23,7 +21,7 @@ TOLLS = {
 CONTRACT_PREFIXES = ("mcp-server/src/", "ops/scac-", "ops/config/scheduled-jobs")
 SETTINGS_PATHS = {".claude/settings.json", "ops/config/hooks.json", "ops/config/codex-hooks.json",
                   "ops/config/claude-continuity-hooks.json", "ops/config/delegation-gate-hook.json"}
-DERIVED_PATHS = {"ops/config/gate-baseline.json", "ops/config/scac-registry-source-inventory-fixtures.v1.json",
+DERIVED_PATHS = {"ops/config/scac-registry-source-inventory-fixtures.v1.json",
                  "ops/config/rule-enforcement-map.json"}
 
 
@@ -169,9 +167,6 @@ VERIFIERS = {
          "'./mcp-server/src/tools.js'; "
          "assertCurrentSourceInventoryMatchesFixture(TOOLS);"],
         "the sealed source inventory does not match this tree"),
-    "gate_rebless": (
-        [".venv/bin/python", "hooks/gate-integrity.py"],
-        "a gate's bytes no longer match ops/config/gate-baseline.json"),
     "judgment_without_caller": (
         [".venv/bin/python", "ops/judgment-wiring-selftest.py"],
         "a module that reaches the model has no caller and is not declared inert"),
@@ -225,12 +220,6 @@ def owed(state=None, *, client=None, api_key=None, floor=WARN_AT):
         files = {"edited":files}
     touched = set(files.get("added",[]) + files.get("edited",[]) + files.get("deleted",[]))
     added = set(files.get("added",[]))
-    try:
-        with open(os.path.join(REPO,"ops/config/gate-baseline.json")) as fh:
-            baseline = json.load(fh)
-        tracked = {"hooks/" + name for name in baseline.get("hashes",{})}
-    except (OSError,ValueError):
-        tracked = set()
     selected = set()
     try:
         sealed_sources = _contract_sources()
@@ -241,11 +230,6 @@ def owed(state=None, *, client=None, api_key=None, floor=WARN_AT):
         selected.add("inventory_reseal")
     if any(path.startswith(CONTRACT_PREFIXES) for path in added):
         selected.add("new_ingress_admitted")
-    gates = {path for path in touched if path in tracked}
-    if gates:
-        selected.add("gate_rebless")
-    if any("ops/"+os.path.basename(p).removesuffix(".py")+"-selftest.py" not in touched for p in gates):
-        selected.add("paired_selftest")
     if "ops/ci.sh" in touched:
         selected.add("ci_sh_reseal")
     if any(path.startswith("ops/jev_") or path in {"ops/typesafe_client.py","ops/judgment-wiring-selftest.py"} for path in touched):

@@ -1238,11 +1238,9 @@ test("reviewed non-MCP source locators resolve and remain explicitly non-authori
   assert.equal(scripts.some(path => path === "ops/sync_control_catalog.py"), true);
   assert.equal(scripts.some(path => path === "ops/githooks/pre-commit"), true);
   assert.equal(scripts.some(path => path === "ops/githooks/pre-push"), true);
-  assert.equal(scripts.some(path => path === "ops/githooks/commit-msg"), true);
   for (const path of [
     "ops/capture-verb-reachability.py",
     "ops/delegation-telemetry-report.py",
-    "ops/gate-lifecycle-report.py",
     "ops/rule-triage-apply.py",
     "ops/rule-triage-report.py",
     "ops/zz-engineering-controller-concurrency-gate.py",
@@ -1491,9 +1489,12 @@ test("only verb-contract changes and new write entrances hold a pull request to 
     { ingress_key: "github-workflow:.github/workflows/ci.yml", source_digest: "a" },
     { ingress_key: "launchd-workflow:com.carr.nightly", source_digest: "a" },
     { ingress_key: "worker-sidewrite:tool-read-call", handler_digest: "a" },
+    { ingress_key: "external-admin:bin/migrate-dell.sh", handler_digest: "a", authority_only: true },
   ];
   const digest = rows => sourceInventoryFixtureDigest(boundInventoryRows(rows));
   const edit = (key, field) => base.map(row => row.ingress_key === key ? { ...row, [field]: "b" } : row);
+  assert.equal(digest(edit("external-admin:bin/migrate-dell.sh", "handler_digest")), digest(base));
+  assert.notEqual(digest(edit("external-admin:bin/migrate-dell.sh", "authority_only")), digest(base));
   assert.equal(digest(edit("script-entrypoint:hooks/lint-gate.py", "source_digest")), digest(base));
   assert.equal(digest(edit("github-workflow:.github/workflows/ci.yml", "source_digest")), digest(base));
   assert.equal(digest(edit("launchd-workflow:com.carr.nightly", "source_digest")), digest(base));
@@ -1570,7 +1571,7 @@ test("credential rotation source review cannot widen authority or admit an ingre
 });
 
 
-test("Dell receipt source review binds its live bytes without changing the sealed frontier", () => {
+test("Dell receipt retains its sealed authority contract after local script cleanup", () => {
   const fixture = JSON.parse(readRegistryArtifact(new URL(
     "../../ops/config/scac-registry-source-inventory-fixtures.v1.json", import.meta.url), "utf8"));
   const sealed = frozenInventory("scac-mutation-registry.v103");
@@ -1578,10 +1579,10 @@ test("Dell receipt source review binds its live bytes without changing the seale
   const review = fixture.current_source_reviews["scac-mutation-registry.v103"];
   const reviewed = review.upsert.find(row => row.ingress_key === key);
   const current = fullInventory(TOOLS).find(row => row.ingress_key === key);
-  assert.deepEqual(reviewed, current);
   assert.notEqual(sealed.find(row => row.ingress_key === key).handler_digest, reviewed.handler_digest);
   const contract = row => Object.fromEntries(Object.entries(row)
     .filter(([field]) => !["schema_digest", "handler_digest", "source_digest"].includes(field)));
   assert.deepEqual(contract(reviewed), contract(sealed.find(row => row.ingress_key === key)));
+  assert.deepEqual(contract(current), contract(reviewed));
   assert.equal(assertCurrentSourceInventoryMatchesFixture(TOOLS), true);
 });

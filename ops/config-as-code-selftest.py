@@ -13,6 +13,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # THE ONE SCRUBBER, not a local copy (rule a8c55a47). The hooksPath fixture below
@@ -48,7 +49,7 @@ def copy_continuity_contract(repo: Path) -> None:
 
 DESIRED = {"hooks": {
     "Stop": [{"hooks": [{
-        "type": "command", "command": "/Users/booko/carr-system/hooks/completion-evidence-gate.py", "timeout": 15,
+        "type": "command", "command": "/Users/booko/carr-system/hooks/context-handoff-gate.py", "timeout": 15,
     }]}],
 }}
 LIVE = {
@@ -190,6 +191,14 @@ def main():
             configured_check = mod.cmd_check()
         configured_hooks = json.loads(Path(mod.CODEX_HOOKS_SRC).read_text(encoding="utf-8"))
         configured_toml = Path(mod.CODEX_CONFIG).read_text(encoding="utf-8")
+        original_native_hooks = {path: Path(path).read_text() for path in (mod.HOOKS_REPO, mod.CODEX_HOOKS_REPO)}
+        with patch.object(mod, 'pairs', return_value=[
+                ('Claude hooks', '{}\n', mod.HOOKS_REPO),
+                ('Codex hooks', '{}\n', mod.CODEX_HOOKS_REPO)]), contextlib.redirect_stdout(io.StringIO()):
+            capture_rc = mod.cmd_pull(True)
+        native_sources_preserved = capture_rc == 0 and all(
+            Path(path).read_text() == body for path, body in original_native_hooks.items())
+
 
         # Scheduled task *definitions* are CARR-managed only when their name
         # exists in the repo registry.  Primary install must render every
@@ -821,6 +830,7 @@ def main():
                 str(repo / "ops" / "not-githooks"), str(fixture_hooks))
         )
     cases = [
+        ("pull preserves native hook JSON when live settings are stale", native_sources_preserved),
         ("ephemeral marker is honoured inside frontmatter",
          ephemeral_marker_honoured),
         ("ephemeral marker in prose does not exempt a tracked task",
@@ -841,7 +851,7 @@ def main():
         ("unrelated Stop hook preserved", "/Users/booko/other/hooks/keep.py" in names),
         ("mixed group keeps unrelated hook", "/Users/booko/other/hooks/mixed.py" in names),
         ("stale CARR hook removed", all("/carr-system/hooks/old" not in name for name in names)),
-        ("desired CARR hook installed once", names.count("/Users/booko/carr-system/hooks/completion-evidence-gate.py") == 1),
+        ("desired CARR hook installed once", names.count("/Users/booko/carr-system/hooks/context-handoff-gate.py") == 1),
         ("second merge is idempotent", again == merged),
         ("Call Mode LaunchAgent resolves to its tracked tool source",
          call_mode_source.endswith(

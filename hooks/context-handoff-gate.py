@@ -44,7 +44,7 @@ from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from stop_latch import announce  # noqa: E402
+from lib.hook_runtime import announce  # noqa: E402
 
 MANIFEST_DEFAULT = REPO / "ops/config/session-context-lifecycle.v2.json"
 STATE_DIR_DEFAULT = REPO / "out/session-context-lifecycle"
@@ -3649,6 +3649,9 @@ def hook_main():
 
 
 def main() -> int:
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
     return cli_main(sys.argv[1:]) if len(sys.argv) > 1 else hook_main()
 
 

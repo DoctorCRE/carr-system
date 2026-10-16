@@ -9,15 +9,6 @@
    "triaged_on": "2026-09-24",
    "verdict": "false_positive"
   },
-  "hooks/gate-edit-gate.py#b9c5bcf4c71e604e": {
-   "hash": "b9c5bcf4c71e604e",
-   "path": "hooks/gate-edit-gate.py",
-   "reason": "docstring narrative citing past decision dates, not a runtime bound",
-   "seeded_line": 75,
-   "triaged_by": "timebomb-audit-seed",
-   "triaged_on": "2026-09-24",
-   "verdict": "false_positive"
-  },
   "hooks/md_manifest.py#007df2a06b4dc572": {
    "hash": "007df2a06b4dc572",
    "path": "hooks/md_manifest.py",

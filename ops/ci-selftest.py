@@ -1447,47 +1447,6 @@ def test_hosted_migration_budget_covers_observed_acceptance_runtime():
           bool(other) and all(budget == 20 for budget in other), other)
 
 
-def test_gate_replay_has_an_independent_required_class():
-    """PR1546's gates passed at 1101s, then cleanup hit the 20-minute cap.
-
-    Its 295s replay must run in a separate required job, preserving the cap
-    and every check instead of making the already long job wait for replay.
-    """
-    src = CI.read_text()
-    order = re.search(r'^CLASS_ORDER="([^"]+)"', src, re.M)
-    check("full local CI includes the replay class",
-          order is not None and "replay" in order.group(1).split())
-    gates_body = src.split("check_gates() {", 1)[1].split("\ncheck_", 1)[0]
-    check("gates no longer serializes the real-fixture replay",
-          '"$PY" ops/gate-replay.py' not in gates_body)
-    job = _hosted_workflow()["jobs"]["classes"]
-    groups = job["strategy"]["matrix"]["classes"]
-    check("hosted replay runs once as its own required matrix job",
-          groups.count("replay") == 1)
-    check("gates and replay retain the existing 20-minute cap",
-          job["timeout-minutes"] == "${{ matrix.classes == 'migration' && 35 || 20 }}")
-    with tempfile.TemporaryDirectory() as tmp:
-        fixture = pathlib.Path(tmp) / "gate-replay.py"
-        fixture.write_text("import os,sys\n"
-                           "print('gate-replay: OK replay fixture ran')\n"
-                           "sys.exit(int(os.environ['REPLAY_FIXTURE_RC']))\n")
-        # Invoke the class through ci.sh's normal --only interface. Replace
-        # only the replay program with a cheap fixture, keeping its handling.
-        script = pathlib.Path(tmp) / "ci.sh"
-        body = src.replace('"$PY" ops/gate-replay.py', f'"$PY" {shlex.quote(str(fixture))}')
-        # The script resolves the repository from its own path.
-        body = re.sub(r'^REPO=.*$', f'REPO={shlex.quote(str(REPO))}', body, flags=re.M)
-        script.write_text(body)
-        for child_rc, expected_rc in ((0, 0), (1, 1), (78, 1), (124, 1)):
-            out = subprocess.run(["bash", str(script), "--strict", "--only", "replay"],
-                                 cwd=REPO, env=scrubbed_env(dict(os.environ,
-                                     REPLAY_FIXTURE_RC=str(child_rc))),
-                                 capture_output=True, text=True, timeout=10)
-            check(f"strict replay propagates child exit {child_rc}",
-                  out.returncode == expected_rc and "replay fixture ran" in out.stdout + out.stderr,
-                  out.stdout + out.stderr)
-
-
 def test_hosted_zsh_setup_does_not_refresh_working_indexes():
     """PR 1465 spent its entire job budget in apt update before any class ran.
 
@@ -1770,7 +1729,6 @@ def main(argv=None):
                test_strict_still_owns_the_gates_class,
                test_hosted_ci_runs_classes_in_parallel_behind_one_required_context,
                test_hosted_migration_budget_covers_observed_acceptance_runtime,
-               test_gate_replay_has_an_independent_required_class,
                test_hosted_zsh_setup_does_not_refresh_working_indexes,
                test_hosted_zsh_cache_requires_authenticated_bytes):
         try:

@@ -238,8 +238,9 @@ def mirror(receipt: dict, dest: Path) -> None:
               **{c['path']: c['sha256'] for c in ev['cohorts'].values()}}
     for rel in evidence_paths(receipt) | {"evals/surfaces.json"}:
         (dest / rel).parent.mkdir(parents=True, exist_ok=True)
-        data = (ROOT / rel).read_bytes()
         expected = hashes.get(rel)
+        data = ((ROOT / rel).read_bytes() if (ROOT / rel).is_file()
+                else historical_dependency(ROOT, rel, expected))
         if expected is not None and hashlib.sha256(data).hexdigest() != expected:
             data = historical_dependency(ROOT, rel, expected)
         (dest / rel).write_bytes(data)

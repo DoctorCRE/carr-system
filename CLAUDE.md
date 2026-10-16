@@ -83,10 +83,6 @@ For any request to recommend, design, build, revise, review, or publish a map,
 GIS analysis, route, day trip, or Tour surface, call the live `map-architecture`
 verb first. It returns the current doctrine and machine-contract pointer.
 
-The Stop gate only announces this now (Joe's 2026-08-23 gate rationing): a
-skip is recorded in `out/map-architecture-gate.jsonl` but does not block, so
-the session making the call enforces it.
-
 ## Dell migration trigger
 
 Only in interactive Claude Code in `~/carr-system`, Dell or Joe typing the exact

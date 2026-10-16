@@ -19,7 +19,7 @@ CURATION_BATCH = REPO / "audits" / "guidance-situation-curation-approval-batch.v
 # Runs through hooks/hook-meter-run.py on the repo interpreter (2026-09-23):
 # the same pin every other wired hook carries, so this gate is metered like
 # the rest and never resolves to whatever python3 PATH offers.
-HOOK_TEMPLATE = "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-pack-drift-gate.py"
+HOOK_TEMPLATE = "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-drift-gate.py"
 
 
 def _stop_commands(document: dict) -> list[str]:

@@ -1444,14 +1444,14 @@ def run_all(tree, first_only=False):
 
 # ------------------------------------------------------------------ gate-integrity wiring
 
-def check_gate_integrity_rearms():
+def check_session_start_rearms():
     """The real SessionStart hook arms on compact and prints the instructions."""
     work = tempfile.mkdtemp(prefix="rule-boot-gi-")
     try:
         c = Case(REPO, work)
         c.stub("c", pages=4)
         payload = {"hook_event_name": "SessionStart", "session_id": SESSION, "source": "compact"}
-        out = subprocess.run([sys.executable, os.path.join(REPO, "hooks", "gate-integrity.py")],
+        out = subprocess.run([sys.executable, os.path.join(REPO, "hooks", "rule-boot-gate.py")],
                              input=json.dumps(payload), capture_output=True, text=True,
                              env=c.env, timeout=60).stdout
         assert "RULE BOOT" in out and "4 page(s)" in out, out[-800:]
@@ -1462,43 +1462,13 @@ def check_gate_integrity_rearms():
         # release sends it yet, see Case.arm). The hook must hand the agent
         # through, so the session arm (and main's epoch) stand.
         child = {**payload, "agent_id": "sub-gi"}
-        out = subprocess.run([sys.executable, os.path.join(REPO, "hooks", "gate-integrity.py")],
+        out = subprocess.run([sys.executable, os.path.join(REPO, "hooks", "rule-boot-gate.py")],
                              input=json.dumps(child), capture_output=True, text=True,
                              env=c.env, timeout=60).stdout
         assert "RULE BOOT" in out, out[-800:]
         with open(os.path.join(c.state, SESSION, "arm.json"), encoding="utf-8") as fh:
             after = json.load(fh)
         assert after["epoch"] == arm["epoch"], ("a child's SessionStart re-armed the session", arm, after)
-        # A flagged (CI) run never arms and never reads stdin.
-        out = subprocess.run([sys.executable, os.path.join(REPO, "hooks", "gate-integrity.py"), "--strict"],
-                             input=json.dumps({**payload, "session_id": "other"}),
-                             capture_output=True, text=True, env=c.env, timeout=60).stdout
-        assert "RULE BOOT" not in out and not os.path.exists(os.path.join(c.state, "other"))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
-def check_pending_install():
-    """Before install the new gate reads PENDING INSTALL, never a failure; once
-    it has been seen installed, a missing tuple is a real finding again."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("gate_integrity", os.path.join(REPO, "hooks", "gate-integrity.py"))
-    gi = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gi)
-    work = tempfile.mkdtemp(prefix="rule-boot-pending-")
-    try:
-        gi.PENDING_INSTALL_STAMP_DIR = work
-        errs = ["expected 1 exact PreToolUse/.* hook rule-boot-gate.py; found 0",
-                "expected 1 exact PostToolUse/Bash|mcp__.*__standing-context hook rule-boot-gate.py; found 0",
-                "expected 1 exact Stop/Stop hook conduct-stop-gate.py; found 0"]
-        real, pending = gi.split_pending_install(errs, {})
-        assert pending == ["rule-boot-gate.py"] and real == errs[2:], (real, pending)
-        installed = {"PreToolUse": [{"matcher": ".*", "hooks": [
-            {"type": "command", "command": "/x/.venv/bin/python /x/hooks/hook-meter-run.py /x/hooks/rule-boot-gate.py"}]}]}
-        real, pending = gi.split_pending_install(errs[1:2], installed)
-        assert pending == [] and real == errs[1:2], "partly installed is drift, not pending"
-        real, pending = gi.split_pending_install(errs[:1], {})
-        assert pending == [] and real == errs[:1], "seen installed once: missing is a finding"
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -1596,6 +1566,7 @@ def mutant_tree(root, replacements):
     os.makedirs(os.path.join(tree, "lib"), exist_ok=True)
     shutil.copyfile(os.path.join(REPO, "lib", "hook_runtime.py"), os.path.join(tree, "lib", "hook_runtime.py"))
     shutil.copy2(os.path.join(REPO, "hooks", "rule-boot-gate.py"), os.path.join(tree, "hooks"))
+    shutil.copy2(os.path.join(REPO, "hooks", "grok_invocation.py"), os.path.join(tree, "hooks"))
     shutil.copy2(os.path.join(REPO, "lib", "rule_recall.py"), os.path.join(tree, "lib"))
     with open(os.path.join(REPO, "lib", "rule_boot_gate.py"), encoding="utf-8") as fh:
         source = fh.read()
@@ -1615,8 +1586,7 @@ def main():
     if failures:
         print("FAIL rule-boot-gate cases:\n  " + "\n  ".join(failures))
         return 1
-    check_gate_integrity_rearms()
-    check_pending_install()
+    check_session_start_rearms()
     survived = []
     for name, replacements in MUTANTS.items():
         root = tempfile.mkdtemp(prefix=f"rule-boot-mutant-{name}-")
@@ -1631,7 +1601,7 @@ def main():
     if survived:
         print("FAIL: planted mutants survived: " + ", ".join(survived))
         return 1
-    print(f"rule-boot-gate-selftest: {len(CASES)} cases + gate-integrity re-arm + pending-install passed; "
+    print(f"rule-boot-gate-selftest: {len(CASES)} cases + native SessionStart re-arm passed; "
           f"{len(MUTANTS)} of {len(MUTANTS)} planted mutants killed")
     return 0
 

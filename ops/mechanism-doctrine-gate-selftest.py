@@ -79,7 +79,7 @@ for mech_path, want in (
     # one is pre-existing and one was the file that exposed it, and a predicate
     # keyed on the underscore naming habit rather than on behaviour would pass
     # both while still waving through an underscore-named gate.
-    ("hooks/conduct_patterns.py", False),
+    ("hooks/hook_meter.py", False),
     ("hooks/turn_origin.py", False),
     ("mcp-server/test/decision-short-id.test.mjs", False),
 ):

@@ -1,46 +1,5 @@
 #!/usr/bin/env python3
-"""
-stale-config-selftest.py — acceptance test for ops/stale-config-check.py,
-written before the check (rule e65efc68).
-
-THE FAILURE IT PREVENTS, twice on 2026-08-14 and both times damaging.
-
-  ops/ci.sh — pull request 60 added a type-check class that treated a missing
-  mypy as SKIP. Pull request 65, cut BEFORE 60 existed, replaced the whole class
-  with its own older copy that reported a false failure instead. It merged
-  second and won. A machine without mypy then failed CI with "mypy found shape
-  mistakes", which is both wrong and a wrong explanation.
-
-  ops/config/gate-baseline.json — pull request 70 changed a gate and re-blessed
-  its hash in the same commit, exactly as the baseline's own instructions
-  require. A concurrent pull request cut before it blessed from the older base
-  and merged after, carrying the pre-70 hash. Main then shipped a gate whose
-  recorded hash did not match its own file, so EVERY session booted reporting
-  GATE INTEGRITY FAILURE until it was re-blessed by hand.
-
-WHY NOTHING CAUGHT EITHER. Each branch is internally consistent and passes CI on
-its own. The conflict does not exist until the two are combined on main, and git
-does not report a conflict because the second branch rewrote the whole region.
-This is a lost update, not a merge conflict.
-
-WHY THESE FILES SPECIFICALLY. They are GENERATED and rewritten wholesale by
-tooling rather than hand-edited line by line, so two branches touching them
-almost never conflict textually — they just silently overwrite each other.
-ops/config/gate-baseline.json took THIRTY-SIX commits on main in twenty-four
-hours. A hand-written source file would have conflicted and been noticed.
-
-THE RULE THE CHECK ENFORCES: if your branch differs from origin/main for one
-of these files, its newest upstream commit must already be in your history.
-An exact committed copy of main is safe without matching commit ancestry.
-
-WHAT IT MUST NOT DO, which is most of this file:
-  - never fire on a branch that does not touch a watched file
-  - never fire when the branch is already current for that file
-  - never fire on main itself, where there is nothing to be stale against
-  - fail OPEN when it cannot tell (no origin/main, shallow clone, not a repo),
-    because a check that blocks every push when git is unavailable is worse than
-    the lost update it guards
-"""
+"""Regression checks for stale generated-configuration rewrites."""
 
 import os
 import subprocess
@@ -94,7 +53,7 @@ def make_repo(tmp):
     git(tmp, "clone", "-q", origin, repo, must=True)
     git(repo, "config", "user.email", "t@example.invalid", must=True)
     git(repo, "config", "user.name", "t", must=True)
-    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "1"}}\n')
+    write(repo, "ops/config/services.json", '{"gates": {"a": "1"}}\n')
     write(repo, "readme.txt", "seed\n")
     git(repo, "add", "-A", must=True)
     git(repo, "commit", "-q", "-m", "seed", must=True)
@@ -120,8 +79,8 @@ def advance_main(tmp, origin, content):
         git(other, "config", "user.email", "o@example.invalid", must=True)
         git(other, "config", "user.name", "o", must=True)
     git(other, "pull", "-q", "--ff-only", must=True)
-    write(other, "ops/config/gate-baseline.json", content)
-    git(other, "add", "ops/config/gate-baseline.json", must=True)
+    write(other, "ops/config/services.json", content)
+    git(other, "add", "ops/config/services.json", must=True)
     git(other, "commit", "-q", "-m", "someone else re-blessed", must=True)
     git(other, "push", "-q", "origin", "main", must=True)
 
@@ -137,13 +96,13 @@ with tempfile.TemporaryDirectory() as tmp:
     origin, repo = make_repo(tmp)
     git(repo, "checkout", "-q", "-b", "mine", must=True)
     advance_main(tmp, origin, '{"gates": {"a": "2"}}\n')      # someone else lands first
-    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
-    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    write(repo, "ops/config/services.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/services.json", must=True)
     git(repo, "commit", "-q", "-m", "my bless", must=True)
     git(repo, "fetch", "-q", "origin", "main", must=True)
     rc, out = run(repo)
     check("a stale branch touching a watched file is refused", rc == 2, f"rc={rc}")
-    check("the refusal names the file", "gate-baseline.json" in out, out[:200])
+    check("the refusal names the file", "services.json" in out, out[:200])
     check("the refusal says what to do", "rebase" in out.lower() or "merge" in out.lower(),
           out[:200])
     check("the refusal explains the damage, not just the rule",
@@ -165,8 +124,8 @@ with tempfile.TemporaryDirectory() as tmp:
     rc, out = run(repo)
     check("byte-identical cherry-picked generated file is allowed", rc == 0,
           f"rc={rc}: {out[:200]}")
-    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
-    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    write(repo, "ops/config/services.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/services.json", must=True)
     git(repo, "commit", "-q", "-m", "diverge after copy", must=True)
     rc, out = run(repo)
     check("a local difference after copying still refuses unseen ancestry", rc == 2,
@@ -194,8 +153,8 @@ with tempfile.TemporaryDirectory() as tmp:
     advance_main(tmp, origin, '{"gates": {"a": "2"}}\n')
     git(repo, "fetch", "-q", "origin", "main", must=True)
     git(repo, "merge", "-q", "origin/main", "-m", "catch up", must=True)  # now current
-    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
-    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    write(repo, "ops/config/services.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/services.json", must=True)
     git(repo, "commit", "-q", "-m", "my bless on top", must=True)
     rc, out = run(repo)
     check("a branch that already has main's latest change is allowed", rc == 0,
@@ -218,8 +177,8 @@ with tempfile.TemporaryDirectory() as tmp:
 # 4. ON MAIN: nothing to be stale against.
 with tempfile.TemporaryDirectory() as tmp:
     origin, repo = make_repo(tmp)
-    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "9"}}\n')
-    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    write(repo, "ops/config/services.json", '{"gates": {"a": "9"}}\n')
+    git(repo, "add", "ops/config/services.json", must=True)
     git(repo, "commit", "-q", "-m", "on main", must=True)
     rc, out = run(repo)
     check("on main itself the check does not fire", rc == 0, f"rc={rc}: {out[:200]}")
@@ -238,8 +197,8 @@ with tempfile.TemporaryDirectory() as tmp:
     origin, repo = make_repo(tmp)
     git(repo, "checkout", "-q", "-b", "mine", must=True)
     git(repo, "remote", "remove", "origin", must=True)   # no origin/main to compare
-    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
-    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    write(repo, "ops/config/services.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/services.json", must=True)
     git(repo, "commit", "-q", "-m", "no remote", must=True)
     rc, out = run(repo)
     check("with no origin/main to compare it never blocks", rc == 0,
@@ -255,8 +214,8 @@ with tempfile.TemporaryDirectory() as tmp:
     git(repo, "fetch", "-q", "origin", "main", must=True)
     git(repo, "cherry-pick", "origin/main", must=True)
     check("cherry-picked identical generated content is allowed", run(repo)[0] == 0)
-    write(repo, "ops/config/gate-baseline.json", '{"gates": {"a": "3"}}\n')
-    git(repo, "add", "ops/config/gate-baseline.json", must=True)
+    write(repo, "ops/config/services.json", '{"gates": {"a": "3"}}\n')
+    git(repo, "add", "ops/config/services.json", must=True)
     git(repo, "commit", "-q", "-m", "stale overwrite", must=True)
     check("a differing stale overwrite still refuses after cherry-pick", run(repo)[0] == 2)
 

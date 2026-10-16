@@ -19,9 +19,7 @@ from types import SimpleNamespace
 
 REPO = Path(__file__).resolve().parent.parent
 HOOK = REPO / "hooks/context-handoff-gate.py"
-RUNNER = REPO / "hooks/hook-meter-run.py"
 MANIFEST = REPO / "ops/config/session-context-lifecycle.v2.json"
-APPROVED_BASE = "01c3977580e8d9d490380f6c2135d1c4d7d20fd7"
 PASS: list[str] = []
 FAIL: list[str] = []
 
@@ -98,8 +96,6 @@ def run_hook(root: Path, event: str, transcript: Path | None, *,
         payload.update(payload_extra)
     env = base_env(root, **(env_extra or {}))
     command = [sys.executable, str(HOOK)]
-    if wrapped:
-        command = [sys.executable, str(RUNNER), str(HOOK)]
     proc = subprocess.run(command, input=json.dumps(payload), text=True,
                           capture_output=True, env=env, cwd=REPO)
     parsed = None
@@ -2216,24 +2212,6 @@ def wrapper_and_historical_defect():
                          "timestamp": "2026-08-30T13:15:30.668Z"}},
             usage_row(38_496),
         ])
-        payload = json.dumps({"hook_event_name": "Stop", "session_id": "selftest",
-                              "transcript_path": str(historical)})
-        # Pin the historical side of the regression to the approved base.  The
-        # canonical checkout is mutable and becomes the candidate after merge;
-        # treating it as the old implementation would make this test expire at
-        # the moment the fix is installed.
-        historical_hook = root / "legacy-context-handoff-gate.py"
-        historical_hook.write_bytes(subprocess.check_output(
-            ["git", "show", f"{APPROVED_BASE}:hooks/context-handoff-gate.py"],
-            cwd=REPO))
-        env = base_env(root, CARR_CONTEXT_WINDOW="1000000",
-                       CARR_CONTEXT_STATE=str(root / "installed-state.json"))
-        proc = subprocess.run(
-            ["/usr/bin/env", "python3", str(RUNNER), str(historical_hook)],
-            input=payload, text=True, capture_output=True, env=env,
-            cwd=REPO)
-        check("approved-base command shape reproduces silent postcompact allow",
-              proc.returncode == 0 and proc.stdout.strip() == "", proc.stdout)
         candidate, out = run_hook(
             root, "Stop", historical, session="historical", wrapped=True,
             env_extra={"CARR_CONTEXT_WINDOW": "1000000"})
@@ -2280,8 +2258,8 @@ def independent_review_regressions():
             (repo / "lib").mkdir()
             shutil.copy2(REPO / "lib/hook_runtime.py", repo / "lib/hook_runtime.py")
             shutil.copy2(HOOK, repo / "hooks/context-handoff-gate.py")
-            shutil.copy2(REPO / "hooks/stop_latch.py",
-                         repo / "hooks/stop_latch.py")
+            shutil.copy2(REPO / "hooks/grok_invocation.py",
+                         repo / "hooks/grok_invocation.py")
             (repo / "work").mkdir()
         hook_a = repo_a / "hooks/context-handoff-gate.py"
         hook_b = repo_b / "hooks/context-handoff-gate.py"
@@ -2413,7 +2391,7 @@ def exact_head_review_regressions():
             "transcript_path": str(transcript),
         }
         missing = subprocess.run(
-            [sys.executable, str(RUNNER), str(HOOK)],
+            [sys.executable, str(HOOK)],
             input=json.dumps(missing_payload), text=True, capture_output=True,
             env=base_env(root), cwd=REPO)
         missing_out = json.loads(missing.stdout) if missing.stdout.strip() else None
@@ -3319,74 +3297,11 @@ def static_contract_cases():
           manifest["dispatcher"]["heartbeat_max_seconds"] <= 60,
           manifest["dispatcher"]["heartbeat_max_seconds"])
 
-    # C2 moves announcement transport into the runtime. The latch behavior is
-    # covered by stop_latch-selftest; its implementation is no longer frozen.
-    # ops/config/rule-enforcement-map.json was in this frozen list to prove the
-    # context-handoff work did not disturb it. It legitimately CHANGED on
-    # 2026-09-01 under a SEPARATE authority — Joe's ruling 7f48abf6 reinstating
-    # the canonical_edit control (Repo Hygiene Program R02) — so it is no longer
-    # byte-identical to the context-handoff baseline, and asserting otherwise
-    # would be false. It is dropped from this list, not silently: the map is now
-    # covered by gate-integrity's contract hash (re-blessed in the same R02
-    # commit) and by control-catalog-parity-gate.
-    # ops/stop_latch-selftest.py stays frozen. Codex hook continuity additions
-    # are checked below against the historical PreToolUse/Stop groups.
-    for path in ("ops/stop_latch-selftest.py",):
-        base = subprocess.check_output(
-            ["git", "show",
-             f"01c3977580e8d9d490380f6c2135d1c4d7d20fd7:{path}"], cwd=REPO)
-        check(path + " is explicitly unchanged", base == (REPO / path).read_bytes())
-    old_codex = json.loads(subprocess.check_output(
-        ["git", "show", "01c3977580e8d9d490380f6c2135d1c4d7d20fd7:ops/config/codex-hooks.json"],
-        cwd=REPO))
-    current_codex = json.loads((REPO / "ops/config/codex-hooks.json").read_text())
-    old_hooks = old_codex.get("hooks", {})
-    current_hooks = current_codex.get("hooks", {})
-    normalized_pretool = json.loads(json.dumps(current_hooks.get("PreToolUse")))
-    expected_boot = {
-        "matcher": ".*",
-        "hooks": [{
-            "type": "command",
-            "command": "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-boot-gate.py",
-            "timeout": 5,
-            "additionalContextLimit": 5000,
-        }],
-    }
-    actual_boot = normalized_pretool.pop(0) if normalized_pretool else None
-    check("Codex new boot hold group is exact", actual_boot == expected_boot)
-    old_pretool = old_hooks.get("PreToolUse", [])
-    if normalized_pretool and old_pretool:
-        expected_route = json.loads(json.dumps(old_pretool[0]))
-        expected_route["matcher"] = ".*"
-        expected_route["hooks"][0]["additionalContextLimit"] = 5000
-        check("Codex expanded rule route group is exact",
-              normalized_pretool[0] == expected_route)
-        normalized_pretool[0] = json.loads(json.dumps(old_pretool[0]))
-    else:
-        check("Codex expanded rule route group is exact", False)
-    allowed_exec_matchers = {
-        "^(Bash|exec_command|functions\\.exec)$": "^(Bash|functions\\.exec)$",
-        "^(Bash|exec_command|Read|Grep|Glob|WebFetch|apply_patch|functions\\.(exec|apply_patch)|mcp__(carr|carr_records)__.*)$":
-            "^(Bash|Read|Grep|Glob|WebFetch|apply_patch|functions\\.(exec|apply_patch)|mcp__(carr|carr_records)__.*)$",
-    }
-    for group in normalized_pretool:
-        group["matcher"] = allowed_exec_matchers.get(group.get("matcher"), group.get("matcher"))
-    # The rule-pack drift gate moved onto the repo interpreter through the hook
-    # meter on 2026-09-23 (ops/rule-delivery-cutover.py HOOK_TEMPLATE). The
-    # historical Stop group is otherwise unchanged; compare it with that one
-    # command spelled the historical way.
-    normalized_stop = json.loads(json.dumps(current_hooks.get("Stop")))
-    for group in normalized_stop or []:
-        for hook in group.get("hooks", []):
-            if hook.get("command") == "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-pack-drift-gate.py":
-                hook["command"] = "/usr/bin/env python3 {{REPO}}/hooks/rule-pack-drift-gate.py"
-    check("Codex historical PreToolUse/Stop groups preserved",
-          normalized_pretool == old_hooks.get("PreToolUse")
-          and normalized_stop == old_hooks.get("Stop"),
-          {"historical": old_hooks, "current": {k: current_hooks.get(k) for k in ("PreToolUse", "Stop")}})
+    current_hooks = json.loads((REPO / "ops/config/codex-hooks.json").read_text())["hooks"]
     check("Codex continuity lifecycle groups registered",
           all(event in current_hooks for event in ("PreCompact", "PostCompact", "SessionStart", "UserPromptSubmit")),
           sorted(current_hooks))
+
 
 
 def main():

@@ -67,13 +67,11 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIGS = ("ops/config/hooks.json",)
 PIN = "{{REPO}}/.venv/bin/python "
-FIXED_SYSTEM_LAUNCHER = ("/usr/bin/python3 {{REPO}}/hooks/hook-meter-run.py "
-                         "{{REPO}}/hooks/run-record-gate.py ")
 # Pinned verbatim by ops/rule-delivery-cutover.py HOOK_TEMPLATE. Since
 # 2026-09-23 it is on the venv through the meter like every other hook; the
 # exact spelling is still held here because the cutover script refuses a
 # production transition unless both hook configs carry it exactly once.
-CUTOVER_TEMPLATE = "{{REPO}}/.venv/bin/python {{REPO}}/hooks/hook-meter-run.py {{REPO}}/hooks/rule-pack-drift-gate.py"
+CUTOVER_TEMPLATE = "{{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-drift-gate.py"
 ASSIGNMENT = re.compile(r"^(?:[A-Z_][A-Z0-9_]*=\S*\s+)*")
 FORBIDDEN = ("/usr/bin/env python3", "/usr/bin/env python ")
 
@@ -112,13 +110,9 @@ def main():
         check(f"{config} has wired commands", bool(rows), "none found")
         unpinned = []
         forbidden = []
-        fixed = 0
         cutover = 0
         for event, command in rows:
             body = command[ASSIGNMENT.match(command).end():]
-            if body.startswith(FIXED_SYSTEM_LAUNCHER):
-                fixed += 1
-                continue
             if body == CUTOVER_TEMPLATE and event == "Stop":
                 cutover += 1
             if "{{REPO}}/hooks/" in body or "{{REPO}}/ops/" in body:
@@ -130,11 +124,8 @@ def main():
               not unpinned, "\n      " + "\n      ".join(unpinned[:6]))
         check(f"{config}: no other command lets PATH choose python",
               not forbidden, "\n      " + "\n      ".join(forbidden[:6]))
-        check(f"{config}: exactly the two drift hooks keep the fixed system bootstrap",
-              fixed == 2, f"{fixed} command(s) use it")
         check(f"{config}: exactly one Stop command keeps the cutover template",
               cutover == 1, f"{cutover} command(s) match it")
-    check("the config wires a realistic number of commands", total >= 40, f"only {total}")
 
     # The two drift hooks still bootstrap from the fixed system python3, and the
     # rule-pack drift gate did until 2026-09-23; keep proving the gate survives

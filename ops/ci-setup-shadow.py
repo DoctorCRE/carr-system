@@ -195,7 +195,6 @@ def inventory(repo):
         'types': ['python-lock', 'mypy'],
         'contract': ['python', 'node'],
         'gates': ['git', 'full-history', 'python-lock', 'node', 'zsh', 'postgres-17', 'dynamic-child-tools'],
-        'replay': ['git', 'full-history', 'python-lock', 'node', 'zsh', 'dynamic-hook-tools'],
         'secret': ['git', 'python'],
         'dependency': ['python-lock', 'node', 'both-node-locks'],
         'migration': ['git', 'full-history', 'historic-schema-blob', 'python-lock', 'node', 'postgres-17', 'role-bootstrap', 'disposable-cluster'],

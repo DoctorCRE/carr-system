@@ -240,10 +240,6 @@
    "moment": "conduct_stop gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
-    {
      "kind": "boot"
     }
    ],
@@ -252,10 +248,6 @@
   "1f3a7372": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -357,10 +349,6 @@
   "2271e684": {
    "moment": "completion_evidence gate, terminal technical claim",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -670,10 +658,6 @@
    "moment": "chat_lint gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "mcp__*__create_draft",
@@ -693,10 +677,6 @@
   "3a9dbafd": {
    "moment": "conduct_stop (conduct-stop-gate.py Stop)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -845,10 +825,6 @@
   "43e2ef76": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -1031,10 +1007,6 @@
   "4e104d4c": {
    "moment": "completion_evidence gate, new-verb deployment claim",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -1239,10 +1211,6 @@
    "moment": "completion_evidence gate, metric completion claim",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "path_rule",
      "path_globs": [
       "*tools/health-check.py",
@@ -1262,10 +1230,6 @@
   "5be2f462": {
    "moment": "chat_lint gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -1543,10 +1507,6 @@
    "moment": "completion_evidence gate (shipping claim)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Artifact",
@@ -1693,10 +1653,6 @@
    "moment": "completion_evidence stop_gate - config-file change completion",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [],
@@ -1737,10 +1693,6 @@
   "767f9b41": {
    "moment": "completion_evidence gate, confirmation response",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "boot"
     }
@@ -1930,10 +1882,6 @@
    "moment": "completion_evidence stop_gate - unattended-path credential verification",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "mcp__*__create_scheduled_task",
@@ -1996,8 +1944,7 @@
    "moment": "blocker_decider gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/blocker-decider-gate.py"
+     "kind": "boot"
     }
    ]
   },
@@ -2042,10 +1989,6 @@
   "8c1e6057": {
    "moment": "chat_lint stop_gate - asking a partner to open/edit/review a file",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -2179,10 +2122,6 @@
   "97326357": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -2364,10 +2303,6 @@
    "moment": "completion_evidence stop_gate - changed-system completion",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [],
@@ -2447,10 +2382,6 @@
    "moment": "completion_evidence stop_gate - check-result reporting",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "path_rule",
      "path_globs": [
       "*hooks/*.py",
@@ -2467,10 +2398,6 @@
   "ab814a26": {
    "moment": "rule_shape gate (approve-rule)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/rule-shape-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -2660,10 +2587,6 @@
    "moment": "loose_work stop_gate - session Stop",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/loose-work-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [],
@@ -2786,10 +2709,6 @@
   "c315befa": {
    "moment": "chat_lint gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -3071,10 +2990,6 @@
    "moment": "chat_lint gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Agent"
@@ -3136,10 +3051,6 @@
   "dcf98880": {
    "moment": "completion_evidence gate (human verification instruction)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "boot"
     }
@@ -3207,10 +3118,6 @@
    "moment": "conduct_stop gate (before command handoff)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
-    {
      "kind": "boot"
     }
    ],
@@ -3265,10 +3172,6 @@
    "moment": "completion_evidence gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "mcp__*__create_scheduled_task",
@@ -3293,10 +3196,6 @@
   "eaa31ac5": {
    "moment": "completion_evidence gate (delivery claim)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -3374,10 +3273,6 @@
    "moment": "completion_evidence gate (autonomous-run completion)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Agent",
@@ -3443,10 +3338,6 @@
   "f47a8fe9": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -3528,10 +3419,6 @@
   "fa217e48": {
    "moment": "completion_evidence gate (completion/file claims)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],

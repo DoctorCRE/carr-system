@@ -312,8 +312,6 @@ class SetupReplays(unittest.TestCase):
     def test_inventory_covers_classes_and_history_obligations(self):
         inventory=mod.inventory(ROOT)
         self.assertEqual(set(inventory['classes']),set(mod.class_names(ROOT)))
-        self.assertIn('full-history',inventory['classes']['replay']['retain'])
-        self.assertIn('dynamic-hook-tools',inventory['classes']['replay']['retain'])
         self.assertIn('full-history',inventory['classes']['freshness']['retain'])
         self.assertIn('historic-schema-blob',inventory['classes']['migration']['retain'])
         self.assertEqual(inventory['removals'],[])

@@ -2618,13 +2618,17 @@ export const MCP_TOOL_BOUND_FIELDS = Object.freeze(
 
 // The part of an inventory a pull request is held to: script, workflow and
 // launchd rows drop out, worker rows keep only their key, MCP verb rows keep
-// the runtime-enforced contract, every other row kind is compared whole.
+// the runtime-enforced contract. External administration retains its authority
+// contract; local script bytes are reviewed through Git and CI.
 export function boundInventoryRows(rows) {
   return rows
     .filter(row => !UNSEALED_INGRESS_KINDS.has(ingressKind(row)))
     .map(row => {
       const kind = ingressKind(row);
       if (KEY_BOUND_INGRESS_KINDS.has(kind)) return { ingress_key: row.ingress_key };
+      if (kind === "external-admin")
+        return Object.fromEntries(Object.entries(row)
+          .filter(([field]) => !["schema_digest", "handler_digest", "source_digest"].includes(field)));
       if (kind === "mcp-tool")
         return Object.fromEntries(MCP_TOOL_BOUND_FIELDS.map(field => [field, row[field]]));
       return row;

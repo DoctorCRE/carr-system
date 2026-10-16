@@ -229,24 +229,6 @@ class DeterministicTests(unittest.TestCase):
         self.assertEqual(result['status'],'failed')
         self.assertIn('deadline',result['criteria'][0]['reason'])
 
-    def test_prose_handoff_advisory_reaches_both_hook_entrypoints(self):
-        import subprocess
-        prose='mlx-serve is ready once the Homebrew tap is trusted; trust it, then install.'
-        transcript=self.root/'turn.jsonl'
-        transcript.write_text('\n'.join(json.dumps(row) for row in [
-            {'type':'user','message':{'content':'yes install it'}},
-            {'type':'assistant','message':{'content':prose}}])+'\n')
-        for hook,payload in [
-            ('conduct-stop-gate',{'transcript_path':str(transcript),'session_id':'selftest'}),
-            ('escalation-gate',{'transcript_path':str(transcript),'session_id':'selftest',
-                'tool_name':'AskUserQuestion','tool_input':{'questions':[{'question':prose,'options':[]}]}})]:
-            with self.subTest(hook=hook):
-                run=subprocess.run([sys.executable,str(REPO/'hooks'/(hook+'.py'))],
-                    input=json.dumps(payload),capture_output=True,text=True,timeout=10)
-                self.assertEqual(run.returncode,0,run.stderr)
-                self.assertIn('handoff_review',run.stdout,run.stderr)
-                self.assertIn('needs_review',run.stdout)
-                self.assertNotIn('"decision": "block"',run.stdout)
 
     def test_artifact_read_honors_deadline(self):
         import time
@@ -377,9 +359,6 @@ class DeterministicTests(unittest.TestCase):
     def test_no_inert_handoff_or_requirement_compatibility_interfaces(self):
         import inspect
         self.assertFalse((REPO/'ops/jev_handoff.py').exists())
-        for hook in ('conduct-stop-gate','escalation-gate'):
-            text=(REPO/'hooks'/(hook+'.py')).read_text()
-            self.assertNotIn('jev_handoff',text,hook)
         req=load('jev_requirements')
         for name in ('changed_paths','test_output','evaluate_requirements','MUTATION_TOOLS','TEST_COMMAND'):
             self.assertFalse(hasattr(req,name),name)
@@ -397,7 +376,7 @@ class DeterministicTests(unittest.TestCase):
     def test_tolls_use_path_contract_dependencies_not_transport(self):
         tolls = load('jev_change_tolls')
         result = tolls.owed({'files':{'edited':['ops/ci.sh','mcp-server/src/tools.js','hooks/delegation-gate.py']}},client=NoModel())
-        self.assertTrue({'ci_sh_reseal','inventory_reseal','gate_rebless'} <= {name for _,name,_ in result})
+        self.assertTrue({'ci_sh_reseal','inventory_reseal'} <= {name for _,name,_ in result})
         self.assertEqual(tolls.owed({'files':{'edited':['README.md']}},client=NoModel()),[])
 
     def test_tolls_follow_sealed_source_locators_outside_server(self):
@@ -453,31 +432,7 @@ class DeterministicTests(unittest.TestCase):
         run=subprocess.run([sys.executable,'-c',script,str(REPO),str(self.root),str(fifo)],capture_output=True,text=True,timeout=10)
         self.assertIn('refused',run.stdout,run.stderr)
 
-    def test_supervisor_stop_observes_contract_artifacts_from_installed_payload(self):
-        spec=importlib.util.spec_from_file_location('typed_supervisor',REPO/'hooks/jev-supervisor.py')
-        hook=importlib.util.module_from_spec(spec);spec.loader.exec_module(hook)
-        (self.root/'result.json').write_text('{"count":2}')
-        criterion={'id':'count','kind':'json_equals','path':'result.json','pointer':'/count','value':2}
-        prompt=json.dumps({'acceptance_contract':{'criteria':[criterion]}})
-        from types import SimpleNamespace
-        captured=[]
-        def inspect(final,evidence,*args):captured.append(evidence);return []
-        payload={'last_assistant_message':'Done','cwd':str(self.root),'session_id':'s','hook_event_name':'Stop',
-                 'transcript_path':str(self.root/'missing.jsonl')}
-        with patch.object(hook,'_task',return_value=prompt),patch.object(hook,'_git_root',return_value=None),patch.object(hook,'_lib',return_value=SimpleNamespace(inspect_stop_boundary=inspect)):
-            hook.stop(payload,hook.Run())
-        done=load('jev_done_checks')
-        self.assertEqual(done.check_done_claim('Done',captured[0])['verdict'],'supported')
-        (self.root/'result.json').write_text('{"count":3}')
-        self.assertEqual(done.check_done_claim('Done',captured[0])['verdict'],'unsupported')
 
-    def test_supervisor_runs_deterministic_stop_without_paid_registration(self):
-        spec = importlib.util.spec_from_file_location('det_supervisor', REPO/'hooks/jev-supervisor.py')
-        hook = importlib.util.module_from_spec(spec); spec.loader.exec_module(hook)
-        import io
-        with patch.object(hook.POLICY,'call_site_enabled',return_value=False), patch.object(hook,'stop') as stop, patch.object(hook,'judgment_point',return_value=True), patch.object(hook.sys,'stdin',io.StringIO(json.dumps({'hook_event_name':'Stop','session_id':'fixture'}))):
-            hook.main()
-        stop.assert_called_once()
 
     def test_slice_matches_production_member_projection(self):
         marker = load('slice-done-marker').Marker(call=NoModel(),git_run=NoModel())

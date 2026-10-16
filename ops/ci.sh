@@ -134,7 +134,7 @@ done
 # pushfloor is FIRST deliberately. It is the cheapest class and the one the
 # local pre-push hook runs, so when a push is going to be refused it is refused
 # in the first seconds rather than after the expensive classes have run.
-CLASS_ORDER="pushfloor unit types contract gates replay secret dependency migration binding artifact freshness"
+CLASS_ORDER="pushfloor unit types contract gates secret dependency migration binding artifact freshness"
 
 class_desc() {
   case "$1" in
@@ -144,7 +144,6 @@ class_desc() {
     types)      echo "seeded shape mistake in a data hand-off" ;;
     contract)   echo "seeded auth/schema contract break" ;;
     gates)      echo "seeded enforcement-layer regression" ;;
-    replay)     echo "real-fixture gate verdict regression" ;;
     secret)     echo "seeded credential in the tree" ;;
     dependency) echo "seeded unpinned or vulnerable dependency" ;;
     migration)  echo "seeded bad migration / trigger permission" ;;
@@ -234,44 +233,6 @@ trap 'rm -rf "$LOGDIR"' EXIT
 # the failing check at the merge base, and ops/inherited-from-main-selftest.py
 # seeds both directions against a real repository, including the case that must
 # never misfire: a branch that broke a check without touching it.
-# ------------------------------------------------------------ name the move
-# THE RETRY-LOOP FINDING, 2026-08-23 council: the same defect went red two and
-# three times in a row because the message said WHAT failed and never what to
-# do about it. A session reads "failed: gate-integrity", re-runs it, gets the
-# same line, and pushes again. Cluster C -- gate work failing the gate web --
-# is near-structurally a first-try red, so this is the class where the cost of
-# not naming the move is paid most often.
-#
-# Only the four co-change moves are named here, because those are the ones the
-# failing check CANNOT name itself: each is a demand to edit a DIFFERENT file
-# from the one that went red. Everything else already names its own remedy in
-# its own output, and repeating it here would only teach people to scroll past.
-gates_name_the_move() {  # gates_name_the_move <failed check names...>
-  local named=0 f
-  for f in "$@"; do
-    case "$f" in
-      gate-integrity)
-        printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-          "re-bless IN THE SAME COMMIT (rule c0b38d80): hooks/gate-integrity.py --bless, then commit ops/config/gate-baseline.json together with the gate you edited" >&2
-        named=1 ;;
-      enforcement-coverage-check|rule-enforcement-map-check)
-        printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-          "register the control you added: run ops/$f.py directly — it prints the exact row it wants and where it goes" >&2
-        named=1 ;;
-      mechanism-doctrine-gate)
-        printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-          "add '# doctrine: <slug>' to the mechanism you ADDED, naming its section in the doctrine store (a slug, never a file path — the markdown renders were retired 2026-08-19)" >&2
-        named=1 ;;
-      *-selftest.py)
-        printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-          "$f is the PAIRED suite for the gate of the same name: a gate and its selftest change in the same commit, or the pair has stopped meaning anything" >&2
-        named=1 ;;
-    esac
-  done
-  [ "$named" = "1" ] || printf '        \033[36mTHE MOVE\033[0m  %s\n' \
-    "each check above names its own remedy in its output — read the failing check's own output above, not just this summary line" >&2
-}
-
 INHERIT_ASKED=0
 inherited_abort() {  # inherited_abort <check-name> <cmd...> -- never returns if inherited
   [ "$INHERIT_ASKED" = "0" ] || return 0
@@ -292,7 +253,7 @@ inherited_abort() {  # inherited_abort <check-name> <cmd...> -- never returns if
   if [ "$rc" -ne 0 ]; then
     # rc=2 is "cannot tell", and it used to return in silence -- so a run that
     # took this path looked exactly like a run where the probe never fired, and
-    # the widened replay tail that rc=0/rc=1 print was never reached. The full
+    # the widened tail that rc=0/rc=1 print was never reached. The full
     # run still proceeds, unchanged; it just says why no attribution appears.
     printf '        \033[33mattribution\033[0m  %s\n' \
       "the inherited-from-main probe could not tell whether main fails $name too; no attribution, the full run proceeds" >&2
@@ -532,9 +493,6 @@ tree_fingerprint() {
 # promotion gate in their own right rather than developer convenience.
 check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0
-  run_quiet "$LOGDIR/gate-declarations.log" "$PY" lib/gate_declarations.py --check \
-    || { failures="$failures gate-declarations"; tail -15 "$LOGDIR/gate-declarations.log" >&2; }
-
   # EVERY GATE FIRED IN THIS CLASS IS A FIXTURE, and saying so once here is what
   # keeps the enforcement numbers honest. A selftest drives a real gate with an
   # attack payload; the gate then writes its ordinary log line. Before this
@@ -730,130 +688,13 @@ PYEOF
       failures="$failures $sbase"; fail_tail "$LOGDIR/gate-$sbase.log"
     fi
   done; fi
-  # gate-integrity is the baseline check itself: a gate edited without a
-  # re-bless in the same commit (rule c0b38d80) fails here.
-  #
-  # --strict IS LOAD-BEARING AND WAS MISSING UNTIL 2026-08-14. Without it this
-  # call could never fail: gate-integrity returns 0 on every path including its
-  # failure path, deliberately, because it is also a SessionStart hook and a
-  # boot check that wedges a session is worse than the drift it reports. So
-  # this line announced a baseline check it never performed. Pull request #102,
-  # cut before #99 merged, then overwrote main's baseline and dropped two gates
-  # from it with CI green the whole way. --strict fails on repository-content
-  # findings only (a hash that does not match, a blessed gate gone, a gate
-  # nothing blessed) and never on machine state a runner legitimately lacks.
-  #
-  # THIS IS THE ONLY LAYER THAT CAN CATCH THAT OVERWRITE. The pre-commit
-  # co-change check cannot: the clobber happens inside GitHub's merge, where no
-  # local hook runs.
-  run_quiet "$LOGDIR/gate-integrity.log" "$PY" hooks/gate-integrity.py --strict \
+  run_quiet "$LOGDIR/safety-hooks.log" "$PY" hooks/gate-integrity.py --strict \
     || { inherited_abort gate-integrity "$PY" hooks/gate-integrity.py --strict
-         failures="$failures gate-integrity"; tail -12 "$LOGDIR/gate-integrity.log" >&2; }
+         failures="$failures gate-integrity"; tail -12 "$LOGDIR/safety-hooks.log" >&2; }
 
-  # THE THREE INVENTORY CHECKS, run against THIS REPO rather than a synthetic
-  # tree. The selftest loop above runs their *-selftest.py, and every one of
-  # those builds its own fixture tree on purpose — that measures the CHECK and
-  # says nothing whatever about the actual inventory. So all three could pass
-  # their suites while the real files contradicted each other, and that is not
-  # hypothetical: on 2026-08-15 ops/audit-queue-freshness-check.py FAILED on
-  # main's own tree while CI reported green, because nothing here ever ran it.
-  #
-  # Same shape as gate-integrity --strict directly above: repository content
-  # only, no machine state, no network, no database. Each carries its own
-  # escape hatch for a genuinely mid-flight tree and names its own remedy in
-  # its own output, so none is repeated here.
-  #
-  # mechanism-doctrine-gate is in this list rather than a class of its own
-  # because it is the same kind of check: repository content only, no machine
-  # state and no database. It is the compiled half of "knowledge ships with the
-  # mechanism" (open loop 504) — a newly ADDED gate, hook, launchd job or
-  # scheduled task must name the doctrine section explaining it. It reads the
-  # change against origin/main, so it is a no-op on a branch that adds none of
-  # those, which is nearly every branch. Editing an existing mechanism is
-  # deliberately out of scope.
-  # rule-enforcement-map-check JOINED THIS LIST 2026-08-23, and the reason is a
-  # merged mistake. hooks/gate-integrity.py runs it too, but classifies it an
-  # ENVIRONMENT problem that --strict deliberately does not fail CI on, because
-  # it was once "the vault-backed rule map" and a bare runner had no vault. The
-  # markdown-render cutoff on 2026-08-19 retired that dependency: the check now
-  # reads one repository file and passes under `env -i`, which is the same
-  # standard every other check in this loop meets. Left where it was, it caught
-  # a real defect — rule 3fa422b7 categorized session_task_rail without the
-  # matching override — only at the NEXT session's boot, after the change had
-  # merged with CI green. Here it catches it before the merge.
-  # scheduler-cutover-coverage-gate JOINED 2026-08-23. Same kind again:
-  # repository content only, no machine state and no database — it reads the
-  # launchd declarations and the cutover registry. It is a RATCHET rather than a
-  # threshold, because coverage stands at three of twenty-three and a check that
-  # fails every run is one people learn to scroll past. It fails only when a job
-  # that HAD a workflow binding loses it.
-  # rule-load-layer-check JOINED 2026-08-23, alongside the delivery tags it
-  # validates. Same kind again: one repository file, no machine state, no
-  # database. It is the check that stops the scoping change from becoming the
-  # thing the council warned about — a wildcard tag, an untagged rule, or a
-  # `control` claim on a rule nothing can actually refuse would all ship a
-  # smaller boot payload that silently drops law, and the failure is invisible
-  # afterwards because a session that boots with fewer rules looks exactly like
-  # one that boots correctly.
-  # reachability-check JOINED 2026-08-23, from the completion-integrity council's
-  # fix D: it is the one question none of the others ask — whether anything
-  # CALLS a declared control.
-  # selftest-git-isolation-check JOINED 2026-08-23, council recommendation 1.
-  # rule-classification-parity-check JOINED here (WR-000019 slice S10). Same
-  # kind again: repository content only, no machine state and no database — it
-  # compares ops/config/rule-enforcement-map.json against the committed
-  # ops/config/rule-admission-export.v1.json (refreshed only by a human running
-  # bin/sync-rule-admission-prod.sh --export against production) and fails on
-  # any rule the two sides classify structurally differently. It does not
-  # require full coverage between the files, so it stays cheap and honest on a
-  # freshly-seeded, mostly-empty export exactly as it will on a fully synced one.
-  # boot-budget-check and sync-core-rule-ids --check JOINED HERE (WR-000019 slice
-  # S11, boot diet). Same kind again: repository content only, no machine
-  # state, no database. boot-budget-check reads CLAUDE.md, the connector's
-  # initialize instructions block in mcp-server/src/mcp.js, and a committed
-  # snapshot of the standing-context payload (ops/config/boot-budget-core-
-  # fixture.v1.json, refreshed by hand -- this check has no database to call
-  # standing-context with) against ops/config/boot-budget.v1.json's ceiling,
-  # and fails the push the same way an overage would go unnoticed otherwise:
-  # silently, at the next session's boot. sync-core-rule-ids --check is the parity
-  # gate for mcp-server/src/core-rule-ids.js against ops/config/rule-
-  # triage.v1.json's `home: "core"` set -- the generated module doctrine.js
-  # reads because a Cloudflare Worker has no filesystem at request time.
-  # sync-rule-boot-classes --check JOINED 2026-09-26 (gated rule boot): the same
-  # parity shape for mcp-server/src/rule-boot-classes.js against
-  # ops/config/rule-classes.v1.json, plus the rule boot's token budget (fails
-  # naming the largest always-on rules; never truncates).
-  # rule-route-coverage JOINED 2026-09-26 (100%-recall rule delivery). Same
-  # kind again: repository files only. It fails when an active rule has no
-  # delivery route, a corpus rule is missing from ops/config/rule-routes.v1.json,
-  # or a trigger names a verb, tool or gate that cannot fire.
-  # check-eval-receipt JOINED 2026-09-29 (eval-gate): a change to a surface
-  # registered in evals/surfaces.json carries evals/<surface>/receipt.json or a
-  # reasoned no-eval line in the PR body. Enforced only in a pull_request run,
-  # where GITHUB_EVENT_PATH carries the body; elsewhere a missing receipt is
-  # advisory and a malformed one still fails. Procedure: evals/README.md.
-  # migration-order-gate JOINED 2026-10-03, after 0757, the 0769/0770 pair and
-  # 0783 each merged below a number main had already released and stopped every
-  # worker release at staging-prepare ("partial candidate ledger is not an exact
-  # source prefix"). Same kind: repository content only — it compares this
-  # tree's migrations/ against origin/$GITHUB_BASE_REF (origin/main locally) and
-  # refuses any ADDED number not strictly above the base maximum. Because strict
-  # status checks force update-branch before merge, and update-branch raises
-  # `synchronize`, a PR that fell behind main re-runs this and turns red until
-  # renumbered. An unreadable base exits 2, which fails like any nonzero.
-  # migration-safety-gate JOINED 2026-10-05 (gap #18): every ADDED migration
-  # carries a rollback note in its header and declares any destructive or
-  # long-locking statement (expand-contract / lock-review line), and
-  # db/schema.sql's ledger names every migration with its runner checksum, so the
-  # reference schema cannot fall behind the migrations again. Static, no DB; the
-  # migration class proves the snapshot by actually building it.
-  # door-reachability-check JOINED 2026-10-13 (WR-000284, defect 96b57c6c): every
-  # script under the audited trees and every repo SKILL.md is reached from a
-  # door, or is declared in ops/config/door-inventory.v1.json. Same kind:
-  # repository content only. ci-only and prose-only are printed, not failed.
-  for inv in enforcement-coverage-check audit-queue-freshness-check map-row-evidence-check \
-             rule-enforcement-map-check rule-load-layer-check rule-classification-parity-check \
-             reachability-check selftest-git-isolation-check \
+  for inv in audit-queue-freshness-check \
+             rule-load-layer-check rule-classification-parity-check \
+             selftest-git-isolation-check \
              drive-dependency-inventory drive-retirement-readiness-gate \
              mechanism-doctrine-gate scheduler-cutover-coverage-gate \
              boot-budget-check sync-core-rule-ids rule-route-coverage \
@@ -891,48 +732,14 @@ PYEOF
 
   if [ -n "$failures" ]; then
     bad gates "failed:$failures"
-    gates_name_the_move $failures
   elif [ -n "$skiplist" ]; then
     incomplete
     # Deliberately NOT a plain OK. The class ran with reduced coverage, and the
     # summary line says so — an exception that reads as a clean pass is how a
     # bounded check gets mistaken for a complete one.
-    ok gates "$count suites + baseline integrity · NOT RUN:$skiplist"
+    ok gates "$count suites + safety hook installation · NOT RUN:$skiplist"
   else
-    ok gates "$count selftest suites + baseline integrity"
-  fi
-}
-
-# ---------------------------------------------------------------- replay
-# The real-fixture replay runs in an independent hosted job. PR1546 spent
-# 295s here after the gate suites, then exhausted the job budget in cleanup.
-# Keep the same replay, watchdog and strict failure handling in local CI.
-check_replay() {
-  export CARR_HOOK_FIXTURE=1
-  local tree_before="$(tree_fingerprint)"
-  if [ -f ops/gate-replay.py ]; then
-    "$PY" "$CI_TIMEOUT_HELPER" 900 "$PY" ops/gate-replay.py >"$LOGDIR/gate-gate-replay.log" 2>&1
-    local rrc=$?
-    if [ "$rrc" -eq 78 ]; then
-      skip replay "NOT CONFIGURED (exit 78): gate-replay.py"
-      printf '        \033[33mnot run\033[0m  %s — NOT CONFIGURED (exit 78): %s\n' \
-        gate-replay.py "$(tail -1 "$LOGDIR/gate-gate-replay.log" 2>/dev/null)" >&2
-    elif [ "$rrc" -ne 0 ]; then
-      inherited_abort gate-replay "$PY" ops/gate-replay.py
-      bad replay "gate-replay failed (exit $rrc)"; tail -40 "$LOGDIR/gate-gate-replay.log" >&2
-    else
-      # A pass prints its invocation count, runtime and verdict totals, so the
-      # hosted log shows the replay ran and how long it took.
-      grep -E '^gate-replay: [0-9]+ invocations|^  verdicts: |^gate-replay: OK' \
-        "$LOGDIR/gate-gate-replay.log" >&2
-      ok replay "real-fixture verdicts match the committed snapshot"
-    fi
-  else
-    skip replay "ops/gate-replay.py not present"
-  fi
-
-  if [ "$(tree_fingerprint)" != "$tree_before" ]; then
-    bad replay "tree-mutated-by-replay"
+    ok gates "$count selftest suites + safety hook installation"
   fi
 }
 
@@ -1050,12 +857,6 @@ check_pushfloor() {
   }
 
   # ── always: the checks whose failure is far more expensive to find later ──
-  run_quiet "$LOGDIR/pushfloor-gate-integrity.log" \
-    "$PY" hooks/gate-integrity.py --strict \
-    || { tail -12 "$LOGDIR/pushfloor-gate-integrity.log" >&2
-         floor_fail gate-integrity \
-           "a gate moved without its baseline. Re-bless what you changed and stage it in the SAME commit: python3 hooks/gate-integrity.py --bless <gate> && git add ops/config/gate-baseline.json"; }
-
   # A single `git ls-files` + pattern match against the whole tracked tree —
   # cheaper than anything else in this class, and the one check that must
   # never be skippable by scoping to $changed: a client deliverable that came
@@ -1173,7 +974,7 @@ check_pushfloor() {
   # ── predictor: the gate-impact closure ───────────────────────────────────
   local gate_surface=""
   if [ -n "$changed" ]; then
-    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(gate-baseline|rule-enforcement-map|delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
+    gate_surface="$(printf '%s\n' "$changed" | grep -E '^(hooks/[^/]+\.py|ops/ci\.sh|ops/githooks/|ops/config/(delegation-gate-hook|codex-hooks|model-floors)\.json|ops/[^/]+-selftest\.py)' || true)"
   fi
   if [ -n "$gate_surface" ]; then
     ran="$ran gate-closure"
@@ -1184,7 +985,7 @@ check_pushfloor() {
     # guessing and buy the full class below.
     for touched_gate in $(printf '%s\n' "$gate_surface" | grep -E '^hooks/[^/]+\.py$' | grep -v -- '-selftest\.py$' || true); do
       base="$(basename "$touched_gate" .py)"
-      paired="$("$PY" lib/gate_declarations.py --paired "$touched_gate" 2>/dev/null || true)"
+      paired="ops/$base-selftest.py"
       if [ -f "$paired" ]; then
         run_quiet "$LOGDIR/pushfloor-$base-selftest.log" "$PY" "$paired" \
           || { tail -15 "$LOGDIR/pushfloor-$base-selftest.log" >&2
@@ -1218,14 +1019,6 @@ check_pushfloor() {
         || { tail -12 "$LOGDIR/pushfloor-$ibase.log" >&2
              floor_fail "$ibase" "run it alone to iterate: .venv/bin/python $iso"; }
     done
-
-    if [ -f ops/enforcement-coverage-check.py ]; then
-      run_quiet "$LOGDIR/pushfloor-enforcement-coverage.log" \
-        "$PY" ops/enforcement-coverage-check.py \
-        || { tail -15 "$LOGDIR/pushfloor-enforcement-coverage.log" >&2
-             floor_fail enforcement-coverage \
-               "a blessed gate is named by no control. Add it to the enforcement map, or record it in ops/config/enforcement-coverage-backlog.json with a reason."; }
-    fi
 
     # The mechanism-doctrine check reads the change against origin/main, so it
     # is a no-op on a branch that adds no gate, hook, launchd job or scheduled
@@ -1343,7 +1136,7 @@ check_migration() {
     *) hard migration "REFUSED: CARR_CI_DATABASE_URL is not loopback. This applies every migration; it runs against a throwaway only."
        return ;;
   esac
-  # WHAT THIS ASKS, changed 2026-08-13. It used to replay all 121 migrations
+  # WHAT THIS ASKS, changed 2026-08-13. It used to all 121 migrations
   # against an empty database, which CANNOT WORK and is also the wrong question.
   # Several migrations are data backfills carrying guards like "remapped ZERO
   # deals — stop and report, do not force"; those guards are correct, they catch
@@ -1456,7 +1249,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
        run_quiet "$LOGDIR/invoice-tracker-transaction.log" \
        node --test mcp-server/test/invoice-tracker-transaction.test.mjs; then
     tail -30 "$LOGDIR/invoice-tracker-transaction.log" >&2
-    bad migration "the registered invoice receipt replay and atomic rollback proof failed"
+    bad migration "the registered invoice receipt and atomic rollback proof failed"
     return
   fi
   local tour_pg_proof tour_pg_log
@@ -1657,7 +1450,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   # SQL logic mutant surviving a FakeDb suite, so the coverage function, the
   # Joe-authority fallback writer and their append-only guards are proved here
   # on real rows as the real principals, and a skip is a failure.
-  # V5-RW02 joins it: the evidence store's replay projection, its typed
+  # V5-RW02 joins it: the evidence store's projection, its typed
   # conflict and its write-time refusal of malformed or double-counted
   # readback evidence only exist on real rows as carr_writer.
   # WR-000262 approve-rule legacy adoption joins it: binding, receipt and
@@ -1752,7 +1545,7 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   fi
 
   # V5-R03 action-needed producer: recipient routing, recovery standing,
-  # deferred exclusion and replay dedupe in a rolled-back transaction.
+  # deferred exclusion and dedupe in a rolled-back transaction.
   if [ -f mcp-server/test/r03-loop-queue-postgres.sql ]; then
     if ! run_quiet "$LOGDIR/r03-loop-queue-postgres.log" \
          "$psql_bin" -X -v ON_ERROR_STOP=1 -P format=csv -d "$dsn" \

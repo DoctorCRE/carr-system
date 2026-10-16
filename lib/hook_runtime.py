@@ -3,7 +3,6 @@ from contextlib import redirect_stderr, redirect_stdout
 from functools import wraps
 import io
 import json
-import os
 import sys
 
 
@@ -84,6 +83,15 @@ class Verdict:
         return self.code
 
 
+def announce(message, event="Stop"):
+    try:
+        Verdict.announce(message, event).emit(sys.stdout, sys.stderr)
+        sys.stdout.flush()
+    except Exception:
+        pass
+    return 0
+
+
 class Event(dict):
     def transcript(self, *, hook, log_path=None):
         from lib.transcript_read import load_transcript
@@ -93,22 +101,6 @@ class Event(dict):
         return load_transcript(path, hook=hook,
                                session=self.get('session_id') or self.get('sessionId'),
                                log_path=log_path)
-
-    def latch(self, hook, reason, claims):
-        from hooks import stop_latch
-        session = self.get('session_id') or self.get('sessionId')
-        identity = stop_latch.claim_identity(hook, reason, claims)
-        # Fixtures relocate state before invoking this method; existing gates
-        # can keep their imported latch state and individual banking order.
-        saved = stop_latch.STATE
-        stop_latch.STATE = os.environ.get('CARR_STOP_LATCH_STATE') or saved
-        try:
-            if stop_latch.latched(session, identity):
-                return True
-            stop_latch.record_fire(session, identity)
-            return False
-        finally:
-            stop_latch.STATE = saved
 
 
 def decision(function=None, *, on_error=None, failure="open"):

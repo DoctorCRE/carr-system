@@ -31,7 +31,7 @@ WHAT THIS FILE NOW PROVES, in three parts:
   3. THE STOP SUMMARY IS RIGHT. At hook_event_name=="Stop", the gate reads
      back this session's bucket, appends EXACTLY ONE row to
      out/delegation-gate-ledger.jsonl (never one row per call), clears the
-     bucket, and speaks an ANNOUNCE (hooks/stop_latch.announce -- additional
+     bucket, and speaks an ANNOUNCE (lib.hook_runtime.announce -- additional
      context, never a block) only when would_have_flagged reached
      DELEGATION_GATE_MATERIAL_THRESHOLD. A session that never called a
      mechanical tool gets no ledger row at all; a session under the material
