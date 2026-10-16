@@ -43,7 +43,6 @@
 # this file therefore cannot authorize a credential mutation or cloud backup.
 #
 # ACTIONS ARE PINNED TO COMMIT SHAs, not tags — same rule and the same two
-# pins ci.yml and automerge-pilot.yml already use.
 #
 # THREE MODES, ONE GATE (WR54). The gate below resolves every invocation into
 # exactly one of `backup`, `disabled`, or `failure-proof`, and every later step
@@ -265,7 +264,6 @@ jobs:
         if: steps.gate.outputs.mode == 'backup'
         env:
           # Never inline a secret into a run: command — env indirection only,
-          # same as CARR_CI_DATABASE_URL in ci.yml / automerge-pilot.yml.
           # Not a literal credential (a GitHub secret reference), so
           # ops/ci-secret-scan.py's dsn-with-password pattern does not match
           # this line and no inline allow marker is needed.

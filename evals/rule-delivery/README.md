@@ -57,33 +57,5 @@ python3 evals/rule-delivery/run_eval.py --compare baseline v3
 python3 evals/rule-delivery/run_eval.py --verdict baseline v3 recall
 python3 evals/rule-delivery/noise.py baseline
 python3 evals/rule-delivery/explain.py                        # train split only
-python3 evals/rule-delivery/make_report.py receipt --baseline-ref <sha>   # evidence/ + receipt.json
-python3 evals/rule-delivery/make_report.py rounds             # runs/results.md (+ report.html with --builder)
 python3 evals/rule-delivery/run_eval.py --freeze-expectations # only for a new expectations version
 ```
-
-## The receipt
-
-`make_report.py receipt` replays every case through the working tree
-(candidate) and through the tree at `--baseline-ref` (baseline) with the same
-harness, and writes the raw observations to `evidence/{baseline,candidate}.jsonl`.
-`run_eval.score_receipt` grades both against `expectations.v3.json` and
-computes each dimension on the test split of its cohort: per-arm case
-bootstrap intervals and a paired-bootstrap delta over identical cohorts.
-`receipt.json` binds the harness, every tracked file the candidate replay
-read, the expectations and both cohorts by sha256; authored fields (change,
-verdict, notes, critical flags) carry over from the current receipt.
-`ops/check-eval-receipt.py` re-runs the scorer and refuses any difference.
-
-The current round command and candidate verdict read the train split only.
-Historical rounds v1-v3 used the test split to decide keep/revert; those test
-intervals are descriptive, not untouched-holdout evidence. The frozen split
-still protects future rounds. `explain.py` reads train only. The system is
-deterministic, so run-to-run noise is zero; paired bootstrap intervals measure
-case-sampling variation only.
-
-## Not covered here
-
-The Jev half (ranking and single-rule binding at `UserPromptSubmit`) needs a
-live TypeSafe binding. `tools/rule-delivery-eval.py ... --jev live` measures it;
-this eval leaves it alone.

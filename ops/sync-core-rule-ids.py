@@ -15,9 +15,7 @@ ops/config-as-code.py already uses for machine config (Joe, 2026-08-03:
 "shouldnt all code be in the repo? .json is code").
 
 THIS SCRIPT IS THE ONLY WAY THAT MODULE IS MEANT TO BE PRODUCED. Hand edits to
-mcp-server/src/core-rule-ids.js will be silently overwritten the next time this
-runs, and will drift from ops/boot-budget-check.py's parity read in the
-meantime -- exactly the two-homes disease config-as-code.py exists to avoid.
+mcp-server/src/core-rule-ids.js will be overwritten the next time this script runs.
 
 Usage:
     ./.venv/bin/python ops/sync-core-rule-ids.py            # regenerate

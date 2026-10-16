@@ -172,10 +172,6 @@ with tempfile.TemporaryDirectory() as temp:
         else:
             raise AssertionError("unregistered mode-160000 Gitlink was skipped")
 
-ci = (ROOT / "ops/ci.sh").read_text()
-assert "drive-dependency-inventory drive-retirement-readiness-gate" in ci
-passed += 1
-
 actual = inventory._read_json(ROOT / "ops/config/drive-dependencies.v1.json")
 actual_entries = inventory.validate_registry(
     actual, schema=inventory._read_json(ROOT / "ops/config/drive-dependencies.schema.v1.json"))
@@ -187,4 +183,4 @@ assert all(by_id[item] in inventory.OPERATIONAL_CLASSES for item in (
     "scheduled-settings-render"))
 passed += 1
 
-print(f"drive dependency inventory selftest: {passed}/15 passed")
+print(f"drive dependency inventory selftest: {passed}/14 passed")

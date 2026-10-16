@@ -33,12 +33,6 @@
       "evidence": "3f7132ce (#1414); evals/rule-delivery/split.json is its output"
     },
     {
-      "path": "evals/rule-delivery/round.sh",
-      "class": "hand_tool",
-      "reason": "A person runs it after each hillclimb round to record the change, patch and summary into runs/ledger.jsonl.",
-      "evidence": "evals/rule-delivery/round.sh header usage line (added 3f7132ce, #1414)"
-    },
-    {
       "path": "ops/accept-doctorcre-bundle.sh",
       "class": "hand_tool",
       "reason": "The controller runs it on a DoctorCRE build bundle before acceptance so the citation trace check actually executes.",

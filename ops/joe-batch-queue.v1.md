@@ -85,7 +85,7 @@ pass) — 20 proposals, each `{rule_id, current_chars, proposed_statement,
 proposed_chars, clauses_preserved_note}`. Measured totals: current core
 payload 41,505 chars (~11,859 tokens); proposed 20,121 chars (~5,749 tokens),
 a 51.5% reduction. (A separate committed measurement,
-`ops/config/boot-budget-core-fixture.v1.json`, puts the full-text core payload
+the archived core payload measurement, puts the full-text core payload
 at 48,091 bytes / ~13,740 tokens by a slightly different byte-counting method
 — both numbers describe the same underlying fact: the 20 core rules in full
 are larger than the entire current boot budget.) 5 of 20 rules already sit at
@@ -117,7 +117,7 @@ programmatically from that fetch, not estimated.
 **If Joe declines.** No harm today — the current shadow-mode boot budget
 passes (9,948.6 of 10,000 tokens, see item (e)'s prerequisite discussion and
 AC-S11 in the outcome-feedback report). But the margin is only 51.4 tokens,
-and `ops/config/boot-budget-core-fixture.v1.json` already documents that the
+and the archived core payload measurement already documents that the
 full-text core payload (48,091 bytes, ~13,740 tokens) is the SEPARATE, larger
 number the S13 flip would introduce once `standing-context`'s enforced-mode
 `core_preview` starts actually being used — that is not covered by today's

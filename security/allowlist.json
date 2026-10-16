@@ -42,6 +42,12 @@
       "sha256": "51aba0aacbedc3e99f3b4ac39981d6a4f2049e381db2cad6cf19107bf23c9dc1",
       "rule": "pii-email",
       "reason": "unescaped dots in the GitHub SSH origin regex at a7c97855, not an address; escaped in 94cef0ec"
+    },
+    {
+      "path": "evals/jev-judgments/evidence/baseline.jsonl",
+      "sha256": "76fdd7e7cb518323cd49d448aa67672bf0627902c2451d518fcad8f6085f1d88",
+      "rule": "pii-phone",
+      "reason": "a 10-digit sha256 prefix inside a case id, not a phone number"
     }
   ]
 }
