@@ -214,7 +214,7 @@ json.dump({"schema":"carr-ci-result/v1","strict":True,"classes":[
 RESULT
 ''')
         (self.root / "ops/scac-mutation-inventory.mjs").write_text(
-            "export function assertCurrentSourceInventoryMatchesFixture() {}\n")
+            "export function assertCurrentContracts() {}\n")
         (self.root / "mcp-server/src/tools.js").write_text("export const TOOLS = {};\n")
         self.git("add", "README.md", "ops", "evals", "migrations", "mcp-server")
         self.git("commit", "-qm", "base")
@@ -292,7 +292,7 @@ RESULT
         self.git("rm", "migrations/0001_collision.sql")
         self.git("commit", "-qm", "remove fixture collision")
         self.collect()
-        self.edit("ops/scac-mutation-inventory.mjs", "export function assertCurrentSourceInventoryMatchesFixture() { throw Error('mismatch'); }\n")
+        self.edit("ops/scac-mutation-inventory.mjs", "export function assertCurrentContracts() { throw Error('mismatch'); }\n")
         with self.assertRaises(self.adapter.Refusal):
             self.collect()
 
@@ -345,7 +345,7 @@ RESULT
             with self.subTest(flag=flag):
                 self.git("update-index", flag, path)
                 (self.root / path).write_text(
-                    "export function assertCurrentSourceInventoryMatchesFixture() { throw Error('mismatch'); }\n")
+                    "export function assertCurrentContracts() { throw Error('mismatch'); }\n")
                 self.assertEqual(self.git("status", "--porcelain", "--untracked-files=no"), "")
                 with self.assertRaises(self.adapter.Refusal):
                     self.adapter.verify(self.root, "origin/main", "", receipt)

@@ -87,12 +87,6 @@
       "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
     },
     {
-      "path": "ops/registry-chain-postgres-proof.py",
-      "class": "one_shot",
-      "reason": "Proved one successor publication of the registry chain on a disposable database and an isolated source clone.",
-      "evidence": "72b1f088 (Architecture C1, #1609)"
-    },
-    {
       "path": "ops/rule-recall-benchmark.py",
       "class": "one_shot",
       "reason": "Measured full-text rule availability on the unchanged 72-case test split before replacement recall was trusted.",

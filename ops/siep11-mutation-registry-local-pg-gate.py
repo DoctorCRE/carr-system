@@ -17,7 +17,6 @@ import psycopg
 
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
 from scac_mutation_db_inventory import project, summarize
-from registry_chain import registry_chain
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -84,24 +83,17 @@ def refusal(cur, query: str, params: tuple, fragment: str) -> None:
 
 
 def sealed_service_launchd(registry_version: str) -> list[tuple[str, str, str]]:
-    """Check live source closure and read the selected seal's frozen catalog.
-
-    Decision 05e144eb exempts launchd source edits from registry resealing.
-    Comparing an immutable database snapshot with today's catalog would demand
-    a successor anyway. Keep exact DB parity against its independent fixture;
-    workflowDefinitionInventory still refuses missing/duplicate live owners.
-    """
+    """Check the current launchd service authority catalog."""
     result = subprocess.run(
         ["node", "--input-type=module", "-e", """
-        import { frozenInventory, workflowDefinitionInventory }
+        import { workflowDefinitionInventory }
           from './ops/scac-mutation-inventory.mjs';
-        workflowDefinitionInventory();
-        const mappings = frozenInventory(process.argv[1]).flatMap(row =>
+        const mappings = workflowDefinitionInventory().flatMap(row =>
           (row.physical_authority_refs || []).filter(ref =>
             ref.startsWith('ops.service_environment:')).map(ref => {
               const parts = ref.split(':');
               if (parts.length !== 3 || !parts[1] || !parts[2])
-                throw new Error('malformed frozen service authority');
+                throw new Error('malformed service authority');
               return [parts[1], parts[2], row.source_locator];
             }));
         process.stdout.write(JSON.stringify(mappings));
@@ -218,7 +210,7 @@ def main() -> int:
             digest = version[0]
             runtime_version = successor[0] if successor is not None else "scac-mutation-registry.v1"
             expected_sealed_service_launchd = sealed_service_launchd(runtime_version)
-            if runtime_version not in {row["version"] for row in registry_chain()["versions"][1:]}:
+            if runtime_version not in {'scac-mutation-registry.v118'}:
                 raise RuntimeError(f"unsupported live successor {runtime_version!r}")
             # A successor may only ADD a seal. Whatever version is live, the one
             # immediately below it must still be present AND still validate its

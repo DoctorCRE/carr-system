@@ -23,31 +23,13 @@ TOLLS = {
 CONTRACT_PREFIXES = ("mcp-server/src/", "ops/scac-", "ops/config/scheduled-jobs")
 SETTINGS_PATHS = {".claude/settings.json", "ops/config/hooks.json", "ops/config/codex-hooks.json",
                   "ops/config/claude-continuity-hooks.json", "ops/config/delegation-gate-hook.json"}
-DERIVED_PATHS = {"ops/config/gate-baseline.json", "ops/config/scac-registry-source-inventory-fixtures.v1.json",
+DERIVED_PATHS = {"ops/config/gate-baseline.json",
                  "ops/config/rule-enforcement-map.json"}
 
 
 def _contract_sources():
-    """Conservative dependency edges from the reviewed inventory's locators.
-
-    Historical locators remain edges: an extra verifier is safe, whereas a
-    missing edge can hide a drifted seal. The verifier decides current drift.
-    """
-    with open(os.path.join(REPO, "ops/config/scac-registry-source-inventory-fixtures.v1.json")) as handle:
-        fixture = json.load(handle)
-    sources = set()
-    def visit(value):
-        if isinstance(value, dict):
-            locator = value.get("source_locator")
-            if isinstance(locator, str):
-                sources.add(locator.split("#", 1)[0].split(":", 1)[0])
-            for child in value.values():
-                visit(child)
-        elif isinstance(value, list):
-            for child in value:
-                visit(child)
-    visit(fixture)
-    return sources
+    return {"mcp-server/src/" + name for name in os.listdir(os.path.join(REPO, "mcp-server/src"))
+            if name.endswith(".js")}
 
 def change(base="origin/main", repo=REPO):
     """The changed-file list, plus the two facts the questions cannot see.
@@ -164,10 +146,10 @@ def change(base="origin/main", repo=REPO):
 VERIFIERS = {
     "inventory_reseal": (
         ["node", "--input-type=module", "-e",
-         "import {assertCurrentSourceInventoryMatchesFixture} from "
+         "import {assertCurrentContracts} from "
          "'./ops/scac-mutation-inventory.mjs'; import {TOOLS} from "
          "'./mcp-server/src/tools.js'; "
-         "assertCurrentSourceInventoryMatchesFixture(TOOLS);"],
+         "assertCurrentContracts(TOOLS);"],
         "the sealed source inventory does not match this tree"),
     "gate_rebless": (
         [".venv/bin/python", "hooks/gate-integrity.py"],

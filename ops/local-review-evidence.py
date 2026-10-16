@@ -311,9 +311,9 @@ def collect(root: Path, base: str, body: str) -> dict:
     classes = select_classes(root, paths)
     checks = [eval_check(root, base, body), migration_union(root, base)]
     checks.append(checked(root, "source-seal", ["node", "--input-type=module", "-e",
-        "import {assertCurrentSourceInventoryMatchesFixture} from './ops/scac-mutation-inventory.mjs';"
+        "import {assertCurrentContracts} from './ops/scac-mutation-inventory.mjs';"
         "import {TOOLS} from './mcp-server/src/tools.js';"
-        "assertCurrentSourceInventoryMatchesFixture(TOOLS); console.log('source-seal: OK');"], "source-seal: OK"))
+        "assertCurrentContracts(TOOLS); console.log('source-seal: OK');"], "source-seal: OK"))
     with tempfile.TemporaryDirectory(prefix="review-ci-") as td:
         result = Path(td) / "result.json"
         body_file = Path(td) / "body"
