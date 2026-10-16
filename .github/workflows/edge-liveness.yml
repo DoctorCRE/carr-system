@@ -38,7 +38,6 @@
 # chain check would make one red indistinguishable from the other.
 #
 # ACTIONS ARE PINNED TO COMMIT SHAs, not tags — same rule and the same two pins
-# ci.yml, backup-nightly.yml and automerge-pilot.yml already use. This file was
 # the last one still on mutable tags (checkout@v4, setup-python@v5): a tag can
 # be repointed at new code by anyone who controls the action repo, and a
 # watchdog that runs unattended on a schedule is the worst place to leave that
@@ -80,7 +79,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install the one dependency this needs
-        run: pip install --disable-pip-version-check "psycopg[binary]"
+        run: pip install --disable-pip-version-check -r requirements.lock
 
       - name: Read the ledger and deliver the incident
         env:

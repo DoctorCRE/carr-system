@@ -14,7 +14,5 @@
     }
   ],
   "quarantined": [],
-  "_evidence_note": "Every local_only entry here was proven by a real CI failure, not predicted. Two others that failed the same run were FIXED rather than excluded: test-review-council.py needed zsh installed and its own out/ dirs created, and test-record-home-gate.py had a hardcoded $HOME path. Excluding a check is the last resort, not the first.",
-  "known_gaps": [],
-  "_known_gap_history": "2026-08-13: the migration class carried a known gap for ~40 minutes while replay-from-zero was blocked on a design decision. Resolved by the schema-snapshot approach (bin/schema-snapshot.sh + db/schema.sql), so the class passes on its own merit and the gap was removed the same day. Kept here as evidence the expiry mechanism was exercised and released rather than quietly extended."
+  "_evidence_note": "Every local_only entry here was proven by a real CI failure, not predicted. Two others that failed the same run were FIXED rather than excluded: test-review-council.py needed zsh installed and its own out/ dirs created, and test-record-home-gate.py had a hardcoded $HOME path. Excluding a check is the last resort, not the first."
 }

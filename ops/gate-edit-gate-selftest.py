@@ -223,9 +223,7 @@ LOG_ONLY_BODY = "\n".join([
 ])
 
 # A shared helper two gates import. It refuses nothing and runs on nothing, so
-# it is not a mechanism — the same behavioural discriminator
-# ops/mechanism-doctrine-gate.py settled on after it wrongly classified
-# hooks/turn_origin.py as a gate. The bare `return 2` is deliberate: it is a
+# it is not a gate. The bare `return 2` is deliberate: it is a
 # count, and a card check keyed on that string alone would punish it.
 LIBRARY_BODY = "\n".join([
     '"""a shared helper two gates import"""',

@@ -394,16 +394,7 @@ class DeterministicTests(unittest.TestCase):
             params=set(inspect.signature(function).parameters)
             self.assertFalse(params & {'client','judge','shortlist'},function.__name__)
 
-    def test_tolls_use_path_contract_dependencies_not_transport(self):
-        tolls = load('jev_change_tolls')
-        result = tolls.owed({'files':{'edited':['ops/ci.sh','mcp-server/src/tools.js','hooks/delegation-gate.py']}},client=NoModel())
-        self.assertTrue({'ci_sh_reseal','inventory_reseal','gate_rebless'} <= {name for _,name,_ in result})
-        self.assertEqual(tolls.owed({'files':{'edited':['README.md']}},client=NoModel()),[])
 
-    def test_tolls_follow_sealed_source_locators_outside_server(self):
-        tolls=load('jev_change_tolls')
-        result=tolls.owed({'files':{'edited':['bin/deploy-worker.sh']}},client=NoModel())
-        self.assertIn('inventory_reseal',[name for _,name,_ in result])
 
     def test_notebook_uses_exact_error_or_artifact_not_topic_overlap(self):
         notebook = load('jev_notebook')

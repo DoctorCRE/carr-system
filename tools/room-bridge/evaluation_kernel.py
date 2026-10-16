@@ -397,8 +397,7 @@ def critical_dimension_blockers(dimension_results: Any) -> list[str]:
     """Name every critical dimension that blocks, whatever any overall score did.
 
     The same no-aggregate rule the portfolio applies, exposed for callers that
-    hold dimension rows but not a whole portfolio (ops/check-eval-receipt.py,
-    the LLM-steering eval receipt). A critical dimension blocks when it failed,
+    hold dimension rows but not a whole portfolio. A critical dimension blocks when it failed,
     was blocked, or regressed against baseline. Rows are validated against
     DIMENSION_FIELDS; extra measurement fields are the caller's to strip.
     """

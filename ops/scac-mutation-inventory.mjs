@@ -2594,7 +2594,7 @@ export function frozenInventory(version) {
   return Object.freeze(rows.map(row => Object.freeze(structuredClone(row))));
 }
 
-export const UNSEALED_INGRESS_KINDS = Object.freeze(new Set(["script-entrypoint", "github-workflow", "launchd-workflow"]));
+export const UNSEALED_INGRESS_KINDS = Object.freeze(new Set(["script-entrypoint", "external-admin", "github-workflow", "launchd-workflow"]));
 
 // Worker routes and side-writes are write entrances into Production, so a NEW
 // one still needs a registry successor: their ingress keys stay bound. Their

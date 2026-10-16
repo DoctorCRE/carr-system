@@ -71,7 +71,7 @@ if not GATE.exists():
     sys.exit(1)
 
 spec = importlib.util.spec_from_file_location("chat_lint_gate", GATE)
-assert spec and spec.loader          # same narrowing idiom as ops/automerge-pilot-selftest.py
+assert spec and spec.loader
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 

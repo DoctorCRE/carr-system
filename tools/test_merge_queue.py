@@ -1755,7 +1755,7 @@ class QueueTests(unittest.TestCase):
             self.assertNotEqual(result.returncode,0)
             self.assertIsNone(p.poll())
         finally:
-            p.terminate();p.wait(timeout=5)
+            p.kill();p.wait(timeout=5)
 
     def test_handover_refuses_to_start_without_hold_migration_receipt(self):
         legacy=self.root/'legacy';legacy.mkdir()

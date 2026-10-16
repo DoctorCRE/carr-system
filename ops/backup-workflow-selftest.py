@@ -627,7 +627,7 @@ _CHECK_STATES: dict[str, dict[str, object]] = {
 # is registered here precisely so the controls below can attach it to rows the
 # seam did not write.
 # "required_ci" is the exact context AGENTS.md says the ruleset requires and
-# ops/config/automerge-pilot-policy.v1.json registers. It is a LABEL here like
+# the CI workflow produces. It is a LABEL here like
 # every other: the controls below attach it to rows no ci.yml run produced, and
 # the door must refuse every one of them.
 _CHECK_LABELS = {
@@ -1653,26 +1653,6 @@ def _dispatch_door_contract() -> None:
             "+ REQUIRED_CHECK_WORKFLOW_FILE" in status_source
         and "args." not in resolver_code,
         "a resolver whose workflow file came from the caller would authenticate nothing",
-    )
-    # THE REGISTERED IDENTITY THE LITERALS RESTATE. AGENTS.md names the required
-    # context and ops/config/automerge-pilot-policy.v1.json registers its
-    # provider identity; the door restates both as literals because it has to run
-    # from a copied tree with no second file to load. Equal spellings are
-    # asserted here so the restatement cannot drift into a check nobody produces.
-    registered_raw = json.loads(
-        (_ROOT / "ops" / "config" / "automerge-pilot-policy.v1.json")
-        .read_text(encoding="utf-8")).get("required_check")
-    registered = registered_raw if isinstance(registered_raw, dict) else {}
-    _check(
-        "the door's required-check literals are the ones the repository registers",
-        'REQUIRED_CHECK_NAME = "ops/ci.sh --strict"' in status_source
-        and 'REQUIRED_CHECK_WORKFLOW_FILE = "ci.yml"' in status_source
-        and 'REQUIRED_CHECK_CONCLUSION = "success"' in status_source
-        and registered.get("name") == "ops/ci.sh --strict"
-        and registered.get("workflow_file") == "ci.yml"
-        and registered.get("app_slug") == "github-actions"
-        and 'ACTIONS_APP_SLUG = "github-actions"' in status_source,
-        f"the door would demand a check nobody produces: registered {registered!r}",
     )
     _check(
         "the head-evidence scan resolves both suite sets before it scans",

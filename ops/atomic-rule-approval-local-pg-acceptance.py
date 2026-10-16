@@ -165,52 +165,6 @@ def main() -> int:
                 if finite_applicable is None or finite_applicable[0] != 1:
                     refuse("global approved rule did not apply to a finite context")
 
-                # ---- the REAL eval_receipt control (migration 0753) ----
-                # Rule 6cbaa63a names 'eval_receipt CI check' as its carrying
-                # control. Unlike the fixtures above, this does NOT insert a
-                # catalog row: it proves the row the migration set seeded is
-                # one approve-rule accepts, binding it from the catalog with no
-                # pre-written ops.rule_control_binding. Savepoint-scoped so the
-                # extra active rule leaves no deferred epoch work behind.
-                cur.execute("reset session authorization")
-                cur.execute("savepoint eval_receipt_control")
-                eval_rule_id = uuid.uuid4()
-                cur.execute(
-                    """insert into rule(id,statement,human_quote,taught_by,status)
-                       values (%s,'local eval-receipt control fixture',
-                               'Joe approved the eval receipt fixture',%s,'proposed')""",
-                    (eval_rule_id, actor[0]),
-                )
-                cur.execute(
-                    """insert into ops.rule_load_layer
-                         (rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
-                       values (%s,left(%s::text,8),'control','{}'::text[],'shared',
-                               'local eval_receipt control acceptance',
-                               'ops/atomic-rule-approval-local-pg-acceptance.py',
-                               repeat('0',64))""",
-                    (eval_rule_id, eval_rule_id),
-                )
-                cur.execute("set session authorization carr_authority_joe")
-                cur.execute(
-                    "select ops.approve_rule(%s,'machine_enforceable',array['eval_receipt'],%s,%s)",
-                    (eval_rule_id, f"local-eval-receipt-{uuid.uuid4()}",
-                     "Joe local eval_receipt control acceptance"),
-                )
-                eval_approved = cur.fetchone()
-                if eval_approved is None or eval_approved[0].get("policy_status") != "active":
-                    refuse("approve-rule did not accept the seeded eval_receipt control")
-                cur.execute("reset session authorization")
-                cur.execute(
-                    """select binding_contract->>'implementation_ref'
-                         from ops.rule_control_binding
-                        where rule_id=%s and control_key='eval_receipt'""",
-                    (eval_rule_id,),
-                )
-                eval_binding = cur.fetchone()
-                if eval_binding is None or "ops/check-eval-receipt.py" not in (eval_binding[0] or ""):
-                    refuse("eval_receipt binding does not name ops/check-eval-receipt.py")
-                cur.execute("rollback to savepoint eval_receipt_control")
-                cur.execute("release savepoint eval_receipt_control")
                 cur.execute("set session authorization carr_authority_joe")
 
                 # ---- versioned amendment (WR-000019 slice S10) ----

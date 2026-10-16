@@ -120,19 +120,6 @@
         "mcp-server/test/work-request-ready-plan.test.mjs",
         "ops/local-pg-ci-selftest.py"
       ]
-    },
-    "eval_receipt": {
-      "_note": "Carrying control for rule 6cbaa63a-be57-4c2e-955f-4ea7b5c0405d (every LLM-steering change ships an eval receipt), taught with enforcement_home=gate and carrying_control 'eval_receipt CI check'. Declared here rather than in rule-enforcement-map.json because audits/guidance-situation-curation-review.v1.json still pins the map by sha256 (review_state proposed). Fold it into the map with the other extras once that review settles.",
-      "enforcement_class": "deny_gate",
-      "failure_mode": "required CI check refuses the merge: a pull request that changes a surface in evals/surfaces.json without a valid evals/<surface>/receipt.json changed in the same PR, or a reasoned no-eval line in its body, turns ops/ci.sh --strict (gates class) red, and the main ruleset will not merge a red head",
-      "implementation": [
-        "ops/check-eval-receipt.py",
-        "ops/ci.sh",
-        "evals/surfaces.json"
-      ],
-      "test": [
-        "ops/check-eval-receipt-selftest.py"
-      ]
     }
   },
   "enforcement_class_is_a_property_of_the_control": "Deriving the class from the rules that cite a control was tried first and rejected: deal_guard and loop_guard both fail as 'transaction refusal' yet their rules were tagged differently, because a rule's enforcement_class describes what the RULE does while this describes how the CONTROL fires.",

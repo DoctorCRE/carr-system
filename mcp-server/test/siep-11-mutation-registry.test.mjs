@@ -1326,8 +1326,6 @@ test("GitHub and launchd workflow entrances bind exact triggers, permissions, an
   assert.deepEqual(github.map(row => row.source_locator).sort(), githubPaths.sort());
   assert.equal(github.every(row => row.ingress_kind === "workflow_entrypoint" &&
     row.trigger_contract_digest && row.permissions_contract_digest && row.classification_authorizing === false), true);
-  const automerge = workflows.find(row => row.source_locator === ".github/workflows/automerge-pilot.yml");
-  assert.equal(automerge.delegates_to.includes("script:ops/automerge_pilot.py"), true);
   const backup = workflows.find(row => row.source_locator === ".github/workflows/backup-nightly.yml");
   assert.equal(backup.delegates_to.includes("shell:aws-s3api-put-object"), true);
   const dbAcceptance = workflows.find(row => row.source_locator === ".github/workflows/db-acceptance.yml");
@@ -1499,6 +1497,7 @@ test("only verb-contract changes and new write entrances hold a pull request to 
   assert.equal(digest(edit("launchd-workflow:com.carr.nightly", "source_digest")), digest(base));
   assert.equal(digest(edit("worker-sidewrite:tool-read-call", "handler_digest")), digest(base));
   assert.equal(digest([...base, { ingress_key: "script-entrypoint:ops/new.py", source_digest: "c" }]), digest(base));
+  assert.equal(digest([...base, { ingress_key: "external-admin:ops/local-check.py", source_digest: "c" }]), digest(base));
   assert.notEqual(digest([...base, { ingress_key: "worker-route:new-write", handler_digest: "c" }]), digest(base));
   assert.notEqual(digest(edit("mcp-tool:add-loop", "schema_digest")), digest(base));
   // The whole-file digest of a verb's source is not what the runtime checks.

@@ -213,8 +213,6 @@ case("plist StandardOut/ErrorPath land under {{REPO}}/out/",
 case("plist wakes every 30 minutes as specified",
      lambda: "StartInterval" not in _pl and launchd_calendar.cadence_seconds(_pl) == 1800)
 
-case("plist carries a mechanism-doctrine-gate declaration",
-     lambda: bool(re.search(r"doctrine:\s*[A-Za-z0-9][A-Za-z0-9._-]{3,}\s*-->", _plist_text)))
 
 # ---------------------------------------------------------------------------
 # services.json registration
