@@ -13,9 +13,6 @@
     "command": {
       "seconds": 120
     },
-    "board": {
-      "seconds": 60
-    },
     "sqlite": {
       "seconds": 30
     },

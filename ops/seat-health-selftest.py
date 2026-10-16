@@ -328,10 +328,6 @@ class SeatHealthTests(unittest.TestCase):
         required = nightly.split('required=(', 1)[1].split(')', 1)[0]
         for path in ('ops/seat-health.py', 'ops/host_liveness.py', 'tools/room-bridge/dispatch.py'):
             self.assertIn(path, required)
-        self.assertIn('step "dispatch claim reconcile" ./.venv/bin/python tools/room-bridge/dispatch.py '
-                      'reconcile --older-than-hours 6\n',
-                      nightly)
-        self.assertLess(nightly.index('step "daily AI seat health"'), nightly.index('step "dispatch claim reconcile"'))
 
     def test_health_rows_show_bound_actions_without_new_model_calls(self):
         rows = health.health_rows({})

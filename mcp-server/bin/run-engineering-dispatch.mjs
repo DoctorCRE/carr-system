@@ -3,13 +3,13 @@
 // an MCP verb: it owns the fixed carr_jobs connection, calls only the scoped
 // engineering claim function, and gives the Codex child no database capability.
 
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { Pool } from "@neondatabase/serverless";
 import {
-  runEngineeringWorker,
+  runEngineeringWorker, canonicalDigest,
 } from "../src/engineering-runtime.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -144,8 +144,8 @@ function runAdapter(input) {
       if (code !== 0) return reject(new ControllerError({ error: "engineering_adapter_refused", exit_code: code }));
       try {
         const parsed = JSON.parse(stdout);
-        if (!parsed?.ok || !parsed.receipt || typeof parsed.receipt !== "object") throw new Error("invalid adapter response");
-        resolve(parsed.receipt);
+        if (!parsed?.outcome || typeof parsed.outcome !== "object") throw new Error("invalid adapter response");
+        resolve(parsed);
       } catch {
         reject(new ControllerError({ error: "engineering_adapter_response_invalid" }));
       }
@@ -221,9 +221,46 @@ async function main() {
       const result = await runEngineeringWorker({
         c: client, worker: WORKER, desk: DESK, ToolError: ControllerError,
         withCanonicalOwnership,
-        dispatchEnvelope: async (_desk, envelope, task) => runAdapter({
-          desk: DESK, envelope, task, executor_slug: "codex",
-        }),
+        dispatchEnvelope: async (_desk, envelope, task) => {
+          const source = (await client.query("select ops.engineering_admission_source($1::text) as source",
+            [task.work_request_ref])).rows[0]?.source;
+          const accepted = source?.accepted_plan;
+          if (source?.execution_authorized === false || accepted?.digest !== envelope.plan_revision.digest
+              || source?.work_request?.id !== envelope.work_request_id
+              || Number(source?.work_request?.version) !== envelope.state_binding.state_version
+              || source?.work_request?.canonical_record_digest !== envelope.state_binding.canonical_record_digest)
+            throw new ControllerError({ error: "engineering_source_changed" });
+          const scope = accepted.caps?.source_merge;
+          if (!scope || scope.repository !== "jbookout/carr-system" || !Array.isArray(scope.authorized_paths))
+            throw new ControllerError({ error: "engineering_source_scope_missing" });
+          const slice = task.engineering_slice;
+          const job = {
+            repository: scope.repository,
+            revision: execFileSync("git", ["-C", REPO, "rev-parse", "origin/main"], { encoding: "utf8", env: safeAdapterEnv() }).trim(),
+            permitted_work: { objective: slice.objective, definition_of_done: slice.definition_of_done,
+              scope_boundary: slice.scope_boundary, forbidden_change_refs: slice.forbidden_change_refs,
+              actions: envelope.request.allowed_actions, resource_refs: slice.declared_resource_refs,
+              component_refs: slice.declared_component_refs, paths: scope.authorized_paths },
+            checks: slice.planned_checks,
+          };
+          const result = await runAdapter(job);
+          const outcome = result.outcome;
+          // Retain the existing database history format at its write boundary.
+          return {
+            schema_version: "engineering-slice-receipt.v1", envelope_digest: canonicalDigest(envelope),
+            attempt_id: task.attempt_id, slice_ref: task.slice_ref, plan_digest: task.plan_digest,
+            attribution: { actor_ref: envelope.server_binding.identity.agent_principal_id,
+              session_ref: envelope.agent_session.id, adapter_ref: envelope.server_binding.adapter.adapter_id },
+            planned_resource_refs: slice.declared_resource_refs, actual_resource_refs: result.permitted_work.resource_refs,
+            planned_component_refs: slice.declared_component_refs, actual_component_refs: result.permitted_work.component_refs,
+            checks: result.checks, outcome: outcome.status, artifact_refs: outcome.artifact_refs,
+            evidence_refs: outcome.evidence_refs, source_evidence: outcome.source_evidence, deviations: [],
+            reset_reconstruction: { fresh_session: true, inherited_transcript_used: false,
+              reconstruction_free: false, remediation_action: "Job results do not measure reconstruction" },
+            executor_claim: { claim_state: "executor_claim", claimed_by: "codex", claimed_at: new Date().toISOString() },
+            independent_verification_required: true,
+          };
+        },
       });
       // This is the operator readback: references and states only, never model
       // text, task content, or a credential.

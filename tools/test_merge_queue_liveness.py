@@ -43,7 +43,6 @@ EFFECTS = (
     Effect('files', (('migrate_holds', 'pages'),), 'migration'),
     Effect('create_label', (('migrate_holds', 'gh'),), 'migration'),
     Effect('apply_label', (('migrate_holds', 'api'),), 'migration'),
-    Effect('board', (('flush_events', 'command'),)),
 )
 
 
@@ -72,8 +71,6 @@ def operation(argv):
     if argv[0] == 'git' and 'fetch' in argv:
         name = Path(argv[argv.index('-C') + 1]).name.removesuffix('.git')
         return 'fetch', 'jbookout/' + name, None
-    if len(argv) > 1 and argv[1].endswith('/tools/progress_board.py'):
-        return 'board', None, None
     return None
 
 
@@ -118,7 +115,7 @@ class RunLoop:
                 raise (mq.ReadRejected if read else mq.ActionRejected)('injected persistent external rejection')
             raise OSError('injected persistent external failure')
         if argv[0] != 'gh':
-            return '' if op[0] == 'board' else self.commands(argv, **kwargs)
+            return self.commands(argv, **kwargs)
         a = argv[1:]
         self.f.data['calls'].append(a)
         name, repo, n = op
@@ -317,8 +314,6 @@ class LivenessTests(unittest.TestCase):
                         recovered = (mq.REPOS[0], 1) in {(repo, n) for repo, n, _ in loop.merged}
                         visible = any(e['detail'] and any(word in (e['outcome'] + e['detail']).lower() for word in ('exhaust', 'blocked', 'held')) for e in events)
                         self.assertTrue(recovered or visible, f'Entry silently stuck: {dict(row)}')
-                        if effect.name == 'board':
-                            self.assertIn('exhaust', (f.state / 'queue.log').read_text().lower())
                         self.assertGreaterEqual(loop.discoveries, 4)
                         self.assertGreaterEqual(loop.polls, 4)
                     finally:

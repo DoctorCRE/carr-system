@@ -427,7 +427,7 @@ class ReplayTests(unittest.TestCase):
                              reason="failure", next_action="retry")
             self.assertEqual(run.call_args.kwargs["env"]["PROGRESS_BOARD_LOCAL_ONLY"], "1")
             self.assertIn("--receipt", run.call_args.args[0])
-            self.assertIn("--defer-refresh", run.call_args.args[0])
+            self.assertNotIn("--defer-refresh", run.call_args.args[0])
 
     def test_clear_without_recovery_retires_only_exact_generated_watchdog_card(self):
         import job_watchdog as w
