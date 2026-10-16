@@ -15,5 +15,37 @@
     "Glob",
     "WebFetch",
     "WebSearch"
-  ]
+  ],
+  "missing_script_policy": {
+    "_note": "Shared hook classification. hook-command-selftest.py executes every template against these lists. Safety Stop hooks terminate immediately with a named error; the failure limit is one. Delegation is observation-only telemetry. Continuity, presence, machine setup and watchdog digests are optional.",
+    "safety": [
+      "hooks/bash-write-gate.py",
+      "hooks/canonical-edit-gate.py",
+      "hooks/costar-lane-gate.py",
+      "hooks/draft-export-gate.py",
+      "hooks/executor-tier-gate.py",
+      "hooks/gate-integrity.py",
+      "hooks/github-burst-guard.py",
+      "hooks/guard-unattended.py",
+      "hooks/lint-gate.py",
+      "hooks/model-floor-gate.py",
+      "hooks/one-repo-gate.py",
+      "hooks/record-home-gate.py",
+      "hooks/rule-boot-gate.py",
+      "hooks/rule-pack-preuse-reselection.py",
+      "hooks/scheduled-run-record.py",
+      "hooks/weekend-quiet-gate.py",
+      "hooks/write-effect-check.py"
+    ],
+    "optional": [
+      "hooks/delegation-gate.py",
+      "hooks/job-watchdog-digest.py",
+      "hooks/machine-converge.py",
+      "hooks/session-presence-hook.py",
+      "hooks/worktree-self-plumb.py",
+      "ops/claude-continuity-hook.py",
+      "ops/codex-continuity-hook.py"
+    ],
+    "safety_stop_failure_limit": 1
+  }
 }
