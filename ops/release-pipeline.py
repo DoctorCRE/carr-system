@@ -1545,6 +1545,8 @@ class Pipeline:
         try:
             self.wrangler_auth()
         except StepFailed as failure:
+            if failure.step not in {"credential-missing", "wrangler-auth"}:
+                raise
             self.out(f"  prerequisite still unavailable: {failure.step}; log {failure.log or '-'}")
             return False
         return True
