@@ -175,7 +175,9 @@ def main(argv=None):
             time.sleep(5)
     print("Verified exact CARR staging source and synthetic normal session", flush=True)
     if args.app_repo:
-        checked_run(["node", "scripts/e2e-staging/deploy-app.mjs", "--source-sha", args.app_sha],
+        checked_run(["npm", "run", "build"], cwd=args.app_repo,
+                    env={key: value for key, value in child_env.items() if key != "CLOUDFLARE_API_TOKEN"})
+        checked_run(["node", "scripts/release-staging.mjs", "--source-sha", args.app_sha],
                     cwd=args.app_repo, env=child_env)
         print("DoctorCRE staging candidate deployed at " + args.app_sha, flush=True)
     return 0

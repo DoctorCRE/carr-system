@@ -72,6 +72,31 @@ class StagingSessionTests(unittest.TestCase):
                 with self.assertRaises(MODULE.StagingRefusal):
                     MODULE.main(arguments)
 
+    def test_app_candidate_uses_standard_publisher_after_credential_free_artifact_build(self):
+        app_sha = "b" * 40
+        app_repo = Path("/synthetic/doctorcre-app")
+        calls = []
+
+        def run(args, **kwargs):
+            calls.append((args, kwargs))
+            return "https://github.com/jbookout/doctorcre-app.git\n" if args[:3] == ["git", "remote", "get-url"] else ""
+
+        with patch.object(MODULE, "source_identity", side_effect=[SHA, app_sha]), \
+                patch.object(MODULE, "checked_run", side_effect=run), \
+                patch.object(MODULE, "load_secret", return_value=SECRET), \
+                patch.object(MODULE, "load_carr_tokens", return_value={"CLOUDFLARE_API_TOKEN": TOKEN}), \
+                patch.object(MODULE, "provision_and_deploy"), patch.object(MODULE, "smoke"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(MODULE.main(["--apply", "--source-sha", SHA,
+                                         "--app-repo", str(app_repo), "--app-sha", app_sha]), 0)
+        build, publish = calls[-2:]
+        self.assertEqual(build[0], ["npm", "run", "build"])
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", build[1]["env"])
+        self.assertEqual(publish[0], ["node", "scripts/release-staging.mjs", "--source-sha", app_sha])
+        self.assertEqual(publish[1]["env"]["CLOUDFLARE_API_TOKEN"], TOKEN)
+        self.assertEqual(build[1]["cwd"], app_repo)
+        self.assertEqual(publish[1]["cwd"], app_repo)
+
     def test_config_refuses_production_and_shared_kv(self):
         source = (REPO / "mcp-server/wrangler.toml").read_text()
         MODULE.validate_config(source)
