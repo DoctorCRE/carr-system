@@ -20,14 +20,14 @@ session that improvises files is the failure this whole build exists to end.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from migration_source import migration_names, read_migration
-
 import json
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from migration_source import migration_names, read_migration
 from lib.hook_runtime import decision, run, Event
 
 PACK_DELIVERY_RAIL = (
@@ -283,10 +283,11 @@ def _seed_evidence_rows(repo=None):
     import re
     if repo is None:
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    migration = os.path.join(repo, "migrations", "0125_ai_capability_program.sql")
-    if Path(migration).name not in migration_names(Path(repo)):
+    repository = Path(repo)
+    migration = "0125_ai_capability_program.sql"
+    if migration not in migration_names(repository):
         return []
-    sql = read_migration(Path(repo), Path(migration).name)
+    sql = read_migration(repository, migration)
     # The seed rows look like:
     # (N, 'carr-ai-engineering-suite-v1', 'WR-AI-00X', 'Title', 'build', ...,
     #  '{"scope":"...","evidence":["path/a","path/b"],...}'::jsonb, 'joe', 'joe')
