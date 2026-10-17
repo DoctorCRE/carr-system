@@ -162,6 +162,9 @@ with tempfile.TemporaryDirectory(prefix="client-name-warn-hook-") as tmp:
                 "ops/config/review-tiers.v1.json"):
         (hr / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(HERE.parent / rel, hr / rel)
+    # The hook's leak guard is stubbed: it needs a corpus and a gitleaks download.
+    (hr / "security").mkdir()
+    (hr / "security" / "leak_guard.py").write_text("import sys\nsys.stdin.read()\n")
     subprocess.run(["git", "init", "-q", "-b", "main", str(hr)], check=True, env=ENV)
     git(hr, "config", "user.email", "selftest@example.invalid")
     git(hr, "config", "user.name", "selftest")

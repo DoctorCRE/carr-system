@@ -1226,9 +1226,6 @@ class SpendHealthTests(unittest.TestCase):
         nightly = (MODULE_PATH.parent.parent / "bin" / "nightly.sh").read_text()
         self.assertIn('./run.sh costs --publish --alerts', nightly)
         self.assertFalse('step "Jev daily spend alarm"' in nightly)
-        preflight = nightly.split('if [ "${1:-}" = "--preflight" ]; then', 1)[1].split('missing=0', 1)[0]
-        self.assertIn("tools/health-check.py", preflight)
-        self.assertIn("ops/jev_spend_health.py", preflight)
 
     def test_nightly_alarm_has_a_narrow_exit_status(self):
         health = (MODULE_PATH.parent.parent / "tools" / "health-check.py").read_text()

@@ -504,32 +504,6 @@ class AlarmMailTests(unittest.TestCase):
 
 
 
-class ChangeTollsPredicateTests(unittest.TestCase):
-    def test_repeated_changed_paths_are_pure_and_do_not_transport(self):
-        spec = importlib.util.spec_from_file_location('tolls_under_test', REPO/'ops/jev_change_tolls.py')
-        tolls = importlib.util.module_from_spec(spec); spec.loader.exec_module(tolls)
-        class Explosive:
-            def __getattr__(self, name): raise AssertionError(name)
-        state = {'files':['ops/ci.sh']}
-        first = tolls.owed(state, client=Explosive())
-        self.assertEqual(first,tolls.owed(state,client=Explosive()))
-        self.assertEqual([n for _,n,_ in first],['ci_sh_reseal','inventory_reseal'])
-
-    def test_collector_reads_changed_content_without_model(self):
-        spec = importlib.util.spec_from_file_location('tolls_collector', REPO/'ops/jev_change_tolls.py')
-        tolls = importlib.util.module_from_spec(spec); spec.loader.exec_module(tolls)
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)
-            subprocess.run(['git','init','-q',tmp],env=ENV,check=True)
-            subprocess.run(['git','remote','add','origin',tmp],cwd=tmp,env=ENV,check=True)
-            (root/'fixture.py').write_text('old')
-            subprocess.run(['git','add','fixture.py'],cwd=tmp,env=ENV,check=True)
-            subprocess.run(['git','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],cwd=tmp,env=ENV,check=True)
-            (root/'fixture.py').write_text('first')
-            first=tolls.change(base='HEAD',repo=tmp)
-            (root/'fixture.py').write_text('second')
-            second=tolls.change(base='HEAD',repo=tmp)
-            self.assertNotEqual(first['file_content_sha256'],second['file_content_sha256'])
 
 
 class WorkerBreakerTests(Harness):

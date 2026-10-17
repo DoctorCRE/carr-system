@@ -337,7 +337,6 @@ def gap_evidence(doc, classes_path=CLASSES_PATH):
     paths.append(Path(classes_path))
     return {
         "schema": "rule-boot-route-gap-evidence/v1",
-        "baseline_ref": json.loads((root / "evals/rule-delivery/receipt.json").read_text())["evidence"]["baseline"]["ref"],
         "method": "Subtract candidate.delivered from every frozen v2 gold and hard-case required set, "
                   "then keep class B/C. Count train + test for retention; acceptable-only hard labels "
                   "are excluded. Boot availability is excluded from gap derivation.",

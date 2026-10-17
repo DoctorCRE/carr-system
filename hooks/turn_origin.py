@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
 """One answer to "did a partner actually type this", for every gate that asks.
 
-WHY THIS FILE EXISTS. Two gates asked the same question and gave different
-answers, and the wrong one shipped. ledger-sweep.py worked it out the expensive
-way — patched four times in nine days as each new injected shape defeated it —
-and ended at a POSITIVE test: is there evidence the partner typed this, with
-anything else treated as not his. weekend-quiet-gate.py asked the same question
-with a guessed allowlist of origin kinds, accepting "user" and "keyboard", which
-the harness has never written. Measured across sixteen real transcripts, that
-allowlist matched ZERO of 3,271 candidate records, so its carve-out — a partner
-typing ends the weekend quiet — could not fire once (defect 16291f00).
-
-The knowledge that would have prevented it was sitting in the sibling file the
-whole time, in a field nobody had read. That is the shape rule a8c55a47 names: a
-manual path and an automated path that do the same job must be the same code.
-Two implementations of one question do not double the enforcement; they let the
-weaker one be wrong on its own for a week.
-
-WHAT THE CALLERS GET. is_harness_injected is lifted from ledger-sweep verbatim,
-including the counted-transcript evidence in its docstring, because that
-evidence is the argument for the design and rewriting it would lose the
-provenance. partner_typed_this is the inverse, for callers that want the
-positive form.
+is_harness_injected rejects injected transcript entries.
+partner_typed_this is the inverse, for callers that want the positive form.
 
 CHANGE THIS FILE AGAINST A TRANSCRIPT, NEVER AGAINST AN ASSUMPTION. Every
 correction recorded below was made by counting records in a live session, and

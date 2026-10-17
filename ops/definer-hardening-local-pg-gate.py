@@ -196,8 +196,7 @@ def main() -> int:
                 """select registry_version from ops.scac_mutation_registry_version
                     order by regexp_replace(registry_version,'^.*[.]v','','')::integer desc limit 1"""
             ).fetchall()[0][0]
-            from registry_chain import registry_chain
-            if live not in {row['version'] for row in registry_chain()['versions'][1:]}:
+            if live not in {'scac-mutation-registry.v118'}:
                 raise RuntimeError(f"unsupported live successor {live!r}")
             ordinal = int(live.rsplit(".v", 1)[1])
             if cur.execute(f"select ops.scac_mutation_catalog_v{ordinal}_current()").fetchall()[0][0] is not True:

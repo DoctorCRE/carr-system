@@ -1,4 +1,4 @@
-import { readRegistryArtifact } from '../../ops/registry-history.mjs';
+import { readFileSync } from 'node:fs';
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -76,7 +76,7 @@ test("broker feedback distinguishes removed projection from unavailable read", a
 });
 
 test("migration binds feedback to sealed current projection, member property, active grant and idempotent request", () => {
-  const migration = readRegistryArtifact(path.join(root, "migrations/0749_tour_client_feedback.sql"), "utf8");
+  const migration = readFileSync(path.join(root, "migrations/0749_tour_client_feedback.sql"), "utf8");
   for (const name of ["write_tour_share_shortlist", "write_tour_share_comment", "read_tour_share_feedback", "read_tour_feedback"])
     assert.match(migration, new RegExp(`create (?:or replace )?function ops\\.${name}\\(`, "i"));
   assert.match(migration, /tour_share_session_grant\(p_session_digest,'shortlist'\)/);

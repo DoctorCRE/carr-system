@@ -30,15 +30,23 @@ const state = {
   source_cursor: { byte_offset: 1234, compaction_generation: 2 },
 };
 
-test("surface tokens are locked to their three continuity verbs", () => {
+test("surface tokens are locked to their checkpoint and recovery verbs", () => {
   const request = new Request("https://api.doctorcre.com/mcp?profile=full");
   assert.equal(profileForActor(actor, request), "claude-continuity");
   assert.equal(allowedIn("claude-continuity", "claude-checkpoint", { write: true }), true);
   assert.equal(allowedIn("claude-continuity", "log-activity", { write: true }), false);
   const codex = { continuity_surface: "codex", via: "codex-continuity-token" };
   assert.equal(profileForActor(codex, request), "codex-continuity");
-  assert.equal(allowedIn("codex-continuity", "codex-record-event", { write: true }), true);
-  assert.equal(allowedIn("codex-continuity", "claude-record-event", { write: true }), false);
+  assert.equal(allowedIn("codex-continuity", "codex-checkpoint", { write: true }), true);
+  assert.equal(allowedIn("codex-continuity", "claude-checkpoint", { write: true }), false);
+});
+
+test("retired continuity receipt verbs are absent from the registry and surface profiles", () => {
+  for (const verb of ["claude-record-event", "codex-record-event"]) {
+    assert.equal(TOOLS[verb], undefined);
+    for (const profile of ["claude-continuity", "codex-continuity"])
+      assert.equal(allowedIn(profile, verb, { write: true }), false);
+  }
 });
 
 function tools() {
@@ -53,13 +61,11 @@ function tools() {
 function memoryClient() {
   let leaf = null;
   let checkpoint = null;
-  const events = [];
   const queries = [];
   return {
     queries,
     get leaf() { return leaf; },
     get checkpoint() { return checkpoint; },
-    events,
     async query(sql, params = []) {
       queries.push({ sql, params });
       if (sql === "select id from actor where slug=$1")
@@ -101,20 +107,6 @@ function memoryClient() {
         return { rows: [checkpoint] };
       }
       if (sql.startsWith("insert into claude_continuity_revision")) return { rows: [] };
-      if (sql.startsWith("insert into claude_continuity_event")) {
-        const existing = events.find(event => event.organization_tenant_id === params[0] &&
-          event.surface_principal_actor_id === params[1] && event.idempotency_key === params[9]);
-        if (existing) return { rows: [] };
-        const event = { id: `event-${events.length + 1}`, organization_tenant_id: params[0],
-          surface_principal_actor_id: params[1], leaf_id: params[2], event_type: params[3],
-          cursor: JSON.parse(params[4]), transcript_digest: params[5], observed_at: params[6],
-          telemetry: params[7] == null ? null : JSON.parse(params[7]), checkpoint_version: params[8],
-          idempotency_key: params[9] };
-        events.push(event);
-        return { rows: [event] };
-      }
-      if (sql.startsWith("select * from claude_continuity_event"))
-        return { rows: events.filter(event => event.idempotency_key === params[2]) };
       throw new Error(`unexpected SQL: ${sql}`);
     },
   };
@@ -155,34 +147,28 @@ test("Claude recovery fails closed when its authenticated actor row is unavailab
 
 test("every Claude continuity verb refuses wrong-surface, shared, and unverified credentials before SQL", async () => {
   const client = { query: async () => { throw new Error("authority refusal must precede SQL"); } };
-  const args = { ...base, idempotency_key: "event-1", expected_version: 0, state,
-    event_type: "pre_compact", cursor: {}, observed_at: state.source_observed_at };
+  const args = { ...base, idempotency_key: "checkpoint-1", expected_version: 0, state };
   for (const badActor of [
     { ...actor, continuity_surface: "codex" },
     { ...actor, continuity_surface: undefined, via: "local-token" },
     { ...actor, native_agent_verified: false },
     { ...actor, slug: "codex" },
   ]) {
-    for (const verb of ["claude-checkpoint", "claude-read-recovery", "claude-record-event"])
+    for (const verb of ["claude-checkpoint", "claude-read-recovery"])
       await assert.rejects(() => tools()[verb].handler(client, badActor, args),
         error => error.payload?.error === "claude_native_principal_required");
   }
 });
 
-test("the first lifecycle write establishes one immutable leaf binding for events and checkpoints", async () => {
+test("the first checkpoint establishes an immutable leaf binding", async () => {
   const client = memoryClient();
-  await tools()["claude-record-event"].handler(client, actor, { ...base,
-    idempotency_key: "event-1", event_type: "user_prompt_submit", cursor: { offset: 1 },
-    observed_at: state.source_observed_at,
+  await tools()["claude-checkpoint"].handler(client, actor, { ...base,
+    idempotency_key: "checkpoint-1", expected_version: 0, state,
   });
-  await assert.rejects(() => tools()["claude-checkpoint"].handler(client, actor, { ...base,
-    project_affinity: "repo:other", idempotency_key: "checkpoint-1", expected_version: 0, state,
-  }), error => error.payload?.error === "claude_continuity_binding_conflict");
-  await assert.rejects(() => tools()["claude-record-event"].handler(client, actor, { ...base,
-    native_agent_id: "agent-other", idempotency_key: "event-2", event_type: "pre_compact", cursor: {},
-    observed_at: state.source_observed_at,
-  }), error => error.payload?.error === "claude_continuity_binding_conflict");
-  assert.equal(client.events.length, 1);
+  for (const changed of [{ project_affinity: "repo:other" }, { native_agent_id: "agent-other" }])
+    await assert.rejects(() => tools()["claude-checkpoint"].handler(client, actor, { ...base,
+      ...changed, idempotency_key: "checkpoint-2", expected_version: 1, state,
+    }), error => error.payload?.error === "claude_continuity_binding_conflict");
 });
 
 test("cwd and model are telemetry while transcript digest and agent leaf separate identity", async () => {
@@ -199,9 +185,9 @@ test("cwd and model are telemetry while transcript digest and agent leaf separat
   assert.equal(client.leaf.latest_model_id, "claude-opus-4-1");
 
   const distinct = memoryClient();
-  await tools()["claude-record-event"].handler(distinct, actor, { ...base,
+  await tools()["claude-checkpoint"].handler(distinct, actor, { ...base,
     transcript_path_digest: "b".repeat(64), native_agent_id: "subagent-2", idempotency_key: "event-subagent",
-    event_type: "post_tool_use", cursor: { offset: 3 }, observed_at: state.source_observed_at,
+    expected_version: 0, state,
   });
   assert.equal(distinct.leaf.transcript_path_digest, "b".repeat(64));
   assert.equal(distinct.leaf.native_agent_id, "subagent-2");
@@ -220,21 +206,10 @@ test("checkpoint CAS is JSON-safe and compaction generation never regresses", as
   error => error.payload?.error === "claude_checkpoint_expected_version_invalid");
 });
 
-test("event replay is idempotent and a changed payload is refused", async () => {
-  const client = memoryClient();
-  const args = { ...base, idempotency_key: "event-replay", event_type: "post_tool_use",
-    cursor: { b: 2, a: 1 }, observed_at: state.source_observed_at, telemetry: { duration_ms: 12 } };
-  const first = await tools()["claude-record-event"].handler(client, actor, args);
-  const replay = await tools()["claude-record-event"].handler(client, actor, { ...args, cursor: { a: 1, b: 2 } });
-  assert.equal(first.event.id, replay.event.id);
-  await assert.rejects(() => tools()["claude-record-event"].handler(client, actor,
-    { ...args, event_type: "stop" }), error => error.payload?.error === "claude_event_key_conflict");
-});
-
 test("multibyte native leaf identifiers are refused before database access", async () => {
   const args = { ...base, native_agent_id: "🧭".repeat(200), idempotency_key: "invalid-leaf",
-    event_type: "pre_compact", cursor: {}, observed_at: state.source_observed_at };
-  await assert.rejects(() => tools()["claude-record-event"].handler(
+    expected_version: 0, state };
+  await assert.rejects(() => tools()["claude-checkpoint"].handler(
     { query: async () => { throw new Error("must not query"); } }, actor, args),
   error => ["claude_continuity_field_invalid", "claude_native_identity_invalid"].includes(error.payload?.error) &&
     error.payload?.field === "native_agent_id");
@@ -259,45 +234,44 @@ test("worst-case capsule reserves all mandatory recovery sections before optiona
     assert.match(capsule, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
-for (const prompt of ["checkpoint_request", "_activation_envelope"]) {
-  test(`${prompt} instructs an accepted registered checkpoint call`, async () => {
-    const rendered = spawnSync("python3", ["-c", `
-import importlib.util,json,sys
+test("the SessionStart activation instructs an accepted registered checkpoint call", async () => {
+  const rendered = spawnSync("python3", ["-c", `
+import importlib.util,json,sys,tempfile
 from pathlib import Path
 path = Path("ops/claude-continuity-hook.py")
 spec = importlib.util.spec_from_file_location("continuity_hook", path)
 hook = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(hook)
-hook.unsent_receipts = lambda: 0
-identity,cursor = json.load(sys.stdin)
-print(getattr(hook, sys.argv[1])(identity,cursor,{"ok":True,"found":False,"checkpoint":None}))
-`, prompt], { cwd: new URL("../../", import.meta.url),
-      input: JSON.stringify([base, state.source_cursor]), encoding: "utf8" });
-    assert.equal(rendered.status, 0, rendered.stderr);
-    const argumentLine = rendered.stdout.split("\n").find(line => line.startsWith("arguments="));
-    assert.ok(argumentLine, "the hook must publish complete MCP arguments as JSON");
-    const args = JSON.parse(argumentLine.slice("arguments=".length));
-    assert.equal(args.binding, undefined);
-    for (const field of TOOLS["claude-checkpoint"].inputSchema.required)
-      assert.ok(Object.hasOwn(args, field), `missing required field ${field}`);
-    assert.equal(args.session_id, base.session_id);
-    assert.equal(args.transcript_path_digest, base.transcript_path_digest);
-    assert.equal(args.expected_version, 0);
-    assert.equal(args.compaction_generation, 0);
-    assert.ok(args.idempotency_key);
-    assert.deepEqual(args.state.source_cursor, { byte_offset: 1234 });
-    args.state.objective = state.objective;
-    args.state.next_action = state.next_action;
-    await assertRegisteredToolInput("claude-checkpoint", TOOLS["claude-checkpoint"], args);
-    const client = memoryClient();
-    const accepted = await tools()["claude-checkpoint"].handler(client, actor, args);
-    assert.equal(accepted.ok, true);
-    assert.equal(accepted.checkpoint.checkpoint_version, 1);
-    const recovered = await tools()["claude-read-recovery"].handler(client, actor, base);
-    assert.equal(recovered.found, true);
-    assert.equal(recovered.checkpoint.state.objective, state.objective);
-  });
-}
+identity,offset = json.load(sys.stdin)
+with tempfile.NamedTemporaryFile() as transcript:
+  transcript.write(b"x" * offset); transcript.flush()
+  print(hook.activation(identity, Path(transcript.name), {"ok":True,"found":False,"checkpoint":None}))
+`], { cwd: new URL("../../", import.meta.url),
+    input: JSON.stringify([base, state.source_cursor.byte_offset]), encoding: "utf8" });
+  assert.equal(rendered.status, 0, rendered.stderr);
+  const argumentLine = rendered.stdout.split("\n").find(line => line.startsWith("arguments="));
+  assert.ok(argumentLine, "the hook must publish complete MCP arguments as JSON");
+  const args = JSON.parse(argumentLine.slice("arguments=".length));
+  assert.equal(args.binding, undefined);
+  for (const field of TOOLS["claude-checkpoint"].inputSchema.required)
+    assert.ok(Object.hasOwn(args, field), `missing required field ${field}`);
+  assert.equal(args.session_id, base.session_id);
+  assert.equal(args.transcript_path_digest, base.transcript_path_digest);
+  assert.equal(args.expected_version, 0);
+  assert.equal(args.compaction_generation, 0);
+  assert.ok(args.idempotency_key);
+  assert.deepEqual(args.state.source_cursor, { byte_offset: 1234 });
+  args.state.objective = state.objective;
+  args.state.next_action = state.next_action;
+  await assertRegisteredToolInput("claude-checkpoint", TOOLS["claude-checkpoint"], args);
+  const client = memoryClient();
+  const accepted = await tools()["claude-checkpoint"].handler(client, actor, args);
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.checkpoint.checkpoint_version, 1);
+  const recovered = await tools()["claude-read-recovery"].handler(client, actor, base);
+  assert.equal(recovered.found, true);
+  assert.equal(recovered.checkpoint.state.objective, state.objective);
+});
 
 test("the reported nested binding shape is refused by the registered schema", async () => {
   await assert.rejects(() => assertRegisteredToolInput("claude-checkpoint", TOOLS["claude-checkpoint"], {

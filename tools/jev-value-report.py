@@ -88,7 +88,6 @@ NATURE = {
     "judge:post_write_task_fit_shadow": "per_turn",
     "judge:unattributed": "per_turn",
     "jev_build_advisory": "per_turn",
-    "jev_change_tolls": "per_turn",
     "legacy_unattributed": "per_turn",
     "judge:supervise.escalation_router": "judgment_point",
     "judge:supervise.effort_picker": "judgment_point",

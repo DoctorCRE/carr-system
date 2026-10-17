@@ -245,7 +245,13 @@ def main() -> int:
           and "finish all\nthree within one hour" in rollback_runbook
           and "within 24\nhours of the completed bundle" in rollback_runbook,
           "the typed bundle and approval both fail closed when their timing windows expire")
-    check("8d. only a DB-prepared typed recovery step can temporarily shrink",
+    check("8d. reviewed retirements use the same guard in CI and deploy",
+          'sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS_REGISTRY"' in source
+          and 'sh ops/verb-count.sh "$REPO/mcp-server" --check-retirements "$marker"'
+          in (REPO / "ops/ci.sh").read_text(encoding="utf-8")
+          and "ops/config/retired-verbs.v1.json" in source,
+          "CI and deploy must enforce the same committed retirement ledger")
+    check("8e. only DB-prepared typed recovery can waive an unlisted shrink",
           "--allow-shrink" not in source
           and '[ "$RECOVERY_STEP" != "standalone" ] || fail "standalone deploys cannot authorize verb shrink."' in source
           and 'staging-attempt prepare' in source
@@ -253,8 +259,9 @@ def main() -> int:
           and 'current_before|prior|current_after)' in source
           and 'restore_only)' in source
           and "exact prepared typed recovery step" in source
-          and "There is no `--allow-shrink` override" in rollback_runbook,
-          "a standalone/source deploy or manual flag can still waive verb loss")
+          and "There is no `--allow-shrink` override" in rollback_runbook
+          and '[ "$LOST" -le 0 ] || [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]' in source,
+          "an unlisted shrink can escape the exact staging recovery authorization")
 
     check("9. restore-only is a separate staging writer, not a fourth bundle step",
           '"restore_only"' in source

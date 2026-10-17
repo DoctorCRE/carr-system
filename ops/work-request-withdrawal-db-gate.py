@@ -23,13 +23,13 @@ WHAT IT PROVES, in the order a reader would want it:
                            the capability erasing the record it exists to write
   captured only, for a decline
                            a triaged request cannot be declined, at two layers
-  triaged supersession     0883: a triaged request with nothing downstream is
+  triaged supersession     0888: a triaged request with nothing downstream is
                            superseded, keeps its triage fields, and its triage
                            receipt stays readable through superseded_by; one
                            with a plan is refused by NAME, at the function and
                            again at the trigger for a forged receipt
   the receipts are evidence
-                           withdrawal and (since 0883) triage receipts are
+                           withdrawal and (since 0888) triage receipts are
                            append-only by TRIGGER, not by a table comment
   the pointers hold        no self-supersession, no successor that is itself
                            withdrawn, no non-sourced successor, no two-row cycle
@@ -356,7 +356,7 @@ def main() -> int:
             refuses(cur, "select ops.decline_sourced_work_request(%s,2,'r','joe',%s)",
                     (real, str(uuid.uuid4())), "withdrawing at a version that is not the captured one")
 
-            # --- 0883: a triaged request with nothing downstream ------------------
+            # --- 0888: a triaged request with nothing downstream ------------------
             retired, successor, planned = capture(cur, "Retired"), capture(cur, "Successor"), capture(cur, "Planned")
             for ref in (retired, planned):
                 triage(cur, ref)
@@ -396,13 +396,13 @@ def main() -> int:
                 refuses_named(cur, f"insert into {table} ({column}) values (%s)", (value,),
                               "work_request_evidence_not_live:", f"new evidence on a retired request in {table}")
 
-            # --- 0883: the triage receipt is evidence -----------------------------
+            # --- 0888: the triage receipt is evidence -----------------------------
             refuses_named(cur, "update ops.work_request_triage_receipt set classification='safety_review'",
                           (), "ops.work_request_triage_receipt is append-only", "rewriting a triage receipt")
             refuses_named(cur, "delete from ops.work_request_triage_receipt", (),
                           "ops.work_request_triage_receipt is append-only", "deleting a triage receipt")
 
-            # --- 0883: a triaged request with a plan is refused by name -----------
+            # --- 0888: a triaged request with a plan is refused by name -----------
             runbook = runbook_fixture(cur, actor)
             cur.execute(
                 "select * from ops.propose_sourced_work_request_plan(%s,2,'Bounded scope',%s,%s,"

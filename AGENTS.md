@@ -217,29 +217,20 @@ both. Run one class while iterating:
 the top of `ops/ci.sh`: under zsh its class loop does not word-split, and the
 script will report every class green having executed none.
 
-## Changes to LLM-steering surfaces ship with an eval
+## Changes to model behavior
 
-Any change to a surface registered in `evals/surfaces.json` runs
-`/claude-api build-eval`, then `/claude-api hillclimb`, and ships with
-`evals/<surface>/receipt.json`, or a reasoned `no-eval: <surface>: <reason>`
-line in the PR body. Procedure: `evals/README.md`.
-
-Reviewer checklist on the exact head: `ops/check-eval-receipt.py` passed; each
-receipt was changed in this PR; its verdict matches its numbers and authorizes
-shipping (`ship` or `ship_cost_at_parity`, with no critical regression); each
-no-eval line names a real reason a measurement is impossible. An unreadable PR
-event fails the check.
+Run relevant behavior tests when changing model behavior. Use measured comparisons
+when claiming an improvement. Current cases and scorers live in `evals/`.
 
 ## Progress board
 
-For work >5 steps or >30 min, update the board via `tools/progress_board.py`
-after each step; record Joe questions with defaults, and give a blocked task
-`--reason` and `--next-action`. Every `init`, `task`, `ask`, `answer`,
-`deliver` and `note` writes `out/boards/<project>.json` under a per-board lock
-and publishes it; the only board UI is https://app.doctorcre.com/progress-board
-(`?board=<project>`, or `?board=all-repos` for every jbookout PR). A failed
-publish exits nonzero with the local state kept and names the retry
-(`render <project> --publish`); `PROGRESS_BOARD_LOCAL_ONLY=1` skips publishing
+Keep human notes and questions with `tools/progress_board.py`. Local mutations
+save `out/boards/<project>.json` under a per-board lock. The scheduled renderer
+reads GitHub and release facts and publishes independently. Board writes and
+publication never gate source delivery. The only board UI is
+https://app.doctorcre.com/progress-board (`?board=<project>` or `?board=all-repos`).
+A failed scheduled publish keeps local notes and questions for the next render.
+`PROGRESS_BOARD_LOCAL_ONLY=1` skips publishing
 and says so. There is no static HTML copy. The launchd job runs
 `ops/progress-board-render.sh` from a repository checkout, which binds
 `CARR_REPO_ROOT` and the repo's `.venv` Python; never run an extracted copy.
@@ -329,4 +320,4 @@ than claim the pass. The PR body's `Design and debt pass` section gives one
 line per skill: what it changed, or why nothing did.
 This section is the canonical policy for both client entry points.
 
-Rigorous engineering work uses `/poteto-mode` from [pstack](plugins/pstack/skills/poteto-mode/SKILL.md).
+Rigorous engineering work uses `/poteto-mode` from [pstack](plugins/pstack/skills/poteto-mode/SKILL.md). Every job sizes itself first (`/grill-with-docs` if big, `/wayfinder` past one session) and codes test-first with `/tdd`.

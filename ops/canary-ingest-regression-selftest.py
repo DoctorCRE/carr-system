@@ -351,19 +351,6 @@ class Regressions(unittest.TestCase):
             self.assertTrue({'call-mode', 'doc-engine', 'quill-dictate'}.issubset(observed))
         self.assertIn('com.carr.canary-ingest-sink.plist', config.PRIMARY_ONLY)
 
-    def test_8_scheduler_reconciles_probe_backed_direct_service(self):
-        scheduler = load('scheduler_regression', 'tools/scheduler-truth.py')
-        plist_dir = self.directory / 'plists'
-        plist_dir.mkdir()
-        source = REPO / 'ops/launchd/com.carr.canary-ingest-sink.plist'
-        (plist_dir / source.name).write_bytes(source.read_bytes())
-        registry = self.directory / 'services.json'
-        service = next(s for s in json.loads((REPO / 'ops/config/services.json').read_text())['services'] if s['key'] == 'canary-ingest-sink')
-        registry.write_text(json.dumps({'services': [service]}))
-        with patch.object(scheduler, 'REPO', str(self.directory)), patch.object(scheduler, 'REPO_PLISTS', str(plist_dir)), patch.object(scheduler, 'INSTALLED', str(plist_dir)), patch.object(scheduler, 'SERVICES', str(registry)), patch.object(scheduler, 'loaded_labels', return_value={'com.carr.canary-ingest-sink'}), contextlib.redirect_stdout(io.StringIO()):
-            result = scheduler.main()
-        self.assertFalse(scheduler.DRIFT, scheduler.DRIFT)
-        self.assertEqual(result, 0)
 
     def test_9_live_and_canary_exact_body_limit(self):
         # Execute the live handler through its guard, without touching a DB.

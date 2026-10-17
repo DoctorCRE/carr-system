@@ -90,6 +90,12 @@ def decide(payload):
         emit("deny", "RULE BOOT UNVERIFIED: hook input must be an object; repair the adapter.")
         return 0
     event = payload.get("hook_event_name") or "PreToolUse"
+    if event == "SessionStart":
+        from lib.rule_boot_gate import arm_session
+        print(arm_session(payload.get("session_id") or payload.get("sessionId"),
+                          payload.get("source"),
+                          agent_id=payload.get("agent_id") or payload.get("agentId")))
+        return 0
     try:
         if event in ("PostToolUse", "PostToolUseFailure"):
             from lib.rule_boot_gate import observe
@@ -108,6 +114,9 @@ def decide(payload):
 
 
 def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
     return run(decide, parse_error=_parse_error)
 
 

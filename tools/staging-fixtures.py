@@ -26,6 +26,10 @@ FIXTURE_ID = uuid.uuid5(uuid.UUID("80d943c3-53af-4a13-9200-f3d8581a459a"),
                         "carr-clean-staging-replacement-party-v1")
 INVOICE_NAMESPACE = uuid.UUID("4acbfa5b-1f38-47af-aac0-1c4688cfc479")
 EXCLUDED_TOUR_NAMESPACE = uuid.UUID("61c09cb0-19e3-411c-98d8-ea2c962eb3a1")
+RELATIONSHIP_NAMESPACE = uuid.UUID("439206ab-d73a-5c1b-8a20-531e536e5804")
+RELATIONSHIP_SCHEMA = "doctorcre-staging-relationship-fixture.v1"
+RELATIONSHIP_NORTH = "Synthetic Staging QA North"
+RELATIONSHIP_SOUTH = "Synthetic Staging QA South"
 TOUR_TENANT = "carr-internal"
 EMPTY_ASSERTION_SET_DIGEST = "sha256:" + hashlib.sha256(b"[]").hexdigest()
 PLAN_SCHEMA = "doctorcre-staging-records-plan.v1"
@@ -531,7 +535,7 @@ def validate_proof_destination(path: pathlib.Path) -> None:
 
 
 def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
-    """Atomically create a bounded 0600 proof; exact reruns validate but never replace it."""
+    """Atomically create a bounded 0600 proof; matching reruns retain the original."""
     encoded = (json.dumps(proof, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n").encode("ascii")
     if len(encoded) > MAX_PROOF_BYTES:
         raise FixtureRefusal("proof exceeds the bounded size")
@@ -540,7 +544,7 @@ def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
     try:
         existing = _read_private_existing_proof(directory_fd, name)
         if existing is not None:
-            if existing == encoded:
+            if _proof_matches_readback(existing, encoded, proof):
                 return "already-exact"
             raise FixtureRefusal("existing proof does not exactly match this fixture readback")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
@@ -563,7 +567,7 @@ def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
             os.link(temp_name, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd, follow_symlinks=False)
         except FileExistsError:
             existing = _read_private_existing_proof(directory_fd, name)
-            if existing == encoded:
+            if _proof_matches_readback(existing, encoded, proof):
                 return "already-exact"
             raise FixtureRefusal("existing proof does not exactly match this fixture readback")
         except OSError as exc:
@@ -577,6 +581,34 @@ def publish_private_proof(path: pathlib.Path, proof: Mapping[str, Any]) -> str:
         except FileNotFoundError:
             pass
         os.close(directory_fd)
+
+
+def _proof_matches_readback(existing: bytes | None, encoded: bytes, proof: Mapping[str, Any]) -> bool:
+    if existing == encoded:
+        return True
+    if existing is None or proof.get("schema") != RELATIONSHIP_SCHEMA:
+        return False
+    try:
+        retained = json.loads(existing)
+        network = dict(proof["projection"]["response"])
+        previous = retained["projection"]["response"]
+        observed = dt.datetime.strptime(previous["observed_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
+        valid_until = (observed + dt.timedelta(seconds=60)).isoformat(timespec="milliseconds") + "Z"
+        if previous["valid_until"] != valid_until:
+            return False
+        # Rebind freshly read content to the retained observation, then check every field and hash.
+        network.update(observed_at=previous["observed_at"], valid_until=valid_until)
+        projected = _relationship_projection("digest", {"network": network})
+        content_hash = _relationship_digest(network)
+        expected = dict(proof)
+        expected["projection"] = {**proof["projection"], "response": network, "response_sha256": content_hash}
+        expected["projection_evidence"] = {**proof["projection_evidence"],
+            "observed_at": network["observed_at"], "valid_until": valid_until,
+            "response_sha256": projected["response_sha256"],
+            "network_response_sha256": projected["response_sha256"], "content_sha256": content_hash}
+        return retained == expected
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 def build_fixture_proof(plan: Mapping[str, Any], target: Mapping[str, Any],
@@ -797,11 +829,350 @@ def build_vendor_reference_proof(operation_id: uuid.UUID, app_sha: str, carr_sha
     }
 
 
+def relationship_fixture_values(plan: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        run = plan["run"]
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{8,80}", run):
+            raise ValueError("run")
+        if plan["schema"] != PLAN_SCHEMA or plan["origin"] != STAGING_ORIGIN \
+                or plan["state"] != "complete" or plan["inflight"] is not None or plan["current_step"] != "readback":
+            raise ValueError("completion")
+        for pin in ("source_commit", "carr_source_commit"):
+            if not re.fullmatch(r"[0-9a-f]{40}", plan["release"][pin]):
+                raise ValueError("source pair")
+        observed = dt.datetime.strptime(plan["observed_at"], "%Y-%m-%dT%H:%M:%S.%fZ")
+        records, names = plan["records"], plan["names"]
+        ids = {step: str(uuid.UUID(records[step]["id"])) for step in
+               ("party", "client", "deal", "vendor_party", "vendor", "vendor_entry")}
+        if len(set(ids.values())) != len(ids) or ids["party"] != str(FIXTURE_ID) \
+                or records["party"]["name"] != "Synthetic Staging Fixture" \
+                or records["client"]["name"] != "Synthetic Staging Fixture":
+            raise ValueError("identity chain")
+        if records["deal"]["name"] != f"Synthetic staging QA {run} active deal" \
+                or names["deal"] != records["deal"]["name"]:
+            raise ValueError("deal name")
+        keys = {}
+        for step, field in (("client", "client_id"), ("deal", "deal_id"), ("vendor_party", "party_id"),
+                            ("vendor", "vendor_id"), ("vendor_entry", "activity_id")):
+            keys[step] = str(uuid.UUID(plan["keys"][step]))
+            if plan["receipts"][step][field] != ids[step]:
+                raise ValueError("creation receipt")
+        if names["vendor"] != f"QA Vendor {keys['vendor_party']}" \
+                or any(records[step]["name"] != names["vendor"] for step in ("vendor", "vendor_party")):
+            raise ValueError("vendor name")
+        vendor_entry_link = str(uuid.UUID(records["vendor_entry"]["link_id"]))
+    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+        raise FixtureRefusal("relationship plan lacks an exact complete synthetic ownership chain") from exc
+    def identifier(label: str) -> str:
+        return str(uuid.uuid5(RELATIONSHIP_NAMESPACE, f"relationship:{label}:{run}"))
+    destination = {"id": identifier("destination_deal"), "name": f"Synthetic staging QA {run} referred deal",
+                   "client_id": identifier("destination_client"), "party_id": identifier("destination_party")}
+    if set(destination[key] for key in ("id", "client_id", "party_id")) & set(ids.values()):
+        raise FixtureRefusal("relationship destination collides with an original identity")
+    return {"ids": ids, "keys": keys, "destination": destination, "vendor_entry_link": vendor_entry_link,
+            "party_name": f"Synthetic staging QA {run} referred client", "vendor_name": names["vendor"],
+            "provenance": f"fixtures/staging-relationship/{run}", "occurred_on": observed.date().isoformat(),
+            "notes": {role: f"Fictional staging QA {role}_association referral for fixture {run}." for role in ("referral", "vendor")},
+            "attribution_ids": {role: identifier(role + "_attribution") for role in ("referral", "vendor")},
+            "links": [(identifier("referral_association"), ids["party"], destination["party_id"], destination["id"]),
+                      (identifier("vendor_association"), ids["vendor_party"], ids["party"], ids["deal"])]}
+
+
+def _relationship_digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+
+
+def _relationship_select(cur: Any, table: str, fields: Mapping[str, Any], *, lock: bool,
+                         either: bool = False) -> list[dict[str, Any]]:
+    condition = (" or " if either else " and ").join(f"r.{field}=%s" for field in fields)
+    cur.execute(f"select to_jsonb(r) from public.{table} r where {condition}" + (" for update" if lock else ""),
+                tuple(fields.values()))
+    return [row[0] for row in cur.fetchall()]
+
+
+def _relationship_exact(rows: list[dict[str, Any]], expected: Mapping[str, Any], label: str) -> dict[str, Any]:
+    if len(rows) != 1 or any(key not in rows[0] or rows[0][key] != value for key, value in expected.items()):
+        raise FixtureRefusal(f"relationship {label} is absent, ambiguous, or differs from the exact fixture")
+    return rows[0]
+
+
+def _relationship_state(cur: Any, plan: Mapping[str, Any], *, lock: bool) -> dict[str, Any]:
+    values = relationship_fixture_values(plan)
+    ids, destination = values["ids"], values["destination"]
+    cur.execute("select session_user,current_user,current_database()")
+    if tuple(cur.fetchone() or ()) != ("neondb_owner", "neondb_owner", "neondb"):
+        raise FixtureRefusal("relationship fixture requires the exact owner database session")
+    actors = []
+    for slug in ("system", "joe"):
+        cur.execute(f"select id::text from public.actor where slug='{slug}'")
+        found = cur.fetchall()
+        if len(found) != 1:
+            raise FixtureRefusal("relationship fixture requires exact system and Joe actors")
+        actors.append(str(found[0][0]))
+    system, joe = actors
+    def select(table: str, **fields: Any) -> list[dict[str, Any]]:
+        return _relationship_select(cur, table, fields, lock=lock)
+    live = {"merged_into": None}
+    party = _relationship_exact(select("party", id=ids["party"]),
+        {"id": ids["party"], "name": "Synthetic Staging Fixture", "kind": "org", "deleted_at": None,
+         "notes_path": "fixtures/clean-staging-replacement-v1", "created_by": system, **live}, "fixed party lineage")
+    clients = [row for row in select("client", party_id=ids["party"]) if row["merged_into"] is None]
+    _relationship_exact(clients, {"id": ids["client"], "party_id": ids["party"], "status": "engaged",
+        "acquisition_source": "referral", "acquisition_detail": "Explicitly fictional staging QA fixture only"}, "selected live client")
+    if any(row["merged_into"] is None for row in select("vendor", party_id=ids["party"])):
+        raise FixtureRefusal("relationship fixed party has vendor precedence")
+    if select("vendor", party_id=destination["party_id"]):
+        raise FixtureRefusal("relationship destination has vendor precedence or conflicting history")
+    _relationship_exact(select("deal", id=ids["deal"]), {"id": ids["deal"], "client_id": ids["client"],
+        "name": plan["names"]["deal"], "owner": "joe", "phase": "pending", "lane": "territory", "deal_type": "startup"}, "owned deal")
+    _relationship_exact(select("party", id=ids["vendor_party"]), {"id": ids["vendor_party"], "name": values["vendor_name"],
+        "kind": "org", "deleted_at": None, **live}, "owned vendor party")
+    vendors = [row for row in select("vendor", party_id=ids["vendor_party"]) if row["merged_into"] is None]
+    vendor = _relationship_exact(vendors, {"id": ids["vendor"], "party_id": ids["vendor_party"],
+        "category": "cpa", "stage": "prospect_uncontacted"}, "owned vendor")
+    entry = _relationship_exact(select("activity", id=ids["vendor_entry"]), {"vendor_id": ids["vendor"],
+        "kind": "note", "summary": "Synthetic staging QA introduction entry",
+        "detail": "Fictional QA evidence only; no contact, referral, or send occurred."}, "vendor original entry")
+    _relationship_exact(select("party_link", id=values["vendor_entry_link"]), {"from_party": ids["vendor_party"],
+        "to_party": ids["party"], "kind": "can_introduce", "via_party": None,
+        "note": "Synthetic staging QA suggested introduction only; no real-world introduction occurred."}, "vendor setup link")
+    setup_receipts = []
+    for step, verb, table in (("client", "new-client", "client"), ("deal", "new-deal", "deal"),
+            ("vendor_party", "add-party", "party"), ("vendor", "new-vendor", "vendor"), ("vendor_entry", "log-activity", "vendor")):
+        subject = ids["vendor" if step == "vendor_entry" else step]
+        event = _relationship_exact(select("event", idempotency_key=values["keys"][step], verb=verb,
+            subject_type=table, subject_id=subject), {"subject_id": subject}, "app creation event")
+        if step == "vendor_entry" and event.get("new_value", {}).get("activity") != ids["vendor_entry"]:
+            raise FixtureRefusal("relationship vendor original entry lacks its exact creation event")
+        setup_receipts.append(event)
+    for row, field, allowed in ((party, "city", RELATIONSHIP_NORTH), (vendor, "territory", RELATIONSHIP_SOUTH)):
+        if row.get(field) not in (None, allowed):
+            raise FixtureRefusal("relationship territory would alter a nonfixture value")
+    common = {"created_by": system, "updated_by": system}
+    specs = [
+        ("destination_party", "party", {"id": destination["party_id"], "kind": "org", "name": values["party_name"],
+            "notes_path": values["provenance"], "city": RELATIONSHIP_NORTH, "contact_state": "active", **common},
+            {"deleted_at": None, "merged_into": None, "version": 1}),
+        ("destination_client", "client", {"id": destination["client_id"], "party_id": destination["party_id"], "status": "engaged",
+            "acquisition_source": "referral", "acquisition_detail": values["provenance"],
+            "notes_path": values["provenance"], "owner_id": joe, **common}, {"merged_into": None, "version": 1}),
+        ("destination_deal", "deal", {"id": destination["id"], "name": destination["name"], "client_id": destination["client_id"],
+            "deal_type": "startup", "phase": "pending", "lane": "territory", "owner": "joe",
+            "notes_path": values["provenance"], **common}, {"outcome": None, "version": 1}),
+    ]
+    for role, (link_id, from_party, to_party, deal_id) in zip(("referral", "vendor"), values["links"]):
+        specs += [(role + "_association", "party_link", {"id": link_id, "from_party": from_party, "to_party": to_party,
+            "kind": "referred", "via_party": None, "occurred_on": values["occurred_on"],
+            "note": values["notes"][role], "source": "stated", "created_by": system}, {}),
+            (role + "_attribution", "party_link_deal", {"link_id": link_id, "deal_id": deal_id, "referred_by": from_party,
+            "occurred_on": values["occurred_on"], "note": values["notes"][role], "created_by": system}, {})]
+    existing = []
+    for role, table, expected, defaults in specs:
+        if table == "party_link_deal":
+            rows = select(table, link_id=expected["link_id"])
+        elif table == "party_link":
+            rows = _relationship_select(cur, table, {"id": expected["id"], "from_party": expected["from_party"],
+                "to_party": expected["to_party"]}, lock=lock, either=True)
+            rows = [r for r in rows if r["id"] == expected["id"] or
+                    (r["from_party"] == expected["from_party"] and r["to_party"] == expected["to_party"] and r["kind"] == "referred")]
+        else:
+            collision = "party_id" if table == "client" else "name"
+            rows = _relationship_select(cur, table, {"id": expected["id"], collision: expected[collision]}, lock=lock, either=True)
+        if rows:
+            existing.append((role, table, _relationship_exact(rows, {**expected, **defaults}, "destination or referral row")))
+    if existing and len(existing) != len(specs):
+        raise FixtureRefusal("relationship fixture is partial; reconcile without retrying writes")
+    if existing and (party.get("city") != RELATIONSHIP_NORTH or vendor.get("territory") != RELATIONSHIP_SOUTH
+                     or vendor.get("deal_history_verified_at") is not None):
+        raise FixtureRefusal("relationship fixture has partial territory or vendor coverage state")
+    return {"values": values, "system": system, "specs": specs, "existing": existing,
+            "party": party, "vendor": vendor, "entry": entry, "setup_receipts": setup_receipts}
+
+
+def install_relationship_fixture(conn: Any, plan: Mapping[str, Any]) -> int:
+    try:
+        with conn.cursor() as cur:
+            # Prevent new role rows and same-name collisions between census and commit.
+            cur.execute("lock table public.party,public.client,public.vendor,public.deal,public.party_link,"
+                        "public.party_link_deal,public.activity,public.event in share row exclusive mode")
+            state = _relationship_state(cur, plan, lock=True)
+            count = 0
+            if not state["existing"]:
+                for _, table, row, _ in state["specs"]:
+                    columns = ",".join(row)
+                    cur.execute(f"insert into public.{table} ({columns}) values ({','.join(['%s'] * len(row))})", tuple(row.values()))
+                    count += 1
+            for table, row, field, value in (("party", state["party"], "city", RELATIONSHIP_NORTH),
+                                            ("vendor", state["vendor"], "territory", RELATIONSHIP_SOUTH)):
+                if row.get(field) is None or (table == "vendor" and row.get("deal_history_verified_at") is not None):
+                    extra = ",deal_history_verified_at=null" if table == "vendor" else ""
+                    cur.execute(f"update public.{table} set {field}=%s,updated_by=%s{extra} where id=%s",
+                                (value, state["system"], row["id"]))
+                    count += 1
+            checked = _relationship_state(cur, plan, lock=True)
+            if len(checked["existing"]) != 7:
+                raise FixtureRefusal("relationship insertion did not read back completely")
+            _read_relationship_projection(cur, checked["values"])
+        conn.commit()
+        return count
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _relationship_projection(operation: str, payload: Mapping[str, Any] | None = None) -> Any:
+    script = """import {networkStatement,projectNetwork} from './mcp-server/src/relationship-network.js';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+const input=JSON.parse(readFileSync(0,'utf8'));
+const network=input.operation==='sql' ? null : input.operation==='digest' ? input.network : projectNetwork(input.snapshot,input.observed_at);
+const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
+process.stdout.write(JSON.stringify(input.operation==='sql' ? networkStatement : {network,response_sha256:digest(network)}));
+"""
+    try:
+        result = subprocess.run(["node", "--input-type=module", "-e", script], cwd=REPO,
+            input=json.dumps({"operation": operation, **(payload or {})}), text=True,
+            capture_output=True, timeout=30, check=True)
+        return json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise FixtureRefusal("normal relationship projection is unavailable; output suppressed") from exc
+
+
+def _relationship_evidence(values: Mapping[str, Any], network: Mapping[str, Any], response_sha256: str) -> dict[str, Any]:
+    ids, dest = values["ids"], values["destination"]
+    expected_nodes = [("party:" + ids["party"], "client", ids["client"]),
+        ("party:" + ids["vendor_party"], "vendor", ids["vendor"]),
+        ("party:" + dest["party_id"], "client", dest["client_id"]),
+        ("deal:" + ids["deal"], "deal", ids["deal"]), ("deal:" + dest["id"], "deal", dest["id"])]
+    nodes = [_relationship_exact([n for n in network["nodes"] if n["id"] == node_id],
+        {"kind": kind, "record_id": record_id}, "projected node") for node_id, kind, record_id in expected_nodes]
+    if nodes[0].get("territory") != RELATIONSHIP_NORTH or nodes[1].get("territory") != RELATIONSHIP_SOUTH:
+        raise FixtureRefusal("relationship projection lacks exact territory contrast")
+    expected_edges = [(f"client-deal:{deal}", f"party:{party}", f"deal:{deal}", "client_deal")
+        for party, deal in ((ids["party"], ids["deal"]), (dest["party_id"], dest["id"]))]
+    for link, from_party, to_party, deal in values["links"]:
+        expected_edges += [(f"link:{link}", f"party:{from_party}", f"party:{to_party}", "referred"),
+                           (f"evidence:{from_party}:{deal}:referred", f"party:{from_party}", f"deal:{deal}", "referred")]
+    edges = []
+    for edge_id, from_node, to_node, kind in expected_edges:
+        expected = {"from": from_node, "to": to_node, "kind": kind, "via": None}
+        if kind == "referred":
+            expected["detail"] = values["notes"]["referral" if from_node == "party:" + ids["party"] else "vendor"]
+        edges.append(_relationship_exact([e for e in network["edges"] if e["id"] == edge_id], expected, "projected edge"))
+    metrics = []
+    for party in (ids["party"], ids["vendor_party"]):
+        metric = _relationship_exact([r for r in network["referrals"] if r["node_id"] == f"party:{party}"],
+            {"deals": 1, "won": 0, "lost": 0, "win_rate": None}, "owned referral metrics")
+        metrics.append(metric)
+    territories: dict[str, dict[str, Any]] = {}
+    for label, territory in (("inside", RELATIONSHIP_NORTH), ("outside", RELATIONSHIP_SOUTH)):
+        member_ids = sorted(n["id"] for n in network["nodes"] if n.get("territory") == territory)
+        referral_ids = sorted(e["id"] for e in network["edges"] if e["kind"] == "referred" and e["from"] in member_ids and e["id"].startswith("evidence:"))
+        if not member_ids or not referral_ids:
+            raise FixtureRefusal("relationship territory lacks referral membership")
+        territories[label] = {"territory": territory, "node_ids": member_ids, "node_count": len(member_ids),
+            "referral_ids": referral_ids, "referral_count": len(referral_ids),
+            "territory_sha256": hashlib.sha256(territory.encode()).hexdigest(),
+            "membership_sha256": _relationship_digest({"node_ids": member_ids, "referral_ids": referral_ids})}
+    other_nodes = {n["id"] for n in network["nodes"] if isinstance(n.get("territory"), str)
+                   and n["territory"].strip() and n["territory"] != RELATIONSHIP_NORTH}
+    return {"schema": network["schema"], "observed_at": network["observed_at"],
+            "valid_until": network["valid_until"], "response_sha256": response_sha256,
+            "network_response_sha256": response_sha256, "content_sha256": _relationship_digest(network),
+            "client_deal_edge_id": expected_edges[0][0], "evidence_edge_id": expected_edges[3][0],
+            "evidence_detail_sha256": hashlib.sha256(values["notes"]["referral"].encode()).hexdigest(),
+            "referral_metrics": metrics[0], "territory_sha256": hashlib.sha256(RELATIONSHIP_NORTH.encode()).hexdigest(),
+            "total_referrals": len(network["referrals"]),
+            "same_territory_referrals": sum(r["node_id"] in territories["inside"]["node_ids"] for r in network["referrals"]),
+            "other_territory_referrals": sum(r["node_id"] in other_nodes for r in network["referrals"]),
+            "nodes": nodes, "edges": edges,
+            "metrics": metrics, "territories": territories}
+
+
+def _read_relationship_projection(cur: Any, values: Mapping[str, Any]) -> dict[str, Any]:
+    cur.execute(_relationship_projection("sql"))
+    snapshot = cur.fetchone()
+    if not snapshot:
+        raise FixtureRefusal("normal relationship snapshot is absent")
+    observed = dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    projected = _relationship_projection("project", {"snapshot": snapshot[0], "observed_at": observed})
+    return {"response": projected["network"], "response_sha256": _relationship_digest(projected["network"]),
+            "evidence": _relationship_evidence(values, projected["network"], projected["response_sha256"])}
+
+
+def _relationship_logical_rows(state: Mapping[str, Any]) -> dict[str, Any]:
+    stored = {role: row for role, _, row in state["existing"]}
+    fields = {"destination_party": ("id", "name", "kind", "city"),
+        "destination_client": ("id", "party_id", "status"),
+        "destination_deal": ("id", "name", "client_id", "owner", "phase", "lane", "deal_type")}
+    rows = {role: {key: stored[role][key] for key in keys} for role, keys in fields.items()}
+    rows["fixed_party"] = {key: state["party"][key] for key in ("id", "city")}
+    rows["owned_vendor"] = {key: state["vendor"][key] for key in ("id", "party_id", "territory")}
+    for prefix in ("referral", "vendor"):
+        association, attribution = stored[prefix + "_association"], stored[prefix + "_attribution"]
+        common = {"kind": "referred", "via_party_id": None, "occurred_on": association["occurred_on"],
+                  "note": association["note"], "attribution": "system"}
+        rows[prefix + "_association"] = {**common, "id": association["id"],
+            "from_party_id": association["from_party"], "to_party_id": association["to_party"]}
+        # party_link_deal has a composite physical key; the app binds a logical UUIDv5 attribution ID.
+        rows[prefix + "_attribution"] = {**common, "id": state["values"]["attribution_ids"][prefix],
+            "party_id": attribution["referred_by"], "deal_id": attribution["deal_id"], "note": attribution["note"]}
+    return rows
+
+
+def read_relationship_fixture(conn: Any, plan: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        with conn.cursor() as cur:
+            cur.execute("set transaction isolation level repeatable read read only")
+            state = _relationship_state(cur, plan, lock=False)
+            if len(state["existing"]) != 7 or state["party"]["city"] != RELATIONSHIP_NORTH \
+                    or state["vendor"]["territory"] != RELATIONSHIP_SOUTH \
+                    or state["vendor"].get("deal_history_verified_at") is not None:
+                raise FixtureRefusal("relationship committed readback is incomplete")
+            projection = _read_relationship_projection(cur, state["values"])
+        def receipt(table: str, row: Mapping[str, Any]) -> dict[str, Any]:
+            identity = {key: row[key] for key in (("link_id", "deal_id") if table == "party_link_deal" else ("id",))}
+            key = str(uuid.uuid5(RELATIONSHIP_NAMESPACE, f"{plan['run']}:{table}:{_relationship_digest(identity)}"))
+            return {"table": table, "row_ids": identity, "fixture_key": key, "row": dict(row), "row_sha256": _relationship_digest(row)}
+        rows = _relationship_logical_rows(state)
+        row_hashes = {role: _relationship_digest(row) for role, row in rows.items()}
+        logical_tables = {"destination_party": "party", "destination_client": "client", "destination_deal": "deal",
+            "fixed_party": "party", "owned_vendor": "vendor", "referral_association": "party_association",
+            "vendor_association": "party_association", "referral_attribution": "deal_attribution", "vendor_attribution": "deal_attribution"}
+        receipts = {role: {"operation": "update" if role in ("fixed_party", "owned_vendor") else "insert",
+            "table": logical_tables[role], "row_id": row["id"],
+            "before_sha256": row_hashes[role] if role in ("fixed_party", "owned_vendor") else None,
+            "after_sha256": row_hashes[role]} for role, row in rows.items()}
+        return {"rows": rows, "row_sha256": row_hashes, "receipts": receipts,
+            "creation_receipts": [dict(receipt(table, row), role=role) for role, table, row in state["existing"]],
+            "update_receipts": [dict(receipt(table, row), field=field, value=value,
+                accepted_previous_values=[None, value]) for table, row, field, value in
+                (("party", state["party"], "city", RELATIONSHIP_NORTH), ("vendor", state["vendor"], "territory", RELATIONSHIP_SOUTH))],
+            "setup_creation_receipts": state["setup_receipts"], "vendor_original_entry": state["entry"],
+            "projection": {key: projection[key] for key in ("response", "response_sha256")}, "projection_evidence": projection["evidence"]}
+    finally:
+        conn.rollback()
+
+
+def build_relationship_fixture_proof(plan: Mapping[str, Any], target: Mapping[str, Any],
+                                     readback: Mapping[str, Any]) -> dict[str, Any]:
+    values = relationship_fixture_values(plan)
+    return {"schema": RELATIONSHIP_SCHEMA, "fixture_run": plan["run"], "source_pair": dict(plan["release"]),
+        "provenance": {"kind": "raw-sql-fixture", "readback": "separate-committed-readonly-connection"},
+        "verified_target": dict(target), "recorded_plan_observed_at": plan["observed_at"],
+        "tool_source_sha256": hashlib.sha256(pathlib.Path(__file__).resolve().read_bytes()).hexdigest(),
+        "party_id": values["ids"]["party"], "client_id": values["ids"]["client"], "deal_id": values["ids"]["deal"],
+        "relationship_referral_deal": values["destination"],
+        "original_note_sha256": {role: hashlib.sha256(note.encode()).hexdigest() for role, note in values["notes"].items()}, **readback}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--invoice-plan", type=pathlib.Path)
     parser.add_argument("--tour-plan", type=pathlib.Path)
+    parser.add_argument("--relationship-plan", type=pathlib.Path)
     parser.add_argument("--vendor-reference-data", action="store_true",
                         help="install the single synthetic staging vendor-stage reference row")
     parser.add_argument("--expected-app-sha")
@@ -809,6 +1180,42 @@ def main() -> int:
     parser.add_argument("--proof-file", type=pathlib.Path)
     parser.add_argument("--aged-invoice", action="store_true")
     args = parser.parse_args()
+    if args.relationship_plan:
+        if args.invoice_plan or args.tour_plan or args.vendor_reference_data or args.aged_invoice:
+            parser.error("relationship mode cannot be combined with another fixture mode")
+        if not args.expected_app_sha or not args.expected_carr_sha:
+            parser.error("relationship mode requires both explicit full source pins")
+        if args.apply and not args.proof_file:
+            parser.error("relationship apply requires --proof-file")
+        if args.proof_file and not args.apply:
+            parser.error("relationship proof requires --apply")
+        try:
+            plan = load_private_plan(args.relationship_plan, args.expected_app_sha, args.expected_carr_sha)
+            relationship_fixture_values(plan)
+            if not args.apply:
+                print("staging-fixtures: PLAN relationship_rows=7 territory_updates=2 mutated=false")
+                return 0
+            validate_proof_destination(args.proof_file)
+            dsn = os.environ.get("DATABASE_URL", "")
+            project = os.environ.get("CARR_STAGING_REPLACEMENT_PROJECT_ID", "")
+            endpoint = os.environ.get("CARR_STAGING_REPLACEMENT_ENDPOINT_ID", "")
+            validate_target(dsn, project, endpoint)
+            target = validate_provider_binding(dsn, project, endpoint)
+            import psycopg
+            with psycopg.connect(dsn) as conn:
+                count = install_relationship_fixture(conn, plan)
+            with psycopg.connect(dsn) as conn:
+                readback = read_relationship_fixture(conn, plan)
+            proof = build_relationship_fixture_proof(plan, target, readback)
+            result = publish_private_proof(args.proof_file, proof)
+            print(f"staging-fixtures: PASS relationship_rows_changed={count} proof={result}")
+            return 0
+        except (FixtureRefusal, ImportError) as exc:
+            print(f"staging-fixtures: REFUSED — {exc}", file=sys.stderr)
+            return 2
+        except Exception:
+            print("staging-fixtures: REFUSED — relationship fixture failed; details suppressed", file=sys.stderr)
+            return 2
     if args.vendor_reference_data:
         if args.tour_plan or args.invoice_plan or args.aged_invoice:
             parser.error("vendor reference mode cannot be combined with invoice or Tour mode")

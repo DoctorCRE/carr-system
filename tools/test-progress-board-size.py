@@ -70,7 +70,8 @@ class SnapshotSizeTests(unittest.TestCase):
                 "repo": "jbookout/carr-system", "pr_head": "a" * 40, "pr_checks": "failure",
                 "pr_links": [{"repo": "jbookout/doctorcre-app", "number": 42, "head_sha": "b" * 40}],
                 "question": "Which delivery target applies?"}
-        projected = board.board_snapshot({"project": "fixture", "tasks": {"review": task}})["tasks"]["review"]
+        projected = board.board_snapshot({"project": "fixture", "tasks": {"review": task}},
+                                         costs={"state": "unavailable", "providers": []})["tasks"]["review"]
         for field in ("pr_head", "pr_checks", "pr_links", "question"):
             with self.subTest(field=field):
                 self.assertEqual(projected.get(field), task[field])
@@ -94,7 +95,7 @@ class SnapshotSizeTests(unittest.TestCase):
             }
         state = {"project": "carr-v5", "tasks": tasks}
         before = copy.deepcopy(state)
-        snapshot = board.board_snapshot(state)
+        snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})
         self.assertLessEqual(board.snapshot_size(snapshot), board.SNAPSHOT_LIMIT * 9 // 10)
         self.assertTrue(set(f"task-{n}" for n in range(337)) <= snapshot["tasks"].keys())
         for n in range(337):

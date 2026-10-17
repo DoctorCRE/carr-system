@@ -1,5 +1,4 @@
 """Measure a finite, offline Codex boot network-policy matrix."""
-import datetime
 import hashlib
 import json
 import subprocess
@@ -8,10 +7,6 @@ import score
 
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main():
@@ -63,39 +58,6 @@ def main():
     measured = score.score(exp,arms['baseline'],arms['candidate'])
     assert measured == score.score(exp,arms['baseline'],arms['candidate'])
     assert measured['controls']['oracle_pass_rate']==1 and measured['controls']['null_pass_rate']==0
-    refs = [f'evals/model-routing/evidence/v3/{a}.jsonl' for a in arms]
-    source = {f'evals/model-routing/{f}':sha(HERE/f) for f in ('score.py','make_report.py')}
-    deps = {f'tools/room-bridge/{f}':sha(ROOT/f'tools/room-bridge/{f}') for f in ('desks.py','codex_models.py')}
-    deps['tools/room-bridge/codex_wire.py'] = sha(ROOT/'tools/room-bridge/codex_wire.py')
-    dims = [{'dimension_id':name,'critical':True,'status':'passed',
-             'direction_vs_baseline':'improved' if values['delta']['value']>0 else 'equivalent',
-             'evidence_refs':refs,**values} for name, values in measured['dimensions'].items()]
-    receipt = {'schema_version':2,'surface':'model-routing',
-        'change':'Measure explicit synthetic boot refusal, fresh ephemeral read-only network opt-in, and resume refusal.',
-        'measured_on':datetime.date.today().isoformat(),'rung':'regression',
-        'adapter':{'surface':'offline_programmatic','adapter_id':'codex-routing-fresh-network-matrix','adapter_version':'3',
-            'harness_id':'evals/model-routing/score.py','harness_version':source['evals/model-routing/score.py'],
-            'provider_id':'none','model_id':'deterministic-no-model',
-            'native_session_ref':'offline-fresh-network-boundary-v3',
-            'configuration_fingerprint':'sha256:'+hashlib.sha256(json.dumps(deps,sort_keys=True).encode()).hexdigest()},
-        'cases':{'total':len(cases),'train':sum(c['split']=='train' for c in cases.values()),
-            'test':sum(c['split']=='test' for c in cases.values()),'should_not_fire':sum(c['should_not_fire'] for c in cases.values()),
-            'sources':sorted({c['source'] for c in cases.values()})},
-        'split':{'method':'Disjoint finite protocol variants; test adds configured cwd and read-only default-off cases; no population inference.',
-                 'sealed_test':True},'repeats':2,
-        'grader':{'kind':'programmatic','validation':{'graded_twice':True,'result':'pass',**measured['controls']}},
-        'noise_floor':0,'min_useful_gain':.01,'primary_dimension':'fresh-network-boundary','dimensions':dims,
-        'stage_results':[{'stage_id':'routing','status':'passed','dimension_ids':list(measured['dimensions']),'evidence_refs':refs}],
-        'cost':{'baseline_usd_per_case':0,'candidate_usd_per_case':0},
-        'verdict':{'decision':'ship','statement':'Finite offline protocol cases pass; actual authenticated CARR boot remains unqualified until a fresh post-merge probe.'},
-        'notes':['Fake App Server explicitly refuses the synthetic boot task when read-only network permission is absent; it does not simulate App Server request rejection.',
-                 'Test inputs are disjoint configured-workspace variants, not held-out samples or a model-quality/generalization measure.',
-                 'The production trace establishes the missing network capability; synthetic acceptance does not prove live CARR reachability.'],
-        'evidence':{'scorer':{'path':'evals/model-routing/score.py','function':'score'},'source':source,'dependencies':deps,
-            'expectations':{'path':'evals/model-routing/expectations.v3.json','version':exp['version'],
-            'sha256':sha(expectations_path)},
-            'cohorts':{a:{'path':f'evals/model-routing/evidence/v3/{a}.jsonl','sha256':sha(evidence_dir/f'{a}.jsonl')} for a in arms}}}
-    (HERE/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
     print(json.dumps(measured,indent=2))
 
 

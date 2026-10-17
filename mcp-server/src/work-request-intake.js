@@ -748,7 +748,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         if (!row || !["captured", "triaged", "ready", "needs_joe", "declined", "superseded"].includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
         const triaged = ["triaged", "ready"].includes(row.state);
         // A withdrawn row carries no plan and no shape: decline is captured-
-        // only, and 0883 supersedes a triaged row only when nothing downstream
+        // only, and 0888 supersedes a triaged row only when nothing downstream
         // names it. A row superseded from triaged keeps its triage fields, so
         // the triage block is keyed on the column rather than on the state.
         const withdrawn = ["declined", "superseded"].includes(row.state);
@@ -934,7 +934,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // same reason; this is that split reaching the verb layer.
     //
     // The STATE RULE lives in the database, not here. ops.decline_sourced_work_
-    // request admits captured only. ops.supersede_sourced_work_request (0883)
+    // request admits captured only. ops.supersede_sourced_work_request (0888)
     // also admits triaged when ops.work_request_supersession_strands finds
     // nothing downstream naming the request, and names each refusal so the
     // handler below can surface it instead of an unhandled failure.
@@ -1014,7 +1014,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
                  /* work-request-intake:supersede */`,
               [args.human_ref, args.base_version, text(args.exit_reason), args.superseded_by, actor.slug, args.idempotency_key]);
           } catch (error) {
-            // 0883 names every refusal "<name>: <sentence>". The database raises
+            // 0888 names every refusal "<name>: <sentence>". The database raises
             // on each one and never returns an empty row.
             const detail = String(error?.message || "");
             const name = /^([a-z_]+):/.exec(detail)?.[1];

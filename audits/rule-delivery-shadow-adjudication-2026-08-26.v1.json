@@ -27,7 +27,6 @@
       "ops/rule-pack-drift-gate-selftest.py"
     ],
     "nightly": [
-      "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
       "ops/config-as-code.py",
       "lib/rule_delivery_shadow.py"
     ],

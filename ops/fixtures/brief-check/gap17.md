@@ -1,6 +1,6 @@
 ROLE: Reviewer tooling engineer. Model: Claude Opus 5.5, high effort. Repo jbookout/carr-system, branch claude/brief-check.
 GOAL (Joe 2026-10-05, gap #17): before the orchestrator reviews a builder PR, a check confirms each numbered requirement of the builder's brief was met, with evidence, so review time goes to judgment.
-WHAT EXISTS: builder briefs live in out/orch/**/ *.md with "BUILD (all required):" numbered lists; out/orch/review-pr.sh and review-template.md; the APPROVE + Reviewed-SHA comment format; Jev (ask-jev) for bounded review judgments.
+WHAT EXISTS: builder briefs live in out/orch/**/ *.md with "BUILD (all required):" numbered lists; out/orch/review-pr.sh and review-template.md; serial merges gated by GitHub required CI; Jev (ask-jev) for bounded review judgments.
 BUILD (all required):
 1. Builders record which brief they ran (brief path + sha256) in the PR body; add that to the builder preamble/runners (out/orch/*-run.sh are not in the repo — put the convention and a helper in the repo and name the runner change in the PR body for the orchestrator to apply).
 2. ops/brief-check.py <repo> <pr>: parses the numbered requirements, and for each finds evidence in the PR (diff paths, tests added and their CI result, PR body sections) and returns met / not met / needs judgment with the evidence link. Deterministic parts are code; only the "needs judgment" residue may go to Jev, labelled as such.

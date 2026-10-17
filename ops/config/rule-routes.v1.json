@@ -185,10 +185,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -240,10 +237,6 @@
    "moment": "conduct_stop gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
-    {
      "kind": "boot"
     }
    ],
@@ -252,10 +245,6 @@
   "1f3a7372": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -308,8 +297,8 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
-      "start-capability-project"
+      "propose-ready-plan",
+      "review-heavy-build-plan"
      ],
      "bash_patterns": []
     }
@@ -344,7 +333,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
       "log-decision",
       "review-heavy-build-plan",
       "update-loop",
@@ -357,10 +345,6 @@
   "2271e684": {
    "moment": "completion_evidence gate, terminal technical claim",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -472,9 +456,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
-      "prepare-capability-project",
-      "start-capability-project",
       "write-work-shape"
      ],
      "bash_patterns": []
@@ -516,8 +497,6 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -570,11 +549,7 @@
      "tools": [
       "WebSearch"
      ],
-     "verbs": [
-      "begin-capability-project",
-      "prepare-capability-project",
-      "start-capability-project"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -670,10 +645,6 @@
    "moment": "chat_lint gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "mcp__*__create_draft",
@@ -691,12 +662,8 @@
    ]
   },
   "3a9dbafd": {
-   "moment": "conduct_stop (conduct-stop-gate.py Stop)",
+   "moment": "external communication",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -845,10 +812,6 @@
   "43e2ef76": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -1031,10 +994,6 @@
   "4e104d4c": {
    "moment": "completion_evidence gate, new-verb deployment claim",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -1239,10 +1198,6 @@
    "moment": "completion_evidence gate, metric completion claim",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "path_rule",
      "path_globs": [
       "*tools/health-check.py",
@@ -1262,10 +1217,6 @@
   "5be2f462": {
    "moment": "chat_lint gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -1359,8 +1310,6 @@
      "verbs": [
       "accept-workflow",
       "advance-workflow-cutover-stage",
-      "assign-execution-route",
-      "issue-execution-envelope",
       "open-workflow-cutover-plan",
       "record-workflow-caller"
      ],
@@ -1543,10 +1492,6 @@
    "moment": "completion_evidence gate (shipping claim)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Artifact",
@@ -1576,8 +1521,6 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -1693,10 +1636,6 @@
    "moment": "completion_evidence stop_gate - config-file change completion",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [],
@@ -1737,10 +1676,6 @@
   "767f9b41": {
    "moment": "completion_evidence gate, confirmation response",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "boot"
     }
@@ -1875,9 +1810,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -1929,10 +1862,6 @@
   "847f9995": {
    "moment": "completion_evidence stop_gate - unattended-path credential verification",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -1996,8 +1925,7 @@
    "moment": "blocker_decider gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/blocker-decider-gate.py"
+     "kind": "boot"
     }
    ]
   },
@@ -2029,10 +1957,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bclaude\\s+-p\\b"
      ]
@@ -2042,10 +1967,6 @@
   "8c1e6057": {
    "moment": "chat_lint stop_gate - asking a partner to open/edit/review a file",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -2179,10 +2100,6 @@
   "97326357": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -2364,10 +2281,6 @@
    "moment": "completion_evidence stop_gate - changed-system completion",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [],
@@ -2447,10 +2360,6 @@
    "moment": "completion_evidence stop_gate - check-result reporting",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "path_rule",
      "path_globs": [
       "*hooks/*.py",
@@ -2467,10 +2376,6 @@
   "ab814a26": {
    "moment": "rule_shape gate (approve-rule)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/rule-shape-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -2559,7 +2464,6 @@
      "tools": [],
      "verbs": [
       "accept-ready-plan",
-      "begin-capability-project",
       "propose-ready-plan",
       "register-engineering-slice-plan",
       "review-heavy-build-plan",
@@ -2660,10 +2564,6 @@
    "moment": "loose_work stop_gate - session Stop",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/loose-work-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [],
@@ -2725,7 +2625,6 @@
      "path_globs": [
       "*ops/config/rule-enforcement-map.json",
       "*ops/*-gate.py",
-      "*ops/config/gate-baseline.json",
       "*hooks/*.py",
       "*ops/*-check.py",
       "*ops/githooks/*"
@@ -2742,11 +2641,9 @@
       "mcp__*__create_scheduled_task"
      ],
      "verbs": [
-      "begin-capability-project",
       "propose-ready-plan",
       "register-engineering-slice-plan",
       "review-heavy-build-plan",
-      "start-capability-project",
       "write-work-shape"
      ],
      "bash_patterns": []
@@ -2776,7 +2673,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "issue-execution-envelope",
       "record-finding"
      ],
      "bash_patterns": []
@@ -2786,10 +2682,6 @@
   "c315befa": {
    "moment": "chat_lint gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -2868,9 +2760,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bclaude\\s+-p\\b"
      ]
@@ -3071,17 +2961,11 @@
    "moment": "chat_lint gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -3136,10 +3020,6 @@
   "dcf98880": {
    "moment": "completion_evidence gate (human verification instruction)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "boot"
     }
@@ -3207,10 +3087,6 @@
    "moment": "conduct_stop gate (before command handoff)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
-    {
      "kind": "boot"
     }
    ],
@@ -3265,10 +3141,6 @@
    "moment": "completion_evidence gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "mcp__*__create_scheduled_task",
@@ -3293,10 +3165,6 @@
   "eaa31ac5": {
    "moment": "completion_evidence gate (delivery claim)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -3374,10 +3242,6 @@
    "moment": "completion_evidence gate (autonomous-run completion)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Agent",
@@ -3443,10 +3307,6 @@
   "f47a8fe9": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -3529,10 +3389,6 @@
    "moment": "completion_evidence gate (completion/file claims)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [
@@ -3592,8 +3448,6 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
@@ -3673,10 +3527,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bdispatch\\.py\\s+send\\b"
      ]

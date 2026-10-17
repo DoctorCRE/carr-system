@@ -1143,72 +1143,72 @@
       "target": "docs/adr"
     },
     {
-      "file": "docs/frontier-finding/comparison-report.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
       "target": "migrations/0454-0471"
     },
     {
-      "file": "docs/frontier-finding/comparison-report.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
       "target": "migrations/0454-0471"
     },
     {
-      "file": "docs/frontier-finding/comparison-report.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
       "target": "migrations/0454-0471"
     },
     {
-      "file": "docs/frontier-finding/comparison-report.md",
+      "file": "_to_delete/frontier-finding/comparison-report.md",
       "kind": "path",
       "target": "migrations/0454-0471"
     },
     {
-      "file": "docs/frontier-finding/cs-review-trail.md",
+      "file": "_to_delete/frontier-finding/cs-review-trail.md",
       "kind": "path",
       "target": "db-tap.py"
     },
     {
-      "file": "docs/frontier-finding/cs-review-trail.md",
+      "file": "_to_delete/frontier-finding/cs-review-trail.md",
       "kind": "path",
       "target": "db-tap.py"
     },
     {
-      "file": "docs/frontier-finding/gated-register-plan.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
       "target": "breakglass-run.py"
     },
     {
-      "file": "docs/frontier-finding/gated-register-plan.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
       "target": "docs/frontier-finding/breakglass-run.py"
     },
     {
-      "file": "docs/frontier-finding/gated-register-plan.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
       "target": "gen-breakglass-run.py"
     },
     {
-      "file": "docs/frontier-finding/gated-register-plan.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
       "target": "gen-census-matrix.py"
     },
     {
-      "file": "docs/frontier-finding/gated-register-plan.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
       "target": "gen-frontier-manifest.py"
     },
     {
-      "file": "docs/frontier-finding/gated-register-plan.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
       "target": "migrations/0467"
     },
     {
-      "file": "docs/frontier-finding/gated-register-plan.md",
+      "file": "_to_delete/frontier-finding/gated-register-plan.md",
       "kind": "path",
       "target": "migrations/0471"
     },
     {
-      "file": "docs/frontier-finding/target-identity-contract.md",
+      "file": "_to_delete/frontier-finding/target-identity-contract.md",
       "kind": "path",
       "target": "migrations/0454"
     },
@@ -1461,21 +1461,6 @@
       "file": "ops/scheduled-tasks/linkedin-engagement-daily.SKILL.md",
       "kind": "path",
       "target": "Media/linkedin-engagement-engine.md"
-    },
-    {
-      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
-      "kind": "path",
-      "target": "Management/record-layer/runbook.md"
-    },
-    {
-      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
-      "kind": "path",
-      "target": "db-tap.py"
-    },
-    {
-      "file": "ops/scheduled-tasks/nightly-record-layer.SKILL.md",
-      "kind": "path",
-      "target": "db-tap.py"
     },
     {
       "file": "ops/scheduled-tasks/notes-sweep-hourly.SKILL.md",
