@@ -85,7 +85,7 @@ def read_migration(repo: Path, name: str, ref: str | None = None) -> str:
             raw = (repo / 'migrations' / name).read_bytes()
         elif ref is not None and name in _names(repo, ref):
             raw = _git(repo, 'show', f'{ref}:migrations/{name}')
-        elif name in covered:
+        elif baseline is not None and name in covered:
             try:
                 raw = _git(repo, 'show', f'{baseline.source_revision}:migrations/{name}')
             except ValueError as exc:

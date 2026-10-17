@@ -124,6 +124,7 @@ def wrapper_receipt_path(step: str, expected: str, *, refuse: bool = False) -> t
         fake_py = tmp / "python"
         fake_py.write_text("""#!/usr/bin/env python3
 import json, os, sys
+from pathlib import Path
 args=sys.argv[1:]
 Path(os.environ['CALL_LOG']).open('a').write(json.dumps(args)+'\\n')
 if 'staging-readback-verify' in args:
