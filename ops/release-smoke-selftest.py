@@ -452,81 +452,108 @@ class BlockingRegressions(unittest.TestCase):
 
 
 class InstalledBrowserContract(unittest.TestCase):
-    def test_current_process_and_required_native_coverage_are_both_required(self):
+    def setUp(self):
         from unittest.mock import patch
-        import subprocess
-        with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory)
-            for name in ('scripts/browser-product-proof.mjs', 'e2e.config.ts', 'node_modules/e2e/dist/cli/bin.js'):
-                path = app / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.touch()
-            manifest = app / 'tests/journeys/required-coverage.json'
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text(json.dumps({'tests': [{'file': 'tests/journeys/synthetic.e2e.ts', 'title': 'synthetic journey'}]}))
-            key = 'tests/journeys/synthetic.e2e.ts::synthetic%20journey'
-            proof = app / '.e2e/proof'
-            proof.mkdir(parents=True)
-            def produce(rc=0, tests=True):
-                packet = {'schema': 'browser-product-proof.v1', 'binding': {'repo': 'jbookout/doctorcre-app', 'sourceCommit': SHA, 'runId': 'synthetic-run'}}
-                report = {'run': {'id': 'synthetic-run', 'vcs': {'commit': SHA, 'dirty': False}, 'exitCode': 0, 'status': 'passed',
-                    'results': [{'testId': key, 'selected': True, 'status': 'passed', 'attempts': [{}]}] if tests else []}}
-                (proof / 'packet.json').write_text(json.dumps(packet))
-                (proof / 'native-report.json').write_text(json.dumps(report))
-                for name in ('checkpoint.png', 'video.webm', 'trace.zip'):
-                    (proof / name).write_bytes(b'synthetic artifact')
-                return subprocess.CompletedProcess([], rc, '', '')
-            runner = rs.browser_runner(app, app / 'out', expected_sha=SHA)
-            with patch.object(rs.subprocess, 'check_output', return_value=SHA):
-                with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: produce()):
-                    summary = smoke(FakeProduction(), lane='app', browser=runner)
-                    self.assertTrue(summary['ok'])
-                    self.assertEqual(probe(summary, 'browser-journeys')['evidence']['source_commit'], SHA)
-                with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: produce(rc=1)):
-                    self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
-                with patch.object(rs.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')):
-                    self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
-                with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: produce(tests=False)):
-                    self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
-            with patch.object(rs.subprocess, 'check_output', return_value=OLD):
-                self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.app = Path(self.tmp.name)
+        for name in ('e2e.production.config.ts', 'node_modules/e2e/dist/cli/bin.js'):
+            path = self.app / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        self.out = self.app / 'evidence'
+        self.git = patch.object(rs.subprocess, 'check_output', return_value=SHA)
+        self.git.start()
+        self.addCleanup(self.git.stop)
 
-    def test_a_failing_test_is_named_from_this_runs_native_report(self):
+    def run_browser(self, *, rc=0, report=True, missing=False, commit=SHA,
+                    dirty=False, target='chromium', skipped=False):
         from unittest.mock import patch
         import subprocess
-        with tempfile.TemporaryDirectory() as directory:
-            app = Path(directory)
-            for name in ('scripts/browser-product-proof.mjs', 'e2e.config.ts', 'node_modules/e2e/dist/cli/bin.js'):
-                path = app / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.touch()
-            manifest = app / 'tests/journeys/required-coverage.json'
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text(json.dumps({'tests': [{'file': 'a.e2e.ts', 'title': 'one'},
-                                                      {'file': 'b.e2e.ts', 'title': 'two'}]}))
-            native = app / '.e2e/report.json'
-            native.parent.mkdir()
-            def report(commit=SHA):
-                return {'run': {'id': 'r', 'vcs': {'commit': commit, 'dirty': False}, 'exitCode': 1, 'status': 'failed',
-                        'results': [{'testId': 'a.e2e.ts::one', 'selected': True, 'status': 'passed', 'attempts': [{}]},
-                                    {'testId': 'b.e2e.ts::two', 'selected': True, 'status': 'failed', 'attempts': [{}]}]}}
-            def refused(commit=SHA):
-                native.write_text(json.dumps(report(commit)))   # the e2e runner wrote it, then the producer refused
-                return subprocess.CompletedProcess([], 1, '', '')
-            runner = rs.browser_runner(app, app / 'out', expected_sha=SHA)
-            with patch.object(rs.subprocess, 'check_output', return_value=SHA):
-                with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: refused()):
-                    summary = smoke(FakeProduction(), lane='app', browser=runner)
-                self.assertEqual(probe(summary, 'browser-journeys')['evidence']['failed_tests'], ['b.e2e.ts::two'])
-                # A report from another source revision names nothing.
-                with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: refused(OLD)):
-                    self.assertNotIn('failed_tests', probe(smoke(FakeProduction(), lane='app', browser=runner),
-                                                           'browser-journeys')['evidence'])
-                # A report left by an EARLIER run is deleted first and never read.
-                native.write_text(json.dumps(report()))
-                with patch.object(rs.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', '')):
-                    self.assertNotIn('failed_tests', probe(smoke(FakeProduction(), lane='app', browser=runner),
-                                                           'browser-journeys')['evidence'])
+        def execute(command, **kwargs):
+            self.assertEqual(command[:5], ['node', 'node_modules/e2e/dist/cli/bin.js',
+                                           'run', '--config', 'e2e.production.config.ts'])
+            self.assertEqual(command[command.index('--target') + 1], 'chromium')
+            self.assertEqual(kwargs['cwd'], self.app)
+            self.assertEqual(kwargs['env']['DOCTORCRE_SMOKE_URL'], APP)
+            output = self.app / command[command.index('--output') + 1]
+            output.mkdir(parents=True)
+            if report:
+                required = rs.PRODUCTION_BROWSER_TESTS
+                rows = [{'testId': key, 'selected': True, 'targetId': target,
+                         'status': 'skipped' if skipped else 'failed' if rc else 'passed',
+                         'attempts': [] if skipped else [{}]} for key in required]
+                native = {'schemaVersion': 'report-1', 'run': {
+                    'id': 'synthetic-run', 'vcs': {'commit': commit, 'dirty': dirty},
+                    'exitCode': rc, 'status': 'failed' if rc else 'passed',
+                    'results': rows[:1] if missing else rows}}
+                (output / 'report.json').write_text(json.dumps(native))
+                (output / 'results').mkdir()
+                (output / 'results/checkpoint.png').write_bytes(b'synthetic screenshot')
+            return subprocess.CompletedProcess(command, rc, 'runner stdout', 'captured runner stderr')
+        with patch.object(rs.subprocess, 'run', side_effect=execute):
+            runner = rs.browser_runner(self.app, self.out, expected_sha=SHA, app_url=APP)
+            return probe(smoke(FakeProduction(), lane='app', browser=runner), rs.BROWSER)
+
+    def test_native_production_chromium_runner_passes_and_copies_evidence(self):
+        result = self.run_browser()
+        self.assertEqual(result['status'], 'pass')
+        evidence = result['evidence']
+        self.assertEqual(evidence['source_commit'], SHA)
+        self.assertEqual(evidence['test_count'], 2)
+        self.assertEqual(evidence['runner']['exit'], 0)
+        self.assertEqual(evidence['runner']['stderr'], 'captured runner stderr')
+        self.assertTrue((self.out / 'browser/report.json').is_file())
+        self.assertTrue((self.out / 'browser/results/checkpoint.png').is_file())
+
+    def test_process_failure_without_report_preserves_stderr_and_exit(self):
+        result = self.run_browser(rc=3, report=False)
+        self.assertEqual(result['status'], 'fail')
+        self.assertEqual(result['evidence']['runner']['exit'], 3)
+        self.assertEqual(result['evidence']['runner']['stderr'], 'captured runner stderr')
+        self.assertEqual(result['evidence']['error'], 'application_browser_report_unavailable')
+        self.assertEqual((self.out / 'browser/stderr.log').read_text(), 'captured runner stderr')
+
+    def test_missing_contract_names_missing_paths_in_evidence(self):
+        (self.app / 'e2e.production.config.ts').unlink()
+        runner = rs.browser_runner(self.app, self.out, expected_sha=SHA)
+        result = probe(smoke(FakeProduction(), lane='app', browser=runner), rs.BROWSER)
+        self.assertEqual(result['evidence']['error'], 'application_browser_contract_unavailable')
+        self.assertEqual(result['evidence']['missing_paths'], ['e2e.production.config.ts'])
+
+    def test_complete_failure_names_each_failed_test(self):
+        result = self.run_browser(rc=1)
+        self.assertEqual(result['evidence']['failed_tests'], list(rs.PRODUCTION_BROWSER_TESTS))
+        self.assertEqual(result['evidence']['runner']['exit'], 1)
+
+    def test_partial_report_does_not_attribute_missing_tests_to_release(self):
+        result = self.run_browser(missing=True)
+        self.assertEqual(result['status'], 'fail')
+        self.assertNotIn('failed_tests', result['evidence'])
+
+    def test_wrong_revision_dirty_tree_and_wrong_target_fail(self):
+        for kwargs in ({'commit': OLD}, {'dirty': True}, {'target': 'webkit'}, {'skipped': True}):
+            with self.subTest(**kwargs):
+                self.assertEqual(self.run_browser(**kwargs)['status'], 'fail')
+
+    def test_timeout_keeps_partial_stderr(self):
+        from unittest.mock import patch
+        import subprocess
+        with patch.object(rs.subprocess, 'run', side_effect=subprocess.TimeoutExpired('node', 1800,
+                                                                                  stderr=b'timeout stderr')):
+            result = probe(smoke(FakeProduction(), lane='app',
+                                 browser=rs.browser_runner(self.app, self.out, expected_sha=SHA)), rs.BROWSER)
+        self.assertEqual(result['evidence']['error'], 'application_browser_timeout')
+        self.assertEqual(result['evidence']['runner']['stderr'], 'timeout stderr')
+        self.assertIsNone(result['evidence']['runner']['exit'])
+
+    def test_spawn_failure_keeps_exception_type(self):
+        from unittest.mock import patch
+        with patch.object(rs.subprocess, 'run', side_effect=FileNotFoundError('node')):
+            result = probe(smoke(FakeProduction(), lane='app',
+                                 browser=rs.browser_runner(self.app, self.out, expected_sha=SHA)), rs.BROWSER)
+        self.assertEqual(result['evidence']['error'], 'application_browser_spawn_failed')
+        self.assertEqual(result['evidence']['exception'], 'FileNotFoundError')
 
 
 if __name__ == "__main__":
