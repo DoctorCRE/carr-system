@@ -174,6 +174,7 @@ def privilege_difference(production, snapshot):
 
 def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=None):
     import psycopg
+    from psycopg.conninfo import make_conninfo
     local_pg = load('production_proof_local_pg', ROOT / 'ops/local-pg-ci.py')
     env = local_pg.scrub_cloud_environment(os.environ)
     env['PATH'] = str(bins) + os.pathsep + env.get('PATH', '')
@@ -231,7 +232,9 @@ def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=No
                     cursor.executemany('insert into schema_migrations(filename, sha256) values (%s,%s)',
                                        sorted(production_ledger.items()))
             checked([sys.executable, repo / 'tools/migrate.py', '--apply', '--yes'],
-                    dict(env, DATABASE_URL=dsn), 'apply pending migrations to disposable production schema')
+                    dict(env, DATABASE_URL=make_conninfo(
+                        dsn, user=(grants or {}).get('migration_role', 'carr_ci'))),
+                    'apply pending migrations to disposable production schema')
         ledger, schema, grants = read_source(dsn, bins)
         return dict(dump=schema, grants=grants, ledger=ledger)
 
@@ -251,6 +254,7 @@ def read_source(dsn, bins=None, include_acl=False):
         exported = conn.execute('select pg_export_snapshot()').fetchone()[0]
         production = schema_dump(dsn, bins, os.environ, exported, include_acl=include_acl)
         grants = privilege_catalog(conn)
+        grants['migration_role'] = conn.execute('select session_user').fetchone()[0]
         conn.rollback()
     return applied, production, grants
 
@@ -274,16 +278,19 @@ def live_proof(ledger_only=True):
     result['equivalence'] = dict(ok=False,
         snapshot_sha256=hashlib.sha256((ROOT / 'db/schema.sql').read_bytes()).hexdigest(),
         scope='all pg_dump schema objects; internal namespace ACLs, database ACLs and large objects excluded; role passwords and grantor identities excluded',
-        normalization='owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; explicit non-owner ACLs compared by common role without grantor identity; owners normalized to <owner>; implicit ACL defaults excluded, including PUBLIC defaults; owner role attributes informational')
+        normalization='same runtime roles and migration principal; public snapshot identity-prose projection; owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; explicit non-owner ACLs compared by common role without grantor identity; owners normalized to <owner>; implicit ACL defaults excluded, including PUBLIC defaults; owner role attributes informational')
     result['grants'] = dict(ok=None, status='not_run', stage='production plus pending',
                             reason='disposable reconstruction did not complete')
     try:
-        reference = build_schema(ROOT / 'db/schema.sql', bins)
+        reference = build_schema(ROOT / 'db/schema.sql', bins, grants=grants)
         with tempfile.TemporaryDirectory(prefix='production-schema-proof-') as directory:
             source = Path(directory) / 'production.sql'
             source.write_text(production)
             built = build_schema(source, bins, production_ledger=applied, grants=grants)
-        difference = schema_difference(built['dump'], reference['dump'])
+        from pii_guard import load_corpus, sanitize_snapshot
+        corpus = load_corpus(ROOT / 'ops/config/public-source-identities.v1.json')
+        difference = schema_difference(sanitize_snapshot(built['dump'], corpus),
+                                       sanitize_snapshot(reference['dump'], corpus))
         result['grants'] = dict(privilege_difference(built['grants'], reference['grants']), stage='production plus pending', status='complete')
         result['equivalence'].update(ok=built['ledger'] == reference['ledger'] == repository and not difference,
             ledger_matches=built['ledger'] == reference['ledger'] == repository, schema_diff=difference)

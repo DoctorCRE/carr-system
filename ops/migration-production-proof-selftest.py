@@ -240,6 +240,10 @@ class ProofTests(unittest.TestCase):
             with psycopg.connect(dsn) as conn:
                 conn.execute('ALTER ROLE neondb_owner LOGIN')
                 conn.execute('ALTER TABLE public.deal OWNER TO neondb_owner')
+                conn.execute('CREATE ROLE carr_backup')
+                conn.execute('CREATE POLICY carr_backup_full_read ON ops.work_request FOR SELECT TO carr_backup USING(true)')
+                conn.execute('CREATE POLICY carr_backup_full_read_memory_item ON public.memory_item FOR SELECT TO carr_backup USING(true)')
+                conn.execute('GRANT carr_reader TO neondb_owner WITH ADMIN TRUE, INHERIT FALSE, SET FALSE')
             captured.append(read_source(dsn, bins, include_acl=True))
             return read_source(dsn, bins)
 
@@ -258,7 +262,7 @@ class ProofTests(unittest.TestCase):
         self.assertTrue(result['equivalence']['ok'], result['equivalence'])
         self.assertTrue(result['grants']['ok'], result['grants'])
         self.assertEqual(result['grants']['informational_owner_attributes']['production_only'],
-                         [('neondb_owner', False, True, False, False, True, False, -1, False)])
+                         [])
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_live_proof_rejects_explicit_select_drift(self):
@@ -359,7 +363,7 @@ create table public.schema_migrations (filename text primary key, sha256 text);
                 shutil.copyfile(ROOT / 'tools' / name, root / 'tools' / name)
             scripts = {name: 'select 1;' for names in FROZEN_COLLISIONS.values() for name in names}
             scripts.update({'0900_base.sql': 'create table public.example (id integer);',
-                            '0901_pending.sql': 'alter table public.example add column label text;'})
+                            '0901_pending.sql': "do $$ begin if current_user <> 'fixture_owner' then raise exception 'wrong migration principal'; end if; end $$; alter table public.example add column label text;"})
             hashes = {}
             for name, sql in scripts.items():
                 (root / 'migrations' / name).write_text(sql)
@@ -380,11 +384,19 @@ begin
 end $$;
 create constraint trigger empty_policy_guard after insert on public.schema_migrations
  deferrable initially deferred for each row execute function public.empty_policy_guard();
+grant usage,create on schema public to fixture_owner;
+grant usage on schema ops to fixture_owner;
+grant select on ops.rule_delivery_policy to fixture_owner;
+alter table public.example owner to fixture_owner;
+alter table public.schema_migrations owner to fixture_owner;
 """
             production = root / 'production.sql'
             production.write_text(base)
             applied = {name: hashes[name] for name in scripts if name < '0901'}
-            grants = dict(roles=['reader', 'reader_group', 'source_only'], memberships=[('reader_group', 'reader', False, True, False)])
+            grants = dict(roles=['reader', 'reader_group', 'source_only', 'fixture_owner'],
+                          memberships=[('reader_group', 'reader', False, True, False)],
+                          migration_role='fixture_owner',
+                          role_attributes=[('fixture_owner', False, True, False, False, True, False, -1, False)])
             built = proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
             self.assertEqual(built['ledger'], hashes)
             production.write_text(base + "insert into ops.rule_delivery_policy values(true,'full','fixture','existing policy');")
@@ -394,9 +406,9 @@ create constraint trigger empty_policy_guard after insert on public.schema_migra
             expected = root / 'expected.sql'
             ledger = ''.join(f"insert into schema_migrations(filename,sha256) values ('{name}','{digest}');\n"
                              for name, digest in hashes.items())
-            roles = 'create role reader; create role reader_group; grant reader_group to reader with admin false, inherit true, set false;'
-            expected.write_text(roles + base + scripts['0901_pending.sql'] + \
-                "insert into ops.rule_delivery_policy values(true,'shadow','fixture','fresh snapshot');\n" + ledger)
+            roles = 'create role reader; create role reader_group; create role fixture_owner login; grant reader_group to reader with admin false, inherit true, set false;'
+            expected.write_text(roles + base + "set role fixture_owner;" + scripts['0901_pending.sql'] + \
+                "reset role; insert into ops.rule_delivery_policy values(true,'shadow','fixture','fresh snapshot');\n" + ledger)
             reference = proof.build_schema(expected, bins, root)
             self.assertEqual(proof.schema_difference(built['dump'], reference['dump']), [])
             self.assertTrue(proof.privilege_difference(built['grants'], reference['grants'])['ok'])
