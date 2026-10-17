@@ -31,8 +31,9 @@ TWO CHECKS, both static, both in ops/ci.sh's gates class.
    asking for a marker; the marker is one line.
 
 2. SNAPSHOT CURRENTNESS. db/schema.sql's applied-migration ledger must name
-   every migration in the tree with the checksum tools/migrate.py records, and
-   nothing else. A migration that is not in the ledger means the reference
+   every active or baseline-covered migration with the checksum tools/migrate.py
+   records, and nothing else. The immutable manifest binds its original source
+   snapshot; later snapshots can add suffix ledger entries. A migration that is not in the ledger means the reference
    schema is behind the migrations that define it. Regenerate with
    ops/migration-shadow.py (which also proves the snapshot is exactly what the
    base snapshot plus the pending migrations produce).
@@ -47,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import pathlib
 import re
@@ -57,7 +59,8 @@ from typing import Mapping
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
-from migration_number_contract import SLOT_RE  # noqa: E402
+from migration_baseline import MANIFEST, MigrationBaseline  # noqa: E402
+from migration_source import migration_names, read_migration  # noqa: E402
 
 MIGRATIONS_DIR = "migrations"
 SNAPSHOT = "db/schema.sql"
@@ -301,17 +304,20 @@ def ledger_rows(snapshot: str) -> dict[str, str] | None:
     return None
 
 
-def ledger_problems(files: Mapping[str, str], snapshot: str) -> list[str]:
+def ledger_problems(files: Mapping[str, str], snapshot: str,
+                    baseline: MigrationBaseline | None = None) -> list[str]:
     rows = ledger_rows(snapshot)
     if rows is None:
         return [f"{SNAPSHOT} has no complete schema_migrations ledger section"]
+    identities = (baseline.repository_ledger(files) if baseline else
+                  {name: runner_sha256(text) for name, text in files.items()})
     problems: list[str] = []
-    for name in sorted(files):
+    for name in sorted(identities):
         if name not in rows:
             problems.append(f"{name} is not in the {SNAPSHOT} ledger")
-        elif rows[name] != runner_sha256(files[name]):
+        elif rows[name] != identities[name]:
             problems.append(f"{name} checksum differs from the {SNAPSHOT} ledger")
-    for name in sorted(set(rows) - set(files)):
+    for name in sorted(set(rows) - set(identities)):
         problems.append(f"{name} is in the {SNAPSHOT} ledger but has no file in {MIGRATIONS_DIR}/")
     return problems
 
@@ -321,11 +327,6 @@ def ledger_problems(files: Mapping[str, str], snapshot: str) -> list[str]:
 def git(repo: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True,
                           check=True).stdout
-
-
-def migration_names(repo: pathlib.Path, ref: str) -> set[str]:
-    out = git(repo, "ls-tree", "--name-only", f"{ref}:{MIGRATIONS_DIR}")
-    return {name for name in out.splitlines() if SLOT_RE.match(name)}
 
 
 def read_blobs(repo: pathlib.Path, ref: str, paths: list[str]) -> dict[str, str]:
@@ -345,6 +346,31 @@ def read_blobs(repo: pathlib.Path, ref: str, paths: list[str]) -> dict[str, str]
     return out
 
 
+def baseline_at(repo: pathlib.Path, ref: str) -> MigrationBaseline | None:
+    if MANIFEST not in git(repo, "ls-tree", "--name-only", ref, "--", MANIFEST).splitlines():
+        return None
+    return MigrationBaseline.from_document(json.loads(git(repo, "show", f"{ref}:{MANIFEST}")))
+
+
+def validate_baseline(repo: pathlib.Path, baseline: MigrationBaseline | None,
+                      previous: MigrationBaseline | None) -> None:
+    if previous is not None and baseline != previous:
+        raise ValueError("migration baseline manifest is immutable once established")
+    if baseline is None:
+        return
+    if git(repo, "cat-file", "-t", baseline.source_revision).strip() != "commit":
+        raise ValueError("migration baseline source revision must name a commit")
+    source = read_blobs(repo, baseline.source_revision, [SNAPSHOT])[SNAPSHOT]
+    if hashlib.sha256(source.encode()).hexdigest() != baseline.snapshot_sha256:
+        raise ValueError("migration baseline source snapshot checksum differs")
+    rows = ledger_rows(source)
+    if rows is None:
+        raise ValueError("migration baseline source snapshot has no complete ledger")
+    baseline.validate_coverage(rows)
+    if rows != dict(baseline.migrations):
+        raise ValueError("migration baseline coverage differs from the pinned source snapshot ledger")
+
+
 def default_base(environ: Mapping[str, str]) -> str:
     ref = (environ.get("GITHUB_BASE_REF") or "").strip()
     return f"origin/{ref}" if ref else "origin/main"
@@ -360,12 +386,21 @@ def main(argv: list[str] | None = None) -> int:
     base = args.base or default_base(os.environ)
 
     try:
+        head = git(repo, "rev-parse", "--verify", f"{args.head}^{{commit}}").strip()
         base_names = migration_names(repo, base)
-        head_names = migration_names(repo, args.head)
-        fork = git(repo, "merge-base", base, args.head).strip()
+        head_names = migration_names(repo, head)
+        fork = git(repo, "merge-base", base, head).strip()
         fork_names = migration_names(repo, fork)
-        texts = read_blobs(repo, args.head,
-                           [f"{MIGRATIONS_DIR}/{n}" for n in sorted(head_names)] + [SNAPSHOT])
+        baseline = baseline_at(repo, head)
+        validate_baseline(repo, baseline, baseline_at(repo, base))
+        paths = [path for path in git(repo, "ls-tree", "-r", "--name-only", head,
+                                     "--", f"{MIGRATIONS_DIR}/").splitlines()
+                 if path.count("/") == 1 and path.endswith(".sql")]
+        texts = read_blobs(repo, head, paths + [SNAPSHOT])
+        files = {pathlib.Path(path).name: texts[path] for path in paths}
+        stale = ledger_problems(files, texts[SNAPSHOT], baseline)
+        added = sorted(head_names - fork_names - base_names)
+        by_file = {name: findings(read_migration(repo, name, head)) for name in added}
     except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as exc:
         detail = getattr(exc, "stderr", None) or exc
         print(f"migration-safety-gate: cannot read migrations or {SNAPSHOT} at "
@@ -373,11 +408,6 @@ def main(argv: list[str] | None = None) -> int:
         print("  This is not a pass. Fetch the base (git fetch origin) and re-run.",
               file=sys.stderr)
         return 2
-
-    added = sorted(head_names - fork_names - base_names)
-    by_file = {name: findings(texts[f"{MIGRATIONS_DIR}/{name}"]) for name in added}
-    stale = ledger_problems({n: texts[f"{MIGRATIONS_DIR}/{n}"] for n in head_names},
-                            texts[SNAPSHOT])
 
     failed = False
     for name, found in by_file.items():

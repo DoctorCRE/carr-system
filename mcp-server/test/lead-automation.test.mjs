@@ -1,7 +1,8 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { leadAutomationTools, planLeadMoves, nextMorning } from "../src/lead-automation.js";
 import { TOOLS } from "../src/tools.js";
 
@@ -135,7 +136,7 @@ test("approval queue and last-search read are registered; never-run and failed-r
   assert.equal(TOOLS["approve-lead-draft"].humanOnly,true);
 });
 test("database migration has draft-only constraints and finite forward transitions",()=>{
-  const sql=readFileSync(new URL("../../migrations/0811_lead_stage_automation.sql",import.meta.url),"utf8");
+  const sql=readMigration(new URL("../../migrations/0811_lead_stage_automation.sql",import.meta.url));
   assert.match(sql,/check \(requires_human_send\)/);assert.match(sql,/check \(not dispatchable\)/);
   assert.match(sql,/unique\(lead_id,from_stage,to_stage,activity_id\)/);assert.doesNotMatch(sql,/grant.*delete/i);
 });

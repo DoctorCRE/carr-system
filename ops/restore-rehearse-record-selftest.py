@@ -64,12 +64,17 @@ row back with `tools/ops-record.py trace <correlation>`.
 RUN IT:
     python3 ops/restore-rehearse-record-selftest.py
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
+
 import os
 import re
 import subprocess
-import sys
 import tempfile
-from pathlib import Path
 from typing import Optional
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -186,10 +191,10 @@ def tier1() -> None:
         r"create extension if not exists ([a-z0-9_]+)", source.lower()
     ))
     migration_extensions = set()
-    for migration in (Path(REPO) / "migrations").glob("*.sql"):
+    for migration in ((Path(REPO) / "migrations") / name for name in migration_names((Path(REPO) / "migrations").parent) if fnmatch.fnmatchcase(name, "*.sql")):
         migration_extensions.update(re.findall(
             r"create extension if not exists ([a-z0-9_]+)",
-            migration.read_text(encoding="utf-8").lower(),
+            read_migration(migration.parent.parent, migration.name).lower(),
         ))
     check("restore bootstraps every extension prerequisite declared by migrations",
           extension_names == migration_extensions == {"pg_trgm", "pgcrypto"},

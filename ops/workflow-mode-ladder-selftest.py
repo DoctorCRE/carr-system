@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -31,10 +35,10 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 
 def check_migration() -> None:
-    check("migration 0334 exists", MIGRATION.is_file(), str(MIGRATION))
-    if not MIGRATION.is_file():
+    check("migration 0334 exists", MIGRATION.name in migration_names(MIGRATION.parent.parent), str(MIGRATION))
+    if not MIGRATION.name in migration_names(MIGRATION.parent.parent):
         return
-    source = MIGRATION.read_text(encoding="utf-8")
+    source = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     check("migration replaces ops.enqueue_job", "create or replace function ops.enqueue_job(" in source)
     check("migration branches on canary mode", "if p_mode='canary' then" in source)
     check("migration branches on live mode", "elsif p_mode='live' then" in source)

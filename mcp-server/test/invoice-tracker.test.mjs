@@ -1,9 +1,10 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { invoiceTrackerTools } from '../src/invoice-tracker.js';
 import { TOOLS } from '../src/tools.js';
 import { assertAdmits } from './helpers/registry-admission.mjs';
-import { readFileSync } from 'node:fs';
+
 import { createHash } from 'node:crypto';
 class ToolError extends Error { constructor(payload) { super(payload.error); this.payload=payload; } }
 function harness(patch={}) {
@@ -51,6 +52,6 @@ test('all deal reads expose the four lifecycle fields without inventing a missin
 
 
 test('shipped invoice read-fields migration retains its filename and bytes',()=>{
- const sql=readFileSync(new URL('../../migrations/0782_deal_invoice_read_fields.sql',import.meta.url));
+ const sql=Buffer.from(readMigration(new URL('../../migrations/0782_deal_invoice_read_fields.sql',import.meta.url)));
  assert.equal(createHash('sha256').update(sql).digest('hex'),'feb7748c3ce6f07afeb48507c145928a353dab8c5a8e96fb34fd69c7b32c7a0b');
 });
