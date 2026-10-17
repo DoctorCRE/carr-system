@@ -39,6 +39,37 @@ class PublicSourceGuardTests(unittest.TestCase):
         self.assertLess(digest.call_count, 1500,
                         "repeated snapshot vocabulary must not rehash every occurrence")
 
+    def test_repeated_registry_windows_do_not_churn_the_phrase_cache(self):
+        corpus = self.synthetic_corpus()
+        corpus["max_tokens"] = 16
+        entries = " ".join(hashlib.sha256(str(i).encode()).hexdigest() for i in range(600))
+        block = entries + " Example Dental Group\n"
+        source = block * 10
+        with mock.patch.object(pii_guard.hashlib, "sha256", wraps=hashlib.sha256) as digest:
+            spans = pii_guard.identity_spans(source, corpus)
+        self.assertEqual(spans, [
+            (i * len(block) + len(entries) + 1,
+             i * len(block) + len(entries) + 21, corpus["hashes"][0])
+            for i in range(10)
+        ])
+        self.assertLess(digest.call_count, 15000,
+                        "repeated registry windows must reuse prefix judgments")
+
+    def test_snapshot_projection_bounds_long_sql_statement_work(self):
+        program = """
+import sys
+sys.path.insert(0, 'ops')
+import pii_guard
+corpus = {'salt': 'a' * 64, 'hashes': ['b' * 64], 'max_tokens': 1}
+source = "INSERT INTO synthetic VALUES " + ",".join(["('safe',123)"] * 24000) + ";\\n"
+assert pii_guard.sanitize_snapshot(source, corpus) == source
+print('complete; SQL bytes preserved')
+"""
+        result = subprocess.run([sys.executable, "-c", program], cwd=REPO,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "complete; SQL bytes preserved\n")
+
     def test_cache_eviction_long_tokens_and_changed_corpus_preserve_detection(self):
         corpus = self.synthetic_corpus()
         source = ("Example Dental Group\n" +
