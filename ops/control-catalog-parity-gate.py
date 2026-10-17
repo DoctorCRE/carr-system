@@ -45,6 +45,10 @@ import sys
 import psycopg
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from retained_pack_delivery import (
+    ACCEPTED_STATE_LABEL, RETAINED_PACK_DELIVERY, RETAINED_PACK_DELIVERY_SQL,
+)
 # Loaded by path rather than imported by name: ops/ is not a package, and the
 # point is that this gate runs THE SAME compiler the sync applies. If it grew its
 # own copy of the rule, the gate could pass while the sync wrote something else.
@@ -96,12 +100,18 @@ def main() -> int:
                     "enforcement. Declare them in the map, or retire them deliberately — "
                     "this gate will not delete a row that may still be enforcing a live rule.")
 
+            cur.execute(f"select exists(select 1 from ops.enforcement_control_catalog c "
+                        f"where {RETAINED_PACK_DELIVERY_SQL})")
+            retained_row = cur.fetchone()
+            assert retained_row is not None
+            retained_pack = retained_row[0]
             problems = []
             for key, want in sorted(expected.items()):
                 _, impl, test, klass, installed, verified = actual[key]
-                if impl != want["implementation_ref"]:
+                accepted_historical = key == RETAINED_PACK_DELIVERY[0] and retained_pack
+                if impl != want["implementation_ref"] and not accepted_historical:
                     problems.append(f"{key}: implementation drifted")
-                if test != want["test_ref"]:
+                if test != want["test_ref"] and not accepted_historical:
                     problems.append(f"{key}: test reference drifted")
                 if klass != want["enforcement_class"]:
                     problems.append(
@@ -126,7 +136,8 @@ def main() -> int:
 
     print(f"control-catalog-parity-gate passed: {len(expected)} control(s) declared and present, "
           f"{installed_count} verified installed, "
-          f"{len(expected) - installed_count} held back with a stated reason")
+          f"{len(expected) - installed_count} held back with a stated reason"
+          + (f"; {ACCEPTED_STATE_LABEL}" if retained_pack else ""))
     return 0
 
 

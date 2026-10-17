@@ -1941,6 +1941,16 @@ DECLARED_CONTROL_ROWS
   exit 1
 fi
 
+# One historical row is accepted only under its exact active approval.
+# The same predicate and named constant are consumed by the parity reader.
+RETAINED_PACK_DELIVERY_SQL="$("$CATALOG_PY" - "$REPO" <<'RETAINED_PACK_DELIVERY'
+import pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "tools"))
+from retained_pack_delivery import RETAINED_PACK_DELIVERY_SQL
+print(RETAINED_PACK_DELIVERY_SQL)
+RETAINED_PACK_DELIVERY
+)"
+
 # Composed into a FILE rather than substituted with sed, because the declared
 # values are repository paths and sed's own delimiter lives in every one of them.
 CONTROL_VERIFY_SQL="$(mktemp)"
@@ -1957,14 +1967,28 @@ VERIFY_HEAD
     ) as d(control_key, implementation_ref, test_ref, enforcement_class, installed)
     left join ops.enforcement_control_catalog c
       on  c.control_key        = d.control_key::text
-      and c.implementation_ref = d.implementation_ref::text
-      and c.test_ref           = d.test_ref::text
+      and ((c.implementation_ref = d.implementation_ref::text
+        and c.test_ref           = d.test_ref::text) or
+VERIFY_TAIL
+  printf '      %s)\n' "$RETAINED_PACK_DELIVERY_SQL"
+  cat <<'VERIFY_TAIL'
       and c.enforcement_class  = d.enforcement_class::text
       and c.installed          = d.installed
       and (not d.installed or c.verified_at is not null)
    where c.control_key is null;
   if drifted is not null then
     raise exception 'schema snapshot refused: exact reviewed control catalog is missing or drifted: %', drifted;
+  end if;
+  if exists (select 1 from ops.enforcement_control_catalog c where
+VERIFY_TAIL
+  printf '    %s) then\n' "$RETAINED_PACK_DELIVERY_SQL"
+  "$CATALOG_PY" - "$REPO" <<'RETAINED_PACK_NOTICE'
+import pathlib, sys
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]) / "tools"))
+from retained_pack_delivery import ACCEPTED_STATE_LABEL
+print("    raise notice 'schema-snapshot control catalog passed; %', '" + ACCEPTED_STATE_LABEL.replace("'", "''") + "';")
+RETAINED_PACK_NOTICE
+  cat <<'VERIFY_TAIL'
   end if;
 end
 $carr_control_catalog$;

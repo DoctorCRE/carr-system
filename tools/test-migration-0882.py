@@ -17,6 +17,7 @@ from psycopg import sql
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
+sys.path.insert(0, str(ROOT / 'ops'))
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 import migration_0882
 
@@ -199,18 +200,19 @@ class Recovery(unittest.TestCase):
         self.conn.commit()
         self.assertEqual(self.run_runner().returncode,0)
 
-    def seed_pack_approval(self):
-        rule_id = '1fcaa63a-73d7-498d-9f76-e99bcd821a89'
+    def seed_pack_approval(self, controls=None, receipt_id="691779e7-d1bc-43f0-adea-c5a97ef72c94",
+                           rule_id="1fcaa63a-73d7-498d-9f76-e99bcd821a89"):
+        controls = ["pack_delivery"] if controls is None else controls
         self.conn.execute('insert into rule(id,statement,status,version,taught_by,activated_by) '
                           "values(%s,'pack fixture','active',2,gen_random_uuid(),gen_random_uuid())", (rule_id,))
         self.conn.execute('insert into ops.rule_control_binding(rule_id,control_key,statement_hash,binding_contract) '
                           "values(%s,'pack_delivery',%s,'{}')", (rule_id,'b'*64))
         self.conn.execute('insert into ops.rule_approval_receipt '
-                          '(idempotency_key,rule_id,rule_version,statement_hash,actor_id,reason,policy_kind,'
+                          '(id,idempotency_key,rule_id,rule_version,statement_hash,actor_id,reason,policy_kind,'
                           'enforcement_status,normalized_contract,requested_control_keys,installed_control_keys,contract_hash,evidence_refs) '
-                          "values('active-pack',%s,2,%s,gen_random_uuid(),'fixture','machine_enforceable',"
-                          "'hard_enforced','{}',array['pack_delivery'],array['pack_delivery'],"
-                          "encode(digest('{}'::jsonb::text,'sha256'),'hex'),array['fixture'])", (rule_id,'b'*64))
+                          "values(%s,'active-pack',%s,2,%s,gen_random_uuid(),'fixture','machine_enforceable',"
+                          "'hard_enforced','{}',%s,%s,"
+                          "encode(digest('{}'::jsonb::text,'sha256'),'hex'),array['fixture'])", (receipt_id,rule_id,'b'*64,controls,controls))
         self.conn.commit()
 
     def pack_snapshot(self):
@@ -249,6 +251,15 @@ class Recovery(unittest.TestCase):
         self.assertEqual(repeat.returncode, 0, repeat.stdout + repeat.stderr)
         self.assertIn('nothing to do', repeat.stdout)
 
+    def test_pack_rule_version_change_refuses(self):
+        self.seed_pack_approval()
+        self.conn.execute("update rule set version=3 where id='1fcaa63a-73d7-498d-9f76-e99bcd821a89'")
+        self.conn.commit()
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('0884 recovery REFUSED', result.stderr)
+        self.assertIsNone(self.conn.execute("select 1 from schema_migrations where filename like '0884%'").fetchone())
+
     def test_active_pack_approval_with_catalog_drift_refuses(self):
         self.conn.execute("update ops.enforcement_control_catalog set test_ref='unexpected' where control_key='pack_delivery'")
         self.conn.commit()
@@ -260,6 +271,70 @@ class Recovery(unittest.TestCase):
         self.assertIn('0884 recovery REFUSED', result.stderr)
         self.assertEqual(self.pack_snapshot(), before)
         self.assertIsNone(self.conn.execute("select 1 from schema_migrations where filename like '0884%' ").fetchone())
+
+    def assert_pack_refused(self):
+        before = self.pack_snapshot()
+        self.conn.commit()
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('0884 recovery REFUSED', result.stderr)
+        self.assertEqual(self.pack_snapshot(), before)
+        self.assertIsNone(self.conn.execute("select 1 from schema_migrations where filename like '0884%'").fetchone())
+
+    def test_pack_extra_control_refuses(self):
+        self.seed_pack_approval(controls=['pack_delivery', 'context_rail'])
+        self.assert_pack_refused()
+
+    def test_pack_removed_control_refuses(self):
+        self.seed_pack_approval(controls=['context_rail'])
+        self.assert_pack_refused()
+
+    def test_pack_duplicate_control_refuses(self):
+        self.seed_pack_approval(controls=['pack_delivery', 'pack_delivery'])
+        self.assert_pack_refused()
+
+    def test_pack_unexpected_receipt_refuses(self):
+        self.seed_pack_approval(receipt_id='11111111-1111-4111-8111-111111111111')
+        self.assert_pack_refused()
+
+    def test_pack_unexpected_rule_refuses(self):
+        self.seed_pack_approval(rule_id='11111111-1111-4111-8111-111111111111')
+        self.assert_pack_refused()
+
+    def test_pack_additional_approval_refuses(self):
+        self.seed_pack_approval()
+        self.conn.execute("insert into ops.rule_approval_receipt select "
+                          "(jsonb_populate_record(null::ops.rule_approval_receipt, "
+                          "to_jsonb(ar)||jsonb_build_object('id',gen_random_uuid(), "
+                          "'idempotency_key','other-pack'))).* from ops.rule_approval_receipt ar")
+        self.conn.commit()
+        self.assert_pack_refused()
+
+    def test_pack_additional_active_rule_refuses(self):
+        self.seed_pack_approval()
+        other = '11111111-1111-4111-8111-111111111111'
+        self.conn.execute("insert into rule(id,statement,status,taught_by,activated_by) "
+                          "values(%s,'other pack','active',gen_random_uuid(),gen_random_uuid())", (other,))
+        self.conn.execute("insert into ops.rule_control_binding(rule_id,control_key,statement_hash,binding_contract) "
+                          "values(%s,'pack_delivery',%s,'{}')", (other,'c'*64))
+        self.conn.commit()
+        self.assert_pack_refused()
+
+    def test_retained_catalog_readers(self):
+        import sync_control_catalog
+        self.seed_pack_approval()
+        migrated = self.run_runner()
+        self.assertEqual(migrated.returncode, 0, migrated.stdout + migrated.stderr)
+        for row in sync_control_catalog.compile_catalog():
+            self.conn.execute("insert into ops.enforcement_control_catalog "
+                              "(control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at) "
+                              "values(%s,%s,%s,%s,%s,now()) on conflict(control_key) do nothing",
+                              tuple(row[k] for k in ('control_key','implementation_ref','test_ref','enforcement_class','installed')))
+        self.conn.commit()
+        result = subprocess.run([sys.executable, str(ROOT / 'ops/control-catalog-parity-gate.py')],
+                                env={**os.environ, 'DATABASE_URL':self.dsn}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('accepted historical pack_delivery', result.stdout)
 
     def test_0884_checksum_change_refuses(self):
         import migration_0884
