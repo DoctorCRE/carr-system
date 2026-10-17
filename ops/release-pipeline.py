@@ -1676,6 +1676,9 @@ class Pipeline:
                 live_sha = (live.get("git_sha") or {}).get("value") if lane == "worker" else live.get("source_commit")
                 if live_sha == sha:
                     raise Blocked("live_target_unreceipted", "selected release target already serves without a reconciled durable release proof")
+            if lane == "worker" and (sha == base or not self._at_or_before(base, sha, repo_dir)):
+                raise Blocked("history_diverged",
+                              f"selected target {sha[:12]} is not a strict descendant of live Worker {base[:12]}")
             changed = self.changed_paths(base, sha, cwd=repo_dir)
             needed, hits = classify(changed, lane_cfg)
             self.out(f"release-pipeline[{lane}]: batch {base[:12]}..{sha[:12]}: "
@@ -1691,9 +1694,6 @@ class Pipeline:
                                        "status": "no_release_needed", "run_id": self.run_id})
                 return 0
             if lane == "worker":
-                if sha == base or not self._at_or_before(base, sha, repo_dir):
-                    raise Blocked("history_diverged",
-                                  f"selected target {sha[:12]} is not a strict descendant of live Worker {base[:12]}")
                 result = self.release_worker(lane_cfg, base, sha, state, lane)
             else:
                 result = self.release_app(lane_cfg, repo_dir, base, sha)

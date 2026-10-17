@@ -516,6 +516,39 @@ class WorkerIdentityReconciliation(Base):
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.slice_marks, [])
 
+    def test_docs_only_target_before_merged_live_side_branch_cannot_regress_checkpoint(self):
+        candidate = self.fx.commit({"mcp-server/src/c.js": "same runtime", "docs/c.md": "candidate"})
+        git(self.fx.repo, "checkout", "-q", "-b", "live-side", self.fx.base)
+        runtime = self.fx.repo / "mcp-server/src/c.js"
+        runtime.parent.mkdir(parents=True, exist_ok=True)
+        runtime.write_text("same runtime")
+        (self.fx.repo / "README.md").write_text("live side")
+        git(self.fx.repo, "add", "mcp-server/src/c.js", "README.md")
+        git(self.fx.repo, "commit", "-q", "-m", "side")
+        live_sha = git(self.fx.repo, "rev-parse", "HEAD")
+        self.assertEqual(git(self.fx.repo, "rev-parse", f"{candidate}:mcp-server"),
+                         git(self.fx.repo, "rev-parse", f"{live_sha}:mcp-server"))
+        git(self.fx.repo, "checkout", "-q", "main")
+        git(self.fx.repo, "merge", "--no-ff", "-m", "merge side", "live-side")
+        merge = git(self.fx.repo, "rev-parse", "HEAD")
+        head = self.fx.commit({"mcp-server/src/h.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        gh = FakeGitHub(canary={candidate: ("completed", "success"),
+                               merge: ("in_progress", None), head: ("in_progress", None)})
+        pipe = self.fx.pipeline(runner, github=gh, live=live)
+        pipe.store.save({"worker": {"last_released_sha": candidate}})
+
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        rows = self.fx.records()
+        self.assertEqual([row["status"] for row in rows], ["live_identity_reconciled", "blocked"])
+        self.assertEqual((rows[0]["from_sha"], rows[0]["sha"]), (candidate, live_sha))
+        self.assertEqual((rows[-1]["reason"], rows[-1]["sha"]), ("history_diverged", candidate))
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+        self.assertEqual(live["sha"], live_sha)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
     def test_unreadable_identity_refuses_even_when_checkpoint_equals_main(self):
         for response in [OSError("offline"), {}, {"git_sha": {"value": "short"}},
                          {"git_sha": "malformed"},
