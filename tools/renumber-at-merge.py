@@ -154,7 +154,7 @@ class Plan:
     writes: dict[str, bytes]
     commands: list[list[str]]
     generated: dict[str, bytes]
-    immutable: dict[str, bytes]
+    immutable: dict[str, bytes | None]
 
     def summary(self, dry_run: bool) -> dict:
         changed = set(self.writes) | set(self.generated)
@@ -205,8 +205,11 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
     applied = applied_names(blob(repo, base, SNAPSHOT))
     if set(pending) & applied:
         raise MigrationNumberError("applied main migration cannot be reallocated: " + ", ".join(sorted(set(pending) & applied)))
-    immutable = {path: git(repo, "show", f"{base}:{path}") for path in base_paths
-                 if (path.startswith("migrations/") and path.endswith(".sql")) or path == MANIFEST}
+    immutable = {
+        path: git(repo, "show", f"{base}:{path}") if branch or (repo / path).exists() else None
+        for path in base_paths
+        if (path.startswith("migrations/") and path.endswith(".sql")) or path == MANIFEST
+    }
     result = Plan(base, head, ancestor != base, {}, {}, [], {}, immutable)
     try:
         validate_integration_union(main, main | pending)
@@ -306,8 +309,9 @@ def apply(repo: Path, result: Plan) -> None:
                 (repo / path).unlink()
         for command in result.commands:
             run_generator(repo, command)
-        for path, content in result.immutable.items():
-            if not (repo / path).is_file() or read_file(repo, path) != content:
+        for path, expected_content in result.immutable.items():
+            observed = read_file(repo, path) if (repo / path).exists() else None
+            if observed != expected_content:
                 raise MigrationNumberError(f"generator changed an applied main migration: {path}")
         validate_integration_union(
             {name: read_migration(repo, name, result.base).encode() for name in migration_names(repo, result.base)},
