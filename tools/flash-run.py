@@ -32,6 +32,7 @@ import uuid
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tools"))
 import flashlib
 OUT = os.path.join(REPO, "out")
@@ -454,25 +455,16 @@ def pick_rules(task, situation=RULE_SITUATION, **judge):
     active corpus. Injected judgment arguments use the same bounded batch interface.
     """
     try:
-        selector = _lib("rule_trigger_delivery")
-        corpus = selector.load_rules()
-        picked, report = selector.judge_budgeted(situation + task, corpus, [], **judge)
-    except Exception as exc:
-        return [], f"{type(exc).__name__}: {exc}"[:300]
-    by_id = {rule["id"]: rule for rule in corpus}
-    rules = [{**by_id[row["id"]], **row}
-             for row in sorted(picked.values(), key=lambda r: (-r["probability"], r["id"]))]
-    gaps = [f"{key}={report[key]}" for key, healthy in
-            (("rank_status", ("ok", "not_needed", "deterministic_shortlist")),
-             ("bind_status", ("judged", "none")))
-            if report.get(key) not in healthy]
-    if report.get("deadline_hit"):
-        gaps.append(f"deadline hit, unjudged={report.get('unjudged', [])}")
-    if report.get("review_required"):
-        candidates = ", ".join(sorted(report.get("advisory_candidates") or {}))
-        gaps.append(f"review required for rule suggestions: {candidates}")
-    note = ("rule judgment degraded: " + "; ".join(gaps))[:300] if gaps else None
-    return rules[:MAX_TASK_RULES], note
+        from lib.rule_scope_lookup import lookup, moment_judge
+        result = lookup({'hook_event_name': 'UserPromptSubmit', 'task': situation + task},
+                        judge=judge.get('judge') or moment_judge('flash-task'))
+        if not result['complete']:
+            return [], 'rule lookup incomplete; resolve scope defects and unanswered moments before proceeding'
+        if len(json.dumps(result['rules'])) > 90000:
+            return [], 'selected rule text exceeds the task context budget'
+        return result['rules'], None
+    except Exception:
+        return [], 'rule scope catalog unavailable'
 
 
 def rules_block(rules):
@@ -481,10 +473,8 @@ def rules_block(rules):
         return None
     lines = ["RULES FOR THIS TASK (picked from the practice's taught rules for this task alone; "
              "follow them):"]
-    for rule in rules[:MAX_TASK_RULES]:
+    for rule in rules:
         text = (rule.get("statement") or rule.get("gist") or "").strip()
-        if len(text) > RULE_STATEMENT_CHARS:
-            text = text[:RULE_STATEMENT_CHARS].rsplit(" ", 1)[0] + " ..."
         lines.append(f"- [{rule.get('id')}] {rule.get('gist', '').strip()}: {text}")
     return "\n".join(lines)
 
@@ -811,6 +801,9 @@ def cmd_run(a):
     row["rules"] = [r.get("id") for r in rules]
     if rules_error:
         row["rules_error"] = rules_error
+        if not a.no_rules:
+            _say(rules_error)
+            return 1
     if rules:
         _say("rules for this task: " + ", ".join(f"{r.get('id')} {r.get('gist', '')[:50]}"
                                                   for r in rules))

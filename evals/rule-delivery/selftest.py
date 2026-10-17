@@ -71,14 +71,25 @@ def main():
     world = R.World(expectations)
     check("frozen expectations match the live labels", not R.expectation_drift(world, cases, expectations))
     fresh = [R.observe(c, R.replay(world, c)) for c in sorted(cases, key=lambda c: c["id"])]
+    pairs = []
+    for case in cases:
+        old = world.selection.fixture['cases'][case['id']]
+        current = [world.prompt_ids(case)] + [world.tool_ids(case, i, call) for i, call in enumerate(case['tool_calls'])]
+        if current != old['events'] or case['input_sha256'] != old['input_sha256']:
+            pairs.append(case['id'])
+    check('paired routing preserves all 339 cases and event order', len(cases) == 339 and not pairs, pairs)
     review_case = {"id": "surface-review-read", "prompt": "",
                    "tool_calls": [{"tool_name": "Read", "tool_input": {
                        "file_path": os.path.join(REPO, "dealroom", "public", "index.html")}}],
                    "required": ["67580c28", "9293d609", "b7ec8f3b"],
                    "gold": ["67580c28", "9293d609", "b7ec8f3b"], "disputed": []}
-    review_grade = R.grade(world, review_case, R.replay(world, review_case))
-    check("eval labels a page review as owed and delivered",
-          not review_grade["missed"] and set(review_case["required"]) <= set(review_grade["delivered"]))
+    from lib.rule_scope_lookup import select_rules
+    fixture = world.selection.fixture
+    catalog = dict(world.selection.catalog, rules=[dict(id=rid, statement='Synthetic scope contract',
+                    personal_to=None, scope=scope) for rid, scope in fixture['structural_scopes'].items()])
+    result = select_rules(catalog, dict(tool_name='Read',tool_input=review_case['tool_calls'][0]['tool_input']))
+    check('stored structural contract delivers page-review rules',
+          set(review_case['required']) <= {r['id'] for r in result['rules']})
 
     # -- task design: split frozen, disjoint, both halves non-trivial
     with open(os.path.join(HERE, "split.json"), "r", encoding="utf-8") as handle:

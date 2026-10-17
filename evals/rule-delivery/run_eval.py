@@ -1,46 +1,9 @@
 #!/usr/bin/env python3
-"""run_eval.py — replay events through CARR's deterministic rule-delivery layer.
+"""Replay current lookup consumers with frozen pre-cutover moment decisions.
 
-The system under test is the trigger/pack layer with the Jev judgment OFF:
-
-  prompt event  ops/rule_trigger_delivery.advise (compiled prompt_regex rows
-                plus always-on; rank/ask stubbed to raise, so no Jev call),
-                then the UserPromptSubmit hook's own pack-layer filter
-                (lib/rule_delivery_preuse.semantic_delivery);
-  tool event    hooks/rule-pack-preuse-reselection.py's own decision code:
-                the scheduled rail (_matches), the route rail
-                (routed_rule_ids over ops/config/rule-routes.v1.json) and the
-                compiled-table rail (matched_triggers), unioned as process()
-                unions them, deduped per (rule, tool) inside one case as
-                lib/rule_routes.fresh_ids dedupes per session.
-
-It calls the production functions; it does not re-implement them. It writes
-nothing to production logs or caches (log_path=os.devnull, no session id).
-
-GRADER (programmatic, expected rule ids per case):
-  expected  = gold - disputed - boot-delivered rules, restricted to rules the
-              trigger layer owes (a trigger/path route, or pack-layer member).
-              Frozen per case in expectations.v4.json (--freeze-expectations)
-              and graded from there, so a change to the routes cannot move its
-              own denominator; a drift from the live derivation needs a new
-              expectations version.
-  recall    = |delivered & expected| / |expected|, per case and micro.
-  false     = delivered rules outside the case's full gold set (and not
-              disputed). A should-not-fire case has no expected rule.
-  tokens    = estimated context tokens of the receipts the events would inject
-              (render replicated offline; chars / 4, no offline tokenizer).
-
-RECEIPT EVIDENCE: --observe writes one raw observation per case (what was
-delivered, no grades); score_receipt() grades a baseline and a candidate
-observation cohort against the frozen expectations and is the scorer
-compares current observations.
-
-Usage:
-  run_eval.py --variant baseline --split train
-  run_eval.py --variant v1 --split all
-  run_eval.py --compare baseline v1 --split test
-  run_eval.py --observe OUT.jsonl [--trace-reads READS.json]
-  run_eval.py --freeze-expectations
+Labels, cohorts, source inputs and grading remain independent. Receipt sizing
+uses the replacement contract. Offline judgments establish plumbing parity,
+not live model accuracy. Run --variant NAME --split all to write observations.
 """
 import argparse
 import hashlib
@@ -213,7 +176,8 @@ class World:
         self.preuse, self.rule_routes = preuse, rule_routes
         ev = _load(os.path.join(REPO, "ops", "rule_delivery_eval.py"), "rde_world")
         self.ev = ev
-        self.rtd = ev._quiet_rule_trigger_delivery(REPO, "eval")
+        from ops.rule_scope_replay import FrozenSelection
+        self.selection = FrozenSelection(REPO)
         self.hook = _load(os.path.join(REPO, "hooks", "rule-pack-preuse-reselection.py"),
                           "preuse_hook_world")
         with open(os.path.join(REPO, "ops", "config", "rule-selection-corpus.v1.json"),
@@ -263,56 +227,33 @@ class World:
     # ---- delivery
 
     def prompt_ids(self, case):
-        if not case["prompt"].strip():
-            return []
-        rows = self.rtd.advise(case["prompt"], session_id=None, log_path=os.devnull,
-                               rank=_raise, ask=_raise)
-        kept, _packs = self.preuse.semantic_delivery(__import__("pathlib").Path(REPO),
-                                                     [row["id"] for row in rows])
-        return sorted(kept)
+        result = self.selection.select({'hook_event_name': 'UserPromptSubmit', 'task': case['prompt']})
+        if not result['complete']:
+            raise ValueError('incomplete_replay_selection')
+        return [r['id'] for r in result['rules']]
 
     def tool_ids(self, case, index, call):
-        payload = {"hook_event_name": "PreToolUse", "tool_name": call["tool_name"],
-                   "tool_input": call.get("tool_input"), "session_id": "rule-delivery-eval",
-                   "tool_use_id": f"eval-{case['id']}-{index}"}
-        if self.hook._matches(payload):
-            return sorted(self.hook.scheduled_rule_ids())
-        rows = self.hook.matched_triggers(payload)
-        routed = self.hook.routed_rule_ids(payload)
-        table = self.preuse.merge_trigger_delivery(rows)[2] if rows else []
-        return sorted(set(routed) | set(table))
-
-    # ---- token cost
+        result = self.selection.select({'hook_event_name': 'PreToolUse', 'task': case['prompt'],
+                                       'tool_name': call['tool_name'], 'tool_input': call.get('tool_input')})
+        if not result['complete']:
+            raise ValueError('incomplete_replay_selection')
+        return [r['id'] for r in result['rules']]
 
     def receipt_chars(self, ids, *, prompt):
-        """Characters of the receipt an event with these fresh ids injects.
-
-        Replicates hooks/rule-pack-preuse-reselection._route_delivery's render
-        (same keys, the real ROUTE_INSTRUCTION, the real fit_rules under the
-        real cap) with fixed-width stand-ins for digests and identities. The
-        prompt receipt has the same skeleton plus probabilities."""
-        rr = self.rule_routes
-        pad = "0" * 64
-        base = {"schema": rr.ROUTE_RECEIPT_SCHEMA, "client": "claude",
-                "session_id": "0" * 36, "turn_id": None, "tool_use_id": "toolu_" + "0" * 22,
-                "tool_name": "Bash", "tool_input_sha256": pad, "routes_digest": pad,
-                "triggers_digest": pad, "map_digest": pad, "source_digest": pad,
-                "trigger_ids": [], "route_rule_ids": [], "packs": [],
-                "identity": {"agent_principal_id": "0" * 36,
-                             "runtime_principal": "joe-local", "sponsoring_human_id": "0" * 36},
-                "rule_ids": list(ids), "not_found": [], "instruction": rr.ROUTE_INSTRUCTION,
-                "rule_delivery": {"mode": "shadow", "declared_packs": [], "packs_not_found": []},
-                "receipt_id": pad}
-
+        from lib.rule_delivery_preuse import LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION
+        pad = '0'*64
+        base = dict(schema=LOOKUP_RECEIPT_SCHEMA, client='claude', session_id='0'*36,
+                    turn_id=None, tool_use_id='toolu_'+'0'*22, tool_name='Bash',
+                    tool_input_sha256=pad, task_sha256=pad, corpus_digest=pad, source_digest=pad,
+                    event_name='UserPromptSubmit' if prompt else 'PreToolUse',
+                    identity=self.selection.catalog['identity'], rule_ids=list(ids),
+                    data_defects=[], unresolved=[], models=['jev-1.13.0'], complete=True,
+                    instruction=LOOKUP_INSTRUCTION, receipt_id=pad)
         def render(full, overflow):
-            row = dict(base, rules=[{"id": r["id"], "statement": r["statement"]} for r in full],
-                       overflow=overflow)
-            if prompt:
-                row["probabilities"] = {r["id"]: 1.0 for r in full}
-            return self.preuse.canonical(row).decode("utf-8")
-        rules = [{"id": rid, "statement": self.statements.get(rid, "")} for rid in sorted(ids)]
-        full, overflow = rr.fit_rules(rules, render, always_on=set())
-        return rr.context_chars(render(full, overflow)), bool(overflow)
+            return self.preuse.canonical(dict(base, rules=full, overflow=overflow)).decode()
+        rules = [r for r in self.selection.catalog['rules'] if r['id'] in ids]
+        full, overflow = self.rule_routes.fit_rules(rules, render, always_on=set())
+        return self.rule_routes.context_chars(render(full, overflow)), bool(overflow)
 
 
 def _raise(*_args, **_kwargs):

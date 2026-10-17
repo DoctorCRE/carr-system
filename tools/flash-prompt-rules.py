@@ -57,19 +57,21 @@ def build_output(prompt, **judge):
     """The hook's JSON output for one message, or None when nothing should be added.
     `judge` passes through to flash-run's pick_rules (tests inject the paid requests)."""
     text = (prompt or "").strip()
-    if text.startswith("/") or len(text) < MIN_CHARS:
+    if text.startswith("/") or not text:
         return None
     row = {"at": datetime.now(timezone.utc).isoformat(), "prompt": text[:300]}
     try:
         flash_run = _flash_run()
-        rules, note = flash_run.pick_rules(text[:2000], situation=SITUATION, **judge)
+        rules, note = flash_run.pick_rules(text, situation=SITUATION, **judge)
         block = flash_run.rules_block(rules)
-    except Exception as exc:
-        rules, note, block = [], f"{type(exc).__name__}: {exc}"[:300], None
+    except Exception:
+        rules, note, block = [], "rule scope catalog unavailable", None
     row["rules"] = [r.get("id") for r in rules]
     if note:
         row["error"] = note
     _log(row)
+    if note:
+        return {"decision": "block", "reason": note}
     if not block:
         return None
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",

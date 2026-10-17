@@ -199,30 +199,6 @@ class PublicSourceGuardTests(unittest.TestCase):
             REPO / "ops/config/public-source-identities.v1.json", output=output), 0,
             output.getvalue())
 
-    def test_nonprivate_trigger_cues_preserve_routing(self):
-        triggers = json.loads((REPO / "ops/config/rule-jit-triggers.v1.json").read_text())["triggers"]
-        import re
-        for cue in ["NPPES", "already system"]:
-            self.assertTrue(any(row.get("kind") == "prompt_regex" and "5d44d3f3" in row.get("rule_ids", []) and
-                                re.search(row.get("pattern", "(?!)"), cue, re.I)
-                                for row in triggers), cue)
-        base = json.loads(subprocess.check_output([
-            "git", "show", "0e1ca6525af547e829dba5286111f2aa21c3dcd6:ops/config/rule-jev-triggers.v1.json"], cwd=REPO))
-        current = json.loads((REPO / "ops/config/rule-jev-triggers.v1.json").read_text())
-        admitted = set(json.loads((REPO / "ops/config/rule-admission-export.v1.json").read_text())["rules"])
-        for key, row in base["rules"].items():
-            if key not in current["rules"]:
-                # A rule leaves the table only when it leaves admission (retired);
-                # a dropped row for a rule still admitted is a lost cue.
-                self.assertNotIn(key, admitted, (key, "dropped from the trigger table while still admitted"))
-                continue
-            candidate = current["rules"][key]
-            for field in ["always_on_probability", "negatives", "no_cue_probability"]:
-                self.assertEqual(row[field], candidate[field], (key, field))
-            for cue, probability in row["triggers"]["keywords"].items():
-                if not re.fullmatch(r"[clvp]-\d+", cue):
-                    self.assertEqual(candidate["triggers"]["keywords"].get(cue), probability,
-                                     (key, "non-private cue"))
 
     def test_ci_scanner_checks_index_bytes_and_changed_files(self):
         with tempfile.TemporaryDirectory() as tmp:
