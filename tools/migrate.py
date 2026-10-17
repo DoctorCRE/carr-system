@@ -82,6 +82,12 @@ from migration_number_contract import (
 # must be the same code, and an environment nobody can rebuild is not the same
 # code).
 DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
+    "0248_register_conduct_stop_control.sql": (
+        "select 1 from rule where id = '3fa422b7-7c99-49fc-8e22-1e551a975c6f'",
+        "0272 registers the conduct-stop control from ops/config/rule-enforcement-map.json "
+        "on every database; all 0248 adds here is a binding to the autonomy rule, "
+        "which this database does not carry",
+    ),
     "0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql": (
         "select 1 where exists (select 1 from ops.enforcement_control_catalog "
         "where control_key='pack_delivery' and installed) "
@@ -89,12 +95,6 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
         "where b.control_key='pack_delivery' and r.status='active')",
         "the text-delivery control is no longer installed and backs no active rule; "
         "the frozen refresh has no live control to update",
-    ),
-    "0248_register_conduct_stop_control.sql": (
-        "select 1 from rule where id = '3fa422b7-7c99-49fc-8e22-1e551a975c6f'",
-        "0272 registers the conduct-stop control from ops/config/rule-enforcement-map.json "
-        "on every database; all 0248 adds here is a binding to the autonomy rule, "
-        "which this database does not carry",
     ),
 }
 

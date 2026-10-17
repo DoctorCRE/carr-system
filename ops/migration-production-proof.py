@@ -145,9 +145,11 @@ def privilege_catalog(conn):
                 memberships=memberships, role_attributes=attributes)
 
 
-def privilege_difference(production, snapshot):
+def privilege_difference(production, snapshot, comparison_roles=None):
     left_roles, right_roles = set(production['roles']), set(snapshot['roles'])
     common = left_roles & right_roles
+    if comparison_roles is not None:
+        common &= set(comparison_roles)
     def comparable(row):
         return ((row[3] in common or row[3] == '<owner>')
                 and (row[0] != 'ROLE' or row[1] in common)
@@ -161,6 +163,9 @@ def privilege_difference(production, snapshot):
     return dict(ok=left == right and
                 not any(row[0] not in owner_roles for row in left_only_attributes | right_only_attributes),
                 common_roles=sorted(common),
+                informational_external_acl_counts=dict(
+                    production=sum(not comparable(row) for row in production['privileges']),
+                    snapshot=sum(not comparable(row) for row in snapshot['privileges'])),
                 production_only_attributes=sorted(row for row in left_only_attributes if row[0] not in owner_roles),
                 snapshot_only_attributes=sorted(row for row in right_only_attributes if row[0] not in owner_roles),
                 informational_owner_attributes=dict(
@@ -284,10 +289,14 @@ def live_proof(ledger_only=True):
     result['equivalence'] = dict(ok=False,
         snapshot_sha256=hashlib.sha256((ROOT / 'db/schema.sql').read_bytes()).hexdigest(),
         scope='all pg_dump schema objects; internal namespace ACLs, database ACLs and large objects excluded; role passwords and grantor identities excluded',
-        normalization='same runtime roles and migration principal; public snapshot identity-prose projection; owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; explicit non-owner ACLs compared by common role without grantor identity; owners normalized to <owner>; implicit ACL defaults excluded, including PUBLIC defaults; owner role attributes informational')
+        normalization='same runtime roles and migration principal; public snapshot identity-prose projection; owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; explicit non-owner ACLs compared for original snapshot-declared common roles without grantor identity; external-principal ACL counts informational; owners normalized to <owner>; implicit ACL defaults excluded, including PUBLIC defaults; owner role attributes informational')
     result['grants'] = dict(ok=None, status='not_run', stage='production plus pending',
                             reason='disposable reconstruction did not complete')
     try:
+        # The unprovisioned rebuild defines the original common-role ACL scope.
+        # Provision external roles only for conditional schema objects and
+        # preserve observed owner/membership options in the comparison fixture.
+        declared = build_schema(ROOT / 'db/schema.sql', bins)
         reference = build_schema(ROOT / 'db/schema.sql', bins, grants=grants)
         with tempfile.TemporaryDirectory(prefix='production-schema-proof-') as directory:
             source = Path(directory) / 'production.sql'
@@ -297,7 +306,7 @@ def live_proof(ledger_only=True):
         corpus = load_corpus(ROOT / 'ops/config/public-source-identities.v1.json')
         difference = schema_difference(sanitize_snapshot(built['dump'], corpus),
                                        sanitize_snapshot(reference['dump'], corpus))
-        result['grants'] = dict(privilege_difference(built['grants'], reference['grants']), stage='production plus pending', status='complete')
+        result['grants'] = dict(privilege_difference(built['grants'], reference['grants'], declared['grants']['roles']), stage='production plus pending', status='complete')
         result['equivalence'].update(ok=built['ledger'] == reference['ledger'] == repository and not difference,
             ledger_matches=built['ledger'] == reference['ledger'] == repository, schema_diff=difference)
     except RuntimeError as exc:
@@ -340,6 +349,9 @@ def main():
             print('grants:', 'PASS' if result['grants']['ok'] else 'FAIL',
                   f"stage={result['grants']['stage']} production_only={len(result['grants']['production_only'])} snapshot_only={len(result['grants']['snapshot_only'])} "
                   f"role_attribute_differences={len(result['grants']['production_only_attributes']) + len(result['grants']['snapshot_only_attributes'])}")
+            external = result['grants']['informational_external_acl_counts']
+            print('external-principal ACLs: INFO',
+                  f"production={external['production']} snapshot={external['snapshot']}")
             informational = result['grants']['informational_owner_attributes']
             print('owner role attributes: INFO',
                   f"differences={len(informational['production_only']) + len(informational['snapshot_only'])}")

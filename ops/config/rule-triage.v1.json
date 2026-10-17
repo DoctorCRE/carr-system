@@ -948,6 +948,17 @@
       "title_gist": "Suggest a pairing with a caveat until a partner rules on it"
     },
     {
+      "detector": {
+        "kind": "verb",
+        "pattern": "(?:^EnterPlanMode$|^UpdatePlan$|(?:^|__)propose-ready-plan$|(?:^|__)register-engineering-slice-plan$)"
+      },
+      "home": "jit",
+      "id": "8400cd3d",
+      "jit_trigger_hint": "Starting a new build, plan, queued item, or builder dispatch; size the work before execution.",
+      "reason": "The active sizing procedure binds when work begins and is delivered at that occasion.",
+      "title_gist": "Size each new work item before building"
+    },
+    {
       "home": "jit",
       "id": "847f9995",
       "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",

@@ -946,12 +946,6 @@
   },
   {
    "id": "8400cd3d",
-   "gist": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP",
-   "statement": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP. Tiny work is built in one go. Medium-to-large work opens with /grill-with-docs. Work that outgrows one session moves to /wayfinder. Never start with /wayfinder.",
-   "scope": {}
-  },
-  {
-   "id": "8400cd3d",
    "gist": "Size each new build before starting; use the bounded pstack and Pocock workflow for its rung.",
    "statement": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP BEFORE ANY BUILDING. Binding at the moment a session or brief begins a new build, plan or queued item, and at every dispatch to a builder. Ordered questions: (1) Is it tiny (a small, obvious change one session finishes with no open design question)? Build it in one go. (2) Otherwise, if it fits in one session: open with a grilling interview against the docs (the Pocock grilling skill, .agents/skills/grilling), one question at a time, until the design questions are settled; then build under /poteto-mode (plugins/pstack/skills/poteto-mode) and run the two AGENTS.md design-and-debt passes (codebase-design, zero-tech-debt) before the PR. (3) If it outgrows one session: never start building it in-session. File a Work Request (report-problem / write-work-shape) whose criteria are the slices, then hand each slice to a builder; each slice is sized again by this rule when dispatched. The brief for every dispatched slice states which rung it sits on. Origin: Joe adopted the sizing step from Matt Pocock's 2026-10-08 post; the beyond-one-session rung originally named a Wayfinder map, replaced 2026-10-13 because that skill exists nowhere.",
    "scope": {}

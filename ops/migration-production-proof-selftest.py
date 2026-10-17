@@ -176,6 +176,19 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(result['snapshot_only'], [right['privileges'][0]])
 
 
+    def test_provisioning_external_roles_does_not_expand_the_original_acl_scope(self):
+        grant = ['table', 'public.example', '', 'external_backup', 'select', False]
+        runtime = ['table', 'public.example', '', 'reader', 'select', False]
+        left = dict(roles=['reader', 'external_backup'], privileges=[grant, runtime])
+        right = dict(roles=['reader', 'external_backup'], privileges=[runtime])
+        result = proof.privilege_difference(left, right, ['reader'])
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['informational_external_acl_counts'], dict(production=1, snapshot=0))
+        right['privileges'] = []
+        result = proof.privilege_difference(left, right, ['reader'])
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['production_only'], [runtime])
+
     def test_common_role_attributes_and_membership_options_must_match(self):
         role = ('reader', False, True, False, False, False, False, -1)
         left = dict(roles=['reader'], role_attributes=[role], privileges=[])
