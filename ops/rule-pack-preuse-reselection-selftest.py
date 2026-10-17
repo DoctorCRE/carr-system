@@ -228,5 +228,103 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('permissionDecision', hook.process(event, runner=unavailable)['hookSpecificOutput'])
 
 
+class CardDeliveryTests(unittest.TestCase):
+    """PLANNING/TOOL cards ride PreToolUse, PROMPT cards ride UserPromptSubmit."""
+    UNCOVERED = dict(id='11111111', statement='Inspect the current diff.',
+                     scope={'tools': ['Bash']}, personal_to=None)
+
+    @staticmethod
+    def covered(prefix, scope=None):
+        return dict(id=f'{prefix}-0000-0000-0000-000000000000', statement=f'Rule {prefix} as text.',
+                    scope=scope or {'tools': ['Bash']}, personal_to=None)
+
+    def invoke(self, rows, *, event='PreToolUse', payload=None, dedupe=False, judge=None):
+        source = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
+                  'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                               'sponsoring_human_id': 'joe'}, 'rules': rows}
+        base = {'hook_event_name': event, 'session_id': 'cards', 'tool_use_id': 'call',
+                'tool_name': 'Bash', 'tool_input': {'command': 'git diff'}, 'prompt': 'Review this change'}
+        base.update(payload or {})
+        runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
+        return hook.process(base, runner=runner, dedupe=dedupe, judge=judge)
+
+    def receipt(self, output):
+        specific = output['hookSpecificOutput']
+        self.assertNotIn('permissionDecision', specific)
+        row = json.loads(specific['additionalContext'])
+        self.assertTrue(validate_lookup_receipt(row, repo=REPO))
+        return row
+
+    def test_tool_card_replaces_its_source_rule(self):
+        row = self.receipt(self.invoke([self.UNCOVERED, self.covered('24e10ee8')]))
+        self.assertEqual(row['rule_ids'], ['11111111'])
+        self.assertNotIn('Rule 24e10ee8', json.dumps(row))
+        self.assertEqual([c['id'] for c in row['cards']], ['A01'])
+        self.assertEqual(row['cards'][0]['acknowledgement'],
+                         'Before acting, answer one line: applies yes/no; action or reason.')
+
+    def test_planning_card_matches_its_own_pattern_at_pretooluse(self):
+        payload = {'tool_name': 'EnterPlanMode',
+                   'tool_input': {'plan': 'Should we add a new table for tour feedback or reuse notes?'}}
+        row = self.receipt(self.invoke([], payload=payload))
+        self.assertIn('L07', [c['id'] for c in row['cards']])
+
+    def test_prompt_card_rides_user_prompt_submit(self):
+        output = self.invoke([], event='UserPromptSubmit',
+                             payload={'prompt': 'its asking me to share the transcript'})
+        row = self.receipt(output)
+        self.assertEqual(row['event_name'], 'UserPromptSubmit')
+        self.assertEqual([c['id'] for c in row['cards']], ['R24'])
+        self.assertEqual(row['rules'], [])
+
+    def test_at_most_three_non_core_cards_per_event(self):
+        rows = [self.covered(p) for p in ('8400cd3d', '2e362970', '43e2ef76', 'a3f6c7f9', 'b42f11a0')]
+        row = self.receipt(self.invoke(rows))
+        self.assertEqual(len(row['cards']), 3)
+        self.assertEqual(row['rules'], [])
+        self.assertTrue(all(c['id'][0] != 'K' for c in row['cards']))
+
+    def test_stop_gets_no_cards_and_card_rules_never_block(self):
+        self.assertIsNone(self.invoke([self.covered('24e10ee8')], event='Stop'))
+
+    def test_card_covered_unresolved_moments_are_not_reported_twice(self):
+        def unavailable(*_):
+            raise TimeoutError('provider detail')
+        moment = self.covered('24e10ee8', scope={'moment': 'Before a retry loop'})
+        row = self.receipt(self.invoke([self.UNCOVERED, moment], judge=unavailable))
+        self.assertEqual(row['unresolved'], [])
+        self.assertTrue(row['complete'])
+
+    def test_cards_are_sent_once_per_context(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
+                'CARR_RULE_ROUTE_DEDUPE_DIR': os.path.join(tmp, 'routes'),
+                'CARR_RULE_BOOT_STATE_DIR': os.path.join(tmp, 'boot')}):
+            prompt = {'prompt': 'its asking me to share the transcript'}
+            first = self.receipt(self.invoke([], event='UserPromptSubmit', payload=prompt, dedupe=True))
+            self.assertEqual([c['id'] for c in first['cards']], ['R24'])
+            self.assertIsNone(self.invoke([], event='UserPromptSubmit', payload=prompt, dedupe=True))
+
+    def test_card_load_failure_fails_open_to_todays_rule_delivery(self):
+        with patch.object(hook.rule_cards, 'load_cards', side_effect=ValueError('broken cards')):
+            row = self.receipt(self.invoke([self.UNCOVERED, self.covered('24e10ee8')]))
+        self.assertEqual(row['rule_ids'], ['11111111', '24e10ee8-0000-0000-0000-000000000000'])
+        self.assertNotIn('cards', row)
+
+    def test_selector_failure_delivers_nothing_extra_and_never_blocks(self):
+        with patch.object(hook.rule_cards, 'routed_cards', side_effect=RuntimeError('selector bug')):
+            row = self.receipt(self.invoke([self.UNCOVERED, self.covered('24e10ee8')]))
+            self.assertIsNone(self.invoke([], event='UserPromptSubmit',
+                                          payload={'prompt': 'its asking me to share the transcript'}))
+        self.assertEqual(row['rule_ids'], ['11111111'])
+        self.assertNotIn('cards', row)
+
+    def test_receipt_rejects_malformed_or_oversized_card_lists(self):
+        row = self.receipt(self.invoke([self.covered(p) for p in ('8400cd3d', '2e362970', '43e2ef76')]))
+        for cards in ([], row['cards'] * 2, [dict(row['cards'][0], extra='x')]):
+            bad = dict(row, cards=cards)
+            bad['receipt_id'] = hook.receipt_id(bad)
+            self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
+
+
 if __name__ == '__main__':
     unittest.main()
