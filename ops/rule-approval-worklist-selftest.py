@@ -34,16 +34,20 @@ What it proves:
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import io
 import json
 import re
-import sys
 import tempfile
 import types
 import unittest
 import uuid
 from contextlib import redirect_stdout
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -110,7 +114,7 @@ def catalog_rows_from_0874() -> dict[str, dict]:
     rows = {m["key"]: {"control_key": m["key"], "installed": m["installed"] == "true",
                        "verified": True,  # every 0874 row sets verified_at = now()
                        "enforcement_class": m["klass"]}
-            for m in INSERT_RE.finditer(MIGRATION_0874.read_text(encoding="utf-8"))}
+            for m in INSERT_RE.finditer(read_migration(MIGRATION_0874.parent.parent, MIGRATION_0874.name))}
     assert set(rows) == {"session_boot", "ledger_capture", "loop_guard"}, sorted(rows)
     return rows
 
@@ -225,7 +229,7 @@ class WorklistTest(unittest.TestCase):
     def test_real_class_file_and_0874_class_the_reminders_surfacing(self):
         classes = json.loads(REAL_CLASSES.read_text(encoding="utf-8"))["control_enforcement_class"]
         rows = catalog_rows_from_0874()
-        sql = MIGRATION_0874.read_text(encoding="utf-8")
+        sql = read_migration(MIGRATION_0874.parent.parent, MIGRATION_0874.name)
         for key in REMINDER_CONTROLS:
             if key == "ledger_capture":
                 self.assertNotIn(key, classes, "PR #1801 retires ledger_capture")

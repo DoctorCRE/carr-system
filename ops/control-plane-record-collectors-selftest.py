@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
+
+from datetime import datetime, timezone
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,8 +37,8 @@ def _find_tiered_queue_migration() -> str:
     "Forward-only, numbered"), so a rename before merge must not silently
     stop this check from running.
     """
-    for path in sorted((ROOT / "migrations").glob("*.sql")):
-        text = path.read_text()
+    for path in sorted(((ROOT / "migrations") / name for name in migration_names((ROOT / "migrations").parent) if fnmatch.fnmatchcase(name, "*.sql"))):
+        text = read_migration(ROOT, path.name)
         if "lead_client_gaps" in text and "v_control_plane_enrichment_queue" in text:
             return text
     raise AssertionError("no migration defines the tiered enrichment/deal-history queues")

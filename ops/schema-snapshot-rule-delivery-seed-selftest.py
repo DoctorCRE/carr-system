@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
 """Pin scoped rule-delivery reconstruction to bounded, exact source data."""
 
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = (ROOT / "bin" / "schema-snapshot.sh").read_text(encoding="utf-8")
 SNAPSHOT = (ROOT / "db" / "schema.sql").read_text(encoding="utf-8")
-MIGRATION_SOURCE = (ROOT / "migrations" / "0317_atomic_rule_delivery_cutover.sql").read_text(
-    encoding="utf-8"
-)
-REFRESH_MIGRATION_SOURCE = (
-    ROOT / "migrations" / "0332_refresh_rule_delivery_activation_preimage.sql"
-).read_text(encoding="utf-8")
-CURRENT_MIGRATION_SOURCE = (
-    ROOT / "migrations" / "0363_rule_delivery_activation_digest_repin.sql"
-).read_text(encoding="utf-8")
+MIGRATION_SOURCE = read_migration(ROOT, "0317_atomic_rule_delivery_cutover.sql")
+REFRESH_MIGRATION_SOURCE = read_migration(ROOT, "0332_refresh_rule_delivery_activation_preimage.sql")
+CURRENT_MIGRATION_SOURCE = read_migration(ROOT, "0363_rule_delivery_activation_digest_repin.sql")
 POLICY_MIGRATION = "0291_rule_delivery_layers.sql"
 CUTOVER_MIGRATION = "0317_atomic_rule_delivery_cutover.sql"
 REFRESH_MIGRATION = "0332_refresh_rule_delivery_activation_preimage.sql"
 SECOND_REFRESH_MIGRATION = "0348_pr_only_main_ruleset_control.sql"
-SECOND_REFRESH_MIGRATION_SOURCE = (
-    ROOT / "migrations" / "0348_pr_only_main_ruleset_control.sql"
-).read_text(encoding="utf-8")
+SECOND_REFRESH_MIGRATION_SOURCE = read_migration(ROOT, "0348_pr_only_main_ruleset_control.sql")
 CURRENT_MIGRATION = "0363_rule_delivery_activation_digest_repin.sql"
 SOURCE_MERGE_MIGRATION = "0471_source_merge_catalog_registry_successor.sql"
 TAIL_REPIN_MIGRATION = "0478_repin_rule_delivery_activation_after_heavy_build_tag.sql"
@@ -35,62 +32,36 @@ CUTOVER_READY_MIGRATION = "0554_scoped_rule_delivery_cutover_ready.sql"
 # ede4b241 entered the reviewed map, 2026-09-29).
 MODEL_CHOICE_REPIN_MIGRATION = "0772_repin_rule_delivery_activation_after_model_choice_rule.sql"
 CONTROL_RETIREMENT_REPIN_MIGRATION = "0837_repin_rule_delivery_activation_after_control_retirement.sql"
-CONTROL_RETIREMENT_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / CONTROL_RETIREMENT_REPIN_MIGRATION
-).read_text(encoding="utf-8")
+CONTROL_RETIREMENT_REPIN_MIGRATION_SOURCE = read_migration(ROOT, CONTROL_RETIREMENT_REPIN_MIGRATION)
 SIZING_REPIN_MIGRATION = "0851_repin_rule_delivery_activation_after_sizing_rule.sql"
-SIZING_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / SIZING_REPIN_MIGRATION
-).read_text(encoding="utf-8")
+SIZING_REPIN_MIGRATION_SOURCE = read_migration(ROOT, SIZING_REPIN_MIGRATION)
 TRACKER_RETIREMENT_REPIN_MIGRATION = (
     "0859_repin_rule_delivery_activation_after_tracker_retirement.sql"
 )
-TRACKER_RETIREMENT_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / TRACKER_RETIREMENT_REPIN_MIGRATION
-).read_text(encoding="utf-8")
+TRACKER_RETIREMENT_REPIN_MIGRATION_SOURCE = read_migration(ROOT, TRACKER_RETIREMENT_REPIN_MIGRATION)
 UNFILED_BUG_REPIN_MIGRATION = (
     "0871_repin_rule_delivery_activation_after_unfiled_bug_control.sql"
 )
-UNFILED_BUG_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / UNFILED_BUG_REPIN_MIGRATION
-).read_text(encoding="utf-8")
+UNFILED_BUG_REPIN_MIGRATION_SOURCE = read_migration(ROOT, UNFILED_BUG_REPIN_MIGRATION)
 HELD_CONTROL_REPIN_MIGRATION = "0875_repin_rule_delivery_activation_after_held_control_tests.sql"
-HELD_CONTROL_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / HELD_CONTROL_REPIN_MIGRATION
-).read_text(encoding="utf-8")
+HELD_CONTROL_REPIN_MIGRATION_SOURCE = read_migration(ROOT, HELD_CONTROL_REPIN_MIGRATION)
 BURST_CONTROL_REPIN_MIGRATION = (
     "0878_repin_rule_delivery_activation_after_github_burst_guard_control.sql"
 )
-BURST_CONTROL_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / BURST_CONTROL_REPIN_MIGRATION
-).read_text(encoding="utf-8")
+BURST_CONTROL_REPIN_MIGRATION_SOURCE = read_migration(ROOT, BURST_CONTROL_REPIN_MIGRATION)
 REGISTRY_INVENTORY_REPIN_MIGRATION = (
     "0880_repin_rule_delivery_activation_after_registry_inventory_refresh.sql"
 )
-REGISTRY_INVENTORY_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / REGISTRY_INVENTORY_REPIN_MIGRATION
-).read_text(encoding="utf-8")
+REGISTRY_INVENTORY_REPIN_MIGRATION_SOURCE = read_migration(ROOT, REGISTRY_INVENTORY_REPIN_MIGRATION)
 REPLY_CONTROL_REPIN_MIGRATION = (
     "0883_repin_rule_delivery_activation_after_reply_control_retirement.sql"
 )
-REPLY_CONTROL_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / REPLY_CONTROL_REPIN_MIGRATION
-).read_text(encoding="utf-8")
-SOURCE_MERGE_MIGRATION_SOURCE = (
-    ROOT / "migrations" / SOURCE_MERGE_MIGRATION
-).read_text(encoding="utf-8")
-TAIL_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / TAIL_REPIN_MIGRATION
-).read_text(encoding="utf-8")
-FINAL_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / FINAL_REPIN_MIGRATION
-).read_text(encoding="utf-8")
-MODEL_CHOICE_REPIN_MIGRATION_SOURCE = (
-    ROOT / "migrations" / MODEL_CHOICE_REPIN_MIGRATION
-).read_text(encoding="utf-8")
-CUTOVER_READY_MIGRATION_SOURCE = (
-    ROOT / "migrations" / CUTOVER_READY_MIGRATION
-).read_text(encoding="utf-8")
+REPLY_CONTROL_REPIN_MIGRATION_SOURCE = read_migration(ROOT, REPLY_CONTROL_REPIN_MIGRATION)
+SOURCE_MERGE_MIGRATION_SOURCE = read_migration(ROOT, SOURCE_MERGE_MIGRATION)
+TAIL_REPIN_MIGRATION_SOURCE = read_migration(ROOT, TAIL_REPIN_MIGRATION)
+FINAL_REPIN_MIGRATION_SOURCE = read_migration(ROOT, FINAL_REPIN_MIGRATION)
+MODEL_CHOICE_REPIN_MIGRATION_SOURCE = read_migration(ROOT, MODEL_CHOICE_REPIN_MIGRATION)
+CUTOVER_READY_MIGRATION_SOURCE = read_migration(ROOT, CUTOVER_READY_MIGRATION)
 POLICY_MARKER = "-- CARR RULE DELIVERY POLICY (bin/schema-snapshot.sh)"
 TARGET_POST_MARKER = (
     "-- CARR RULE DELIVERY ACTIVATION TARGETS POST-0332 (bin/schema-snapshot.sh)"
