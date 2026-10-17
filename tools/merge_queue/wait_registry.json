@@ -65,6 +65,9 @@
     },
     "pacing_lock": {
       "seconds": 155
+    },
+    "regeneration": {
+      "seconds": 1500
     }
   }
 }
