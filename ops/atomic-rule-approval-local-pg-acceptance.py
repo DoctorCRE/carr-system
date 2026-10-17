@@ -9,8 +9,9 @@ rule and receipt created here is rolled back.
 from __future__ import annotations
 
 import os
+import json
 import uuid
-from typing import NoReturn
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 
 import psycopg
@@ -18,6 +19,12 @@ import psycopg
 
 def refuse(message: str) -> NoReturn:
     raise RuntimeError(message)
+
+
+def scalar(cur: psycopg.Cursor) -> Any:
+    row = cur.fetchone()
+    assert row is not None, "expected a database result"
+    return row[0]
 
 
 def install_pre_trigger_rule_shape(cur, statement: str, params: tuple) -> None:
@@ -50,6 +57,20 @@ def main() -> int:
         try:
             with conn.cursor() as cur:
                 cur.execute("begin")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is True, "registered current scope grant must pass the live catalog check"
+                cur.execute("savepoint unregistered_scope_grant")
+                cur.execute("grant execute on function ops.amend_rule_scope(uuid,jsonb,text,integer,text,text) to carr_writer")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is False, "an unregistered scope-writer grant must refuse"
+                cur.execute("rollback to savepoint unregistered_scope_grant")
+                cur.execute("release savepoint unregistered_scope_grant")
+                cur.execute("savepoint missing_scope_grant")
+                cur.execute("revoke execute on function ops.amend_rule_scope(uuid,jsonb,text,integer,text,text) from carr_authority")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is False, "a missing registered grant must refuse"
+                cur.execute("rollback to savepoint missing_scope_grant")
+                cur.execute("release savepoint missing_scope_grant")
                 cur.execute("select rolsuper from pg_roles where rolname=current_user")
                 row = cur.fetchone()
                 if row is None or row[0] is not True:
@@ -165,52 +186,6 @@ def main() -> int:
                 if finite_applicable is None or finite_applicable[0] != 1:
                     refuse("global approved rule did not apply to a finite context")
 
-                # ---- the REAL eval_receipt control (migration 0753) ----
-                # Rule 6cbaa63a names 'eval_receipt CI check' as its carrying
-                # control. Unlike the fixtures above, this does NOT insert a
-                # catalog row: it proves the row the migration set seeded is
-                # one approve-rule accepts, binding it from the catalog with no
-                # pre-written ops.rule_control_binding. Savepoint-scoped so the
-                # extra active rule leaves no deferred epoch work behind.
-                cur.execute("reset session authorization")
-                cur.execute("savepoint eval_receipt_control")
-                eval_rule_id = uuid.uuid4()
-                cur.execute(
-                    """insert into rule(id,statement,human_quote,taught_by,status)
-                       values (%s,'local eval-receipt control fixture',
-                               'Joe approved the eval receipt fixture',%s,'proposed')""",
-                    (eval_rule_id, actor[0]),
-                )
-                cur.execute(
-                    """insert into ops.rule_load_layer
-                         (rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
-                       values (%s,left(%s::text,8),'control','{}'::text[],'shared',
-                               'local eval_receipt control acceptance',
-                               'ops/atomic-rule-approval-local-pg-acceptance.py',
-                               repeat('0',64))""",
-                    (eval_rule_id, eval_rule_id),
-                )
-                cur.execute("set session authorization carr_authority_joe")
-                cur.execute(
-                    "select ops.approve_rule(%s,'machine_enforceable',array['eval_receipt'],%s,%s)",
-                    (eval_rule_id, f"local-eval-receipt-{uuid.uuid4()}",
-                     "Joe local eval_receipt control acceptance"),
-                )
-                eval_approved = cur.fetchone()
-                if eval_approved is None or eval_approved[0].get("policy_status") != "active":
-                    refuse("approve-rule did not accept the seeded eval_receipt control")
-                cur.execute("reset session authorization")
-                cur.execute(
-                    """select binding_contract->>'implementation_ref'
-                         from ops.rule_control_binding
-                        where rule_id=%s and control_key='eval_receipt'""",
-                    (eval_rule_id,),
-                )
-                eval_binding = cur.fetchone()
-                if eval_binding is None or "ops/check-eval-receipt.py" not in (eval_binding[0] or ""):
-                    refuse("eval_receipt binding does not name ops/check-eval-receipt.py")
-                cur.execute("rollback to savepoint eval_receipt_control")
-                cur.execute("release savepoint eval_receipt_control")
                 cur.execute("set session authorization carr_authority_joe")
 
                 # ---- versioned amendment (WR-000019 slice S10) ----
@@ -235,8 +210,8 @@ def main() -> int:
                 # SECURITY DEFINER authority functions.
                 cur.execute("reset session authorization")
                 cur.execute(
-                    """insert into rule(id,statement,human_quote,taught_by,status)
-                       values (%s,%s,'Joe approved the amendment fixture',%s,'proposed')""",
+                    """insert into rule(id,statement,human_quote,taught_by,status,scope)
+                       values (%s,%s,'Joe approved the amendment fixture',%s,'proposed','{"source":"import","nested":{"quote_absent":true},"verbs":["teach"]}'::jsonb)""",
                     (amend_rule_id, original_statement, actor[0]),
                 )
                 cur.execute(
@@ -295,6 +270,106 @@ def main() -> int:
                 if before_amend is None or before_amend[0] != 1:
                     refuse("amendment fixture was not applicable before amendment")
 
+                cur.execute("select version from public.rule where id=%s", (amend_rule_id,))
+                scope_version = scalar(cur)
+                scope_key = f"local-scope-{uuid.uuid4()}"
+                scope_sql = "select ops.amend_rule_scope(%s,%s::jsonb,%s,%s,%s,%s)"
+                old_scope = {"source": "import", "nested": {"quote_absent": True}, "verbs": ["teach"]}
+                new_scope = {**old_scope, "moment": "Before amending a rule"}
+                scope_args = (amend_rule_id, json.dumps(new_scope),
+                              original_statement, scope_version, scope_key, "Backfill from rule text")
+                cur.execute(scope_sql, scope_args)
+                scope_result = scalar(cur)
+                assert scope_result["ok"] and not scope_result["replayed"]
+                cur.execute(scope_sql, scope_args)
+                assert scalar(cur)["replayed"]
+                cur.execute(
+                    """select r.scope, r.statement, r.human_quote, r.personal_to, r.version,
+                              ar.prior_scope, ar.new_scope, ar.rationale
+                         from public.rule r join ops.rule_amendment_receipt ar on ar.rule_id=r.id
+                        where r.id=%s and ar.id=%s""",
+                    (amend_rule_id, scope_result["amendment_receipt_id"]),
+                )
+                stored = cur.fetchone()
+                assert stored == (new_scope, original_statement,
+                                  "Joe approved the amendment fixture", None, scope_version + 1,
+                                  old_scope, new_scope, "Backfill from rule text")
+
+                def scope_refuses(params, message, role="carr_authority_joe"):
+                    cur.execute("reset session authorization")
+                    cur.execute("savepoint scope_refusal")
+                    cur.execute(f"set session authorization {role}")
+                    try:
+                        cur.execute(scope_sql, params)
+                    except psycopg.Error as exc:
+                        cur.execute("rollback to savepoint scope_refusal")
+                        assert message in str(exc).lower(), str(exc)
+                    else:
+                        refuse(f"scope amendment should refuse: {message}")
+                    finally:
+                        cur.execute("release savepoint scope_refusal")
+                        cur.execute("reset session authorization")
+                        cur.execute("set session authorization carr_authority_joe")
+
+                def scope_attempt(scope, version=scope_version + 1, key=None, reason="Scope check"):
+                    return (amend_rule_id, scope, original_statement, version,
+                            key if key is not None else str(uuid.uuid4()), reason)
+
+                scope_refuses(scope_attempt('{"moment":"Changed"}'), "active_rule_scope_frozen")
+                scope_refuses(scope_attempt('{}'), "active_rule_scope_frozen")
+                scope_refuses(scope_attempt('[]'), "invalid_object")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "verb": "teach"})),
+                              "permission denied", role="carr_writer")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "source": "changed"})), "active_rule_scope_frozen")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "nested": {"quote_absent": False}})), "active_rule_scope_frozen")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "verbs": ["teach", "amend-rule"]})), "active_rule_scope_frozen")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "verb": "teach"}),
+                                            version=scope_version), "version_conflict")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "verb": "teach"}),
+                                            reason=""), "rationale")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "verb": "teach"}),
+                                            key=""), "idempotency")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "verb": "teach"}),
+                                            key=scope_key), "different input")
+                scope_refuses(scope_attempt(json.dumps({**new_scope, "verb": "teach"})),
+                              "joe authority", role="carr_authority_dell")
+                scope_refuses(scope_attempt(json.dumps(new_scope)), "no-op")
+
+                cur.execute("savepoint scope_key_statement_replay")
+                try:
+                    cur.execute("select ops.amend_rule_statement(%s,%s,%s,%s)",
+                                (amend_rule_id, original_statement, scope_key, "Backfill from rule text"))
+                except psycopg.Error as exc:
+                    cur.execute("rollback to savepoint scope_key_statement_replay")
+                    assert "different input" in str(exc).lower(), str(exc)
+                else:
+                    refuse("statement writer replayed a scope amendment key")
+                cur.execute("release savepoint scope_key_statement_replay")
+
+                cur.execute("reset session authorization")
+                cur.execute("savepoint direct_scope_refusal")
+                try:
+                    cur.execute("update public.rule set scope=scope || '{\"verb\":\"teach\"}'::jsonb where id=%s",
+                                (amend_rule_id,))
+                except psycopg.Error as exc:
+                    cur.execute("rollback to savepoint direct_scope_refusal")
+                    assert "receipt" in str(exc).lower(), str(exc)
+                else:
+                    refuse("unreceipted direct active scope update succeeded")
+                cur.execute("release savepoint direct_scope_refusal")
+                cur.execute("set session authorization carr_authority_joe")
+
+                cur.execute("reset session authorization")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is True
+                cur.execute("savepoint scope_catalog_rejects_extra_grant")
+                cur.execute("grant execute on function ops.amend_rule_scope(uuid,jsonb,text,integer,text,text) to carr_writer")
+                cur.execute("select ops.scac_mutation_catalog_v118_current()")
+                assert scalar(cur) is False, "the catalog must reject any extra scope-writer grant"
+                cur.execute("rollback to savepoint scope_catalog_rejects_extra_grant")
+                cur.execute("release savepoint scope_catalog_rejects_extra_grant")
+                cur.execute("set session authorization carr_authority_joe")
+
                 amended_statement = "local exact amendment fixture, AFTER wording fix"
                 cur.execute(
                     "select ops.amend_rule_statement(%s,%s,%s,%s)",
@@ -315,11 +390,10 @@ def main() -> int:
                          and ar.new_statement=%s
                          and ar.new_statement_hash=encode(digest(r.statement,'sha256'),'hex')
                          and ar.rationale='fixing the wording, same meaning'
-                         and ar.id=%s
                          from rule r join ops.rule_amendment_receipt ar on ar.rule_id=r.id
-                        where r.id=%s""",
+                        where r.id=%s and ar.id=%s""",
                     (amended_statement, original_statement, amended_statement,
-                     amendment_receipt_id, amend_rule_id),
+                     amend_rule_id, amendment_receipt_id),
                 )
                 amendment_binding = cur.fetchone()
                 if amendment_binding is None or amendment_binding[0] is not True:
@@ -332,6 +406,8 @@ def main() -> int:
                 amend_replay = cur.fetchone()
                 if amend_replay is None or amend_replay[0].get("replayed") is not True:
                     refuse("amendment exact replay failed")
+
+                scope_refuses(scope_args, "replay refused")
 
                 # THE PART THAT IS EASY TO MISS: an amended ACTIVE rule must
                 # keep reciting under its old approval, not silently vanish
@@ -827,10 +903,24 @@ def main() -> int:
                 if legacy_amend_replay is None or legacy_amend_replay[0].get("replayed") is not True \
                         or legacy_amend_replay[0].get("legacy_admission") != legacy_amend_note:
                     refuse("legacy amendment exact replay failed")
+                cur.execute("select version from public.rule where id=%s", (legacy_amend_id,))
+                legacy_scope_version = scalar(cur)
+                cur.execute(scope_sql, (legacy_amend_id, '{"moment":"Before legacy rule amendments"}',
+                                       "legacy scope and wording correction", legacy_scope_version,
+                                       str(uuid.uuid4()), "Backfill legacy scope"))
+                legacy_scope_result = scalar(cur)
+                assert legacy_scope_result["ok"] and not legacy_scope_result["replayed"]
+                cur.execute(
+                    """select ar.legacy_admission, ar.prior_scope, ar.new_scope, r.statement
+                         from ops.rule_amendment_receipt ar join public.rule r on r.id=ar.rule_id
+                        where ar.id=%s""", (legacy_scope_result["amendment_receipt_id"],))
+                assert cur.fetchone() == (legacy_amend_note, {},
+                                         {"moment": "Before legacy rule amendments"},
+                                         "legacy scope and wording correction")
                 cur.execute("reset session authorization")
 
                 conn.rollback()
-                print("PASS: atomic Joe rule approval, amendment, replay, retirement, "
+                print("PASS: atomic Joe rule approval, additive scope backfill, amendment, replay, retirement, "
                       "legacy lifecycle (0351) and rollback")
                 return 0
         finally:

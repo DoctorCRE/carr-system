@@ -18,7 +18,9 @@ SPEC.loader.exec_module(boot)
 CORPUS = {row["id"]: row["statement"] for row in
           json.loads((REPO / "ops/config/rule-selection-corpus.v1.json").read_text())["rules"]}
 # Regression fixtures only; production recognition must depend on statements, not these ids.
-STANDING_IDS = ("3d185f2b", "424ba0cc", "51d9f05f", "5697071b", "614c1209",
+# 5697071b (licensure per partner) left the corpus when it was retired on 2026-10-13
+# (loop 1304); the licence shape stays covered by the neutral positives below.
+STANDING_IDS = ("3d185f2b", "424ba0cc", "51d9f05f", "614c1209",
                 "67580c28", "725dff46", "9293d609", "a8f159ad", "b7ec8f3b",
                 "c8ebeb5b", "ce12c11e", "d3774a28", "f0f9156e", "f2d58a30", "f5bac101")
 

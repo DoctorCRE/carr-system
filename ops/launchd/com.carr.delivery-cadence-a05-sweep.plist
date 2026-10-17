@@ -6,7 +6,7 @@
   com.carr.delivery-cadence-a05-sweep: daily V5-A05 delivery-cadence sweep.
 
   A LAUNCH AGENT, NOT A SCHEDULED MODEL SESSION (PROP-010's ruling; see
-  com.carr.timebomb-audit.plist's own header). Reading cadence-status and,
+  the native launchd definitions's own header). Reading cadence-status and,
   only on a detected miss, calling raise-delivery-cadence-alert is a fixed
   predicate pipeline over deterministic record-layer reads and one bounded
   write, not a judgement call about what to do next.

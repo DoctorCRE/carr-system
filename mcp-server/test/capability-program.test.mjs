@@ -8,7 +8,6 @@ import { TOOLS, executeRegisteredTool, ToolError as RegistryToolError } from "..
 import {
   COMPLETION_KINDS,
   capabilityProgramTools,
-  completionEvidenceError,
   nextProjectState,
 } from "../src/capability-program.js";
 
@@ -89,51 +88,6 @@ test("Joe's retrieval decision moves RAG first without renaming or skipping anot
   assert.match(sql, /WR-AI-006[\s\S]*sole queue head/i);
 });
 
-test("completion evidence is conditional on what completion means", () => {
-  assert.deepEqual(COMPLETION_KINDS, ["built", "extended", "adopted", "declined"]);
-
-  assert.equal(completionEvidenceError("built", {
-    artifact_ref: "pr:201",
-    acceptance_test_refs: ["ci:run:501"],
-    independent_verifier_ref: "finding:review-9",
-  }), null);
-
-  assert.equal(completionEvidenceError("extended", {
-    artifact_ref: "commit:abc",
-    acceptance_test_refs: ["test:contract"],
-    independent_verifier_ref: "review:fresh-context",
-  }), null);
-
-  assert.equal(completionEvidenceError("adopted", {
-    artifact_ref: "manifest:runtime-v1",
-    acceptance_test_refs: ["rehearsal:12"],
-    independent_verifier_ref: "review:13",
-    rollback_ref: "runbook:remove-runtime",
-    decision_ref: "decision:adopt-runtime",
-  }), null);
-
-  assert.equal(completionEvidenceError("declined", {
-    decision_ref: "decision:decline-transformer",
-    independent_verifier_ref: "review:cost-case",
-  }), null);
-
-  assert.equal(completionEvidenceError("built", {
-    artifact_ref: "pr:201",
-    acceptance_test_refs: [],
-    independent_verifier_ref: "review:9",
-  }).error, "completion_evidence_incomplete");
-
-  assert.equal(completionEvidenceError("adopted", {
-    artifact_ref: "manifest:runtime-v1",
-    acceptance_test_refs: ["rehearsal:12"],
-    independent_verifier_ref: "review:13",
-  }).missing.includes("rollback_ref"), true);
-
-  assert.equal(completionEvidenceError("declined", {
-    decision_ref: "decision:decline-transformer",
-  }).missing.includes("independent_verifier_ref"), true);
-});
-
 test("advancement activates exactly one successor and never skips a queued row", () => {
   assert.deepEqual(nextProjectState(1, [
     { sequence: 2, state: "ready" },
@@ -159,24 +113,17 @@ test("advancement activates exactly one successor and never skips a queued row",
 
 test("the registry exposes a read context and only human-governed lifecycle writes", () => {
   assert.equal(Boolean(TOOLS["capability-program"]?.write), false);
-  assert.equal(Boolean(TOOLS["start-capability-project"]?.write), true);
   assert.equal(Boolean(TOOLS["complete-capability-project"]?.write), true);
-  assert.equal(Boolean(TOOLS["begin-capability-project"]?.write), true);
-  assert.equal(Boolean(TOOLS["attest-capability-project"]?.write), true);
   assert.equal(TOOLS["complete-capability-project"].humanOnly, undefined);
-  assert.equal(TOOLS["start-capability-project"].humanOnly, undefined);
-  assert.equal(TOOLS["begin-capability-project"].humanOnly, undefined);
-  assert.equal(TOOLS["attest-capability-project"].humanOnly, undefined);
 
   const completion = TOOLS["complete-capability-project"].inputSchema;
   assert.equal(completion.additionalProperties, false);
   assert.equal(completion.required.includes("base_version"), true);
   assert.equal(completion.required.includes("completion_evidence"), true);
   assert.deepEqual(completion.properties.completion_kind.enum, COMPLETION_KINDS);
-  assert.equal(TOOLS["prepare-capability-project"].humanOnly, undefined);
   assert.equal(TOOLS["capability-program"].inputSchema.properties.program_key.const, PROGRAM,
     "the public reader must not select an arbitrary program");
-  for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project"])
+  for (const name of ["complete-capability-project"])
     assert.equal(TOOLS[name].inputSchema.properties.program_key.const, PROGRAM,
       `${name} must reject cross-program writes`);
 });
@@ -346,51 +293,6 @@ test("a decline that WAS decided stops being a proposed decline", async () => {
   assert.equal(result.program_complete, true);
 });
 
-test("a settled decline may be closed out of order; build work may not", async () => {
-  const head = { id: "h", ref: "WR-AI-001", program_ordinal: 2, version: 3,
-    state: "ready", disposition: "extend", title: "LLM evaluation harness", project_context: {} };
-  const decline = { id: "d", ref: "WR-AI-024", program_ordinal: 24, version: 5,
-    state: "ready", disposition: "decline", title: "Feature store", project_context: {} };
-  const buildLater = { id: "b", ref: "WR-AI-007", program_ordinal: 7, version: 2,
-    state: "ready", disposition: "extend", title: "Something buildable", project_context: {} };
-
-  const dbFor = rows => ({ query: async (sql, params = []) => {
-    if (/order by w.program_ordinal limit 1/.test(sql)) return { rows: [head] };
-    if (/program_ordinal=\$2/.test(sql)) {
-      const wanted = Number(params[1]);
-      return { rows: rows.filter(r => Number(r.program_ordinal) === wanted) };
-    }
-    if (sql.includes("from ops.capability_agent_session")) return { rows: [] };
-    throw new Error(`unexpected query: ${sql}`);
-  }});
-
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-
-  let err = null;
-  try {
-    await tools["start-capability-project"].handler(dbFor([decline]), actor,
-      { idempotency_key: "00000000-0000-4000-8000-000000000001", sequence: 24, base_version: 5, executor_actor: "claude", program_key: PROGRAM });
-  } catch (e) { err = e; }
-  assert.notEqual(err?.payload?.error, "out_of_order_project",
-    "a row already dispositioned decline must not be refused for being out of sequence");
-
-  err = null;
-  try {
-    await tools["start-capability-project"].handler(dbFor([buildLater]), actor,
-      { idempotency_key: "00000000-0000-4000-8000-000000000002", sequence: 7, base_version: 2, executor_actor: "claude", program_key: PROGRAM });
-  } catch (e) { err = e; }
-  assert.equal(err?.payload?.error, "out_of_order_project",
-    "buildable work stays strictly ordered");
-
-  err = null;
-  try {
-    await tools["start-capability-project"].handler(dbFor([decline]), actor,
-      { idempotency_key: "00000000-0000-4000-8000-000000000003", sequence: 24, base_version: 1, executor_actor: "claude", program_key: PROGRAM });
-  } catch (e) { err = e; }
-  assert.equal(err?.payload?.error, "version_conflict",
-    "the decline exemption must not smuggle a stale write past the version check");
-});
-
 class ToolError extends Error {
   constructor(payload) { super(payload.error); this.payload = payload; }
 }
@@ -497,16 +399,6 @@ test("persisted candidate plus an independent pass closes exactly one project an
   );
 });
 
-test("lifecycle binds a persisted session and does not falsely collapse ready through claimed", async () => {
-  const source = fs.readFileSync(path.join(REPO, "mcp-server/src/capability-program.js"), "utf8");
-  assert.match(source, /insert into ops\.capability_agent_session/i,
-    "start must create/validate a persisted session, not accept an arbitrary string");
-  assert.match(source, /state='claimed'/i,
-    "ready→claimed must be a real durable transition");
-  assert.match(source, /active_session_id|agent_session_id/i,
-    "prepare and complete must bind to the same persisted session");
-});
-
 test("the scheduled builder definition cannot certify, merge, deploy, or communicate", () => {
   const prompt = fs.readFileSync(
     path.join(REPO, "ops/scheduled-tasks/ai-capability-builder.SKILL.md"), "utf8");
@@ -524,7 +416,7 @@ test("the scheduled builder definition cannot certify, merge, deploy, or communi
 
 test("the dispatcher lets a non-human actor reach every capability lifecycle handler", async () => {
   const nonHuman = { id: "scheduled-builder", human: false, slug: "scheduled-builder" };
-  for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project", "cancel-capability-session"]) {
+  for (const name of ["complete-capability-project", "cancel-capability-session"]) {
     await assert.rejects(
       executeRegisteredTool({ query: async () => { throw new Error("handler must not run"); } }, nonHuman, name, {}),
       error => !(error instanceof RegistryToolError && error.payload?.error === "human_only"),

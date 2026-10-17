@@ -135,12 +135,6 @@ jobs:
         run: npm --prefix mcp-server ci
 
       - name: Install zsh
-        # ops/gate-zero-scheduler-canary-gate.py runs the Gate Zero canary
-        # LaunchAgent's own ProgramArguments, and both the wrapper
-        # (bin/run-scheduled.sh) and the canary carry a #!/bin/zsh shebang. A
-        # runner without zsh would fail that gate for the environment rather
-        # than for the code — the same three seconds of apt ci.yml already
-        # spends for bin/review-council-runner.sh.
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
 
       - name: Install Python dependencies from the lock

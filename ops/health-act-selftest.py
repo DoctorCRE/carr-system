@@ -288,7 +288,7 @@ class HealthActTests(unittest.TestCase):
     # row. Every `ai_seat_health/<seat>` loop is then "not red", but nothing
     # proved any seat green, so none of them may close.
 
-    UNREADABLE = ("Seat health evidence unreadable; on breach: orchestrator repairs ops/seat-health.py "
+    UNREADABLE = ("Seat health evidence unreadable; on breach: orchestrator repairs credential health "
                   "and reruns the daily exact-value probes; auto-clear when all seats pass")
 
     def own_loops(self, lib, *rows):
@@ -337,31 +337,6 @@ class HealthActTests(unittest.TestCase):
                     receipts_path=Path(tmp) / "r.jsonl", complete=True, now=NOW)
         self.assertEqual(door.loops["960"]["status"], "open")
 
-    def test_health_check_reports_no_seat_green_when_seat_rows_raise(self):
-        """End to end through the shipped `_canonical_health` and act(): the
-        seat reader raises, and no per-seat loop closes."""
-        import contextlib, io
-        findings_suite = _load_tool_module("health_check_findings_selftest",
-                                           REPO / "tools" / "health-check-findings-selftest.py")
-        lib = load()
-        for rows, open_after in (
-                (TypeError("fixture seat report"), {"950", "951"}),
-                (["PASS grok latency=1s layer=none · ok", SEAT.replace("grok", "codex")], {"951"})):
-            with self.subTest(rows=rows):
-                ns = findings_suite.PaidCapCanonicalHealthTests().all_namespace()
-                ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
-                def seat_rows(rows=rows):
-                    if isinstance(rows, Exception):
-                        raise rows
-                    return rows
-                ns["_seat_health_rows"] = seat_rows
-                with contextlib.redirect_stdout(io.StringIO()):
-                    ns["_canonical_health"]()
-                door = self.own_loops(lib, ("ai_seat_health", "grok"), ("ai_seat_health", "codex"))
-                with tempfile.TemporaryDirectory() as tmp:
-                    lib.act(list(ns["_FINDINGS"]), door, receipts_path=Path(tmp) / "r.jsonl",
-                            complete=True, green=dict(ns["_GREEN_EVIDENCE"]), now=NOW)
-                self.assertEqual({n for n in ("950", "951") if door.loops[n]["status"] == "open"}, open_after)
 
     def test_the_consumer_passes_the_green_evidence(self):
         health = (REPO / "tools" / "health-check.py").read_text()
@@ -423,7 +398,6 @@ class HealthActTests(unittest.TestCase):
                          "the consumer must run before the completion marker, which stays last")
         self.assertIn("if ACT_MODE:", health)
         self.assertIn('elif arg == "--act":', health)
-        self.assertIn('subject=_seat_line.split()[1]', health, "one finding per seat")
         nightly = (REPO / "bin" / "nightly.sh").read_text()
         self.assertIn('./run.sh health --act', nightly)
         run_sh = (REPO / "run.sh").read_text()

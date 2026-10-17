@@ -10,8 +10,7 @@ so the bridge can wake the originating room's dispatcher without a human relay.
 
 The claim uses Hermes' canonical 900-second lease.  Hermes
 ``release_stale_claims`` restores an expired, workerless run to its retry
-phase on a dispatcher tick.  This is deliberately the recovery authority: a
-second local retry ledger would create a competing task state machine.
+phase on a dispatcher tick.
 
 Queue metadata is an execution-routing boundary, not a Job Passport
 ExecutionEnvelope.  The controller therefore does not fabricate Work Request,
@@ -32,10 +31,8 @@ from typing import Callable
 META_PREFIX = "[CARR_QUEUE_META "
 RESULT_PREFIX = "CARR_QUEUE_RESULT "
 META_FIELDS = {"v", "target", "cap", "source_seq", "source_msg_id", "finish"}
-# kanban_adapter stamps server-derived provenance as an optional field; tasks without it keep working.
 META_OPTIONAL = {"origin"}
 ORIGIN_VALUE = re.compile(r"[a-z][a-z-]{0,31}:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
-# The desk-facing line carrying that provenance; always the prompt's third line (see _prompt), never body text.
 TRUST_PREFIX = "[Model Room trust"
 RESULT_FIELDS = {"v", "task_id", "outcome", "summary"}
 RECORD_WRITE_EVIDENCE_FIELDS = {"mcp_verb", "record_id", "readback_verb", "readback_record_id"}
@@ -108,7 +105,6 @@ def _decode_exact(raw: str, fields: set[str], label: str) -> dict:
 
 
 def _decode_meta(raw: str) -> dict:
-    """The six required metadata fields, plus the optional server-stamped `origin` when present and well-formed."""
     try:
         value = json.loads(raw)
     except (TypeError, json.JSONDecodeError) as exc:
@@ -161,12 +157,6 @@ def parse_terminal_result(raw: str, task_id: str, cap: str = "read") -> dict:
         raise QueueDispatchError("terminal result is not valid JSON") from exc
     if not isinstance(value, dict) or not RESULT_FIELDS <= set(value):
         raise QueueDispatchError("terminal result fields are invalid")
-    # Real sessions add their own detail fields (pr_url, verbs, gaps,
-    # room_seq, ...) next to the required ones: t_24b0a0c6 and t_a4765f1b did
-    # their work and were blocked as result_protocol_error only for that.
-    # Unknown fields are therefore dropped, never validated or forwarded; the
-    # protocol fields themselves stay exact.  ``code`` is a protocol field and
-    # belongs only to a blocked outcome.
     known = RESULT_FIELDS | {"code"}
     if cap == "record-write":
         known |= RECORD_WRITE_EVIDENCE_FIELDS
@@ -202,15 +192,6 @@ def parse_terminal_result(raw: str, task_id: str, cap: str = "read") -> dict:
 
 
 def _bounded_reply(raw_result: str) -> str:
-    """The desk's own prose: its trailing CARR_QUEUE_RESULT protocol line stripped,
-    the rest truncated at MAX_REPLY_CHARS. Not redaction — nothing here scans for or
-    removes secrets/PII from the model's own text; it is the desk's reply verbatim,
-    just with the protocol line removed and a length bound applied.
-
-    Used for synchronous desks without MCP tools (Flash and Grok). They cannot
-    post their own answers into the room while doing the task; this callback
-    carries those answers.
-    """
     if not isinstance(raw_result, str):
         return "(empty reply)"
     lines = raw_result.rstrip().splitlines()
@@ -258,8 +239,6 @@ class QueueDeskExecutor:
         )
         origin = parsed["meta"].get("origin")
         if isinstance(origin, str) and ORIGIN_VALUE.fullmatch(origin):
-            # Server provenance from the adapter-built metadata line: always the prompt's third line, directly after
-            # the source line and before the blank line that starts the body, so posted text can never stand here.
             source += f"{TRUST_PREFIX} origin {origin} cap {parsed['meta']['cap']}]\n"
         evidence = ""
         if parsed["meta"]["cap"] == "record-write":
@@ -283,14 +262,6 @@ class QueueDeskExecutor:
 
     def _retry_or_block(self, task_id: str, code: str, *, now: str | None,
                         before_block: Callable[[str], None] | None = None) -> dict:
-        """Use only Hermes evidence for the finite recovery bound.
-
-        ``before_block`` runs immediately before any permanent block, and never
-        before a retry. The synchronous flash-local path passes its FINAL room
-        completion post here, so a retry posts nothing (the retried attempt owns
-        the one completion key) and a post failure raises before Hermes is
-        marked blocked, leaving the claim for Hermes' own stale-claim recovery.
-        """
         def block(reason: str) -> None:
             if before_block is not None:
                 before_block(reason)
@@ -369,9 +340,6 @@ class QueueDeskExecutor:
         _created, task_id, parsed = min(ready_candidates)
         receipt = self._read_final(completion_dir, parsed)
 
-        # A socket-backed desk that is known dead gets a timing-only grace
-        # window.  Crucially this happens before claim, so no Hermes attempt,
-        # dispatch, retry, or reassignment is manufactured while waiting.
         if desk_live is False and receipt is None:
             task_unavailable_since = (
                 unavailable_since.get(task_id) if isinstance(unavailable_since, dict)
@@ -399,12 +367,9 @@ class QueueDeskExecutor:
             self.adapter.block(task_id, "desk_unavailable", kind="transient")
             return {"outcome": "blocked", "task_id": task_id, "code": "desk_unavailable"}
 
-        # The canonical claim is the race boundary. No dispatch happens first.
         try:
             self.adapter.claim(task_id)
         except Exception:
-            # Another controller may have won the atomic claim, or Hermes may
-            # have become unavailable. Either way, dispatching would be wrong.
             return {"outcome": "claim_not_acquired", "task_id": task_id, "target": target_alias}
         if receipt is not None:
             if post_completion is None:
@@ -412,7 +377,7 @@ class QueueDeskExecutor:
             return self._apply_final(receipt, post_completion)
         try:
             row = dispatch_call(self._prompt(parsed))
-        except Exception as exc:  # dispatch details may contain provider output; never persist them here
+        except Exception as exc:
             error_code = getattr(exc, "code", None)
             if error_code == "queue_unavailable":
                 code = "queue_unavailable"
@@ -441,15 +406,6 @@ class QueueDeskExecutor:
                 },
             }
         if status != "completed":
-            # A no-answer reply is a distinct, honestly-labeled failure, not a
-            # generic provider outage: flash_wire is the only dispatch_call
-            # that ever sets detail="no_answer" (an empty Flash reply), so
-            # this stays desk-agnostic and only ever fires for that case. The
-            # route's `then` desk in ops/config/model-routes.v1.json is NOT
-            # dispatched to here — see finish_pending's retry_protocol_errors
-            # for why a real cross-desk hand-off is out of this module's
-            # bounded scope today; this still only retries then blocks, under
-            # its own diagnosable code instead of a misleading one.
             detail = row.get("detail") if isinstance(row, dict) else None
             code = "no_answer" if detail == "no_answer" else _dispatch_failure_code(status)
             return self._retry_or_block(task_id, code, now=now)
@@ -459,8 +415,6 @@ class QueueDeskExecutor:
                    "source_msg_id": parsed["meta"]["source_msg_id"],
                    "dispatch_msg_id": row.get("msg_id")}
         if include_reply and isinstance(row.get("provider_metadata"), dict):
-            # The wire validates provider identity. Keep only its declared
-            # receipt fields; arbitrary provider diagnostics never enter the room.
             pending["provider_metadata"] = {
                 key: row["provider_metadata"][key] for key in (
                     "requested_model", "actual_model", "effort", "request_id",
@@ -516,8 +470,6 @@ class QueueDeskExecutor:
             return
         path = self._final_path(completion_dir, receipt["binding"]["kanban_task_id"])
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Write ahead of publication, including an uncertain post response.
-        # Preserve JSON key order: the room compares the serialized body.
         temp = path.with_suffix(".tmp")
         with temp.open("w") as stream:
             stream.write(json.dumps(receipt, separators=(",", ":")))
@@ -551,10 +503,7 @@ class QueueDeskExecutor:
         """Return the bounded callback contract.
 
         Never return model prose — EXCEPT when ``include_reply`` is set by the
-        synchronous Flash/Grok desk paths (see start()/finish_pending()). A
-        codex-session or claude-session desk has its own MCP tools and posts its own reply into the room
-        as part of doing the task, so the "never return model prose" rule holds for it
-        unchanged; Flash/Grok have no tools, so their replies would otherwise be lost.
+        synchronous Flash/Grok desk paths (see start()/finish_pending()).
         ``include_reply`` is the one bounded exception carrying it back — its
         protocol result line stripped and truncated (_bounded_reply), not redacted.
         """
@@ -614,29 +563,23 @@ class QueueDeskExecutor:
         """Like finish_pending, but posts the room completion callback BEFORE any Hermes
         terminal transition, never after.
 
-        Synchronous desks without MCP tools (start()) need this. The bridge supplies
+        The bridge supplies
         completion_dir to persist the exact final callback and terminal operation
         before publication. Once Hermes releases a stale claim, start() claims it
         again and replays that receipt without dispatching another provider call.
-        This is publication evidence, not a second task-state or retry authority.
 
         Posting first instead means a failed post (post_completion raises, and the
         exception propagates to the caller UNCHANGED) leaves the Hermes claim in
         place — never marked done/blocked/review — so the task stays "running" until
         Hermes' own release_stale_claims puts it back in the retry phase on its own
-        schedule. That is the SAME recovery authority every other transient dispatch
-        failure in this module already relies on (see the module docstring), not a
-        second local retry ledger.
+        schedule.
 
         Only a FINAL completion is ever posted: after the result line parses, or
         when the task is being permanently blocked (a non-retryable failure, or a
         retryable protocol error whose Hermes retry budget is spent). A protocol
         error that schedules a retry posts nothing. The room callback has exactly
         one idempotency key per task (queue-completion:<task_id>) and the server
-        rejects that key with a different body (key_reuse), so posting an interim
-        "blocked" before a retry would both show the room a false result and make
-        the retried attempt's real completion unpostable forever (PR #1254 round
-        2 review, finding 1). A crash between a successful post and the Hermes
+        rejects that key with a different body (key_reuse). A crash between a successful post and the Hermes
         transition re-posts the identical final body, which the server replays.
         """
         return self._finish(
@@ -683,21 +626,6 @@ class QueueDeskExecutor:
             return finish("block", "record_write_evidence_missing", "record_write_evidence_missing",
                           kind="needs_input")
         except QueueDispatchError:
-            # A desk with no MCP tools of its own (flash-local) is far more likely
-            # to fumble the exact trailing-line protocol than a codex-session or
-            # claude-session desk, which write it themselves as one more tool
-            # call. retry_protocol_errors (set only for flash-local, see start())
-            # gives it the same bounded retry-then-block every other transient
-            # failure gets here, instead of a permanent block on the first miss.
-            # A scheduled retry posts NOTHING to the room; only the exhausted,
-            # permanent block posts the final completion (see
-            # finish_pending_posted). This is NOT the cross-desk hand-off to the
-            # route's `then` desk that flash_wire.py's docstring and
-            # ops/config/model-routes.v1.json describe: Hermes'
-            # CARR_QUEUE_META.target is fixed in the task body at creation and
-            # validated against the claiming desk's own alias (parse_queue_task),
-            # so handing a task to a different desk would need a new, linked task
-            # rather than a reassignment of this one — tracked as loop #649.
             if retry_protocol_errors:
                 def before_block(reason: str) -> None:
                     receipt = final_receipt("block", reason, "blocked", kind="transient")

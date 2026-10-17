@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+from pathlib import Path
 from typing import Any
 
 
@@ -222,6 +224,37 @@ def summarize(projection: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         key=lambda row: row["ingress_key"],
     )
     return {"categories": categories, "combined": {"count": len(combined_rows), "digest": digest(combined_rows)}}
+
+
+def validate_registered_grants(projection, baseline, contract):
+    remaining = {name: list(projection[name]) for name in
+                 ("secdef_execute", "relation_dml", "column_dml")}
+    for grant in contract["secdef_execute"]:
+        if remaining["secdef_execute"].count(grant) != 1:
+            raise RuntimeError(f"registered grant missing or altered: {grant['ingress_key']}")
+        remaining["secdef_execute"].remove(grant)
+    for name, rows in remaining.items():
+        if {"count": len(rows), "digest": digest(rows)} != baseline[name]:
+            raise RuntimeError(f"current DB catalog drift: {name}")
+
+
+def validate_current_catalog(cur):
+    repo = Path(__file__).resolve().parents[1]
+    contract = json.loads(subprocess.check_output(
+        ["node", "--input-type=module", "-e",
+         "import {SCAC_MUTATION_CURRENT_DB_GRANTS as grants} from './mcp-server/src/scac-mutation-registry.current.generated.js'; console.log(JSON.stringify(grants));"],
+        cwd=repo, text=True))
+    installed = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0]
+    if installed != contract:
+        raise RuntimeError("current generated registry differs from the installed grant contract")
+    row = cur.execute(
+        "select registry_digest,catalog_projection from ops.scac_mutation_registry_version where registry_version=%s",
+        (contract["registry_version"],)).fetchone()
+    if row is None or row[0] != contract["registry_digest"]:
+        raise RuntimeError("current grant contract database registry digest mismatch")
+    projection = project(cur)
+    validate_registered_grants(projection, row[1], contract)
+    return summarize(projection)
 
 
 def project_role_authority(cur: Any) -> dict[str, Any]:

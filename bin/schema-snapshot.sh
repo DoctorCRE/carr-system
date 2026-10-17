@@ -286,230 +286,55 @@ case "$RULE_DELIVERY_DIGEST_REPIN_APPLIED" in
   *) echo "schema-snapshot: could not read the rule-delivery digest-repin ledger state" >&2; exit 1 ;;
 esac
 
-SOURCE_MERGE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0471_source_merge_catalog_registry_successor.sql')" \
-  2>/dev/null)"
-case "$SOURCE_MERGE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the source-merge registry ledger state" >&2; exit 1 ;;
-esac
 
-CODEX_CONTINUITY_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0481_codex_continuity_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CODEX_CONTINUITY_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Codex continuity registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_CONTINUITY_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0486_claude_continuity_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_CONTINUITY_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude continuity registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_STARTUP_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0487_claude_startup_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_STARTUP_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude startup registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_ACTOR_HYDRATION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0488_claude_actor_hydration_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_ACTOR_HYDRATION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude actor hydration registry ledger state" >&2; exit 1 ;;
-esac
 
-CLAUDE_CONFIG_PRESERVATION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0489_claude_config_preservation_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CLAUDE_CONFIG_PRESERVATION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Claude config-preservation registry ledger state" >&2; exit 1 ;;
-esac
 
-CODEX_COMPACTION_CHECKPOINT_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0490_codex_compaction_checkpoint_registry_activation.sql')" \
-  2>/dev/null)"
-case "$CODEX_COMPACTION_CHECKPOINT_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Codex compaction-checkpoint registry ledger state" >&2; exit 1 ;;
-esac
 
-BACKUP_GUARD_STATUS_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0491_backup_guard_status_registry_activation.sql')" \
-  2>/dev/null)"
-case "$BACKUP_GUARD_STATUS_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the backup guard/status registry ledger state" >&2; exit 1 ;;
-esac
 
-SOURCED_SHAPE_FORWARD_CORRECTION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0492_sourced_shape_forward_correction_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$SOURCED_SHAPE_FORWARD_CORRECTION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the sourced shape forward-correction registry ledger state" >&2; exit 1 ;;
-esac
 
-INCIDENT_WORK_REQUEST_LINK_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0493_incident_work_request_link_scac_successor.sql')" \
-  2>/dev/null)"
-case "$INCIDENT_WORK_REQUEST_LINK_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the incident/work-request registry ledger state" >&2; exit 1 ;;
-esac
 
-CONTINUITY_ARCHIVE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0494_codex_continuity_archive_registry.sql')" \
-  2>/dev/null)"
-case "$CONTINUITY_ARCHIVE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the continuity-archive registry ledger state" >&2; exit 1 ;;
-esac
 
-R06_HOOKS_CORRECTNESS_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0495_r06_hooks_correctness_scac_successor.sql')" \
-  2>/dev/null)"
-case "$R06_HOOKS_CORRECTNESS_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the R06 hooks-correctness registry ledger state" >&2; exit 1 ;;
-esac
 
-DOCTORCRE_PORTFOLIO_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0496_doctorcre_portfolio_hierarchy_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DOCTORCRE_PORTFOLIO_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the DoctorCRE portfolio registry ledger state" >&2; exit 1 ;;
-esac
 
-R07_REPO_HYGIENE_JANITOR_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0497_r07_repo_hygiene_janitor_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$R07_REPO_HYGIENE_JANITOR_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the R07 repo-hygiene janitor registry ledger state" >&2; exit 1 ;;
-esac
 
-V5_F09_WORKFLOW_TRUTH_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0498_f09_workflow_truth_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$V5_F09_WORKFLOW_TRUTH_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the V5-F09 workflow truth registry ledger state" >&2; exit 1 ;;
-esac
 
-V5_SCHEDULED_JOB_ADMISSION_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0501_scheduled_job_admission_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$V5_SCHEDULED_JOB_ADMISSION_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the V5 scheduled job admission registry ledger state" >&2; exit 1 ;;
-esac
 
-GATE_ZERO_OUTCOME_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0503_gate_zero_outcome_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$GATE_ZERO_OUTCOME_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Gate Zero outcome registry ledger state" >&2; exit 1 ;;
-esac
 
-FOUNDATION_ASSURANCE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0512_foundation_assurance_scac_successor.sql')" \
-  2>/dev/null)"
-case "$FOUNDATION_ASSURANCE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the foundation-assurance registry ledger state" >&2; exit 1 ;;
-esac
 
-DEAL_FIELD_PROVENANCE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0516_deal_field_change_provenance_and_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DEAL_FIELD_PROVENANCE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the deal-field provenance registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000110. 0518 is the registry successor half of the atomic (0517,0518)
 # group, so probing the SUCCESSOR and not the domain migration is what says
 # the v29 registry surface exists. A snapshot taken between the two would be
 # taken inside a transaction that has not committed, which cannot happen.
-PROGRAM_CONTROLLER_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0518_program_controller_seams_scac_successor.sql')" \
-  2>/dev/null)"
-case "$PROGRAM_CONTROLLER_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the program controller registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000111/112/113. 0522 is the registry successor half of the atomic
 # (0519,0520,0521,0522) group, so probing the SUCCESSOR and not any of the three
 # domain migrations is what says the v30 registry surface exists. A snapshot
 # taken between them would be taken inside a transaction that has not
 # committed, which cannot happen.
-PRODUCER_TRIO_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0522_producer_trio_scac_successor.sql')" \
-  2>/dev/null)"
-case "$PRODUCER_TRIO_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the producer trio registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000114. 0524 is the registry successor half of the atomic (0523,0524)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v31 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-DOC_CONVERSATION_WRITE_DOORS_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0524_doc_conversation_write_doors_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DOC_CONVERSATION_WRITE_DOORS_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Doc conversation write-door registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000115. 0526 is the registry successor half of the atomic (0525,0526)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v32 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-DOC_CONVERSATION_LIST_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0526_doc_conversation_list_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DOC_CONVERSATION_LIST_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Doc conversation list registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000116. 0528 is the registry successor half of the atomic (0527,0528)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v33 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-NOTIFICATION_PREFERENCES_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0528_notification_preferences_scac_successor.sql')" \
-  2>/dev/null)"
-case "$NOTIFICATION_PREFERENCES_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the notification preference registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000119. 0532 is the registry successor half of the atomic (0531,0532)
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v35 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-DISPATCH_SPINE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0532_room_dispatch_spine_scac_successor.sql')" \
-  2>/dev/null)"
-case "$DISPATCH_SPINE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the dispatch spine registry ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000125. 0532a and 0532b are one atomic suffix after the already-applied
 # v35 predecessor. A snapshot may expose v36 only when the registry successor
@@ -522,13 +347,6 @@ case "$WR125_DOMAIN_APPLIED" in
   t|f) ;;
   *) echo "schema-snapshot: could not read the WR125 ownership ledger state" >&2; exit 1 ;;
 esac
-WR125_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0532b_ready_plan_amendment_scac_successor.sql')" \
-  2>/dev/null)"
-case "$WR125_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the WR125 SCAC ledger state" >&2; exit 1 ;;
-esac
 
 # WR-000130. 0539 advances the registry after 0538 assurance binding.
 WR130_ASSURANCE_APPLIED="$("$PSQL" -Atqc \
@@ -538,33 +356,12 @@ case "$WR130_ASSURANCE_APPLIED" in
   t|f) ;;
   *) echo "schema-snapshot: could not read the WR130 assurance ledger state" >&2; exit 1 ;;
 esac
-WR130_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0539_canonical_ownership_assurance_scac_successor.sql')" \
-  2>/dev/null)"
-case "$WR130_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the WR130 SCAC ledger state" >&2; exit 1 ;;
-esac
-WR132_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0541_release_readiness_scac_successor.sql')" \
-  2>/dev/null)"
-case "$WR132_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the WR132 SCAC ledger state" >&2; exit 1 ;;
-esac
 MODEL_ROLE_STORE_APPLIED="$("$PSQL" -Atqc \
   "select exists (select 1 from schema_migrations where filename='0542_model_role_store.sql')" \
   2>/dev/null)"
 case "$MODEL_ROLE_STORE_APPLIED" in
   t|f) ;;
   *) echo "schema-snapshot: could not read the Model Room role-store ledger state" >&2; exit 1 ;;
-esac
-MODEL_ROLE_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0543_model_role_store_scac_successor.sql')" \
-  2>/dev/null)"
-case "$MODEL_ROLE_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the Model Room SCAC ledger state" >&2; exit 1 ;;
 esac
 
 WR130_HOTFIX_REGISTRY_APPLIED="$("$PSQL" -Atqc \
@@ -1389,13 +1186,6 @@ fi
 # group, so probing the SUCCESSOR and not the domain migration is what says the
 # v34 registry surface exists. A snapshot taken between the two would be taken
 # inside a transaction that has not committed, which cannot happen.
-SESSION_IDENTITY_REGISTRY_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0530_session_identity_scac_successor.sql')" \
-  2>/dev/null)"
-case "$SESSION_IDENTITY_REGISTRY_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the session identity registry ledger state" >&2; exit 1 ;;
-esac
 
 # pg_dump renders timestamptz in the server session timezone; pin it so the
 # Production and disposable-local paths serialize identical instants alike.
@@ -2577,494 +2367,10 @@ case "$SCAC_REGISTRY_APPLIED" in
   *) echo "schema-snapshot: could not read the SCAC registry ledger state" >&2; exit 1 ;;
 esac
 
-scac_select_registry() {
-  SCAC_SELECTION="$(python3 "$REPO/ops/registry_chain.py" snapshot "$1")" || exit 1
-  eval "$SCAC_SELECTION"
-}
-
 if [ "$SCAC_REGISTRY_APPLIED" = t ]; then
-  if [ "$WR130_HOTFIX_REGISTRY_APPLIED" = t ]; then
-    [ "$MODEL_ROLE_REGISTRY_APPLIED" = t ] || {
-      echo "schema-snapshot: WR130 hotfix v40 is applied without v39" >&2
-      exit 1
-    }
-    [ "$WR132_REGISTRY_APPLIED" = t ] && [ "$MODEL_ROLE_STORE_APPLIED" = t ] || {
-      echo "schema-snapshot: WR130 hotfix v40 registry is applied without its v39, v38 and 0542 predecessors" >&2
-      exit 1
-    }
-    scac_select_registry 40
-    if [ "$B09_OUTCOME_REGISTRY_APPLIED" = t ]; then
-      scac_select_registry 41
-      if [ "$B09_ATOMIC_REPAIR_REGISTRY_APPLIED" = t ]; then
-        scac_select_registry 42
-        if [ "$JEV_PROCESS_REGISTRY_APPLIED" = t ]; then
-          scac_select_registry 43
-          if [ "$JEV_HOOK_ACTIVATION_REGISTRY_APPLIED" = t ]; then
-            scac_select_registry 44
-            if [ "$DEAL_CONFLICT_REGISTRY_APPLIED" = t ]; then
-              scac_select_registry 45
-              if [ "$DEAL_UNDO_REGISTRY_APPLIED" = t ]; then
-                scac_select_registry 46
-                if [ "$HERMES_DISPATCH_REGISTRY_APPLIED" = t ]; then
-                  scac_select_registry 47
-                  if [ "$RULE_DELIVERY_REGISTRY_APPLIED" = t ]; then
-                    scac_select_registry 48
-                    if [ "$MEETING_MODE_REGISTRY_APPLIED" = t ]; then
-                      scac_select_registry 49
-                      if [ "$MACHINE_ROLE_REGISTRY_APPLIED" = t ]; then
-                        scac_select_registry 50
-                        if [ "$SNAPSHOT_DEDUP_REGISTRY_APPLIED" = t ]; then
-                          scac_select_registry 51
-                          if [ "$JEV_HANDOFF_REGISTRY_APPLIED" = t ]; then
-                            scac_select_registry 52
-                            if [ "$OPENSSL_RESOLUTION_REGISTRY_APPLIED" = t ]; then
-                              scac_select_registry 53
-                              if [ "$MACHINE_PATHS_REGISTRY_APPLIED" = t ]; then
-                                scac_select_registry 54
-                                if [ "$LOGITECH_KEYMAP_OPTOUT_REGISTRY_APPLIED" = t ]; then
-                                  scac_select_registry 55
-                                  if [ "$CI_SPLIT_REGISTRY_APPLIED" = t ]; then
-                                    scac_select_registry 56
-                                    if [ "$TOUR_PROPERTY_REGISTRATION_REGISTRY_APPLIED" = t ]; then
-                                      scac_select_registry 57
-                                      if [ "$TOUR_REGISTRATION_ATOMIC_PAIR_REGISTRY_APPLIED" = t ]; then
-                                        scac_select_registry 58
-                                        if [ "$JEV_COMBINED_V59_REGISTRY_APPLIED" = t ]; then
-                                          scac_select_registry 59
-                                          if [ "$CALL_MODE_ORIGIN_REGISTRY_APPLIED" = t ]; then
-                                            scac_select_registry 60
-                                            if [ "$QUILL_SPEAKER_LABELS_REGISTRY_APPLIED" = t ]; then
-                                              scac_select_registry 61
-                                              if [ "$REQUIRED_ARGS_NULLABLE_REGISTRY_APPLIED" = t ]; then
-                                                scac_select_registry 62
-                                                if [ "$ANSWER_JOE_REGISTRY_APPLIED" = t ]; then
-                                                  scac_select_registry 63
-                                                  if [ "$ANSWER_JOE_ATOMIC_PAIR_REGISTRY_APPLIED" = t ]; then
-                                                    scac_select_registry 64
-                                                    if [ "$RESOURCE_OBSERVATION_REGISTRY_APPLIED" = t ]; then
-                                                      scac_select_registry 65
-                                                      if [ "$RESOURCE_OBSERVATION_MIGRATE_PY_RESEAL_REGISTRY_APPLIED" = t ]; then
-                                                        scac_select_registry 66
-                                                        if [ "$TIMEBOMB_AUDIT_REGISTRY_APPLIED" = t ]; then
-                                                          scac_select_registry 67
-                                                          if [ "$RELEASE_PIPELINE_REGISTRY_APPLIED" = t ]; then
-                                                            scac_select_registry 68
-                                                            if [ "$JEV_CALL_RECEIPT_REGISTRY_APPLIED" = t ]; then
-                                                              scac_select_registry 69
-                                                              if [ "$JEV_CALL_RECEIPT_MIGRATE_PY_RESEAL_REGISTRY_APPLIED" = t ]; then
-                                                                scac_select_registry 70
-                                                                if [ "$NIGHTLY_EXPORTS_DAYTIME_RETRY_REGISTRY_APPLIED" = t ]; then
-                                                                  scac_select_registry 71
-                                                                  if [ "$V5_R02_REGISTRY_APPLIED" = t ]; then
-                                                                    scac_select_registry 72
-                                                                    if [ "$DEPLOY_WORKER_DO_MIGRATION_RESEAL_REGISTRY_APPLIED" = t ]; then
-                                                                      scac_select_registry 73
-                                                                      if [ "$JOURNEY_ONE_CLOCK_DOOR_REGISTRY_APPLIED" = t ]; then
-                                                                        scac_select_registry 74
-                                                                        if [ "$DELIVERY_CADENCE_A05_REGISTRY_APPLIED" = t ]; then
-                                                                          scac_select_registry 75
-                                                                          if [ "$GLOBAL_BOUNDARIES_DOOR_REGISTRY_APPLIED" = t ]; then
-                                                                            scac_select_registry 76
-                                                                            if [ "$F01_RECORD_SOURCE_AUTHORITY_REGISTRY_APPLIED" = t ]; then
-                                                                              scac_select_registry 77
-                                                                              if [ "$V5_SLICE_DONE_MARKER_REGISTRY_APPLIED" = t ]; then
-                                                                                scac_select_registry 78
-                                                                                if [ "$GOVERNED_CORRESPONDENCE_REGISTRY_APPLIED" = t ]; then
-                                                                                  scac_select_registry 79
-                                                                                  if [ "$CRE_LIFECYCLE_REGISTRY_APPLIED" = t ]; then
-                                                                                    scac_select_registry 80
-                                                                                    if [ "$AMEND_CLOSED_LOOP_REGISTRY_APPLIED" = t ]; then
-                                                                                      scac_select_registry 81
-                                                                                      if [ "$ACTION_CLASS_SUCCESSOR_REGISTRY_APPLIED" = t ]; then
-                                                                                        scac_select_registry 82
-                                                                                        if [ "$ASSURANCE_HEALTH_REGISTRY_APPLIED" = t ]; then
-                                                                                          scac_select_registry 83
-                                                                                          if [ "$V5_A03_REVIEW_REGISTRY_APPLIED" = t ]; then
-                                                                                            scac_select_registry 84
-             if [ "$V5_A02_RULE_ENFORCEMENT_REGISTRY_APPLIED" = t ]; then
-               scac_select_registry 85
-               if [ "$SESSION_TRACE_ARCHIVE_REGISTRY_APPLIED" = t ]; then
-                 scac_select_registry 86
-                 if [ "$F05_RULE_CONTEXT_REGISTRY_APPLIED" = t ]; then
-                   scac_select_registry 87
-                   if [ "$SALESFORCE_RECONCILIATION_RW02_REGISTRY_APPLIED" = t ]; then
-                     scac_select_registry 88
-                     if [ "$PROVISION_ENGINEERING_CONTROLLER_REGISTRY_APPLIED" = t ]; then
-                       scac_select_registry 89
-                       if [ "$RULE_BOOT_STANDING_CONTEXT_REGISTRY_APPLIED" = t ]; then
-                         scac_select_registry 90
-                         if [ "$SALESFORCE_RW02_SAFE_STOP_REGISTRY_APPLIED" = t ]; then
-                           scac_select_registry 91
-                           if [ "$INCIDENT_TRIAGE_REGISTRY_APPLIED" = t ]; then
-                             scac_select_registry 92
-                             if [ "$INDUSTRY_EVENTS_REGISTRY_APPLIED" = t ]; then
-                               scac_select_registry 93
-                               if [ "$BOARD_ANSWERS_REGISTRY_APPLIED" = t ]; then
-                                 scac_select_registry 94
-                                 if [ "$SCHEDULE_BOARD_REGISTRY_APPLIED" = t ]; then
-                                   scac_select_registry 95
-                                   if [ "$DOC_SUGGESTIONS_REGISTRY_APPLIED" = t ]; then
-                                     scac_select_registry 96
-                                     if [ "$CODEX_SESSION_READ_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 97
-                                     if [ "$TOUR_FEEDBACK_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 98
-                                     if [ "$PROPERTY_EVIDENCE_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 99
-                                     if [ "$PROGRESS_DIRECTORY_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 100
-                                     if [ "$WHATS_NEW_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 101
-                                     if [ "$CONFIRM_MERGE_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 102
-                                     if [ "$FIND_RULE_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 103
-                                     if [ "$JEV_CAP_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 104
-                                     if [ "$OBSERVATORY_ROOM_READ_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 105
-                                     if [ "$LEAD_AUTOMATION_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 106
-                                     if [ "$DOC_ACTIVITY_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 107
-                                     if [ "$SYSTEM_WORK_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 108
-                                     if [ "$RELATIONSHIP_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 109
-                                     if [ "$INVOICE_TRACKER_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 110
-                                     if [ "$AUTOMATION_UNDO_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 111
-                                     if [ "$LEADS_REGISTRY_APPLIED" = t ]; then
-                                       scac_select_registry 112
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                     fi
-                                   fi
-                                 fi
-                               fi
-                             fi
-                           fi
-                         fi
-                       fi
-                     fi
-                   fi
-                 fi
-               fi
-             fi
-                                                                                          fi
-                                                                                        fi
-                                                                                      fi
-                                                                                    fi
-                                                                                  fi
-                                                                                fi
-                                                                              fi
-                                                                            fi
-                                                                          fi
-                                                                        fi
-                                                                      fi
-                                                                    fi
-                                                                  fi
-                                                                fi
-                                                              fi
-                                                            fi
-                                                          fi
-                                                        fi
-                                                      fi
-                                                    fi
-                                                  fi
-                                                fi
-                                              fi
-                                            fi
-                                          fi
-                                        fi
-                                      fi
-                                    fi
-                                  fi
-                                fi
-                              fi
-                            fi
-                          fi
-                        fi
-                      fi
-                    fi
-                  fi
-                fi
-              fi
-            fi
-          fi
-        fi
-      fi
-    fi
-  elif [ "$MODEL_ROLE_REGISTRY_APPLIED" = t ]; then
-    [ "$WR132_REGISTRY_APPLIED" = t ] && [ "$MODEL_ROLE_STORE_APPLIED" = t ] || {
-      echo "schema-snapshot: Model Room v39 registry is applied without its v38 and 0542 predecessors" >&2
-      exit 1
-    }
-    scac_select_registry 39
-  elif [ "$WR132_REGISTRY_APPLIED" = t ]; then
-    [ "$WR130_REGISTRY_APPLIED" = t ] || {
-      echo "schema-snapshot: WR132 v38 registry is applied without its v37 predecessor" >&2
-      exit 1
-    }
-    scac_select_registry 38
-  elif [ "$WR130_REGISTRY_APPLIED" = t ]; then
-    [ "$WR130_ASSURANCE_APPLIED" = t ] && [ "$WR125_REGISTRY_APPLIED" = t ] && [ "$WR125_DOMAIN_APPLIED" = t ] || {
-      echo "schema-snapshot: WR130 v37 registry is applied without its 0538 and WR125 predecessors" >&2
-      exit 1
-    }
-    scac_select_registry 37
-  elif [ "$WR125_REGISTRY_APPLIED" = t ]; then
-    [ "$WR125_DOMAIN_APPLIED" = t ] || {
-      echo "schema-snapshot: WR125 v36 registry is applied without its 0532a domain suffix" >&2
-      exit 1
-    }
-    scac_select_registry 36
-  elif [ "$DISPATCH_SPINE_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 35
-    # Same one-behind rule as every branch below: the v34 full entry set became
-    # readable only once 0532 sealed it, so this branch is where that seal is
-    # first required. All 34 sealed histories are covered here.
-  elif [ "$SESSION_IDENTITY_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 34
-    # Same one-behind rule as every branch below: the v33 full entry set became
-    # readable only once 0530 sealed it, so this branch is where that seal is
-    # first required. All 33 sealed histories are covered here.
-  elif [ "$NOTIFICATION_PREFERENCES_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 33
-    # Same one-behind rule as every branch below: the v32 full entry set became
-    # readable only once 0528 sealed it, so this branch is where that seal is
-    # first required. All 32 sealed histories are covered here.
-  elif [ "$DOC_CONVERSATION_LIST_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 32
-    # Same one-behind rule as every branch below: the v31 full entry set became
-    # readable only once 0526 sealed it, so this branch is where that seal is
-    # first required. All 31 sealed histories are covered here.
-  elif [ "$DOC_CONVERSATION_WRITE_DOORS_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 31
-    # Same one-behind rule as every branch below: the v30 full entry set became
-    # readable only once 0524 sealed it, so this branch is where that seal is
-    # first required. All 30 sealed histories are covered here.
-  elif [ "$PRODUCER_TRIO_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 30
-    # Same one-behind rule as every branch below: the v29 full entry set became
-    # readable only once 0522 sealed it, so this branch is where that seal is
-    # first required. All 29 sealed histories are covered here.
-  elif [ "$PROGRAM_CONTROLLER_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 29
-    # Same one-behind rule as every branch below: the v28 full entry set became
-    # readable only once 0518 sealed it, so this branch is where that seal is
-    # first required. All 28 sealed histories are covered here.
-  elif [ "$DEAL_FIELD_PROVENANCE_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 28
-    # Same one-behind rule as every branch below: the v27 full entry set became
-    # readable only once 0516 sealed it, so this branch is where that seal is
-    # first required. All 27 sealed histories are covered here.
-  elif [ "$FOUNDATION_ASSURANCE_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 27
-  elif [ "$GATE_ZERO_OUTCOME_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 26
-    # Same one-behind rule as every branch below: the v25 full entry set became
-    # readable only once 0503 sealed it, so this branch is where that seal is
-    # first required. All 25 sealed histories are covered here.
-  elif [ "$V5_SCHEDULED_JOB_ADMISSION_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 25
-    # Same one-behind rule as every branch below: the v24 full entry set became
-    # readable only once 0501 sealed it, so this branch is where that seal is
-    # first required. All 24 sealed histories are covered here.
-  elif [ "$V5_F09_WORKFLOW_TRUTH_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 24
-    # Same one-behind rule as every branch below: the v23 full entry set became
-    # readable only once 0498 sealed it, so this branch is where that seal is
-    # first required. All 23 sealed histories are covered here.
-  elif [ "$R07_REPO_HYGIENE_JANITOR_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 23
-    # Same one-behind rule as every branch below: the v22 full entry set became
-    # readable only once 0497 sealed it, so this branch is where that seal is
-    # first required. All 22 sealed histories are covered here.
-  elif [ "$DOCTORCRE_PORTFOLIO_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 22
-    # Same one-behind rule as every branch below: the v21 full entry set became
-    # readable only once 0496 sealed it, so this branch is where that seal is
-    # first required. All 21 sealed histories are covered here.
-  elif [ "$R06_HOOKS_CORRECTNESS_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 21
-    # A full entry set covers the DB-catalog-projected ACL rows as well as the
-    # source rows, so it is only readable from a database that already applied
-    # the migration: the seal file trails the frontier by one, and the v20 set
-    # lands with the release that applies 0495.
-  elif [ "$CONTINUITY_ARCHIVE_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 20
-  elif [ "$INCIDENT_WORK_REQUEST_LINK_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 19
-  elif [ "$SOURCED_SHAPE_FORWARD_CORRECTION_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 18
-  elif [ "$BACKUP_GUARD_STATUS_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 17
-  elif [ "$CODEX_COMPACTION_CHECKPOINT_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 16
-  elif [ "$CLAUDE_CONFIG_PRESERVATION_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 15
-  elif [ "$CLAUDE_ACTOR_HYDRATION_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 14
-  elif [ "$CLAUDE_STARTUP_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 13
-  elif [ "$CLAUDE_CONTINUITY_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 12
-  elif [ "$CODEX_CONTINUITY_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 11
-  elif [ "$SOURCE_MERGE_REGISTRY_APPLIED" = t ]; then
-    scac_select_registry 10
-    # +2 on 2026-09-01: the Repo Hygiene Program's R02 landing (Joe's ruling
-    # 7f48abf6) adds two script entrypoints, hooks/canonical-edit-gate.py and
-    # ops/untracked-anomaly-report.py, so v10's source set grows by two beyond
-    # R05's base of 805. v1-v9 are sealed history and sum to 12660. WR-000048's
-    # regeneration atom adds two more script entrypoints on top of main's #853
-    # count (tools/run-breakglass.py, the tracked break-glass launcher, and
-    # tools/migrate-prod-support.py, the migration door's receipt/escalation
-    # command), so v10 current grows by two: 1456 -> 1458, source 812 -> 814,
-    # total 12660 + 1458 = 14118. All three re-derived live from the generator.
-  else
-    scac_select_registry 9
-  fi
-  # The historical refusal arms retain their existing prerequisite checks.
-  # Successors appended to the manifest select themselves from the same ledger.
-  SCAC_APPLIED_MIGRATIONS="$("$PSQL" -Atqc 'select filename from schema_migrations order by filename')" || exit 1
-  SCAC_SUCCESSOR_SELECTION="$(printf '%s\n' "$SCAC_APPLIED_MIGRATIONS" | python3 "$REPO/ops/registry_chain.py" successor-snapshot "$SCAC_CURRENT_NUMBER")" || exit 1
-  eval "$SCAC_SUCCESSOR_SELECTION"
-  case "$SCAC_EXPECTED_CURRENT_DIGEST$SCAC_EXPECTED_CURRENT_SOURCE_SET$SCAC_EXPECTED_CURRENT_CATALOG" in
-    ''|*[!0-9a-f]*) echo "schema-snapshot: reviewed SCAC v${SCAC_CURRENT_NUMBER} runtime seals are malformed" >&2; exit 1 ;;
-  esac
-  [ "${#SCAC_EXPECTED_CURRENT_DIGEST}" -eq 64 ] &&
-    [ "${#SCAC_EXPECTED_CURRENT_SOURCE_SET}" -eq 64 ] && [ "${#SCAC_EXPECTED_CURRENT_CATALOG}" -eq 64 ] || {
-    echo "schema-snapshot: reviewed SCAC v${SCAC_CURRENT_NUMBER} source or catalog seal is malformed" >&2; exit 1
-  }
-  SCAC_EXPECTED_CURRENT_DIGEST="sha256:$SCAC_EXPECTED_CURRENT_DIGEST"
-  SCAC_EXPECTED_CURRENT_SOURCE_SET="sha256:$SCAC_EXPECTED_CURRENT_SOURCE_SET"
-  SCAC_EXPECTED_CURRENT_CATALOG="sha256:$SCAC_EXPECTED_CURRENT_CATALOG"
-  SCAC_FULL_SET_SEALS="$REPO/ops/config/scac-registry-full-entry-set-seals.json"
-  SCAC_FULL_SET_SQL="$(node -e '
-    const fs=require("fs"); const seals=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
-    const count=Number(process.argv[2]); const current=Number(process.argv[3]);
-    const allKeys=Array.from({length:current},(_,i)=>`scac-mutation-registry.v${i+1}`);
-    const keys=allKeys.slice(0,count);
-    if (Object.keys(seals).sort().join("|")!==allKeys.sort().join("|") ||
-        !Number.isInteger(count) || !Number.isInteger(current) ||
-        count<9 || count>current || current<10 ||
-        allKeys.some(key=>!/^sha256:[0-9a-f]{64}$/.test(seals[key]))) process.exit(2);
-    const quote=String.fromCharCode(39);
-    const literal=value=>quote+String(value).replaceAll(quote,quote+quote)+quote;
-    process.stdout.write(keys.map(key=>`(${literal(key)},${literal(seals[key])})`).join(","));
-  ' "$SCAC_FULL_SET_SEALS" "$SCAC_FULL_SET_SEAL_COUNT" "$SCAC_CURRENT_NUMBER")" || {
-    echo "schema-snapshot: immutable SCAC full-entry-set seals are unavailable or malformed" >&2; exit 1
-  }
-  # WHAT THIS CHECK ASKS, AND WHAT IT DELIBERATELY DOES NOT. Every comparison
-  # below is about the registry being INTERNALLY CONSISTENT: the version rows,
-  # their counts, their digests recomputed from their own entries, the sealed
-  # entry sets, and the current version's row against the reviewed runtime file.
-  # All of it is a property of the data, so it answers the same way on any
-  # machine that applied the same migrations.
-  #
-  # ${SCAC_CURRENT_CATALOG_FUNCTION} USED TO BE ONE OF THESE ARMS AND IS NOT ANY
-  # MORE. That function re-derives the catalog from the LIVE CLUSTER and also
-  # carries the role-escalation guard, so it answers a different question — is
-  # the cluster's privilege state clean RIGHT NOW — and roles are cluster-wide,
-  # not database-scoped. The disposable-Postgres lane runs 52 acceptance
-  # programs against one cluster before this point, and at least one of them
-  # mints a probe role matching ^carr_ with an escalated grant on purpose, as
-  # its own permanent mutation test. That made writing a schema snapshot depend
-  # on the order the gates happened to run in, and on 2026-09-03 it failed the
-  # database class while all twelve genuine consistency arms were true. Proven
-  # by injection: creating one such role on a passing database flipped this arm
-  # alone and reproduced the failure exactly; dropping the role restored it.
-  #
-  # THE ASSERTION IS NOT DELETED, it is left where it belongs and still fires in
-  # two places that are about privilege rather than about snapshots: migration
-  # 0471 raises from inside the database when the live catalog is not current,
-  # and ops/siep18-reference-monitor-local-pg-gate.py asserts the function true
-  # and then asserts it false under a deliberately escalated probe role. The
-  # emitted snapshot below also keeps its own `not ${SCAC_CURRENT_CATALOG_FUNCTION}`
-  # guard, so a snapshot still refuses to seed onto a cluster with drifted
-  # privileges. Only the WRITE decision stopped asking a privilege question.
-  SCAC_REGISTRY_EXACT="$("$PSQL" -Atqc \
-    "select count(*)=$SCAC_VERSION_COUNT
-       and array_agg(registry_version order by split_part(registry_version,'.v',2)::integer)=array[$SCAC_VERSION_ARRAY]::text[]
-       and sum(entry_count)=$SCAC_TOTAL_ENTRY_COUNT
-       and bool_and(entry_count=(select count(*) from ops.scac_mutation_registry_entry e
-                                  where e.registry_version=v.registry_version))
-       and bool_and(entry_set_digest=(select 'sha256:'||encode(public.digest(
-             convert_to(coalesce(string_agg(e.entry_digest,',' order by e.ingress_key collate \"C\"),''),'UTF8'),
-             'sha256'),'hex') from ops.scac_mutation_registry_entry e
-             where e.registry_version=v.registry_version))
-       and not exists(select 1 from (values $SCAC_FULL_SET_SQL) expected(registry_version,entry_set_digest)
-         left join ops.scac_mutation_registry_version sealed using(registry_version)
-         where sealed.entry_set_digest is distinct from expected.entry_set_digest)
-       and not exists(select 1 from ops.scac_mutation_registry_entry e
-         where e.entry_digest is distinct from 'sha256:'||encode(public.digest(
-           convert_to(ops.scac_canonical_json(e.contract),'UTF8'),'sha256'),'hex'))
-       and not exists(select 1 from unnest(array[$SCAC_HISTORICAL_ARRAY]) historical(registry_version)
-         where not ops.scac_mutation_registry_seal_valid(historical.registry_version))
-       and (select registry_digest='$SCAC_EXPECTED_CURRENT_DIGEST' and entry_count=$SCAC_CURRENT_ENTRY_COUNT and source_entry_count=$SCAC_CURRENT_SOURCE_COUNT
-              from ops.scac_mutation_registry_version where registry_version='scac-mutation-registry.v$SCAC_CURRENT_NUMBER')
-       and (select 'sha256:'||encode(public.digest(convert_to(string_agg(e.entry_digest,',' order by e.entry_digest collate \"C\"),'UTF8'),'sha256'),'hex')='$SCAC_EXPECTED_CURRENT_SOURCE_SET'
-              from ops.scac_mutation_registry_entry e where e.registry_version='scac-mutation-registry.v$SCAC_CURRENT_NUMBER'
-                and e.ingress_kind not in ('db_function_acl','db_relation_acl','db_column_acl'))
-       and (select 'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(v.catalog_projection),'UTF8'),'sha256'),'hex')='$SCAC_EXPECTED_CURRENT_CATALOG'
-              from ops.scac_mutation_registry_version v where v.registry_version='scac-mutation-registry.v$SCAC_CURRENT_NUMBER')
-     from ops.scac_mutation_registry_version v" 2>/dev/null)"
-  [ "$SCAC_REGISTRY_EXACT" = t ] || {
-    echo "schema-snapshot: SCAC v1-v${SCAC_CURRENT_NUMBER} registry is missing or internally drifted — nothing written" >&2
-    # NAME THE ARM THAT FAILED. The check above is one long AND across nine
-    # independent comparisons, so on failure it said only "drifted" and left
-    # the reader to re-derive the whole reseal cascade blind. That cost two
-    # rounds on 2026-09-03 and sent one session re-pinning a seal that was not
-    # the cause. This re-evaluates the SAME comparisons one at a time and
-    # prints each — it is diagnostic only and runs ONLY after the gate has
-    # already decided to fail, so it cannot turn a red check green.
-    "$PSQL" -Atqc \
-      "select 'arm version_count            = '||(count(*)=$SCAC_VERSION_COUNT)::text
-         ||E'\n'||'arm version_array           = '||(array_agg(registry_version order by split_part(registry_version,'.v',2)::integer)=array[$SCAC_VERSION_ARRAY]::text[])::text
-         ||E'\n'||'arm total_entry_count       = '||(sum(entry_count)=$SCAC_TOTAL_ENTRY_COUNT)::text||' (observed '||sum(entry_count)||', expected $SCAC_TOTAL_ENTRY_COUNT)'
-         ||E'\n'||'arm per_version_counts      = '||bool_and(entry_count=(select count(*) from ops.scac_mutation_registry_entry e where e.registry_version=v.registry_version))::text
-         ||E'\n'||'arm entry_set_recompute     = '||bool_and(entry_set_digest=(select 'sha256:'||encode(public.digest(convert_to(coalesce(string_agg(e.entry_digest,',' order by e.ingress_key collate \"C\"),''),'UTF8'),'sha256'),'hex') from ops.scac_mutation_registry_entry e where e.registry_version=v.registry_version))::text
-         ||E'\n'||'arm sealed_entry_sets       = '||(not exists(select 1 from (values $SCAC_FULL_SET_SQL) expected(registry_version,entry_set_digest) left join ops.scac_mutation_registry_version sealed using(registry_version) where sealed.entry_set_digest is distinct from expected.entry_set_digest))::text
-         ||E'\n'||'arm entry_digest_self       = '||(not exists(select 1 from ops.scac_mutation_registry_entry e where e.entry_digest is distinct from 'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(e.contract),'UTF8'),'sha256'),'hex')))::text
-         ||E'\n'||'arm historical_seals_valid  = '||(not exists(select 1 from unnest(array[$SCAC_HISTORICAL_ARRAY]) historical(registry_version) where not ops.scac_mutation_registry_seal_valid(historical.registry_version)))::text
-         ||E'\n'||'arm current_version_row     = '||(select (registry_digest='$SCAC_EXPECTED_CURRENT_DIGEST' and entry_count=$SCAC_CURRENT_ENTRY_COUNT and source_entry_count=$SCAC_CURRENT_SOURCE_COUNT)::text||' (digest '||registry_digest||', entries '||entry_count||', source '||source_entry_count||')' from ops.scac_mutation_registry_version where registry_version='scac-mutation-registry.v$SCAC_CURRENT_NUMBER')
-         ||E'\n'||'arm current_source_set      = '||(select (('sha256:'||encode(public.digest(convert_to(string_agg(e.entry_digest,',' order by e.entry_digest collate \"C\"),'UTF8'),'sha256'),'hex'))='$SCAC_EXPECTED_CURRENT_SOURCE_SET')::text from ops.scac_mutation_registry_entry e where e.registry_version='scac-mutation-registry.v$SCAC_CURRENT_NUMBER' and e.ingress_kind not in ('db_function_acl','db_relation_acl','db_column_acl'))
-         ||E'\n'||'arm current_catalog_digest  = '||(select (('sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(v2.catalog_projection),'UTF8'),'sha256'),'hex'))='$SCAC_EXPECTED_CURRENT_CATALOG')::text from ops.scac_mutation_registry_version v2 where v2.registry_version='scac-mutation-registry.v$SCAC_CURRENT_NUMBER')
-         ||E'\n'||'live_catalog_fn (not an arm)= '||($SCAC_CURRENT_CATALOG_FUNCTION)::text
-       from ops.scac_mutation_registry_version v" >&2 2>/dev/null ||
-      echo "schema-snapshot: the per-arm breakdown could not be read" >&2
-    "$PSQL" -Atqc \
-      "select 'sealed entry-set mismatch '||expected.registry_version||': expected '||expected.entry_set_digest||', observed '||coalesce(sealed.entry_set_digest,'<missing>')
-         from (values $SCAC_FULL_SET_SQL) expected(registry_version,entry_set_digest)
-         left join ops.scac_mutation_registry_version sealed using(registry_version)
-        where sealed.entry_set_digest is distinct from expected.entry_set_digest
-        order by expected.registry_version" >&2 2>/dev/null ||
-      echo "schema-snapshot: sealed entry-set mismatch details could not be read" >&2
-    exit 1
-  }
-
   cat >> "$TMP" <<SCAC_REGISTRY_HEADER
 
--- CARR SCAC MUTATION REGISTRY V1-V${SCAC_CURRENT_NUMBER} (bin/schema-snapshot.sh) — immutable,
--- internally digest-verified security configuration. The append-only triggers
--- are disabled only while restoring the exact sealed rows and re-enabled
--- before the closing verification block.
+-- CARR SCAC MUTATION REGISTRY (bin/schema-snapshot.sh)
 alter table ops.scac_mutation_registry_version disable trigger scac_mutation_registry_version_sealed;
 alter table ops.scac_mutation_registry_entry disable trigger scac_mutation_registry_entry_sealed;
 SCAC_REGISTRY_HEADER
@@ -3136,41 +2442,6 @@ SCAC_REGISTRY_ROWS
 set constraints all immediate;
 alter table ops.scac_mutation_registry_entry enable trigger scac_mutation_registry_entry_sealed;
 alter table ops.scac_mutation_registry_version enable trigger scac_mutation_registry_version_sealed;
-do \$carr_scac_registry\$
-begin
-  if not (select count(*)=${SCAC_VERSION_COUNT} and sum(entry_count)=${SCAC_TOTAL_ENTRY_COUNT} and
-      bool_and(entry_count=(select count(*) from ops.scac_mutation_registry_entry e
-                            where e.registry_version=v.registry_version)) and
-      bool_and(entry_set_digest=(select 'sha256:'||encode(public.digest(
-        convert_to(coalesce(string_agg(e.entry_digest,',' order by e.ingress_key collate "C"),''),'UTF8'),
-        'sha256'),'hex') from ops.scac_mutation_registry_entry e
-        where e.registry_version=v.registry_version))
-    from ops.scac_mutation_registry_version v) then
-    raise exception 'restored SCAC v1-v${SCAC_CURRENT_NUMBER} registry is incomplete or digest-drifted';
-  end if;
-  if exists(select 1 from (values ${SCAC_FULL_SET_SQL}) expected(registry_version,entry_set_digest)
-       left join ops.scac_mutation_registry_version sealed using(registry_version)
-       where sealed.entry_set_digest is distinct from expected.entry_set_digest) then
-    raise exception 'restored SCAC registry does not match immutable full-entry-set seals';
-  end if;
-  if exists(select 1 from unnest(array[${SCAC_HISTORICAL_ARRAY}]) historical(registry_version)
-       where not ops.scac_mutation_registry_seal_valid(historical.registry_version)) or
-     not (select registry_digest='${SCAC_EXPECTED_CURRENT_DIGEST}' and entry_count=${SCAC_CURRENT_ENTRY_COUNT} and source_entry_count=${SCAC_CURRENT_SOURCE_COUNT}
-            from ops.scac_mutation_registry_version where registry_version='scac-mutation-registry.v${SCAC_CURRENT_NUMBER}') or
-     not (select 'sha256:'||encode(public.digest(convert_to(string_agg(e.entry_digest,',' order by e.entry_digest collate "C"),'UTF8'),'sha256'),'hex')='${SCAC_EXPECTED_CURRENT_SOURCE_SET}'
-            from ops.scac_mutation_registry_entry e where e.registry_version='scac-mutation-registry.v${SCAC_CURRENT_NUMBER}'
-              and e.ingress_kind not in ('db_function_acl','db_relation_acl','db_column_acl')) or
-     not (select 'sha256:'||encode(public.digest(convert_to(ops.scac_canonical_json(v.catalog_projection),'UTF8'),'sha256'),'hex')='${SCAC_EXPECTED_CURRENT_CATALOG}'
-            from ops.scac_mutation_registry_version v where v.registry_version='scac-mutation-registry.v${SCAC_CURRENT_NUMBER}') or
-     not ${SCAC_CURRENT_CATALOG_FUNCTION} or
-     exists(select 1 from ops.scac_mutation_registry_entry e
-       where e.entry_digest is distinct from 'sha256:'||encode(public.digest(
-         convert_to(ops.scac_canonical_json(e.contract),'UTF8'),'sha256'),'hex')) then
-    raise exception 'restored SCAC registry failed exact historical, current, or per-entry contract seals';
-  end if;
-end
-\$carr_scac_registry\$;
-
 SCAC_REGISTRY_FOOTER
 fi
 

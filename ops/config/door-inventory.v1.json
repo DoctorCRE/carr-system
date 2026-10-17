@@ -33,12 +33,6 @@
       "evidence": "3f7132ce (#1414); evals/rule-delivery/split.json is its output"
     },
     {
-      "path": "evals/rule-delivery/round.sh",
-      "class": "hand_tool",
-      "reason": "A person runs it after each hillclimb round to record the change, patch and summary into runs/ledger.jsonl.",
-      "evidence": "evals/rule-delivery/round.sh header usage line (added 3f7132ce, #1414)"
-    },
-    {
       "path": "ops/accept-doctorcre-bundle.sh",
       "class": "hand_tool",
       "reason": "The controller runs it on a DoctorCRE build bundle before acceptance so the citation trace check actually executes.",
@@ -87,16 +81,10 @@
       "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
     },
     {
-      "path": "ops/registry-chain-postgres-proof.py",
-      "class": "one_shot",
-      "reason": "Proved one successor publication of the registry chain on a disposable database and an isolated source clone.",
-      "evidence": "72b1f088 (Architecture C1, #1609)"
-    },
-    {
-      "path": "ops/rule-recall-benchmark.py",
-      "class": "one_shot",
-      "reason": "Measured full-text rule availability on the unchanged 72-case test split before replacement recall was trusted.",
-      "evidence": "0330c01f (#1611)"
+      "path": "pipelines/backfill_lease_event.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 19(d) repair of structured lease dates from the preserved raw date shim; it is invoked directly rather than by a runtime job.",
+      "evidence": "pipelines/backfill_lease_event.py module docstring and CLI usage"
     },
     {
       "path": "pipelines/build-pretour-packet.py",
@@ -115,6 +103,12 @@
       "class": "one_shot",
       "reason": "Lifted dated contact events out of existing narrative rows once, the Option B capture fix of 2026-08-01.",
       "evidence": "d3a9f6bb"
+    },
+    {
+      "path": "pipelines/import_brokers.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 27(b) import of the brokers workbook into existing party records; it is not a scheduled runtime importer.",
+      "evidence": "pipelines/import_brokers.py module docstring and main entry point"
     },
     {
       "path": "pipelines/import_clients_active.py",
@@ -157,6 +151,12 @@
       "class": "hand_tool",
       "reason": "A person runs it on downloaded FL DOH licensure files to rebuild the radar's license pool before a sweep.",
       "evidence": "pipelines/radar/build-license-pool-from-raw.py docstring (lookback fixed aa241723, #1206)"
+    },
+    {
+      "path": "security/install_hook.py",
+      "class": "hand_tool",
+      "reason": "Part of the pinned leak-guard bundle (security/bundle.json); a person runs it once per worktree to point core.hooksPath at the repo pre-push hook, which then runs the guard.",
+      "evidence": "39778c41 (#1590); security/bundle.json pins its bytes"
     },
     {
       "path": "tools/apply-graph-colors.py",
@@ -229,6 +229,30 @@
       "class": "one_shot",
       "reason": "Applied ORDER 38's doctrine-ownership stamp to ORDER 30 phase 2's file set; the stamped markdown is retired.",
       "evidence": "f163962f (ORDER 40); gated behind recovery in e2b6f3ff (#519)"
+    },
+    {
+      "path": "pipelines/radar/build-license-pool.py",
+      "class": "hand_tool",
+      "reason": "A person runs it on the browser-filtered DOH transport TSV to build the radar license pool.",
+      "evidence": "pipelines/radar/build-license-pool.py module docstring and CLI usage"
+    },
+    {
+      "path": "pipelines/radar/build-pecos-pool.py",
+      "class": "hand_tool",
+      "reason": "A person runs it on a downloaded quarterly CMS enrollment extract to build the radar PECOS pool.",
+      "evidence": "pipelines/radar/build-pecos-pool.py module docstring and CLI usage"
+    },
+    {
+      "path": "pipelines/radar/enrich-pecos-nppes.py",
+      "class": "hand_tool",
+      "reason": "A person runs it to fill practice geography in the PECOS pool using NPPES.",
+      "evidence": "pipelines/radar/enrich-pecos-nppes.py module docstring and CLI usage"
+    },
+    {
+      "path": "ops/build-duration-check.py",
+      "class": "hand_tool",
+      "reason": "A person requests one report of unusually slow completed GitHub runs; workflow timeouts bound running jobs.",
+      "evidence": "ops/build-duration-check.py module docstring and main CLI"
     }
   ]
 }

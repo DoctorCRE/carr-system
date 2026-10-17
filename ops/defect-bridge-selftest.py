@@ -369,7 +369,7 @@ class Wiring(unittest.TestCase):
         self.assertIn("from lib.defect_bridge import main", entry)
         nightly = (ROOT / "bin/nightly.sh").read_text()
         grok = nightly.index('step "Grok authentication health"')
-        bridge = nightly.index('step "defect bridge (one Work Request per unaddressed defect class)"')
+        bridge = nightly.index('step "defect bridge"')
         self.assertLess(grok, bridge)
         self.assertIn("./.venv/bin/python ops/defect-bridge.py\n", nightly[bridge:bridge + 200])
         health = (ROOT / "tools/health-check.py").read_text()

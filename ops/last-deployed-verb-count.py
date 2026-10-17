@@ -2,7 +2,7 @@
 """last-deployed-verb-count.py — what the last deploy of this service to this
 environment actually shipped, read from the ledger.
 
-WHY THIS EXISTS. bin/deploy-worker.sh refuses a deploy that would remove verbs,
+WHY THIS EXISTS. bin/deploy-worker.sh refuses unlisted verb loss,
 and it needs a previous number to compare against. That number used to live in
 mcp-server/.last-deployed-verb-count.<env>, a file the deploy wrote and the
 postflight told you to commit. Committing it fails ops/release-manifest-selftest.py
@@ -19,6 +19,9 @@ nothing requires this one.
 
 ONE CODE PATH, TWO CALLERS (rule a8c55a47): the deploy asks this, and so can CI
 or a human. A second copy of the query in shell would be free to drift.
+The --registry form imports names from the exact git_sha recorded at deployment
+and verifies the recorded count. Missing source or inconsistent evidence fails
+closed. A retirement already absent from that source cannot excuse another loss.
 
 EXIT CODES, and the shell caller depends on telling them apart:
   0   a previous deployment exists; its verb count is printed on stdout
@@ -26,7 +29,7 @@ EXIT CODES, and the shell caller depends on telling them apart:
       which must be allowed to establish the baseline rather than refused forever
   78  no credential in this environment (EX_CONFIG, the convention bin/nightly.sh
       and bin/run-scheduled.sh already use for "not configured here")
-  1   the ledger exists but could not be read — the caller must FAIL CLOSED
+  1   the ledger could not be read or lacks usable baseline evidence — FAIL CLOSED
 
 WHY FAIL CLOSED IS CHEAP HERE, stated so nobody softens it later: the Worker
 being deployed needs Postgres for every verb it serves. A deploy attempted while
@@ -36,11 +39,18 @@ through — that is how the 2026-08-09 verb loss happened, when production went
 from 75 verbs to 66 and nothing objected.
 
 Usage:  last-deployed-verb-count.py <service> <environment>
+        last-deployed-verb-count.py <service> <environment> --registry
 """
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
+import re
+import subprocess
 import sys
+import tarfile
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -49,6 +59,26 @@ REPO = Path(__file__).resolve().parent.parent
 # aborted row never reached the edge, so its count is not a baseline. `verifying`
 # counts: the code is live, only the golden suite is unproven.
 SHIPPED_STATES = ("complete", "verifying", "rolled_back", "superseded")
+
+
+def source_registry(git_sha: str, count: int) -> dict:
+    """Reconstruct the deployed name set from its immutable ledger binding."""
+    if not isinstance(git_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", git_sha):
+        raise ValueError("deployed source must have a full Git commit SHA")
+    archive = subprocess.run(
+        ["git", "archive", git_sha, "mcp-server"], cwd=REPO,
+        capture_output=True, check=True, timeout=30).stdout
+    with tempfile.TemporaryDirectory(prefix="deployed-registry-") as raw:
+        with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+            source.extractall(raw, filter="data")
+        result = subprocess.run(
+            ["sh", str(REPO / "ops/verb-count.sh"), str(Path(raw) / "mcp-server"), "--names"],
+            capture_output=True, text=True, check=True, timeout=60)
+        names = json.loads(result.stdout)
+    if (not isinstance(names, list) or any(not isinstance(name, str) for name in names)
+            or len(set(names)) != len(names) or len(names) != count):
+        raise ValueError("deployed source registry does not match the ledger verb count")
+    return {"git_sha": git_sha, "verb_count": count, "verbs": names}
 
 
 def load_ops_record():
@@ -110,11 +140,8 @@ def countless_rows_newer_than_baseline(cur, service, environment, observed_at):
     recurs, because the first failure was already written down in a docstring
     and that did not stop the second.
 
-    Reported, never fatal here. The caller decides — see the STALE BASELINE
-    block in bin/deploy-worker.sh for why it warns loudly rather than refusing:
-    refusing would block a legitimate release on a bookkeeping gap in rows that
-    already exist, which is a control lowering the floor it was meant to raise
-    (decision 91020f79).
+    Count-only reads report staleness on stderr. Registry reads refuse stale
+    evidence because the deployed name set must describe the latest shipment.
     """
     cur.execute(
         """select count(*)
@@ -130,11 +157,12 @@ def countless_rows_newer_than_baseline(cur, service, environment, observed_at):
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: last-deployed-verb-count.py <service> <environment>",
+    registry = len(sys.argv) == 4 and sys.argv[3] == "--registry"
+    if len(sys.argv) != 3 and not registry:
+        print("usage: last-deployed-verb-count.py <service> <environment> [--registry]",
               file=sys.stderr)
         return 64
-    service, environment = sys.argv[1], sys.argv[2]
+    service, environment = sys.argv[1:3]
 
     try:
         ops = load_ops_record()
@@ -161,6 +189,20 @@ def main() -> int:
     try:
         with conn, conn.cursor() as cur:
             row = baseline_row(cur, service, environment)
+            if not row:
+                cur.execute(
+                    """select count(*)
+                         from ops.deployment d
+                         join ops.service s on s.id = d.service_id
+                        where s.key = %s
+                          and d.environment = %s
+                          and d.state = any(%s)""",
+                    (service, environment, list(SHIPPED_STATES)))
+                if cur.fetchone()[0]:
+                    print(f"last-deployed-verb-count: shipped deployments of {service} "
+                          f"to {environment} lack a usable verb count; "
+                          "a baseline must be recorded before deployment", file=sys.stderr)
+                    return 1
             stale_newer = (
                 countless_rows_newer_than_baseline(cur, service, environment, row[4])
                 if row else 0)
@@ -169,9 +211,9 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    if not row or row[0] is None:
-        print(f"last-deployed-verb-count: no prior deployment of {service} to "
-              f"{environment} carries a verb count", file=sys.stderr)
+    if not row:
+        print(f"last-deployed-verb-count: no prior shipped deployment of {service} to "
+              f"{environment}", file=sys.stderr)
         return 3
 
     # STDERR, never stdout: the caller reads stdout as the number itself.
@@ -182,7 +224,17 @@ def main() -> int:
               f"{row[4]:%Y-%m-%d} and does not describe what is serving now. "
               "A loss guard comparing against it can pass while verbs disappear "
               "(defect 4077b653).", file=sys.stderr)
-    print(int(row[0]))
+    if registry:
+        if stale_newer:
+            print("last-deployed-verb-count: refusing a stale deployed name set", file=sys.stderr)
+            return 1
+        try:
+            print(json.dumps(source_registry(row[1], int(row[0]))))
+        except (ValueError, OSError, subprocess.SubprocessError, tarfile.TarError) as exc:
+            print(f"last-deployed-verb-count: deployed registry unavailable: {exc}", file=sys.stderr)
+            return 1
+    else:
+        print(int(row[0]))
     return 0
 
 

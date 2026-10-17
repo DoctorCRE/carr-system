@@ -24,6 +24,8 @@ ONE ROTATION, in this order, each step leaving a receipt:
                child that fails it is revoked and the previous child stays.
   4. store     through lib/token_store.py, the same map and writer
                tools/store-token.py uses. A failed write revokes the child.
+               Cloudflare candidates stay in a separate private file until
+               fleet installation verifies the live write or restores it.
   5. install   where a tool keeps its own copy (Codex: `codex login
                --with-api-key`, value on stdin). It runs AFTER the store on
                purpose: a failed install leaves the new child stored and the
@@ -85,7 +87,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
-from lib import token_store
+from lib import cloudflare_tokens, token_store
 from lib.credential_file import carr_config
 from lib.github_app_config import CONFIG_PATH as GITHUB_APP_CONFIG, read_config
 from lib.machine_role import is_primary
@@ -463,6 +465,20 @@ def _iso(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _child_destination(store_name: str) -> token_store.Destination:
+    if store_name in cloudflare_tokens.TOKEN_NAMES:
+        return token_store.Destination("credential-mint-candidates.env", store_name)
+    return token_store.destination(store_name)
+
+
+def _read_child(store_name: str) -> str | None:
+    dest = _child_destination(store_name)
+    try:
+        return token_store.read_env_file(dest.path).get(dest.key) or None
+    except OSError:
+        return None
+
+
 @dataclass
 class Minter:
     plan: Plan
@@ -584,7 +600,8 @@ class Minter:
         self._receipt(name, grant.name, "verify", "verified")
 
         try:
-            token_store.store(store_name, new.value)
+            dest = _child_destination(store_name)
+            token_store.write_env_line(dest.path, dest.key, new.value)
         except OSError:
             state["minting"].pop(name, None)
             self._receipt(name, grant.name, "store", "failed_new_child_revoked_previous_kept")
@@ -598,13 +615,13 @@ class Minter:
 
     def _adopt(self, grant: GrantPlan, child: ChildPlan, entry: Mapping[str, Any] | None,
                child_id: str, minted: datetime, state: dict[str, Any]) -> None:
-        """The stored child becomes the current one; the in-flight record ends."""
+        """Track the stored candidate before installation; end the in-flight record."""
         state["credentials"][child.credential] = {
             "grant": grant.name,
             "child_id": child_id,
             "minted_at": _iso(minted),
             "expires_at": _iso(minted + timedelta(days=int(grant.ttl_days or 0))),
-            "install_pending": child.install is not None,
+            "install_pending": child.install is not None or child.store_name in cloudflare_tokens.TOKEN_NAMES,
             "previous_child_id": (entry or {}).get("child_id"),
         }
         state["minting"].pop(child.credential, None)
@@ -628,7 +645,7 @@ class Minter:
                 self._receipt(name, grant.name, "recover_mint",
                               f"no_id_recorded_check_provider_for_label_{pending.get('label')}")
                 continue
-            stored = token_store.read(str(child.store_name))
+            stored = _read_child(str(child.store_name))
             if stored is not None and _fingerprint(stored) == pending.get("fingerprint"):
                 minted = datetime.fromisoformat(pending["since"])
                 self._adopt(grant, child, state["credentials"].get(name), str(child_id), minted, state)
@@ -642,6 +659,15 @@ class Minter:
     def _finish_install(self, grant: GrantPlan, adapter: Provider, root: str, child: ChildPlan,
                         entry: dict[str, Any], state: dict[str, Any], *, retried: bool) -> str:
         name = child.credential
+        if child.store_name in cloudflare_tokens.TOKEN_NAMES:
+            value = _read_child(str(child.store_name))
+            states = cloudflare_tokens.sync(str(child.store_name), value, runner=self.run) if value else {}
+            if not states or any(states.get(machine) != "ok" for machine in cloudflare_tokens.MACHINES):
+                entry["install_pending"] = True
+                self._receipt(name, grant.name, "install", "fleet_unconfirmed_previous_kept_retry_next_night")
+                return "install_failed"
+            entry["install_pending"] = False
+            self._receipt(name, grant.name, "install", "fleet_verified" + ("_on_retry" if retried else ""))
         if child.install is not None:
             value = token_store.read(str(child.store_name))
             if value is None or not INSTALLERS[child.install](value, self.run):

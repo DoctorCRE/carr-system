@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Family dispatch uses a changing catalog, never a stored model pin."""
 import contextlib
 import io
 import json

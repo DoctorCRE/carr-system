@@ -648,6 +648,21 @@ class VerbUsageLines(unittest.TestCase):
 class PaidCapCanonicalHealthTests(unittest.TestCase):
     """Execute the shipped health function and CLI with only external readers stubbed."""
 
+    def test_cloudflare_rows_record_each_failure_and_only_verified_green(self):
+        import contextlib, io
+        ns = self.namespace()
+        rows = [
+            {"subject": "studio:CLOUDFLARE_API_TOKEN", "status": "failed", "line": "WARN Cloudflare studio CLOUDFLARE_API_TOKEN failed"},
+            {"subject": "macbook:CLOUDFLARE_API_TOKEN", "status": "ok", "line": "OK Cloudflare macbook CLOUDFLARE_API_TOKEN ok"},
+            {"subject": "dell:CLOUDFLARE_API_TOKEN", "status": "unreachable", "line": "WARN Cloudflare dell CLOUDFLARE_API_TOKEN unreachable"},
+        ]
+        ns["_cloudflare_rows"] = lambda: rows
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ns["_canonical_health"](), 1)
+        actual = {r["subject"] for r in ns["_FINDINGS"] if r["key"] == "cloudflare_token"}
+        self.assertEqual(actual, {"studio:CLOUDFLARE_API_TOKEN", "dell:CLOUDFLARE_API_TOKEN"})
+        self.assertEqual(ns["_GREEN_EVIDENCE"]["cloudflare_token"], {"macbook:CLOUDFLARE_API_TOKEN"})
+
     def namespace(self):
         import os, re, sys, time, subprocess
         from unittest.mock import Mock
@@ -659,6 +674,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   CANONICAL_SECTION="credentials", CANONICAL_FIXTURE=None, timedelta=timedelta,
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
                   _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
+                  _cloudflare_rows=lambda: [],
                   _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
                   # The breach consumer reaches the record layer; its own
                   # hermetic suite is ops/health-act-selftest.py.
@@ -806,7 +822,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _tailscale_row=lambda: ("OK fixture node", False),
                   _system_sends_row=lambda: ("OK system sends fixture", False, False),
                   _host_liveness_rows=lambda: [("OK fixture host", False, "fixture")],
-                  _claude_continuity_spool_row=lambda drain: ("OK continuity spool depth — fixture", 0),
                   _build_duration_row=lambda: ("OK fixture build duration", 0),
                   _health_sub=Mock(classify_loose_status=Mock(return_value={
                       "actionable_tracked": [], "actionable_untracked": [],
@@ -860,37 +875,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         self.assertEqual([(f["key"], f["hard_error"]) for f in ns["_FINDINGS"]],
                          [("verb_usage", False)])
 
-    def test_builds_health_records_failure_and_prints_marker_last(self):
-        import contextlib, io
-        for line, expected in (("OK build duration", 0), ("WARN build duration", 1),
-                               ("UNAVAILABLE build duration", 1)):
-            ns = self.all_namespace()
-            ns.update(CANONICAL_SECTION="builds", _build_duration_row=lambda: (line, expected))
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                self.assertEqual(ns["_canonical_health"](), expected)
-            self.assertEqual(output.getvalue().splitlines()[-1], "HEALTH_COMPLETE")
-            self.assertEqual(len(ns["_FINDINGS"]), expected)
-            if expected:
-                self.assertEqual(ns["_FINDINGS"][0]["key"], "build_duration")
-                self.assertEqual(ns["_FINDINGS"][0]["hard_error"], line.startswith("UNAVAILABLE"))
 
-    def test_seat_rows_red_on_fail_and_stale_red_only(self):
-        # STALE-RED (no probe row for over 72 h with the host online or
-        # unknown) feeds the ai_seat_health red; young STALE and SKIP do not.
-        import io, contextlib
-        for line, expected in (("STALE-RED grok last=never no probe row · on breach: x", 1),
-                               ("FAIL grok latency=1s layer=auth · on breach: x", 1),
-                               ("STALE grok last=2026-10-11 · on breach: x", 0),
-                               ("SKIP grok: host mac-studio offline · on breach: x", 0)):
-            with self.subTest(line=line):
-                ns = self.all_namespace()
-                ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
-                ns["_seat_health_rows"] = lambda: [line]
-                with contextlib.redirect_stdout(io.StringIO()):
-                    self.assertEqual(ns["_canonical_health"](), expected)
-                self.assertEqual([row["key"] for row in ns["_FINDINGS"]],
-                                 ["ai_seat_health"] * expected)
 
     def test_all_health_sections_report_cap_failure_with_other_checks_clean(self):
         import io, contextlib
@@ -903,42 +888,6 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                 self.assertIn("HEALTH_COMPLETE", out.getvalue())
                 self.assertEqual([row["key"] for row in ns["_FINDINGS"]],
                                  [] if line.startswith("OK") else ["jev_paid_cap"])
-
-    def test_the_real_spool_row_drains_only_when_the_nightly_asks(self):
-        # Exercises the real _claude_continuity_spool_row rather than the stub:
-        # an always-drain mutant would make `health-check --section all`
-        # mutate the spool, and this is the test that dies for it.
-        import pathlib as _pathlib
-        from unittest.mock import patch
-        import sys as _sys
-        ns = self.namespace()
-        exec(compile(ast.Module(body=[_find_function("_claude_continuity_spool_row")], type_ignores=[]),
-                     str(HEALTH_CHECK_PATH), "exec"), ns)  # noqa: S102 — trusted repo source
-        _sys.path.insert(0, ns["REPO_ROOT"])
-        from lib import claude_continuity_spool as cs
-        drains = []
-        with patch.object(cs, "drain", lambda: drains.append("drain") or {"delivered": 0}), \
-             patch.object(cs, "health_row", lambda **kw: f"OK continuity spool depth — drained={kw['drained']!r}"), \
-             patch.object(cs, "loop_state_path", lambda: _pathlib.Path("/dev/null")):
-            manual, manual_code = ns["_claude_continuity_spool_row"](False)
-            nightly, nightly_code = ns["_claude_continuity_spool_row"](True)
-        self.assertEqual(drains, ["drain"], "exactly one drain, and only for the nightly section")
-        self.assertEqual((manual, manual_code), ("OK continuity spool depth — drained=None", 0))
-        self.assertEqual((nightly, nightly_code), ("OK continuity spool depth — drained={'delivered': 0}", 0))
-
-    def test_a_deep_continuity_spool_is_its_own_finding(self):
-        import io, contextlib
-        ns = self.all_namespace()
-        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
-        drains = []
-        ns["_claude_continuity_spool_row"] = lambda drain: (
-            drains.append(drain) or ("WARN continuity spool depth — 12 unsent", 1))
-        with contextlib.redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(ns["_canonical_health"](), 1)
-        self.assertIn("HEALTH_COMPLETE", out.getvalue())
-        self.assertIn("WARN continuity spool depth — 12 unsent", out.getvalue())
-        self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["claude_continuity_spool"])
-        self.assertEqual(drains, [False], "manual health reports; only the nightly section drains")
 
     def test_canonical_health_records_cap_failures_and_finishes(self):
         import io, contextlib

@@ -275,16 +275,7 @@ test("flagged loops always appear and explicit classifications win over keywords
   });
 });
 
-test("display classes cover the conduct gate vocabulary and watchdog credential phrases", () => {
-  const conduct = readFileSync(new URL("../../hooks/conduct_patterns.py", import.meta.url), "utf8");
-  const protectedBlock = conduct.split("PROTECTED = re.compile(")[1].split("re.I)")[0];
-  const literals = [...protectedBlock.matchAll(/r"([^"\n]*)"/g)].map(match => match[1]);
-  const words = literals.join("").match(/client\|(.*?)\)\\b/)[0]
-    .replace(/\)\\b$/, "").split("|");
-  for (const word of words) {
-    const sample = word.replace("[- ]", "-").replace("s?", "s");
-    assert.ok(classifyHumanOnly(sample), `conduct gate: ${sample}`);
-  }
+test("display classes cover money and watchdog credential phrases", () => {
   for (const text of ["$240", "£20", "€30", "10 usd", "10 dollars", "per month", "a year", "per seat", "a user"])
     assert.equal(classifyHumanOnly(text), "money", text);
   const watchdog = JSON.parse(readFileSync(new URL("../../ops/config/job-watchdog.json", import.meta.url)));

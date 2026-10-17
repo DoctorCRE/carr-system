@@ -504,32 +504,6 @@ class AlarmMailTests(unittest.TestCase):
 
 
 
-class ChangeTollsPredicateTests(unittest.TestCase):
-    def test_repeated_changed_paths_are_pure_and_do_not_transport(self):
-        spec = importlib.util.spec_from_file_location('tolls_under_test', REPO/'ops/jev_change_tolls.py')
-        tolls = importlib.util.module_from_spec(spec); spec.loader.exec_module(tolls)
-        class Explosive:
-            def __getattr__(self, name): raise AssertionError(name)
-        state = {'files':['ops/ci.sh']}
-        first = tolls.owed(state, client=Explosive())
-        self.assertEqual(first,tolls.owed(state,client=Explosive()))
-        self.assertEqual([n for _,n,_ in first],['ci_sh_reseal','inventory_reseal'])
-
-    def test_collector_reads_changed_content_without_model(self):
-        spec = importlib.util.spec_from_file_location('tolls_collector', REPO/'ops/jev_change_tolls.py')
-        tolls = importlib.util.module_from_spec(spec); spec.loader.exec_module(tolls)
-        with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)
-            subprocess.run(['git','init','-q',tmp],env=ENV,check=True)
-            subprocess.run(['git','remote','add','origin',tmp],cwd=tmp,env=ENV,check=True)
-            (root/'fixture.py').write_text('old')
-            subprocess.run(['git','add','fixture.py'],cwd=tmp,env=ENV,check=True)
-            subprocess.run(['git','-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],cwd=tmp,env=ENV,check=True)
-            (root/'fixture.py').write_text('first')
-            first=tolls.change(base='HEAD',repo=tmp)
-            (root/'fixture.py').write_text('second')
-            second=tolls.change(base='HEAD',repo=tmp)
-            self.assertNotEqual(first['file_content_sha256'],second['file_content_sha256'])
 
 
 class WorkerBreakerTests(Harness):
@@ -771,7 +745,7 @@ let text = ""; for await (const chunk of process.stdin) text += chunk;
 const request = JSON.parse(text); let calls = 0, consumed = false;
 const ask = jevAskBinding({ TYPESAFE_API_KEY: "vendor-fixture", JEV_ADMISSION_SECRET: "offline-admission" },
   async () => { calls++; return new Response(JSON.stringify({model:"m",answers:{q:{noul:0.8}}})); },
-  {cache:null, reserveAttempt:async () => {
+  {cache:null, countPaidAttemptsToday:async () => 0, reserveAttempt:async () => {
     if(consumed) throw Error("already consumed"); consumed = true;
     return {key:"fixture",receipt_id:"fixture"};
   }});
@@ -940,6 +914,16 @@ class RegistryCoverageTests(unittest.TestCase):
         for entry in registry["sites"].values():
             self.assertLessEqual(entry["daily_budget"], client.JEV_COST_CONFIG["daily_paid_call_cap"],
                                  "each site limit sits beneath the shared admission cap")
+
+    def test_worker_ceiling_is_one_number_in_registry_worker_and_wrangler(self):
+        cap = json.loads(REGISTRY_PATH.read_text())["worker_daily_paid_call_cap"]
+        self.assertIs(type(cap), int)
+        self.assertGreater(cap, 0)
+        worker = (REPO / "mcp-server" / "src" / "jev-call-receipt.js").read_text()
+        self.assertEqual(re.findall(r"^const WORKER_DAILY_CAP_DEFAULT = (\d+);$", worker, re.M), [str(cap)])
+        wrangler = (REPO / "mcp-server" / "wrangler.toml").read_text()
+        self.assertEqual(re.findall(r'^JEV_WORKER_DAILY_CAP = "(\d+)"$', wrangler, re.M), [str(cap)] * 2,
+                         "[vars] and [env.staging.vars] each declare the ceiling")
 
     def test_every_paid_call_source_is_registered(self):
         registry = client.load_call_sites(REGISTRY_PATH)

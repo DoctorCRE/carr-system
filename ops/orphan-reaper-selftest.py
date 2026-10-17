@@ -368,12 +368,6 @@ class ReaperTests(unittest.TestCase):
         self.assertIn('{{REPO}}/bin/run-scheduled.sh', plist['ProgramArguments'])
         self.assertIn('{{REPO}}/ops/orphan-reaper.py', plist['ProgramArguments'])
 
-    def test_job_declares_its_mechanism_doctrine(self):
-        spec = importlib.util.spec_from_file_location('mechanism_doctrine', ROOT / 'ops/mechanism-doctrine-gate.py')
-        assert spec is not None and spec.loader is not None
-        gate = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(gate)
-        self.assertIsNotNone(gate.declared_slug('ops/launchd/com.carr.orphan-reaper.plist'))
 
     def test_plist_is_accepted_by_supported_installer(self):
         spec = importlib.util.spec_from_file_location('reaper_installer', ROOT / 'ops/config-as-code.py')

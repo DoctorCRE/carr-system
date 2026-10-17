@@ -243,6 +243,12 @@ CONTINUITY_SURFACE_ENFORCEMENT = "required"
 CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
 CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
 CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
+# Hard ceiling on paid Jev (TypeSafe) attempts per UTC day across every caller
+# and purpose, counted in the Worker's own attempt ledger (WR-000292). The
+# per-site budgets in ops/config/jev-call-sites.v1.json are enforced only on
+# the calling machine; this one holds even when a caller's admission is valid.
+# Must equal worker_daily_paid_call_cap there (ops/jev-call-sites-selftest.py).
+JEV_WORKER_DAILY_CAP = "300"
 
 # Cloudflare supplies the immutable version ID, optional tag, and creation
 # timestamp at runtime. /release reads this binding as provider identity; it is
@@ -346,6 +352,7 @@ CONTINUITY_SURFACE_ENFORCEMENT = "required"
 CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
 CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
 CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
+JEV_WORKER_DAILY_CAP = "300"
 
 # Environment configuration is explicit: staging's separate Worker needs the
 # same runtime version-identity binding and must not depend on inheritance.

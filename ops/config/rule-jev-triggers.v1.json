@@ -1,8 +1,8 @@
 {
  "counts": {
-  "residual": 3,
-  "rules": 107,
-  "triggered": 104
+  "residual": 15,
+  "rules": 118,
+  "triggered": 103
  },
  "generated_note": "Written only by ops/rule-trigger-compile.py: one Jev request per pack-layer rule, keyed to the rule's statement digest. ops/rule-jit-compile.py turns these into rows of ops/config/rule-jit-triggers.v1.json. Never hand-edit.",
  "proposals": {},
@@ -54,6 +54,52 @@
      "cost next": 0.62,
      "window math": 0.74
     },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "07dde434": {
+   "always_on_probability": 0.31,
+   "id": "07dde434",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.34,
+   "packs": [
+    "client-deal"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'advisor' is a one-word cue that fires on routine deal prompts (tenant/client advisor, Jev as advisor) and 'self-serve' fires on the house phrase 'self-serve the blocker' (rule 5cd8d0f6) in engineering prompts; neither is specific to building a prospect-facing AI. 'behind scenes', 'briefs call', 'build answers', 'allowed trade-off' are dead stopword-stripped bigrams.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "b7d0cd03d293cef77b595764c4c401113643e0b8023c75acbe56c4ba889a0398",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "08c4eda2": {
+   "always_on_probability": 0.05,
+   "id": "08c4eda2",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.15,
+   "packs": [
+    "client-deal"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'agreement', 'loi', 'letter of intent', 'representation' and 'issued' fire on nearly every deal prompt (and 'issued'/'agreement' on engineering ones), while the rule binds only Alabama lead routing and Alabama party-of-record; the discriminating cue 'alabama' (or 'licence/license') is absent, and 'party record' / 'record alabama' are dead bigrams.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "abb6e65ebea5b989ee9891c86ce053a9f19706b9b48fe7f6497f686ea7606336",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
     "paths": {},
     "tools": {},
     "verbs": {}
@@ -838,6 +884,29 @@
     "verbs": {}
    }
   },
+  "486584d6": {
+   "always_on_probability": 0.08,
+   "id": "486584d6",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.17,
+   "packs": [
+    "engineering-git"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'already signed' matches routine deal prompts ('the tenant already signed the LOI/lease'), not just 'already signed in'; tighten it to 'already signed in'. Other cues are precise but mostly dead in Joe's phrasing ('browser session's', 'joe's signed-in'); consider 'chrome', 'dashboard', 'cloudflare console'-style cues.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "2d53bffc9c36bf9695007734b50dfee69cff155fe6fe578ec88e091b1ae14e26",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
   "49533583": {
    "always_on_probability": 0.06,
    "id": "49533583",
@@ -872,6 +941,29 @@
      "local/fetch-calendar.sh": 0.67,
      "out/calendar-archive/calendar-joe-*.ics": 0.73
     },
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "4a77c35d": {
+   "always_on_probability": 0.11,
+   "id": "4a77c35d",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.34,
+   "packs": [
+    "delegation-council"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "The only surviving cue 'dot chatgpt' requires 'dot' immediately followed by 'chatgpt', which natural prompts ('the Dot', 'send it to ChatGPT') will not contain, so a triggered rule with no live cue is effectively never delivered; needs cues like 'the dot' or 'chatgpt'.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "e70472ec4fc8a2fed61fd07cd0f14bc25e47cea152eadbc0f577e4ac666ef96e",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
     "tools": {},
     "verbs": {}
    }
@@ -962,28 +1054,24 @@
     "verbs": {}
    }
   },
-  "5697071b": {
-   "always_on_probability": 0.1,
-   "id": "5697071b",
-   "mode": "triggered",
+  "578fdd91": {
+   "always_on_probability": 0.06,
+   "id": "578fdd91",
+   "mode": "residual",
    "model": "jev-1.13.0",
-   "negatives": {
-    "vendor party": 0.66
-   },
-   "no_cue_probability": 0.19,
+   "negatives": {},
+   "no_cue_probability": 0.21,
    "packs": [
-    "client-deal"
+    "records-intake"
    ],
-   "statement_sha256": "9618ee17dec36a05f8c23871d7c8f66b70e09b61f073ce2db9c7019a2c303d6c",
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'identity' fires on constant engineering talk (session identity, local-verb identity, identity field, visual identity) and 'prior' on any 'prior session/PR/run'; the real cue 'enrich'/'enrichment' alone is missing, and 'applies corrections', 'apply overwriting', 'apply pass', 'enrichment applies' are dead bigrams.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "09fe640fd1d22f861981c4a3219c6d2c7651a560e973bd9aec61f959ab615c5b",
    "triggers": {
     "commands": {},
-    "keywords": {
-     "alabama exam": 0.52,
-     "dell's": 0.51,
-     "licensed party": 0.58,
-     "licensure grounds": 0.6,
-     "may joe advertise into alabama": 0.55
-    },
+    "keywords": {},
     "paths": {},
     "tools": {},
     "verbs": {}
@@ -1240,6 +1328,29 @@
     "verbs": {}
    }
   },
+  "661d7757": {
+   "always_on_probability": 0.08,
+   "id": "661d7757",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.23,
+   "packs": [
+    "delegation-council"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'carr records' fires on routine deal/record lookups ('check CARR records for X') where a Jev-review permission rule does not bind, and 'bounded' (0.50) fires on unrelated text ('bounded migration', 'bounded context'). 'jev' and 'jev available' are acceptable.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "5a9f00b04f638e81a9fe37fa5745938ba1824ab1f20780ffc79b35343c96ffa9",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
   "67580c28": {
    "always_on_probability": 0.08,
    "id": "67580c28",
@@ -1279,6 +1390,30 @@
      "room command": 0.53,
      "surface board": 0.55
     },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "67e48aaf": {
+   "always_on_probability": 0.11,
+   "id": "67e48aaf",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.21,
+   "packs": [
+    "engineering-git",
+    "scheduled-automation"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'exposed' fires on engineering prompts about exposed endpoints/ports/verbs and 'rotating' on any key or share-grant rotation work, neither of which is Joe pasting a credential; most other cues ('accepts exposure', 'showed screenshot', 'warn token', 'chat showed') are dead bigrams. The real binding moment is a pasted token-shaped string, which no cue detects.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "9d68c1d0c7466410a2c0ac5b162f4379bd0dff67f5bf60f3a3b6af52139ae02e",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
     "paths": {},
     "tools": {},
     "verbs": {}
@@ -1504,6 +1639,29 @@
     "verbs": {}
    }
   },
+  "76fcbed6": {
+   "always_on_probability": 0.08,
+   "id": "76fcbed6",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.18,
+   "packs": [
+    "source-study"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'link' (0.52) is a one-word cue that fires on routine prompts ('link the lead to the client', 'link to the PR', link-parties) unrelated to a source arriving; the arrival of a source is better detected by the existing URL prompt_cue pattern. 'apply source', 'sends gets', 'arrives study's', 'started arrives', 'study's job' are dead bigrams.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "b8db28ed6172407119ebfeb5a05e3363661aef37a59332fb1e23554332d4fe94",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
   "7b4ba3aa": {
    "always_on_probability": 0.05,
    "id": "7b4ba3aa",
@@ -1643,38 +1801,6 @@
      "caveat": 0.51,
      "confirm this pairing logic": 0.74,
      "suggest caveat": 0.7
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "8400cd3d": {
-   "always_on_probability": 0.13,
-   "id": "8400cd3d",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "visible step": 0.6
-   },
-   "no_cue_probability": 0.12,
-   "packs": [
-    "governance-rules"
-   ],
-   "statement_sha256": "8ae8c4068f67b109d5dba3fb8d8d2026afd863603bab0d0de9ac4ac2df4ef017",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "grill-with-docs": 0.73,
-     "grill-with-docs work": 0.61,
-     "medium-to-large": 0.54,
-     "medium-to-large work": 0.54,
-     "moves wayfinder": 0.63,
-     "opens grill-with-docs": 0.71,
-     "outgrows": 0.55,
-     "sizing": 0.59,
-     "sizing step": 0.69,
-     "starts sizing": 0.67
     },
     "paths": {},
     "tools": {},
@@ -1978,6 +2104,29 @@
     "verbs": {}
    }
   },
+  "a3da3d39": {
+   "always_on_probability": 0.14,
+   "id": "a3da3d39",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.12,
+   "packs": [
+    "governance-rules"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'left' (0.51), 'pending', 'awaiting', 'retire' and 'anything left' would fire on a large share of engineering and deal prompts (pending PR/checks/deal, 'anything left?'). The binding moment is in the session's own output (leaving something awaiting Joe), which prompt cues cannot see; a short rule like this fits always_on better than triggered.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "2828d8b662e11549ec69f6f7d9254f44bfa07ae16de3220aa36d4b1cff29a4fd",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
   "a3f6c7f9": {
    "always_on_probability": 0.12,
    "id": "a3f6c7f9",
@@ -2065,6 +2214,59 @@
      "surface carries": 0.59,
      "svg": 0.58
     },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "a9fc3f0e": {
+   "always_on_probability": 0.11,
+   "id": "a9fc3f0e",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.26,
+   "packs": [
+    "records-intake",
+    "source-study"
+   ],
+   "review_note": "Live cues ('research-site index', 'research-site') are specific and will not fire on unrelated prompts; triggered mode fits. Recall is weak (rule binds on any research or fact-check, and 'add index', 'adding removing', 'index memory', 'internet research-site' are dead bigrams), worth a recall pass later.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "fe224be5334d19711480e21b7eda0da8b2554522f09d6254f99129f574ab8204",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "add index": 0.68,
+     "adding removing": 0.61,
+     "index memory": 0.55,
+     "internet research-site": 0.53,
+     "research-site": 0.64,
+     "research-site index": 0.72
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "ac0a6579": {
+   "always_on_probability": 0.07,
+   "id": "ac0a6579",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.1,
+   "packs": [
+    "client-deal"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'another client' fires on ordinary deal prompts ('another client wants a clinic in Fairhope') where share-site password policy does not bind; the specific 'share-site' cues are good, and 'share.doctorcre.com' plus 'password' near 'client' would be stronger additions.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "b45687dce5a7b37d488d4caf3c3aece8bbae6dcbedbb4731c4ab189d0e44027d",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
     "paths": {},
     "tools": {},
     "verbs": {}
@@ -2414,6 +2616,29 @@
     "verbs": {}
    }
   },
+  "c363bd8b": {
+   "always_on_probability": 0.05,
+   "id": "c363bd8b",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.11,
+   "packs": [
+    "engineering-git"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "The path triggers db/schema.sql and ops/config/gate-baseline.json fire on every tool call touching files the rule itself says nearly every carr-system PR regenerates, so the merge-time orchestrator rule lands on routine builder work (and trigger_rows emits paths with no 0.5 threshold). 'overlap' alone also fires on territory/schedule overlap; the PR-specific prompt cues ('batch prs', 'shared files', 'remerge') are fine.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "c7988fc17487f8fa22ad9be9e209e2a970677ba4582a199bc7955fc2a597b6d1",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
   "c4a284b2": {
    "always_on_probability": 0.06,
    "id": "c4a284b2",
@@ -2595,6 +2820,29 @@
      "no-conflict": 0.51,
      "self-perform": 0.72
     },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "cfe6b5c6": {
+   "always_on_probability": 0.06,
+   "id": "cfe6b5c6",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.2,
+   "packs": [
+    "engineering-git"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "'null' is a one-word cue that fires on everyday engineering prompts (null values, NULL handling) and 'already asked' fires on any frustrated follow-up ('I already asked you to...'); 'shadow mode' and 'obvious improvement' are the right cues.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "b84a74fbc15b71188dcc748fdbca396d1d3ff46ff5eebdee228a870acaa68ec5",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
     "paths": {},
     "tools": {},
     "verbs": {}
@@ -2872,34 +3120,6 @@
     "verbs": {}
    }
   },
-  "ede4b241": {
-   "always_on_probability": 0.05,
-   "id": "ede4b241",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "staffing model": 0.72
-   },
-   "no_cue_probability": 0.19,
-   "packs": [
-    "delegation-council"
-   ],
-   "statement_sha256": "1d64a4910ca6904e925ac5944bbb71ed11e79bb4a0e3c7151e89b7b2dee2af6d",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "batches": 0.5,
-     "cloud model": 0.52,
-     "cloud pick": 0.54,
-     "model choice": 0.54,
-     "pick model": 0.55,
-     "work's shape": 0.56
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
   "ede4c735": {
    "always_on_probability": 0.06,
    "id": "ede4c735",
@@ -3108,6 +3328,35 @@
      "home propose": 0.51,
      "useful-but-not-today": 0.65,
      "useful-but-not-today knowledge": 0.69
+    },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "f673326b": {
+   "always_on_probability": 0.08,
+   "id": "f673326b",
+   "mode": "triggered",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.3,
+   "packs": [
+    "delegation-council"
+   ],
+   "review_note": "Cues ('agent access', 'access restrictions', 'add access', 'data fences', 'personal-scope', 'custody') appear where an agent is being granted access and rarely in unrelated engineering or deal prompts; triggered mode fits a rule that binds at access-grant time.",
+   "reviewed_at": "2026-10-15",
+   "reviewed_by": "independent-subagent-opus",
+   "statement_sha256": "8e3907ed3e762cd3db33adf04bfa963bbfcde015efdc69629c5b1007fa31b182",
+   "triggers": {
+    "commands": {},
+    "keywords": {
+     "access restrictions": 0.54,
+     "add access": 0.52,
+     "agent access": 0.66,
+     "custody": 0.62,
+     "data fences": 0.51,
+     "personal-scope": 0.5
     },
     "paths": {},
     "tools": {},

@@ -15,7 +15,7 @@
     than here: a double hyphen is illegal inside an XML comment, and writing it
     made this the one plist in ops/launchd that no strict XML parser could read.
     launchd and `plutil` both accept it, which is why it survived unnoticed —
-    found 2026-08-14 by tools/scheduler-truth.py on its first run.)
+    found 2026-08-14 by ops/scheduled-jobs-check.py on its first run.)
 
     Apple Notes is a local macOS application. This is a LaunchAgent, not a
     daemon: it runs only after Joe has logged in. `RunAtLoad` lets it catch up

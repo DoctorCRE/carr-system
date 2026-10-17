@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-test("Claude continuity stdio proxy keeps the bearer out of config and exposes three verbs", async () => {
+test("Claude continuity stdio proxy keeps the bearer out of config and exposes checkpoint and recovery only", async () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "carr-continuity-proxy-"));
   const tokenFile = path.join(temp, "mcp-tokens.env");
   const proxy = path.join(temp, "continuity-stdio-proxy.mjs");
@@ -65,7 +65,7 @@ test("Claude continuity stdio proxy keeps the bearer out of config and exposes t
   assert.match(responses[0].result.instructions, /semantic milestones/);
   assert.doesNotMatch(responses[0].result.instructions, /standing-context|full store/);
   assert.deepEqual(responses[1].result.tools.map(tool => tool.name), [
-    "claude-checkpoint", "claude-read-recovery", "claude-record-event",
+    "claude-checkpoint", "claude-read-recovery",
   ]);
   assert.equal(responses[2].error.message, "not_in_claude_continuity_profile");
   assert.equal(responses[3].result.content[0].text, "ok");

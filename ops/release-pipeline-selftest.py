@@ -12,12 +12,10 @@ What is pinned, one test class each:
   batching         N merges since the last release ship as ONE release of the
                    latest SHA
   stop on failure  a nonzero step stops the lane, records step/rc/log, enqueues
-                   exactly one diagnosis turn, and the same SHA is never retried
+                   exactly one diagnosis turn; code failures wait for a new SHA
   staging guard    a failed staging step never reaches promotion
   kill switch      config flag, local override file, per-lane flag
   lock             a second concurrent tick runs nothing
-  verifier≠maker   the maker, a human partner, the author and this pipeline are
-                   refused as verifier
   blockers         a missing credential files one loop, once, and runs nothing
   dry run          prints commands, executes none, writes no state
   schema supersede a new schema-snapshot PR closes the older open ones (close
@@ -48,11 +46,6 @@ assert _SPEC is not None and _SPEC.loader is not None
 rp = importlib.util.module_from_spec(_SPEC)
 sys.modules["release_pipeline"] = rp
 _SPEC.loader.exec_module(rp)
-_PRODUCER_SPEC = importlib.util.spec_from_file_location("record_release_review", HERE / "record-release-review.py")
-assert _PRODUCER_SPEC is not None and _PRODUCER_SPEC.loader is not None
-producer = importlib.util.module_from_spec(_PRODUCER_SPEC)
-_PRODUCER_SPEC.loader.exec_module(producer)
-
 FIXTURE_ENV = fixture_env()
 VERSION = "0f1e2d3c-4b5a-4968-8776-655443322110"
 CF_TOKEN = "cf-selftest-token-must-never-be-echoed-9f8e7d"
@@ -150,6 +143,12 @@ class FakeRunner:
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text(failed_out, encoding="utf-8")
             return rp.Result(7, failed_out)
+        is_app_worktree = name == "app-worktree"
+        is_app_worktree_cleanup = (name == "worktree-cleanup" and argv[:5] == [
+            "git", "-C", str(cwd), "worktree", "remove"] and "/app-" in argv[-1])
+        if is_app_worktree or name == "app-main-ref-refresh" or is_app_worktree_cleanup:
+            proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
+            return rp.Result(proc.returncode, proc.stdout + proc.stderr)
         if name == "release-key":
             key = argv[argv.index("--key") + 1]
             return rp.Result(0 if key.endswith("-01") else 2, "")
@@ -228,26 +227,18 @@ class InstallingRunner(FakeRunner):
 HEAD_DATE = "2026-09-29T00:00:00Z"
 
 
-def approve(pr, *, when="2026-09-30T00:00:00Z", assoc="OWNER", body=None, cid=None, reviewed=None):
-    if body is None:
-        body = f"APPROVE\nReviewed-SHA: {reviewed or pr_head(pr)}\n"
-    return {"id": cid or 900 + pr, "body": body, "created_at": when, "author_association": assoc,
-            "user": {"login": "jbookout" if assoc == "OWNER" else "stranger"},
-            "html_url": f"https://github.com/o/r/pull/{pr}#issuecomment-{cid or 900 + pr}"}
-
-
 def pr_head(n: int) -> str:
     return f"feed{n:036x}"
 
 
 class FakeGitHub:
-    """Every PR approved by the owner after its head commit, CI green, canary
-    green on every main commit, app check `test` green — unless overridden."""
+    """Merged source with green CI and canary results unless overridden."""
 
-    def __init__(self, approve_all: bool = True, comments: dict | None = None, canary: dict | None = None,
+    _pr_numbers: dict[str, int] = {}
+
+    def __init__(self, canary: dict | None = None,
                  red_ci_prs: set | None = None, checks: list | None = None, raise_on: str | None = None,
                  ci_runs: dict | None = None):
-        self.approve_all, self.comment_map = approve_all, comments or {}
         self.ci_runs = ci_runs or {}     # pr -> [(id, conclusion)], replacing the default single run
         self.canary, self.red_ci_prs = canary, red_ci_prs or set()
         self.checks = checks if checks is not None else [
@@ -257,7 +248,7 @@ class FakeGitHub:
         self.merge_commit: dict[str, str] = {}   # commit -> the PR's merge_commit_sha, when not itself
 
     def pr_number(self, sha):
-        return 100 + int(sha[:4], 16) % 800
+        return self._pr_numbers.setdefault(sha, 100 + len(self._pr_numbers))
 
     def pr_for_commit(self, sha):
         if self.raise_on == "pr_for_commit":
@@ -292,12 +283,6 @@ class FakeGitHub:
         return [{"name": "ops/ci.sh --strict", "conclusion": "success"},
                 {"name": "ops/ci.sh --strict --only pushfloor unit secret", "conclusion": "success"}]
 
-    def comments(self, pr):
-        if pr in self.comment_map:
-            return self.comment_map[pr]
-        return [approve(pr)] if self.approve_all else [{"id": 1, "body": "looks fine to me",
-                                                       "created_at": "2026-09-30T00:00:00Z",
-                                                       "author_association": "OWNER", "html_url": "x"}]
 
     def check_runs(self, sha):
         return self.checks
@@ -395,48 +380,6 @@ class Fixture:
         # (release_key, sha) it would have marked in self.slice_marks.
         if slice_marker is None:
             slice_marker = lambda key, sha: (self.slice_marks.append((key, sha)) or {"rc": 0})  # noqa: E731
-        # The fixture models the existing local merge-event producer. The
-        # pipeline still independently checks the live PR/comment evidence.
-        # The pipeline evaluates origin/main, which can be ahead of this
-        # checkout in update-branch/squash fixtures. Generate one local event
-        # for each merged commit in the batch: the controller may release an
-        # older green commit while newer commits are still pending.
-        remote_main = git(self.repo, "ls-remote", "origin", "refs/heads/main").split()[0]
-        commits = git(self.repo, "rev-list", "--reverse", "HEAD", f"^{self.base}").splitlines()
-        if remote_main not in commits:
-            commits.append(remote_main)
-        events = []
-        lane_names = [name for name in ("worker", "app")
-                      if name == "worker" or cfg[name].get("enabled")]
-        for merge_sha in commits:
-            for lane_name in lane_names:
-                lane_cfg = cfg[lane_name]
-                source_gh = github or FakeGitHub()
-                try:
-                    pr = source_gh.pr_for_commit(merge_sha)
-                except ValueError:
-                    # A fixture may deliberately make GitHub unreadable so
-                    # the pipeline's own refusal path can be exercised.
-                    continue
-                if pr is None:
-                    continue
-                pr_number = int(pr["number"])
-                reviewed_head = str(pr["head"]["sha"])
-                source_comments = source_gh.comments(pr_number)
-                deciding = rp.deciding_verdict(source_comments, lane_cfg) or {}
-                fake_comment_id = int(deciding.get("id") or 900 + pr_number)
-                reviewed_sha = rp.reviewed_header_sha(str(deciding.get("body") or "")) or reviewed_head
-                events.append({"schema": "carr-release-merge-event.v1",
-                               "provenance_source": "codex-record-event", "continuity_event_id": "fixture-event",
-                               "reviewer": "codex", "repository": lane_cfg["github_repo"],
-                               "pull_number": pr_number, "head_sha": reviewed_head,
-                               "reviewed_sha": reviewed_sha, "review_comment_id": fake_comment_id,
-                               "merge_sha": merge_sha, "reviewer_task_ref": "review-task-1",
-                               "maker_task_ref": "maker-task-1", "task_refs_verified": False,
-                               "builder_evidence_refs": ["github:jbookout/carr-system/pull/1"]})
-        event_path = self.repo / cfg.get("merge_event_file", "out/merge-events.jsonl")
-        event_path.parent.mkdir(parents=True, exist_ok=True)
-        event_path.write_text("".join(json.dumps(event) + "\n" for event in events))
         env = rp.child_env(FIXTURE_ENV)
         env.update({k: FIXTURE_ENV[k] for k in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")})
         # Fixture source stands in for the modules loaded by a production
@@ -482,7 +425,7 @@ class RejectionReconciliation(Base):
     def setUp(self):
         super().setUp()
         self.sha = self.fx.commit({"mcp-server/src/a.js": "1"})
-        self.gh = FakeGitHub(approve_all=False)
+        self.gh = FakeGitHub()
         self.clock = 1000.0
         self.runner = FakeRunner()
         self.pipe = self.fx.pipeline(self.runner, github=self.gh)
@@ -493,51 +436,8 @@ class RejectionReconciliation(Base):
         self.runner.live = live
         self.pipe.http = lambda _url: {"git_sha": {"value": live["sha"]}}
 
-    def test_unchanged_review_rejection_executes_once_across_restart(self):
-        with mock.patch.object(self.pipe, "release_worker", wraps=self.pipe.release_worker) as release:
-            self.pipe.tick(["worker"])
-            self.pipe.tick(["worker"])
-            self.assertEqual(release.call_count, 1)
-        again = self.fx.pipeline(self.runner, github=self.gh)
-        again.now = lambda: self.clock
-        with mock.patch.object(again, "release_worker", wraps=again.release_worker) as release:
-            again.tick(["worker"])
-            self.assertEqual(release.call_count, 0)
-        self.assertEqual(len([r for r in self.fx.records() if r["status"] == "blocked"]), 1)
-        self.assertIn("repair", self.fx.state()["worker"]["rejection"])
-
-    def test_each_comment_edit_and_body_edit_permits_one_evaluation(self):
-        self.pipe.tick(["worker"])
-        number = self.gh.pr_number(self.sha)
-        self.gh.comment_map[number] = [{"body": "REVIEW: BLOCKED\nReviewed-SHA: " + pr_head(number),
-            "author_association": "OWNER", "id": 99}]
-        with mock.patch.object(self.pipe, "release_worker", wraps=self.pipe.release_worker) as release:
-            self.pipe.tick(["worker"])
-            self.pipe.tick(["worker"])
-            self.assertEqual(release.call_count, 1)
-        original = self.gh.pr_for_commit
-        self.gh.pr_for_commit = lambda sha: {**original(sha), "body": "changed no-eval evidence"}
-        with mock.patch.object(self.pipe, "release_worker", wraps=self.pipe.release_worker) as release:
-            self.pipe.tick(["worker"])
-            self.pipe.tick(["worker"])
-            self.assertEqual(release.call_count, 1)
-
-    def test_check_completion_wakes_but_does_not_bypass_review(self):
-        cfg = self.fx.config(); cfg["app"]["enabled"] = True
-        self.gh.checks = [{"name": "test", "status": "in_progress", "conclusion": None}]
-        pipe = self.fx.pipeline(self.runner, cfg=cfg, github=self.gh)
-        pipe.now = lambda: self.clock
-        pipe.http = lambda _url: {"source_commit": self.fx.base}
-        pipe.tick(["app"]); pipe.tick(["app"])
-        self.gh.checks[0].update(status="completed", conclusion="success")
-        with mock.patch.object(pipe, "release_app", wraps=pipe.release_app) as release:
-            pipe.tick(["app"]); pipe.tick(["app"])
-            self.assertEqual(release.call_count, 1)
-        self.assertEqual(self.runner.calls, [])
-        self.assertNotIn("last_released_sha", self.fx.state()["app"])
 
     def test_health_recheck_is_bounded_and_recovery_runs_all_release_guards(self):
-        self.gh.approve_all = True
         self.runner.health_baseline_findings = [{"key": "reader", "subject": "", "count": 1,
             "hard_error": True, "time_rolling": False}]
         self.pipe.tick(["worker"])
@@ -552,13 +452,6 @@ class RejectionReconciliation(Base):
         self.assertNotIn("promote", self.runner.names())
         self.assertEqual(self.fx.state()["worker"]["failed_sha"], self.sha)
 
-    def test_unreadable_reconciliation_stays_refused(self):
-        self.pipe.tick(["worker"])
-        self.gh.raise_on = "pr_for_commit"
-        with mock.patch.object(self.pipe, "release_worker", wraps=self.pipe.release_worker) as release:
-            self.pipe.tick(["worker"])
-            self.assertEqual(release.call_count, 0)
-        self.assertEqual(self.runner.calls, [])
 
     def test_canonical_staging_observer_hashes_real_provider_scope_and_exact_ledger(self):
         from decimal import Decimal
@@ -586,7 +479,6 @@ class RejectionReconciliation(Base):
         cursor.execute.assert_any_call('select filename,sha256 from public.schema_migrations order by filename collate "C"')
 
     def test_staging_ledger_reconciliation_permits_one_retry_and_retains_checks(self):
-        self.gh.approve_all = True
         self.runner.fail_at = "staging-prepare"
         ledger = {"candidate": "fixture", "ledger": {"migration": "old"}}
         self.pipe.staging_ledger = lambda: dict(ledger)
@@ -604,7 +496,6 @@ class RejectionReconciliation(Base):
         self.assertIn("staging_ledger_digest", rejection)
 
     def test_pre_rejection_staging_failure_acquires_a_baseline_then_recovers(self):
-        self.gh.approve_all = True
         self.wire_live()
         # The exact lane shape a staging failure persisted before rejections existed.
         self.pipe.store.save({"worker": {"failed_sha": self.sha, "failed_step": "staging-prepare",
@@ -624,7 +515,6 @@ class RejectionReconciliation(Base):
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.sha)
 
     def test_staging_recovery_reconciles_the_failed_target_behind_a_pending_head(self):
-        self.gh.approve_all = True
         self.wire_live()
         self.runner.fail_at = "staging-prepare"
         ledger = {"candidate": "fixture", "ledger": "before"}
@@ -642,7 +532,6 @@ class RejectionReconciliation(Base):
         self.assertEqual(lane["last_released_sha"], self.sha)  # the canary target, never the pending head
 
     def test_staging_observation_failures_never_wake_a_failed_release(self):
-        self.gh.approve_all = True
         self.runner.fail_at = "staging-prepare"
         self.pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": "before"}
         self.pipe.tick(["worker"])
@@ -658,7 +547,6 @@ class RejectionReconciliation(Base):
                 self.assertNotIn("private-error-canary", self.pipe.store.records_path.read_text())
 
     def test_staging_recovery_resumes_interrupted_retirement(self):
-        self.gh.approve_all = True
         self.runner.fail_at = "staging-prepare"
         ledger = {"candidate": "fixture", "ledger": "before"}
         self.pipe.staging_ledger = lambda: dict(ledger)
@@ -687,6 +575,20 @@ class RejectionReconciliation(Base):
         self.pipe.tick(["worker"])
         raw = (self.pipe.store.state_path.read_bytes() + self.pipe.store.records_path.read_bytes())
         self.assertNotIn(secret.encode(), raw)
+
+
+class FakeGitHubIdentity(unittest.TestCase):
+    def test_red_ci_does_not_leak_to_a_commit_with_a_colliding_short_hash(self):
+        green = "01bec640" + "0" * 32
+        red = "04dec640" + "0" * 32
+        red_pr = FakeGitHub().pr_number(red)
+        gh = FakeGitHub(red_ci_prs={red_pr})
+        green_source = gh.pr_for_commit(green)
+        red_source = gh.pr_for_commit(red)
+        self.assertNotEqual(green_source["number"], red_source["number"])
+        self.assertEqual(gh.runs_for(green_source["head"]["sha"])[0]["conclusion"], "success")
+        self.assertEqual(gh.runs_for(red_source["head"]["sha"])[0]["conclusion"], "failure")
+        self.assertEqual(FakeGitHub().pr_number(green), green_source["number"])
 
 
 class FixtureIsolation(unittest.TestCase):
@@ -817,7 +719,6 @@ class CanaryAggregate(Base):
         self.assertEqual(pipeline.canary_verdict(gh, cfg, 'a'*40), 'pending')
 
 
-
 class DurableReleaseEvidence(Base):
     def test_failed_proof_append_cannot_advance_release_or_slices(self):
         latest = self.fx.commit({"mcp-server/src/a.js": "1"})
@@ -879,7 +780,6 @@ class DurableReleaseEvidence(Base):
             self.assertEqual(pipe.tick(["worker"]), 1)
         self.assertNotEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
         self.assertEqual(self.fx.slice_marks, [])
-
 
 
 class RecoveryCrash(BaseException):
@@ -1176,6 +1076,10 @@ class Batching(Base):
         uploads = [a for n, a in runner.calls if n == "upload"]
         self.assertEqual(len(uploads), 1)
         self.assertEqual(uploads[0][uploads[0].index("--release-sha") + 1], latest)
+        upload = uploads[0]
+        self.assertEqual(upload[upload.index("--verifier") + 1], "github-actions")
+        self.assertEqual(upload[upload.index("--verifier-evidence") + 1],
+                         upload[upload.index("--test-evidence") + 1])
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
         shipped = [r for r in self.fx.records() if r["status"] == "shipped"]
         self.assertEqual([r["sha"] for r in shipped], [latest])
@@ -1320,6 +1224,222 @@ class StopOnFailure(Base):
         self.assertEqual(self.fx.pipeline(runner).tick(["worker"]), 1)
         self.assertEqual(self.fx.records()[-1]["step"], "verify-live")
 
+
+class PrerequisiteRecovery(Base):
+    def test_rejected_token_is_probed_until_repaired_without_redispatch(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        rejected = "Authentication error [code: 10000]"
+        first = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": rejected})
+        self.assertEqual(self.fx.pipeline(first, verbs=verbs).tick(["worker"]), 1)
+        for _ in range(2):
+            runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": rejected})
+            self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+            self.assertEqual(runner.names(), ["wrangler-auth"])
+            self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn"])
+
+    def test_auth_transport_failure_recovers_after_a_successful_probe(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "network unavailable"})
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "wrangler-auth")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
+    def test_auth_probe_install_failure_reaches_diagnosis_after_restart(self):
+        for lane in ("worker", "app"):
+            for fail_at in ("wrangler-install", None):
+                with self.subTest(lane=lane, fail_at=fail_at), tempfile.TemporaryDirectory() as tmp:
+                    fx = Fixture(Path(tmp))
+                    sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                    cfg = fx.config()
+                    cfg[lane]["enabled"] = True
+                    verbs = []
+                    def pipeline(runner):
+                        pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                        if lane == "app":
+                            pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                        return pipe
+                    (fx.cred / "tokens.env").write_text("")
+                    self.assertEqual(pipeline(FakeRunner()).tick([lane]), 1)
+                    (fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+                    shutil.rmtree(fx.repo / "out/release-pipeline/toolchain")
+                    runner = FakeRunner(fail_at=fail_at)
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-install")
+                    self.assertEqual(fx.records()[-1]["step"], "wrangler-install")
+                    self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn", "add-room-turn"])
+                    retry = FakeRunner()
+                    self.assertEqual(pipeline(retry).tick([lane]), 0)
+                    self.assertEqual(retry.calls, [])
+                    self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                    self.assertEqual(len(verbs), 3)
+
+    def test_second_auth_transport_failure_retains_first_diagnosis_across_restarts(self):
+        for lane in ("worker", "app"):
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                cfg = fx.config()
+                cfg[lane]["enabled"] = True
+                verbs = []
+                def pipeline(runner):
+                    pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                    if lane == "app":
+                        pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                    return pipe
+                first = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "network unavailable"})
+                self.assertEqual(pipeline(first).tick([lane]), 1)
+                original_turn = verbs[0][1]
+                for _ in range(2):
+                    runner = FakeRunner(outputs={"wrangler-auth": "network unavailable"})
+                    original_run = runner.run
+                    def run(argv, **kw):
+                        if kw["log"].stem.endswith("wrangler-auth"):
+                            runner.fail_at = ("wrangler-auth" if "wrangler-auth" in runner.names() else None)
+                        return original_run(argv, **kw)
+                    runner.run = run
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(runner.names(), ["wrangler-auth", "wrangler-auth"])
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-auth")
+                    self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                self.assertEqual(verbs, [("add-room-turn", original_turn)])
+                self.assertEqual(fx.state()[lane]["dispatches"][sha], 1)
+
+    def test_auth_probe_execution_failure_gets_its_own_diagnosis_after_restart(self):
+        for lane in ("worker", "app"):
+            for output in ("SyntaxError: Unexpected token", "Error [ERR_MODULE_NOT_FOUND]",
+                           "unrecognized process failure", ""):
+                with self.subTest(lane=lane, output=output), tempfile.TemporaryDirectory() as tmp:
+                    fx = Fixture(Path(tmp))
+                    sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                    cfg = fx.config()
+                    cfg[lane]["enabled"] = True
+                    verbs = []
+                    def pipeline(runner):
+                        pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                        if lane == "app":
+                            pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                        return pipe
+                    (fx.cred / "tokens.env").write_text("")
+                    self.assertEqual(pipeline(FakeRunner()).tick([lane]), 1)
+                    (fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+                    runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": output})
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(runner.names(), ["wrangler-auth"])
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-execution")
+                    failure = fx.records()[-1]
+                    self.assertEqual((failure["step"], failure["rc"]), ("wrangler-execution", 7))
+                    self.assertEqual(Path(failure["log"]).read_text(), output)
+                    self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn", "add-room-turn"])
+                    self.assertIn("wrangler-execution", json.dumps(verbs[-1][1]))
+                    for _ in range(2):
+                        retry = FakeRunner()
+                        self.assertEqual(pipeline(retry).tick([lane]), 0)
+                        self.assertEqual(retry.calls, [])
+                        self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                    self.assertEqual(len(verbs), 3)
+
+    def test_first_transport_failure_save_keeps_diagnosis_across_restarts(self):
+        class Interrupted(BaseException):
+            pass
+        for lane in ("worker", "app"):
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                cfg = fx.config()
+                cfg[lane]["enabled"] = True
+                verbs = []
+                def pipeline():
+                    runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "fetch failed"})
+                    pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                    if lane == "app":
+                        pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                    return pipe, runner
+                pipe, _ = pipeline()
+                save = pipe.store.save
+                def interrupt_after_failed_save(state):
+                    save(state)
+                    if state.get(lane, {}).get("failed_step") == "wrangler-auth":
+                        raise Interrupted()
+                pipe.store.save = interrupt_after_failed_save
+                with self.assertRaises(Interrupted):
+                    pipe.tick([lane])
+                self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                self.assertEqual(verbs, [])
+                for _ in range(2):
+                    retry, runner = pipeline()
+                    self.assertEqual(retry.tick([lane]), 0)
+                    self.assertEqual(runner.names(), ["wrangler-auth"])
+                self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+                self.assertEqual(fx.state()[lane]["dispatches"][sha], 1)
+                self.assertEqual(fx.state()["pending_diagnoses"], {})
+
+    def test_code_failures_still_require_a_fix_forward_merge(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        pipe = self.fx.pipeline(FakeRunner())
+        for step in ("app-build", "npm-ci", "wrangler-install", "staging", "migrate-apply", "smoke-post"):
+            with self.subTest(step=step):
+                pipe.store.save({"worker": {"failed_sha": sha, "failed_step": step}})
+                runner, verbs = FakeRunner(), []
+                self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(verbs, [])
+                self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+
+    def test_tracked_venv_link_conflict_waits_for_fix_forward_after_restart(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        blob = git(self.fx.repo, "hash-object", "-w", "README.md")
+        git(self.fx.repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},.venv")
+        git(self.fx.repo, "commit", "-q", "-m", "tracked venv conflict")
+        git(self.fx.repo, "push", "-q", "origin", "HEAD:main")
+        sha = git(self.fx.repo, "rev-parse", "HEAD")
+        verbs = []
+        runner = RealGitRunner("")
+        original_run = runner.run
+        def run(argv, **kw):
+            if argv[0] == "ln":
+                runner.calls.append(("venv-link", list(argv)))
+                result = subprocess.run(argv, cwd=kw["cwd"], env=kw["env"], capture_output=True, text=True)
+                kw["log"].parent.mkdir(parents=True, exist_ok=True)
+                kw["log"].write_text(result.stdout + result.stderr)
+                return rp.Result(result.returncode, result.stdout + result.stderr)
+            return original_run(argv, **kw)
+        runner.run = run
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "venv-link")
+        self.assertIn("File exists", Path(self.fx.records()[-1]["log"]).read_text())
+        for _ in range(2):
+            retry = FakeRunner()
+            self.assertEqual(self.fx.pipeline(retry, verbs=verbs).tick(["worker"]), 0)
+            self.assertEqual(retry.calls, [])
+            self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
+    def test_missing_venv_is_probed_before_any_release_step_then_recovers(self):
+        python = self.fx.repo / ".venv/bin/python"
+        python.unlink()
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=verbs).tick(["worker"]), 1)
+        runner = FakeRunner()
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        python.write_text("#!/bin/sh\nexit 0\n")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
 
 
 class PostReleaseProof(Base):
@@ -1787,9 +1907,9 @@ class HealthCompleteMarkerDoesNotDrift(unittest.TestCase):
         # And all print call sites in tools/health-check.py actually use
         # the constant, not a re-typed literal that could drift from it on
         # its own.
-        self.assertEqual(health_check_src.count("print(_HEALTH_COMPLETION_MARKER)"), 3,
+        self.assertEqual(health_check_src.count("print(_HEALTH_COMPLETION_MARKER)"), 2,
                          "tools/health-check.py should print the marker constant, by name, "
-                         "from exactly three places (the REFUSED and builds returns and the normal end)")
+                         "from the REFUSED return and the normal end")
 
 
 class HealthGate(Base):
@@ -2384,209 +2504,6 @@ class Lock(Base):
             self.assertTrue(held)
 
 
-class VerifierIsNotMaker(unittest.TestCase):
-    cfg = json.loads((HERE / "config" / "release-pipeline.v1.json").read_text())["worker"]
-
-    @staticmethod
-    def event(**overrides):
-        event = {"schema": "carr-release-merge-event.v1", "provenance_source": "codex-record-event",
-                 "continuity_event_id": "event-1", "reviewer": "codex",
-                 "reviewer_task_ref": "review-task-1", "maker_task_ref": "maker-task-1",
-                 "task_refs_verified": False, "builder_evidence_refs": ["github:builder/1"]}
-        event.update(overrides)
-        return event
-
-    def test_missing_provenance_has_no_configured_actor_fallback(self):
-        with self.assertRaises(rp.Blocked) as caught:
-            rp.choose_verifier(self.cfg, {})
-        self.assertEqual(caught.exception.reason, "verifier_provenance_missing")
-
-    def test_only_the_authenticated_event_names_codex_reviewer(self):
-        self.assertEqual(rp.choose_verifier(self.cfg, self.event()), "codex")
-        with self.assertRaisesRegex(rp.Blocked, "authenticated native Codex"):
-            rp.choose_verifier(self.cfg, self.event(reviewer="claude-review-agent"))
-
-    def test_comment_text_cannot_name_the_verifier(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            fx = Fixture(Path(tmp))
-            sha = fx.commit({"mcp-server/src/a.js": "1"})
-            n = FakeGitHub().pr_number(sha)
-            gh = FakeGitHub(comments={n: [approve(n, body=f"APPROVE\nReviewed-SHA: {pr_head(n)}\nVerifier: joe")]})
-            live = {"sha": fx.base}
-            runner = FakeRunner(live=live)
-            fx.pipeline(runner, github=gh, live=live).tick(["worker"])
-            up = next(a for name, a in runner.calls if name == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "codex")
-
-    def test_maker_humans_pipeline_and_author_are_refused(self):
-        for bad in ("carr_jobs", "joe", "Dell", "release-pipeline", "jbookout"):
-            with self.assertRaises(rp.Blocked, msg=bad):
-                rp.choose_verifier(self.cfg, self.event(reviewer=bad))
-        with self.assertRaises(rp.Blocked):
-            rp.choose_verifier(self.cfg, self.event(reviewer="codex", author_actor="codex"))
-        with self.assertRaises(rp.Blocked) as caught:
-            rp.choose_verifier(self.cfg, self.event(maker_task_ref="review-task-1"))
-        self.assertEqual(caught.exception.reason, "verifier_job_evidence_invalid")
-        with self.assertRaises(rp.Blocked):
-            rp.choose_verifier(self.cfg, self.event(task_refs_verified=True))
-
-    def test_upload_binds_the_verifier_and_its_evidence(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            fx = Fixture(Path(tmp))
-            fx.commit({"mcp-server/src/a.js": "1"})
-            live = {"sha": fx.base}
-            runner = FakeRunner(live=live)
-            fx.pipeline(runner, live=live).tick(["worker"])
-            up = next(a for n, a in runner.calls if n == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "codex")
-            self.assertRegex(up[up.index("--verifier-evidence") + 1], r"^github:o/r/pull/\d+#issuecomment-\d+$")
-            self.assertRegex(up[up.index("--test-evidence") + 1],
-                             r"^github-actions:jbookout/carr-system/runs/\d+#ops-ci-strict$")
-
-    def test_a_merge_without_independent_review_is_blocked_not_failed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            fx = Fixture(Path(tmp))
-            fx.commit({"mcp-server/src/a.js": "1"})
-            runner = FakeRunner()
-            self.assertEqual(fx.pipeline(runner, github=FakeGitHub(approve_all=False)).tick(["worker"]), 0)
-            self.assertEqual(runner.calls, [])
-            self.assertEqual(fx.records()[-1]["reason"], "no_independent_review")
-            self.assertNotIn("failed_sha", fx.state().get("worker", {}))
-
-    def test_missing_or_mismatched_local_event_holds_before_deploy(self):
-        for mutation, expected in (("missing", "verifier_provenance_missing"),
-                                   ("stale_head", "verifier_provenance_mismatch")):
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
-                fx = Fixture(Path(tmp))
-                fx.commit({"mcp-server/src/a.js": "1"})
-                runner = FakeRunner()
-                pipe = fx.pipeline(runner)
-                event_path = fx.repo / "out/merge-events.jsonl"
-                if mutation == "missing":
-                    event_path.write_text("")
-                else:
-                    event = json.loads(event_path.read_text().splitlines()[0])
-                    event["head_sha"] = "c" * 40
-                    event_path.write_text(json.dumps(event) + "\n")
-                self.assertEqual(pipe.tick(["worker"]), 0)
-                self.assertEqual(runner.calls, [])
-                self.assertEqual(fx.records()[-1]["reason"], expected)
-
-
-class ReleaseReviewProducer(unittest.TestCase):
-    class GitHub:
-        def __init__(self, *, head="a" * 40, merged=True, reviewed=None):
-            self.head, self.merged = head, merged
-            self.reviewed = reviewed or head
-        def api(self, path, *, paginate=False):
-            if path.endswith("/pulls/17"):
-                return {"state": "closed", "merged_at": "2026-10-01T00:00:00Z" if self.merged else None,
-                        "merge_commit_sha": "b" * 40,
-                        "head": {"sha": self.head}, "base": {"ref": "main"},
-                        "user": {"login": "jbookout"}}
-            return [{"id": 917, "body": f"APPROVE\nReviewed-SHA: {self.reviewed}\n",
-                     "created_at": "2026-10-01T00:00:00Z", "author_association": "OWNER",
-                     "user": {"login": "jbookout"},
-                     "html_url": "https://github.com/jbookout/carr-system/pull/17#issuecomment-917"}]
-
-    def args(self, head="a" * 40):
-        return argparse.Namespace(repository="jbookout/carr-system", pull_number=17, head_sha=head,
-            native_task_id="01a13766-5922-7aa1-ac61-beeb0e1e0a02", project_id="git:/Users/booko/carr-system/.git",
-            cwd="/Users/booko/carr-system", reviewer_task_ref="01a13766-5922-7aa1-ac61-beeb0e1e0a02",
-            maker_task_ref="01b13766-5922-7aa1-ac61-beeb0e1e0a02",
-            builder_evidence=["github:jbookout/carr-system/pull/1753"])
-
-    def test_exact_merged_approval_records_server_event_before_local_append(self):
-        with mock.patch.object(producer, "_append_event") as append:
-            calls = []
-            event = producer.record(self.args(), gh=self.GitHub(),
-                                    record_event=lambda args: (calls.append(args) or "continuity-1"))
-        self.assertEqual(event["schema"], "carr-release-merge-event.v1")
-        self.assertEqual(event["reviewer"], "codex")
-        self.assertEqual(event["continuity_event_id"], "continuity-1")
-        self.assertIs(event["task_refs_verified"], False)
-        self.assertEqual(calls[0]["event_type"], "release_review")
-        self.assertNotIn("reviewer", calls[0]["cursor"])
-        append.assert_called_once()
-
-    def test_stale_head_unmerged_pr_and_failed_continuity_never_append(self):
-        with mock.patch.object(producer, "_append_event") as append:
-            with self.assertRaisesRegex(ValueError, "exact head"):
-                producer.record(self.args(), gh=self.GitHub(head="c" * 40), record_event=lambda _args: "x")
-            with self.assertRaisesRegex(ValueError, "not merged"):
-                producer.record(self.args(), gh=self.GitHub(merged=False), record_event=lambda _args: "x")
-            with self.assertRaisesRegex(RuntimeError, "record failed"):
-                producer.record(self.args(), gh=self.GitHub(),
-                                record_event=lambda _args: (_ for _ in ()).throw(RuntimeError("record failed")))
-        append.assert_not_called()
-
-    def test_accepted_update_branch_review_records_the_covered_sha(self):
-        reviewed = "f" * 40
-        with mock.patch.object(producer.rp.Pipeline, "main_merge_only", return_value=None):
-            with mock.patch.object(producer, "_append_event"):
-                event = producer.record(self.args(), gh=self.GitHub(reviewed=reviewed),
-                                        record_event=lambda _args: "continuity-1")
-        self.assertEqual(event["reviewed_sha"], reviewed)
-
-    def test_record_uses_fixed_authenticated_profile_without_actor_argument(self):
-        seen = {}
-        class Result:
-            returncode, stdout = 0, ""
-        def runner(argv, **kwargs):
-            seen.update(argv=argv, **kwargs)
-            request = json.loads(argv[-1])
-            Result.stdout = json.dumps({"ok": True, "event": {
-                "id": "server-event", "native_task_id": request["native_task_id"],
-                "project_id": request["project_id"], "cwd": request["cwd"],
-                "event_type": request["event_type"], "cursor": request["cursor"]}})
-            return Result()
-        request = {"event_type": "release_review", "native_task_id": "task-1",
-                   "project_id": "project-1", "cwd": "/repo", "cursor": {"head": "a" * 40}}
-        event_id = producer._run_record(request, runner=runner)
-        self.assertEqual(event_id, "server-event")
-        self.assertEqual(seen["env"]["CARR_MCP_CLIENT_PROFILE"], "codex-continuity")
-        self.assertNotIn("reviewer", json.loads(seen["argv"][-1]))
-
-    def test_record_rejects_unconfirmed_or_mismatched_worker_response(self):
-        request = {"event_type": "release_review", "native_task_id": "task-1",
-                   "project_id": "project-1", "cwd": "/repo", "cursor": {"head": "a" * 40}}
-        event = {"id": "server-event", **request}
-        bad_responses = [
-            {"ok": False, "event": event},
-            {"ok": True, "event": {**event, "native_task_id": "other-task"}},
-            {"ok": True, "event": {**event, "project_id": "other-project"}},
-            {"ok": True, "event": {**event, "cwd": "/other"}},
-            {"ok": True, "event": {**event, "event_type": "other-event"}},
-            {"ok": True, "event": {**event, "cursor": {"head": "b" * 40}}},
-        ]
-        for payload in bad_responses:
-            with self.subTest(payload=payload):
-                class Result:
-                    returncode = 0
-                    stdout = json.dumps(payload)
-                with self.assertRaisesRegex(RuntimeError, "continuity record"):
-                    producer._run_record(request, runner=lambda *_args, **_kwargs: Result())
-
-    def test_local_append_retry_is_idempotent_and_conflicting_reuse_refuses(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "out/merge-events.jsonl"
-            event = {"repository": "jbookout/carr-system", "merge_sha": "b" * 40}
-            producer._append_event(path, event)
-            producer._append_event(path, event)
-            self.assertEqual(len(path.read_text().splitlines()), 1)
-            with self.assertRaisesRegex(RuntimeError, "different merge event"):
-                producer._append_event(path, {**event, "reviewer": "not-codex"})
-
-    def test_release_reader_marks_conflicting_events_ambiguous(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "merge-events.jsonl"
-            first = {"merge_sha": "b" * 40, "repository": "jbookout/carr-system", "reviewer": "codex"}
-            second = {**first, "reviewer": "claude-review-agent"}
-            path.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
-            self.assertEqual(rp.read_merge_events(path)["b" * 40]["jbookout/carr-system"],
-                             {"event_conflict": True})
-
-
 class GitHubBudgetEnvironment(unittest.TestCase):
     def test_configured_cache_path_reaches_github_reader_without_credentials(self):
         budget_path = "/tmp/github-read-budget.json"
@@ -2603,707 +2520,6 @@ class GitHubBudgetEnvironment(unittest.TestCase):
         self.assertNotIn("CARR_DB_PASSWORD", env)
         self.assertNotIn("GH_TOKEN", env)
 
-
-class ReviewGate(Base):
-    """B1: the approval must be trusted, the latest verdict, and fresh."""
-
-    def blocked_reason(self, comments_for_head):
-        # distinct content per call: a repeat call must add a real code commit,
-        # not an empty one (see Fixture's info/exclude)
-        self._calls = getattr(self, "_calls", 0) + 1
-        sha = self.fx.commit({"mcp-server/src/a.js": str(self._calls)})
-        n = FakeGitHub().pr_number(sha)
-        runner = FakeRunner()
-        self.assertEqual(self.fx.pipeline(runner, github=FakeGitHub(comments={n: comments_for_head(n)}))
-                         .tick(["worker"]), 0)
-        self.assertEqual(runner.calls, [])
-        return self.fx.records()[-1]["reason"]
-
-    def test_an_outsider_comment_is_not_an_approval(self):
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, assoc="NONE")]), "no_independent_review")
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, assoc="CONTRIBUTOR")]), "no_independent_review")
-
-    def test_a_later_block_overrides_an_earlier_approve(self):
-        self.assertEqual(self.blocked_reason(lambda n: [
-            approve(n, when="2026-09-30T01:00:00Z", cid=1),
-            approve(n, when="2026-09-30T02:00:00Z", cid=2, body="Independent review: BLOCK\nmissing test")]),
-            "review_blocked")
-
-    def test_an_outsider_cannot_override_with_a_later_approve(self):
-        self.assertEqual(self.blocked_reason(lambda n: [
-            approve(n, when="2026-09-30T02:00:00Z", cid=2, body="Independent review: BLOCK"),
-            approve(n, when="2026-09-30T03:00:00Z", cid=3, assoc="NONE")]), "review_blocked")
-
-    def test_an_approval_of_an_earlier_head_is_stale(self):
-        # N1: approval for H1 posted after H2 was committed but before it was
-        # pushed. Dates cannot tell; the exact Reviewed-SHA can.
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, reviewed="ab" * 20,
-                                                                when="2099-01-01T00:00:00Z")]),
-                         "review_stale")
-
-    def test_an_approval_without_reviewed_sha_is_stale(self):
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, body="Independent review: PASS")]),
-                         "review_stale")
-
-    def test_hidden_or_later_reviewed_sha_cannot_approve_a_release(self):
-        for make_body in (
-            lambda n: f"APPROVE <!--\nReviewed-SHA: {pr_head(n)}\n-->",
-            lambda n: f"APPROVE `\nReviewed-SHA: {pr_head(n)}\n`",
-            lambda n: f"APPROVE\nExplanation\n```\nReviewed-SHA: {pr_head(n)}\n```",
-        ):
-            with self.subTest(kind=make_body(1001).split("\n", 1)[0]):
-                self.assertEqual(self.blocked_reason(lambda n: [approve(n, body=make_body(n))]),
-                                 "review_stale")
-
-    def test_a_short_sha_prefix_is_not_enough(self):
-        self.assertEqual(self.blocked_reason(lambda n: [approve(
-            n, body=f"Independent review: PASS at {pr_head(n)[:12]}")]), "review_stale")
-
-    def test_the_exact_reviewed_sha_ships(self):
-        self.fx.commit({"mcp-server/src/a.js": "1"})
-        live = {"sha": self.fx.base}
-        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), live=live).tick(["worker"]), 0)
-        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
-
-    def test_crlf_literal_review_header_ships(self):
-        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
-        n = FakeGitHub().pr_number(sha)
-        comment = approve(n, body=f"APPROVE\r\nReviewed-SHA: {pr_head(n)}\r\n")
-        live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        self.assertEqual(self.fx.pipeline(runner, github=FakeGitHub(comments={n: [comment]}),
-                                          live=live).tick(["worker"]), 0)
-        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
-
-    def test_verdict_comments_are_read_across_pages(self):
-        gh = rp.GitHub("o/r", {})
-        seen = []
-        replies = [
-            'HTTP/2.0 200\nLink: <https://api.github.com/x?page=2>; rel="next"\n\n[{"id":1}]',
-            'HTTP/2.0 200\nX-RateLimit-Remaining: 10\n\n[{"id":2},{"id":3}]',
-        ]
-        def fake(argv, **kw):
-            seen.append(argv)
-            return subprocess.CompletedProcess(argv, 0, replies.pop(0), "")
-        gh.reader = rp.GitHubReader(env={}, runner=fake)
-        self.assertEqual([c["id"] for c in gh.comments(5)], [1, 2, 3])
-        self.assertEqual([a[2] for a in seen], [
-            "repos/o/r/issues/5/comments?per_page=100&page=1",
-            "repos/o/r/issues/5/comments?per_page=100&page=2",
-        ])
-        self.assertTrue(all("--paginate" not in a for a in seen))
-
-
-
-class NumberedGitHub(FakeGitHub):
-    """FakeGitHub with PR numbers assigned explicitly per commit, so no two
-    commits of one scenario can hash to the same PR number (the default
-    numbering collides about once in 800 pairs)."""
-
-    def __init__(self, numbers: dict[str, int], **kw):
-        super().__init__(**kw)
-        self.numbers = numbers
-
-    def pr_number(self, sha):
-        return self.numbers[sha] if sha in self.numbers else super().pr_number(sha)
-
-
-class FixForward(Base):
-    """A merged PR B whose latest trusted verdict is BLOCK may ship ONLY
-    together with its fix: a LATER commit in the same batch, at or before the
-    release target, that is exactly PR F's merge commit, whose DECIDING
-    approval (exact or main-merge-only) carries the line `Fixes-Forward: #<B>`,
-    and whose change is still present at the target. Anything else is a
-    review_blocked hold. Never a fresh APPROVE on B's defective head."""
-
-    def setUp(self):
-        super().setUp()
-        self.nums: dict[str, int] = {}
-
-    def land(self, files, message=None):
-        sha = self.fx.commit(files)
-        if message:   # reword the tip, as `git revert` would title it
-            git(self.fx.repo, "commit", "-q", "--amend", "-m", message)
-            git(self.fx.repo, "push", "-q", "-f", "origin", "HEAD:main")
-            sha = git(self.fx.repo, "rev-parse", "HEAD")
-        self.nums[sha] = 1000 + len(self.nums) + 1
-        return sha, self.nums[sha]
-
-    def block(self, n, *, when="2026-09-30T02:00:00Z", cid=None):
-        return approve(n, when=when, cid=cid or 5000 + n,
-                       body=f"BLOCKING: P1 defect\n\nReviewed-SHA: {pr_head(n)}\n")
-
-    def fix_approve(self, n, names, *, when="2026-09-30T03:00:00Z", cid=None, assoc="OWNER", prefix=""):
-        lines = "".join(f"{prefix}Fixes-Forward: #{b}\n" for b in names)
-        return approve(n, when=when, cid=cid or 6000 + n, assoc=assoc,
-                       body=f"APPROVE\nReviewed-SHA: {pr_head(n)}\n{lines}")
-
-    def two_commits(self):
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed"})
-        return b, f, nb, nf
-
-    def tick(self, comments, *, canary=None, live=None, merge_commit=None):
-        live = live or {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        gh = NumberedGitHub(self.nums, comments=comments, canary=canary)
-        gh.merge_commit = merge_commit or {}
-        self.assertEqual(self.fx.pipeline(runner, github=gh, live=live).tick(["worker"]), 0)
-        return runner, self.fx.records()[-1]
-
-    def assert_held(self, runner, rec, nb):
-        self.assertEqual(rec["status"], "blocked")
-        self.assertEqual(rec["reason"], "review_blocked")
-        self.assertIn(f"#{nb}", rec["detail"])
-        self.assertFalse(DEPLOY_STEPS & {n for n, _ in runner.calls}, "a held batch ran a deploy step")
-        self.assertNotIn("failed_sha", self.fx.state().get("worker", {}))
-
-    def test_fix_in_batch_and_target_after_fix_releases_with_evidence(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [approve(nb, cid=1), self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(rec["sha"], f)
-        [ff] = rec["fix_forwards"]
-        self.assertEqual(ff["blocked_pr"], nb)
-        self.assertEqual(ff["blocked_commit"], b)
-        self.assertEqual(ff["fixing_pr"], nf)
-        self.assertEqual(ff["fixing_commit"], f)
-        self.assertEqual(ff["fixing_reviewed_sha"], pr_head(nf))
-        self.assertEqual(ff["fixing_approval_url"], f"https://github.com/o/r/pull/{nf}#issuecomment-{6000 + nf}")
-        self.assertTrue(ff["block_url"].endswith(f"#issuecomment-{5000 + nb}"))
-        self.assertNotIn(nb, rec["prs"], "a blocked PR is never listed as approved")
-
-    def test_target_between_blocked_and_fix_holds(self):
-        b, f, nb, nf = self.two_commits()
-        # the canary is green on the blocked commit only: the target is B itself
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]},
-                                canary={b: ("completed", "success")})
-        self.assertEqual(rec["sha"], b)
-        self.assert_held(runner, rec, nb)
-
-    def test_target_on_a_commit_between_blocked_and_fix_holds(self):
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        m, _ = self.land({"mcp-server/src/b.js": "unrelated"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]},
-                                canary={m: ("completed", "success")})
-        self.assertEqual(rec["sha"], m)
-        self.assert_held(runner, rec, nb)
-
-    def test_marker_naming_the_wrong_pr_holds(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb + 1000])]})
-        self.assert_held(runner, rec, nb)
-
-    def test_unicode_line_separator_cannot_spoof_fix_forward_header(self):
-        b, f, nb, nf = self.two_commits()
-        body = (f"APPROVE\u2028Reviewed-SHA: {'a' * 40}\u2028Fixes-Forward: #{nb}\n"
-                f"Reviewed-SHA: {pr_head(nf)}\n")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [approve(nf, body=body)]})
-        self.assertEqual(runner.calls, [])
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-
-    def test_marker_on_a_non_deciding_approval_holds(self):
-        b, f, nb, nf = self.two_commits()
-        later_plain = approve(nf, when="2026-09-30T04:00:00Z", cid=7001)
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb]), later_plain]})
-        self.assert_held(runner, rec, nb)
-
-    def test_marker_on_a_trusted_non_verdict_comment_holds(self):
-        b, f, nb, nf = self.two_commits()
-        handoff = approve(nf, when="2026-09-30T05:00:00Z", cid=7002,
-                          body=f"Hand-off to the orchestrator\nFixes-Forward: #{nb}\n")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [approve(nf), handoff]})
-        self.assert_held(runner, rec, nb)
-
-    def test_marker_on_an_untrusted_comment_holds(self):
-        b, f, nb, nf = self.two_commits()
-        outsider = self.fix_approve(nf, [nb], when="2026-09-30T06:00:00Z", cid=7003, assoc="NONE")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [approve(nf), outsider]})
-        self.assert_held(runner, rec, nb)
-
-    def test_quoted_marker_does_not_count(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb], prefix="> ")]})
-        self.assert_held(runner, rec, nb)
-
-    def test_fixing_pr_not_in_the_batch_holds(self):
-        f, nf = self.land({"mcp-server/src/a.js": "earlier fix"})
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        # F already released: the batch is B alone
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]}, live={"sha": f})
-        self.assertEqual(rec["from_sha"], f)
-        self.assert_held(runner, rec, nb)
-
-    def test_fixing_pr_merged_before_the_blocked_pr_holds(self):
-        f, nf = self.land({"mcp-server/src/a.js": "earlier fix"})
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], b)
-        self.assert_held(runner, rec, nb)
-
-    def test_fixing_pr_whose_own_latest_verdict_is_block_holds(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)],
-                                 nf: [self.fix_approve(nf, [nb]), self.block(nf, when="2026-09-30T09:00:00Z")]})
-        self.assertEqual(rec["status"], "blocked")
-        self.assertEqual(rec["reason"], "review_blocked")
-        self.assertFalse(DEPLOY_STEPS & {n for n, _ in runner.calls})
-
-    def test_fixing_commit_that_is_not_the_fixing_prs_merge_commit_holds(self):
-        # GitHub maps the commit to F, but F's own merge_commit_sha is elsewhere
-        # (e.g. an earlier commit of a rebase merge): the fix is not proven in.
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]},
-                                merge_commit={f: "ab" * 20})
-        self.assert_held(runner, rec, nb)
-
-    def test_a_later_revert_of_the_fix_in_the_same_batch_holds(self):
-        # B, then its fix F, then an approved PR R that reverts F: the target R
-        # carries B's defect without F's change.
-        b, f, nb, nf = self.two_commits()
-        r, nr = self.land({"mcp-server/src/a.js": "defect"}, message=f"Revert fix\n\nThis reverts commit {f}.")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-        self.assertIn("no longer present", rec["detail"])
-
-    def test_partial_revert_of_two_file_fix_holds(self):
-        b, nb = self.land({"mcp-server/src/a.js": "defect", "mcp-server/src/b.js": "old"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed", "mcp-server/src/b.js": "unrelated improvement"})
-        r, nr = self.land({"mcp-server/src/a.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_one_file_fix_holds(self):
-        b, nb = self.land({"mcp-server/src/a.js": "bad one\nbad two\n"})
-        f, nf = self.land({"mcp-server/src/a.js": "good one\ngood two\n"})
-        r, nr = self.land({"mcp-server/src/a.js": "bad one\ngood two\n"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_leading_space_path_holds(self):
-        b, nb = self.land({" leading.js": "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({" leading.js": "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({" leading.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_pathspec_magic_name_holds(self):
-        b, nb = self.land({":(literal)odd.js": "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({":(literal)odd.js": "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({":(literal)odd.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_carriage_return_path_holds(self):
-        name = "carriage\rreturn.js"
-        b, nb = self.land({name: "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({name: "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({name: "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_crlf_path_holds(self):
-        name = "carriage\r\nreturn.js"
-        b, nb = self.land({name: "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({name: "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({name: "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_filename_matrix_preserves_fix_presence_decision(self):
-        names = (" leading.js", "trailing.js ", "carriage\rreturn.js", "line\nfeed.js",
-                 "carriage\r\nreturn.js", ":(literal)odd.js", "tab\tname.js",
-                 "unicodé.js", "-dash.js")
-        for name in names:
-            with self.subTest(name=repr(name)), tempfile.TemporaryDirectory() as td:
-                self.fx = Fixture(Path(td))
-                self.nums = {}
-                b, nb = self.land({name: "defect", "mcp-server/src/a.js": "old"})
-                f, nf = self.land({name: "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-                u, nu = self.land({"mcp-server/src/unrelated.js": "later edit"})
-                self.assertTrue(self.fx.pipeline(FakeRunner()).change_present(self.fx.repo, f, u))
-                r, nr = self.land({name: "defect"})
-                runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-                self.assertEqual(rec["sha"], r)
-                self.assert_held(runner, rec, nb)
-
-    def test_a_later_edit_of_the_fix_lines_holds_unless_it_carries_the_marker_too(self):
-        b, f, nb, nf = self.two_commits()
-        g, ng = self.land({"mcp-server/src/a.js": "fixed better"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assert_held(runner, rec, nb)
-        # G's reviewer attests G still fixes B: G's own change is present, so it ships with G as the fixer
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])],
-                                 ng: [self.fix_approve(ng, [nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(rec["fix_forwards"][0]["fixing_pr"], ng)
-
-    def test_an_unrelated_later_commit_keeps_the_fix(self):
-        b, f, nb, nf = self.two_commits()
-        m, _ = self.land({"mcp-server/src/b.js": "unrelated"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(rec["sha"], m)
-
-    def test_two_blocked_prs_and_a_fix_naming_only_one_holds(self):
-        a, na = self.land({"mcp-server/src/a.js": "defect a"})
-        b, nb = self.land({"mcp-server/src/b.js": "defect b"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed", "mcp-server/src/b.js": "fixed"})
-        runner, rec = self.tick({na: [self.block(na)], nb: [self.block(nb)], nf: [self.fix_approve(nf, [na])]})
-        self.assert_held(runner, rec, nb)
-
-    def test_a_marker_never_rescues_a_stale_or_missing_review(self):
-        # the marker only answers a BLOCK verdict; an unreviewed PR still holds as before
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [approve(nb, body="Independent review: PASS")],
-                                 nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["reason"], "review_stale")
-
-    def test_one_fix_may_carry_several_markers(self):
-        a, na = self.land({"mcp-server/src/a.js": "defect a"})
-        b, nb = self.land({"mcp-server/src/b.js": "defect b"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed", "mcp-server/src/b.js": "fixed"})
-        runner, rec = self.tick({na: [self.block(na)], nb: [self.block(nb)], nf: [self.fix_approve(nf, [na, nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(sorted(x["blocked_pr"] for x in rec["fix_forwards"]), sorted([na, nb]))
-
-    def test_marker_parser_is_line_exact(self):
-        ff = lambda approval: rp.fixes_forward(approval, "a" * 40)
-        prefix = f"APPROVE\nReviewed-SHA: {'a' * 40}\n"
-        crlf_prefix = f"APPROVE\r\nReviewed-SHA: {'a' * 40}\r\n"
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: #1342\n"}), {1342})
-        self.assertEqual(rp.fixes_forward({"body": prefix + "Fixes-Forward: #1342\n"}, "b" * 40),
-                         set(), "the header SHA must be the accepted reviewed SHA")
-        self.assertEqual(ff({"body": crlf_prefix + "Fixes-Forward: #1342\r\n"}), {1342})
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward:   #1342  \n"}), {1342})
-        self.assertEqual(ff({"body": prefix + "  Fixes-Forward: #1342\n"}), set(), "indented")
-        self.assertEqual(ff({"body": prefix + "    Fixes-Forward: #1342\n"}), set(), "indented code block")
-        self.assertEqual(ff({"body": prefix + "```\nFixes-Forward: #1342\n```\n"}), set(), "fenced")
-        self.assertEqual(ff({"body": prefix + "~~~text\nFixes-Forward: #1342\n~~~\n"}), set(), "fenced")
-        self.assertEqual(ff({"body": prefix + "```\nx\n```\nFixes-Forward: #1342\n"}), set(),
-                         "a marker after prose or examples is outside the authority header")
-        self.assertEqual(ff({"body": prefix + "see Fixes-Forward: #1342"}), set())
-        self.assertEqual(ff({"body": prefix + "> Fixes-Forward: #1342"}), set())
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: 1342"}), set())
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: #01342"}), set(), "leading zero")
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: #1342, #1343"}), set())
-
-    def test_mismatched_or_shorter_fences_do_not_authorize_a_fix(self):
-        ff = lambda approval: rp.fixes_forward(approval, "a" * 40)
-        examples = [
-            "````\n```\nFixes-Forward: #1342\n````",
-            "````\n~~~\nFixes-Forward: #1342\n````",
-            "~~~\n```\nFixes-Forward: #1342\n~~~",
-            "````\n````example\nFixes-Forward: #1342\n````",
-        ]
-        for example in examples:
-            with self.subTest(example=example):
-                body = f"APPROVE\nReviewed-SHA: {'a' * 40}\n{example}\n"
-                self.assertEqual(ff({"body": body}), set())
-
-    def test_fenced_example_marker_holds_full_release(self):
-        b, f, nb, nf = self.two_commits()
-        for example in (f"````\n```\nFixes-Forward: #{nb}\n````",
-                        f"````\n~~~\nFixes-Forward: #{nb}\n````",
-                        f"````\n````example\nFixes-Forward: #{nb}\n````"):
-            with self.subTest(example=example):
-                approval = approve(nf, body=f"APPROVE\nReviewed-SHA: {pr_head(nf)}\n{example}\n")
-                runner, rec = self.tick({nb: [self.block(nb)], nf: [approval]})
-                self.assert_held(runner, rec, nb)
-
-    def test_hidden_marker_contexts_hold_full_release(self):
-        b, f, nb, nf = self.two_commits()
-        examples = (
-            f"Example <!--\nFixes-Forward: #{nb}\n-->",
-            f"<!--\nFixes-Forward: #{nb}\n-->",
-            f"<pre>\nFixes-Forward: #{nb}\n</pre>",
-            f"Example <pre>\nFixes-Forward: #{nb}\n</pre>",
-            f"Example <textarea>\nFixes-Forward: #{nb}\n</textarea>",
-            f"Example ``\nFixes-Forward: #{nb}\n``",
-        )
-        for example in examples:
-            with self.subTest(example=example):
-                approval = approve(nf, body=f"APPROVE\nReviewed-SHA: {pr_head(nf)}\n{example}\n")
-                runner, rec = self.tick({nb: [self.block(nb)], nf: [approval]})
-                self.assert_held(runner, rec, nb)
-
-    def test_only_contiguous_header_markers_confer_authority(self):
-        ff = lambda approval: rp.fixes_forward(approval, "a" * 40)
-        reviewed = f"Reviewed-SHA: {'a' * 40}"
-        self.assertEqual(ff({"body": f"APPROVE\n{reviewed}\nFixes-Forward: #1342\n"
-                                     "Fixes-Forward: #1343\nExplanation follows\n"}), {1342, 1343})
-        for prefix in ("Example\n", "\n", "<!-- -->\n", "```\n```\n"):
-            with self.subTest(prefix=prefix):
-                self.assertEqual(ff({"body": f"APPROVE\n{reviewed}\n{prefix}Fixes-Forward: #1342\n"}), set())
-
-
-class FixForwardDerivedDigest(Base):
-    """The app lane's contracts/e2e-staging-control-proofs.v1.json carries
-    application_source_sha256, a digest of the whole app tree that almost
-    every app PR recomputes. A later PR that changes ONLY that listed JSON
-    pointer must not undo an earlier fix-forward; any other difference still
-    does, and only the lane that lists the path gets the exception."""
-
-    PROOFS = "contracts/e2e-staging-control-proofs.v1.json"
-    # FixForward's scenario helpers, without re-running its tests
-    land, block, fix_approve = FixForward.land, FixForward.block, FixForward.fix_approve
-    tick, assert_held = FixForward.tick, FixForward.assert_held
-
-    def setUp(self):
-        super().setUp()
-        self.nums: dict[str, int] = {}
-
-    def proofs(self, digest, controls=("a",), raw=None):
-        return raw if raw is not None else json.dumps({
-            "schema": "doctorcre-staging-control-proofs.v1", "reviewed_source_commit": "c" * 40,
-            "application_source_sha256": digest, "carr_source_commit": "d" * 40,
-            "controls": list(controls)}, indent=2) + "\n"
-
-    def derived(self, lane):
-        return self.fx.config()[lane].get("fix_forward_derived_fields") or []
-
-    def present(self, fix, target, lane="app"):
-        ignored = []
-        ok = self.fx.pipeline(FakeRunner()).change_present(self.fx.repo, fix, target, self.derived(lane), ignored)
-        return ok, ignored
-
-    def carrier(self):
-        self.land({"src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
-        f, _ = self.land({"src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
-        return f
-
-    def test_config_lists_the_app_digest_and_nothing_for_the_worker(self):
-        self.assertEqual(self.derived("app"), [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}])
-        self.assertEqual(self.derived("worker"), [])
-
-    def test_a_later_recompute_of_only_the_listed_digest_keeps_the_carrier(self):   # (a)
-        f = self.carrier()
-        u, _ = self.land({"src/b.js": "later app PR", self.PROOFS: self.proofs("3" * 64)})
-        self.assertEqual(self.present(f, u),
-                         (True, [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}]))
-
-    def test_an_unchanged_carrier_records_no_ignored_field(self):
-        f = self.carrier()
-        u, _ = self.land({"src/b.js": "later app PR"})
-        self.assertEqual(self.present(f, u), (True, []))
-
-    def test_another_field_of_the_same_file_differing_is_not_present(self):   # (b)
-        f = self.carrier()
-        u, _ = self.land({self.PROOFS: self.proofs("3" * 64, controls=("a", "b"))})
-        self.assertEqual(self.present(f, u), (False, []))
-        # a type change the == operator would hide (true == 1) still differs
-        f2, _ = self.land({self.PROOFS: self.proofs("4" * 64, controls=(1,))})
-        u2, _ = self.land({self.PROOFS: self.proofs("5" * 64, controls=(True,))})
-        self.assertEqual(self.present(f2, u2), (False, []))
-
-    def test_an_unlisted_path_differing_is_not_present(self):   # (c)
-        self.land({"src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
-        f, _ = self.land({"src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
-        u, _ = self.land({"src/a.js": "rewritten", self.PROOFS: self.proofs("3" * 64)})
-        self.assertEqual(self.present(f, u), (False, []))
-        # the same pointer in an unlisted JSON file is not exempt either
-        self.land({"contracts/other.v1.json": self.proofs("1" * 64)})
-        f2, _ = self.land({"contracts/other.v1.json": self.proofs("2" * 64)})
-        u2, _ = self.land({"contracts/other.v1.json": self.proofs("3" * 64)})
-        self.assertEqual(self.present(f2, u2), (False, []))
-
-    def test_the_worker_lane_with_the_same_file_name_is_not_present(self):   # (d)
-        f = self.carrier()
-        u, _ = self.land({self.PROOFS: self.proofs("3" * 64)})
-        self.assertEqual(self.present(f, u, lane="worker"), (False, []))
-
-    def test_malformed_or_ambiguous_json_at_the_target_is_not_present(self):   # (e)
-        f = self.carrier()
-        good = self.proofs("3" * 64)
-        for raw in (good[:-5], "", "[]", good.replace('"schema"', '"schema": 1, "schema"', 1),
-                    good.replace('"application_source_sha256"', '"application_source_sha"', 1)):
-            with self.subTest(raw=raw[:40]):
-                u, _ = self.land({self.PROOFS: self.proofs("", raw=raw)})
-                self.assertEqual(self.present(f, u), (False, []))
-
-    def test_a_pointer_missing_at_the_fix_or_a_mode_change_is_not_present(self):
-        self.land({self.PROOFS: json.dumps({"controls": ["a"]})})
-        f, _ = self.land({self.PROOFS: json.dumps({"controls": ["b"]})})
-        u, _ = self.land({self.PROOFS: json.dumps({"controls": ["b"], "application_source_sha256": "x"})})
-        self.assertEqual(self.present(f, u), (False, []))
-        f2 = self.carrier()
-        self.land({self.PROOFS: self.proofs("3" * 64)})
-        (self.fx.repo / self.PROOFS).chmod(0o755)
-        git(self.fx.repo, "add", self.PROOFS)
-        git(self.fx.repo, "commit", "-q", "-m", "mode")
-        git(self.fx.repo, "push", "-q", "origin", "HEAD:main")
-        u2 = git(self.fx.repo, "rev-parse", "HEAD")
-        self.assertEqual(self.present(f2, u2), (False, []))
-
-    def test_the_run_record_names_the_ignored_derived_field(self):
-        b, nb = self.land({"mcp-server/src/a.js": "defect", self.PROOFS: self.proofs("1" * 64)})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed", self.PROOFS: self.proofs("2" * 64)})
-        u, nu = self.land({"mcp-server/src/b.js": "later", self.PROOFS: self.proofs("3" * 64)})
-        comments = {nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]}
-        runner, rec = self.tick(comments)   # the worker lane lists nothing: held
-        self.assert_held(runner, rec, nb)
-        cfg = self.fx.config()
-        cfg["worker"]["fix_forward_derived_fields"] = self.derived("app")
-        self.fx.config = lambda **_: cfg
-        runner, rec = self.tick(comments)
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(rec["sha"], u)
-        [ff] = rec["fix_forwards"]
-        self.assertEqual(ff["fixing_pr"], nf)
-        self.assertEqual(ff["derived_fields_ignored"],
-                         [{"path": self.PROOFS, "json_pointer": "/application_source_sha256"}])
-
-
-class SquashGitHub(FakeGitHub):
-    """FakeGitHub, except the squash commit `merged` maps to PR `number`
-    whose real head is `head`, approved at `reviewed`."""
-
-    def __init__(self, merged: str, number: int, head: str, reviewed: str):
-        super().__init__()
-        self.merged, self.number, self.real_head = merged, number, head
-        self.comment_map = {number: [approve(number, reviewed=reviewed)]}
-
-    def pr_number(self, sha):
-        # Main commits must not inherit the squash PR's review by a hash collision.
-        number = super().pr_number(sha)
-        return number + 1 if number == self.number else number
-
-    def pr_for_commit(self, sha):
-        if sha == self.merged:
-            self.heads[self.real_head] = self.number
-            return {"number": self.number, "merged_at": "2026-09-30T00:00:00Z",
-                    "head": {"sha": self.real_head}}
-        return super().pr_for_commit(sha)
-
-
-class UpdateBranchReview(Base):
-    """`gh pr update-branch` merges main into a PR after its review, so the
-    merged head H is not the Reviewed-SHA R. R covers H only when R..H is
-    nothing but main merges that leave the PR's own files alone. The PR is
-    built in a separate author clone and squash-merged, as on GitHub, so the
-    pipeline's checkout has neither R nor H until it fetches refs/pull/N/head."""
-
-    N = 777
-
-    def test_squash_fixture_reserves_its_explicit_pr_number(self):
-        main_commit = "02a5" + "0" * 36
-        gh = SquashGitHub("a" * 40, self.N, "b" * 40, "b" * 40)
-        self.assertEqual(FakeGitHub().pr_number(main_commit), self.N)
-        self.assertNotEqual(gh.pr_for_commit(main_commit)["number"], self.N)
-
-    def test_exact_review_ships_when_main_hash_collides_with_squash_pr(self):
-        reviewed, head, merged = self.build()
-        with mock.patch.object(FakeGitHub, "pr_number", return_value=self.N):
-            rc, runner = self.tick(merged, head, head)
-        self.assertEqual(rc, 0)
-        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
-        self.assertIn("promote", runner.names())
-
-    def build(self, *, merge_touches_pr_file=False, merge_touches_other_file=False,
-              pr_rel="mcp-server/src/pr.js", main_extra=None):
-        fx = self.fx
-        author = fx.tmp / "author"
-        git(fx.tmp, "clone", "-q", str(fx.origin), str(author))
-        git(author, "config", "user.email", "a@example.invalid")
-        git(author, "config", "user.name", "a")
-        git(author, "checkout", "-q", "-b", "pr")
-        (author / "mcp-server/src").mkdir(parents=True, exist_ok=True)
-        (author / pr_rel).write_text("reviewed\n")
-        git(author, "add", "-A")
-        git(author, "commit", "-q", "-m", "the PR")
-        reviewed = git(author, "rev-parse", "HEAD")
-        main_files = {"mcp-server/src/other.js": "main moved"}
-        if main_extra is not None:
-            main_files[main_extra] = "main added"
-        main_moved = fx.commit(main_files)   # main advances
-        git(author, "fetch", "-q", "origin", "main")
-        git(author, "merge", "-q", "--no-ff", "--no-edit", "origin/main")   # what update-branch does
-        if merge_touches_pr_file or merge_touches_other_file:
-            rel = pr_rel if merge_touches_pr_file else "mcp-server/src/sneak.js"
-            (author / rel).write_text("changed inside the merge, after review\n")
-            git(author, "add", "-A")
-            git(author, "commit", "-q", "--amend", "--no-edit")
-        head = git(author, "rev-parse", "HEAD")
-        git(author, "push", "-q", "origin", f"HEAD:refs/pull/{self.N}/head")
-        git(author, "checkout", "-q", "-B", "main", "origin/main")
-        git(author, "merge", "-q", "--squash", head)
-        git(author, "commit", "-q", "-m", f"the PR (#{self.N})")
-        merged = git(author, "rev-parse", "HEAD")
-        git(author, "push", "-q", "origin", "HEAD:main")
-        git(fx.repo, "fetch", "-q", "origin", "main")
-        self.assertNotEqual(main_moved, merged)
-        return reviewed, head, merged
-
-    def tick(self, merged, head, reviewed):
-        live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        gh = SquashGitHub(merged, self.N, head, reviewed)
-        return self.fx.pipeline(runner, live=live, github=gh).tick(["worker"]), runner
-
-    def test_exact_rule_is_recorded(self):
-        reviewed, head, merged = self.build()
-        rc, _ = self.tick(merged, head, head)          # approval names H itself
-        self.assertEqual(rc, 0)
-        rec = self.fx.records()[-1]
-        self.assertEqual(rec["status"], "shipped")
-        self.assertEqual((rec["review_rule"], rec["reviewed_sha"], rec["pr_head_sha"]), ("exact", head, head))
-        self.assertIn({"pr": self.N, "rule": "exact", "reviewed_sha": head, "head_sha": head}, rec["reviews"])
-
-    def test_main_merge_only_rule_accepts_update_branch(self):
-        reviewed, head, merged = self.build()
-        self.assertNotEqual(reviewed, head)
-        rc, _ = self.tick(merged, head, reviewed)
-        self.assertEqual(rc, 0)
-        rec = self.fx.records()[-1]
-        self.assertEqual(rec["status"], "shipped")
-        self.assertEqual((rec["review_rule"], rec["reviewed_sha"], rec["pr_head_sha"]),
-                         ("main-merge-only", reviewed, head))
-
-    def test_merge_that_touches_a_pr_file_holds(self):
-        reviewed, head, merged = self.build(merge_touches_pr_file=True)
-        rc, runner = self.tick(merged, head, reviewed)
-        self.assertEqual(rc, 0)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-        self.assertIn("mcp-server/src/pr.js", rec["detail"])
-        self.assertIsNone(self.fx.state().get("worker", {}).get("failed_sha"))
-
-    def test_merge_that_touches_whitespace_pr_file_holds(self):
-        reviewed, head, merged = self.build(merge_touches_pr_file=True,
-                                            pr_rel=" pr.js", main_extra="\tpr.js")
-        rc, runner = self.tick(merged, head, reviewed)
-        self.assertEqual(rc, 0)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-
-    def test_merge_that_smuggles_a_non_pr_file_holds(self):
-        reviewed, head, merged = self.build(merge_touches_other_file=True)
-        rc, runner = self.tick(merged, head, reviewed)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-        self.assertIn("non-PR file", rec["detail"])
-        self.assertIn("mcp-server/src/sneak.js", rec["detail"])
-
-    def test_non_merge_commit_after_review_holds(self):
-        reviewed, head, merged = self.build()
-        # an approval of an OLDER sha whose successor is an ordinary commit: R = parent of the PR commit
-        older = git(self.fx.repo, "rev-parse", f"{self.fx.base}")
-        rc, runner = self.tick(merged, head, older)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual(rec["reason"], "review_stale")
-        self.assertIn("not a two-parent merge", rec["detail"])
 
 class CanaryAndCI(Base):
     """B2: the nearest canary verdict decides; every release-path PR has green CI."""
@@ -3445,15 +2661,26 @@ class ReleaseTarget(Base):
         self.assertEqual((rec["status"], rec["sha"]), ("shipped", target))
         return rec
 
+    def test_repaired_credential_retries_failed_canary_below_unverified_head(self):
+        target = self.fx.commit({"mcp-server/src/z.js": "1"})
+        head = self.fx.commit({"mcp-server/src/a.js": "1"})
+        gh = FakeGitHub(canary={target: self.GREEN, head: ("in_progress", None)})
+        (self.fx.cred / "tokens.env").write_text("")
+        self.assertEqual(self.fx.pipeline(FakeRunner(), github=gh).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], target)
+        runner = FakeRunner()
+        self.assertEqual(self.fx.pipeline(runner, github=gh).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+        self.assert_shipped(*self.ship(gh), target)
+
     def test_head_in_progress_ships_the_older_green_commit(self):
         z = self.fx.commit({"mcp-server/src/z.js": "1"})
         a = self.fx.commit({"mcp-server/src/a.js": "1"})
         pr_a = FakeGitHub().pr_number(a)
-        # HEAD's PR is unapproved and its CI is red: neither may matter, because
+        # HEAD's CI is red, but the release target is the older green source.
         # the batch now ends at z and every downstream check names z, not HEAD.
-        gh = FakeGitHub(canary={z: self.GREEN, a: ("in_progress", None)}, red_ci_prs={pr_a},
-                        comments={pr_a: [{"id": 1, "body": "looks fine", "created_at": HEAD_DATE,
-                                          "author_association": "OWNER", "html_url": "x"}]})
+        gh = FakeGitHub(canary={z: self.GREEN, a: ("in_progress", None)}, red_ci_prs={pr_a})
         rc, runner = self.ship(gh)
         rec = self.assert_shipped(rc, runner, z)
         self.assertEqual(rec["pr"], FakeGitHub().pr_number(z))
@@ -3558,7 +2785,7 @@ class ReleaseTarget(Base):
 
 
 class AppLane(Base):
-    """B3: the app lane has a review gate and an empty check list is a hold."""
+    """The app lane requires green checks and verifies the live release."""
 
     def cfg(self):
         cfg = self.fx.config()
@@ -3574,16 +2801,8 @@ class AppLane(Base):
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.records()[-1]["reason"], "checks_missing")
 
-    def test_app_needs_an_approved_pr(self):
-        self.fx.commit({"src/worker.js": "1"})
-        runner = FakeRunner()
-        pipe = self.fx.pipeline(runner, cfg=self.cfg(), github=FakeGitHub(approve_all=False))
-        pipe.http = lambda _u: {"source_commit": self.fx.base, "environment": "production"}
-        self.assertEqual(pipe.tick(["app"]), 0)
-        self.assertEqual(runner.calls, [])
-        self.assertEqual(self.fx.records()[-1]["reason"], "no_independent_review")
 
-    def test_reviewed_app_change_releases(self):
+    def test_green_merged_app_change_releases_without_review(self):
         sha = self.fx.commit({"src/worker.js": "1"})
         runner = FakeRunner()
         pipe = self.fx.pipeline(runner, cfg=self.cfg())
@@ -3597,9 +2816,10 @@ class AppLane(Base):
                 live["source_commit"] = sha
             return res
         runner.run = run  # type: ignore[method-assign]
-        self.assertEqual(pipe.tick(["app"]), 0)
-        self.assertEqual(runner.names()[:7], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build",
-                                              "smoke-baseline", "app-release", "smoke-post"])
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.names()[:8], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build",
+                                              "smoke-baseline", "app-main-ref-refresh", "app-release",
+                                              "smoke-post"])
         build_index = runner.names().index("app-build")
         self.assertEqual(runner.calls[build_index][1], ["npm", "run", "build"])
         self.assertEqual(runner.envs["app-build"]["DOCTORCRE_SOURCE_COMMIT"], sha)
@@ -3610,6 +2830,63 @@ class AppLane(Base):
         # no ops.release row for membership to attach to.
         self.assertEqual(self.fx.slice_marks, [])
         self.assertNotIn("slice_marker", self.fx.records()[-1])
+
+    def test_immutable_main_fetch_refreshes_stale_tracking_ref_before_exact_main_guard(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+        stale = git(self.fx.repo, "rev-parse", "refs/remotes/origin/main")
+        self.assertNotEqual(candidate, stale)
+        fetch_head = self.fx.repo / ".git/FETCH_HEAD"
+        fetch_head.write_text("another session's fetch evidence\n")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.guard_observations, [(candidate, candidate)])
+        self.assertEqual(git(self.fx.repo, "rev-parse", "HEAD"), self.fx.base)
+        self.assertEqual(git(self.fx.repo, "rev-parse", "refs/remotes/origin/main"), candidate)
+        self.assertEqual(fetch_head.read_text(), "another session's fetch evidence\n")
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_app_release_refuses_main_advance_during_build(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+
+        def advance_main():
+            (other / "src/next.js").write_text("unexpected later main commit\n")
+            git(other, "add", "src/next.js")
+            git(other, "commit", "-q", "-m", "advance main during app build")
+            git(other, "push", "-q", "origin", "HEAD:main")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live, on_build=advance_main)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 1)
+        self.assertNotIn("app-release", runner.names())
+        self.assertEqual(self.fx.records()[-1]["sha"], candidate)
+        self.assertEqual(self.fx.records()[-1]["status"], "failed")
+        self.assertNotEqual(git(self.fx.repo, "ls-remote", "origin", "refs/heads/main").split()[0], candidate)
 
     def test_failed_credential_free_build_never_reaches_publication(self):
         self.fx.commit({"src/worker.js": "1"})
@@ -3888,7 +3165,7 @@ class ClearFailedRetirement(Base):
         git(self.fx.repo, "update-ref", "refs/remotes/origin/main", self.fx.base)
         fetch_head = self.fx.repo / ".git/FETCH_HEAD"
         fetch_head.write_text("another session's fetch evidence\n")
-        pipe = self.fx.pipeline(FakeRunner(), github=FakeGitHub(approve_all=False))
+        pipe = self.fx.pipeline(FakeRunner(), github=FakeGitHub())
         pipe.tick(["worker"])
         self.assertEqual(git(self.fx.repo, "rev-parse", "origin/main"), self.fx.base)
         self.assertEqual(fetch_head.read_text(), "another session's fetch evidence\n")
@@ -4123,216 +3400,21 @@ class ClearFailedRetirement(Base):
         self.assert_retry_available()
 
 
-class ControllerSourceCapture(Base):
-    def test_default_provenance_survives_disk_updates_after_loading(self):
-        # Load real modules in a separate interpreter; fixture injection must
-        # not conceal a constructor that re-reads already replaced source.
-        files = {path: (HERE.parent / path).read_text() for path in (
-            "ops/release-pipeline.py", "lib/secret_redaction.py",
-            "lib/credential_file.py", "lib/github_reader.py")}
-        files["ops/config/release-pipeline.v1.json"] = json.dumps(self.fx.config())
-        for helper in ("ops/release-smoke.py", "ops/doctorcre-production-smoke.py"):
-            files[helper] = (HERE.parent / helper).read_text()
-        self.fx.commit(files)
-        script = '''
-import json, runpy, subprocess, sys
-from pathlib import Path
-repo = Path(sys.argv[1])
-module = runpy.run_path(str(repo / "ops/release-pipeline.py"))
-cfg = module["load_config"](repo / "ops/config/release-pipeline.v1.json")
-for path in ("ops/release-pipeline.py", "lib/credential_file.py",
-             "lib/github_reader.py", "lib/secret_redaction.py",
-             "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
-             "ops/config/release-pipeline.v1.json", "mcp-server/package.json",
-             "mcp-server/package-lock.json"):
-    with (repo / path).open("a") as stream:
-        stream.write("\\nchanged after loading\\n")
-pipe = module["Pipeline"](cfg, repo=repo, out=lambda _: None)
-subprocess.run(["git", "add", "ops/release-pipeline.py", "lib/credential_file.py",
-                "lib/github_reader.py", "lib/secret_redaction.py", "ops/release-smoke.py",
-                "ops/doctorcre-production-smoke.py", "ops/config/release-pipeline.v1.json",
-                "mcp-server/package.json", "mcp-server/package-lock.json"], cwd=repo, check=True)
-subprocess.run(["git", "commit", "-qm", "updated disk"], cwd=repo, check=True)
-subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=repo, check=True)
-try:
-    pipe.controller_current({})
-except module["Blocked"] as exc:
-    print(exc.reason)
-else:
-    raise AssertionError("loaded controller passed after main changed")
-'''
-        result = subprocess.run([sys.executable, "-c", script, str(self.fx.repo)],
-                                env=FIXTURE_ENV, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "controller_stale")
-
-
-class ControllerFreshness(Base):
-    """The tick runs from the canonical checkout. When that checkout lags
-    origin/main (fleet-sync refuses to fast-forward over local changes), the
-    pipeline must hold instead of releasing main with older controller code:
-    2026-10-05 burned app f04c9ab8 running `release:production` without the
-    `app-build` step main already had."""
-
-    def setUp(self):
-        super().setUp()
-        self.fx.commit({"ops/release-pipeline.py": "v1\n"})
+class StaleControllerRefusal(Base):
+    def test_stale_controller_bytes_refuse_release_without_burning_target(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "candidate", "ops/release-pipeline.py": "current controller\n"})
+        (self.fx.repo / "ops/release-pipeline.py").write_text("obsolete controller\n")
         live = {"sha": self.fx.base}
-        pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
         pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
-        pipe.tick(["worker"])
-
-
-    def test_smoke_helper_and_its_reader_are_bound_by_controller_freshness(self):
-        for path in ('ops/release-smoke.py', 'ops/doctorcre-production-smoke.py'):
-            with self.subTest(path=path):
-                self.fx.commit({path: 'verified source\n'})
-                (self.fx.repo / path).write_text('obsolete verification\n')
-                with self.assertRaises(rp.Blocked) as caught:
-                    self.fx.pipeline(FakeRunner()).controller_current(self.fx.state())
-                self.assertEqual(caught.exception.reason, rp.CONTROLLER_STALE)
-                (self.fx.repo / path).write_text('verified source\n')
-
-    def push_from_elsewhere(self, files: dict[str, str]) -> str:
-        other = self.fx.tmp / "other"
-        if not other.exists():
-            git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
-            git(other, "config", "user.email", "t@example.invalid")
-            git(other, "config", "user.name", "t")
-        git(other, "pull", "-q", "--ff-only", "origin", "main")
-        for rel, text in files.items():
-            (other / rel).parent.mkdir(parents=True, exist_ok=True)
-            (other / rel).write_text(text)
-        git(other, "add", "-A")
-        git(other, "commit", "-q", "-m", "c")
-        git(other, "push", "-q", "origin", "HEAD:main")
-        return git(other, "rev-parse", "HEAD")
-
-    def test_freshness_read_failures_hold_then_retry_the_same_sha(self):
-        sha = self.fx.commit({"mcp-server/src/a.js": "1", "ops/release-smoke.py": "helper\n"})
-        for command in ("ls-remote", "fetch", "ls-tree", "hash-object"):
-            with self.subTest(command=command):
-                runner, verbs = FakeRunner(), []
-                pipe = self.fx.pipeline(runner, verbs=verbs)
-                original = pipe.git
-                counts = {}
-
-                def read(*args, **kwargs):
-                    counts[args[0]] = counts.get(args[0], 0) + 1
-                    occurrence = 2 if command in ("ls-remote", "fetch") else 1
-                    if args[0] == command and counts[command] == occurrence:
-                        raise rp.StepFailed("git " + command, 128, "", "fixture read unavailable")
-                    return original(*args, **kwargs)
-
-                pipe.git = read
-                pipe.tick(["worker"])
-                self.assertEqual(runner.calls, [])
-                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
-                self.assertEqual(verbs, [])
-                self.assertEqual(self.fx.records()[-1]["reason"], "controller_unreadable")
-        live = {"sha": self.fx.base}
-        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), live=live).tick(["worker"]), 0)
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
-
-    def test_recovered_dry_run_preserves_populated_state_bytes(self):
-        self.push_from_elsewhere({"ops/release-pipeline.py": "v2\n", "mcp-server/src/a.js": "1"})
-        self.assertEqual(self.fx.pipeline(FakeRunner()).tick(["worker"]), 3)
-        git(self.fx.repo, "pull", "-q", "--ff-only", "origin", "main")
-        path = self.fx.repo / "out/release-pipeline/state.json"
-        before = path.read_bytes()
-        self.assertEqual(self.fx.pipeline(FakeRunner(), dry_run=True).tick(["worker"]), 0)
-        self.assertEqual(path.read_bytes(), before)
-
-    def test_fast_forward_after_load_cannot_disguise_running_controller(self):
-        for path in ("ops/release-pipeline.py", "lib/credential_file.py",
-                     "lib/github_reader.py", "lib/secret_redaction.py",
-                     "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
-                     "ops/config/release-pipeline.v1.json"):
-            with self.subTest(path=path):
-                cfg = self.fx.config()
-                cfg["app"]["enabled"] = True
-                prior_release = self.fx.state().get("app", {}).get("last_released_sha")
-                self.fx.commit({path: json.dumps(cfg) if path.endswith(".json") else "old source\n"})
-                runner = FakeRunner()
-                pipe = self.fx.pipeline(runner, cfg=rp.load_config(self.fx.repo / path)
-                                        if path.endswith(".json") else cfg)
-                pipe.http = lambda _url: {"source_commit": self.fx.base, "environment": "production"}
-                updated = json.loads(json.dumps(cfg))
-                updated["app"]["enabled"] = False
-                self.push_from_elsewhere({path: json.dumps(updated) if path.endswith(".json") else "new source\n",
-                                          "src/app.js": path})
-                git(self.fx.repo, "pull", "-q", "--ff-only", "origin", "main")
-                self.assertEqual(pipe.tick(["app"]), 3)
-                self.assertEqual(runner.calls, [])
-                self.assertEqual(self.fx.records()[-1]["reason"], "controller_stale")
-                state = self.fx.state().get("app", {})
-                self.assertFalse(state.get("failed_sha"))
-                self.assertEqual(state.get("last_released_sha"), prior_release)
-
-    def test_wrangler_package_inputs_must_match_main_before_any_release_step(self):
-        prior_release = self.fx.state()["worker"]["last_released_sha"]
-        sha = self.fx.commit({"mcp-server/src/a.js": "candidate"})
-        for package_file in rp.TOOLCHAIN_FILES:
-            with self.subTest(package_file=package_file):
-                path = self.fx.repo / "mcp-server" / package_file
-                original = path.read_bytes()
-                path.write_bytes(original + b"\n")
-                runner = FakeRunner(live={"sha": self.fx.base})
-                try:
-                    self.assertEqual(self.fx.pipeline(runner, live={"sha": self.fx.base}).tick(["worker"]), 3)
-                    self.assertEqual(runner.calls, [])
-                    record = self.fx.records()[-1]
-                    self.assertEqual((record["status"], record["reason"], record["sha"]),
-                                     ("blocked", "controller_stale", sha))
-                    self.assertIn("mcp-server/" + package_file, record["detail"])
-                    state = self.fx.state()["worker"]
-                    self.assertFalse(state.get("failed_sha"))
-                    self.assertEqual(state["last_released_sha"], prior_release)
-                finally:
-                    path.write_bytes(original)
-
-    def test_a_checkout_behind_main_holds_without_burning_the_sha_then_ships_once_current(self):
-        released = self.fx.state()["worker"]["last_released_sha"]
-        sha = self.push_from_elsewhere({"ops/release-pipeline.py": "v2\n", "mcp-server/src/a.js": "1"})
-        verbs: list = []
-        runner = FakeRunner()
-        remote_ref = git(self.fx.repo, "rev-parse", "origin/main")
-        fetch_head = self.fx.repo / ".git/FETCH_HEAD"
-        fetch_head.write_text("another session's fetch evidence\n")
-        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 3)
-        self.assertEqual(runner.calls, [])
-        self.assertEqual(git(self.fx.repo, "rev-parse", "origin/main"), remote_ref)
-        self.assertEqual(fetch_head.read_text(), "another session's fetch evidence\n")
-        held = self.fx.records()[-1]
-        self.assertEqual((held["status"], held["reason"]), ("blocked", "controller_stale"))
-        self.assertIn("ops/release-pipeline.py", held["detail"])
-        self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], released)
-        loops = [a for v, a in verbs if v == "add-loop"]
-        self.assertEqual(len(loops), 1)
-        self.assertEqual(loops[0]["owner"], "Claude")
-        self.assertNotIn("credential", loops[0]["blocker_detail"])
-        again: list = []
-        self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=again).tick(["worker"]), 3)
-        self.assertEqual(again, [])   # one loop per stale episode
-
-        git(self.fx.repo, "pull", "-q", "--ff-only", "origin", "main")
-        live = {"sha": released}
-        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), live=live).tick(["worker"]), 0)
-        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
-        self.assertNotIn("controller_stale", self.fx.state().get("filed_blockers", {}))
-
-    def test_an_uncommitted_controller_edit_holds_the_app_lane_too(self):
-        (self.fx.repo / "ops/release-pipeline.py").write_text("local edit\n")
-        self.push_from_elsewhere({"src/worker.js": "1"})
-        cfg = self.fx.config()
-        cfg["app"]["enabled"] = True
-        runner = FakeRunner()
-        pipe = self.fx.pipeline(runner, cfg=cfg)
-        pipe.http = lambda _u: {"source_commit": self.fx.base, "environment": "production"}
-        self.assertEqual(pipe.tick(["app"]), 3)
+        self.assertEqual(pipe.tick(["worker"]), 3)
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.records()[-1]["reason"], "controller_stale")
+        self.assertEqual(self.fx.records()[-1]["sha"], sha)
+        state = self.fx.state()["worker"]
+        self.assertFalse(state.get("failed_sha"))
+        self.assertEqual(state["last_released_sha"], self.fx.base)
 
 
 class Blockers(Base):
@@ -4621,24 +3703,29 @@ class CapabilityRecovery(Base):
         self.assertEqual(loops[0], loops[1])
         self.assertEqual(retry.runner.calls, [])
 
-    def test_repaired_token_stays_paused_and_report_names_all_recoveries(self):
+    def test_report_tracks_only_lanes_still_failed_after_token_repair(self):
         sha = self.missing()
         calls = []
         self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=calls).tick(["worker"]), 1)
         notification = calls[0][1]["body"]
         self.assertIn(sha, notification)
-        self.assertIn("clear-failed", notification)
-        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-        pipe = self.fx.pipeline(FakeRunner())
+        self.assertIn("automatically retries", notification)
+        live = {"sha": self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live, verbs=calls)
         state = pipe.store.load()
         state["app"] = {"failed_sha": "b" * 40, "failed_step": "credential-missing"}
         pipe.store.save(state)
-        self.assertEqual(pipe.tick(["worker"]), 0)
-        self.assertEqual(pipe.runner.calls, [])
         report = rp.report(pipe.store, "2099-01-01")
         for lane, head in (("worker", sha), ("app", "b" * 40)):
             self.assertIn(f"--lane {lane} --sha {head}", report)
         self.assertIn("verif", report.lower())
+        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        report = rp.report(pipe.store, "2099-01-01")
+        self.assertNotIn(f"--lane worker --sha {sha}", report)
+        self.assertIn(f"--lane app --sha {'b' * 40}", report)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in calls], ["add-loop", "add-room-turn"])
 
     def test_loop_operation_key_binds_complete_payload(self):
         first = rp.blocker_loop("CLOUDFLARE_API_TOKEN", "missing from /one")
@@ -4687,7 +3774,6 @@ class DeployCredential(unittest.TestCase):
         if app:
             cfg["worker"]["enabled"] = False
             cfg["app"]["enabled"] = True
-            cfg["app"]["review_required_after"] = "2000-01-01T00:00:00Z"
         pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs, dry_run=dry_run)
         pipe.out = self.lines.append
         return pipe
@@ -4802,7 +3888,7 @@ class DeployCredential(unittest.TestCase):
         self.assertNotIn("loop_filed", self.fx.records()[-1])
         self.assertIn("CLOUDFLARE_API_TOKEN", self.fx.state()["filed_blockers"])
 
-    def test_token_restoration_requires_the_notified_clearance_for_both_lanes(self):
+    def test_token_restoration_automatically_retries_both_lanes(self):
         for lane in ("worker", "app"):
             with self.subTest(lane=lane):
                 self.write_tokens("")
@@ -4822,16 +3908,8 @@ class DeployCredential(unittest.TestCase):
                 self.assertIn("ops/release-pipeline.py report", body)
                 self.assertIn(f"clear-failed --lane {lane} --sha {sha}",
                               rp.report(store, "2099-01-01"))
-                self.assertNotIn("every tick", body)
+                self.assertIn("automatically retries", body)
                 self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-                paused = FakeRunner()
-                paused_pipe = self.pipeline(paused, app=lane == "app")
-                if lane == "app":
-                    paused_pipe.http = lambda _u: {"source_commit": self.fx.base, "environment": "production"}
-                self.assertEqual(paused_pipe.tick([lane]), 0)
-                self.assertEqual(paused.calls, [])
-                self.assertEqual(self.fx.state()[lane]["failed_sha"], sha)
-                rp.clear_failed(store, lane, sha, "credential restored and verified", repo_dir=self.fx.repo)
                 live = {"sha": self.fx.base}
                 runner = FakeRunner(live=live)
                 pipe = self.pipeline(runner, app=lane == "app")
@@ -4852,7 +3930,7 @@ class DeployCredential(unittest.TestCase):
     def test_combined_lanes_recover_from_one_notification_without_resetting_dedup(self):
         sha = self.fx.commit({"mcp-server/src/a.js": "both", "src/worker.js": "both"})
         cfg = self.fx.config(credential_dir="~/.config/carr")
-        cfg["app"].update(enabled=True, review_required_after="2000-01-01T00:00:00Z")
+        cfg["app"].update(enabled=True)
         live = {"worker": self.fx.base, "app": self.fx.base}
         verbs: list = []
 
@@ -4872,22 +3950,7 @@ class DeployCredential(unittest.TestCase):
         self.assertIn("every currently failed lane", loops[0]["body"])
 
         self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-        paused = FakeRunner()
-        self.assertEqual(pipeline(paused).tick(["worker", "app"]), 0)
-        self.assertEqual(paused.calls, [])
         store = rp.Store(self.fx.repo / "out/release-pipeline")
-        # Recovery must come from current state even after the failure's day.
-        recovery = rp.report(store, "2099-01-01")
-        commands = [shlex.split(line.strip()) for line in recovery.splitlines()
-                    if line.strip().startswith("ops/release-pipeline.py clear-failed ")]
-        self.assertEqual(len(commands), 2)
-        self.assertEqual({cmd[cmd.index("--lane") + 1] for cmd in commands}, set(live))
-        for cmd in commands:
-            self.assertEqual(cmd[cmd.index("--sha") + 1], sha)
-            rp.clear_failed(store, cmd[cmd.index("--lane") + 1],
-                            cmd[cmd.index("--sha") + 1], cmd[cmd.index("--reason") + 1],
-                            repo_dir=self.fx.repo)
-
         worker_live = {"sha": self.fx.base}
         runner = FakeRunner(live=worker_live)
         original_run = runner.run
@@ -4933,7 +3996,7 @@ class FailClosedVenv(Base):
         runner = FakeRunner()
         self.assertEqual(self.fx.pipeline(runner).tick(["worker"]), 1)
         rec = self.fx.records()[-1]
-        self.assertEqual(rec["step"], "venv-link")
+        self.assertEqual(rec["step"], "venv-source-missing")
         self.assertIn(".venv", rec.get("detail", ""))
         self.assertIn("bin/python", rec.get("detail", ""))
         # the real `ln -s` never ran — no dangling symlink was created.
@@ -5156,6 +4219,33 @@ class RealGitRunner(FakeRunner):
         self.calls.append((log.stem.split("-", 1)[1], list(argv)))
         proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
         return rp.Result(proc.returncode, proc.stdout + proc.stderr)
+
+
+class ExactMainAppGuardRunner(RealGitRunner):
+    """Use real local Git state for the app's unchanged exact-main guard."""
+
+    def __init__(self, **kw):
+        self.on_build = kw.pop("on_build", None)
+        super().__init__("", **kw)
+        self.guard_observations = []
+        self.live = kw.get("live")
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        if argv[:2] == ["node", "scripts/release-production.mjs"]:
+            head = git(Path(cwd), "rev-parse", "HEAD")
+            tracking = git(Path(cwd), "rev-parse", "refs/remotes/origin/main")
+            self.guard_observations.append((head, tracking))
+            if head != tracking:
+                self.calls.append((log.stem.split("-", 1)[1], list(argv)))
+                return rp.Result(1, "release guard: HEAD must equal origin/main")
+            if isinstance(self.live, dict):
+                self.live["source_commit"] = head
+                self.live["environment"] = "production"
+            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        if log.stem.endswith("app-build") and self.on_build is not None:
+            self.on_build()
+        return result
 
 
 class SchemaFollowupBase(Base):

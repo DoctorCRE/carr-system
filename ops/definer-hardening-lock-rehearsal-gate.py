@@ -42,7 +42,6 @@ from pathlib import Path
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
-from registry_chain import registry_chain
 
 REPO = Path(__file__).resolve().parents[1]
 BATCH = (
@@ -51,10 +50,7 @@ BATCH = (
     "0856_qualify_security_definer_dependencies.sql",
     "0857_dot_hardening_scac_successor.sql",
 )
-CHAIN = registry_chain()['versions']
-HARDENING = next(row for row in CHAIN if Path(row['migration']).name == BATCH[-1])
-PREDECESSOR = Path(next(row['migration'] for row in CHAIN
-                       if row['version'] == HARDENING['predecessor'])).name
+PREDECESSOR = '0853_party_identity_scac_successor.sql'
 FINGERPRINT = """
 select md5(string_agg(line, E'\\n' order by line)) from (
   select 'fn:'||p.oid::regprocedure::text||':'||coalesce(p.proconfig::text,'')||':'||coalesce(p.proacl::text,'')

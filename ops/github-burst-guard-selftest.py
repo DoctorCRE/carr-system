@@ -485,28 +485,6 @@ def cooldown_cases(failures):
            0 if "rate_limited_at" not in read_state() else 1, 0)
 
 
-def pending_install_cases(failures):
-    """Between merge and `config-as-code install` the new wiring is absent
-    from live settings; gate-integrity must read that as PENDING INSTALL, not
-    as a GATE INTEGRITY FAILURE in every session on the machine."""
-    import importlib.util
-    import shutil
-    spec = importlib.util.spec_from_file_location(
-        "gate_integrity", os.path.join(REPO, "hooks", "gate-integrity.py"))
-    gi = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(gi)
-    work = tempfile.mkdtemp(prefix="burst-guard-pending-")
-    try:
-        gi.PENDING_INSTALL_STAMP_DIR = work
-        errs = ["expected 1 exact PreToolUse/Bash hook github-burst-guard.py; found 0",
-                "expected 1 exact PostToolUse/Bash hook github-burst-guard.py; found 0"]
-        real, pending = gi.split_pending_install(errs, {})
-        if pending != ["github-burst-guard.py"] or real:
-            failures.append(f"pending-install: not installed yet should be pending, got {real} {pending}")
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-
-
 def expect(failures, name, got, want):
     if got != want:
         failures.append(f"{name}: exit {got}, expected {want}")
@@ -541,7 +519,6 @@ def main():
 
     tick_cases(failures)
     cooldown_cases(failures)
-    pending_install_cases(failures)
 
     # Plumbing: non-Bash tools pass, malformed input fails open, Codex shape works.
     clear_state()

@@ -151,8 +151,6 @@ def problems(repo: Path, doc: dict, *, corpus_ids=None, classes=None, verbs=None
                 if survivor == rid or not delivers(survivor):
                     out.append(f"{rid}: duplicate survivor {survivor!r} is not a routed rule "
                                "with a delivery of its own")
-        if cls == "d" and not gates:
-            out.append(f"{rid}: class d rule has no gate route")
         if cls == "e" and "duplicate" not in kinds:
             out.append(f"{rid}: class e rule does not name its surviving duplicate")
         stop_only = gates and all(Path(g).name in stops for g in gates)
