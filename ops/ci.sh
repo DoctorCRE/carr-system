@@ -414,7 +414,7 @@ check_pushfloor() {
   fi
 
   if [ -n "$changed" ] && printf '%s\n' "$changed" | grep -Eq \
-      '^(migrations/|tools/migration_number_contract\.py$|ops/migration-order-gate\.py$)'; then
+      '^(migrations/|db/migration-baseline\.json$|tools/migration_(number_contract|baseline|source)\.py$|ops/migration-order-gate\.py$)'; then
     ran="$ran migration-structure"
     run_quiet "$LOGDIR/pushfloor-migration-structure.log" \
       "$PY" ops/migration-order-gate.py \
@@ -528,6 +528,11 @@ check_dependency() {
 }
 
 check_migration() {
+  if ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
+    tail -30 "$LOGDIR/migration-baseline.log" >&2
+    bad migration "migration baseline identity or historical source checks failed before database work"
+    return
+  fi
   if ! run_quiet "$LOGDIR/migration-structure.log" "$PY" ops/migration-order-gate.py; then
     tail -15 "$LOGDIR/migration-structure.log" >&2
     bad migration "migration ordering or slot collision failed before database work; reserve a forward number"

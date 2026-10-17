@@ -1,4 +1,5 @@
 import { canonicalJson } from "./artifact-trust.js";
+import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { bindReferralDeal } from "./relationship-network.js";
@@ -334,12 +335,15 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["record-lead-contact", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || (verb === "update-lead" && args.stage_review) || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "review-heavy-build-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["record-lead-contact", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || (verb === "update-lead" && args.stage_review) || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
-    return { replayed: true, ...prior.rows[0].response };          // A1: replay, no second write
+    const response = prior.rows[0].response;
+    if (verb === "add-industry-event" || verb === "update-industry-event")
+      return { replayed: true, ...response, event: industryEventRecord(response.event) };
+    return { replayed: true, ...response };                          // A1: replay, no second write
   }
   const result = await fn();                                        // inside the open transaction
   await client.query(
@@ -505,6 +509,10 @@ function industryEventId(value) {
   if (typeof value !== "string" || !UUID_RE.test(value))
     throw new ToolError({ error: "industry_event_id_invalid" });
   return value;
+}
+
+function industryEventRecord(row) {
+  return integerFields(row, ["version"], "industry_event_version_invalid");
 }
 
 // [defect 18b12fda-b79c-43a1-86c4-51b9623e12fd, 2026-08-14] THE VIOLATION WAS OURS.
@@ -8467,7 +8475,7 @@ export const TOOLS = {
           [tenant, clean.title, clean.organizer, clean.kind, clean.starts_at, clean.ends_at,
            clean.location, clean.is_virtual, clean.url, clean.relevance_note, clean.attendance_intent,
            clean.owner_partner, clean.status, clean.source, actor.id]);
-        const event = inserted.rows[0];
+        const event = industryEventRecord(inserted.rows[0]);
         await writeEvent(c, actor, "add-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };
@@ -8490,7 +8498,7 @@ export const TOOLS = {
            from industry_event
           where organization_tenant_id=$1
           order by starts_at, id limit $2`, [organizationTenantForActor(actor), limit]);
-      return { ok: true, events: result.rows, count: result.rows.length };
+      return { ok: true, events: result.rows.map(industryEventRecord), count: result.rows.length };
     },
   },
 
@@ -8508,8 +8516,7 @@ export const TOOLS = {
     }, required: ["idempotency_key", "event_id", "base_version"] },
     handler: async (c, actor, args) => {
       const eventId = industryEventId(args.event_id);
-      if (!Number.isInteger(args.base_version) || args.base_version < 1)
-        throw new ToolError({ error: "industry_event_base_version_invalid" });
+      safeInteger(args.base_version, "industry_event_base_version_invalid", { allowString: false });
       const clean = validateIndustryEventFields(args, { partial: true });
       const keys = ["title", "organizer", "kind", "starts_at", "ends_at", "location", "is_virtual",
         "url", "relevance_note", "attendance_intent", "owner_partner", "status", "source"]
@@ -8535,7 +8542,7 @@ export const TOOLS = {
         if (!result.rows.length)
           throw new ToolError({ error: "industry_event_version_conflict",
             hint: "read the event again and retry with its current version" });
-        const event = result.rows[0];
+        const event = industryEventRecord(result.rows[0]);
         await writeEvent(c, actor, "update-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };

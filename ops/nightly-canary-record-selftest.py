@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Hermetic contract checks for the isolated Nightly availability canary."""
 from __future__ import annotations
-import hashlib, json, os, shutil, subprocess, sys, uuid
+
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+import hashlib, json, os, shutil, subprocess, sys, uuid
 from typing import Any
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -73,7 +78,7 @@ def check_exec(label, ok_fn):
 nightly=(ROOT/'bin/nightly.sh').read_text()
 matcher=(ROOT/'pipelines/availability_matcher.py').read_text()
 runner=(ROOT/'tools/control-plane.py').read_text()
-sql=(ROOT/'migrations/0227_nightly_availability_canary_record_layer.sql').read_text()
+sql=read_migration(ROOT, '0227_nightly_availability_canary_record_layer.sql')
 manifest=json.loads((ROOT/'ops/config/control-plane-workflows.v1.json').read_text())
 workflow=next(w for w in manifest['workflows'] if w['key']=='nightly-record-layer')
 check('Nightly canary is an explicit standalone argument before normal setup',

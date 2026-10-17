@@ -1,9 +1,10 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const migration = fs.readFileSync(
-  new URL("../../migrations/0463_retired_rule_delivery_cleanup.sql", import.meta.url), "utf8");
+const migration = readMigration(
+  new URL("../../migrations/0463_retired_rule_delivery_cleanup.sql", import.meta.url));
 
 test("retirement removes only the retired rule's delivery row in the same transaction", () => {
   assert.match(migration,

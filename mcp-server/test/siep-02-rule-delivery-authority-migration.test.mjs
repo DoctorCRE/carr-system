@@ -1,9 +1,10 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 
-const migration = await readFile(new URL("../../migrations/0452_siep02_rule_delivery_authority.sql", import.meta.url), "utf8");
-const controllerSuccessor = await readFile(new URL("../../migrations/0363_rule_delivery_activation_digest_repin.sql", import.meta.url), "utf8");
+
+const migration = await readMigration(new URL("../../migrations/0452_siep02_rule_delivery_authority.sql", import.meta.url));
+const controllerSuccessor = await readMigration(new URL("../../migrations/0363_rule_delivery_activation_digest_repin.sql", import.meta.url));
 // 0363 permanently pins the map digest that was current WHEN IT WAS WRITTEN.
 // Until 2026-09-01 that equalled the live map digest, because the map had not
 // moved since 0363. Reinstating the canonical_edit control (Joe's ruling

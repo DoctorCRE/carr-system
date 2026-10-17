@@ -142,55 +142,6 @@ def capture(cur, section_id, revision_id, origin_ref, suffix: str, *, title=None
     ).fetchone()
 
 
-def heavy_contract() -> dict:
-    def evidence(suffix: str, source_class: str) -> dict:
-        return {
-            "source_ref": f"safe:research:{suffix}",
-            "source_class": source_class,
-            "locator": f"https://example.com/{suffix}",
-            "observed_at": "2026-08-25T12:00:00Z",
-            "content_digest": "sha256:" + "e" * 64,
-            "finding": f"Verified {source_class} evidence for the heavy-build acceptance fixture.",
-        }
-
-    return {
-        "builder_session_ref": "session:builder:hermes-memory-negative",
-        "research_manifest": {
-            "primary_sources": [evidence("primary", "primary_source")],
-            "maintained_repositories": [
-                evidence("repo-one", "maintained_repository"),
-                evidence("repo-two", "maintained_repository"),
-            ],
-            "practitioner_evidence": [evidence("practitioner", "practitioner_evidence")],
-            "current_baseline": [evidence("baseline", "current_baseline")],
-            "failure_modes": [evidence("failure", "failure_mode")],
-            "unresolved_contradictions": [],
-            "conclusion": "The evidence supports the chosen architecture and preserves the named falsifier.",
-        },
-        "master_plan": {
-            "product_goal": "Ship the complete governed agent-learning capability rather than only its prerequisite executor repairs.",
-            "non_goals": ["Do not substitute Engineering Passport repairs for the requested product."],
-            "architecture": ["Heavy-build admission layer", "Bounded execution layer", "Independent verification layer"],
-            "authority_boundaries": ["Models supply evidence while the database derives admission and humans retain acceptance."],
-            "dependency_dag": [
-                {"step_ref": "step:admission", "depends_on": []},
-                {"step_ref": "step:execution", "depends_on": ["step:admission"]},
-            ],
-            "planned_checks": [{
-                "artifact": "heavy-build readiness transition",
-                "comparator": "typed research, plan, shape, and review receipts",
-                "failure_condition": "any required receipt is absent or the latest review failed",
-            }],
-            "baseline_comparison": "Replay the tour-packet task as the positive path and the Hermes-memory task as the refusal path.",
-            "release_strategy": "Release behind the existing human ready-plan acceptance boundary.",
-            "rollback_strategy": "Remove the new gate and functions while leaving pre-existing accepted plans untouched.",
-            "observability_strategy": "Return classifier reasons and immutable admission and review hashes on every path.",
-            "fully_shipped_definition": "No heavy request reaches ready without current shape, research, complete-plan, and review receipts.",
-            "prerequisite_policy": "A discovered prerequisite remains a dependency and never replaces the parent product plan.",
-        },
-    }
-
-
 def triage(cur, ref: str, version: int, actor: str):
     key = uuid.uuid4()
     cur.execute(f"set session authorization carr_authority_{actor}")
@@ -487,123 +438,53 @@ def main() -> int:
             )
             cur.execute("reset role")
 
-            # Heavy work is recognized from the actual request and plan, not a
-            # caller checkbox. It needs current Work Shape, typed research and
-            # complete-plan admission, then the LATEST fresh-context review.
             set_local_role(cur, "carr_writer")
-            heavy_id, heavy_ref, _, heavy_captured_version = capture(
-                cur, source_section, source_revision, origin_ref, "heavy agent learning",
+            bounded_id, bounded_ref, _, bounded_version = capture(
+                cur, source_section, source_revision, origin_ref, "agent learning",
                 title="Build a new governed agent learning system",
-                desired="Extend the CARR memory kernel into a complete agent-learning capability",
-                criteria=[{"id": f"HEAVY-{i}", "text": f"Heavy-build acceptance condition {i} is independently verified"}
-                          for i in range(1, 6)],
+                desired="Implement the complete multi-surface capability",
+                criteria=[{"id": f"CAP-{i}", "text": f"Capability condition {i} is verified"} for i in range(1, 6)],
             )
             cur.execute("reset role")
-            heavy_triaged = triage(cur, heavy_ref, heavy_captured_version, "joe")
+            bounded_triaged = triage(cur, bounded_ref, bounded_version, "joe")
             set_local_role(cur, "carr_writer")
-            shaped = one(cur,
-                "select * from ops.set_sourced_work_request_shape_disposition(%s,%s,'required',null,%s,%s,%s)",
-                (heavy_ref, heavy_triaged[3], "Multiple implementation surfaces remain viable.", joe_id, uuid.uuid4()),
-            )
+            disposition = one(cur,
+                "select * from ops.set_sourced_work_request_shape_disposition(%s,%s,'not_required',%s,%s,%s,%s)",
+                (bounded_ref, bounded_triaged[3], "safe:fixed-surface", "The implementation is already fixed.", joe_id, uuid.uuid4()))
+            plan = one(cur, "select * from ops.propose_sourced_work_request_plan(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (bounded_ref, disposition[3], "Build the capability end to end", runbook_ref,
+                 Jsonb([]), "safe:recovery:stop", "safe:observability:record",
+                 Jsonb({"max_steps": 20, "max_duration_minutes": 120}), uuid.uuid4()))
             cur.execute("reset role")
-            shaped_version = shaped[3]
-            cur.execute(
-                """insert into ops.work_shape_revision
-                   (work_request_id,work_request_version,version,trinity,hidden_assumption,
-                    repo_searches,maintained_repos,archetypes,chosen_key,mind_changing_fact,
-                    builder_brief,created_by_actor_id)
-                   values (%s,%s,1,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (heavy_id, shaped_version,
-                 Jsonb({"workflow_trigger": "heavy request", "runtime": "CARR", "output_user": "Joe and Dell"}),
-                 "The prerequisite framework may be mistaken for the requested product.",
-                 Jsonb(["agent memory architecture", "governed learning engine"]),
-                 Jsonb([{"url": f"https://github.com/example/repo-{i}", "maintenance_evidence": "current release"} for i in range(5)]),
-                 Jsonb([{"key": "extend", "core_assumption": "extend current kernel"},
-                        {"key": "replace", "core_assumption": "replace current kernel"},
-                        {"key": "hybrid", "core_assumption": "bind specialized layers"}]),
-                 "extend", "A current kernel limitation would falsify extension.",
-                 Jsonb({"chosen_shape": "extend", "text": "Build the complete capability from the accepted evidence."}), joe_id),
-            )
-            heavy_proposal_key = uuid.uuid4()
-            set_local_role(cur, "carr_writer")
-            heavy_plan = one(cur,
-                """select * from ops.propose_sourced_work_request_plan(
-                     %s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (heavy_ref, shaped_version, "Build a new agent learning system end to end", runbook_ref,
-                 Jsonb(["safe:dependency:memory-kernel"]), "safe:recovery:stop-no-change",
-                 "safe:observability:heavy-build-receipts", Jsonb({"max_steps": 6, "max_duration_minutes": 90}),
-                 heavy_proposal_key),
-            )
-            classification = one(cur,
-                "select * from ops.classify_sourced_work_request_build(%s,%s,%s,%s,%s)",
-                (heavy_ref, shaped_version, "Build a new agent learning system end to end",
-                 Jsonb(["safe:dependency:memory-kernel"]), Jsonb({"max_steps": 6, "max_duration_minutes": 90})),
-            )
-            cur.execute("reset role")
-            if classification[2] != "heavy" or not classification[3] or classification[5] is not True:
-                raise RuntimeError(f"server did not classify the shaped heavy fixture: {classification}")
+            ready = accept(cur, bounded_ref, disposition[3], plan[2], uuid.uuid4(), "joe")
+            if ready[2] != "ready" or ready[9] != "not_required":
+                raise RuntimeError("bounded plan still requires the retired admission lifecycle")
 
+            cur.execute("select set_config('carr.acting_actor_slug','joe',true), set_config('carr.verified_human_actor_slug','joe',true)")
+            set_local_role(cur, "carr_writer")
+            amendment_sql = "select ops.propose_ready_plan_amendment(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+            amendment_args = (bounded_ref, ready[3], plan[2], "Replace the accepted plan with a bounded successor",
+                runbook_ref, Jsonb([]), "safe:recovery:stop", "safe:observability:record",
+                Jsonb({"max_steps": 20, "max_duration_minutes": 120}), joe_id, uuid.uuid4())
+            successor = one(cur, amendment_sql, amendment_args)[0]
+            replayed = one(cur, amendment_sql, amendment_args)[0]
+            if not successor.get('ok') or not replayed.get('replayed') or 'build_admission' in successor:
+                raise RuntimeError(f"successor plan still requires admission or lost replay: {successor}")
+            conflict = one(cur, amendment_sql, (*amendment_args[:3], "Changed scope", *amendment_args[4:]))[0]
+            if conflict.get('reason_id') != 'ready_plan_amendment_idempotency_conflict':
+                raise RuntimeError(f"changed successor replay was accepted: {conflict}")
+            stale = one(cur, amendment_sql, (*amendment_args[:2], 'sha256:'+'0'*64, *amendment_args[3:-1], uuid.uuid4()))[0]
+            if stale.get('reason_id') != 'ready_plan_amendment_predecessor_stale':
+                raise RuntimeError(f"unbound successor predecessor was accepted: {stale}")
+            cur.execute("reset role")
             cur.execute("set session authorization carr_authority_joe")
-            refusal(cur, "select * from ops.accept_sourced_work_request_plan(%s,%s,%s,%s)",
-                    (heavy_ref, shaped_version, heavy_plan[2], uuid.uuid4()),
-                    "heavy acceptance without research/master-plan admission")
+            accepted_successor = one(cur, "select ops.accept_ready_plan_amendment(%s,%s,%s,%s)",
+                (bounded_ref, ready[3], successor['plan']['hash'], uuid.uuid4()))[0]
             cur.execute("reset session authorization")
-
-            set_local_role(cur, "carr_writer")
-            admission = one(cur,
-                """select * from ops.record_sourced_heavy_build_admission(
-                     %s,%s,%s,%s,%s,%s,%s)""",
-                (heavy_plan[0], heavy_ref, shaped_version, Jsonb(classification[3]),
-                 Jsonb(heavy_contract()), joe_id, heavy_proposal_key),
-            )
-            cur.execute("reset role")
-            if admission[6] != "heavy" or admission[8] != "session:builder:hermes-memory-negative":
-                raise RuntimeError(f"heavy admission lost classifier or builder context: {admission}")
-
-            cur.execute("set session authorization carr_authority_joe")
-            refusal(cur, "select * from ops.accept_sourced_work_request_plan(%s,%s,%s,%s)",
-                    (heavy_ref, shaped_version, heavy_plan[2], uuid.uuid4()),
-                    "heavy acceptance without independent review")
-            cur.execute("reset session authorization")
-
-            set_local_role(cur, "carr_writer")
-            refusal(cur,
-                """select * from ops.review_sourced_heavy_build_plan(
-                     %s,%s,%s,%s,'pass',%s,%s,%s,%s,%s)""",
-                (heavy_ref, heavy_plan[2], admission[5], joe_id,
-                 "session:builder:hermes-memory-negative", "Builder tried to review its own planning context.",
-                 Jsonb(["safe:review:self"]), Jsonb([]), uuid.uuid4()),
-                "same-context heavy review")
-            failed_review = one(cur,
-                """select * from ops.review_sourced_heavy_build_plan(
-                     %s,%s,%s,%s,'fail',%s,%s,%s,%s,%s)""",
-                (heavy_ref, heavy_plan[2], admission[5], joe_id,
-                 "session:reviewer:fresh-sol-one", "Fresh review found that one required comparison was absent.",
-                 Jsonb(["safe:review:heavy-negative"]), Jsonb(["The baseline comparison is not yet proven."]), uuid.uuid4()),
-            )
-            cur.execute("reset role")
-            if failed_review[7] != "fail":
-                raise RuntimeError(f"failed heavy review was not durable: {failed_review}")
-            cur.execute("set session authorization carr_authority_joe")
-            refusal(cur, "select * from ops.accept_sourced_work_request_plan(%s,%s,%s,%s)",
-                    (heavy_ref, shaped_version, heavy_plan[2], uuid.uuid4()),
-                    "heavy acceptance after latest failed review")
-            cur.execute("reset session authorization")
-
-            set_local_role(cur, "carr_writer")
-            passed_review = one(cur,
-                """select * from ops.review_sourced_heavy_build_plan(
-                     %s,%s,%s,%s,'pass',%s,%s,%s,%s,%s)""",
-                (heavy_ref, heavy_plan[2], admission[5], joe_id,
-                 "session:reviewer:fresh-sol-two", "Fresh review checked the actual manifest and plan against every acceptance criterion.",
-                 Jsonb(["safe:review:heavy-positive"]), Jsonb([]), uuid.uuid4()),
-            )
-            cur.execute("reset role")
-            if passed_review[7] != "pass":
-                raise RuntimeError(f"passing heavy review was not durable: {passed_review}")
-            heavy_accepted = accept(cur, heavy_ref, shaped_version, heavy_plan[2], uuid.uuid4(), "joe")
-            if heavy_accepted[2] != "ready" or heavy_accepted[9] != "required":
-                raise RuntimeError(f"fully admitted heavy plan did not preserve Work Shape into ready: {heavy_accepted}")
+            if not accepted_successor.get('ok'):
+                raise RuntimeError(f"successor acceptance still requires the retired review: {accepted_successor}")
+            if one(cur, "select count(*) from pg_proc where pronamespace='ops'::regnamespace and (proname like 'heavy_build_%%' or proname='classify_sourced_work_request_build')")[0]:
+                raise RuntimeError("retired callable admission machinery is still present")
 
             privileges = cur.execute(
                 """select
@@ -611,13 +492,13 @@ def main() -> int:
                   has_table_privilege('carr_authority','ops.sourced_work_request_plan_acceptance_receipt','INSERT'),
                   has_function_privilege('carr_writer','ops.accept_sourced_work_request_plan(text,integer,text,uuid)','EXECUTE'),
                   has_function_privilege('carr_jobs','ops.accept_sourced_work_request_plan(text,integer,text,uuid)','EXECUTE'),
-                  has_table_privilege('carr_writer','ops.heavy_build_admission_revision','INSERT'),
-                  has_table_privilege('carr_authority','ops.heavy_build_plan_review','INSERT')"""
+                  has_table_privilege('carr_writer','ops.retired_build_admission_revision','INSERT'),
+                  has_table_privilege('carr_authority','ops.retired_build_plan_review','INSERT')"""
             ).fetchone()
             if privileges != (False, False, False, False, False, False):
                 raise RuntimeError(f"raw plan/acceptance authority leaked: {privileges}")
 
-        print("PASS: Program 6 plans are immutable; heavy plans require shape, research/master-plan admission, and fresh passing review before human acceptance")
+        print("PASS: immutable bounded plans and successor acceptance preserve authority and replay without retired admission")
         return 0
     except Exception as exc:
         return fail(str(exc))
