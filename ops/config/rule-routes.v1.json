@@ -290,20 +290,6 @@
     }
    ]
   },
-  "1fcaa63a": {
-   "moment": "heavy build protocol invoked",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "propose-ready-plan",
-      "review-heavy-build-plan"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
   "1fddcffb": {
    "moment": "deciding what belongs in always-read core vs task-loaded files",
    "routes": [
@@ -334,7 +320,6 @@
      "tools": [],
      "verbs": [
       "log-decision",
-      "review-heavy-build-plan",
       "update-loop",
       "write-work-shape"
      ],
@@ -820,7 +805,6 @@
       "admit-engineering-slice",
       "propose-ready-plan",
       "register-engineering-slice-plan",
-      "review-heavy-build-plan",
       "set-work-shape-disposition",
       "write-work-shape"
      ],
@@ -1816,7 +1800,7 @@
    ]
   },
   "8400cd3d": {
-   "moment": "starting a plan, a heavy-build plan, propose-ready-plan, or a Codex or Dot brief",
+   "moment": "starting a plan, propose-ready-plan, or a Codex or Dot brief",
    "routes": [
     {
      "kind": "trigger",
@@ -1828,7 +1812,6 @@
      ],
      "verbs": [
       "propose-ready-plan",
-      "review-heavy-build-plan",
       "accept-ready-plan",
       "register-engineering-slice-plan"
      ],
@@ -2466,7 +2449,6 @@
       "accept-ready-plan",
       "propose-ready-plan",
       "register-engineering-slice-plan",
-      "review-heavy-build-plan",
       "set-work-shape-disposition"
      ],
      "bash_patterns": [
@@ -2643,7 +2625,6 @@
      "verbs": [
       "propose-ready-plan",
       "register-engineering-slice-plan",
-      "review-heavy-build-plan",
       "write-work-shape"
      ],
      "bash_patterns": []
@@ -3510,8 +3491,7 @@
      "tools": [],
      "verbs": [
       "ask-jev",
-      "review-engineering-slice",
-      "review-heavy-build-plan"
+      "review-engineering-slice"
      ],
      "bash_patterns": [
       "\\bgh\\s+pr\\s+review\\b"
@@ -3727,8 +3707,7 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "propose-ready-plan",
-      "review-heavy-build-plan"
+      "propose-ready-plan"
      ],
      "bash_patterns": []
     },

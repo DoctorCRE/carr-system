@@ -61,7 +61,10 @@ def admit(run, job, pr, head, repo=REPO):
     groups = {'ops/ci.sh --strict --only ' + g: g for g in evidence.class_groups()}
     if job.get('name') not in groups:
         raise Refusal('only a named CI class job may be rerun')
-    return groups[job['name']]
+    group = groups[job['name']]
+    if pr.get('draft') and group in ('gates', 'migration'):
+        raise Refusal('expensive CI class reruns require a ready PR')
+    return group
 
 
 def hosted_checks(remote, group):

@@ -109,7 +109,7 @@ class LookupTests(unittest.TestCase):
 
     def test_audited_moments_preserve_all_scopes_without_a_top_k_cutoff(self):
         fixture = json.loads((Path(__file__).parent / "fixtures/rule-delivery-eval/scope-backfills.json").read_text())
-        self.assertEqual(len(fixture["scopes"]), 212)
+        self.assertEqual(len(fixture["scopes"]), 211)  # retired 1fcaa63a removed
         source = catalog(*(rule(rid, scope) for rid, scope in fixture["scopes"].items()))
         seen = {}
         def judge(state, questions):

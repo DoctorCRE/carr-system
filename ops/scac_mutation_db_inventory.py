@@ -233,6 +233,12 @@ def validate_registered_grants(projection, baseline, contract):
         if remaining["secdef_execute"].count(grant) != 1:
             raise RuntimeError(f"registered grant missing or altered: {grant['ingress_key']}")
         remaining["secdef_execute"].remove(grant)
+    for grant in contract.get("retired_secdef_execute", []):
+        if any(row["ingress_key"] == grant["ingress_key"] for row in projection["secdef_execute"]):
+            raise RuntimeError(f"retired grant is still installed: {grant['ingress_key']}")
+        remaining["secdef_execute"].append(grant)
+    if contract.get("retired_secdef_execute"):
+        remaining["secdef_execute"].sort(key=lambda row: row["ingress_key"])
     for name, rows in remaining.items():
         if {"count": len(rows), "digest": digest(rows)} != baseline[name]:
             raise RuntimeError(f"current DB catalog drift: {name}")
