@@ -283,10 +283,24 @@ def judge_budgeted(text, rules, always, *, rank=None, ask=None, client=None, tit
     return {}, report
 
 
+def record_delivered(session_id, rule_ids, *, now=None, delivered_cache=DELIVERED_CACHE):
+    if not rule_ids or not isinstance(session_id, str) or not session_id.strip():
+        return
+    now = time.time() if now is None else now
+    cache = _sibling("jev_verdict_cache")
+    key = cache.key({"session": session_id.strip(), "delivered": True})
+    recent = cache.get(delivered_cache, key, ttl=DEDUPE_TTL_SECONDS, now=now) or {}
+    recent = recent if isinstance(recent, dict) else {}
+    recent = {rid: at for rid, at in recent.items()
+              if isinstance(at, (int, float)) and 0 <= now - at <= DEDUPE_TTL_SECONDS}
+    recent.update({rid: now for rid in rule_ids})
+    cache.put(delivered_cache, key, recent, ttl=DEDUPE_TTL_SECONDS, now=now)
+
+
 def advise(situation, *, session_id=None, now=None, triggers_path=TRIGGERS_PATH,
            compiled=None, rules=None, ask=None, client=None, rank=None,
            delivered_cache=DELIVERED_CACHE, log_path=LOG_PATH, envelope=None,
-           deadline=None, judgment_cache=None):
+           deadline=None, judgment_cache=None, defer_delivery=False):
     """The rules this message surfaces, within the Jev budget and the clock.
 
     `deadline` is a time.monotonic() value; by default DEADLINE_SECONDS from
@@ -392,11 +406,9 @@ def advise(situation, *, session_id=None, now=None, triggers_path=TRIGGERS_PATH,
              if not (isinstance(recent.get(rule_id), (int, float))
                      and 0 <= now - recent[rule_id] <= DEDUPE_TTL_SECONDS)}
     ordered = sorted(fresh.values(), key=lambda row: (-row["probability"], row["id"]))[:MAX_SURFACED]
-    if ordered and cache is not None:
-        recent = {rule_id: at for rule_id, at in recent.items()
-                  if isinstance(at, (int, float)) and 0 <= now - at <= DEDUPE_TTL_SECONDS}
-        recent.update({row["id"]: now for row in ordered})
-        cache.put(delivered_cache, dedupe_key, recent, ttl=DEDUPE_TTL_SECONDS, now=now)
+    if ordered and cache is not None and not defer_delivery:
+        record_delivered(session_key, [row["id"] for row in ordered],
+                         now=now, delivered_cache=delivered_cache)
     _log({"at": now, "mode": "human" if human else "envelope", "session": session_id,
           "compiled_status": compiled_status, "matched": sorted(selected),
           "jev_calls": report["calls"], "rank_status": report["rank_status"],
@@ -404,6 +416,8 @@ def advise(situation, *, session_id=None, now=None, triggers_path=TRIGGERS_PATH,
           "overflow": report["overflow"],
           "deadline_hit": report.get("deadline_hit", False),
           "unjudged": report.get("unjudged", []),
-          "delivered": [row["id"] for row in ordered],
+          "selected": [row["id"] for row in ordered],
+          "delivery_deferred": defer_delivery,
+          "delivered": [] if defer_delivery else [row["id"] for row in ordered],
           "situation": situation[:300]}, log_path)
     return ordered
