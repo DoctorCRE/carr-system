@@ -14,6 +14,7 @@ SANCTIONED_LOCAL_SPONSORS = {"joe-local": "joe", "dell-local": "dell"}
 DELIVERY_SOURCE_PATHS = (
     "hooks/rule-pack-preuse-reselection.py", "lib/rule_delivery_preuse.py",
     "lib/rule_scope_lookup.py", "lib/rule_operations.py", "lib/rule_routes.py",
+    "lib/rule_boot_gate.py", "lib/hook_runtime.py", "ops/jev_verdict_cache.py",
     "ops/jev_semantic.py", "ops/typesafe_client.py", "ops/config/jev-call-sites.v1.json",
     "ops/config/hooks.json", "ops/config/codex-hooks.json",
 )
