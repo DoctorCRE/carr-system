@@ -3,11 +3,13 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.rule_scope_lookup import lookup, select_rules
-from lib import rule_routes
+from lib.rule_delivery_preuse import digest
+from ops.rule_scope_replay import FrozenSelection
 
 
 def rule(rid, scope, **extra):
@@ -22,6 +24,34 @@ def catalog(*rules):
 
 
 class LookupTests(unittest.TestCase):
+    def test_replay_excludes_only_confirmed_retired_structural_and_moment_rules(self):
+        event = dict(hook_event_name='PreToolUse', tool_name='Bash', task='Synthetic replay')
+        historical_ids = ['0f38532e', '11111111', '1fcaa63a', '204391be', '4a77c35d']
+        fixture = {'structural_scopes': {rid: {'tools': ['Bash']}
+                                        for rid in ('0f38532e', '11111111')},
+                   'moment_decisions': {digest(event): historical_ids}}
+        documents = {
+            'ops/fixtures/rule-scope-compatibility.v1.json': fixture,
+            'ops/config/rule-selection-corpus.v1.json': {
+                'rules': [dict(id=rid, statement='Synthetic rule ' + rid) for rid in historical_ids]},
+            'ops/config/rule-retirements.v1.json': {'schema': 'rule-retirements/v1',
+                                                 'rules': {'0f38532e': '2026-10-17',
+                                                           '1fcaa63a': '2026-10-16'}},
+            'ops/fixtures/rule-delivery-eval/scope-backfills.json': {'scopes': {}}}
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            for relative, document in documents.items():
+                target = root/relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(document))
+            replay = FrozenSelection(root)
+            result = replay.select(event)
+        self.assertTrue(result['complete'])
+        self.assertEqual([row['id'] for row in result['rules']], ['11111111', '204391be', '4a77c35d'])
+        self.assertEqual(replay.fixture, fixture)
+        self.assertNotEqual([row['id'] for row in result['rules']],
+                            replay.retirements.active(historical_ids + ['22222222']))
+
     def test_exact_tool_verb_command_and_path_matches_union(self):
         source = catalog(rule("11111111", {"tools": ["Bash"]}),
                          rule("22222222", {"verbs": ["read-doctrine"]}),
@@ -145,31 +175,14 @@ class LookupTests(unittest.TestCase):
 
     def test_structural_scopes_preserve_routes_on_frozen_tool_calls(self):
         repo = Path(__file__).resolve().parent.parent
-        routes = rule_routes.load_routes(repo)
-        stored = []
-        for rid, entry in routes["rules"].items():
-            scope = {key: [] for key in ("tools", "verbs", "bash_patterns", "path_globs")}
-            for route in entry["routes"]:
-                if route["kind"] in {"trigger", "path_rule"}:
-                    for key in scope:
-                        scope[key].extend(route.get(key, []))
-                    if route.get("read_only"):
-                        scope["read_only"] = True
-            if any(scope.values()):
-                stored.append(rule(rid, scope))
-        source = catalog(*stored)
-        cases = json.loads((repo / "ops/fixtures/rule-delivery-eval/cases.v2.json").read_text())["cases"]
-        events = 0
-        for case in cases:
-            for call in case.get("tool_calls", []):
-                with self.subTest(case=case["id"], event=events):
-                    result = select_rules(source, dict(hook_event_name="PreToolUse", **call))
-                    expected = rule_routes.matched_rule_ids(routes, call["tool_name"], call.get("tool_input"))
-                    self.assertEqual([r["id"] for r in result["rules"]], expected)
-                    self.assertTrue(result["complete"])
-                events += 1
-        self.assertGreater(events, 300)
+        fixture = json.loads((repo / 'ops/fixtures/rule-scope-compatibility.v1.json').read_text())
+        source = catalog(*(rule(rid, scope) for rid, scope in fixture['structural_scopes'].items()))
+        for entry in fixture['structural_calls']:
+            result = select_rules(source, dict(hook_event_name='PreToolUse', **entry['call']))
+            self.assertEqual([r['id'] for r in result['rules']], entry['ids'])
+            self.assertTrue(result['complete'])
+        self.assertEqual(len(fixture['structural_calls']), 418)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

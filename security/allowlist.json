@@ -76,6 +76,18 @@
       "rule": "client-data",
       "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
       "reason": "Public county or city name in the initial NPPES territory predicate. This PR retains its original introduced commit; this qualification binds only that public value hash, path and exact historical source bytes."
+    },
+    {
+      "path": "migrations/0865_lead_stage_transition_proof_scac_successor.sql",
+      "sha256": "a0e6b9a7416c74df283c016ff5eeeb2e25aaeb856db8c1a6cb2c03899401cb60",
+      "rule": "generic-api-key",
+      "reason": "Historical generated SCAC v114 source-contract manifest at fc7c1578f. Line 161 serializes ingress identifiers, schema and handler digests, and job routing metadata, not authentication material. Retained in PR history after the successor was removed; exception binds only these exact immutable SQL bytes and this generic detector."
+    },
+    {
+      "path": "migrations/0865_lead_stage_transition_proof_scac_successor.sql",
+      "sha256": "11907f15985826b8b5cb0009ab4de02d7f4922a9f53d5950478838f102f8ffaf",
+      "rule": "generic-api-key",
+      "reason": "Historical generated SCAC v114 source-contract manifest at 710845781. Line 161 serializes ingress identifiers, schema and handler digests, and job routing metadata, not authentication material. Retained in PR history after the successor was removed; exception binds only these exact immutable SQL bytes and this generic detector."
     }
   ]
 }

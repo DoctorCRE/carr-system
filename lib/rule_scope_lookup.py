@@ -6,6 +6,7 @@ callers must handle incomplete results before claiming delivery coverage.
 from __future__ import annotations
 
 import json
+import time
 import math
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from lib.rule_operations import structural_matches
 REPO = Path(__file__).resolve().parent.parent
 MATCH_KEYS = ("tools", "verbs", "bash_patterns", "path_globs")
 MODEL = "jev-1.13.0"
+MAX_QUESTIONS = json.loads((REPO / "mcp-server/src/jev-request-contract.v1.json").read_text())["max_questions"]
 
 
 def _scope_condition(scope: object) -> dict:
@@ -110,15 +112,19 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
     # Each batch stays within the existing semantic transport's 100k input
     # limit. An individual oversized record remains explicit and unresolved.
     batches: list[list[dict]] = []
+    base_size = len(json.dumps(_moment_request([], event)))
+    batch_size = base_size
     for row in moments:
-        if len(json.dumps(_moment_request([row], event))) > 90000:
+        row_size = (len(json.dumps({row['id'][:8]: row}))
+                    + len(json.dumps(_moment_questions([row]))) + 4)
+        if base_size + row_size > 90000:
             unresolved.append({"rule_id": row["id"], "reason": "moment_input_too_large"})
             continue
-        batch = (batches[-1] if batches else []) + [row]
-        if batches and len(batch) <= 255 and len(json.dumps(_moment_request(batch, event))) < 90000:
-            batches[-1] = batch
-        else:
-            batches.append([row])
+        if not batches or len(batches[-1]) >= MAX_QUESTIONS or batch_size + row_size >= 90000:
+            batches.append([])
+            batch_size = base_size
+        batches[-1].append(row)
+        batch_size += row_size
     models = set()
     for batch in batches:
         questions = _moment_questions(batch)
@@ -173,3 +179,16 @@ def lookup(event: dict, *, runner: Callable = subprocess.run,
     except Exception:
         raise RuntimeError("scope_catalog_unavailable") from None
     return select_rules(catalog, event, judge=judge)
+
+
+def moment_judge(session_id: str, *, deadline: float | None = None) -> Callable:
+    """Use the existing semantic cache and shared cognition admission on misses."""
+    deadline = deadline or time.monotonic() + 12
+    def judge(state, questions):
+        from ops import jev_semantic as semantic
+        request = semantic.JudgmentRequest(state, questions, caller='rule_scope_lookup',
+                    version='stored-moment-v1', validate_confidence=True,
+                    session_id=session_id, deadline=deadline,
+                    timeout=max(.01, deadline-time.monotonic()), retries=0)
+        return semantic.evaluate(request).unwrap()
+    return judge

@@ -1,4 +1,5 @@
 import { canonicalJson } from "./artifact-trust.js";
+import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { bindReferralDeal } from "./relationship-network.js";
@@ -339,7 +340,10 @@ async function withEnvelope(client, actor, verb, args, fn) {
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
-    return { replayed: true, ...prior.rows[0].response };          // A1: replay, no second write
+    const response = prior.rows[0].response;
+    if (verb === "add-industry-event" || verb === "update-industry-event")
+      return { replayed: true, ...response, event: industryEventRecord(response.event) };
+    return { replayed: true, ...response };                          // A1: replay, no second write
   }
   const result = await fn();                                        // inside the open transaction
   await client.query(
@@ -505,6 +509,10 @@ function industryEventId(value) {
   if (typeof value !== "string" || !UUID_RE.test(value))
     throw new ToolError({ error: "industry_event_id_invalid" });
   return value;
+}
+
+function industryEventRecord(row) {
+  return integerFields(row, ["version"], "industry_event_version_invalid");
 }
 
 // [defect 18b12fda-b79c-43a1-86c4-51b9623e12fd, 2026-08-14] THE VIOLATION WAS OURS.
@@ -5015,7 +5023,7 @@ export const TOOLS = {
       if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
       const s = await resolveSubject(c, args.lead);
       if (s.type !== "lead") throw new ToolError({ error: "not_a_lead", resolved: s });
-      await versionGuard(c, "lead", s.id, args.base_version);
+      const locked = await versionGuard(c, "lead", s.id, args.base_version);
       const allowed = ["stage","lane","segment","source_type","source_detail","suppressed",
                        "est_lease_event","next_action_date","notes_path","notes","event_source",
                        "event_confidence","report_back_due","drip_campaign","drip_added","sf_deal","score","score_reason","owner"];
@@ -5075,11 +5083,13 @@ export const TOOLS = {
       const columns = Object.keys(storage);
       const old = (await c.query(`select ${columns.join(",")}${owner ? ",(select slug from actor where id=lead.owner_id) as owner" : ""} from lead where id=$1`, [s.id])).rows[0];
       const sets = columns.map((k, i) => `${k}=$${i + 2}`).join(", ");
-      await c.query(`update lead set ${sets}, updated_by=$1 where id=$${columns.length + 2}`,
+      const updated = await c.query(`update lead set ${sets}, updated_by=$1 where id=$${columns.length + 2} returning version`,
         [actor.id, ...Object.values(storage), s.id]);
+      const transitionProof = keys.includes("stage") ? { before_version: locked.version,
+        after_version: updated.rows[0].version, actor_slug: actor.slug } : null;
       for (const k of keys)
         await writeEvent(c, actor, "update-lead", "lead", s.id,
-          { recorded_at_after_lock: k === "stage", field: k, old: { [k]: old[k], ...(k === "owner" ? { owner_id: old.owner_id, owner_label: old.owner_label } : {}) }, new: { [k]: args.fields[k], ...(k === "owner" ? owner : {}), ...(k === "stage" && stageReview ? { stage_review: stageReview } : {}) },
+          { recorded_at_after_lock: k === "stage", field: k, old: { [k]: old[k], ...(k === "owner" ? { owner_id: old.owner_id, owner_label: old.owner_label } : {}) }, new: { [k]: args.fields[k], ...(k === "owner" ? owner : {}), ...(k === "stage" ? { transition_proof: transitionProof } : {}), ...(k === "stage" && stageReview ? { stage_review: stageReview } : {}) },
             ...(k === "stage" && stageReview ? { cause: stageReview.undo_event_id ? "human_correction" : undefined,
               human_quote: stageReview.human_quote, agent_rationale: stageReview.reason } : {}), idempotency_key: args.idempotency_key });
       return { ok: true, updated: keys };
@@ -8467,7 +8477,7 @@ export const TOOLS = {
           [tenant, clean.title, clean.organizer, clean.kind, clean.starts_at, clean.ends_at,
            clean.location, clean.is_virtual, clean.url, clean.relevance_note, clean.attendance_intent,
            clean.owner_partner, clean.status, clean.source, actor.id]);
-        const event = inserted.rows[0];
+        const event = industryEventRecord(inserted.rows[0]);
         await writeEvent(c, actor, "add-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };
@@ -8490,7 +8500,7 @@ export const TOOLS = {
            from industry_event
           where organization_tenant_id=$1
           order by starts_at, id limit $2`, [organizationTenantForActor(actor), limit]);
-      return { ok: true, events: result.rows, count: result.rows.length };
+      return { ok: true, events: result.rows.map(industryEventRecord), count: result.rows.length };
     },
   },
 
@@ -8508,8 +8518,7 @@ export const TOOLS = {
     }, required: ["idempotency_key", "event_id", "base_version"] },
     handler: async (c, actor, args) => {
       const eventId = industryEventId(args.event_id);
-      if (!Number.isInteger(args.base_version) || args.base_version < 1)
-        throw new ToolError({ error: "industry_event_base_version_invalid" });
+      safeInteger(args.base_version, "industry_event_base_version_invalid", { allowString: false });
       const clean = validateIndustryEventFields(args, { partial: true });
       const keys = ["title", "organizer", "kind", "starts_at", "ends_at", "location", "is_virtual",
         "url", "relevance_note", "attendance_intent", "owner_partner", "status", "source"]
@@ -8535,7 +8544,7 @@ export const TOOLS = {
         if (!result.rows.length)
           throw new ToolError({ error: "industry_event_version_conflict",
             hint: "read the event again and retry with its current version" });
-        const event = result.rows[0];
+        const event = industryEventRecord(result.rows[0]);
         await writeEvent(c, actor, "update-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };
