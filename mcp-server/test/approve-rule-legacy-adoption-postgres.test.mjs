@@ -16,6 +16,8 @@ const R = Object.freeze({
   ready:           "26200001-0000-4000-8000-000000000000",
   held:            "26200002-0000-4000-8000-000000000000",
   surfacing:       "26200003-0000-4000-8000-000000000000",
+  amendedText:     "26200009-0000-4000-8000-000000000000",
+  amendedScope:    "26200010-0000-4000-8000-000000000000",
   postCutover:     "26200004-0000-4000-8000-000000000000",
   noAdmission:     "26200005-0000-4000-8000-000000000000",
   classMismatch:   "26200006-0000-4000-8000-000000000000",
@@ -183,6 +185,18 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
     await seedLegacyRule(db, ctx, R.held, { control: CTL.held });
     await seedLegacyRule(db, ctx, R.surfacing, { control: CTL.surfacing });
     await seedLegacyRule(db, ctx, R.postCutover, { activatedAt: new Date().toISOString() });
+    for (const id of [R.amendedText, R.amendedScope]) {
+      const statement = await seedLegacyRule(db, ctx, id, { activatedAt: new Date().toISOString() });
+      await db.query(
+        `insert into ops.rule_approval_receipt
+           (idempotency_key,rule_id,rule_version,statement_hash,actor_id,policy_kind,
+            enforcement_status,requested_control_keys,installed_control_keys,reason,
+            normalized_contract,contract_hash,evidence_refs)
+         values ($1,$2,2,$3,$4,'machine_enforceable','hard_enforced',array[$5],array[$5],
+                 'synthetic approval before amendment','{}'::jsonb,
+                 encode(public.digest('{}'::jsonb::text,'sha256'),'hex'),array['synthetic'])`,
+        [randomUUID(), id, sha(id === R.amendedText ? "prior approved text" : statement), ctx.joeId, CTL.gate]);
+    }
     await seedLegacyRule(db, ctx, R.noAdmission, { admission: false });
     await seedLegacyRule(db, ctx, R.classMismatch, { enforcementClass: "human_only" });
     await seedLegacyRule(db, ctx, R.notJoeActivated, { activatedBy: ctx.dellId });
@@ -345,6 +359,68 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
       } finally {
         await authority.end();
       }
+    });
+
+    await t.test("post-cutover receiptless retirement records the missing grant and replays exactly", async () => {
+      const joe = await clientFor(pg, copy, "carr_authority_joe");
+      const key = randomUUID();
+      try {
+        const args = [R.postCutover, "withdraw authority despite missing grant", key];
+        const first = (await joe.query("select ops.retire_rule($1,$2,null,$3) as r", args)).rows[0].r;
+        assert.equal(first.status, "retired");
+        assert.equal(first.legacy_admission, null);
+        assert.match(first.missing_approval_receipt, /^missing_approval_receipt: /);
+        const replay = (await joe.query("select ops.retire_rule($1,$2,null,$3) as r", args)).rows[0].r;
+        assert.equal(replay.replayed, true);
+        assert.equal(replay.retirement_receipt_id, first.retirement_receipt_id);
+        assert.equal(replay.missing_approval_receipt, first.missing_approval_receipt);
+        const stored = (await db.query(
+          `select rr.*, r.status, r.version, ar.contract_hash as authority_hash
+             from ops.rule_retirement_receipt rr join public.rule r on r.id=rr.rule_id
+             join ops.authority_receipt ar on ar.idempotency_key='retirement:' || rr.idempotency_key
+            where rr.id=$1`, [first.retirement_receipt_id])).rows[0];
+        assert.equal(stored.approval_receipt_id, null);
+        assert.equal(stored.legacy_admission, null);
+        assert.equal(stored.missing_approval_receipt, first.missing_approval_receipt);
+        assert.equal(stored.status, "retired");
+        assert.equal(Number(stored.version), Number(stored.rule_version_after));
+        assert.equal(stored.contract_hash, stored.authority_hash);
+      } finally {
+        await joe.end();
+      }
+    });
+
+    for (const id of [R.amendedText, R.amendedScope]) {
+      await t.test(`retirement accepts an approval for an older ${id === R.amendedText ? "statement" : "scope"} version`, async () => {
+        const result = await callVerb(pg, copy, "carr_authority_joe", JOE, "retire-rule", {
+          idempotency_key: randomUUID(), rule_id: id, reason: "withdraw amended fixture",
+        });
+        assert.equal(result.now, "retired");
+        assert.equal(result.legacy_admission, null);
+        assert.match(result.missing_approval_receipt, /^missing_approval_receipt: /);
+        const receipt = (await db.query(
+          "select approval_receipt_id,missing_approval_receipt from ops.rule_retirement_receipt where id=$1",
+          [result.retirement_receipt_id])).rows[0];
+        assert.equal(receipt.approval_receipt_id, null);
+        assert.equal(receipt.missing_approval_receipt, result.missing_approval_receipt);
+      });
+    }
+
+    await t.test("pre-cutover receiptless retirement preserves its legacy explanation", async () => {
+      const result = await callVerb(pg, copy, "carr_authority_joe", JOE, "retire-rule", {
+        idempotency_key: randomUUID(), rule_id: R.surfacing, reason: "withdraw legacy fixture",
+      });
+      assert.equal(result.now, "retired");
+      assert.match(result.legacy_admission, /^legacy_admission: /);
+      assert.equal(result.missing_approval_receipt, null);
+    });
+
+    await t.test("retire-rule types a real database authority refusal", async () => {
+      await assert.rejects(callVerb(pg, copy, "carr_authority_dell", DELL, "retire-rule", {
+        idempotency_key: randomUUID(), rule_id: R.held, reason: "unauthorized fixture retirement",
+      }), e => e instanceof ToolError && e.payload.error === "rule_retirement_refused"
+        && e.payload.message === "system rule retirement requires Joe authority");
+      assert.equal((await ruleRow(R.held)).status, "active");
     });
 
     await t.test("an adopted rule retires through its receipt, not the legacy path", async () => {

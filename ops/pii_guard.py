@@ -100,6 +100,20 @@ def identity_spans(text, corpus):
     # Both entry count and key length are bounded. Larger phrases are checked
     # uncached, so arbitrary source text cannot inflate retained cache memory.
     cached_digest = functools.lru_cache(maxsize=8192)(matching_digest)
+
+    def matching_prefixes(window):
+        phrase = ""
+        matches = []
+        for width, word in enumerate(window, 1):
+            phrase += word
+            digest = cached_digest(phrase) if len(phrase) <= 1024 else matching_digest(phrase)
+            if digest is not None:
+                matches.append((width, digest))
+        return tuple(matches)
+
+    # Sealed registry versions repeat whole digest lists. Cache their windows
+    # as well as phrases so a list cannot evict every phrase before its replay.
+    cached_prefixes = functools.lru_cache(maxsize=8192)(matching_prefixes)
     raw_words = [(word, m.start(), m.end()) for m in re.finditer(r"(?:[^\W_]|[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f])+", text)
                  for word in tokens(m[0])]
 
@@ -110,12 +124,12 @@ def identity_spans(text, corpus):
 
     for words in itertools.chain([raw_words], represented_words()):
         for start, (_, begin, _) in enumerate(words):
-            phrase = ""
-            for word, _, end in words[start:start + corpus["max_tokens"]]:
-                phrase += word
-                digest = cached_digest(phrase) if len(phrase) <= 1024 else matching_digest(phrase)
-                if digest is not None:
-                    found.add((begin, end, digest))
+            window = words[start:start + corpus["max_tokens"]]
+            key = tuple(word for word, _, _ in window)
+            matches = (cached_prefixes(key) if sum(map(len, key)) <= 1024
+                       else matching_prefixes(key))
+            for width, digest in matches:
+                found.add((begin, window[width - 1][2], digest))
     return sorted(found, key=lambda row: (row[0], -row[1]))
 
 
@@ -160,6 +174,11 @@ def _sql_regions(text):
     """
     i = 0
     statement = []
+    comment_statement = None
+    ordinary_end = re.compile(r'--|/\*|[\'"$;Cc]')
+    comment_line = re.compile(r"[ \t]*--")
+    escaped_quote = re.compile(r"['\\]")
+    copy_end = re.compile(r"(?m)^\\\.\r?$")
     copy_rx = re.compile(r"COPY\s+([^\s(]+)[^;]*FROM stdin;[^\n]*\n", re.I)
     dollar_rx = re.compile(r"\$(?:[a-zA-Z_][a-zA-Z_0-9]*)?\$")
     while i < len(text):
@@ -167,21 +186,22 @@ def _sql_regions(text):
         copy = copy_rx.match(text, i) if text[i] in "Cc" else None
         if copy and not "".join(statement).strip():
             header_end = copy.end()
-            end = re.search(r"(?m)^\\\.\r?$", text[header_end:])
+            end = copy_end.search(text, header_end)
             if end is None:
                 raise ValueError("unterminated COPY")
-            rows_end = header_end + end.start()
+            rows_end = end.start()
             yield i, header_end, False
             yield header_end, rows_end, copy[1] == "public.retrieval_proposal"
-            i = header_end + end.end()
+            i = end.end()
             yield rows_end, i, False
             statement = []
+            comment_statement = None
             continue
         if text.startswith("--", i):
             # Group adjacent comments so the matcher sees line-spanning names.
             end = text.find("\n", i)
             i = len(text) if end < 0 else end + 1
-            while i < len(text) and re.match(r"[ \t]*--", text[i:]):
+            while i < len(text) and comment_line.match(text, i):
                 end = text.find("\n", i)
                 i = len(text) if end < 0 else end + 1
             yield begin, i, True
@@ -224,32 +244,41 @@ def _sql_regions(text):
             continue
         if text[i] in "'\"":
             quote = text[i]
-            escaped = quote == "'" and bool(re.search(r"(?:^|[^a-zA-Z_0-9])E$", "".join(statement), re.I))
-            metadata = quote == "'" and bool(re.match(r"^\s*COMMENT\s+ON\b", "".join(statement), re.I))
+            escaped = quote == "'" and bool(re.search(r"(?:^|[^a-zA-Z_0-9])E$", "".join(statement[-2:]), re.I))
+            if comment_statement is None:
+                comment_statement = bool(re.match(r"^\s*COMMENT\s+ON\b", "".join(statement), re.I))
+            metadata = quote == "'" and comment_statement
             i += 1
             while i < len(text):
-                if escaped and text[i] == "\\":
-                    i += 2
-                elif text[i] == quote:
-                    i += 1
-                    if i < len(text) and text[i] == quote:
-                        i += 1
-                    else:
-                        break
+                if escaped:
+                    special = escaped_quote.search(text, i)
+                    end = special.start() if special else -1
                 else:
+                    end = text.find(quote, i)
+                if end < 0:
+                    raise ValueError("unterminated quote")
+                if escaped and text[end] == "\\":
+                    i = end + 2
+                    continue
+                i = end + 1
+                if i < len(text) and text[i] == quote:
                     i += 1
+                else:
+                    break
             else:
                 raise ValueError("unterminated quote")
             yield begin, i, metadata
             statement.append(" literal ")
             continue
-        # Accumulate statement text so COMMENT and COPY are recognized only
-        # at SQL statement scope, never in strings or another COPY block.
+        # Keep statement context, but advance ordinary SQL as one span.
         i += 1
         if text[begin] == ";":
             statement = []
+            comment_statement = None
         else:
-            statement.append(text[begin])
+            end = ordinary_end.search(text, i)
+            i = end.start() if end else len(text)
+            statement.append(text[begin:i])
         yield begin, i, False
 
 
