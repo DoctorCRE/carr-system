@@ -216,7 +216,7 @@ class ProofTests(unittest.TestCase):
             return read_source(dsn, bins)
         with patch.object(proof, 'read_source', side_effect=capture_source):
             reference = proof.build_schema(ROOT / 'db/schema.sql', bins)
-        self.assertEqual(len(reference['ledger']), 558)
+        self.assertEqual(len(reference['ledger']), len(proof.migrate.load_migrations()))
         self.assertEqual(proof.ledger_proof(
             {name: digest for name, sql, digest in proof.migrate.load_migrations()},
             reference['ledger'])['pending'], [])
@@ -253,7 +253,7 @@ class ProofTests(unittest.TestCase):
              patch.object(proof, 'read_source', side_effect=production_source):
             result = proof.live_proof(ledger_only=False)
         self.assertTrue(result['ledger']['ok'], result['ledger'])
-        self.assertEqual(result['ledger']['applied'], 558)
+        self.assertEqual(result['ledger']['applied'], len(proof.migrate.load_migrations()))
         self.assertEqual(result['ledger']['pending'], [])
         self.assertTrue(result['equivalence']['ok'], result['equivalence'])
         self.assertTrue(result['grants']['ok'], result['grants'])
