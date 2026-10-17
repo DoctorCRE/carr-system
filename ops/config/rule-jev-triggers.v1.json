@@ -1,48 +1,11 @@
 {
  "counts": {
-  "residual": 15,
-  "rules": 117,
+  "residual": 16,
+  "rules": 118,
   "triggered": 102
  },
  "generated_note": "Written only by ops/rule-trigger-compile.py: one Jev request per pack-layer rule, keyed to the rule's statement digest. ops/rule-jit-compile.py turns these into rows of ops/config/rule-jit-triggers.v1.json. Never hand-edit.",
- "proposals": {
-  "8400cd3d": {
-   "always_on_probability": 0.08,
-   "id": "8400cd3d",
-   "mode": "review_required",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "system build": 0.67
-   },
-   "no_cue_probability": 0.16,
-   "packs": [
-    "engineering-git"
-   ],
-   "proposed_mode": "triggered",
-   "statement_sha256": "16791e7b4841a737f1932f8c95340340a1c1b0384da3bfeb72dee1ccb51eb398",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "begins new": 0.56,
-     "beyond-one-session rung": 0.67,
-     "bounded pstack": 0.56,
-     "brief begins": 0.68,
-     "brief dispatched": 0.74,
-     "builder": 0.54,
-     "dispatched": 0.72,
-     "grilling": 0.51,
-     "new build": 0.54,
-     "poteto-mode": 0.56,
-     "sizing": 0.65,
-     "sizing step": 0.66,
-     "slice": 0.56
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  }
- },
+ "proposals": {},
  "rules": {
   "015183f5": {
    "always_on_probability": 0.33,
@@ -1812,6 +1775,29 @@
      "confirm this pairing logic": 0.74,
      "suggest caveat": 0.7
     },
+    "paths": {},
+    "tools": {},
+    "verbs": {}
+   }
+  },
+  "8400cd3d": {
+   "always_on_probability": 0.08,
+   "id": "8400cd3d",
+   "mode": "residual",
+   "model": "jev-1.13.0",
+   "negatives": {},
+   "no_cue_probability": 0.16,
+   "packs": [
+    "engineering-git"
+   ],
+   "rejected_proposed_mode": "triggered",
+   "review_note": "Reject deterministic promotion: slice matches pizza discussion while Build a new governed agent learning system has no trigger. These cues do not establish a new build or builder dispatch. Keep the current statement as residual runtime judgment and preserve the existing plan-start routes.",
+   "reviewed_at": "2026-10-17",
+   "reviewed_by": "codex-independent-review-01a14889",
+   "statement_sha256": "16791e7b4841a737f1932f8c95340340a1c1b0384da3bfeb72dee1ccb51eb398",
+   "triggers": {
+    "commands": {},
+    "keywords": {},
     "paths": {},
     "tools": {},
     "verbs": {}

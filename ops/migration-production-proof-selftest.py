@@ -278,6 +278,11 @@ class ProofTests(unittest.TestCase):
                 repo = Path(directory)
                 (repo / 'db').mkdir()
                 (repo / 'db/migration-baseline.json').write_bytes((ROOT / 'db/migration-baseline.json').read_bytes())
+                (repo / 'migrations').mkdir()
+                baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
+                for migration in (ROOT / 'migrations').glob('*.sql'):
+                    if migration.name not in baseline:
+                        shutil.copyfile(migration, repo / 'migrations' / migration.name)
                 program = ("import sys; from pathlib import Path; "
                            "sys.path.insert(0, sys.argv[1]); import migrate; "
                            "migrate.MIGRATIONS_DIR=Path(sys.argv[2])/'migrations'; "
