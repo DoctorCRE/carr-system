@@ -41,6 +41,21 @@ def dump(body, owner='neondb_owner'):
 
 
 class ProofTests(unittest.TestCase):
+    def test_baseline_requires_every_original_row_before_pending_suffix(self):
+        baseline = proof.MigrationBaseline.load(ROOT)
+        covered = dict(baseline.migrations)
+        repository = dict(covered, **{'9999_future.sql': 'f' * 64})
+        before = dict(covered)
+        result = proof.ledger_proof(repository, covered, baseline)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['pending'], ['9999_future.sql'])
+        self.assertEqual(covered, before)
+        for missing in (baseline.migrations[0][0], baseline.cutoff):
+            partial = {name: sha for name, sha in covered.items() if name != missing}
+            result = proof.ledger_proof(repository, partial, baseline)
+            self.assertFalse(result['ok'])
+            self.assertIn('missing applied coverage', result['error'])
+
     def test_pending_suffix_passes(self):
         result = proof.ledger_proof({'0001_a.sql': 'a', '0003_c.sql': 'c'}, {'0001_a.sql': 'a'})
         self.assertTrue(result['ok'])
@@ -72,6 +87,7 @@ class ProofTests(unittest.TestCase):
         self.assertFalse(proof.ledger_proof({'0001_a.sql': 'a'}, {})['ok'])
 
     def test_snapshot_drift_refuses(self):
+        read_text = Path.read_text
         migrations = proof.migrate.load_migrations()
         applied = {name: digest for name, sql, digest in migrations}
         snapshot = (ROOT / 'db/schema.sql').read_text()
@@ -84,8 +100,9 @@ class ProofTests(unittest.TestCase):
         ]:
             with self.subTest(kind=kind), \
                  patch.object(proof, 'production_dsn') as credentials, \
-                 patch.object(proof.migrate, 'load_migrations', return_value=migrations), \
-                 patch.object(Path, 'read_text', return_value=drifted):
+                 patch.object(Path, 'read_text', autospec=True,
+                              side_effect=lambda path, *args, **kwargs: drifted
+                              if path == ROOT / 'db/schema.sql' else read_text(path, *args, **kwargs)):
                 with self.assertRaisesRegex(RuntimeError, 'ledger'):
                     proof.live_proof()
                 credentials.assert_not_called()
@@ -216,7 +233,7 @@ class ProofTests(unittest.TestCase):
             return read_source(dsn, bins)
         with patch.object(proof, 'read_source', side_effect=capture_source):
             reference = proof.build_schema(ROOT / 'db/schema.sql', bins)
-        self.assertEqual(len(reference['ledger']), 558)
+        self.assertEqual(len(reference['ledger']), len(proof.migrate.load_migrations()))
         self.assertEqual(proof.ledger_proof(
             {name: digest for name, sql, digest in proof.migrate.load_migrations()},
             reference['ledger'])['pending'], [])
@@ -253,7 +270,7 @@ class ProofTests(unittest.TestCase):
              patch.object(proof, 'read_source', side_effect=production_source):
             result = proof.live_proof(ledger_only=False)
         self.assertTrue(result['ledger']['ok'], result['ledger'])
-        self.assertEqual(result['ledger']['applied'], 558)
+        self.assertEqual(result['ledger']['applied'], len(proof.migrate.load_migrations()))
         self.assertEqual(result['ledger']['pending'], [])
         self.assertTrue(result['equivalence']['ok'], result['equivalence'])
         self.assertTrue(result['grants']['ok'], result['grants'])

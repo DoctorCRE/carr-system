@@ -61,7 +61,8 @@ test('W5 PostgreSQL: vendor contract migrations install together on an empty sch
   const migrations=(await readdir(folder)).filter(name=>name.endsWith('_vendor_relationship_contract.sql')).sort();
   assert.ok(migrations.length,'vendor schema installation must be present');
   for(const name of migrations)await db.query((await readFile(new URL(name,folder),'utf8')).replaceAll('public.',schema+'.'));
-  assert.deepEqual((await db.query('select conname from pg_constraint where connamespace=$1::regnamespace order by conname',[schema])).rows.map(row=>row.conname),['vendor_deal_evidence_array','vendor_trust_override_shape']);
+  assert.deepEqual((await db.query("select conname from pg_constraint where connamespace=$1::regnamespace and contype <> 'n' order by conname",[schema])).rows.map(row=>row.conname),['vendor_deal_evidence_array','vendor_trust_override_shape']);
+  assert.deepEqual((await db.query("select attnotnull from pg_attribute where attrelid=$1::regclass and attname='deal_evidence'",[`${schema}.vendor`])).rows,[{attnotnull:true}]);
  } finally {await db.query('rollback');await db.end();}
 });
 
