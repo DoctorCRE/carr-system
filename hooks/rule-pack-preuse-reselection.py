@@ -17,6 +17,7 @@ from lib import rule_routes
 from lib.hook_runtime import decision, run
 
 FAILURE = "RULE LOOKUP INCOMPLETE. Rules were not fully delivered. Ordinary actions must wait. Recover through standing-context or the read-only rule verbs; report unusable scope as a data defect."
+UNAVAILABLE = "RULE LOOKUP UNAVAILABLE. The rule store could not be reached for this action; it was not blocked. Recover rules through standing-context if the work depends on them."
 
 
 def _transcript_lines(path):
@@ -151,6 +152,12 @@ def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
         if not valid_local_identity(selection['identity']):
             return refused(event)
         return delivery_receipt(payload, selection, task, dedupe=dedupe)
+    except RuntimeError as error:
+        # A store outage is advisory: never block work on a transient store or network failure.
+        # Integrity failures (sponsor mismatch, invalid catalog) still refuse below.
+        if str(error) != 'scope_catalog_unavailable':
+            return refused(event)
+        return None if event == 'Stop' else context(UNAVAILABLE, event)
     except Exception:
         return refused(event)
 
