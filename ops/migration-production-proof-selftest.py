@@ -250,6 +250,38 @@ class ProofTests(unittest.TestCase):
         self.assertTrue(proof.privilege_difference(rebuilt['grants'], reference['grants'])['ok'])
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
+    def test_compacted_runner_is_read_only_and_preserves_original_ledger_timestamps(self):
+        import psycopg
+        bins = proof.comparison.find_pg18(None)
+        read_source = proof.read_source
+        observed = []
+
+        def check_no_op(dsn, bins):
+            def ledger():
+                with psycopg.connect(dsn) as conn:
+                    return conn.execute('select filename, sha256, applied_at from schema_migrations order by filename').fetchall()
+            before = ledger()
+            with tempfile.TemporaryDirectory() as directory:
+                repo = Path(directory)
+                (repo / 'db').mkdir()
+                (repo / 'db/migration-baseline.json').write_bytes((ROOT / 'db/migration-baseline.json').read_bytes())
+                program = ("import sys; from pathlib import Path; "
+                           "sys.path.insert(0, sys.argv[1]); import migrate; "
+                           "migrate.MIGRATIONS_DIR=Path(sys.argv[2])/'migrations'; "
+                           "sys.argv=['migrate.py','--apply','--yes']; migrate.main()")
+                output = proof.checked([sys.executable, '-c', program, ROOT / 'tools', repo],
+                    dict(PATH=os.environ.get('PATH', ''), DATABASE_URL=dsn,
+                         PGOPTIONS='-c default_transaction_read_only=on'), 'read-only compacted runner fixture')
+            self.assertIn('pending: 0', output)
+            self.assertEqual(ledger(), before)
+            observed.append(len(before))
+            return read_source(dsn, bins)
+
+        with patch.object(proof, 'read_source', side_effect=check_no_op):
+            proof.build_schema(ROOT / 'db/schema.sql', bins)
+        self.assertEqual(observed, [len(repository_ledger())])
+
+    @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_live_proof_accepts_production_owner_with_zero_pending(self):
         bins = proof.comparison.find_pg18(None)
         read_source = proof.read_source
