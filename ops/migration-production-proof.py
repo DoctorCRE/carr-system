@@ -110,6 +110,27 @@ def privilege_catalog(conn):
     privileges = [(kind, identity, '', role, privilege, grantable)
                   for role, kind, identity, privilege, grantable in facts
                   if kind not in {'database', 'large_object'}]
+    owners = conn.execute("""with owned(owner,kind,identity,namespace) as (
+        select c.relowner,case c.relkind when 'S' then 'sequence' else 'table' end,
+          n.nspname||'.'||c.relname,n.nspname
+          from pg_class c join pg_namespace n on n.oid=c.relnamespace
+        union all select nspowner,'schema',nspname,nspname from pg_namespace
+        union all select p.proowner,'function',
+          n.nspname||'.'||p.proname||'('||oidvectortypes(p.proargtypes)||')',n.nspname
+          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        union all select t.typowner,'type',n.nspname||'.'||t.typname,n.nspname
+          from pg_type t join pg_namespace n on n.oid=t.typnamespace
+        union all select lanowner,'language',lanname,'' from pg_language
+        union all select fdwowner,'foreign_data_wrapper',fdwname,'' from pg_foreign_data_wrapper
+        union all select srvowner,'foreign_server',srvname,'' from pg_foreign_server
+        union all select a.defaclrole,'default_acl',
+          coalesce(n.nspname,'*')||':'||a.defaclobjtype::text||':<owner>',coalesce(n.nspname,'')
+          from pg_default_acl a left join pg_namespace n on n.oid=a.defaclnamespace
+        ) select r.rolname,o.kind,o.identity from owned o join pg_roles r on r.oid=o.owner
+          where o.namespace not in ('pg_catalog','information_schema')
+            and o.namespace !~ '^pg_(toast|temp)' order by 1,2,3""").fetchall()
+    privileges += [('owner', f'{kind}:{identity}', '', '<owner>', 'owner', False)
+                   for role, kind, identity in owners]
     attributes = conn.execute("""select rolname, rolsuper, rolinherit, rolcreaterole,
         rolcreatedb, rolcanlogin, rolreplication, rolconnlimit, rolbypassrls
         from pg_roles order by rolname""").fetchall()
@@ -119,23 +140,32 @@ def privilege_catalog(conn):
         join pg_roles m on m.oid=a.member order by 1,2,3,4,5""").fetchall()
     privileges += [('ROLE', role, '', member, f'MEMBER inherit={inherit} set={set_option}', admin)
                    for role, member, admin, inherit, set_option in memberships]
-    return dict(roles=['PUBLIC'] + roles, privileges=privileges, memberships=memberships, role_attributes=attributes)
+    return dict(roles=['PUBLIC'] + roles, privileges=privileges,
+                owner_roles=sorted({role for role, kind, identity in owners}),
+                memberships=memberships, role_attributes=attributes)
 
 
 def privilege_difference(production, snapshot):
     left_roles, right_roles = set(production['roles']), set(snapshot['roles'])
     common = left_roles & right_roles
     def comparable(row):
-        return (row[3] in common
+        return ((row[3] in common or row[3] == '<owner>')
                 and (row[0] != 'ROLE' or row[1] in common)
-                and (row[0] != 'default_acl' or row[1].rsplit(':', 1)[-1] in common))
+                and (row[0] != 'default_acl' or row[1].rsplit(':', 1)[-1] in common | {'<owner>'}))
     left = {tuple(row) for row in production['privileges'] if comparable(row)}
     right = {tuple(row) for row in snapshot['privileges'] if comparable(row)}
     left_attributes = {tuple(row) for row in production.get('role_attributes', []) if row[0] in common}
     right_attributes = {tuple(row) for row in snapshot.get('role_attributes', []) if row[0] in common}
-    return dict(ok=left == right and left_attributes == right_attributes, common_roles=sorted(common),
-                production_only_attributes=sorted(left_attributes - right_attributes),
-                snapshot_only_attributes=sorted(right_attributes - left_attributes),
+    owner_roles = set(production.get('owner_roles', [])) | set(snapshot.get('owner_roles', []))
+    left_only_attributes, right_only_attributes = left_attributes - right_attributes, right_attributes - left_attributes
+    return dict(ok=left == right and
+                not any(row[0] not in owner_roles for row in left_only_attributes | right_only_attributes),
+                common_roles=sorted(common),
+                production_only_attributes=sorted(row for row in left_only_attributes if row[0] not in owner_roles),
+                snapshot_only_attributes=sorted(row for row in right_only_attributes if row[0] not in owner_roles),
+                informational_owner_attributes=dict(
+                    production_only=sorted(row for row in left_only_attributes if row[0] in owner_roles),
+                    snapshot_only=sorted(row for row in right_only_attributes if row[0] in owner_roles)),
                 production_only_roles=sorted(left_roles - right_roles),
                 snapshot_only_roles=sorted(right_roles - left_roles),
                 production_only=[list(row) for row in sorted(left - right)],
@@ -234,7 +264,7 @@ def live_proof(ledger_only=True):
     result['equivalence'] = dict(ok=False,
         snapshot_sha256=hashlib.sha256((ROOT / 'db/schema.sql').read_bytes()).hexdigest(),
         scope='all pg_dump schema objects; internal namespace ACLs, database ACLs and large objects excluded; role passwords and grantor identities excluded',
-        normalization='owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; privileges compared separately by common role, without grantor identity')
+        normalization='owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; explicit non-owner ACLs compared by common role without grantor identity; owners normalized to <owner>; implicit ACL defaults excluded, including PUBLIC defaults; owner role attributes informational')
     result['grants'] = dict(ok=None, status='not_run', stage='production plus pending',
                             reason='disposable reconstruction did not complete')
     try:
@@ -287,6 +317,9 @@ def main():
             print('grants:', 'PASS' if result['grants']['ok'] else 'FAIL',
                   f"stage={result['grants']['stage']} production_only={len(result['grants']['production_only'])} snapshot_only={len(result['grants']['snapshot_only'])} "
                   f"role_attribute_differences={len(result['grants']['production_only_attributes']) + len(result['grants']['snapshot_only_attributes'])}")
+            informational = result['grants']['informational_owner_attributes']
+            print('owner role attributes: INFO',
+                  f"differences={len(informational['production_only']) + len(informational['snapshot_only'])}")
     if 'detail' in result:
         print(result['detail'])
     print('proof report:', args.report)
