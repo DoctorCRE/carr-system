@@ -326,6 +326,27 @@ create table public.schema_migrations (filename text primary key, sha256 text);
                       rebuilt['grants']['privileges'])
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
+    def test_public_execute_revoke_detects_drift_with_identical_schema(self):
+        bins = proof.comparison.find_pg18(None)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'schema.sql'
+            base = """create function public.example_read() returns int language sql as 'select 1';
+create table public.schema_migrations (filename text primary key, sha256 text);
+"""
+            source.write_text(base)
+            reference = proof.build_schema(source, bins)
+            source.write_text(base + 'revoke execute on function public.example_read() from public;\n')
+            revoked = proof.build_schema(source, bins)
+        self.assertEqual(proof.schema_difference(reference['dump'], revoked['dump']), [])
+        difference = proof.privilege_difference(reference['grants'], revoked['grants'])
+        self.assertFalse(difference['ok'], difference)
+        public_execute = ('function', 'public.example_read()', '', 'PUBLIC', 'execute', False)
+        self.assertIn(public_execute, reference['grants']['privileges'])
+        self.assertNotIn(public_execute, revoked['grants']['privileges'])
+        self.assertEqual(difference['production_only'], [list(public_execute)])
+        self.assertEqual(difference['snapshot_only'], [])
+
+    @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_production_plus_pending_equals_snapshot_and_detects_drift(self):
         shadow = proof.load('fixture_shadow', ROOT / 'ops/migration-shadow.py')
         bins = shadow.find_pg18(None)
@@ -346,7 +367,6 @@ create table public.schema_migrations (filename text primary key, sha256 text);
             base = """create table public.example (id integer);
 grant select on public.example to reader;
 create function public.example_read() returns int language sql as 'select 1';
-grant execute on function public.example_read() to public;
 create table public.schema_migrations (filename text primary key, sha256 text not null,
 applied_at timestamptz not null default now());
 """
