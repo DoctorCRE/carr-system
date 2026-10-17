@@ -101,8 +101,12 @@ def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
     if event not in {'PreToolUse', 'UserPromptSubmit', 'Stop'}:
         return None
     if event == 'PreToolUse':
-        from lib.rule_boot_gate import classify
+        from lib.rule_boot_gate import classify, parse_bash_fetch, READ_ONLY_RULE_VERBS
         if classify(payload.get('tool_name'), payload.get('tool_input'), payload.get('cwd', str(REPO)))[0] != 'other':
+            return None
+        if (payload.get('tool_name') == 'Bash' and isinstance(payload.get('tool_input'), dict)
+                and parse_bash_fetch(payload['tool_input'].get('command'), payload.get('cwd', str(REPO)),
+                                     verbs=READ_ONLY_RULE_VERBS) is not None):
             return None
     if not payload.get('session_id') or (event == 'PreToolUse' and not payload.get('tool_use_id')):
         return refused(event)

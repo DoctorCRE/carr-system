@@ -608,9 +608,10 @@ def _py_preserves_root(code):
     return printed and preserves_root
 
 
-def parse_bash_fetch(command, cwd):
+def parse_bash_fetch(command, cwd, *, verbs=("standing-context",)):
     """(args, direct) when `command` is a standing-context fetch in the grammar
-    above (`direct` False when output passes through a filter), else None."""
+    above (`direct` False when output passes through a filter), else None.
+    The lookup adapter may name the read-only rule verbs; boot uses only standing-context."""
     tokens = _lex(str(command or "").strip())
     if not tokens:
         return None
@@ -638,7 +639,7 @@ def parse_bash_fetch(command, cwd):
     words = [t for t in head if t[0] == "word"]
     if not all(t[0] in ("word", "redir") for t in head) or [t[0] for t in head[:len(words)]] != ["word"] * len(words):
         return None  # a redirect only after the arguments
-    if len(words) not in (3, 4) or [w[1] for w in words[1:3]] != ["call", "standing-context"]:
+    if len(words) not in (3, 4) or words[1][1] != "call" or words[2][1] not in verbs:
         return None
     prog = words[0]
     if "/" not in prog[1]:

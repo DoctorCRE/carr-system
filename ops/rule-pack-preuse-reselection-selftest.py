@@ -112,6 +112,10 @@ class DeliveryTests(unittest.TestCase):
         self.assertNotIn('secret', json.dumps(output))
         event['tool_input'] = {'command': './run.sh call standing-context \'{}\''}
         self.assertIsNone(hook.process(event, runner=unavailable))
+        event['tool_input'] = {'command': './run.sh call read-doctrine \'{"document":"engineering-workflow-sop"}\''}
+        self.assertIsNone(hook.process(event, runner=unavailable))
+        event['tool_input']['command'] += ' && touch forbidden'
+        self.assertEqual(hook.process(event, runner=unavailable)['hookSpecificOutput']['permissionDecision'], 'deny')
 
 
 if __name__ == '__main__':
