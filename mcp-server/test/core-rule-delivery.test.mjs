@@ -6,7 +6,7 @@ import { CORE_RULE_IDS } from "../src/core-rule-ids.js";
 const ACTOR = { id: "11111111-1111-4111-8111-111111111111", slug: "joe",
                 human: true, via: "oauth-google" };
 
-const SHARED = ["1fddcffb", "347a9ca6", "424ba0cc", "4a53ff82"];
+const SHARED = ["24e10ee8", "347a9ca6", "424ba0cc", "4a53ff82"];
 const PERSONAL = ["7e9739f2", "57d13061"];
 
 function rows(ids, personal) {
@@ -19,7 +19,7 @@ function rows(ids, personal) {
 }
 
 const PLAN = [
-  { short_id: "1fddcffb", load_layer: "layer0", packs: [], scope: "shared" },
+  { short_id: "24e10ee8", load_layer: "layer0", packs: [], scope: "shared" },
   { short_id: "347a9ca6", load_layer: "layer0", packs: [], scope: "shared" },
   { short_id: "424ba0cc", load_layer: "pack", packs: ["client-deal"], scope: "shared" },
   { short_id: "4a53ff82", load_layer: "control", packs: ["engineering-git"], scope: "shared" },
@@ -82,8 +82,8 @@ function client({ mode = "shadow", plan = PLAN, packIndex = PACK_INDEX } = {}) {
 
 const call = (c, args = {}) => executeRegisteredTool(c, ACTOR, "standing-context", args);
 
-test("1fddcffb and 4a53ff82 really are CORE ids in the shipped triage", () => {
-  assert.ok(CORE_RULE_IDS.includes("1fddcffb"));
+test("24e10ee8 and 4a53ff82 really are CORE ids in the shipped triage", () => {
+  assert.ok(CORE_RULE_IDS.includes("24e10ee8"));
   assert.ok(CORE_RULE_IDS.includes("4a53ff82"));
   assert.equal(CORE_RULE_IDS.includes("347a9ca6"), false,
     "347a9ca6 must stay a non-core comparison point for this file to mean anything");
@@ -91,7 +91,7 @@ test("1fddcffb and 4a53ff82 really are CORE ids in the shipped triage", () => {
 
 test("enforced mode keeps CORE Layer 0 rules as gists", async () => {
   const out = await call(client({ mode: "enforced" }));
-  const core = out.shared_rules.find(r => r.id === "1fddcffb");
+  const core = out.shared_rules.find(r => r.id === "24e10ee8");
   assert.ok(core && core.gist);
   assert.equal(core.statement, undefined);
 });

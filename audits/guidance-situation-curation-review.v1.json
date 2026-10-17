@@ -18,23 +18,6 @@
       "phrase": "Joe and Dell partner complementarity"
     },
     {
-      "concept_key": "authoritative-record-ownership",
-      "definition": "Choosing one canonical home for a record and making every other surface a governed consumer instead of a competing copy.",
-      "guidance_id": "rule-0f38532e-whole-v1",
-      "label": "Authoritative record ownership",
-      "mappings": [
-        {
-          "concept_key": "authoritative-record-ownership",
-          "doctrine_section_id": "1debbdd7-9880-47f7-81a6-55e788716c57",
-          "rationale": "The active knowledge-architecture section supports authoritative ownership during change; it does not replace the source rule's universal anti-duplication and generated-view mandate.",
-          "role": "supports",
-          "section_address": "carr-production-maturity-baseline#s15-deprecation-decisions-and-knowledge-architecture",
-          "weight": 1
-        }
-      ],
-      "phrase": "choose the authoritative source of truth"
-    },
-    {
       "concept_key": "joe-brokerage-priority-context",
       "definition": "Interpreting Joe's priorities from his healthcare brokerage role and current pipeline-building work rather than over-weighting recent system construction.",
       "guidance_id": "rule-1021fa84-whole-v1",
@@ -214,24 +197,25 @@
     }
   ],
   "proposed_constitution_guidance_ids": [
-    "rule-0f38532e-whole-v1",
     "rule-fa217e48-whole-v1",
-    "rule-1fddcffb-whole-v1",
     "rule-015183f5-whole-v1",
-    "rule-2271e684-whole-v1"
+    "rule-2271e684-whole-v1",
+    "rule-df8f1da0-whole-v1",
+    "rule-179be4b8-whole-v1"
   ],
   "review_state": "proposed",
   "reviewed_base_inventory": {
     "excluded_rule_surface": "intro_politics",
     "path": "ops/config/rule-enforcement-map.json",
-    "sha256": "eed92f90f880c10c4aeaad4a1220de16d59f38a3eaf4e7a2bee7f14e155546cb",
-    "standing_source_count": 208
+    "sha256": "cdc4747ce0916966f2b24f255483da1c4fcaca064e982d9a8d98ec3fdb8415d7",
+    "standing_source_count": 190
   },
   "reviewed_source_manifest": {
     "path": "audits/guidance-migration-manifest.v1.tsv",
-    "sha256": "db9625bc4339568ae49283943eae77e2ee6377518adc047058019acc2f8ffa62"
+    "sha256": "337f226e75ac7c94cabce74b6f2498b0054d7c8aa5aeba6ee627218743ec2487"
   },
   "schema": "guidance-situation-curation-review/v1",
   "_repin_note_2026_10_16_reply_gates": "PR #1801 removes 19 automated gates under Joe's 2026-10-15 purge ruling and reclassifies their 42 rules as judgment_ambient prose guidance; all active rule IDs are preserved. The reviewed migration manifest gained one row per rule, appended as an orchestrator-approved batch with no human review recorded. The doctrine situation mappings are unchanged; these digests identify the updated inventory and manifest without approving any proposed rule or mapping.",
-  "_repin_note_2026_10_17_heavy_build_retirement": "Remove retired 1fcaa63a and include admitted sizing rule 8400cd3d in the current inventory and procedure manifest. Doctrine mappings and proposed review status are unchanged."
+  "_repin_note_2026_10_17_heavy_build_retirement": "Remove retired 1fcaa63a and include admitted sizing rule 8400cd3d in the current inventory and procedure manifest. Doctrine mappings and proposed review status are unchanged.",
+  "_repin_note_2026_10_17_retired_rule_reselection": "PR #1859 removes 18 retired or pending-retirement rule IDs from the active inventory and procedure manifest. The proposed doctrine guidance for retired 0f38532e and the proposed constitution entries for retired 0f38532e and 1fddcffb leave with their source rules. Replacements chosen mechanically (coordinator rule, 2026-10-17): step 1, an existing candidate ranking in this review or the manifest, found none; step 2, core rule cards in ops/config/rule-cards.v1.json by core_rank then source_rule_ids order, taking the first two rules active in the pruned enforcement map, outside the #1857 retirement set (204391be, 4a77c35d) and not already proposed, selected K01 rules df8f1da0 and 179be4b8 (rule-df8f1da0-whole-v1, rule-179be4b8-whole-v1). Every other doctrine mapping and the proposed review status are unchanged."
 }
