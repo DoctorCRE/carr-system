@@ -10,6 +10,8 @@ USAGE:
   ops/rule-trigger-compile.py --changed    # compile only rules whose statement
                                            # digest changed, or that are new;
                                            # drop rules no longer pack-layer
+  ops/rule-trigger-compile.py --prune      # offline: remove inactive rules only;
+                                           # preserve surviving evidence without Jev
   ops/rule-trigger-compile.py --backfill   # recompile every pack-layer rule
   ops/rule-trigger-compile.py --check      # offline: fail when any rule is
                                            # uncompiled, stale or undeliverable
@@ -40,6 +42,7 @@ def main(argv=None):
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--changed", action="store_true")
+    mode.add_argument("--prune", action="store_true", help="offline: remove inactive pack-layer rows without recompiling retained evidence")
     mode.add_argument("--backfill", action="store_true")
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--preview", metavar="RULE_ID")
@@ -64,6 +67,16 @@ def main(argv=None):
     emap = rtc.load_json(rtc.MAP_PATH)
     rules = rtc.pack_rules(corpus, emap)
     doc = rtc.load_compiled()
+
+    if args.prune:
+        if doc is None:
+            parser.error("cannot prune a missing or malformed compiled document")
+        pruned = rtc.prune_inactive(doc, rules)
+        with open(rtc.OUTPUT_PATH, "wb") as handle:
+            handle.write(rtc.canonical_bytes(pruned))
+        retained = len(pruned["rules"]) + len(pruned["proposals"])
+        print(f"rule-trigger-compile: pruned inactive rows; retained {retained} unchanged entries; 0 Jev requests")
+        return 0
 
     if args.promote:
         import datetime
