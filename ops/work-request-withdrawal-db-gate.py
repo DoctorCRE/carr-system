@@ -262,6 +262,54 @@ def concurrency_test(dsn):
             raise RuntimeError("evidence was committed after the request was superseded")
     print("PASS: evidence-first and supersession-first transactions serialize and refuse stranding")
 
+    with psycopg.connect(dsn) as setup:
+        cur = setup.cursor()
+        predecessor, middle, final = [
+            capture(cur, title, slug=slug, section=section, revision=revision)
+            for title in ("Predecessor A", "Successor B", "Successor C")]
+        triage(cur, predecessor)
+        triage(cur, middle)
+    with psycopg.connect(dsn, autocommit=True) as first, psycopg.connect(dsn, autocommit=True) as second:
+        first.execute("set statement_timeout='10s'")
+        second.execute("set statement_timeout='10s'")
+        first.execute("begin")
+        row = first.execute(
+            "select state,version,superseded_by_ref from ops.supersede_sourced_work_request("
+            "%s,2,'next',%s,'joe',%s)", (middle, final, uuid.uuid4())).fetchone()
+        if row != ("superseded", 3, final):
+            raise RuntimeError(f"B->C did not supersede the middle request: {row}")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            def supersede_predecessor():
+                try:
+                    second.execute("select ops.supersede_sourced_work_request(%s,2,'next',%s,'joe',%s)",
+                                   (predecessor, middle, uuid.uuid4()))
+                    return "accepted"
+                except psycopg.Error as exc:
+                    return str(exc.diag.message_primary or exc)
+            pending = pool.submit(supersede_predecessor)
+            try:
+                wait_for_blocker(first, pending, second.info.backend_pid, first.info.backend_pid)
+            finally:
+                first.execute("commit")
+            message = pending.result(timeout=12)
+        if not message.startswith("successor_withdrawn:"):
+            raise RuntimeError(f"A->B must refuse successor_withdrawn after B->C commits: {message}")
+        rows = first.execute(
+            "select w.ref,w.state,w.version,s.ref from ops.work_request w"
+            " left join ops.work_request s on s.id=w.superseded_by"
+            " where w.ref=any(%s) order by w.ref", ([predecessor, middle, final],)).fetchall()
+        expected = [(predecessor, "triaged", 2, None), (middle, "superseded", 3, final),
+                    (final, "captured", 1, None)]
+        if rows != sorted(expected):
+            raise RuntimeError(f"concurrent supersessions left an invalid chain: {rows}")
+        count = first.execute(
+            "select count(*) from ops.work_request_withdrawal_receipt r"
+            " join ops.work_request w on w.id=r.work_request_id where w.ref=%s",
+            (predecessor,)).fetchone()[0]
+        if count != 0:
+            raise RuntimeError("refused A->B left a withdrawal receipt")
+    print("PASS: A->B waits for B->C and refuses successor_withdrawn after commit")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
