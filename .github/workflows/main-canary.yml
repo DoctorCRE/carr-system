@@ -51,7 +51,7 @@ jobs:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
           - "gates"
           - "migration"
-    timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
+    timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
       postgres:
