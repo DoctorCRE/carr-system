@@ -22,8 +22,9 @@ class FrozenSelection:
                         'corpus_digest': digest(corpus), 'identity': {
                             'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
                             'sponsoring_human_id': 'joe'},
-                        'rules': [dict(r, scope={'moment': scopes.get(r['id'], {}).get('moment')
-                                                 or r['statement']}, personal_to=None)
+                        'rules': [dict(r, scope=dict(self.fixture['structural_scopes'].get(r['id'], {}),
+                                                 moment=scopes.get(r['id'], {}).get('moment')
+                                                 or r['statement']), personal_to=None)
                                   for r in corpus]}
 
     def select(self, event):

@@ -78,6 +78,16 @@ def main():
         if current != old['events'] or case['input_sha256'] != old['input_sha256']:
             pairs.append(case['id'])
     check('paired routing preserves all 339 cases and event order', len(cases) == 339 and not pairs, pairs)
+    from unittest.mock import patch
+    from lib.rule_delivery_preuse import digest
+    probe = next((case, i, call) for case in cases for i, call in enumerate(case['tool_calls'])
+                 if world.selection.fixture['structural_events'].get(digest(dict(
+                     hook_event_name='PreToolUse', task=case['prompt'], **call))))
+    with patch('lib.rule_scope_lookup.structural_matches', return_value=False):
+        mutant = R.World(expectations)
+        damaged = mutant.tool_ids(*probe)
+    check('paired replay detects disabled structural selection',
+          damaged != world.selection.fixture['cases'][probe[0]['id']]['events'][probe[1]+1])
     review_case = {"id": "surface-review-read", "prompt": "",
                    "tool_calls": [{"tool_name": "Read", "tool_input": {
                        "file_path": os.path.join(REPO, "dealroom", "public", "index.html")}}],
