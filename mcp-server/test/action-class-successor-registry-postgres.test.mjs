@@ -1,16 +1,3 @@
-// action-class-successor-registry-postgres.test.mjs — V5-D01 on REAL
-// PostgreSQL. The fake-client suite proves the handlers' own logic in
-// isolation; this file proves the things only a real database can prove:
-// migration 0708's status CHECK constraint really admits only 'inactive',
-// the immutability triggers really refuse UPDATE/DELETE/TRUNCATE, the gate
-// function really denies every action_class unconditionally (registered or
-// not), and a gate denial for one action_class has no effect on any other
-// query in the same session -- "missing future gate denies action but not
-// unrelated work".
-//
-// Skips in the unit class; the migration class supplies DATABASE_URL and sets
-// CARR_ACTION_CLASS_SUCCESSOR_DB_REQUIRED=1, which turns a silent skip into a
-// failure (same convention as amend-closed-loop-postgres.test.mjs).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -139,10 +126,6 @@ test("DB: a gate denial for one action_class has no effect on another action_cla
     const gateA = await TOOLS["read-action-class-gate"].handler(admin, actor, { action_class: classA });
     assert.equal(gateA.allowed, false);
 
-    // Unrelated work: classB was never touched by classA's denial, and an
-    // entirely unrelated table read in the SAME session still succeeds --
-    // the deny is scoped to the one action_class argument, not a lock, not a
-    // global flag, not a refusal of the session.
     const gateB = await TOOLS["read-action-class-gate"].handler(admin, actor, { action_class: classB });
     assert.equal(gateB.allowed, false);
     assert.equal(gateB.registered, false, "classB was never registered; classA's registration does not leak to it");

@@ -1,4 +1,4 @@
-"""Exact receipt contract shared by pre-use selection and Stop telemetry."""
+"""Exact receipt contract for pre-use rule selection."""
 from __future__ import annotations
 
 import hashlib
@@ -6,8 +6,46 @@ import json
 from pathlib import Path
 from typing import Any
 
-from lib.rule_delivery_shadow import file_sha256, source_sha256
 from lib.rule_routes import ROUTE_RECEIPT_SCHEMA, validate_route_receipt, within_cap
+
+
+DELIVERY_SOURCE_PATHS = (
+    "hooks/rule-pack-preuse-reselection.py",
+    "hooks/session-brief.py",
+    "hooks/machine-converge.py",
+    "lib/rule_delivery_preuse.py",
+    "mcp-server/src/mcp.js",
+    "mcp-server/src/engineering-runtime.js",
+    "migrations/0291_rule_delivery_layers.sql",
+    "migrations/0317_atomic_rule_delivery_cutover.sql",
+    "migrations/0321_rule_delivery_policy_seed_repair.sql",
+    "ops/config/codex-hooks.json",
+    "ops/config/control-enforcement-classes.v1.json",
+    "ops/config/hooks.json",
+    "ops/config-as-code.py",
+    "ops/config/rule-enforcement-map.json",
+    "ops/config/rule-jit-triggers.v1.json",
+    "ops/rule-jit-compile.py",
+    "ops/scheduled-tasks/engineering-slice.SKILL.md",
+    "tools/room-bridge/engineering_dispatch_adapter.py",
+)
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def source_sha256(repo: Path) -> str:
+    hasher = hashlib.sha256()
+    for relative in DELIVERY_SOURCE_PATHS:
+        path = repo / relative
+        if not path.is_file():
+            raise FileNotFoundError(f"delivery source identity path is absent: {relative}")
+        payload = path.read_bytes()
+        hasher.update(relative.encode("utf-8") + b"\0")
+        hasher.update(str(len(payload)).encode("ascii") + b"\0")
+        hasher.update(payload)
+    return hasher.hexdigest()
 
 
 PACK = "scheduled-automation"

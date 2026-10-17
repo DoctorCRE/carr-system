@@ -84,7 +84,7 @@ class ReadRouterTests(unittest.TestCase):
 
     def _live_risk_projection(self, selected_names):
         generated = subprocess.run(
-            ["python3", "ops/action-risk-registry.py"], cwd=ROOT,
+            [sys.executable, "ops/action-risk-registry.py"], cwd=ROOT,
             check=True, capture_output=True, text=True,
         )
         live_risks = json.loads(generated.stdout)["verbs"]

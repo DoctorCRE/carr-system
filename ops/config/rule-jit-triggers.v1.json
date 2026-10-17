@@ -1,16 +1,16 @@
 {
  "counts": {
-  "jev_compiled_triggers": 120,
-  "pack_fallback_triggers": 7,
-  "seeded_detector_rule_ids": 52,
-  "seeded_detector_triggers": 16,
+  "jev_compiled_triggers": 119,
+  "pack_fallback_triggers": 9,
+  "seeded_detector_rule_ids": 49,
+  "seeded_detector_triggers": 14,
   "structural_extra_triggers": 2,
-  "triggers": 151
+  "triggers": 150
  },
  "generated_from": {
-  "jev_triggers_sha256": "42f77f3373d49fab1fcb7bee9360434b4fb3ca8fb71ed18576b233df5895fb33",
-  "map_sha256": "16fa6edb8f810c5653c61ae781682ee4f47584dce17e6ae4e6658528247f96d6",
-  "triage_sha256": "811c1c200de29efd2b8da3745b3fc79a51542cd3f5f89ab328ba87592c9f7cca"
+  "jev_triggers_sha256": "f26d16ebdf35072ee9eee6eee07c4614a6d7131a379a917dbb40667afe87a62f",
+  "map_sha256": "34660009ba917c15d1ac95abfbae7a2458bd14dea0b447c97203c1f82c6353ab",
+  "triage_sha256": "e96ff4e7ec57ffb37f8b7e55b05b5cf75d28412d5a90581b6a644c411fd1e74b"
  },
  "generated_note": "Compiled by ops/rule-jit-compile.py from ops/config/rule-triage.v1.json's per-rule `detector` fields and ops/config/rule-enforcement-map.json's rule_packs/rule_load_layers. Never hand-edit this file \u2014 run the compiler again after changing either input, and `--check` verifies the two never drift apart.",
  "max_rules_per_trigger": 5,
@@ -99,26 +99,15 @@
   {
    "kind": "content_regex",
    "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\b(?:EnterPlanMode|UpdatePlan|update_plan|propose-ready-plan|heavy[-\\s]?build(?:\\s+plan)?|Codex\\s+brief|Dot\\s+brief)\\b",
-   "rule_ids": [
-    "8400cd3d"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "265cbc0911b6"
-  },
-  {
-   "kind": "content_regex",
-   "packs": [
     "source-study"
    ],
    "pattern": "\\barticle\\b|\\blink\\b|\\bvideo\\b|\\bthread\\b|\\bx\\.com\\b|\\bpaper\\b|\\barxiv\\b|\\brepo\\b|\\bsource\\b|\\bstudy\\b|\\bresearch\\ pass\\b|\\bnew\\ implementation\\b|\\bnew\\ capability\\b",
    "rule_ids": [
     "11b2b73b",
     "6172e7d5",
+    "76fcbed6",
     "9e3fb6d0",
-    "c4a284b2"
+    "a9fc3f0e"
    ],
    "source": "pack_fallback",
    "trigger_id": "a7409197dee7"
@@ -142,6 +131,21 @@
   {
    "kind": "content_regex",
    "packs": [
+    "client-deal"
+   ],
+   "pattern": "\\bdeal\\b|\\bloi\\b|\\bletter\\ of\\ intent\\b|\\blead\\b|\\bclient\\b|\\bprospect\\b|\\blandlord\\b|\\blisting\\ agent\\b|\\bsearch\\ packet\\b|\\btour\\b|\\boutreach\\b|\\bcommission\\b|\\bsalesforce\\b|\\bnational\\ account\\b|\\bpractice\\ owner\\b|\\bfranchisee\\b|\\bmarket\\ commentary\\b",
+   "rule_ids": [
+    "07dde434",
+    "08c4eda2",
+    "ac0a6579",
+    "c315befa"
+   ],
+   "source": "pack_fallback",
+   "trigger_id": "d6c3b5c37c8d"
+  },
+  {
+   "kind": "content_regex",
+   "packs": [
     "delegation-council"
    ],
    "pattern": "\\bfable\\b",
@@ -159,9 +163,10 @@
    "pattern": "\\bgit\\b|\\bbranch\\b|\\bworktree\\b|\\bcommit\\b|\\bpush\\b|\\bpull\\ request\\b|\\bci\\b|\\bgate\\b|\\bhook\\b|\\bmigration\\b|\\bschema\\b|\\bdeploy\\b|\\bwrangler\\b|\\btest\\b|\\bselftest\\b|\\bconfig\\ file\\b|\\bbaseline\\b|\\brefactor\\b|\\barchitecture\\ fork\\b",
    "rule_ids": [
     "204391be",
-    "a2e78f48",
-    "efbdfb1a",
-    "f0f9156e"
+    "43e2ef76",
+    "486584d6",
+    "4e104d4c",
+    "67e48aaf"
    ],
    "source": "pack_fallback",
    "trigger_id": "963b8f2da763"
@@ -186,10 +191,10 @@
    "pattern": "\\bparty\\b|\\bvendor\\b|\\bcontact\\b|\\battendee\\b|\\bduplicate\\b|\\bdedupe\\b|\\benrichment\\b|\\bnpi\\b|\\bnppes\\b|\\bintake\\b|\\bnew\\ client\\b|\\bnew\\ lead\\b|\\bnew\\ vendor\\b|\\badd\\-party\\b|\\bverification\\ stamp\\b",
    "rule_ids": [
     "2ca2add2",
+    "578fdd91",
     "5d44d3f3",
     "614c1209",
-    "d26d63b0",
-    "faf1b643"
+    "a9fc3f0e"
    ],
    "source": "pack_fallback",
    "trigger_id": "36433cdd2d40"
@@ -201,11 +206,29 @@
    ],
    "pattern": "\\bscheduled\\b|\\blaunchd\\b|\\bcron\\b|\\bnightly\\b|\\bheartbeat\\b|\\bhealth\\b|\\bunattended\\b|\\broutine\\b|\\bjob\\b|\\bcredential\\b|\\baway\\ mode\\b|\\btombstone\\b|\\bmetric\\b|\\balarm\\b|\\blong\\ job\\b|\\bestimate\\b",
    "rule_ids": [
+    "1f3a7372",
+    "590b11e1",
+    "67e48aaf",
     "740bb505",
-    "def3e84e"
+    "847f9995"
    ],
    "source": "pack_fallback",
    "trigger_id": "4390b46cdb6b"
+  },
+  {
+   "kind": "content_regex",
+   "packs": [
+    "delegation-council"
+   ],
+   "pattern": "\\bsubagent\\b|\\bdelegate\\b|\\bfan\\-out\\b|\\bcouncil\\b|\\bchair\\b|\\bred\\ team\\b|\\bexecutor\\b|\\bgrok\\b|\\bcopilot\\b|\\bworkflow\\b|\\bseat\\b|\\bbrief\\b",
+   "rule_ids": [
+    "4a77c35d",
+    "661d7757",
+    "d7f74c93",
+    "f673326b"
+   ],
+   "source": "pack_fallback",
+   "trigger_id": "cc673e4aec26"
   },
   {
    "kind": "content_regex",
@@ -234,7 +257,7 @@
     "0c1bac27",
     "113b3833",
     "179be4b8",
-    "1c21263c"
+    "19ebbeb3"
    ],
    "source": "pack_fallback",
    "trigger_id": "33efd5146cbe"
@@ -433,6 +456,18 @@
    ],
    "source": "prompt_cue",
    "trigger_id": "5370274a056f"
+  },
+  {
+   "kind": "prompt_regex",
+   "packs": [
+    "delegation-council"
+   ],
+   "pattern": "\\baccess\\s+restrictions\\b|\\bpersonal\\-scope\\b|\\bagent\\s+access\\b|\\bdata\\s+fences\\b|\\badd\\s+access\\b|\\bcustody\\b",
+   "rule_ids": [
+    "f673326b"
+   ],
+   "source": "jev_compiled",
+   "trigger_id": "5124db1844ad"
   },
   {
    "kind": "prompt_regex",
@@ -1215,6 +1250,19 @@
   },
   {
    "kind": "prompt_regex",
+   "packs": [
+    "records-intake",
+    "source-study"
+   ],
+   "pattern": "\\binternet\\s+research\\-site\\b|\\bresearch\\-site\\s+index\\b|\\badding\\s+removing\\b|\\bresearch\\-site\\b|\\bindex\\s+memory\\b|\\badd\\s+index\\b",
+   "rule_ids": [
+    "a9fc3f0e"
+   ],
+   "source": "jev_compiled",
+   "trigger_id": "f9e64cea1271"
+  },
+  {
+   "kind": "prompt_regex",
    "negative_pattern": "\\bwatch\\-video\\s+skill\\b|\\binsurance\\s+reps\\b|\\bjoe's\\s+ruling\\b",
    "packs": [
     "joe-development"
@@ -1253,19 +1301,6 @@
   },
   {
    "kind": "prompt_regex",
-   "negative_pattern": "\\bvendor\\s+party\\b",
-   "packs": [
-    "client-deal"
-   ],
-   "pattern": "\\bmay\\s+joe\\s+advertise\\s+into\\s+alabama\\b|\\blicensure\\s+grounds\\b|\\blicensed\\s+party\\b|\\balabama\\s+exam\\b|\\bdell's\\b",
-   "rule_ids": [
-    "5697071b"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "5811e2779ed6"
-  },
-  {
-   "kind": "prompt_regex",
    "negative_pattern": "\\bgrok\\s+build\\b",
    "packs": [
     "engineering-git"
@@ -1290,19 +1325,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "50d5f24099f8"
-  },
-  {
-   "kind": "prompt_regex",
-   "negative_pattern": "\\bstaffing\\s+model\\b",
-   "packs": [
-    "delegation-council"
-   ],
-   "pattern": "\\bmodel\\s+choice\\b|\\bwork's\\s+shape\\b|\\bcloud\\s+model\\b|\\bcloud\\s+pick\\b|\\bpick\\s+model\\b|\\bbatches\\b",
-   "rule_ids": [
-    "ede4b241"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "7f7cac8d1070"
   },
   {
    "kind": "prompt_regex",
@@ -1367,19 +1389,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "c3ac9bf9cbb8"
-  },
-  {
-   "kind": "prompt_regex",
-   "negative_pattern": "\\bvisible\\s+step\\b",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\bopens\\s+grill\\-with\\-docs\\b|\\bgrill\\-with\\-docs\\s+work\\b|\\bmedium\\-to\\-large\\s+work\\b|\\bgrill\\-with\\-docs\\b|\\bmedium\\-to\\-large\\b|\\bmoves\\s+wayfinder\\b|\\bstarts\\s+sizing\\b|\\bsizing\\s+step\\b|\\boutgrows\\b|\\bsizing\\b",
-   "rule_ids": [
-    "8400cd3d"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "3af6fc775ffc"
   },
   {
    "kind": "prompt_regex",
@@ -1777,18 +1786,6 @@
   {
    "kind": "verb",
    "packs": [
-    "delegation-council"
-   ],
-   "pattern": "^(?:Agent|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$",
-   "rule_ids": [
-    "ede4b241"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "c373f0cf37e7"
-  },
-  {
-   "kind": "verb",
-   "packs": [
     "source-study"
    ],
    "pattern": "^(WebFetch|WebSearch)$",
@@ -1888,7 +1885,6 @@
    "rule_ids": [
     "412d37d3",
     "4399df76",
-    "5697071b",
     "ce12c11e",
     "f2d58a30"
    ],

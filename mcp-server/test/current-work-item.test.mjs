@@ -1,27 +1,3 @@
-// current-work-item.test.mjs — one verb answers "what is being worked right now".
-//
-// WHY IT EXISTS. The tune-up council of 2026-08-21 ruled that the binding
-// dysfunction was a missing completion surface: work entered cheaply and never
-// formally left, and no single read could say what was current. Answering it
-// took a read of the engineering suite, a read of the sourced queue, and a
-// guess — which is how the suite sat at "0 complete of 51" while six of its
-// projects were finished and nobody could tell.
-//
-// WHAT THE COUNCIL ASKED FOR, and what these cases pin:
-//   the active item(s), with owner, done-predicate, and blocker-or-null.
-//
-// Each of those four words is a case below, because each was a way the previous
-// answer went wrong:
-//   * ACTIVE — a blocked or needs-Joe row is STILL CURRENT and is never skipped.
-//     Dropping it is how a queue looks empty while nothing can move.
-//   * OWNER — who answers for it and who has hands on it are different
-//     questions; one "assignee" field loses one of them.
-//   * DONE-PREDICATE — the acceptance predicates if the row carries them, else
-//     the written completion definition, else null. Never invented.
-//   * BLOCKER-OR-NULL — present even when null, because an absent field and
-//     "not blocked" read identically in a payload and mean different things.
-//
-// Run with: node --test mcp-server/test/current-work-item.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -126,8 +102,6 @@ test("the work-in-progress limit is reported, and over-commitment is named", asy
   const out = await call();
   assert.equal(out.wip.limit_system_wide, 2);
   assert.equal(out.wip.limit_per_executor, 1);
-  // WR-AI-006 in_progress + WR-92 claimed, both codex; the blocked row is held
-  // but not in flight.
   assert.equal(out.wip.in_flight, 2);
   assert.deepEqual(out.wip.executors_over_limit, [{ executor: "codex", in_flight: 2 }]);
   assert.match(out.wip.note, /enforced in the claim path/,
@@ -135,17 +109,6 @@ test("the work-in-progress limit is reported, and over-commitment is named", asy
 });
 
 test("per-executor counting resolves the responsible party exactly as the trigger does", async () => {
-  // THE DIVERGENCE THIS PINS. ops.enforce_work_in_progress_limit() resolves who
-  // a row belongs to with coalesce(executor_actor, owner_actor) and then skips
-  // the per-executor check entirely when that is null. This verb used to bucket
-  // every unnamed row under one "unassigned" pseudo-executor, so two in-flight
-  // rows nobody owned were reported as an executor over their limit — a breach
-  // the database does not refuse and nobody can act on.
-  //
-  // A limit REPORTED but not ENFORCED is worse than either alone: it teaches the
-  // reader the number is decorative, which is how a real breach later gets
-  // waved past. The verb's job is to report what the claim path enforces, so
-  // the two have to resolve ownership the same way or the report is fiction.
   const base = { acceptance_criteria: [], project_context: {},
     blocker_code: null, blocker_detail: null,
     program_key: null, program_ordinal: null,
@@ -166,8 +129,6 @@ test("per-executor counting resolves the responsible party exactly as the trigge
   assert.equal(out.wip.in_flight_unattributed, 2,
     "and they are named rather than silently dropped, or the number stops meaning anything");
 
-  // FALLBACK STILL APPLIES when only the owner is named — same coalesce the
-  // trigger uses, so a row with an owner and no executor counts against them.
   const ownerOnly = new Fake([
     { ...base, ref: "WR-O1", title: "owner a", state: "claimed",
       owner_actor: "dell", executor_actor: null },

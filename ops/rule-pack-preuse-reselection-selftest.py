@@ -38,7 +38,6 @@ _ISOLATED = tempfile.mkdtemp(prefix="preuse-selftest-")
 os.environ.setdefault("CARR_RULE_ROUTE_DEDUPE_DIR", os.path.join(_ISOLATED, "route-dedupe"))
 os.environ.setdefault("CARR_RULE_BOOT_STATE_DIR", os.path.join(_ISOLATED, "boot-state"))
 contract = load("rule_delivery_preuse_test", REPO / "lib/rule_delivery_preuse.py")
-drift = load("rule_pack_drift_preuse_test", REPO / "hooks/rule-pack-drift-gate.py")
 
 # The route rail (ROUTE TRIGGERS) has its own section at the end of this file.
 # Every earlier section pins behaviour that existed before the route file, so
@@ -373,210 +372,7 @@ def check_failure_cases(label: str, call: dict, response: dict, missing_cause: s
 check_failure_cases("scheduled rail", payload(), selector_result(),
                     "selector did not return every scheduled rule", rail.FAILURE_CONTEXT)
 
-# Stop telemetry credits only a platform-proven receipt bound to the exact tool call.
-def claude_tool_call() -> dict:
-    return {"type": "assistant", "message": {"role": "assistant", "content": [{
-        "type": "tool_use", "id": "tool-exact", "name": "Bash",
-        "input": before["tool_input"],
-    }]}, "sessionId": "session-exact"}
-
-
-def claude_attachment(text: str) -> dict:
-    return {
-        "type": "attachment", "sessionId": "session-exact",
-        "attachment": {
-            "type": "hook_additional_context", "hookEvent": "PreToolUse",
-            "hookName": "PreToolUse:Bash", "toolUseID": "tool-exact",
-            "content": [text],
-        },
-    }
-
-
-def codex_tool_call(tool: str = "functions.exec") -> dict:
-    return {"type": "response_item", "payload": {
-        "type": "function_call", "call_id": "tool-exact", "name": tool,
-        "arguments": json.dumps(before["tool_input"], sort_keys=True,
-                                separators=(",", ":")),
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-def codex_custom_tool_call(*, name: str = "exec", wrapper: str = "response_item",
-                           raw: object | None = None) -> dict:
-    tool_input = before["tool_input"] if raw is None else raw
-    if wrapper == "event_msg":
-        return {"type": "event_msg", "payload": {
-            "type": "custom_tool_call", "name": name,
-            "arguments": tool_input,
-        }}
-    return {"type": "response_item", "payload": {
-        "type": "custom_tool_call", "id": "ctc-exact", "status": "completed",
-        "call_id": "tool-exact", "name": name,
-        "input": (json.dumps(tool_input, sort_keys=True, separators=(",", ":"))
-                  if not isinstance(tool_input, str) else tool_input),
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-def codex_context(text: str) -> dict:
-    return {"type": "response_item", "payload": {
-        "type": "message", "role": "developer",
-        "content": [{"type": "input_text", "text": text}],
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-claude_records = [claude_tool_call(), claude_attachment(context(output))]
-mode, loaded, _ = drift.delivery_state(claude_records)
-check("Claude exact hook envelope credits scheduled automation",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-
-codex_output = rail.process(payload(tool="functions.exec", client="codex"), runner=Runner())
-codex_records = [codex_tool_call(), codex_context(context(codex_output))]
-mode, loaded, _ = drift.delivery_state(codex_records)
-check("Codex exact developer context credits scheduled automation",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-codex_bash_output = rail.process(payload(tool="Bash", client="codex"), runner=Runner())
-mode, loaded, _ = drift.delivery_state([
-    codex_tool_call("Bash"), codex_context(context(codex_bash_output)),
-])
-check("Codex Bash alias receives and proves the same receipt",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-
-TRIGGERS, MEMBERS, _ = drift.load_packs()
-for label, records in [
-    ("Claude success", claude_records),
-    ("Codex function success", codex_records),
-    ("Codex response-item custom exec success",
-     [codex_custom_tool_call(), codex_context(context(codex_output))]),
-]:
-    evaluated = drift.evaluate(records, TRIGGERS, MEMBERS)
-    check(f"{label} structurally requires and loads scheduled automation",
-          evaluated["needed"] == ["scheduled-automation"]
-          and evaluated["loaded"] == ["scheduled-automation"]
-          and evaluated["missing"] == [], evaluated)
-
-custom_needed = drift.evaluate([codex_custom_tool_call()], TRIGGERS, MEMBERS)
-check("Codex custom-tool background call structurally requires scheduled automation",
-      custom_needed["needed"] == ["scheduled-automation"]
-      and custom_needed["loaded"] == []
-      and custom_needed["missing"] == ["scheduled-automation"], custom_needed)
-
-for label, records in [
-    ("Claude no receipt", [claude_tool_call()]),
-    ("Claude selector failure", [claude_tool_call(), {
-        "type": "attachment", "sessionId": "session-exact",
-        "attachment": {
-            "type": "hook_additional_context", "hookEvent": "PreToolUse",
-            "hookName": "PreToolUse:Bash", "toolUseID": "tool-exact",
-            "content": [rail.FAILURE_CONTEXT],
-        },
-    }]),
-    ("Codex function no receipt", [codex_tool_call()]),
-    ("Codex response-item custom exec no receipt", [codex_custom_tool_call()]),
-    ("Codex event custom exec_command cannot claim an uncorrelated receipt",
-     [codex_custom_tool_call(name="exec_command", wrapper="event_msg"),
-      codex_context(context(codex_output))]),
-]:
-    evaluated = drift.evaluate(records, TRIGGERS, MEMBERS)
-    check(f"{label} stays needed and missing",
-          evaluated["needed"] == ["scheduled-automation"]
-          and evaluated["loaded"] == []
-          and evaluated["missing"] == ["scheduled-automation"], evaluated)
-
-for label, record in [
-    ("unknown custom alias", codex_custom_tool_call(name="other")),
-    ("unstructured custom wrapper prose", codex_custom_tool_call(
-        raw="tools.exec_command({run_in_background: true})")),
-]:
-    evaluated = drift.evaluate([record], TRIGGERS, MEMBERS)
-    check(f"{label} does not create a structured background requirement",
-          evaluated["needed"] == [] and evaluated["missing"] == [], evaluated)
-
-for label, records in [
-    ("copied user context", [claude_tool_call(), {
-        "type": "user", "message": {"role": "user", "content": context(output)}}]),
-    ("wrong Claude hook name", [claude_tool_call(), {
-        **claude_attachment(context(output)),
-        "attachment": {**claude_attachment(context(output))["attachment"],
-                       "hookName": "PreToolUse:Read"}}]),
-    ("wrong tool id", [claude_tool_call(), {
-        **claude_attachment(context(output)),
-        "attachment": {**claude_attachment(context(output))["attachment"],
-                       "toolUseID": "tool-other"}}]),
-    ("tampered receipt", [claude_tool_call(), claude_attachment(
-        context(output).replace("scheduled-automation", "engineering-git", 1))]),
-    ("Codex user role", [codex_tool_call(), {
-        **codex_context(context(codex_output)),
-        "payload": {**codex_context(context(codex_output))["payload"], "role": "user"}}]),
-]:
-    found = drift.delivery_state(records)
-    check(f"{label} does not count as loaded", found[1] == [], found)
-
-malformed = receipt(output)
-malformed["unexpected"] = True
-found = drift.delivery_state([
-    claude_tool_call(),
-    claude_attachment(json.dumps(malformed, sort_keys=True, separators=(",", ":"))),
-])
-check("extra-key additionalContext does not count as loaded",
-      found[1] == [], found)
-
-with tempfile.TemporaryDirectory(prefix="malformed-receipt-stop-") as stop_tmp:
-    stop_transcript = Path(stop_tmp) / "session.jsonl"
-    standing_call = {"type": "assistant", "message": {"role": "assistant", "content": [{
-        "type": "tool_use", "id": "standing-exact", "name": "mcp__carr__standing_context",
-        "input": {},
-    }]}, "sessionId": "session-exact"}
-    standing_value = {"rule_delivery": {
-        "mode": "enforced", "declared_packs": [], "would_omit": EXPECTED_IDS,
-    }}
-
-    def standing_result(value):
-        return {"type": "user", "message": {"role": "user", "content": [{
-            "type": "tool_result", "tool_use_id": "standing-exact", "content": value,
-        }]}, "sessionId": "session-exact"}
-
-    for malformed_schema in ({}, []):  # type: object
-        malformed_receipt = receipt(output)
-        malformed_receipt["schema"] = malformed_schema
-        for label, malformed_record in (
-                ("hook attachment", claude_attachment(json.dumps(malformed_receipt))),
-                ("service marker", standing_result({**standing_value, "schema": malformed_schema}))):
-            stop_records = [standing_call, standing_result(standing_value),
-                            claude_tool_call(), malformed_record]
-            stop_transcript.write_text("".join(json.dumps(record) + "\n" for record in stop_records))
-            audits: list[dict] = []
-            saved_audit, saved_stdin = drift.audit, sys.stdin
-            drift.audit = audits.append
-            sys.stdin = io.StringIO(json.dumps({
-                "hook_event_name": "Stop", "session_id": "session-exact",
-                "cwd": str(REPO), "transcript_path": str(stop_transcript),
-            }))
-            stdout = io.StringIO()
-            try:
-                with contextlib.redirect_stdout(stdout):
-                    rc = drift.main()
-            finally:
-                drift.audit, sys.stdin = saved_audit, saved_stdin
-            verdict = json.loads(stdout.getvalue() or "{}")
-            check(f"Stop blocks missing pack with {label} schema {malformed_schema!r}",
-                  rc == 0 and verdict.get("decision") == "block"
-                  and "scheduled-automation" in verdict.get("reason", "")
-                  and len(audits) == 1
-                  and audits[0].get("missing") == ["scheduled-automation"]
-                  and not audits[0].get("error"), (verdict, audits))
-
-for record_type, message_role in (("user", "user"), ("assistant", "user"),
-                                  ("user", "assistant")):
-    forged = claude_tool_call()
-    forged["type"] = record_type
-    forged["message"]["role"] = message_role
-    found = drift.delivery_state([forged, claude_attachment(context(output))])
-    check(f"Claude {record_type}/{message_role} tool-call provenance refuses",
-          found[1] == [], found)
-
-# Config parity and shadow-window source identity travel with the rail.
+# Config parity and delivery source identity travel with the rail.
 claude = json.loads((REPO / "ops/config/hooks.json").read_text())
 codex = json.loads((REPO / "ops/config/codex-hooks.json").read_text())["hooks"]
 command = "hooks/rule-pack-preuse-reselection.py"
@@ -601,10 +397,10 @@ check("Claude wires the same rule-delivery module once at the partner-message se
 check("Codex wires the same rule-delivery module once at the partner-message seam",
       len(codex_prompt_rows) == 1)
 check("new rail participates in the epoch source digest",
-      "hooks/rule-pack-preuse-reselection.py" in rail.WINDOW_SOURCE_PATHS)
+      "hooks/rule-pack-preuse-reselection.py" in rail.DELIVERY_SOURCE_PATHS)
 check("the compiled trigger table participates in the epoch source digest too",
-      "ops/config/rule-jit-triggers.v1.json" in rail.WINDOW_SOURCE_PATHS
-      and "ops/rule-jit-compile.py" in rail.WINDOW_SOURCE_PATHS)
+      "ops/config/rule-jit-triggers.v1.json" in rail.DELIVERY_SOURCE_PATHS
+      and "ops/rule-jit-compile.py" in rail.DELIVERY_SOURCE_PATHS)
 
 # Claude-only compaction-scoped dedupe. Codex and disabled Claude retain the
 # exact historical output path; active dedupe requires the continuity config
@@ -949,18 +745,19 @@ check("process() returns None (no injection, no selector call) for a non-match",
 
 # Verb match injects: the Agent tool exactly matches the council trigger.
 agent_call = gen_payload(tool="Agent", tool_input={"description": "spawn helper", "prompt": "zzz"})
-# Rule ede4b241 (cloud model choice) adds a second verb trigger on the same
-# dispatch moment, so an Agent call hits the council trigger AND the model-choice
-# trigger; the council trigger alone still carries its own five rules.
-model_choice_row = next(row for row in TRIGGER_ROWS.values()
-                        if row["kind"] == "verb" and "ede4b241" in row["rule_ids"])
-check("model-choice trigger delivers only rule ede4b241 via delegation-council",
-      model_choice_row["rule_ids"] == ["ede4b241"]
-      and model_choice_row["packs"] == ["delegation-council"])
-check("matched_triggers finds the council and model-choice verb triggers for an Agent call",
-      sorted(r["trigger_id"] for r in rail.matched_triggers(agent_call))
-      == sorted([council_row["trigger_id"], model_choice_row["trigger_id"]]))
-agent_rows = [council_row, model_choice_row]
+# Rules ede4b241 (cloud model choice) and 8400cd3d (new-work sizing) are
+# still PROPOSED, and a proposed rule binds nobody (rule a3da3d39). Since
+# 2026-10-13 (loop 1304) they are in neither the map nor rule-triage.v1.json,
+# so the compiled table carries no trigger for either and an Agent call hits
+# the council trigger alone. Their detector patterns stay tested in
+# ops/rule-jit-compile-selftest.py; on approval their triage rows return and
+# these checks flip back.
+PROPOSED_IDS = {"ede4b241", "8400cd3d"}
+check("the compiled table delivers neither proposed rule (ede4b241, 8400cd3d)",
+      not any(PROPOSED_IDS & set(row["rule_ids"]) for row in TRIGGER_ROWS.values()))
+check("matched_triggers finds exactly the council verb trigger for an Agent call",
+      [r["trigger_id"] for r in rail.matched_triggers(agent_call)] == [council_row["trigger_id"]])
+agent_rows = [council_row]
 agent_packs = sorted({p for r in agent_rows for p in r["packs"]})
 agent_ids = sorted({i for r in agent_rows for i in r["rule_ids"]})
 agent_trigger_ids = sorted(r["trigger_id"] for r in agent_rows)
@@ -982,8 +779,8 @@ check("generalized receipt binds exactly the matched triggers, packs, and rule_i
       and agent_row["packs"] == agent_packs
       and agent_row["rule_ids"] == agent_ids)
 # The cap lives per trigger in the compiler (lib/rule_delivery_preuse.py,
-# merge_trigger_delivery): an Agent call hits two triggers, so the merged set
-# may exceed one trigger's cap, and each matched trigger must stay inside it.
+# merge_trigger_delivery): each matched trigger must stay inside it. The
+# multi-trigger union is exercised by the git push case below.
 check("over-delivery stays inside the compiler's per-trigger cap",
       all(len(r["rule_ids"]) <= MAX_PER_TRIGGER for r in agent_rows)
       and set(agent_row["rule_ids"]) == set(agent_ids))
@@ -1000,32 +797,27 @@ write_output = rail.process(
 write_row = json.loads(context(write_output))
 check("path_pattern match delivers exactly the structural extra rule",
       write_row["rule_ids"] == path_row["rule_ids"] and write_row["packs"] == path_row["packs"])
-# Cloud model choice fires on a cloud-session dispatch and stays silent on
-# routine reads, including the read-only calls of the same remote server.
-for dispatch_tool in ("mcp__Claude_Code_Remote__create_session",
-                      "mcp__Claude_Code_Remote__create_trigger"):
-    dispatch_call = gen_payload(tool=dispatch_tool, tool_input={"prompt": "fix the bug", "model": "sonnet"})
-    check(f"{dispatch_tool} hits the model-choice trigger",
-          model_choice_row["trigger_id"]
-          in [r["trigger_id"] for r in rail.matched_triggers(dispatch_call)])
-model_runner = Runner(gen_selector_result(packs=model_choice_row["packs"], ids=model_choice_row["rule_ids"]))
-model_output = rail.process(
-    gen_payload(tool="mcp__Claude_Code_Remote__create_session",
-                tool_input={"prompt": "fix the bug", "model": "sonnet"}), runner=model_runner)
-model_receipt = json.loads(context(model_output))
-check("a cloud-session dispatch delivers rule ede4b241 in one selector call",
-      len(model_runner.calls) == 1 and "ede4b241" in model_receipt["rule_ids"]
-      and model_receipt["trigger_ids"] == [model_choice_row["trigger_id"]], model_receipt)
-for routine_tool, routine_input in (
-        ("Read", {"file_path": "README.md"}), ("Grep", {"pattern": "model"}),
-        ("Glob", {"pattern": "*.py"}), ("Bash", {"command": "git status"}),
-        ("mcp__Claude_Code_Remote__list_sessions", {}),
-        ("mcp__Claude_Code_Remote__get_session", {"session_id": "x"}),
-        ("mcp__Claude_Code_Remote__list_repos", {})):
-    routine_hits = [r["trigger_id"] for r in
-                    rail.matched_triggers(gen_payload(tool=routine_tool, tool_input=routine_input))]
-    check(f"{routine_tool} stays silent for the model-choice trigger",
-          model_choice_row["trigger_id"] not in routine_hits, routine_hits)
+# While ede4b241 and 8400cd3d are proposed, no dispatch, planning or intake
+# shape delivers either through the compiled table (see above).
+for proposed_tool, proposed_input in (
+        ("mcp__Claude_Code_Remote__create_session", {"prompt": "fix the bug", "model": "sonnet"}),
+        ("mcp__Claude_Code_Remote__create_trigger", {"prompt": "fix the bug", "model": "sonnet"}),
+        ("EnterPlanMode", {}),
+        ("Agent", {"description": "build the importer",
+                   "prompt": "Implement the CSV importer and open a PR."}),
+        ("RemoteTrigger", {"action": "create", "name": "builder",
+                           "prompt": "BUILDER job: add the export verb."}),
+        ("Workflow", {"script": "export const meta = {name: 'review'}"}),
+        ("Bash", {"command": 'python3 tools/room-bridge/dispatch.py send codex-desk '
+                             '--writes ops/x.py "fix the review"'}),
+        ("mcp__carr__write-work-shape", {"title": "new capability"}),
+        ("mcp__carr__report-problem", {"summary": "the export is missing"}),
+        ("mcp__CARR_Record_Layer__propose-ready-plan", {"scope_summary": "new capability"})):
+    proposed_hits = sorted({rid for row in rail.matched_triggers(
+        gen_payload(tool=proposed_tool, tool_input=proposed_input)) for rid in row["rule_ids"]})
+    check(f"{proposed_tool} delivers no proposed rule through the compiled table",
+          not PROPOSED_IDS & set(proposed_hits), proposed_hits)
+
 silent_runner = Runner()
 check("a routine Read delivers nothing and makes no selector call",
       rail.process(gen_payload(tool="Read", tool_input={"file_path": "README.md"}),
@@ -1142,52 +934,6 @@ check("semantic receipt uses authoritative text and keeps the Jev probability",
 check("semantic receipt validates through the shared rule-delivery interface",
       contract.validate_semantic_receipt(semantic_row, repo=REPO))
 
-semantic_claude_attachment = {
-    "type": "attachment", "sessionId": "session-prompt",
-    "attachment": {
-        "type": "hook_additional_context", "hookEvent": "UserPromptSubmit",
-        "hookName": "UserPromptSubmit", "content": [context(semantic_output)],
-    },
-}
-semantic_claude_prompt = {
-    "type": "user", "sessionId": "session-prompt",
-    "message": {"role": "user", "content": "we need to improve this source"},
-}
-mode, loaded, _ = drift.delivery_state([
-    semantic_claude_prompt, semantic_claude_attachment])
-check("Claude Stop telemetry credits only the validated semantic hook envelope",
-      mode == "shadow" and loaded == semantic_packs, (mode, loaded))
-
-replayed_prompt = copy.deepcopy(semantic_claude_prompt)
-cast(dict[str, object], replayed_prompt["message"])["content"] = (
-    "a different later request")
-mode, loaded, _ = drift.delivery_state([replayed_prompt, semantic_claude_attachment])
-check("Claude cannot replay a valid semantic receipt onto a different prompt",
-      mode is None and loaded == [], (mode, loaded))
-
-codex_semantic = rail.process(
-    prompt_payload(client="codex"),
-    runner=Runner(gen_selector_result(packs=semantic_packs, ids=[semantic_id])),
-    adviser=fake_adviser)
-check("Codex semantic receipt binds the native turn",
-      json.loads(context(codex_semantic))["turn_id"] == "turn-prompt")
-codex_semantic_context = codex_context(context(codex_semantic))
-codex_semantic_context["payload"]["internal_chat_message_metadata_passthrough"] = {
-    "turn_id": "turn-prompt"}
-mode, loaded, _ = drift.delivery_state([codex_semantic_context])
-check("Codex Stop telemetry credits the validated semantic developer context",
-      mode == "shadow" and loaded == semantic_packs, (mode, loaded))
-
-forged_semantic = copy.deepcopy(semantic_row)
-forged_semantic["probabilities"][semantic_id] = 0.01
-forged_attachment = copy.deepcopy(semantic_claude_attachment)
-cast(dict[str, object], forged_attachment["attachment"])["content"] = [
-    json.dumps(forged_semantic)]
-mode, loaded, _ = drift.delivery_state([
-    semantic_claude_prompt, forged_attachment])
-check("tampered semantic context cannot claim a loaded pack",
-      mode is None and loaded == [], (mode, loaded))
-
 no_bind_runner = Runner()
 no_bind_output = rail.process(
     prompt_payload(prompt="hello"), runner=no_bind_runner,
@@ -1284,7 +1030,7 @@ check("the original exact background shape still takes the original rail, not th
 
 check_failure_cases(
     "generalized rail", agent_call,
-    gen_selector_result(packs=council_row["packs"], ids=council_row["rule_ids"]),
+    gen_selector_result(packs=agent_packs, ids=agent_ids),
     "selector did not return every triggered rule", rail.GENERALIZED_FAILURE_CONTEXT)
 
 # Tampering with a generalized receipt's content fails validate_generalized_receipt.
@@ -1583,10 +1329,31 @@ with tempfile.TemporaryDirectory() as dispatch_tmp:
         os.environ.update(saved_env)
 
 
-# The Bash route (production route rail) fires on every supported cloud launch
-# form, wherever the flag sits among the options, and not on a local session.
+# Rule ede4b241 (cloud model choice) is still PROPOSED, so since 2026-10-15
+# (loop 1304, 2aca9c7) rule-routes.v1.json carries no route for it and the
+# production route rail delivers it nowhere. Its reviewed cloud-launch route is
+# kept here verbatim from the row that left, so the launch-form coverage below
+# still runs against the real matcher. On approval the row returns to
+# rule-routes.v1.json and these checks go back to the production rail.
+PROPOSED_CLOUD_ROUTE = {
+    "kind": "trigger",
+    "tools": ["Agent", "mcp__*__create_session", "mcp__*__create_trigger"],
+    "verbs": [],
+    "bash_patterns": [
+        "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*"
+        "--(?:remote|cloud)(?=[\\s=;&|)<>]|$)",
+        "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*"
+        "--environment(?:[ \\t]+|=)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)",
+    ],
+}
+check("the production route file carries no route for proposed ede4b241",
+      "ede4b241" not in ROUTES["rules"])
+
+
+# The proposed route fires on every supported cloud launch form, wherever the
+# flag sits among the options, and not on a local session.
 def _cli_routed(command):
-    return "ede4b241" in routed_for("Bash", {"command": command})
+    return routes_lib.route_matches(PROPOSED_CLOUD_ROUTE, "Bash", {"command": command})
 
 
 for cloud_command in (
@@ -1662,8 +1429,10 @@ with tempfile.TemporaryDirectory() as route_tmp:
         check("a neutral Bash command routes nothing",
               routed_for("Bash", {"command": "ls -la"}) == [])
 
-        # Model-choice advice follows cloud CLI arguments through the production
-        # route rail, including options before the dispatch flag.
+        # Model-choice advice follows cloud CLI arguments, including options
+        # before the dispatch flag. While ede4b241 is proposed the route is the
+        # in-test PROPOSED_CLOUD_ROUTE and the production rail must not deliver
+        # it; on approval this goes back to one validated receipt naming it.
         for command in (
                 'claude --remote "fix the bug"',
                 'claude --model sonnet --remote "fix the bug"',
@@ -1678,17 +1447,10 @@ with tempfile.TemporaryDirectory() as route_tmp:
             cloud_call = gen_payload(tool="Bash", tool_input={"command": command},
                                      session="cloud-cli-" + command, tool_use_id="cloud-cli")
             cloud_ids = rail.routed_rule_ids(cloud_call)
-            check("cloud CLI routes model-choice advice: " + command,
-                  "ede4b241" in cloud_ids, cloud_ids)
-            cloud_union = sorted(set(cloud_ids) | set(
-                contract.merge_trigger_delivery(rail.matched_triggers(cloud_call))[2]))
-            cloud_runner = Runner(route_result(cloud_union))
-            cloud_output = rail.process(cloud_call, runner=cloud_runner)
-            cloud_receipt = json.loads(context(cloud_output)) if cloud_output else {}
-            check("cloud CLI delivers model-choice advice in one validated receipt: " + command,
-                  len(cloud_runner.calls) == 1
-                  and "ede4b241" in cloud_receipt.get("rule_ids", [])
-                  and routes_lib.validate_route_receipt(cloud_receipt, repo=REPO))
+            check("cloud CLI matches the proposed model-choice route: " + command,
+                  _cli_routed(command))
+            check("cloud CLI delivers no proposed rule through the production rail: " + command,
+                  "ede4b241" not in cloud_ids, cloud_ids)
         for command in (
                 'claude --remote-control',
                 'claude --model sonnet --remote-control "local session"',
@@ -1702,7 +1464,7 @@ with tempfile.TemporaryDirectory() as route_tmp:
                 'claude --model sonnet && echo --remote',
                 'my-claude --cloud "fix the bug"'):
             check("local CLI or flag prefix stays silent for model choice: " + command,
-                  "ede4b241" not in routed_for("Bash", {"command": command}))
+                  not _cli_routed(command))
 
         # Path globs, and the path_rule kind carries them.
         hook_ids = set(routed_for("Write", {"file_path": str(REPO / "hooks/x-gate.py"),

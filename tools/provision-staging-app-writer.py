@@ -330,59 +330,7 @@ Run = Callable[..., subprocess.CompletedProcess]
 Connect = Callable[[str], Any]
 
 
-ROLE_ACL_FACTS_SQL = """
-with target as (select oid from pg_roles where rolname=%s)
-select 'database',d.datname::text,lower(a.privilege_type),a.is_grantable
-  from pg_database d cross join lateral aclexplode(d.datacl) a
-  join target on target.oid=a.grantee
-union all
-select 'schema',n.nspname,lower(a.privilege_type),a.is_grantable
-  from pg_namespace n cross join lateral aclexplode(n.nspacl) a
-  join target on target.oid=a.grantee
-union all
-select case c.relkind when 'S' then 'sequence' else 'table' end,
-       n.nspname||'.'||c.relname,lower(a.privilege_type),a.is_grantable
-  from pg_class c join pg_namespace n on n.oid=c.relnamespace
-  cross join lateral aclexplode(c.relacl) a join target on target.oid=a.grantee
-union all
-select 'column',n.nspname||'.'||c.relname||'('||att.attname||')',lower(a.privilege_type),a.is_grantable
-  from pg_attribute att join pg_class c on c.oid=att.attrelid
-  join pg_namespace n on n.oid=c.relnamespace
-  cross join lateral aclexplode(att.attacl) a join target on target.oid=a.grantee
- where not att.attisdropped
-union all
-select 'function',n.nspname||'.'||p.proname||'('||oidvectortypes(p.proargtypes)||')',
-       lower(a.privilege_type),a.is_grantable
-  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-  cross join lateral aclexplode(p.proacl) a join target on target.oid=a.grantee
-union all
-select 'type',n.nspname||'.'||t.typname,lower(a.privilege_type),a.is_grantable
-  from pg_type t join pg_namespace n on n.oid=t.typnamespace
-  cross join lateral aclexplode(t.typacl) a join target on target.oid=a.grantee
-union all
-select 'language',l.lanname,lower(a.privilege_type),a.is_grantable
-  from pg_language l cross join lateral aclexplode(l.lanacl) a
-  join target on target.oid=a.grantee
-union all
-select 'foreign_data_wrapper',f.fdwname,lower(a.privilege_type),a.is_grantable
-  from pg_foreign_data_wrapper f cross join lateral aclexplode(f.fdwacl) a
-  join target on target.oid=a.grantee
-union all
-select 'foreign_server',s.srvname,lower(a.privilege_type),a.is_grantable
-  from pg_foreign_server s cross join lateral aclexplode(s.srvacl) a
-  join target on target.oid=a.grantee
-union all
-select 'large_object',l.oid::text,lower(a.privilege_type),a.is_grantable
-  from pg_largeobject_metadata l cross join lateral aclexplode(l.lomacl) a
-  join target on target.oid=a.grantee
-union all
-select 'default_acl',coalesce(n.nspname,'*')||':'||d.defaclobjtype::text||':'||owner.rolname,
-       lower(a.privilege_type),a.is_grantable
-  from pg_default_acl d left join pg_namespace n on n.oid=d.defaclnamespace
-  join pg_roles owner on owner.oid=d.defaclrole
-  cross join lateral aclexplode(d.defaclacl) a join target on target.oid=a.grantee
-order by 1,2,3,4
-"""
+ROLE_ACL_FACTS_SQL = snapshot_grants.role_acl_facts_sql()
 
 
 def reject_unsafe_environment(environ: Mapping[str, str]) -> None:

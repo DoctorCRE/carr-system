@@ -1,35 +1,3 @@
-// approve-rule-legacy-adoption-postgres.test.mjs — WR-000262 on REAL PostgreSQL.
-//
-// 97 active rules were activated by hand before the approval-receipt system
-// existed. approve-rule refused every one ("active rule <id> lacks its
-// immutable exact control binding") because ops.bind_rule_controls treated an
-// active rule only as a replay. Migration 0867 lets ops.approve_rule ADOPT such
-// a legacy admission: bind its installed gate-class controls, flip its admitted
-// contract to hard_enforced, and write the approval and authority receipts for
-// the rule's current version without touching the rule row.
-//
-// This suite seeds legacy-shaped rules into a disposable template copy, calls
-// the approve-rule verb exactly as mcp.js runs it on the carr_authority_joe
-// connection, and asserts:
-//   AC-ADOPT   a legacy rule with an installed, verified control is adopted in
-//              one transaction: receipt, binding, enforcement point,
-//              hard_enforced admission, unchanged rule row; it then reads in
-//              ops.applicable_rules(), replays exactly, and can be retired
-//              through its receipt.
-//   AC-REFUSE  a held (uninstalled) control, a surfacing control, a
-//              post-cutover receiptless active rule, a missing admission, a
-//              class mismatch, a non-Joe activator and a Dell caller are each
-//              refused by name, and a refusal writes nothing.
-//   AC-A02     V5-A02 sees the adopted rule's controls as mapped and passing;
-//              its only remaining gap is the fallback rung, which 0876
-//              (PR 1723) lifts for hard_enforced rules on hook-only controls
-//              (the gate fixture below is a hooks/*.py control).
-//
-// Skips in the unit class. The migration class supplies DATABASE_URL and sets
-// CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1, which turns a skip into a failure.
-// It commits only into a template copy it creates and drops.
-//
-// EVERY RECORD IS SYNTHETIC.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -87,8 +55,6 @@ async function clientFor(pg, database, role = null) {
   return client;
 }
 
-/** One verb call exactly as mcp.js runs it: its own transaction on the
- * principal's own connection, acting actor set transaction-locally. */
 async function callVerb(pg, database, role, actor, verb, args) {
   const client = await clientFor(pg, database, role);
   try {
@@ -117,8 +83,6 @@ async function refusedWithMessage(promise, message) {
   });
 }
 
-/** A legacy-shaped rule: active, activated in 2020 (before any receipt),
- * delivered by a control layer, admitted but blocked, with no receipt. */
 async function seedLegacyRule(db, ctx, id, spec = {}) {
   const statement = `wr262 synthetic legacy rule ${id}`;
   await db.query(
@@ -126,8 +90,6 @@ async function seedLegacyRule(db, ctx, id, spec = {}) {
      values ($1, $2, $3, 'active', $4, $5, 3)`,
     [id, statement, ctx.joeId, spec.activatedBy ?? ctx.joeId,
      spec.activatedAt ?? "2020-01-01T00:00:00Z"]);
-  // SIEP-12 settles a policy epoch only with at least one non-empty pack, so
-  // a fixture may be pack-delivered; every other one is control-delivered.
   await db.query(
     `insert into ops.rule_load_layer (rule_id, short_id, load_layer, packs, scope, why, source, map_digest)
      values ($1::uuid, left($1::uuid::text, 8), case when $2::text is null then 'control' else 'pack' end,
@@ -145,7 +107,6 @@ async function seedLegacyRule(db, ctx, id, spec = {}) {
     [id, spec.enforcementClass ?? "machine_enforceable", ADMITTED.binding_moment,
      ADMITTED.applicability, ADMITTED.projection, ADMITTED.reachability, ADMITTED.input_contract,
      ctx.joeId]);
-  // The map's planned (not yet installed) point, as production carries it.
   await db.query(
     `insert into ops.rule_enforcement_point
        (rule_id, control_key, implementation_ref, test_ref, enforcement_class, installed, verified_at)
@@ -186,9 +147,6 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
       "select 1 from public.schema_migrations where filename = '0867_adopt_active_legacy_rule_approval.sql'");
     assert.equal(applied.rows.length, 1, "migration 0867 is applied as the numbered file");
 
-    // Seed with triggers off: these rows reproduce a shape that predates the
-    // admission and receipt triggers, and every other active rule is retired
-    // so the coverage read below is about these rules only.
     await db.query("begin");
     await db.query("set local session_replication_role = replica");
     await db.query("update public.rule set status = 'retired' where status = 'active'");
@@ -207,9 +165,6 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
            (control_key, implementation_ref, test_ref, enforcement_class, installed, verified_at)
          values ($1, 'hooks/wr262-synthetic-gate.py', 'tests/' || $1, $2, $3,
                  case when $3 then now() - interval '1 hour' end)`, [key, klass, installed]);
-    // The receipt cutover: one receipt older than the post-cutover fixture and
-    // newer than every legacy fixture, so ops.legacy_rule_admission_note()
-    // answers both ways.
     await db.query(
       `insert into public.rule (id, statement, taught_by, status) values ($1, 'wr262 cutover anchor', $2, 'retired')`,
       [R.cutoverAnchor, ctx.joeId]);
@@ -307,9 +262,6 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
       assert.equal(status.rows[0].enforcement_status, "hard_enforced");
       assert.equal(status.rows[0].approval_receipt_id, out.approval_receipt_id);
 
-      // Verb replay (tool_call) and database replay (0479 path) both hold.
-      // The envelope spreads the stored response over its own replayed:true,
-      // so the verb replay is proved by the same receipt and no new rows.
       const verbReplay = await callVerb(pg, copy, "carr_authority_joe", JOE, "approve-rule", args);
       assert.equal(verbReplay.approval_receipt_id, out.approval_receipt_id);
       const joe = await clientFor(pg, copy, "carr_authority_joe");
@@ -319,8 +271,6 @@ test("approve-rule adopts an active legacy rule on real PostgreSQL (WR-000262)",
           [R.ready, [CTL.gate], args.idempotency_key, args.reason]);
         assert.equal(dbReplay.rows[0].r.replayed, true);
         assert.equal(dbReplay.rows[0].r.approval_receipt_id, out.approval_receipt_id);
-        // A second, different approval of an adopted rule is no longer a
-        // legacy adoption: it takes the 0479 path, which refuses an active rule.
         await assert.rejects(joe.query(
           "select ops.approve_rule($1,'machine_enforceable',$2,$3,$4)",
           [R.ready, [CTL.gate], randomUUID(), args.reason]),

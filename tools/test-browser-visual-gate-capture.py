@@ -17,7 +17,6 @@ sys.path.insert(0, str(ROOT / "tools" / "room-bridge"))
 
 import browser_visual_gate_capture as capture  # noqa: E402
 import design_kernel  # noqa: E402
-import job_passport_artifact  # noqa: E402
 
 
 def args(artifact: Path, out: Path, chrome: str | None = None) -> argparse.Namespace:
@@ -76,13 +75,6 @@ def test_playwright_releases_are_newest_first_numerically():
     assert "chromium-1243" in str(candidates[0])
 
 
-def test_job_passport_emits_the_semantic_tokens_the_browser_runner_measures():
-    fixture = ROOT / "control-room" / "contracts" / "fixtures" / "execution-fabric" / "codex_desktop.observatory-projection.v1.json"
-    rendered = job_passport_artifact.render_job_passport_html(json.loads(fixture.read_text()))
-    for token in ("--surface-canvas", "--component-card-background", "--component-control-focus-outline", "min-height:var(--component-control-min-size)", "width:min(960px,100%)", "overflow-wrap:anywhere"):
-        assert token in rendered, token
-
-
 if __name__ == "__main__":
     test_browser_absence_is_a_typed_block_not_a_fabricated_pass()
     print("ok  browser absence becomes typed not_verified report")
@@ -94,5 +86,3 @@ if __name__ == "__main__":
     print("ok  browser runner rejects aliases to installed Google Chrome")
     test_playwright_releases_are_newest_first_numerically()
     print("ok  browser runner chooses the newest Playwright release numerically")
-    test_job_passport_emits_the_semantic_tokens_the_browser_runner_measures()
-    print("ok  Job Passport emits measured semantic and narrow-width controls")

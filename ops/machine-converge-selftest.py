@@ -50,6 +50,7 @@ COPIES = [
     "lib/launchd_calendar.py",
     "lib/machine_role.py",
     "lib/launchd_scope.py",
+    "ops/config/services.json",
     "lib/launchd_hold.py",
     "mcp-server/continuity-stdio-proxy.mjs",
     "ops/claude-continuity-hook.py",

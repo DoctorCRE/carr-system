@@ -72,7 +72,7 @@ edge node, not recovering data.
    yourself is named there with the path to get it.
 4. **Reinstall the scheduled jobs**: `ops/config-as-code.py install --apply`
    writes the launchd agents from the repo copies.
-5. **Verify**: `./run.sh health`, `tools/scheduler-truth.py`, and
+5. **Verify**: `./run.sh health`, `ops/scheduled-jobs-check.py`, and
    `tools/ops-record.py health`. The last one should stop reading `unknown` for
    the local jobs as each next fires.
 

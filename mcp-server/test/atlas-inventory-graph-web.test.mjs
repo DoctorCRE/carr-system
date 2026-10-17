@@ -4,8 +4,6 @@ import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js
 import { ATLAS_GRAPH_PATH } from "../src/atlas-inventory-graph.v5.js";
 
 const HOST = "dealroom.doctorcre.com";
-// Session bootstrap copied from work-inventory-census-web.test.mjs: the route must
-// be reachable only behind the same verified cookie session.
 class Kv {
   constructor() { this.values = new Map(); }
   async put(key, value) { this.values.set(key, value); }
@@ -69,7 +67,6 @@ test("the atlas route is authenticated, flag-gated, GET-only and a pass-through"
 
   const session = await signIn(handler, environment);
 
-  // Flag off: the route does not exist, it is not merely empty.
   response = await handler.fetch(new Request(`https://${HOST}${ATLAS_GRAPH_PATH}`, { headers: { cookie: session } }), { ...environment, WORKSPACE_COMMAND_CENTER_READ_ENABLED: "false" }, {});
   assert.equal(response.status, 404);
   response = await handler.fetch(new Request(`https://${HOST}${ATLAS_GRAPH_PATH}`, { headers: { cookie: session } }), { ...environment, WORKSPACE_COMMAND_CENTER_READ_ENABLED: "yes" }, {});
@@ -98,19 +95,16 @@ test("the atlas route is authenticated, flag-gated, GET-only and a pass-through"
   assert.equal(body.correlation_echo, "corr-web");
   assert.deepEqual(body.params_echo, { layer: null, q: null, include_retired: null, limit: null, cursor: null });
 
-  // The five query parameters reach the reader verbatim; the route parses nothing.
   response = await handler.fetch(new Request(`https://${HOST}${ATLAS_GRAPH_PATH}?layer=installed&q=worker&include_retired=true&limit=25&cursor=abc`, { headers: { cookie: session } }), environment, {});
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).params_echo, {
     layer: "installed", q: "worker", include_retired: "true", limit: "25", cursor: "abc",
   });
 
-  // An unknown parameter is a refusal, not a silently ignored field.
   response = await handler.fetch(new Request(`https://${HOST}${ATLAS_GRAPH_PATH}?viewer=dell`, { headers: { cookie: session } }), environment, {});
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error, "AUTHORIZATION_REFUSED");
 
-  // HEAD answers with the same status and no body.
   response = await handler.fetch(new Request(`https://${HOST}${ATLAS_GRAPH_PATH}`, { method: "HEAD", headers: { cookie: session } }), environment, {});
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "");
@@ -131,15 +125,11 @@ test("typed reader refusals map to the same statuses the census route uses", asy
     assert.equal(response.status, status, `${code} must map to ${status}`);
     assert.equal((await response.json()).error, code);
   }
-  // An untyped throw never leaks its message.
   const opaque = createDealroomHandler(overrides("joe.bookout.carr.us@gmail.com", async () => { throw new Error("connection string"); }));
   const response = await opaque.fetch(new Request(`https://${HOST}${ATLAS_GRAPH_PATH}`, { headers: { cookie: session } }), environment, {});
   assert.equal(response.status, 500);
   assert.equal((await response.json()).error, "INTERNAL_ERROR");
 
-  // With no injected reader the route falls back to its own default reader, which
-  // needs DATABASE_URL_READER. Absent that, the answer is a typed refusal — never
-  // a fabricated empty atlas, and never a leaked connection detail.
   const bare = createDealroomHandler({ ...overrides("joe.bookout.carr.us@gmail.com"), atlasGraphReader: null });
   const missing = await bare.fetch(new Request(`https://${HOST}${ATLAS_GRAPH_PATH}`, { headers: { cookie: session } }), environment, {});
   assert.equal(missing.status, 500);

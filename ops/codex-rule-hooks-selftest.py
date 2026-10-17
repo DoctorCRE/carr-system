@@ -71,14 +71,14 @@ def main():
     assert {"4a53ff82", "58b44ccb", "99e951b9"} <= move_rules, move_rules
     move_out = {"command": "*** Begin Patch\n*** Update File: hooks/probe.py\n*** Move to: scratch.txt\n@@\n-before\n+after\n*** End Patch"}
     assert destination_rules <= set(rule_routes.matched_rule_ids(routes, "apply_patch", move_out))
-    update_patch = {"command": "*** Begin Patch\n*** Update File: hooks/ledger-sweep.py\n@@\n-old\n+new\n*** End Patch"}
+    update_patch = {"command": "*** Begin Patch\n*** Update File: hooks/session-brief.py\n@@\n-old\n+new\n*** End Patch"}
     patch_payload = {"hook_event_name": "PreToolUse", "tool_name": "apply_patch",
                      "tool_input": update_patch}
     edit_payload = dict(patch_payload, tool_name="Edit",
-                        tool_input={"file_path": "hooks/ledger-sweep.py"})
+                        tool_input={"file_path": "hooks/session-brief.py"})
     edit_rows = {row["trigger_id"] for row in rail.matched_triggers(edit_payload)}
     patch_rows = {row["trigger_id"] for row in rail.matched_triggers(patch_payload)}
-    assert {"de72ad57b2c8", "5e186a09dcf2"} <= edit_rows
+    assert "5e186a09dcf2" in edit_rows
     assert edit_rows <= patch_rows, sorted(edit_rows - patch_rows)
     assert "bbffc139" not in rule_routes.matched_rule_ids(
         routes, "apply_patch", update_patch)
@@ -106,7 +106,7 @@ def main():
     )
     for variant in forms:
         update_variant = {"command": variant(update_patch["command"])}
-        assert "hooks/ledger-sweep.py" in rule_routes.call_paths(update_variant)
+        assert "hooks/session-brief.py" in rule_routes.call_paths(update_variant)
         update_ids = set(rule_routes.matched_rule_ids(
             routes, "apply_patch", update_variant))
         assert update_ids == update_rules, (update_ids, update_rules)

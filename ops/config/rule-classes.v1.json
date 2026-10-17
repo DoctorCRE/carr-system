@@ -43,6 +43,23 @@
    "summary": "When proposing structural changes to Joe, frame them as cost-now-vs-later window math for fast decisions.",
    "when": "presenting a structural change to Joe"
   },
+  "07dde434": {
+   "always_on": false,
+   "chars": 917,
+   "class": "c",
+   "moment": "designing or reviewing anything a prospect or client will use",
+   "summary": "Prospect- or client-facing AI must send people to Joe or Dell, never answer in their place.",
+   "when": "designing or reviewing anything a prospect or client will use"
+  },
+  "08c4eda2": {
+   "always_on": true,
+   "always_on_reason": "class-a; standing-fact:partner_license_territory",
+   "chars": 950,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Either partner works Alabama leads; Dell stays party of record on Alabama representation until Joe's licence issues.",
+   "when": "every turn"
+  },
   "0c1bac27": {
    "always_on": false,
    "chars": 1083,
@@ -491,6 +508,15 @@
    "summary": "In every client/prospect meeting, run discovery questions and reflect them back before recommending anything.",
    "when": "client or prospect meeting, before recommending"
   },
+  "486584d6": {
+   "always_on": false,
+   "chars": 904,
+   "class": "b",
+   "moment": "work needs a web console Joe is signed into on the MacBook",
+   "personal_to": "joe",
+   "summary": "Do console steps in Joe's signed-in Chrome yourself unless only he can supply something.",
+   "when": "work needs a web console Joe is signed into on the MacBook"
+  },
   "49533583": {
    "always_on": false,
    "chars": 2139,
@@ -516,6 +542,14 @@
    "moment": "canonical_edit gate, first write to tracked canonical files",
    "summary": "Before any first edit to tracked repo files, take an isolated worktree; never edit the canonical tree.",
    "when": "first tracked repository edit"
+  },
+  "4a77c35d": {
+   "always_on": false,
+   "chars": 712,
+   "class": "b",
+   "moment": "filling or ordering the Dot's work queue",
+   "summary": "Fill the Dot's queue with token-saving research and build-support first; PR reviews only where useful.",
+   "when": "filling or ordering the Dot's work queue"
   },
   "4a9188f3": {
    "always_on": false,
@@ -601,14 +635,13 @@
    "summary": "When Joe shares an x.com link, read the quoted post and its linked article fully",
    "when": "Joe posts an x.com link"
   },
-  "5697071b": {
-   "always_on": true,
-   "chars": 2787,
-   "class": "a",
-   "moment": "every turn: standing person, team or business context",
-   "summary": "Joe holds Florida licensure only; Dell carries Alabama representation.",
-   "when": "every turn",
-   "always_on_reason": "class-a; standing-fact:partner_license_territory"
+  "578fdd91": {
+   "always_on": false,
+   "chars": 1607,
+   "class": "b",
+   "moment": "contact enrichment finds a wrong or blank field",
+   "summary": "Enrichment applies confirmed corrections through the owning verb in the same run instead of parking proposals.",
+   "when": "contact enrichment finds a wrong or blank field"
   },
   "57d13061": {
    "always_on": false,
@@ -756,6 +789,14 @@
    "summary": "Before opening a loop, name a real external blocker from the closed list; otherwise just do the work.",
    "when": "add-loop / opening an open_loop"
   },
+  "661d7757": {
+   "always_on": false,
+   "chars": 505,
+   "class": "c",
+   "moment": "seeking an independent review judgment (Jev) on code, CI, a PR, product or a record",
+   "summary": "Call Jev for any bounded review judgment without separate approval; its result is evidence, never a gate.",
+   "when": "seeking an independent review judgment (Jev) on code, CI, a PR, product or a record"
+  },
   "67580c28": {
    "always_on": true,
    "chars": 1839,
@@ -764,6 +805,15 @@
    "summary": "Joe defines calm positively; CARR surfaces use the dark cinematic register.",
    "when": "every turn",
    "always_on_reason": "class-a; standing-fact:partner_preference"
+  },
+  "67e48aaf": {
+   "always_on": false,
+   "chars": 343,
+   "class": "b",
+   "moment": "Joe pastes a token or credential into chat or a screenshot",
+   "personal_to": "joe",
+   "summary": "Never warn Joe about exposure of a credential he chose to paste; use it as directed.",
+   "when": "Joe pastes a token or credential into chat or a screenshot"
   },
   "6901cc3b": {
    "always_on": false,
@@ -862,6 +912,15 @@
    "summary": "When a markdown write is blocked, route content through record verbs, never redirect it to an unwatched file.",
    "when": "a markdown write is blocked"
   },
+  "76fcbed6": {
+   "always_on": false,
+   "chars": 1181,
+   "class": "c",
+   "moment": "Joe sends a link, article, repo, video or other source",
+   "personal_to": "joe",
+   "summary": "Give every source Joe sends its own study job on arrival; apply each concept or name the failed test.",
+   "when": "Joe sends a link, article, repo, video or other source"
+  },
   "7e9739f2": {
    "always_on": true,
    "always_on_reason": "class-a",
@@ -887,14 +946,6 @@
    "moment": "convening a red team/review panel",
    "summary": "When convening a red team, assign distinct lenses and one seat that re-runs the evidence, never redundant votes.",
    "when": "convening a red team/review panel"
-  },
-  "8400cd3d": {
-   "always_on": false,
-   "chars": 211,
-   "class": "b",
-   "moment": "starting a plan, a heavy-build plan, propose-ready-plan, or a Codex or Dot brief",
-   "summary": "Size new work first: one go for tiny, /grill-with-docs for medium-to-large, and /wayfinder only after one session.",
-   "when": "starting a plan, a heavy-build plan, propose-ready-plan, or a Codex or Dot brief"
   },
   "847f9995": {
    "always_on": false,
@@ -1039,15 +1090,6 @@
    "summary": "When adding content under an indexed multi-folder category, update its INDEX.md in the same session.",
    "when": "adding content under an indexed category"
   },
-  "9b081605": {
-   "always_on": false,
-   "chars": 208,
-   "class": "d",
-   "moment": "no_send_worker check (outbound send)",
-   "personal_to": "joe",
-   "summary": "Auto-send drafts only to Joe's own CARR address; everything else stays a pending draft",
-   "when": "no_send_worker check (outbound send)"
-  },
   "9d80fd2d": {
    "always_on": false,
    "chars": 277,
@@ -1087,6 +1129,15 @@
    "moment": "detecting a known broken thing with a known fix",
    "summary": "When a known issue with a known fix is found, repair it immediately and brief; heavy-path still gates.",
    "when": "detecting a known broken thing with a known fix"
+  },
+  "a3da3d39": {
+   "always_on": false,
+   "chars": 744,
+   "class": "b",
+   "moment": "leaving a rule, decision or retirement waiting on Joe's approval",
+   "personal_to": "joe",
+   "summary": "Put every item waiting on Joe's approval to him in the same turn with an AskUserQuestion box.",
+   "when": "leaving a rule, decision or retirement waiting on Joe's approval"
   },
   "a3f6c7f9": {
    "always_on": true,
@@ -1138,6 +1189,14 @@
    "summary": "A check compares the artifact to its known-good shape; a success signal must read the artifact, never exit code alone.",
    "when": "building guards or wiring work signals"
   },
+  "a9fc3f0e": {
+   "always_on": false,
+   "chars": 753,
+   "class": "c",
+   "moment": "running research or a fact-check",
+   "summary": "Read the research-site index first, also search the open internet, and add new useful sources yourself.",
+   "when": "running research or a fact-check"
+  },
   "ab814a26": {
    "always_on": false,
    "chars": 923,
@@ -1145,6 +1204,14 @@
    "moment": "rule_shape gate (approve-rule)",
    "summary": "Every taught rule must ship classified as machine-enforceable with a gate, or judgment with a reason",
    "when": "rule_shape gate (approve-rule)"
+  },
+  "ac0a6579": {
+   "always_on": false,
+   "chars": 502,
+   "class": "c",
+   "moment": "building or reviewing access for a client share-site page",
+   "summary": "Client share-site passwords stay the client name; never propose stronger access, never show another client's data.",
+   "when": "building or reviewing access for a client share-site page"
   },
   "af7de070": {
    "always_on": false,
@@ -1289,6 +1356,14 @@
    "summary": "When asking a question or presenting a draft, name the specific deal in the question text itself.",
    "when": "chat_lint gate"
   },
+  "c363bd8b": {
+   "always_on": false,
+   "chars": 997,
+   "class": "b",
+   "moment": "preparing to merge open PRs",
+   "summary": "Batch open PRs that share files into one combined PR; never remerge them one at a time.",
+   "when": "preparing to merge open PRs"
+  },
   "c4a284b2": {
    "always_on": false,
    "chars": 2985,
@@ -1367,6 +1442,14 @@
    "summary": "CARR's tenant/buyer-only model is Joe's strongest sales hook.",
    "when": "every turn",
    "always_on_reason": "class-a; standing-fact:organization_service_model"
+  },
+  "cfe6b5c6": {
+   "always_on": false,
+   "chars": 972,
+   "class": "b",
+   "moment": "designing or reviewing a mechanism that defaults to shadow, dry-run or record-only",
+   "summary": "Ship an obvious improvement live with kill switch; shadow only for irreversible untested runs, with a dated end.",
+   "when": "designing or reviewing a mechanism that defaults to shadow, dry-run or record-only"
   },
   "cff429f5": {
    "always_on": false,
@@ -1531,14 +1614,6 @@
    "summary": "Never claim something was handed off, sent, or delivered without naming the specific recipient.",
    "when": "completion_evidence gate (delivery claim)"
   },
-  "ede4b241": {
-   "always_on": false,
-   "chars": 485,
-   "class": "b",
-   "moment": "dispatching work to another model or launching a cloud session (model choice)",
-   "summary": "When launching a cloud session, pick Sonnet 5.5 for well-scoped checkable work and Opus 5.5 for design, gates and reviews.",
-   "when": "model dispatch or cloud-session launch"
-  },
   "ede4c735": {
    "always_on": false,
    "chars": 1071,
@@ -1623,6 +1698,14 @@
    "moment": "costar_lane deny_gate - Chrome-extension tool call targeting costar.com",
    "summary": "Drive CoStar only in the desktop app's own Browser pane, never Chrome or its extension.",
    "when": "Chrome-extension calls targeting CoStar"
+  },
+  "f673326b": {
+   "always_on": false,
+   "chars": 384,
+   "class": "b",
+   "moment": "granting or briefing an agent's access to CARR knowledge, records or tools",
+   "summary": "When granting an agent access, add no fences Joe did not ask for; raise credential custody once.",
+   "when": "granting or briefing an agent's access to CARR knowledge, records or tools"
   },
   "f92dfab2": {
    "always_on": false,

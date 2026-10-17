@@ -172,28 +172,12 @@ def main():
         check("bin/nightly.sh sources the helper",
               "run-lock.sh" in chain)
         check("bin/nightly.sh takes the lock and no-ops when it cannot",
-              "carr_take_lock nightly" in chain)
-        # THE RELEASE MOVED INTO THE CHAIN'S ONE EXIT HANDLER (2026-08-23) and the
-        # two bare `carr_release_lock` traps this used to look for are gone. The
-        # contract is unchanged — release on a signal, release on exit — but the
-        # traps are now installed at the TOP of bin/nightly.sh rather than beside
-        # the lock, because a trap installed after the lock is taken cannot report
-        # a death that happens before it, and every death in the 2026-08-17..19
-        # outage was of exactly that kind. carr_chain_exit releases the lock as
-        # one of the things it does.
-        #
-        # Asserting all three parts rather than the handler's name alone: a
-        # version that wires the traps and never releases satisfies any one of
-        # them, which is the failure this check exists to catch.
+              'carr_take_lock "$SERVICE" || exit 0' in chain)
         check("bin/nightly.sh releases on signals and on exit",
-              "carr_chain_exit $?; exit 143" in chain
-              and "trap 'carr_chain_exit $?' EXIT" in chain
-              and "carr_release_lock" in chain)
-        # And the release is guarded, so the handler cannot fire before the lock
-        # exists (the chain installs its traps well above `carr_take_lock`).
+              "trap 'exit 143' INT TERM HUP" in chain
+              and "trap 'carr_release_lock' EXIT" in chain)
         check("bin/nightly.sh only releases a lock it actually took",
-              "LOCK_HELD=0" in chain and "LOCK_HELD=1" in chain
-              and '[ "$LOCK_HELD" -eq 1 ] && carr_release_lock' in chain)
+              chain.index('carr_take_lock "$SERVICE" || exit 0') < chain.index("trap 'carr_release_lock' EXIT"))
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

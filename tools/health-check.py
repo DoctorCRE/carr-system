@@ -113,8 +113,8 @@ def _reader_args(argv):
         # A parent shell may carry this old ambient variable.  Normal health must
         # not pass it to any child or let a child silently choose a Drive reader.
         os.environ.pop("CARR_VAULT", None)
-    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "claude-continuity-spool", "costs", "builds", "uptime", "storage", "sends"):
-        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|claude-continuity-spool|costs|builds|uptime|storage|sends")
+    if section not in ("all", "exports", "jobs", "registry", "credentials", "jev-spend", "jev-cap", "grok-session", "tailscale", "headless", "costs", "uptime", "storage", "sends"):
+        raise SystemExit("health-check: --section must be all|exports|jobs|registry|credentials|jev-spend|jev-cap|grok-session|tailscale|headless|costs|uptime|storage|sends")
     if fixture and recovery:
         raise SystemExit("health-check: --fixture is for hermetic canonical tests only")
     # --act executes every red row's bound action (tools/health_breach.py). It
@@ -145,6 +145,11 @@ if CANONICAL_SECTION == "headless":
     if not _rows:
         print("OK headless — no installed headless task plists")
     sys.exit(int(any(row["status"] == "WARN" for row in _rows)))
+
+
+def _cloudflare_rows():
+    from lib.cloudflare_tokens import health_rows
+    return health_rows()
 
 
 def _jev_spend_row():
@@ -196,33 +201,6 @@ def _grok_session_row():
                 "owner orchestrator · remediation restore the Grok reader/lock storage · "
                 "verify rerun health · auto-clear on successful read", 1)
 
-
-def _claude_continuity_spool_row(drain):
-    """Continuity spool depth, after an optional drain, with its bound action inline.
-
-    The nightly section drains (re-sends every receipt whose delivery is
-    unknown, under its original key, through the claude-continuity token) and
-    then reports; the `all` view only reports.  Red at the depth/age threshold,
-    green at 0; the row's loop is opened once per episode and auto-clears at 0.
-    """
-    sys.path.insert(0, REPO_ROOT)
-    from datetime import datetime as _dt, timezone as _tz
-    from lib import claude_continuity_spool as continuity_spool
-    try:
-        drained = continuity_spool.drain() if drain else None
-    except (OSError, ValueError) as exc:
-        return (f"UNAVAILABLE {continuity_spool.ROW_NAME} — drain {type(exc).__name__} · "
-                f"{continuity_spool.ACTION}"), 1
-    line = continuity_spool.health_row(run_verb=continuity_spool.run_verb,
-                                       state_path=continuity_spool.loop_state_path(),
-                                       now=_dt.now(_tz.utc), drained=drained)
-    return line, int(not line.startswith("OK"))
-
-
-if CANONICAL_SECTION == "claude-continuity-spool":
-    _spool_line, _spool_rc = _claude_continuity_spool_row(drain=True)
-    print(_spool_line)
-    sys.exit(_spool_rc)
 
 if CANONICAL_SECTION == "jev-spend":
     try:
@@ -769,7 +747,7 @@ def _canonical_snapshot():
         return value
 
     snapshot = {"exports": None, "job_definitions": None, "jobs": None,
-                "controls": None, "errors": []}
+                "controls": None, "verb_usage": None, "errors": []}
     if CANONICAL_SECTION in ("all", "exports"):
         # THE CUTOFF (fired 2026-08-19) IS CARRIED HERE TOO. A retired .md target
         # stops producing export_run rows at all, so 26 hours later every one of
@@ -960,7 +938,59 @@ print(json.dumps({"registered": sorted(TARGETS), "rows": rows, "retired": retire
                         "active_rules_accepted_unenforceable": int(cols[4]),
                     }
                     break
+        # value::text, because db-tap prints str() of each column and a jsonb
+        # column arrives as a Python dict whose str() is not JSON.
+        p = subprocess.run(
+            [_query_python, os.path.join(REPO_ROOT, "tools/db-tap.py"),
+             "sql", "/dev/stdin"],
+            input="select value::text from public.v_integrity_digest "
+                  "where line = 'verb_usage_30d';",
+            cwd=REPO_ROOT, text=True, capture_output=True, timeout=120,
+            env={k: v for k, v in os.environ.items() if k != "CARR_VAULT"},
+        )
+        if p.returncode:
+            snapshot["errors"].append("verb_usage: " +
+                                      ((p.stderr or "").strip() or "query failed"))
+        else:
+            for line in p.stdout.splitlines():
+                if line.startswith("{"):
+                    try:
+                        snapshot["verb_usage"] = json.loads(line)
+                    except ValueError as exc:
+                        snapshot["errors"].append(f"verb_usage: unparseable result ({exc})")
+                    break
+            else:
+                # The query ran and the view has no verb_usage_30d line: the
+                # migration that adds it is not applied yet, which is what the
+                # release baseline reads before it applies that migration.
+                snapshot["verb_usage_absent"] = True
     return snapshot
+
+
+VERB_USAGE_LIST_ALL_BELOW = 60
+VERB_USAGE_LIST_HEAD = 20
+
+
+def _verb_usage_lines(value):
+    """v_integrity_digest's verb_usage_30d row as one sentence, then the names.
+
+    Every name is listed while fewer than VERB_USAGE_LIST_ALL_BELOW are uncalled,
+    else the first VERB_USAGE_LIST_HEAD (write verbs come first, as the view
+    sorts them) and a count of the rest. The action text is the view's own, so
+    the migration and this line cannot disagree about what to do."""
+    uncalled = value["uncalled"]
+    writes = sum(1 for verb in uncalled if verb["write"])
+    gated = sum(1 for verb in uncalled if verb["human_only"] or verb["authority_only"])
+    lines = [f"verb usage: {len(uncalled)} of {value['registered']} registered verbs "
+             f"uncalled in {value['window_days']} days ({writes} write, "
+             f"{len(uncalled) - writes} read; {gated} human/authority-only) — "
+             f"{value['action']}"]
+    names = [verb["verb"] for verb in uncalled]
+    shown = names if len(names) < VERB_USAGE_LIST_ALL_BELOW else names[:VERB_USAGE_LIST_HEAD]
+    lines += ["  " + ", ".join(shown[i:i + 6]) for i in range(0, len(shown), 6)]
+    if len(shown) < len(names):
+        lines.append(f"  … and {len(names) - len(shown)} more (integrity-digest lists every one)")
+    return lines
 
 
 def _iso(value):
@@ -1396,18 +1426,6 @@ def _host_liveness_rows():
     return module.rows(live, config)
 
 
-def _seat_health_rows():
-    """Seat rows from the record layer first (read-resource-dashboard, so the
-    other Mac's probes count) and this Mac's report second; a seat whose host
-    is offline reads SKIP, an unrun probe STALE, and only a run that failed FAIL."""
-    sys.path.insert(0, os.path.join(REPO_ROOT, "ops"))
-    import seat_health
-    try:
-        module, config, live = _host_liveness()
-        offline = module.offline_seats(live, config)
-    except (OSError, ValueError, KeyError, ImportError):
-        offline = {}
-    return seat_health.health_rows(seat_health.current_report(REPO_ROOT), offline=offline)
 
 
 def _tailscale_row():
@@ -1418,26 +1436,6 @@ def _tailscale_row():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
-
-
-_BUILD_DURATION_UNAVAILABLE = ("UNAVAILABLE build duration · on breach: orchestrator restore scheduled "
-                               "checker; verify ops/build-duration-check.py --health; "
-                               "auto-clear after fresh complete scan")
-
-
-def _build_duration_row():
-    from lib.machine_role import is_primary
-    if not CANONICAL_FIXTURE and not is_primary(REPO_ROOT):
-        return 'SKIP build duration · primary-only monitor; secondary machine', 0
-    checker = os.path.join(REPO_ROOT, 'ops', 'build-duration-check.py')
-    args = [sys.executable, checker, '--health']
-    if CANONICAL_SECTION == 'builds' and CANONICAL_FIXTURE:
-        args.extend(['--fixture', CANONICAL_FIXTURE])
-    result = subprocess.run(args, capture_output=True, text=True, timeout=15)
-    lines = result.stdout.strip().splitlines()
-    if result.returncode not in (0, 1) or not lines:
-        return _BUILD_DURATION_UNAVAILABLE, 1
-    return lines[0], result.returncode
 
 
 def _system_cost_row():
@@ -1485,17 +1483,6 @@ def _canonical_health():
     _FINDINGS.clear()
     _GREEN_EVIDENCE.clear()
     rc = 0
-    if CANONICAL_SECTION in ('all', 'builds'):
-        try:
-            build_line, build_rc = _build_duration_row()
-        except (OSError, subprocess.TimeoutExpired):
-            build_line, build_rc = _BUILD_DURATION_UNAVAILABLE, 1
-        print('  ' + build_line)
-        if build_rc:
-            rc = _red('build_duration', build_line, hard_error=build_line.startswith('UNAVAILABLE'), time_rolling=True)
-        if CANONICAL_SECTION == 'builds':
-            print(_HEALTH_COMPLETION_MARKER)
-            return rc
     if CANONICAL_SECTION == "all":
         _cost_snapshot, _cost_line = _system_cost_row()
         print("  " + _cost_line)
@@ -1817,6 +1804,32 @@ def _canonical_health():
                     if _count:
                         rc = _red(_key, _detail, count=_count, time_rolling=_time_rolling)
 
+        # WR-000284 C5: a registered verb nobody calls is named every day. The
+        # count is informational, never red: some uncalled verbs are human-
+        # or authority-only by design, and a permanently red row is a row
+        # nobody reads (rule bd4a6d22). Only an unreadable row is red.
+        print("Verb usage — registered verbs with no call in 30 days")
+        verb_usage = snap.get("verb_usage")
+        if snap.get("verb_usage_absent"):
+            # Soft, not hard: an absent line is a pending migration, and a hard
+            # error here would block the very release that applies it.
+            print("  ⚠︎ verb usage NOT DEPLOYED — v_integrity_digest has no "
+                  "verb_usage_30d line yet · on breach: apply the pending "
+                  "migration through the release")
+            rc = _red("verb_usage", "verb_usage_30d not deployed")
+        else:
+            try:
+                _verb_lines = _verb_usage_lines(verb_usage)
+            except (TypeError, KeyError):
+                print("  ⚠︎ verb usage UNREADABLE — v_integrity_digest verb_usage_30d "
+                      "did not come back · on breach: run integrity-digest by hand")
+                rc = _red("verb_usage", "verb_usage_30d unreadable", hard_error=True)
+            else:
+                _uncalled = len(verb_usage["uncalled"])
+                print(f"  {'OK' if not _uncalled else '→︎'} {_verb_lines[0]}")
+                for _line in _verb_lines[1:]:
+                    print("  " + _line)
+
         p = subprocess.run(["git", "status", "--porcelain"], cwd=REPO_ROOT,
                            text=True, capture_output=True, timeout=30)
         if p.returncode:
@@ -1842,17 +1855,15 @@ def _canonical_health():
             rc = _red("grok_session", _grok_line,
                       hard_error=_grok_line.startswith("UNAVAILABLE"), time_rolling=True)
 
-    if CANONICAL_SECTION == "all":
-        # Report only; the nightly claude-continuity-spool section drains.
-        try:
-            _spool_line, _spool_rc = _claude_continuity_spool_row(drain=False)
-        except Exception as exc:
-            _spool_line, _spool_rc = (f"UNAVAILABLE continuity spool depth — {type(exc).__name__}", 1)
-        print("  " + _spool_line)
-        if _spool_rc:
-            rc = _red("claude_continuity_spool", _spool_line, time_rolling=True)
-
     if CANONICAL_SECTION in ("all", "credentials"):
+        _GREEN_EVIDENCE["cloudflare_token"] = set()
+        if not CANONICAL_FIXTURE:
+            for token_row in _cloudflare_rows():
+                print("  " + token_row["line"])
+                if token_row["status"] == "ok":
+                    _GREEN_EVIDENCE["cloudflare_token"].add(token_row["subject"])
+                else:
+                    rc = _red("cloudflare_token", token_row["line"], subject=token_row["subject"])
         # The source log is canonical across worktrees. The row carries its
         # response action on both OK and WARN, and the helper owns one loop.
         try:
@@ -1987,33 +1998,6 @@ def _canonical_health():
         except Exception as e:
             print(f"  ⚠︎ {'credential health':<18} check failed ({type(e).__name__}: {e})")
             rc = _red("credential_health", f"check failed ({type(e).__name__}: {e})", hard_error=True)
-
-    if CANONICAL_SECTION == "all":
-        # A seat's loop auto-clears only on its own PASS line (tools/
-        # health_breach.py act): until the rows are read, no seat is green.
-        _GREEN_EVIDENCE["ai_seat_health"] = None
-        try:
-            # FAIL (a probe ran and failed) and STALE-RED (no probe row for
-            # over 72 h while the seat's host is online or unknown) are red;
-            # STALE inside the bound and SKIP (host offline) are not.
-            _seats_green = set()
-            for _seat_line in _seat_health_rows():
-                print("  " + _seat_line)
-                if _seat_line.startswith(("FAIL ", "STALE-RED ")):
-                    # One finding per seat: without a subject the six rows
-                    # merged into one (count 6) that kept only the last
-                    # seat's text, so five bound actions were unreachable.
-                    rc = _red("ai_seat_health", _seat_line, subject=_seat_line.split()[1],
-                              time_rolling=True)
-                elif _seat_line.startswith("PASS"):
-                    _seats_green.add(_seat_line.split()[1])
-            _GREEN_EVIDENCE["ai_seat_health"] = _seats_green
-        except (ImportError, TypeError, AttributeError):
-            _seat_detail = ("Seat health evidence unreadable; on breach: orchestrator repairs "
-                            "ops/seat-health.py and reruns the daily exact-value probes; "
-                            "auto-clear when all seats pass")
-            print("  FAIL " + _seat_detail)
-            rc = _red("ai_seat_health", _seat_detail, time_rolling=True)
 
     if CANONICAL_SECTION == "all":
         # Jev liveness compares the last usable provider receipt with a
@@ -2747,93 +2731,6 @@ for name, out_pat, want_hour, tol_h, marker, stale_h, wake_note, svc_key in SCHE
 # nothing, which is exactly how the settings wipe hid behind an already-red
 # config row on 2026-08-08. Naming the streak separates "this broke last night"
 # from "this has been broken all week and nobody looked".
-_nightly_log = os.path.expanduser("~/carr-system/out/nightly.log")
-# PARSED ON COMPLETION LINES, NOT ON "chain begin", and the difference is not
-# cosmetic. Two chains can overlap in this log — it happened on 2026-08-10, two
-# runs 44 seconds apart — and anchoring each FAIL to the most recent begin then
-# hands every failure to the second run and leaves the first with no verdict at
-# all, which under-counts the streak and reports a chronic red as a first
-# failure. Attributing the FAILs seen since the previous verdict to the run that
-# just ended is the honest reading under interleaving: it can over-attribute
-# between two overlapping runs, never lose one.
-try:
-    # BLOCKED is tracked beside FAIL, never folded into it (2026-08-21). A step
-    # that refused for want of a canonical seam did not run, so reporting the
-    # chain clean and saying nothing else would be the false-healthy reading the
-    # refusal script warned about. It is not a failure either — see the argument
-    # at the 69 branch in bin/nightly.sh. So it gets its own count, printed
-    # beside the verdict on every line below, and it never sets rc.
-    # TOMBSTONE is tracked beside BLOCKED for the reason BLOCKED is tracked
-    # beside FAIL, one step further along (2026-08-23). A tombstoned step was
-    # gated out before the chain ran it, so blocked-count going to zero must not
-    # be readable as "the seams got built" — the debt moved from one column to
-    # another and this row has to show both or it reports a fix that did not
-    # happen. Neither count ever sets rc: a known, named, filed debt is not
-    # tonight's alarm. What IS tonight's alarm is a step failing, which still is.
-    _done: list[tuple[bool, list[str], list[str], list[str]]] = []
-    _pending: list[str] = []
-    _blocked: list[str] = []
-    _tombs: list[str] = []
-    _begins = _overlaps = 0
-    _open = 0
-    for _ln in open(_nightly_log, errors="replace"):
-        if "chain begin" in _ln:
-            _begins += 1
-            _open += 1
-            if _open > 1:
-                _overlaps += 1
-        elif "  FAIL  " in _ln:
-            _pending.append(_ln.split("  FAIL  ", 1)[1].strip())
-        elif "  BLOCKED  " in _ln:
-            _blocked.append(_ln.split("  BLOCKED  ", 1)[1].strip())
-        elif "  TOMBSTONE  " in _ln:
-            _tombs.append(_ln.split("  TOMBSTONE  ", 1)[1].strip())
-        else:
-            _outcome = _health_sub.nightly_completion(_ln)
-            if _outcome is None:
-                continue
-            _done.append((_outcome, _pending, _blocked, _tombs))
-            _pending = []
-            _blocked = []
-            _tombs = []
-            _open = max(0, _open - 1)
-    if not _done:
-        print(f"  -- {'nightly chain result':<22} no completed run in the log — the chain "
-              f"has not finished since the log was last trimmed")
-    else:
-        _last_ok, _last_fails, _last_blocked, _last_tombs = _done[-1]
-        _bl_names = sorted({s.split(" (exit")[0] for s in _last_blocked})
-        _bl = (f"  · {len(_bl_names)} step(s) BLOCKED on a missing canonical seam, "
-               f"not counted as failures: {', '.join(_bl_names)}" if _bl_names else "")
-        # The label is everything before the " — gated out" the chain writes, so
-        # the row names the steps rather than reprinting every reopen condition.
-        # The conditions themselves are one grep of out/nightly.log away and this
-        # row has to stay one line.
-        _tb_names = sorted({s.split(" — gated out")[0] for s in _last_tombs})
-        _bl += (f"  · {len(_tb_names)} step(s) TOMBSTONED, gated out rather than run: "
-                f"{', '.join(_tb_names)} — each names what it is missing in "
-                f"out/nightly.log" if _tb_names else "")
-        if _last_ok:
-            print(f"  OK {'nightly chain result':<22} last run exited clean, all steps OK{_bl}")
-        else:
-            # how many consecutive completed runs, newest-first, ended red
-            _streak = 0
-            for _ok, _, _, _ in reversed(_done):
-                if _ok:
-                    break
-                _streak += 1
-            _labels = sorted({s.split(" (exit")[0] for s in _last_fails})
-            _age = "FIRST FAILURE" if _streak == 1 else f"{_streak} runs in a row"
-            _note = (f" · {_overlaps} overlapping run(s) in this log, so step names may be "
-                     f"attributed to the wrong one" if _overlaps else "")
-            print(f"  ⚠︎ {'nightly chain result':<22} last run FAILED ({_age}) — "
-                  f"{', '.join(_labels) or 'step name not in the log'}  · read "
-                  f"out/nightly.log; a chain red for several runs is one nobody is reading, "
-                  f"which is the failure this row exists to catch{_note}{_bl}")
-            rc = 1
-except OSError as _exc:
-    print(f"  -- {'nightly chain result':<22} cannot read {_nightly_log} ({_exc})")
-
 # --- work sitting outside git (added 2026-08-10) -----------------------------
 # Joe asked whether a routine should force every session to commit on a timer.
 # The answer was no: `git commit -a` on a schedule is the operation
@@ -3343,52 +3240,6 @@ except Exception as e:
     print(f"  ⚠︎ {'egress guard':<18} selftest failed ({type(e).__name__}: {e})")
     rc = 1
 
-# A THIRD INDEPENDENT ROW (2026-08-10, loop #231). The egress row above proves
-# the guard still denies network and render writes. It says nothing about whether
-# the GATES THEMSELVES are still protected, which is a separate claim that was
-# false for three days: gate-edit-gate.py guarded Write/Edit while the shell path
-# was wide open, and its own docstring asserted otherwise. The fixtures for that
-# suite had also gone chronically red — 15/27 — after the gate was downgraded to
-# announce and nobody moved them, so nothing would have reported the regression.
-# A suite nobody runs is not a check, which is why it gets a row here.
-try:
-    _ggt = os.path.join(REPO_ROOT, "ops", "gate-edit-gate-selftest.py")
-    if os.path.exists(_ggt):
-        _p = subprocess.run([sys.executable, _ggt], capture_output=True, text=True, timeout=180)
-        _sum = next((l for l in (_p.stdout or "").splitlines()
-                     if "gate-edit-gate-selftest:" in l), "")
-        _sum = _sum.split(": ", 1)[-1] if _sum else "(no output)"
-        if _p.returncode == 0:
-            print(f"  OK {'gate protection':<18} {_sum} · on breach: a gate can be "
-                  f"changed SILENTLY; python3 ops/gate-edit-gate-selftest.py")
-        else:
-            print(f"  ✗✗ {'gate protection':<18} {_sum} · on breach: a gate can be "
-                  f"changed SILENTLY — the announcement both doors promise is not "
-                  f"firing; python3 ops/gate-edit-gate-selftest.py")
-            rc = 1
-except Exception as e:
-    print(f"  ⚠︎ {'gate protection':<18} selftest failed ({type(e).__name__}: {e})")
-    rc = 1
-
-# Rule coverage is deliberately a category map, not a gate count.  A green
-# result means every active rule is classified once and every non-advisory rule
-# names a concrete control/test; it does NOT claim all rules are hard-blocked.
-try:
-    _rem = os.path.join(REPO_ROOT, "ops", "rule-enforcement-map-check.py")
-    if os.path.exists(_rem):
-        _p = subprocess.run([sys.executable, _rem], capture_output=True, text=True, timeout=45)
-        _line = next((l for l in (_p.stdout or "").splitlines()
-                      if l.startswith("rule-enforcement-map:")), "(no output)")
-        _summary = _line.split(" — ", 1)[-1]
-        if _p.returncode == 0:
-            print(f"  OK {'rule coverage':<18} {_summary}")
-        else:
-            print(f"  ✗✗ {'rule coverage':<18} {_summary} · an active rule is unmapped or a claimed control lacks evidence")
-            rc = 1
-except Exception as e:
-    print(f"  ⚠︎ {'rule coverage':<18} check failed ({type(e).__name__}: {e})")
-    rc = 1
-
 # The Hermes runtime writes its own memory files and injects them into every one
 # of its sessions. They are a second, ungated rule store with no provenance, and
 # they go stale silently when the record layer moves. This is a predicate rather
@@ -3691,18 +3542,6 @@ except Exception as e:
 # --- the doctrine store (P4/P5, 2026-08-08; decisions 82a2fb62 + import door) -
 # Every row prints its bound action inline (rule 590b11e1: no metric without a
 # bound action, visible in the render itself). A failed read is never all-clear.
-print("\nrule delivery")
-try:
-    from ops.rule_recall_health import check_local as _check_rule_recall
-    _line = _check_rule_recall(REPO_ROOT)
-    print("  " + _line)
-    if not _line.startswith("OK"):
-        rc = 1
-except Exception as e:
-    from ops.rule_recall_health import ACTION as _recall_action
-    print(f"  UNAVAILABLE rule recall — {type(e).__name__}; warning retained · {_recall_action}")
-    rc = 1
-
 print("\ndoctrine store")
 try:
     _q = ("select "

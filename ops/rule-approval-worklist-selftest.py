@@ -227,12 +227,15 @@ class WorklistTest(unittest.TestCase):
         rows = catalog_rows_from_0874()
         sql = MIGRATION_0874.read_text(encoding="utf-8")
         for key in REMINDER_CONTROLS:
-            self.assertEqual(classes[key], "surfacing", f"{REAL_CLASSES.name} classes {key}")
+            if key == "ledger_capture":
+                self.assertNotIn(key, classes, "PR #1801 retires ledger_capture")
+            else:
+                self.assertEqual(classes[key], "surfacing", f"{REAL_CLASSES.name} classes {key}")
             self.assertEqual(rows[key]["enforcement_class"], "surfacing", f"0874 installs {key}")
             self.assertIn(f"(control_key = '{key}' and enforcement_class = 'surfacing'", sql,
                           f"0874's postcondition pins {key} as surfacing")
         for key, row in rows.items():
-            self.assertEqual(row["enforcement_class"], classes[key],
+            self.assertEqual(row["enforcement_class"], classes.get(key, "surfacing"),
                              f"0874 and {REAL_CLASSES.name} agree on {key}")
 
     def test_real_reminder_controls_read_class_not_approvable(self):
@@ -243,8 +246,8 @@ class WorklistTest(unittest.TestCase):
         catalog = catalog_rows_from_0874()
         real = w.load_map()
         mapped = {s: e for s, e in real.items() if e.get("control") in REMINDER_CONTROLS}
-        self.assertTrue({e["control"] for e in mapped.values()} == set(REMINDER_CONTROLS),
-                        "the real map names rules on both reminders")
+        self.assertEqual({e["control"] for e in mapped.values()}, {"session_boot"},
+                         "the live map retains session_boot and retires ledger_capture")
         controls = dict(mapped)
         controls["5b000001"] = {"control": "session_boot", "enforcement_class": "stop_gate"}
         controls["5b000002"] = {"control": "ledger_capture", "enforcement_class": "stop_gate"}

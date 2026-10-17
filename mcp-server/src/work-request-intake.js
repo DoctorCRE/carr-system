@@ -13,6 +13,9 @@ const TRIAGE_CLASSES = new Set(["operational", "needs_judgment", "safety_review"
 const JOE_ANSWER_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "answer_text", "scope_confirmed", "evidence_ref"]);
 const DECLINE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason"]);
 const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason", "superseded_by"]);
+const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
+  "successor_is_self", "successor_withdrawn", "successor_not_sourced", "supersession_cycle",
+  "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
 const PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
 const ACCEPT_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash"]);
 const AMEND_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","predecessor_plan_hash","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
@@ -744,13 +747,10 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         // exactly those or the SQL widening is dead code.
         if (!row || !["captured", "triaged", "ready", "needs_joe", "declined", "superseded"].includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
         const triaged = ["triaged", "ready"].includes(row.state);
-        // Withdrawal is CAPTURED-ONLY: branch 3 of work_request_sourced_capture_
-        // shape requires triage_classification, triaged_by_actor_id and
-        // triaged_at to all be null in these two states, and the immutability
-        // trigger admits the transition only from 'captured'. So a withdrawn row
-        // carries no triage, no plan and no shape, and every block below that is
-        // keyed on those columns correctly reads null. Nothing here has to
-        // special-case them; the constraint already did.
+        // A withdrawn row carries no plan and no shape: decline is captured-
+        // only, and 0888 supersedes a triaged row only when nothing downstream
+        // names it. A row superseded from triaged keeps its triage fields, so
+        // the triage block is keyed on the column rather than on the state.
         const withdrawn = ["declined", "superseded"].includes(row.state);
         let pendingOutcomeFeedback = null;
         if (row.state === "ready") {
@@ -782,7 +782,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           // would misreport absence as staleness. Same null-when-absent shape
           // as plan/shape below.
           source: row.doctrine_section_id ? sourceProjection(row) : null,
-          triage: triaged ? { classification: row.triage_classification, human_actor_slug: row.triaged_by_actor_slug,
+          triage: row.triaged_at ? { classification: row.triage_classification, human_actor_slug: row.triaged_by_actor_slug,
             triaged_at: row.triaged_at } : null,
           plan: row.plan_hash ? { plan_ref: row.plan_ref || null, plan_hash: row.plan_hash, runbook_ref: row.runbook_ref || null,
             scope_summary: row.scope_summary || null,
@@ -933,12 +933,11 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // decline instead of an error. 0426 splits the database functions for the
     // same reason; this is that split reaching the verb layer.
     //
-    // CAPTURED ONLY, and the verbs do not enforce it — ops.decline_/supersede_
-    // sourced_work_request select "for update" on state='captured' and version=
-    // p_base_version, so a triaged request raises and surfaces here as a version
-    // conflict. Withdrawing a triaged row would strand its triage receipt and may
-    // strand a shape disposition; that is the migration's reasoning, not a
-    // restriction this layer invented.
+    // The STATE RULE lives in the database, not here. ops.decline_sourced_work_
+    // request admits captured only. ops.supersede_sourced_work_request (0888)
+    // also admits triaged when ops.work_request_supersession_strands finds
+    // nothing downstream naming the request, and names each refusal so the
+    // handler below can surface it instead of an unhandled failure.
     //
     // NOT authorityOnly, unlike review-and-triage and accept-ready-plan. 0426
     // grants execute on both functions to carr_writer and nothing else, and the
@@ -997,7 +996,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     },
     "supersede-work-request": {
       write: true,
-      description: "Withdraw one sourced Work Request captured in error by superseding it into the request that replaces it, recording why. It works from captured and no later state; it never triages, assigns, dispatches, approves, executes, or changes the successor.",
+      description: "Withdraw one sourced Work Request by superseding it into the request that replaces it, recording why. It works from captured, or from triaged when nothing downstream (a plan, an admission, a shape, execution or outcome evidence) names the request; a triaged request keeps its triage receipt. It never triages, assigns, dispatches, approves, executes, or changes the successor.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$", minLength: 4, maxLength: 15 },
@@ -1008,18 +1007,32 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
       handler: async (c, actor, args) => {
         validateSupersede(args, ToolError);
         return withEnvelope(c, actor, "supersede-work-request", { ...args, _server_actor_id: actor.id }, async () => {
-          const result = await c.query(
-            `select * from ops.supersede_sourced_work_request($1::text, $2::integer, $3::text, $4::text, $5::text, $6::uuid)
-               /* work-request-intake:supersede */`,
-            [args.human_ref, args.base_version, text(args.exit_reason), args.superseded_by, actor.slug, args.idempotency_key]);
+          let result;
+          try {
+            result = await c.query(
+              `select * from ops.supersede_sourced_work_request($1::text, $2::integer, $3::text, $4::text, $5::text, $6::uuid)
+                 /* work-request-intake:supersede */`,
+              [args.human_ref, args.base_version, text(args.exit_reason), args.superseded_by, actor.slug, args.idempotency_key]);
+          } catch (error) {
+            // 0888 names every refusal "<name>: <sentence>". The database raises
+            // on each one and never returns an empty row.
+            const detail = String(error?.message || "");
+            const name = /^([a-z_]+):/.exec(detail)?.[1];
+            if (name === "work_request_not_supersedable")
+              throw new ToolError({ error: "version_conflict", human_ref: args.human_ref,
+                resolution: "re-read the Work Request card; only its current captured or triaged version may be superseded" });
+            if (SUPERSEDE_REFUSALS.has(name))
+              throw new ToolError({ error: name, human_ref: args.human_ref, superseded_by: args.superseded_by, detail });
+            throw error;
+          }
           const row = result.rows[0];
-          if (!row) throw new ToolError({ error: "version_conflict", human_ref: args.human_ref,
-            resolution: "re-read the Work Request card; only its current captured version may be withdrawn" });
+          // A superseded sourced row keeps triage fields only when it was
+          // superseded from triaged; the shape check forbids them otherwise.
           const subject = await c.query(
-            `select id from ops.work_request where ref = $1
+            `select id, triaged_at is not null as was_triaged from ops.work_request where ref = $1
                /* work-request-intake:withdrawn-subject */`, [row.ref]);
           await writeEvent(c, actor, "supersede-work-request", "ops_work_request", subject.rows[0].id, {
-            field: "state", old: { state: "captured", version: args.base_version },
+            field: "state", old: { state: subject.rows[0].was_triaged ? "triaged" : "captured", version: args.base_version },
             new: { state: "superseded", version: Number(row.version), exit_reason: row.exit_reason,
               superseded_by_ref: row.superseded_by_ref },
             idempotency_key: args.idempotency_key,

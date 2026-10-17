@@ -44,9 +44,9 @@ def expression(value, github):
 class Controls(unittest.TestCase):
     def test_events(self):
         wf = workflow()
-        def event(action, sha='a', base='main', changes=None, run=1):
+        def event(action, sha='a', base='main', run=1):
             return {'workflow':'CI','event_name':'pull_request','run_id':run,
-                    'event':{'action':action,'pull_request':{'number':1665,'head':{'sha':sha},'base':{'ref':base}},'changes':changes or {}}}
+                    'event':{'action':action,'pull_request':{'number':1665,'head':{'sha':sha},'base':{'ref':base}}}}
         def state(e):
             return (expression(wf['concurrency']['group'], e),
                     expression(wf['concurrency']['cancel-in-progress'], e),
@@ -55,17 +55,36 @@ class Controls(unittest.TestCase):
         old = state(event('opened'))
         new = state(event('synchronize',sha='b',run=2))
         self.assertEqual(old[0],new[0]); self.assertTrue(new[1])
-        for changes in ({'title':{'from':'old'}},{'body':{'from':'old'}},{}):
-            edit = state(event('edited',changes=changes,run=3))
-            self.assertNotEqual(edit[0],old[0])
-            self.assertEqual(edit[1:],(False,False,False))
-            self.assertNotEqual(expression(wf['jobs']['checks']['name'],event('edited',changes=changes,run=3)), 'ops/ci.sh --strict')
-        changed = state(event('edited',base='release',changes={'base':{'ref':{'from':'main'}}},run=4))
-        self.assertNotEqual(changed[0],old[0]); self.assertEqual(changed[1:],(False,True,True))
+        for action in ('opened', 'synchronize', 'reopened'):
+            self.assertEqual(state(event(action))[2:], (True, True))
+        changed = state(event('synchronize',base='release',run=4))
+        self.assertNotEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,True,True))
         for name in ('schedule','workflow_dispatch'):
             a={'workflow':'CI','event_name':name,'event':{},'run_id':10}
             b={**a,'run_id':11}
             self.assertNotEqual(state(a)[0],state(b)[0]); self.assertEqual(state(a)[1:],(False,True,True))
+
+    def test_metadata_events_preserve_the_prior_required_context(self):
+        # Run 38104667722 created a new skipped check suite on a passing head.
+        # Reject metadata at the trigger so it cannot replace that suite.
+        wf = workflow()
+        triggers = wf['on']['pull_request']['types']
+        self.assertEqual(set(triggers), {'opened', 'synchronize', 'reopened'})
+        for action in ('ready_for_review', 'edited', 'labeled'):
+            with self.subTest(action=action):
+                self.assertNotIn(action, triggers)
+        self.assertFalse(set(wf['on']['pull_request']) - {'types'})
+
+    def test_required_context_reports_even_after_a_failed_class(self):
+        wf = workflow()
+        self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
+        self.assertEqual(wf['jobs']['checks']['if'], '${{ always() }}')
+        self.assertNotIn('if', wf['jobs']['classes'])
+        self.assertEqual(wf['jobs']['checks']['needs'], 'classes')
+        steps = wf['jobs']['checks']['steps']
+        verdict = next(step for step in steps if step.get('name') == 'Fail unless every class group succeeded')
+        self.assertIn('python3 ops/ci-evidence.py verdict', verdict['run'])
+        self.assertIn('exit 1', verdict['run'])
 
     def test_verdict(self):
         mod = load('ci-evidence')
@@ -75,7 +94,7 @@ class Controls(unittest.TestCase):
         jobs[1]['conclusion']='failure';jobs[2]['conclusion']='cancelled'
         rc, lines=mod.verdict(jobs,groups)
         self.assertNotEqual(rc,0)
-        self.assertIn('gates: FAILED',lines);self.assertIn('replay: CANCELLED',lines)
+        self.assertIn('gates: FAILED',lines);self.assertIn('migration: CANCELLED',lines)
         for c in groups[0].split(): self.assertIn(c+': PASSED',lines)
         self.assertNotEqual(mod.verdict(jobs[:-1],groups)[0],0)
         self.assertIn('migration: MISSING',mod.verdict(jobs[:-1],groups)[1])
@@ -98,7 +117,7 @@ class Controls(unittest.TestCase):
             with self.assertRaises(mod.Refusal): mod.admit(run,{**job,field:value},pr,'a'*40)
         self.assertEqual(mod.admit({**run,'run_attempt':2},{**job,'conclusion':'cancelled'},pr,'a'*40),'gates')
         policy=json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
-        remote=Mock();remote.snapshot.return_value=(run,job,pr)
+        remote=Mock(repo=mod.REPO);remote.snapshot.return_value=(run,job,pr)
         checks=Mock();dispatch=Mock()
         mod.rerun(remote,123,456,'a'*40,policy,checks,dispatch)
         checks.assert_called_once_with('gates');dispatch.assert_called_once_with(123,456,1,'a'*40)
@@ -122,18 +141,23 @@ class Controls(unittest.TestCase):
         job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
                'status':'completed', 'conclusion':'failure'}
         pr = {'state':'open', 'head':{'sha':'a'*40}}
-        responses = {'actions/runs/123':run, 'actions/jobs/456':job, 'pulls/1665':pr,
-                     'actions/runs/123/jobs?filter=latest&per_page=100':{'jobs':[job]}}
+        app_run = {**run, 'name':'e2e', 'path':'.github/workflows/e2e.yml'}
+        app_job = {**job, 'name':'journeys'}
+        sibling = {'id':789, 'name':'test', 'status':'completed', 'conclusion':'success'}
         with tempfile.TemporaryDirectory() as temp:
             for repo, options in (
                     ('jbookout/carr-system', []),
                     ('jbookout/carr-system', ['--repo', 'jbookout/carr-system']),
-                    ('jbookout/doctorcre-app', ['--repo', 'jbookout/doctorcre-app']),
-                    ('jbookout/software-factory', ['--repo', 'jbookout/software-factory'])):
+                    ('jbookout/doctorcre-app', ['--repo', 'jbookout/doctorcre-app'])):
                 with self.subTest(repo=repo, options=options), tempfile.TemporaryDirectory(dir=temp) as attempt:
                     candidate = 'a'*40 if repo == mod.REPO else 'b'*40
-                    run['head_sha'] = candidate
+                    shaped_run, shaped_job = (run, job) if repo == mod.REPO else (app_run, app_job)
+                    shaped_run['head_sha'] = candidate
                     pr['head']['sha'] = candidate
+                    responses = {'actions/runs/123':shaped_run, 'actions/jobs/456':shaped_job, 'pulls/1665':pr,
+                                 'actions/runs/123/jobs?filter=latest&per_page=100':{'jobs':[shaped_job]},
+                                 f'commits/{candidate}/check-runs?per_page=100':
+                                     {'check_runs':[sibling, {**shaped_job, 'name':'journeys'}]}}
                     calls = []
                     def execute(command, **kwargs):
                         calls.append(command)
@@ -151,8 +175,12 @@ class Controls(unittest.TestCase):
                             patch.object(mod.subprocess, 'run', side_effect=execute), \
                             patch.object(mod, 'local_checks') as checks:
                         self.assertEqual(mod.main(), 0)
-                    checks.assert_called_once_with('gates')
-                    self.assertEqual(len(calls), 9)
+                    if repo == mod.REPO:
+                        checks.assert_called_once_with('gates')
+                        self.assertEqual(len(calls), 9)
+                    else:
+                        checks.assert_not_called()
+                        self.assertEqual(len(calls), 10)
                     calls.clear()
                     with patch.object(sys, 'argv', ['ci-rerun.py','123','--job','456',*options]), \
                             patch.object(mod.tempfile, 'gettempdir', return_value=attempt), \
@@ -182,8 +210,10 @@ class Controls(unittest.TestCase):
                               ('jbookout/doctorcre-app', None),
                               ('jbookout/software-factory', 'c'*40)):
             with self.subTest(repo=repo, pr_head=pr_head), tempfile.TemporaryDirectory() as temp:
-                remote = Mock()
-                remote.snapshot.return_value = (run, job, {'state':'open', 'head':{'sha':pr_head}})
+                remote = Mock(repo=repo)
+                shaped = ((run, job) if repo != 'jbookout/doctorcre-app' else
+                          ({**run, 'name':'e2e', 'path':'.github/workflows/e2e.yml'}, {**job, 'name':'journeys'}))
+                remote.snapshot.return_value = (*shaped, {'state':'open', 'head':{'sha':pr_head}})
                 def git_output(command, **kwargs):
                     return 'a'*40 if command[1] == 'rev-parse' else ''
                 with patch.object(sys, 'argv', ['ci-rerun.py','123','--job','456','--repo',repo]), \
@@ -207,7 +237,7 @@ class Controls(unittest.TestCase):
         job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
                'status':'completed', 'conclusion':'failure'}
         pr = {'state':'open', 'head':{'sha':'b'*40}}
-        remote = Mock()
+        remote = Mock(repo=mod.REPO)
         remote.snapshot.return_value = (run, job, pr)
         policy = json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
         checks, dispatch = Mock(), Mock()
@@ -226,6 +256,51 @@ class Controls(unittest.TestCase):
                 with self.assertRaises(mod.Refusal):
                     mod.rerun(remote, 123, 456, None, policy, checks, dispatch)
                 dispatch.assert_not_called()
+
+    def test_rerun_app_job_shapes(self):
+        mod = load('ci-rerun')
+        repo, head = 'jbookout/doctorcre-app', 'b'*40
+        run = {'id':123, 'name':'e2e', 'path':'.github/workflows/e2e.yml', 'event':'pull_request',
+               'status':'completed', 'conclusion':'failure', 'head_sha':head, 'run_attempt':1}
+        job = {'id':456, 'run_id':123, 'name':'journeys', 'status':'completed', 'conclusion':'failure'}
+        pr = {'state':'open', 'head':{'sha':head}}
+        self.assertEqual(mod.admit(run, job, pr, head, repo), {'head':head, 'job':'journeys'})
+        for shaped_run, shaped_job in (
+                (run, {**job, 'name':'other'}),
+                (run, {**job, 'name':'test'}),
+                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'test'}),
+                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'ops/ci.sh --strict --only gates'}),
+                ({**run, 'path':'.github/workflows/other.yml'}, job)):
+            with self.subTest(run=shaped_run['path'], job=shaped_job['name']), self.assertRaises(mod.Refusal):
+                mod.admit(shaped_run, shaped_job, pr, head, repo)
+        with self.assertRaises(mod.Refusal):
+            mod.admit(run, job, pr, head, 'jbookout/software-factory')
+        with self.assertRaises(mod.Refusal):
+            mod.admit(run, job, pr, head)
+        group = {'head':head, 'job':'journeys'}
+        def checks_at(*runs):
+            remote = Mock(repo=repo)
+            remote.api.return_value = {'check_runs':list(runs)}
+            return remote
+        green = {'id':10, 'name':'test', 'status':'completed', 'conclusion':'success'}
+        failed_self = {'id':11, 'name':'journeys', 'status':'completed', 'conclusion':'failure'}
+        mod.hosted_checks(checks_at(green, failed_self), group)
+        mod.hosted_checks(checks_at({**green, 'conclusion':'failure'}, {**green, 'id':12}, failed_self), group)
+        for runs in ((failed_self,), ({**green, 'conclusion':'failure'}, failed_self),
+                     ({**green, 'status':'in_progress', 'conclusion':None}, failed_self)):
+            with self.subTest(runs=runs), self.assertRaises(mod.Refusal):
+                mod.hosted_checks(checks_at(*runs), group)
+        remote = checks_at({**green, 'conclusion':'failure'}, failed_self)
+        remote.snapshot.return_value = (run, job, pr)
+        policy = json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
+        dispatch = Mock()
+        with self.assertRaises(mod.Refusal):
+            mod.rerun(remote, 123, 456, None, policy, lambda g: mod.hosted_checks(remote, g), dispatch)
+        dispatch.assert_not_called()
+        remote = checks_at(green, failed_self)
+        remote.snapshot.return_value = (run, job, pr)
+        mod.rerun(remote, 123, 456, None, policy, lambda g: mod.hosted_checks(remote, g), dispatch)
+        dispatch.assert_called_once_with(123, 456, 1, head)
 
     def test_rerun_unknown_repository_refused_before_validation(self):
         mod = load('ci-rerun')

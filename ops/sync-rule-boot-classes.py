@@ -326,7 +326,7 @@ def gap_evidence(doc, classes_path=CLASSES_PATH):
     root = Path(REPO)
     paths = [root / "ops/fixtures/rule-delivery-eval/cases.v2.json",
              root / "evals/rule-delivery/hard_cases.v1.json",
-             root / "evals/rule-delivery/expectations.v1.json",
+             root / "evals/rule-delivery/expectations.v3.json",
              root / "evals/rule-delivery/evidence/candidate.jsonl"]
     v2, hard, expectations = [json.loads(path.read_text()) for path in paths[:3]]
     observations = [json.loads(line) for line in paths[3].read_text().splitlines() if line.strip()]
@@ -337,7 +337,6 @@ def gap_evidence(doc, classes_path=CLASSES_PATH):
     paths.append(Path(classes_path))
     return {
         "schema": "rule-boot-route-gap-evidence/v1",
-        "baseline_ref": json.loads((root / "evals/rule-delivery/receipt.json").read_text())["evidence"]["baseline"]["ref"],
         "method": "Subtract candidate.delivered from every frozen v2 gold and hard-case required set, "
                   "then keep class B/C. Count train + test for retention; acceptable-only hard labels "
                   "are excluded. Boot availability is excluded from gap derivation.",

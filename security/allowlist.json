@@ -4,12 +4,6 @@
     {
       "path": "security/fixtures/synthetic-contact.json",
       "sha256": "1f73e855f4b964ccb0355c72ef214a9ae9d06e6bb69b7ab045fec904578e03e6",
-      "rule": "pii-email",
-      "reason": "Reserved synthetic contact values for scanner qualification; contains no record-layer data."
-    },
-    {
-      "path": "security/fixtures/synthetic-contact.json",
-      "sha256": "1f73e855f4b964ccb0355c72ef214a9ae9d06e6bb69b7ab045fec904578e03e6",
       "rule": "pii-phone",
       "reason": "Reserved synthetic contact values for scanner qualification; contains no record-layer data."
     },
@@ -20,172 +14,68 @@
       "reason": "Reserved synthetic contact values for scanner qualification; contains no record-layer data."
     },
     {
-      "path": "security/test_leak_guard.py",
-      "sha256": "81c163835d048807f589926344edb728736dd5d5721aec28fa5c7337506c1a29",
-      "rule": "pii-email",
-      "reason": "Integration test uses the required public noreply commit identity; all planted contact values are synthetic and assembled at runtime."
-    },
-    {
       "path": "security/leak_guard.py",
-      "sha256": "5009a17d7036d5a6a1603d85ca71c19778ade2401bd18c5fb1f25fa7c86da901",
-      "rule": "client-data",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "81c163835d048807f589926344edb728736dd5d5721aec28fa5c7337506c1a29",
-      "rule": "client-data",
-      "value_sha256": "4302286f1a3131a2d7d899618999cf753438edad1dcd781dc17a57a89be2ef46",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "81c163835d048807f589926344edb728736dd5d5721aec28fa5c7337506c1a29",
-      "rule": "client-data",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "ops/ci.sh",
-      "sha256": "4d1fa1b14e9825fe939fcc26a3cee6415593696a648035dac8ea9ec40b789df4",
-      "rule": "pii-email",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change."
-    },
-    {
-      "path": "ops/ci.sh",
-      "sha256": "4d1fa1b14e9825fe939fcc26a3cee6415593696a648035dac8ea9ec40b789df4",
-      "rule": "client-data",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change.",
-      "value_sha256": "e38047f8f687b19fc592531bd7234a7e63d2232db38f4b4f430be5db6919fb0d"
-    },
-    {
-      "path": "ops/ci.sh",
-      "sha256": "4d1fa1b14e9825fe939fcc26a3cee6415593696a648035dac8ea9ec40b789df4",
-      "rule": "client-data",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change.",
-      "value_sha256": "20c10bcafd01532db83e33cfe654aaa51779c5026e3d1e1b824ff0fb46802e26"
-    },
-    {
-      "path": "ops/ci.sh",
-      "sha256": "4d1fa1b14e9825fe939fcc26a3cee6415593696a648035dac8ea9ec40b789df4",
-      "rule": "client-data",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change.",
-      "value_sha256": "4302286f1a3131a2d7d899618999cf753438edad1dcd781dc17a57a89be2ef46"
-    },
-    {
-      "path": "ops/ci.sh",
-      "sha256": "4d1fa1b14e9825fe939fcc26a3cee6415593696a648035dac8ea9ec40b789df4",
-      "rule": "client-data",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change.",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c"
-    },
-    {
-      "path": "ops/ci.sh",
-      "sha256": "4d1fa1b14e9825fe939fcc26a3cee6415593696a648035dac8ea9ec40b789df4",
+      "sha256": "2fd0ec5f96977578dba8b75220e1ec64af19b693e66a142d95d2dd1f799d83dd",
       "rule": "pii-address",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change."
-    },
-    {
-      "path": "ops/githooks/pre-push",
-      "sha256": "921dd2d267a9ebb7fecfb5e17a57d0bc0c65b3ba6c4b467e97b1467eb7f70d5d",
-      "rule": "client-data",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change.",
-      "value_sha256": "4302286f1a3131a2d7d899618999cf753438edad1dcd781dc17a57a89be2ef46"
-    },
-    {
-      "path": "ops/githooks/pre-push",
-      "sha256": "921dd2d267a9ebb7fecfb5e17a57d0bc0c65b3ba6c4b467e97b1467eb7f70d5d",
-      "rule": "pii-email",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change."
-    },
-    {
-      "path": "ops/githooks/pre-push",
-      "sha256": "921dd2d267a9ebb7fecfb5e17a57d0bc0c65b3ba6c4b467e97b1467eb7f70d5d",
-      "rule": "client-data",
-      "reason": "Reviewed existing source code or public author identity; no contact record association. Exception expires on any byte change.",
-      "value_sha256": "0255eafa47ec036e6cfaa375a971dd18c4d46d94c222696000f44bf7ae4843c2"
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "cbc8aaaf929f0c7ffa99b90857e4fd920d35e6e8066126389ba3ea870161d396",
-      "rule": "pii-email",
-      "reason": "Integration test uses the required public noreply commit identity; all planted contact values are synthetic and assembled at runtime."
+      "reason": "the guard's own doc comment quoting a synthetic address; reworded in 3b112565"
     },
     {
       "path": "security/leak_guard.py",
-      "sha256": "ba7213dcc94f15dbcf4ac0edd084eb92c96d725a7e28c0471fa112c49ec5b3ed",
-      "rule": "client-data",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
+      "sha256": "f5d8854a9ae10a8618a7fe54436410fe1dfc319224b0bcd1c9a845287d327155",
+      "rule": "pii-address",
+      "reason": "the guard's own doc comment quoting a synthetic address; replaced in 342f539e"
     },
     {
-      "path": "security/test_leak_guard.py",
-      "sha256": "cbc8aaaf929f0c7ffa99b90857e4fd920d35e6e8066126389ba3ea870161d396",
-      "rule": "client-data",
-      "value_sha256": "4302286f1a3131a2d7d899618999cf753438edad1dcd781dc17a57a89be2ef46",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "cbc8aaaf929f0c7ffa99b90857e4fd920d35e6e8066126389ba3ea870161d396",
-      "rule": "client-data",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "3887186e7735e1049866edf1fc47d8a474d90c951d31129a2b4f68b8a8ef2ee1",
+      "path": "ops/disk-reaper.py",
+      "sha256": "13d4bf9ba3882823db52c0f5a5b23901c8bc12851717ebd921d37dadb230f8d5",
       "rule": "pii-email",
-      "reason": "Integration test uses the required public noreply commit identity; all planted contact values are synthetic and assembled at runtime."
+      "reason": "unescaped dots in the GitHub SSH origin regex at 5b2971a6, not an address; escaped in 94cef0ec"
     },
     {
-      "path": "security/leak_guard.py",
-      "sha256": "2ba1381f2454f0929785f6994caee24533bb864e32b70dc200ced4f1f2d56714",
-      "rule": "client-data",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "3887186e7735e1049866edf1fc47d8a474d90c951d31129a2b4f68b8a8ef2ee1",
-      "rule": "client-data",
-      "value_sha256": "4302286f1a3131a2d7d899618999cf753438edad1dcd781dc17a57a89be2ef46",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "3887186e7735e1049866edf1fc47d8a474d90c951d31129a2b4f68b8a8ef2ee1",
-      "rule": "client-data",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c",
-      "reason": "Reviewed code identifier in detector or synthetic qualification code; no record association. Bound to this token digest and exact source bytes."
-    },
-    {
-      "path": "security/leak_guard.py",
-      "sha256": "e3666a5b8935c626e7dc2a0be7e98faf91ea490e1c7f0fcc7ee13885f1d33958",
-      "rule": "client-data",
-      "reason": "Reviewed scanner or synthetic-test source identifier; exact file bytes and this token digest only. No record association or exported values.",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c"
-    },
-    {
-      "path": "security/test_leak_guard.py",
-      "sha256": "05743117ba3b0027d0528c0c43d0197648e7df72805dd14c35b5aec0f0f73f88",
+      "path": "ops/disk-reaper.py",
+      "sha256": "29012a5967b0815f502486e2f281e2a5ad86eef72c9e0927b63ae8cf5f31de76",
       "rule": "pii-email",
-      "reason": "Integration test uses the required public noreply commit identity; all planted contact values are synthetic and assembled at runtime."
+      "reason": "unescaped dots in the GitHub SSH origin regex at fae3aa03, not an address; escaped in 94cef0ec"
     },
     {
-      "path": "security/test_leak_guard.py",
-      "sha256": "05743117ba3b0027d0528c0c43d0197648e7df72805dd14c35b5aec0f0f73f88",
-      "rule": "client-data",
-      "reason": "Reviewed scanner or synthetic-test source identifier; exact file bytes and this token digest only. No record association or exported values.",
-      "value_sha256": "4302286f1a3131a2d7d899618999cf753438edad1dcd781dc17a57a89be2ef46"
+      "path": "ops/disk-reaper.py",
+      "sha256": "51aba0aacbedc3e99f3b4ac39981d6a4f2049e381db2cad6cf19107bf23c9dc1",
+      "rule": "pii-email",
+      "reason": "unescaped dots in the GitHub SSH origin regex at a7c97855, not an address; escaped in 94cef0ec"
     },
     {
-      "path": "security/test_leak_guard.py",
-      "sha256": "05743117ba3b0027d0528c0c43d0197648e7df72805dd14c35b5aec0f0f73f88",
+      "path": "evals/jev-judgments/evidence/baseline.jsonl",
+      "sha256": "76fdd7e7cb518323cd49d448aa67672bf0627902c2451d518fcad8f6085f1d88",
+      "rule": "pii-phone",
+      "reason": "a 10-digit sha256 prefix inside a case id, not a phone number"
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "ca19adb6a542b4343bc36748758116bb4c84fcb9f98b8abe87eb642c139f5215",
       "rule": "client-data",
-      "reason": "Reviewed scanner or synthetic-test source identifier; exact file bytes and this token digest only. No record association or exported values.",
-      "value_sha256": "ad4aec556897c6b8b8b6e53b3f8effef35671dd68af8de30632e18c0a722448c"
+      "value_sha256": "bf796d9711351cc9d49b5d9703efea1f9d8a05e820c21563252c265016f37b61",
+      "reason": "Public county or city name in the NPPES territory predicate, not a client identity, contact or street address. This exception binds only the qualified value hash and these exact source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "ca19adb6a542b4343bc36748758116bb4c84fcb9f98b8abe87eb642c139f5215",
+      "rule": "client-data",
+      "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
+      "reason": "Public county or city name in the NPPES territory predicate, not a client identity, contact or street address. This exception binds only the qualified value hash and these exact source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "99ab31103b36298fc3c5c3a2cf71c8a90bd40083db129c869e90b78ab099a8dc",
+      "rule": "client-data",
+      "value_sha256": "bf796d9711351cc9d49b5d9703efea1f9d8a05e820c21563252c265016f37b61",
+      "reason": "Public county or city name in the initial NPPES territory predicate. This PR retains its original introduced commit; this qualification binds only that public value hash, path and exact historical source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "99ab31103b36298fc3c5c3a2cf71c8a90bd40083db129c869e90b78ab099a8dc",
+      "rule": "client-data",
+      "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
+      "reason": "Public county or city name in the initial NPPES territory predicate. This PR retains its original introduced commit; this qualification binds only that public value hash, path and exact historical source bytes."
     }
   ]
 }

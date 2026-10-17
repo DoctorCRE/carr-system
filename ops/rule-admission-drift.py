@@ -19,7 +19,7 @@ ops.rule_admission select it already had. It can count active rules and it canno
 read one: an unattended job that never needed the doctrine text should not carry
 a credential that can fetch it.
 
-EXIT CONTRACT, the same one its sibling ops/control-plane-registry-drift.py and
+EXIT CONTRACT, the same one its sibling the job monitor and
 the checks around it in bin/nightly.sh use:
   78  no routine credential configured — a SKIP, not a failed night
   0   ran; a gap is PRINTED, not raised, because it is a prompt for a human and

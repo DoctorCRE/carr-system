@@ -295,19 +295,18 @@ check("dry-run reports would-write count without a canonical call or identity ou
       and len(arg_path.read_text().splitlines()) == 16
       and not any(x in p.stdout + p.stderr for x in ("@", "C-TEST", "L-TEST", "V-TEST", "Synthetic meeting")))
 
-# Execute the actual nightly calendar block with a fake step wrapper; no other
-# nightly step, scheduler, database or credential is run.
-nightly = (REPO / "bin/nightly.sh").read_text()
-block = nightly[nightly.index("# Added 2026-08-06 (loop #180)"):nightly.index("# MAIL, loop #169")]
+# Exercise the native capture command independently of nightly maintenance.
+import plistlib
+native = plistlib.loads((REPO / "ops/launchd/com.carr.calendar-eventkit.plist").read_bytes())
+args = native["ProgramArguments"]
+start = next(i for i, value in enumerate(args) if value.endswith("/bin/calendar-eventkit-capture.sh"))
 shutil.copy2(SCRIPT, root / "bin/calendar-eventkit-capture.sh")
 (root / "bin/calendar-eventkit-capture.sh").chmod(0o755)
-(root / "bin/archive-calendar.sh").write_text("#!/bin/sh\nexit 0\n")
-(root / "bin/archive-calendar.sh").chmod(0o755)
+command = [value.replace("{{REPO}}", str(root)) for value in args[start:]]
 env = {**os.environ, "CARR_REPO": str(root), "PATH": str(stub) + os.pathsep + os.environ.get("PATH", ""),
        "CARR_CALENDAR_CAPTURE_WAIT_SECONDS": "1"}
-p = subprocess.run(["/bin/zsh", "-c", 'step() { shift; "$@"; }\n' + block],
-                   cwd=root, env=env, capture_output=True, text=True, timeout=15)
-check("nightly calendar step executes the capture and continues with unmatched pending",
+p = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True, timeout=15)
+check("native calendar job executes the capture and continues with unmatched pending",
       p.returncode == 0 and "source=eventkit mode=live" in p.stdout
       and len(arg_path.read_text().splitlines()) == 24)
 
@@ -466,22 +465,10 @@ edited["exact"][0]["events"][0]["title"] = "Edited title"
 p = run(root, stub)
 check("title edits preserve the same captured occurrence", p.returncode == 0 and len(json.loads((root / "out/store.json").read_text())) == 1)
 
-# Regression 3: malformed evidence fails the actual nightly step, not EX_CONFIG skip.
-nightly_step = nightly[nightly.index('step() {'):nightly.index('\ntombstone() {')]
+# Malformed evidence fails the native capture job rather than becoming an EX_CONFIG skip.
 (root / "out/calendar-intake-evidence.json").write_text("not-json")
-shutil.copy2(SCRIPT, root / "bin/calendar-eventkit-capture.sh")
-(root / "bin/calendar-eventkit-capture.sh").chmod(0o755)
-harness = """rc_total=0; seam_blocked=0; LOG=out/nightly-test.log
-say() { print -r -- "$@"; }
-record_run() { print -r -- "state=$2"; }
-carr_step_timeout_prefix() { CARR_STEP_TIMEOUT_ARGV=(); }
-carr_step_timeout_for() { print 10; }
-carr_routine_exec() { "$@"; }
-""" + nightly_step + "\nstep calendar ./bin/calendar-eventkit-capture.sh\nprint -r -- \"rc_total=$rc_total\"\n"
-p = subprocess.run(["/bin/zsh", "-c", harness], cwd=root,
-    env=dict(os.environ, CARR_REPO=str(root), PATH=f"{stub}:{os.environ['PATH']}"),
-    capture_output=True, text=True, timeout=15)
-check("damaged evidence is a nightly failure", "rc_total=1" in p.stdout and "state=failed" in p.stdout)
+p = run(root, stub)
+check("damaged evidence fails the capture job", p.returncode != 0 and p.returncode != 78)
 
 # R1: private reader output must also reach the existing triage consumer through
 # a completed snapshot, without letting a failed reader replace the last one.

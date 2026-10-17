@@ -30,19 +30,6 @@
    "rationale": "Unreadable corpus-set returns an empty exclusion set with no trace; the cost is double-reporting files another script watches, which is louder, not quieter."
   },
   {
-   "id": "rrn-load-json",
-   "path": "ops/rule-replay-nightly.py",
-   "anchor": "def load_json(path: Path, default=None):",
-   "occurrence": 1,
-   "labels": {
-    "failure_leaves_no_trace": true
-   },
-   "disputed": {
-    "swallow_is_wrong_here": "depends on each caller's default; not established from the region"
-   },
-   "rationale": "Any exception, corrupt JSON included, returns the default with no log."
-  },
-  {
    "id": "intake-route",
    "path": "ops/jev_intake.py",
    "anchor": "        return _unavailable(check_id, kind, task_text, exc)",
@@ -77,43 +64,6 @@
    },
    "disputed": {},
    "rationale": "None is the documented 'no judgment obtained' signal, distinct from an empty list, and the caller falls back to the stem matcher."
-  },
-  {
-   "id": "resort-parse-date",
-   "path": "ops/rule-resort-weekly.py",
-   "anchor": "        dt = datetime.fromisoformat(text)",
-   "occurrence": 1,
-   "labels": {
-    "failure_leaves_no_trace": false,
-    "swallow_is_wrong_here": false
-   },
-   "disputed": {},
-   "rationale": "Parsing an optional timestamp; None is the normal 'no date' answer."
-  },
-  {
-   "id": "gate-integrity-select",
-   "path": "hooks/gate-integrity.py",
-   "anchor": "            ready, _, _ = select.select([sys.stdin.fileno()], [], [], 0.2)",
-   "occurrence": 1,
-   "labels": {
-    "failure_leaves_no_trace": false,
-    "swallow_is_wrong_here": false
-   },
-   "disputed": {},
-   "rationale": "A probe for non-blocking stdin inside a hook that must fail open; absence is the normal case on in-memory stdin."
-  },
-  {
-   "id": "gate-replay-snapshot",
-   "path": "ops/gate-replay.py",
-   "anchor": "                rows.append(tuple(line.split(\"\\t\")))",
-   "occurrence": 1,
-   "labels": {
-    "swallow_is_wrong_here": false
-   },
-   "disputed": {
-    "failure_leaves_no_trace": "a missing snapshot shows up as every row changed in the printed diff; whether that counts as a trace is a judgment call"
-   },
-   "rationale": "Missing snapshot yields an empty baseline, which the diff reports loudly."
   },
   {
    "id": "flash-examples",
@@ -319,17 +269,6 @@
    "rationale": "An equality comparison of two ids, not a truth test on the coerced value."
   },
   {
-   "id": "supervisor-notable",
-   "path": "hooks/jev-supervisor.py",
-   "anchor": "    verdict = str(result.get(\"verdict\", \"\"))",
-   "occurrence": 1,
-   "labels": {
-    "truthy_coercion_bug": false
-   },
-   "disputed": {},
-   "rationale": "A missing verdict becomes 'None', which is not in the quiet set, so it is surfaced: the coercion errs toward reporting."
-  },
-  {
    "id": "task-selftest-docstring",
    "path": "ops/jev-review-task-selftest.py",
    "anchor": "beside the existing advisory one; it never blocks. A fake vendor client and a",
@@ -362,17 +301,6 @@
    },
    "disputed": {},
    "rationale": "Docstring matches the tail read, the tool_result skip and the never-raises contract."
-  },
-  {
-   "id": "supervisor-latest-task",
-   "path": "hooks/jev-supervisor.py",
-   "anchor": "        return _lib(\"jev_code_review\").latest_task(transcript) or \"\"",
-   "occurrence": 1,
-   "labels": {
-    "swallow_is_wrong_here": false
-   },
-   "disputed": {},
-   "rationale": "A hook helper; no task means the task-fit questions are simply not asked."
   }
  ]
 }

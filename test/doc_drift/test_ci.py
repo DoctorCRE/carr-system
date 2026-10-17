@@ -6,8 +6,6 @@ import subprocess
 import tempfile
 import unittest
 
-import yaml
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,17 +31,6 @@ class CiTest(unittest.TestCase):
             files={'tool.py': '0' * 64})))
         with self.assertRaises(ValueError):
             module.verify_snapshot(scratch)
-
-    def test_pr_warnings_and_weekly_writer_have_distinct_authority(self):
-        workflow = yaml.load((ROOT / '.github/workflows/doc-drift.yml').read_text(), Loader=yaml.BaseLoader)
-        self.assertIn('schedule', workflow['on'])
-        self.assertIn('pull_request', workflow['on'])
-        self.assertNotIn('issues', workflow['permissions'])
-        writer = workflow['jobs']['weekly-loops']
-        self.assertEqual(writer['permissions']['issues'], 'write')
-        self.assertIn("github.event_name != 'pull_request'", writer['if'])
-        self.assertIn("github.ref == 'refs/heads/main'", writer['if'])
-        self.assertEqual(writer['needs'], 'check')
 
     @unittest.skipUnless((ROOT / 'ops/ci.sh').exists(), 'CARR owns the single CI script')
     def test_carr_ci_entrypoint_forwards_arguments_to_local_checker(self):

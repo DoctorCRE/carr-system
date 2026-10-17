@@ -10,10 +10,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: doc-drift-${{ github.event.pull_request.number || 'main' }}
-  cancel-in-progress: false
-
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -51,25 +47,8 @@ jobs:
           name: instruction-drift-report
           path: out/doc-drift/public-report.json
           if-no-files-found: error
-
-  weekly-loops:
-    needs: check
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: instruction-drift-report
-          path: out/doc-drift
-      - name: File or clear one loop per stale file for the orchestrator
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPORT_REPO: ${{ github.repository }}
-        run: python3 scripts/doc-drift/loops.py --report out/doc-drift/public-report.json --repo "$REPORT_REPO" --apply
+      - name: Summarize drift and fail on stale claims beyond the baseline
+        if: github.event_name != 'pull_request'
+        run: >-
+          python ops/doc-drift-product.py --report out/doc-drift/public-report.json
+          --baseline scripts/doc-drift/baseline.json --summary "$GITHUB_STEP_SUMMARY"

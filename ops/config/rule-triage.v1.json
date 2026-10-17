@@ -1,9 +1,9 @@
 {
   "counts": {
     "core": 20,
-    "gate": 61,
+    "gate": 33,
     "gone": 0,
-    "jit": 131
+    "jit": 169
   },
   "fallback_narrowing": {
     "delegation-council": {
@@ -27,7 +27,7 @@
       ]
     }
   },
-  "generated_note": "Triage of the 219 active rules into gate/jit/core/gone homes. Classification and tooling only per S7 scope boundary; no rule was retired, amended, or taught by producing this file. Source data: standing-context (205 rules, full text) + ops/config/rule-enforcement-map.json rule_controls (all 219, including the 14 vendor-intros-pack rules that standing-context does not surface to this session -- see defect ad4e25bd-3c98-4334-a7d3-f53c8158711f). ROWS PRUNED 2026-08-27 (WR-000019 rule-retirement batch): Joe accepted and executed the batch this slice's 11 GONE rows named (each already carrying its merge_target in this file); the 11 rows are removed from `rules` and `counts.gone` moves 11 -> 0, keeping this file in exact id-for-id parity with the now-208-row ops/config/rule-enforcement-map.json rule_controls, per ops/rule-triage-selftest.py's coverage checks. The 219/205 figures above describe the file as generated at S7 time and are left as historical record. LIVE PARITY REPAIRED 2026-09-23: removed five retired ids and added three active rules (204391be, a2e78f48, b7ec8f3b) with their existing production pack memberships; current map and triage each carry 209 active rules. 2026-09-29: rule ede4b241 (cloud model choice) added as a JIT row with a delegation-council dispatch detector; current map and triage each carry 210 active rules. 2026-10-08: rule 8400cd3d (new-work sizing) added as a JIT row with planning-entry detectors; map and triage remain in id-for-id parity. 2026-10-12: rule 19ebbeb3 (a detected bug is recorded and addressed in the same session) added as a GATE row carried by the new unfiled_bug Stop gate (hooks/unfiled-bug-stop-gate.py); map and triage remain in id-for-id parity.",
+  "generated_note": "Triage of the 219 active rules into gate/jit/core/gone homes. Classification and tooling only per S7 scope boundary; no rule was retired, amended, or taught by producing this file. Source data: standing-context (205 rules, full text) + ops/config/rule-enforcement-map.json rule_controls (all 219, including the 14 vendor-intros-pack rules that standing-context does not surface to this session -- see defect ad4e25bd-3c98-4334-a7d3-f53c8158711f). ROWS PRUNED 2026-08-27 (WR-000019 rule-retirement batch): Joe accepted and executed the batch this slice's 11 GONE rows named (each already carrying its merge_target in this file); the 11 rows are removed from `rules` and `counts.gone` moves 11 -> 0, keeping this file in exact id-for-id parity with the now-208-row ops/config/rule-enforcement-map.json rule_controls, per ops/rule-triage-selftest.py's coverage checks. The 219/205 figures above describe the file as generated at S7 time and are left as historical record. LIVE PARITY REPAIRED 2026-09-23: removed five retired ids and added three active rules (204391be, a2e78f48, b7ec8f3b) with their existing production pack memberships; current map and triage each carry 209 active rules. 2026-09-29: rule ede4b241 (cloud model choice) added as a JIT row with a delegation-council dispatch detector; current map and triage each carry 210 active rules. 2026-10-08: rule 8400cd3d (new-work sizing) added as a JIT row with planning-entry detectors; map and triage remain in id-for-id parity. 2026-10-12: rule 19ebbeb3 (a detected bug is recorded and addressed in the same session) added as a GATE row carried by the new unfiled_bug Stop gate (hooks/unfiled-bug-stop-gate.py); map and triage remain in id-for-id parity. 2026-10-13 (loop 1304, WR-000284): the 14 rules approved since the August review added as JIT rows delivered by their reviewed packs (661d7757, f673326b, a3da3d39, 76fcbed6, 08c4eda2, 4a77c35d, 67e48aaf, a9fc3f0e, ac0a6579, 578fdd91, 486584d6, 07dde434, cfe6b5c6, c363bd8b); retired 9b081605 and 5697071b and still-proposed ede4b241 and 8400cd3d removed with the map; map and triage remain in id-for-id parity.",
   "rules": [
     {
       "home": "jit",
@@ -49,6 +49,20 @@
       "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Cheapest-window timing: present structural changes as window math",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "Cheapest-window timing: present structural changes as window math"
+    },
+    {
+      "home": "jit",
+      "id": "07dde434",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires when a session designs or reviews anything a prospect or client will use.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "AI FEEDS CONVERSATIONS WITH JOE AND DELL; IT NEVER REPLACES THEM"
+    },
+    {
+      "home": "jit",
+      "id": "08c4eda2",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires when a session assigns, works or represents an Alabama lead or deal.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "ALABAMA LEADS ARE NO LONGER DELL-ONLY"
     },
     {
       "home": "jit",
@@ -148,11 +162,11 @@
       "title_gist": "Joe's strength-training kit: COMPRESSION REPS \u2014 on major decisions and builds, the session invites Joe's"
     },
     {
-      "carrying_control": "unfiled_bug",
-      "home": "gate",
+      "home": "jit",
       "id": "19ebbeb3",
-      "reason": "Machine-enforced via control 'unfiled_bug' (hooks/unfiled-bug-stop-gate.py); binds at turn end when the turn's own prose reports a defect the session observed and the turn carries no record-defect, report-problem or add-loop filing and names no record or fixing PR. Failure mode on violation: Stop block",
-      "title_gist": "A DETECTED BUG IS RECORDED AND ADDRESSED IN THE SAME SESSION, NEVER STEPPED OVER"
+      "reason": "PR #1801 retires unfiled_bug; the rule remains binding prose without this automated control.",
+      "title_gist": "A DETECTED BUG IS RECORDED AND ADDRESSED IN THE SAME SESSION, NEVER STEPPED OVER",
+      "jit_trigger_hint": "turn end, when the turn's own prose reports a defect the session observed"
     },
     {
       "home": "jit",
@@ -176,18 +190,18 @@
       "title_gist": "ALWAYS FIX THE THING; A WORKAROUND IS NOT A FIX"
     },
     {
-      "carrying_control": "conduct_stop",
-      "home": "gate",
+      "home": "jit",
       "id": "1d50a3bb",
-      "reason": "Already machine-enforced via control 'conduct_stop' (hooks/conduct-stop-gate.py); binds a Stop-blocked turn being re-sent. Failure mode on violation: Stop block",
-      "title_gist": "WHEN A STOP GATE REOPENS A TURN, SEND THE DELTA, NOT THE MESSAGE AGAIN"
+      "reason": "PR #1801 retires conduct_stop; the rule remains binding prose without this automated control.",
+      "title_gist": "WHEN A STOP GATE REOPENS A TURN, SEND THE DELTA, NOT THE MESSAGE AGAIN",
+      "jit_trigger_hint": "a Stop-blocked turn being re-sent"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "1f3a7372",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds scheduled finding completion. Failure mode on violation: Stop block",
-      "title_gist": "A SCHEDULED ROUTINE LOGS ITS FINDINGS TO THE RECORD BEFORE IT ENDS \u2014 an unattended run that only prints is a"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "A SCHEDULED ROUTINE LOGS ITS FINDINGS TO THE RECORD BEFORE IT ENDS \u2014 an unattended run that only prints is a",
+      "jit_trigger_hint": "scheduled finding completion"
     },
     {
       "detector": {
@@ -232,11 +246,11 @@
       "title_gist": "Joe's development kit: CLOSE-BEFORE-OPEN \u2014 when Joe opens a substantial new build or design thread, the"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "2271e684",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds terminal technical claim. Failure mode on violation: Stop block",
-      "title_gist": "Double-check before delivering; flag uncertainty"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "Double-check before delivering; flag uncertainty",
+      "jit_trigger_hint": "terminal technical claim"
     },
     {
       "carrying_control": "weekend_quiet",
@@ -364,18 +378,18 @@
       "title_gist": "THE MATCH THRESHOLD, and what to do when it is not met"
     },
     {
-      "carrying_control": "chat_lint",
-      "home": "gate",
+      "home": "jit",
       "id": "38b15dc6",
-      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before an outgoing multi-clause partner instruction can end. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
-      "title_gist": "ANY MULTI-CLAUSE INSTRUCTION GIVEN TO A PARTNER MUST PRESENT EACH CLAUSE SEPARATELY, NUMBERED, WITH AN"
+      "reason": "PR #1801 retires chat_lint; the rule remains binding prose without this automated control.",
+      "title_gist": "ANY MULTI-CLAUSE INSTRUCTION GIVEN TO A PARTNER MUST PRESENT EACH CLAUSE SEPARATELY, NUMBERED, WITH AN",
+      "jit_trigger_hint": "before an outgoing multi-clause partner instruction can end"
     },
     {
-      "carrying_control": "conduct_stop",
-      "home": "gate",
+      "home": "jit",
       "id": "3a9dbafd",
-      "reason": "Already machine-enforced via control 'conduct_stop' (hooks/conduct-stop-gate.py bare_id_hits(), backed by hooks/conduct_patterns.py BARE_ID + ID_EXPLAINED); binds a reply to a partner carrying a bare id, pre-send at Stop. Failure mode on violation: Stop block \u2014 the turn is held open until the id is explained. Detection moved from chat_lint 2026-08-22; corrected here 2026-08-27.",
-      "title_gist": "NEVER MAKE A PARTNER DECODE AN ID. Say what the thing IS, in plain words, every time"
+      "reason": "PR #1801 retires conduct_stop; the rule remains binding prose without this automated control.",
+      "title_gist": "NEVER MAKE A PARTNER DECODE AN ID. Say what the thing IS, in plain words, every time",
+      "jit_trigger_hint": "a reply to a partner carrying a bare id, caught at Stop before the turn ends -- the block holds the turn open until the id is explained"
     },
     {
       "detector": {
@@ -447,11 +461,11 @@
       "title_gist": "Every LOI term is negotiable and template values are placeholders holding the most-common case, never fixed"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "43e2ef76",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds non-trivial build completion. Failure mode on violation: Stop block",
-      "title_gist": "PLAN THE CHECK BEFORE YOU BUILD THE THING"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "PLAN THE CHECK BEFORE YOU BUILD THE THING",
+      "jit_trigger_hint": "non-trivial build completion"
     },
     {
       "carrying_control": "vault_salvage",
@@ -483,6 +497,13 @@
       "title_gist": "DISCOVERY BEFORE SOLVING, IN EVERY CLIENT AND PROSPECT MEETING"
     },
     {
+      "home": "jit",
+      "id": "486584d6",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires when work needs a web console Joe is already signed into in Chrome on the MacBook.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "A DASHBOARD STEP IN JOE'S SIGNED-IN BROWSER IS THE SESSION'S JOB, NOT A HANDOFF"
+    },
+    {
       "detector": {
         "kind": "verb",
         "pattern": "__(send_message|reply|forward|create_draft|update_draft)$"
@@ -509,6 +530,13 @@
     },
     {
       "home": "jit",
+      "id": "4a77c35d",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session fills or orders the Dot's work queue.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "THE DOT WORKS REAL TASKS THAT SAVE PAID CLAUDE TOKENS FIRST"
+    },
+    {
+      "home": "jit",
       "id": "4a9188f3",
       "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: THE TEST FOR CAPTURING A TAUGHT RULE IS 'would the system have to ask this again?' \u2014\u2026",
       "reason": "Currently only SURFACED (a reminder via 'ledger_capture' at partner correction, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
@@ -529,11 +557,11 @@
       "title_gist": "Outbound document formats: LOIs and letters are sent in WORD format so the listing agent can easily edit or"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "4e104d4c",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds new-verb deployment claim. Failure mode on violation: Stop block",
-      "title_gist": "A NEWLY DEPLOYED VERB IS REACHABLE IMMEDIATELY THROUGH `call-verb`"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "A NEWLY DEPLOYED VERB IS REACHABLE IMMEDIATELY THROUGH `call-verb`",
+      "jit_trigger_hint": "new-verb deployment claim"
     },
     {
       "home": "core",
@@ -585,15 +613,11 @@
       "title_gist": "WHEN JOE POSTS A LINK, THE QUOTED POST INSIDE IT IS PART OF THE SOURCE, NOT A FOOTNOTE"
     },
     {
-      "detector": {
-        "kind": "verb",
-        "pattern": "__(prepare-document|compare-lease-terms|record-executed-lease)$"
-      },
       "home": "jit",
-      "id": "5697071b",
-      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires on: LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT",
+      "id": "578fdd91",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires when contact enrichment finds a wrong or blank field on a vendor, client, lead or party.",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
-      "title_gist": "LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT"
+      "title_gist": "ENRICHMENT APPLIES ITS CORRECTIONS; IT DOES NOT PARK THEM AS PROPOSALS"
     },
     {
       "detector": {
@@ -627,11 +651,11 @@
       "title_gist": "Steelman Joe's labels: Joe's confident statements that are slightly off are usually correct intuitions"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "590b11e1",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds metric completion claim. Failure mode on violation: Stop block",
-      "title_gist": "NO METRIC WITHOUT A BOUND ACTION \u2014 a CONSTRAINT that binds at the moment of building"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "NO METRIC WITHOUT A BOUND ACTION \u2014 a CONSTRAINT that binds at the moment of building",
+      "jit_trigger_hint": "metric completion claim"
     },
     {
       "home": "jit",
@@ -641,11 +665,11 @@
       "title_gist": "When a tool error blames a subsystem, do not act on the blame until you have verified the subsystem claim"
     },
     {
-      "carrying_control": "chat_lint",
-      "home": "gate",
+      "home": "jit",
       "id": "5be2f462",
-      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before an assistant reply with a banned contrast-reframe or hard AI-tell construction can end. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
-      "title_gist": "CUT MODIFIERS THAT CARRY NO INFORMATION, AND NEVER INVENT AN OPPOSING VIEW FOR CONTRAST"
+      "reason": "PR #1801 retires chat_lint; the rule remains binding prose without this automated control.",
+      "title_gist": "CUT MODIFIERS THAT CARRY NO INFORMATION, AND NEVER INVENT AN OPPOSING VIEW FOR CONTRAST",
+      "jit_trigger_hint": "before an assistant reply with a banned contrast-reframe or hard AI-tell construction can end"
     },
     {
       "home": "jit",
@@ -738,10 +762,24 @@
     },
     {
       "home": "jit",
+      "id": "661d7757",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session wants an independent review judgment on code, CI, a pull request, product or a CARR record.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Jev is available for all review work across coding, CI, pull requests, product, and CARR records"
+    },
+    {
+      "home": "jit",
       "id": "67580c28",
       "jit_trigger_hint": "Delivered by pack(s) surface-doctrine \u2014 fires on: CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE\u2026",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE - a board, the Deal"
+    },
+    {
+      "home": "jit",
+      "id": "67e48aaf",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git, scheduled-automation \u2014 fires when Joe pastes a token or credential into chat or shows one in a screenshot.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "No transcript-exposure warning for a credential Joe chose to paste"
     },
     {
       "home": "jit",
@@ -811,11 +849,11 @@
       "title_gist": "Never pre-qualify leads before the board"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "73381d78",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds config change completion. Failure mode on violation: Stop block",
-      "title_gist": "A CONFIG FILE READ BY TWO PARSERS HAS TWO CONTRACTS, AND FIXING ONE BREAKS THE OTHER UNLESS YOU CHECK"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "A CONFIG FILE READ BY TWO PARSERS HAS TWO CONTRACTS, AND FIXING ONE BREAKS THE OTHER UNLESS YOU CHECK",
+      "jit_trigger_hint": "config change completion"
     },
     {
       "home": "core",
@@ -831,11 +869,11 @@
       "title_gist": "PROJECTING A LONG JOB: EXCLUDE DEAD TIME, INCLUDE CRASH OVERHEAD, AND SAY WHICH YOU DID"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "767f9b41",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds confirmation response. Failure mode on violation: Stop block",
-      "title_gist": "A confirmation question is an audit trigger \u2014 actually re-verify, then report honestly what was and wasn't at"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "A confirmation question is an audit trigger \u2014 actually re-verify, then report honestly what was and wasn't at",
+      "jit_trigger_hint": "confirmation response"
     },
     {
       "detector": {
@@ -854,6 +892,13 @@
       "id": "76a53dfe",
       "reason": "Already machine-enforced via control 'record_home' (hooks/record-home-gate.py, hooks/bash-write-gate.py); binds before blocked markdown workaround. Failure mode on violation: PreToolUse deny",
       "title_gist": "A BLOCKED MARKDOWN WRITE IS NOT REDIRECTED, IT IS RE-ROUTED THROUGH THE VERBS"
+    },
+    {
+      "home": "jit",
+      "id": "76fcbed6",
+      "jit_trigger_hint": "Delivered by pack(s) source-study \u2014 fires when Joe sends a link, article, repo, video or other source.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "EVERY SOURCE JOE SENDS GETS ITS OWN FULL STUDY, STARTED WHEN IT ARRIVES"
     },
     {
       "detector": {
@@ -905,17 +950,6 @@
     {
       "detector": {
         "kind": "content_regex",
-        "pattern": "\\b(?:EnterPlanMode|UpdatePlan|update_plan|propose-ready-plan|heavy[-\\s]?build(?:\\s+plan)?|Codex\\s+brief|Dot\\s+brief)\\b"
-      },
-      "home": "jit",
-      "id": "8400cd3d",
-      "jit_trigger_hint": "Delivered by governance-rules when a session opens a plan, a heavy-build plan, propose-ready-plan, or a Codex or Dot brief.",
-      "reason": "Sizing belongs at the first planning action for new work. The trigger can detect that moment, while the session must judge whether the work is tiny, medium-large, or beyond one session.",
-      "title_gist": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP"
-    },
-    {
-      "detector": {
-        "kind": "content_regex",
         "pattern": "(?=.*\\b(?:prepare-conversation|log-outreach)\\b)(?=.*\\bvendor\\b)"
       },
       "home": "jit",
@@ -925,11 +959,11 @@
       "title_gist": "Suggest a pairing with a caveat until a partner rules on it"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "847f9995",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds unattended-path verification. Failure mode on violation: Stop block",
-      "title_gist": "NO UNATTENDED PATH MAY DEPEND ON AN INTERACTIVE CREDENTIAL"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "NO UNATTENDED PATH MAY DEPEND ON AN INTERACTIVE CREDENTIAL",
+      "jit_trigger_hint": "unattended-path verification"
     },
     {
       "home": "jit",
@@ -967,11 +1001,11 @@
       "title_gist": "Copilot: Microsoft-native. Claude: everything else \u2014 lead gen, outreach, research, automation, documents"
     },
     {
-      "carrying_control": "chat_lint",
-      "home": "gate",
+      "home": "jit",
       "id": "8c1e6057",
-      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds a reply asking a partner to open, edit or review a file. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
-      "title_gist": "Whenever a partner is asked to edit, open, or review a file, the message must include a clickable markdown"
+      "reason": "PR #1801 retires chat_lint; the rule remains binding prose without this automated control.",
+      "title_gist": "Whenever a partner is asked to edit, open, or review a file, the message must include a clickable markdown",
+      "jit_trigger_hint": "a reply asking a partner to open, edit or review a file"
     },
     {
       "home": "jit",
@@ -1030,11 +1064,11 @@
       "title_gist": "Check the clock, don't infer it: dates/times from real timestamps, never conversational mood"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "97326357",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds surface capability claim. Failure mode on violation: Stop block",
-      "title_gist": "A claim about what a surface can or cannot do becomes doctrine only after a live test from that surface itself"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "A claim about what a surface can or cannot do becomes doctrine only after a live test from that surface itself",
+      "jit_trigger_hint": "surface capability claim"
     },
     {
       "home": "jit",
@@ -1060,13 +1094,6 @@
       "id": "99e951b9",
       "reason": "Already machine-enforced via control 'index_upkeep' (ops/githooks/index-upkeep-check.py, ops/githooks/pre-commit); binds pre-commit when content is added under an indexed multi-folder category. Failure mode on violation: pre-commit refusal",
       "title_gist": "Index upkeep: any multi-folder category gets a short INDEX.md, updated same session as changes"
-    },
-    {
-      "carrying_control": "no_send_worker",
-      "home": "gate",
-      "id": "9b081605",
-      "reason": "Already machine-enforced via control 'no_send_worker' (mcp-server/src/mcp.js); binds before outbound send. Failure mode on violation: capability absent",
-      "title_gist": "Email handover: drafts for Joe's action are emailed from the AI Gmail TO joe.bookout@carr.us"
     },
     {
       "detector": {
@@ -1109,17 +1136,24 @@
     },
     {
       "home": "jit",
+      "id": "a3da3d39",
+      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires when a taught rule, decision or retirement is left waiting on Joe's approval.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "ASK JOE DIRECTLY FOR EVERY APPROVAL, IN THE SAME TURN, WITH AN INTERVIEW BOX"
+    },
+    {
+      "home": "jit",
       "id": "a3f6c7f9",
       "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Diagnose before restructuring: point to a real task that was slow, never a hypothetical",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "Diagnose before restructuring: point to a real task that was slow, never a hypothetical"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "a6e6ab4e",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds changed-system completion. Failure mode on violation: Stop block",
-      "title_gist": "CHECK AGAINST THE BASELINE, NOT ONLY AGAINST THE SPEC"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "CHECK AGAINST THE BASELINE, NOT ONLY AGAINST THE SPEC",
+      "jit_trigger_hint": "changed-system completion"
     },
     {
       "home": "core",
@@ -1141,17 +1175,31 @@
       "title_gist": "CONSTRAINT, binding at the moment a session BUILDS OR REVIEWS ANY CARR SURFACE that carries structure - a"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "a9ecd5b4",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds check result report. Failure mode on violation: Stop block",
-      "title_gist": "A CHECK MUST COMPARE THE ARTIFACT AGAINST WHAT IT SHOULD BE, AND A SUCCESS SIGNAL MUST BE DERIVED FROM"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "A CHECK MUST COMPARE THE ARTIFACT AGAINST WHAT IT SHOULD BE, AND A SUCCESS SIGNAL MUST BE DERIVED FROM",
+      "jit_trigger_hint": "check result report"
+    },
+    {
+      "home": "jit",
+      "id": "a9fc3f0e",
+      "jit_trigger_hint": "Delivered by pack(s) records-intake, source-study \u2014 fires when a session runs research or a fact-check.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "RESEARCH USES THE WHOLE INTERNET, AND THE RESEARCH-SITE INDEX IS A MEMORY, NOT A FENCE"
     },
     {
       "home": "core",
       "id": "ab814a26",
       "reason": "A rule ships with its enforcement, decided at creation; recitation is not enforcement. The meta-law this entire S7 triage exists to satisfy \u2014 every session authoring or reviewing a rule needs it.",
       "title_gist": "A RULE SHIPS WITH ITS ENFORCEMENT, DECIDED AT CREATION \u2014 RECITATION IS NOT ENFORCEMENT"
+    },
+    {
+      "home": "jit",
+      "id": "ac0a6579",
+      "jit_trigger_hint": "Delivered by pack(s) client-deal \u2014 fires when a session builds, reviews or recommends access for a client share-site page.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "CLIENT SHARE-SITE PASSWORDS STAY SIMPLE"
     },
     {
       "home": "jit",
@@ -1270,11 +1318,11 @@
       "title_gist": "Overlap 'defaults' require confirming the specific pairing before acting"
     },
     {
-      "carrying_control": "staged_gate_bless",
-      "home": "gate",
+      "home": "jit",
       "id": "c0b38d80",
-      "reason": "Already machine-enforced via control 'staged_gate_bless' (ops/githooks/staged-gate-bless-check.py, ops/githooks/pre-commit); binds committing a change to a gate. Failure mode on violation: pre-commit refusal",
-      "title_gist": "RE-BLESS THE GATE BASELINE IN THE SAME COMMIT THAT CHANGES A GATE"
+      "reason": "PR #1801 retires staged_gate_bless; the rule remains binding prose without this automated control.",
+      "title_gist": "RE-BLESS THE GATE BASELINE IN THE SAME COMMIT THAT CHANGES A GATE",
+      "jit_trigger_hint": "committing a change to a gate"
     },
     {
       "detector": {
@@ -1301,11 +1349,18 @@
       "title_gist": "THE ESCALATION CONTRACT \u2014 three constraints, each binding at a named moment, that make an agent hierarchy"
     },
     {
-      "carrying_control": "chat_lint",
-      "home": "gate",
+      "home": "jit",
       "id": "c315befa",
-      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before a question, interview box, draft or status ask can end without naming its deal. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
-      "title_gist": "NAME THE DEAL IN THE QUESTION ITSELF. Any question, interview box, draft, or status ask presented to a"
+      "reason": "PR #1801 retires chat_lint; the rule remains binding prose without this automated control.",
+      "title_gist": "NAME THE DEAL IN THE QUESTION ITSELF. Any question, interview box, draft, or status ask presented to a",
+      "jit_trigger_hint": "before a question, interview box, draft or status ask can end without naming its deal"
+    },
+    {
+      "home": "jit",
+      "id": "c363bd8b",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires when the orchestrator prepares to merge open PRs.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "BATCH PRS THAT TOUCH THE SAME FILES; NEVER REMERGE THEM ONE AT A TIME"
     },
     {
       "home": "jit",
@@ -1392,6 +1447,13 @@
       "title_gist": "Lead with the no-conflict framing when a counterparty could self-perform"
     },
     {
+      "home": "jit",
+      "id": "cfe6b5c6",
+      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires when a session designs or reviews a new mechanism that defaults to shadow, dry-run or record-only.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "AN OBVIOUS IMPROVEMENT SHIPS LIVE, NOT IN SHADOW MODE"
+    },
+    {
       "carrying_control": "record_research",
       "home": "gate",
       "id": "cff429f5",
@@ -1434,11 +1496,11 @@
       "title_gist": "CLIENT BENEFIT VALUE IS NOT REVENUE, AND THE TWO MUST NEVER MEET IN THE SAME FIELD"
     },
     {
-      "carrying_control": "chat_lint",
-      "home": "gate",
+      "home": "jit",
       "id": "d7f74c93",
-      "reason": "Already machine-enforced via control 'chat_lint' (hooks/chat-lint-gate.py, hooks/chat-lint-carryover.py); binds before an outgoing assistant reply justifies denying a model, provider, or agent access to CARR material because it is confidential, private, or sensitive. Failure mode on violation: deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the",
-      "title_gist": "NEVER JUSTIFY AN AGENT-ACCESS BOUNDARY ON DATA CONFIDENTIALITY"
+      "reason": "PR #1801 retires chat_lint; the rule remains binding prose without this automated control.",
+      "title_gist": "NEVER JUSTIFY AN AGENT-ACCESS BOUNDARY ON DATA CONFIDENTIALITY",
+      "jit_trigger_hint": "before an outgoing assistant reply justifies denying a model, provider, or agent access to CARR material because it is confidential, private, or sensitive"
     },
     {
       "home": "jit",
@@ -1462,11 +1524,11 @@
       "title_gist": "SOLVE THE PROBLEM; DO NOT SETTLE FOR REPORTING IT"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "dcf98880",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds human verification instruction. Failure mode on violation: Stop block",
-      "title_gist": "He executes his human-side steps reliably \u2014 hand him precise verification steps"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "He executes his human-side steps reliably \u2014 hand him precise verification steps",
+      "jit_trigger_hint": "human verification instruction"
     },
     {
       "home": "jit",
@@ -1505,11 +1567,11 @@
       "title_gist": "ASSESSMENT VS ACTION: \"examine this\", \"what do you think\", \"is this worth it\" means DELIVER THE ASSESSMENT"
     },
     {
-      "carrying_control": "conduct_stop",
-      "home": "gate",
+      "home": "jit",
       "id": "e313a3ca",
-      "reason": "Already machine-enforced via control 'conduct_stop' (hooks/conduct-stop-gate.py); binds before command handoff. Failure mode on violation: Stop block",
-      "title_gist": "RUN THE COMMAND; DO NOT HAND THE PARTNER A COMMAND TO PASTE"
+      "reason": "PR #1801 retires conduct_stop; the rule remains binding prose without this automated control.",
+      "title_gist": "RUN THE COMMAND; DO NOT HAND THE PARTNER A COMMAND TO PASTE",
+      "jit_trigger_hint": "before command handoff"
     },
     {
       "home": "core",
@@ -1540,29 +1602,18 @@
       "title_gist": "Same-category vendor pairing is judgment, not a machine check"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
-      "id": "e8868cbe",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds system acceptance claim. Failure mode on violation: Stop block",
-      "title_gist": "THE 48-HOUR TEST IS THE SYSTEM'S ACCEPTANCE CRITERION"
-    },
-    {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
-      "id": "eaa31ac5",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds before delivery claim. Failure mode on violation: Stop block",
-      "title_gist": "CONSTRAINT, binding at the moment a session is about to say it HANDED OFF, SENT, DELIVERED, NOTIFIED or"
-    },
-    {
-      "detector": {
-        "kind": "verb",
-        "pattern": "^(?:Agent|mcp__[\\w-]*[Rr]emote__create[_-](?:session|trigger))$"
-      },
       "home": "jit",
-      "id": "ede4b241",
-      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session dispatches work to another model or launches a Claude Code cloud session (the Agent tool, or create_session / create_trigger on the Claude Code Remote server).",
-      "reason": "Fires on an occasion, not at every boot: the choice of model for a dispatched job is made at the moment of dispatch, so the rule is delivered by pack and moment. No gate can judge whether a job is well-scoped with a checkable done-condition; the delivery puts the routing rule in front of the session at that decision.",
-      "title_gist": "CLOUD MODEL CHOICE: pick the model by the work's shape; Sonnet 5.5 for well-scoped checkable work, Opus 5.5 for design, gates, eval design and reviews"
+      "id": "e8868cbe",
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "THE 48-HOUR TEST IS THE SYSTEM'S ACCEPTANCE CRITERION",
+      "jit_trigger_hint": "system acceptance claim"
+    },
+    {
+      "home": "jit",
+      "id": "eaa31ac5",
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "CONSTRAINT, binding at the moment a session is about to say it HANDED OFF, SENT, DELIVERED, NOTIFIED or",
+      "jit_trigger_hint": "before delivery claim"
     },
     {
       "home": "jit",
@@ -1586,11 +1637,11 @@
       "title_gist": "KNOWING EVERYTHING I KNOW NOW \u2014 THE DELIBERATE SECOND PASS"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "f04a05aa",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds autonomous-run completion. Failure mode on violation: Stop block",
-      "title_gist": "Autonomous runs: every scheduled task/trigger/subagent gets at creation"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "Autonomous runs: every scheduled task/trigger/subagent gets at creation",
+      "jit_trigger_hint": "autonomous-run completion"
     },
     {
       "home": "jit",
@@ -1611,11 +1662,11 @@
       "title_gist": "EVERY CLIENT-FACING RECOMMENDATION NAMES AT LEAST ONE THING WE WOULD NOT DO, AND WHY"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "f47a8fe9",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds verification report. Failure mode on violation: Stop block",
-      "title_gist": "THE FOUR VERIFICATION FAILURES, each of which produced a wrong claim on 2026-08-02, and the one habit that"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "THE FOUR VERIFICATION FAILURES, each of which produced a wrong claim on 2026-08-02, and the one habit that",
+      "jit_trigger_hint": "verification report"
     },
     {
       "detector": {
@@ -1643,6 +1694,13 @@
       "title_gist": "CoStar is driven ONLY in the Claude desktop app's own Browser pane"
     },
     {
+      "home": "jit",
+      "id": "f673326b",
+      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session grants or briefs an agent's access to CARR knowledge, records or tools.",
+      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
+      "title_gist": "Do not add access restrictions, data fences or protective steps Joe did not ask for"
+    },
+    {
       "carrying_control": "client_asset_packet",
       "home": "gate",
       "id": "f92dfab2",
@@ -1650,11 +1708,11 @@
       "title_gist": "Every client search packet includes market commentary, not just a property list"
     },
     {
-      "carrying_control": "completion_evidence",
-      "home": "gate",
+      "home": "jit",
       "id": "fa217e48",
-      "reason": "Already machine-enforced via control 'completion_evidence' (hooks/completion-evidence-gate.py); binds completion after changed work, and any claim about what a file does. Failure mode on violation: Stop block",
-      "title_gist": "Verify the artifact, not the summary: confirming any work means checking the actual file/record/output"
+      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
+      "title_gist": "Verify the artifact, not the summary: confirming any work means checking the actual file/record/output",
+      "jit_trigger_hint": "completion after changed work, and any claim about what a file does"
     },
     {
       "carrying_control": "egress_guard",

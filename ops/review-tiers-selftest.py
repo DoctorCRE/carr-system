@@ -228,7 +228,7 @@ class ConsistencyTests(unittest.TestCase):
 class LensFaultTests(unittest.TestCase):
     """A review-tier map that cannot be imported, read or validated must ARM
     the security lens and record the fault, never quietly disarm it (council
-    review of PR 1450, finding 1). The git-error fallback is unchanged."""
+    review of PR 1450, finding 1)."""
 
     SENSITIVE = ["mcp-server/src/identity.js"]
 
@@ -288,14 +288,17 @@ class LensFaultTests(unittest.TestCase):
             raise ImportError("lib/review_tiers.py")
         self.assert_armed_and_recorded(broken)
 
-    def test_git_error_fallback_is_unchanged(self):
+    def test_git_error_arms_lens_and_records_fault(self):
         fake_git = types.SimpleNamespace(returncode=128, stdout="", stderr="bad object")
-        original = rcr.subprocess.run
+        logged = []
+        original_run, original_log = rcr.subprocess.run, rcr.log
         rcr.subprocess.run = lambda *a, **k: fake_git
+        rcr.log = logged.append
         try:
-            self.assertIsNone(rcr.security_lens_if_triggered("0" * 40))
+            self.assertEqual(rcr.security_lens_if_triggered("0" * 40), rcr.SECURITY_LENS)
+            self.assertTrue(any("git rc=128" in line and "ARMED conservatively" in line for line in logged), logged)
         finally:
-            rcr.subprocess.run = original
+            rcr.subprocess.run, rcr.log = original_run, original_log
 
 
 class TestEvidenceTests(unittest.TestCase):

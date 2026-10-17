@@ -71,13 +71,6 @@ delivered and what to do before acting, instead of exit 1 with empty
 stdout. A malformed single route counts as matched, so it over-delivers its
 rule rather than dropping it; ops/rule-route-coverage.py refuses it in CI.
 
-NOT DONE HERE, ON PURPOSE: hooks/rule-pack-drift-gate.py's Stop-side keyword
-telemetry still only recognizes the original schema's receipt as "loaded"
-evidence for scheduled-automation; it does not yet credit a generalized-rail
-receipt for the packs it delivers. Wiring that up is a comparison this slice
-chose to leave rather than force through the drift gate's byte-pinned
-observation fixtures under scope pressure — see the note beside
-`load_packs()` in that file.
 """
 
 # doctrine: rule-delivery-load-layers
@@ -103,10 +96,7 @@ from lib.rule_delivery_preuse import (  # noqa:E402
     SEMANTIC_RECEIPT_SCHEMA, TRIGGER_TABLE_RELATIVE, canonical, digest,
     load_trigger_table, merge_trigger_delivery, receipt_id, semantic_delivery,
     semantic_selector_digest, scheduled_rule_ids as _scheduled_rule_ids, valid_local_identity,
-    validate_generalized_receipt,
-)
-from lib.rule_delivery_shadow import (  # noqa:E402
-    WINDOW_SOURCE_PATHS, file_sha256, source_sha256,
+    validate_generalized_receipt, file_sha256, source_sha256, DELIVERY_SOURCE_PATHS,
 )
 
 
@@ -749,12 +739,6 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         return _context(rule_routes.notice_too_large(ids))
     rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full],
                                  agent_id=_agent_id(payload))
-    try:
-        from lib.rule_recall import log_delivery
-        log_delivery(Path(REPO) / "out/rule-route-delivery.jsonl", json.loads(text)["receipt_id"],
-                     [r["id"] for r in full])
-    except (OSError, ValueError):
-        pass
     return _context(text)
 
 
@@ -869,6 +853,9 @@ def decide(payload):
 
 
 def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
     return run(decide)
 
 

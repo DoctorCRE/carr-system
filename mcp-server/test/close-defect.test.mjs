@@ -1,26 +1,3 @@
-// close-defect.test.mjs — the defect log's close door (decision cbe91287).
-//
-// A defect must ACCUMULATE (record-defect's own contract), so closing one is
-// never a delete and never a state on the defect row. It is one append-only
-// resolution receipt naming the fix. The two failures this suite is aimed at:
-//
-//   1. A close with no evidence. A pile cleared by hand-waving LOOKS handled,
-//      which is worse than a pile. Every refusal below happens before the
-//      database is touched, so nothing half-written can follow.
-//   2. A second close that quietly rewrites the first. The receipt is what a
-//      reader stands on; a later call with different evidence is refused, and
-//      the same evidence twice is the same act, not a second row.
-//   3. A close on evidence the server has never seen. The receipt is later
-//      bound as Work Request and incident evidence, so a well-formed sha or PR
-//      number is not enough: ops.defect_resolution_evidence_receipt must
-//      resolve it to a row (a merged and shipped release slice member, a
-//      succeeded run, a complete deployment, a resolved incident) first.
-//   4. A close on real evidence about something else. A shipped commit that
-//      fixed another defect is not this defect's fix, so
-//      ops.defect_resolution_evidence_mismatch must find the defect (or a Work
-//      Request naming it) named in that evidence, or nothing is written.
-//
-// Run with: node --test mcp-server/test/close-defect.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -58,7 +35,6 @@ const refuse = async (fn) => {
 const close = (fake, args) => TOOLS["close-defect"].handler(fake, joeLocal,
   { idempotency_key: "k-close-1", defect_id: DEFECT, ...args });
 
-// ── 1. THE EVIDENCE IS THE CLOSE ────────────────────────────────────────────
 
 test("close-defect without evidence refuses before touching the database", async () => {
   for (const args of [{}, { evidence_kind: "commit" }, { evidence_ref: "abc1234" },
@@ -98,7 +74,6 @@ test("a malformed defect id is refused before the database is asked", async () =
   assert.ok(!fake.sql.some(([s]) => s.includes("public.defect")));
 });
 
-// ── 2. THE SERVER MUST HOLD THE EVIDENCE ────────────────────────────────────
 
 const unresolved = (extra = {}) => new Fake({
   "from tool_call where idempotency_key": [],
@@ -165,7 +140,6 @@ test("a defect that does not exist is refused, and nothing is written", async ()
   assert.ok(!fake.sql.some(([s]) => s.includes("insert into public.defect_resolution")));
 });
 
-// ── 3. THE CLOSE ITSELF ─────────────────────────────────────────────────────
 
 test("a close with evidence appends one resolution receipt and an event", async () => {
   const fake = new Fake({
@@ -223,7 +197,6 @@ test("closing an already-closed defect with different evidence is refused, namin
   assert.equal(payload.existing.receipt_ref, `defect-resolution:${RESOLUTION}`);
 });
 
-// ── 4. THE REGISTRY ENTRY ───────────────────────────────────────────────────
 
 test("close-defect is a keyed write that any session holding the full surface may call", () => {
   const tool = TOOLS["close-defect"];

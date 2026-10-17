@@ -2242,38 +2242,6 @@ def decide(payload):
             print(REFUSAL.format(pct=round(share * 100)), file=sys.stderr)
             sys.exit(2)
 
-    if not reason:
-        # THE GATE DOOR (loop #231, 2026-08-10). Runs only when nothing above
-        # denies, so a destructive shape (`rm -rf hooks/`) still DENIES on the
-        # stronger rule rather than being softened to an announcement here.
-        #
-        # Until today gate-edit-gate.py guarded Write/Edit on these files and
-        # its docstring claimed this file guarded the shell path. It did not —
-        # proven by firing the hook, not by reading it: append, sed -i, `>`
-        # onto settings.json and tee all returned ALLOW while the render
-        # control in the same run correctly DENIED. Shared matcher, one list,
-        # two doors (rule a8c55a47): hooks/gate_paths.py.
-        try:
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            from gate_paths import announcement, enforcement_write
-            hit = enforcement_write(cmd)
-            if hit:
-                msg = announcement(hit, "a shell command")
-                log(f"ANNOUNCE gate-write {hit} :: {cmd[:300]}")
-                print(json.dumps({
-                    "systemMessage": msg,
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "allow",
-                        "permissionDecisionReason": msg,
-                    },
-                }))
-                sys.exit(0)
-        except SystemExit:
-            raise
-        except Exception as exc:
-            log(f"ALLOW(gate-door-error) {exc}")
-
     if reason:
         log(f"DENY {reason} :: {cmd[:300]}")
         # EXIT 2, NOT JSON, AND THE CHOICE MATTERS. The structured contract
