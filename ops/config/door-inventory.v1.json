@@ -21,12 +21,6 @@
       "evidence": "bin/r2-forget.py docstring (added b621455d after the 2026-08-07 empty-backup night)"
     },
     {
-      "path": "evals/rule-delivery/boot_lifecycle.py",
-      "class": "one_shot",
-      "reason": "Measured rendered rule text and the real boot hook across context epochs for the class-A rule boot slimming.",
-      "evidence": "3368054b (#1635)"
-    },
-    {
       "path": "evals/rule-delivery/freeze_split.py",
       "class": "one_shot",
       "reason": "Wrote the frozen train/test split once at baseline; rerunning it would defeat the freeze it exists to create.",

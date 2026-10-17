@@ -17,8 +17,6 @@ from pathlib import Path
 
 ROUTES_RELATIVE = "ops/config/rule-routes.v1.json"
 ROUTES_SCHEMA = "rule-routes/v1"
-# THE ONE LINE TO CHANGE when Builder A's ops/config/rule-classes.v1.json lands:
-# rule_classes() reads this file and nothing else reads the classes.
 CLASSES_RELATIVE = "ops/config/rule-classification.v1.csv"
 CORPUS_RELATIVE = "ops/config/rule-selection-corpus.v1.json"
 HOOKS_RELATIVE = "ops/config/hooks.json"
@@ -68,9 +66,7 @@ SUMMARY_CHARS = 100
 def rule_classes(repo: Path, relative: str = CLASSES_RELATIVE) -> dict[str, dict]:
     """{id: {"class", "layer", "moment"}} — the reviewed classification.
 
-    Reads the committed CSV today. A JSON file keyed by id (bare, or under a
-    "rules" key) with the same fields is read the same way, so pointing
-    CLASSES_RELATIVE at Builder A's rule-classes.v1.json is the whole switch."""
+    Reads the committed CSV, or a JSON file with the same fields."""
     path = Path(repo) / relative
     if path.suffix == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))

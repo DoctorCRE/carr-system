@@ -136,36 +136,15 @@ def rule_meta(repo, corpus=None):
     return meta
 
 
-def boot_always_on_ids(repo, sponsor="joe"):
-    """Ids the live boot would render in full for one sponsor.
-
-    The runtime scopes active store rows first, then applies the class file's
-    personal boundary; class A and declared B/C route gaps keep full text
-    (Joe, 2026-10-10). Unclassified store rows also render in full, but the
-    committed class file names classified ids only; this replays selection
-    without store access.
-    """
-    path = os.path.join(repo, "ops", "config", "rule-classes.v1.json")
-    with open(path, "r", encoding="utf-8") as handle:
-        doc = json.load(handle)
-    rows = doc["rules"]
-    return {rid for rid, row in rows.items()
-            if (row.get("always_on") or rid in doc.get("keep_full_text", {})) and row.get("personal_to") in (None, sponsor)}
-
-
-def universes(meta, names, *, boot_ids=None):
-    if "boot_always_on" in names and boot_ids is None:
-        raise ValueError("boot_always_on universe requires current boot ids")
+def universes(meta, names):
     pack = {rid for rid, row in meta.items() if row["layer"] == PACK_LAYER}
     everything = set(meta)
     layer0 = {rid for rid, row in meta.items() if row["layer"] == "layer0"}
     table = {"prompt_compiled": pack, "prompt_full": pack, "jit_pretooluse": pack,
              "boot_layer0": layer0,
-             "boot_always_on": set(boot_ids or ()),
              "layered_triggers": everything,
              "system_moment": everything,
              "system_moment_packlayer": pack,
-             "system_scoped_boot": everything,
              # The doctrine search door delivers doctrine only; it owes no rule.
              "doctrine_search": set()}
     return {name: table.get(name, everything) for name in names}
@@ -274,7 +253,6 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
     meta = rule_meta(repo)
     layer0 = {rid for rid, row in meta.items() if row["layer"] == "layer0"}
     pack_layer = {rid for rid, row in meta.items() if row["layer"] == PACK_LAYER}
-    always_on = boot_always_on_ids(repo)
 
     from ops.rule_scope_replay import FrozenSelection
     from lib.rule_scope_lookup import select_rules
@@ -307,9 +285,6 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
     def boot(case):
         return {"rules": set(layer0), "packs": set()}
 
-    def live_boot(case):
-        return {"rules": set(always_on), "packs": set()}
-
     adapters = [
         {"name": "prompt_compiled", "select": prompt_compiled, "jev": False},
         {"name": "jit_pretooluse", "select": layered, "jev": False,
@@ -317,7 +292,6 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
         {"name": "layered_triggers", "select": layered, "jev": False,
          "applies": lambda case: bool(case["tool_calls"])},
         {"name": "boot_layer0", "select": boot, "jev": False},
-        {"name": "boot_always_on", "select": live_boot, "jev": False},
     ]
     if doctrine_search:
         adapters.append({"name": "doctrine_search", "jev": True,
@@ -374,8 +348,7 @@ def run_adapters(cases, adapters, *, workers=1):
     return deliveries, errors
 
 
-SYSTEM_ROWS = ("system_moment", "system_moment_packlayer",
-               "system_scoped_boot")
+SYSTEM_ROWS = ("system_moment", "system_moment_packlayer")
 
 
 def add_system_rows(deliveries):
@@ -393,24 +366,17 @@ def add_system_rows(deliveries):
                                of every layer;
       system_moment_packlayer  the same deliveries, charged only for
                                pack-layer gold (the layer those paths serve);
-      system_scoped_boot       the moment paths plus the current always-on
-                               boot. Historical reports without that adapter
-                               retain their legacy layer-zero interpretation.
     """
     prompt = deliveries.get("prompt_full") or deliveries.get("prompt_compiled") or {}
     jit = deliveries.get("jit_pretooluse") or {}
-    boot = deliveries.get("boot_always_on") or deliveries.get("boot_layer0") or {}
     rows = {name: {} for name in SYSTEM_ROWS}
-    for case_id in set(prompt) | set(boot):
+    for case_id in set(prompt) | set(jit):
         moment = set(prompt.get(case_id, {}).get("rules") or ())
         moment |= jit.get(case_id, {}).get("rules") or set()
         doctrine = set(prompt.get(case_id, {}).get("doctrine") or ())
         doctrine |= jit.get(case_id, {}).get("doctrine") or set()
         rows["system_moment"][case_id] = {"rules": moment, "packs": None, "doctrine": doctrine}
         rows["system_moment_packlayer"][case_id] = {"rules": moment, "packs": None}
-        rows["system_scoped_boot"][case_id] = {
-            "rules": moment | (boot.get(case_id, {}).get("rules") or set()), "packs": None,
-            "doctrine": doctrine | (boot.get(case_id, {}).get("doctrine") or set())}
     deliveries.update(rows)
     return deliveries
 
@@ -671,7 +637,7 @@ def render_markdown(report, statements=None, *, top=10, paths=None):
     order = paths or [p for p in SYSTEM_ROWS + ("prompt_full",
                                   "prompt_compiled", "jit_pretooluse",
                                   "layered_triggers",
-                                  "boot_always_on", "boot_layer0",
+                                  "boot_layer0",
                                   "doctrine_search")
                       if p in report["paths"]]
     lines = [f"Cases: {report['cases']} ({', '.join(f'{k} {v}' for k, v in sorted(report['strata'].items()))})",

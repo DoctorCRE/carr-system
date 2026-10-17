@@ -186,18 +186,13 @@ class World:
                                for r in json.load(handle)["rules"]}
         meta = ev.rule_meta(REPO)
         self.layer = {rid: row["layer"] for rid, row in meta.items()}
-        with open(os.path.join(REPO, "ops/config/rule-classes.v1.json"), encoding="utf-8") as handle:
-            classes = json.load(handle)["rules"]
-        self.frozen_jit_boot_ids = {rid for rid, row in classes.items() if row["always_on"]
-                     and row.get("personal_to") in (None, "joe")} | {
-            rid for rid, row in meta.items() if row["layer"] == "layer0"}
         routes = self.rule_routes.load_routes(__import__("pathlib").Path(REPO))["rules"]
         owed = set()
         for rid, entry in routes.items():
             if any(route.get("kind") in ("trigger", "path_rule") for route in entry["routes"]):
                 owed.add(rid)
         owed |= {rid for rid, layer in self.layer.items() if layer == "pack"}
-        self.owed = owed - self.frozen_jit_boot_ids
+        self.owed = owed
         if expectations:
             self.owed = {rid for row in expectations["cases"].values() for rid in row["expected"]}
         self.envelope = _load(os.path.join(REPO, "ops", "machine_envelope.py"),
@@ -284,7 +279,7 @@ def replay(world, case):
 def observe(case, events, boot_ids=None):
     """The raw observation of one case: what was delivered, never how it grades."""
     if boot_ids is None:
-        boot_ids = _load(os.path.join(REPO, "ops/rule_delivery_eval.py"), "rde_boot").boot_always_on_ids(REPO)
+        boot_ids = set()
     return {"case_id": case["id"], "split": case.get("split"), "input_sha256": case.get("input_sha256"),
             "available": sorted(set(boot_ids) | {rid for ev in events for rid in ev["ids"]}),
             "delivered": sorted({rid for ev in events for rid in ev["ids"]}),
@@ -415,8 +410,7 @@ def expectation_drift(world, cases, expectations):
 
 def observe_all():
     world = World()
-    boot_ids = world.ev.boot_always_on_ids(REPO)
-    return [observe(case, replay(world, case), boot_ids) for case in sorted(load_cases("all"), key=lambda c: c["id"])]
+    return [observe(case, replay(world, case)) for case in sorted(load_cases("all"), key=lambda c: c["id"])]
 
 
 def trace_repo_reads():
