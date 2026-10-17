@@ -141,6 +141,39 @@ class LeakGuardTest(unittest.TestCase):
                                  text=True)
         self.assertEqual(new_ref.returncode, 0, new_ref.stdout + new_ref.stderr)
 
+    def test_pre_push_merge_with_receiver_commit_missing_locally(self):
+        base = self.write_commit('sample.txt', 'safe\n')
+        self.git('branch', '-M', 'main')
+        receiver = self.receiver('unknown-old-tip')
+        self.git('push', '-q', str(receiver), 'HEAD:refs/heads/main')
+        tree = self.git('rev-parse', base + '^{tree}')
+        remote = self.git('--git-dir=' + str(receiver), 'commit-tree', tree,
+                          '-p', base, '-m', 'receiver-only commit')
+        self.git('--git-dir=' + str(receiver), 'update-ref', 'refs/heads/feature', remote)
+        self.git('checkout', '-qb', 'feature')
+        self.write_commit('feature.txt', 'feature work\n')
+        self.git('checkout', '-q', 'main')
+        self.write_commit('main.txt', 'main work\n')
+        self.git('checkout', '-q', 'feature')
+        self.git('merge', '-q', '--no-edit', 'main')
+        head = self.git('rev-parse', 'HEAD')
+
+        def push_result():
+            refs = f'refs/heads/feature {head} refs/heads/feature {remote}\n'
+            return subprocess.run(['python3', str(SCRIPT), '--root', str(self.root),
+                                   '--pre-push', '--generic-only', '--remote', str(receiver)],
+                                  input=refs, env=self.env, capture_output=True, text=True)
+
+        result = push_result()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        value = self.secret()
+        self.write_commit('feature.txt', 'token="' + value + '"\n')
+        head = self.write_commit('feature.txt', 'safe again\n')
+        result = push_result()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('feature.txt:1 github-pat', result.stdout)
+        self.assertNotIn(value, result.stdout + result.stderr)
+
     def test_merge_resolution_content_is_still_scanned(self):
         (self.root / 'sample.txt').write_text('safe\n')
         self.git('add', 'sample.txt')
