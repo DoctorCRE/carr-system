@@ -2,7 +2,6 @@
 **/evidence/*
 !**/evidence/baseline.jsonl
 !**/evidence/run-meta.json
-!**/evidence/route-gaps.json
 !**/evidence/v3/
 **/evidence/v3/*
 !**/evidence/v3/baseline.jsonl

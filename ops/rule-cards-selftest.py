@@ -21,9 +21,9 @@ class CardTests(unittest.TestCase):
         return {c['id'] for c in selector.select(event, now=now)}
 
     def test_approved_inventory(self):
-        self.assertEqual(len(self.cards), 61)
+        self.assertEqual(len(self.cards), 60)
         self.assertEqual(len(self.core), 12)
-        self.assertEqual(len({c['id'] for c in self.cards}), 61)
+        self.assertEqual(len({c['id'] for c in self.cards}), 60)
 
     def test_core_always_available(self):
         selector = CardSelector(self.cards)
