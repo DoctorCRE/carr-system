@@ -43,7 +43,7 @@ def context(fixture=None, dry_run=True):
     ctx = runtime.Context("lead-signals-weekly", fixture=fixture, dry_run=dry_run, now=NOW)
     ctx.calls = []
     write = ctx.write
-    def transport(verb, payload):
+    def transport(verb, payload, *, profile):
         validate_payload(verb, payload)
         return VerbResult(verb, OK, {"ok": True, "loop_id": "fixture-loop"})
     def recorded_write(verb, args, key):
@@ -74,7 +74,7 @@ class LeadTests(unittest.TestCase):
         with zipfile.ZipFile(zipped, "w") as archive:
             archive.writestr("npidata_pfile_20260928-20261004.csv", csv_text.getvalue())
         calls = []
-        def transport(verb, payload):
+        def transport(verb, payload, *, profile):
             validate_payload(verb, payload)
             calls.append((verb, payload))
             return VerbResult(verb, OK, {"parties": [], "organizations": []} if verb == "find" else {"ok": True})
@@ -97,7 +97,7 @@ class LeadTests(unittest.TestCase):
 
     def test_failure_payloads_also_pass_real_verb_contracts(self):
         calls = []
-        def transport(verb, payload):
+        def transport(verb, payload, *, profile):
             validate_payload(verb, payload)
             calls.append((verb, payload))
             return VerbResult(verb, OK, {"loops": []} if verb == "loop-board" else {"ok": True})

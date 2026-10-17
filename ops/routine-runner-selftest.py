@@ -3,6 +3,8 @@ from datetime import datetime
 import io
 import fcntl
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +14,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from lib import record_call
 from lib.record_call import VerbResult, OK, TRANSIENT
 from tools.routines import runtime
 
@@ -19,6 +22,67 @@ NOW = datetime.fromisoformat('2026-10-05T07:00:00-05:00')
 
 
 class RunnerTests(unittest.TestCase):
+    def record_transport(self, calls, *, revoke_after_board=False):
+        run = subprocess.run
+        node = shutil.which('node')
+
+        def transport(argv, **kwargs):
+            selected = run([node, '--input-type=module', '-e',
+                'import {selectLocalClientCredential} from "./mcp-server/local-client-auth.mjs"; '
+                'let raw = ""; for await (const chunk of process.stdin) raw += chunk; '
+                'const env = JSON.parse(raw); const value = selectLocalClientCredential(env); '
+                'console.log(JSON.stringify({profile: value.profile, '
+                'tokenVariable: value.tokenVariable, hasToken: Boolean(value.token), '
+                'borrowedLocal: value.token === env.CARR_MCP_LOCAL_TOKEN}));'],
+                cwd=ROOT, input=json.dumps(kwargs['env']), text=True, capture_output=True, check=True)
+            credential = json.loads(selected.stdout)
+            verb = argv[2]
+            calls.append((verb, credential))
+            if not credential['hasToken']:
+                return subprocess.CompletedProcess(argv, 1, '', 'missing ' + credential['tokenVariable'])
+            if revoke_after_board and verb == 'loop-board':
+                os.environ.pop('CARR_MCP_UNATTENDED_TOKEN', None)
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'ok': True, 'loops': []}), '')
+
+        return transport
+
+    def test_all_record_calls_select_unattended_credentials(self):
+        calls = []
+        env = {'CARR_MCP_CLIENT_PROFILE': 'unattended',
+               'CARR_MCP_LOCAL_TOKEN': 'fixture-local', 'CARR_MCP_UNATTENDED_TOKEN': 'fixture-unattended'}
+        transport = self.record_transport(calls)
+        with patch.dict(os.environ, env, clear=True), patch.object(record_call.subprocess, 'run', transport):
+            ctx = runtime.Context('lead-signals-weekly', now=NOW)
+            ctx.read('find', {})
+            ctx.write('add-loop', {'title': 'Fixture proposal'}, 'proposal')
+            ctx.failure('fixture failure')
+        self.assertEqual(calls, [(verb, {'profile': 'unattended',
+            'tokenVariable': 'CARR_MCP_UNATTENDED_TOKEN', 'hasToken': True, 'borrowedLocal': False})
+            for verb in ['find', 'add-loop', 'loop-board', 'add-loop']])
+
+    def test_missing_unattended_token_never_borrows_local_for_records_or_failure(self):
+        for operation in ['read', 'write', 'failure', 'failure-write']:
+            with self.subTest(operation=operation):
+                calls = []
+                env = {'CARR_MCP_CLIENT_PROFILE': 'unattended', 'CARR_MCP_LOCAL_TOKEN': 'fixture-local'}
+                if operation == 'failure-write':
+                    env['CARR_MCP_UNATTENDED_TOKEN'] = 'fixture-unattended'
+                transport = self.record_transport(calls, revoke_after_board=operation == 'failure-write')
+                with patch.dict(os.environ, env, clear=True), patch.object(record_call.subprocess, 'run', transport):
+                    ctx = runtime.Context('lead-signals-weekly', now=NOW)
+                    with self.assertRaisesRegex(RuntimeError, 'missing CARR_MCP_UNATTENDED_TOKEN'):
+                        if operation == 'read':
+                            ctx.read('find', {})
+                        elif operation == 'write':
+                            ctx.write('add-loop', {'title': 'Fixture proposal'}, 'proposal')
+                        else:
+                            ctx.failure('fixture failure')
+                self.assertEqual([verb for verb, _ in calls], {
+                    'read': ['find'], 'write': ['add-loop'], 'failure': ['loop-board'],
+                    'failure-write': ['loop-board', 'add-loop']}[operation])
+                self.assertEqual(calls[-1][1], {'profile': 'unattended',
+                    'tokenVariable': 'CARR_MCP_UNATTENDED_TOKEN', 'hasToken': False, 'borrowedLocal': False})
+
     def test_due_respects_chicago_schedule_and_completion(self):
         self.assertFalse(runtime.due('lead-signals-weekly', NOW.replace(hour=6, minute=59), False))
         self.assertTrue(runtime.due('lead-signals-weekly', NOW, False))

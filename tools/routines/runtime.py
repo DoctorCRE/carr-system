@@ -62,7 +62,7 @@ class Context:
     def read(self, verb, args):
         if self.fixture is not None:
             return self.fixture.get('reads', {}).get(verb, {})
-        result = call_verb(verb, args)
+        result = call_verb(verb, args, profile="unattended")
         if not result.ok:
             raise RuntimeError(result.describe())
         return result.reply
@@ -81,7 +81,7 @@ class Context:
             raise RuntimeError(f'effect {key} requires record-layer readback before retry; journal retained')
         self.state['effects'][key] = {'verb': verb, 'args': payload}
         self.save()
-        result = call_verb(verb, payload)
+        result = call_verb(verb, payload, profile="unattended")
         if not result.ok:
             raise RuntimeError(result.describe())
         self.state['effects'][key]['reply'] = result.reply
