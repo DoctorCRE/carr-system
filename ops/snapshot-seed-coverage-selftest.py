@@ -600,6 +600,21 @@ def main():
                           {"carried": {}, "excluded": {}})
         case("an E-string with a backslash-escaped quote does not silence the migration",
              any("ops.new_registry" in f for f in module.check(repo, artifact(["0100_e.sql"]))))
+        tail_calls = [0]
+        original_tail = module._tail
+
+        def count_tail_calls(parts, count):
+            tail_calls[0] += 1
+            return original_tail(parts, count)
+
+        module._tail = count_tail_calls
+        try:
+            scanned, do_bodies, routines = module.scan_sql("select 'x';\n" * 1000)
+        finally:
+            module._tail = original_tail
+        case("ordinary string scanning does not rebuild the accumulated output tail",
+             tail_calls[0] == 0 and scanned.count("select") == 1000
+             and not do_bodies and not routines)
         # A backslash in an ORDINARY literal is a plain character, not an escape.
         repo = build_repo(tmp + "/r6esc2",
                           {"0100_p.sql": "comment on table t is 'a plain \\ backslash';\n"
@@ -1030,6 +1045,20 @@ def main():
         # payload, pass all 34 cases while the guard refused nothing.
         repo = build_repo(tmp + "/mainok", {"0100_seed.sql": seeding},
                           {"carried": {}, "excluded": {"ops.widget": "runtime"}})
+        seed_artifact = artifact(["0100_seed.sql"])
+        seed_analysis = module.analyze_seeds(repo, seed_artifact)
+        original_written_tables = module.written_tables
+
+        def reject_migration_rescan(sql):
+            raise AssertionError("precomputed seed analysis was not reused")
+
+        module.written_tables = reject_migration_rescan
+        try:
+            reused_findings = module.check(repo, seed_artifact, seed_analysis)
+        finally:
+            module.written_tables = original_written_tables
+        case("check reuses precomputed migration seed analysis",
+             reused_findings == [])
         path_clean = os.path.join(tmp, "clean.sql")
         open(path_clean, "w").write(artifact(["0100_seed.sql"]))
         err = io.StringIO()
