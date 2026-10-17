@@ -10,7 +10,7 @@ export async function ruleBootPage(rows, sponsor, page = 1) {
     .map(r => ({ id: r.id, statement: r.statement, scope: r.scope || null, personal_to: r.personal_to || null }))
     .sort((a, b) => a.id.localeCompare(b.id));
   const digest = `sha256:${await canonicalSha256({ sponsor: sponsor || null, rules })}`;
-  if (page !== 1) return { error: "page_out_of_range", page, pages_total: 1, digest };
+  if (Number(page) !== 1) return { error: "page_out_of_range", page, pages_total: 1, digest };
   const personal = rules.filter(r => r.personal_to).length;
   const text = "CARR rule corpus digest. Before acting, use the standing-context scoped lookup for applicable binding text. "
     + "Fetch explicit rule_ids through standing-context when needed. This boot receipt delivers no rule text.\n";

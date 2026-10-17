@@ -3,7 +3,8 @@
   "source_sha256": "facf81b2a941ed26d24a09f8ae8b6b5df6d434a8a49b2bc926567946470cde3c",
   "approval": {
     "date": "2026-10-17",
-    "scope": "61 cards, 12 core, 11 wording changes; offline evaluation only"
+    "scope": "60 cards, 12 core, 11 wording changes; offline evaluation only",
+    "note": "2026-10-17: card A07 (\"Feed the Dot work that displaces paid seats\") was removed with Joe's approval on 2026-10-17 because its only source rule, 4a77c35d (temporary Dot-first routing), was retired."
   },
   "cards": [
     {
@@ -1326,58 +1327,6 @@
           "expected_match": false
         }
       }
-    },
-    {
-      "id": "A07",
-      "title": "Feed the Dot work that displaces paid seats",
-      "wording": "When queueing work for the Dot, send research and build support that displaces paid work first; send PR reviews only when that queue is empty and our own review stalled or ran out of budget.",
-      "word_count": 35,
-      "placement": "TOOL",
-      "merged_from_drafts": [
-        "P13"
-      ],
-      "source_rule_ids": [
-        "4a77c35d"
-      ],
-      "acknowledgement": "Before acting, answer one line: applies yes/no; action or reason.",
-      "scope": "shared",
-      "delivery_priority": 30,
-      "triggers": {
-        "matchers": [
-          {
-            "event": "PreToolUse",
-            "tool_name_regex": "^Bash$",
-            "input_regex": "bin/dot-relay|dot-review\\.py"
-          }
-        ]
-      },
-      "fixtures": {
-        "positive": {
-          "event": {
-            "hook_event_name": "PreToolUse",
-            "cwd": "/Users/booko/carr-system",
-            "tool_name": "Bash",
-            "tool_input": {
-              "command": "bin/dot-relay send --brief /tmp/brief.md"
-            }
-          },
-          "expected_match": true
-        },
-        "negative": {
-          "event": {
-            "hook_event_name": "PreToolUse",
-            "cwd": "/Users/booko/carr-system",
-            "tool_name": "Bash",
-            "tool_input": {
-              "command": "git status --short"
-            }
-          },
-          "expected_match": false
-        }
-      },
-      "notes": [
-        "Needs Joe's ruling against memory 'free seats first for reviews' (2026-10-09)."
-      ]
     },
     {
       "id": "A08",

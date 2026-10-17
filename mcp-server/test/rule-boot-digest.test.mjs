@@ -17,3 +17,12 @@ test("boot is one bounded digest page even for a large corpus", async () => {
   assert.match(boot.text, /standing-context/);
   assert.doesNotMatch(boot.text, /fixture-rule-body/);
 });
+
+test("a string page of \"1\" is accepted and other pages are rejected", async () => {
+  const rows = [{ id: "00000000-0000-4000-8000-000000000000", statement: "x", personal_to: null }];
+  const ok = await ruleBootPage(rows, "joe", "1");
+  assert.equal(ok.page, 1);
+  assert.equal(ok.error, undefined);
+  assert.equal((await ruleBootPage(rows, "joe", 2)).error, "page_out_of_range");
+  assert.equal((await ruleBootPage(rows, "joe", "2")).error, "page_out_of_range");
+});
