@@ -45,7 +45,7 @@ from lib.rule_delivery_preuse import (  # noqa:E402
     POSTWRITE_RECEIPT_SCHEMA, digest, postwrite_reviewer_digest, receipt_id,
     validate_postwrite_receipt,
 )
-from lib.rule_delivery_shadow import file_sha256  # noqa:E402
+from lib.rule_delivery_preuse import file_sha256  # noqa:E402
 try:                                    # telemetry only — never load-bearing
     import hook_meter
     LOG = hook_meter.guard_log_path(os.path.expanduser("~/carr-system"))

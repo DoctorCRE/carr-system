@@ -21,6 +21,64 @@ function fakeClient(route) {
   };
 }
 
+for (const verb of ["teach", "amend-rule"]) {
+  const args = verb === "teach"
+    ? { idempotency_key: "scope-teach", statement: "fixture rule",
+        human_quote: "fixture quote", enforcement_home: "core" }
+    : { idempotency_key: "scope-amend", rule_id: RULE, base_version: 1,
+        statement: "corrected wording", reason: "fixture correction" };
+
+  for (const [shape, scope] of Object.entries({
+    string: "shared", array: [], null: null, boolean: false, number: 1,
+  })) {
+    test(`${verb} refuses a ${shape} scope before any database write`, async () => {
+      const c = fakeClient(sql => {
+        if (/select status, statement, human_quote, scope, version from rule/i.test(sql))
+          return { rows: [{ status: "proposed", statement: "old wording",
+            human_quote: null, scope: {}, version: 1 }] };
+        if (/select version from rule/i.test(sql)) return { rows: [{ version: 1 }] };
+        if (/insert into rule/i.test(sql)) return { rows: [{ id: RULE, personal_to: null }] };
+        return { rows: [] };
+      });
+      await assert.rejects(
+        () => TOOLS[verb].handler(c, ACTOR, { ...args, scope }),
+        e => {
+          assert.ok(e instanceof ToolError);
+          assert.equal(e.payload.error, "invalid_object");
+          assert.equal(e.payload.field, "scope");
+          assert.match(e.payload.hint, /scope.*object/i);
+          return true;
+        },
+      );
+      assert.equal(c.calls.some(x => /\b(insert|update|delete)\b/i.test(x.sql)), false);
+    });
+  }
+
+  for (const scope of [{}, { section: "fixture" }, undefined]) {
+    test(`${verb} accepts ${scope === undefined ? "omitted" : JSON.stringify(scope)} scope`, async () => {
+      const c = fakeClient(sql => {
+        if (/insert into rule/i.test(sql)) return { rows: [{ id: RULE, personal_to: null }] };
+        if (/select status, statement, human_quote, scope, version from rule/i.test(sql))
+          return { rows: [{ status: "proposed", statement: "old wording",
+            human_quote: null, scope: { section: "original" }, version: 1 }] };
+        if (/select version from rule where id=\$1 for update/i.test(sql))
+          return { rows: [{ version: 1 }] };
+        if (/select version from rule where id=\$1$/i.test(sql))
+          return { rows: [{ version: 2 }] };
+        return { rows: [] };
+      });
+      const out = await executeRegisteredTool(c, ACTOR, verb, {
+        ...args, ...(scope === undefined ? {} : { scope }),
+      });
+      assert.equal(out.ok, true);
+      const write = c.calls.find(x => verb === "teach"
+        ? /insert into rule/i.test(x.sql) : /update rule set statement=/i.test(x.sql));
+      const stored = JSON.parse(write.params[verb === "teach" ? 3 : 2]);
+      assert.deepEqual(stored, scope ?? (verb === "teach" ? {} : { section: "original" }));
+    });
+  }
+}
+
 test("admit-rule is an explicit human-only authority verb with all four D-04 dimensions", () => {
   const tool = TOOLS["admit-rule"];
   // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): dead since
@@ -161,7 +219,7 @@ test("amend-rule still refuses to change an active rule's scope or quote", async
   const cScope = fakeClient((sql) => {
     if (/select status, statement, human_quote, scope, version from rule/i.test(sql))
       return { rows: [{ status: "active", statement: "approved statement",
-        human_quote: "Joe said it", scope: {}, version: 2 }] };
+        human_quote: "Joe said it", scope: { section: "original" }, version: 2 }] };
     if (/select version from rule where id=\$1 for update/i.test(sql))
       return { rows: [{ version: 2 }] };
     return { rows: [] };
@@ -220,4 +278,92 @@ test("applicable-rules delegates finite applicability selection to the policy co
   });
   assert.equal(out.count, 1);
   assert.equal(out.rules[0].rule_id, RULE);
+});
+
+
+for (const statement of [undefined, "corrected statement"])
+test(`amend-rule receipts additive scope and ${statement ? "wording" : "unchanged wording"} with the same identity`, async () => {
+  const oldScope = { source: "import", section: "record-layer", nested: { quote_absent: true } };
+  const scope = { ...oldScope, moment: "Before amending a rule" };
+  const c = fakeClient(sql => {
+    if (/select status, statement, human_quote, scope, version from rule/i.test(sql))
+      return { rows: [{ status: "active", statement: "approved statement",
+        human_quote: "Joe said it", scope: oldScope, version: 2 }] };
+    if (/select version from rule where id=\$1 for update/i.test(sql))
+      return { rows: [{ version: 2 }] };
+    if (/select ops\.amend_rule_scope/i.test(sql)) return { rows: [{ result: {
+      ok: true, rule_version_after: 3, amendment_receipt_id: "scope-receipt", replayed: false,
+    } }] };
+    return { rows: [] };
+  });
+  const out = await executeRegisteredTool(c, ACTOR, "amend-rule", {
+    idempotency_key: "scope-backfill", rule_id: RULE, base_version: 2,
+    scope, ...(statement ? { statement } : {}), reason: "Backfill selection condition from the rule text",
+  });
+  assert.equal(out.rule_id, RULE);
+  assert.equal(out.status, "active");
+  assert.equal(out.version, 3);
+  assert.equal(out.amendment_receipt_id, "scope-receipt");
+  assert.deepEqual(out.changed, statement ? ["statement", "scope"] : ["scope"]);
+  const call = c.calls.find(x => /select ops\.amend_rule_scope/i.test(x.sql));
+  assert.deepEqual(call.params, [RULE, JSON.stringify(scope), statement || "approved statement", 2,
+    "scope-backfill", "Backfill selection condition from the rule text"]);
+  assert.equal(c.calls.some(x => /update rule/i.test(x.sql)), false);
+  const event = c.calls.find(x => /insert into event/i.test(x.sql));
+  assert.ok(event);
+});
+
+for (const scope of [
+  {}, { source: "changed" }, { source: "import", nested: { a: 2 } },
+  { source: "import", nested: { a: 1, b: 2 } },
+  { source: "import", nested: { a: 1 }, verbs: ["teach", "amend-rule"] },
+]) test(`active scope rewrite refuses ${JSON.stringify(scope)}`, async () => {
+  const c = fakeClient(sql => {
+    if (/select status, statement, human_quote, scope, version from rule/i.test(sql))
+      return { rows: [{ status: "active", statement: "approved", human_quote: "quote",
+        scope: { source: "import", nested: { a: 1 }, verbs: ["teach"] }, version: 2 }] };
+    if (/select version from rule where id=\$1 for update/i.test(sql))
+      return { rows: [{ version: 2 }] };
+    return { rows: [] };
+  });
+  await assert.rejects(() => executeRegisteredTool(c, ACTOR, "amend-rule", {
+    idempotency_key: "scope-rewrite", rule_id: RULE, base_version: 2, scope,
+    reason: "Try rewriting approved scope",
+  }), e => e instanceof ToolError && e.payload.error === "active_rule_scope_frozen");
+  assert.equal(c.calls.some(x => /select ops\.amend_rule_|update rule|insert into event/i.test(x.sql)), false);
+});
+
+for (const [label, args, error] of [
+  ["stale version", { base_version: 1 }, "version_conflict"],
+  ["missing reason", { reason: " " }, "reason_required"],
+  ["changed active quote", { human_quote: "new quote" }, "human_quote_immutable"],
+]) test(`active scope backfill refuses ${label} before writing`, async () => {
+  const c = fakeClient(sql => {
+    if (/select status, statement, human_quote, scope, version from rule/i.test(sql))
+      return { rows: [{ status: "active", statement: "approved", human_quote: "quote", scope: {}, version: 2 }] };
+    if (/select version from rule where id=\$1 for update/i.test(sql))
+      return { rows: [{ version: 2 }] };
+    return { rows: [] };
+  });
+  await assert.rejects(() => executeRegisteredTool(c, ACTOR, "amend-rule", {
+    idempotency_key: "scope-check", rule_id: RULE, base_version: 2,
+    scope: { moment: "Before a rule edit" }, reason: "Backfill scope", ...args,
+  }), e => e instanceof ToolError && e.payload.error === error);
+  assert.equal(c.calls.some(x => /select ops\.amend_rule_|update rule|insert into event/i.test(x.sql)), false);
+});
+
+
+test("scope key order alone is a no-op", async () => {
+  const c = fakeClient(sql => {
+    if (/select status, statement, human_quote, scope, version from rule/i.test(sql))
+      return { rows: [{ status: "active", statement: "approved", human_quote: "quote",
+        scope: { source: "import", nested: { a: 1, b: 2 } }, version: 2 }] };
+    if (/select version from rule where id=\$1 for update/i.test(sql)) return { rows: [{ version: 2 }] };
+    return { rows: [] };
+  });
+  await assert.rejects(() => executeRegisteredTool(c, ACTOR, "amend-rule", {
+    idempotency_key: "scope-order", rule_id: RULE, base_version: 2,
+    scope: { nested: { b: 2, a: 1 }, source: "import" }, reason: "Reordered JSON",
+  }), e => e instanceof ToolError && e.payload.error === "no_change");
+  assert.equal(c.calls.some(x => /select ops\.amend_rule_|update rule|insert into event/i.test(x.sql)), false);
 });

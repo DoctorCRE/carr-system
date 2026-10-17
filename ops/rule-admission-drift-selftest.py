@@ -11,11 +11,49 @@ import contextlib
 import importlib.util
 import io
 import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
+
+_GRANT = re.compile(r"\bgrant\s+select\s+on\s+(?:table\s+)?([^;]+?)\s+to\s+([^;]+?);",
+                    re.I | re.S)
+_REVOKE = re.compile(r"\brevoke\s+(?:select|all)\s+on\s+(?:table\s+)?([^;]+?)\s+from\s+([^;]+?);",
+                     re.I | re.S)
+_RELATION = re.compile(r"\b(?:from|join)\s+([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)", re.I)
+
+
+def qualified(name: str) -> str:
+    name = name.strip().strip('"').lower()
+    return name if "." in name else f"public.{name}"
+
+
+def reader_relations() -> set[str]:
+    """Relations carr_reader may SELECT whole, replayed from the migrations in order.
+
+    The preflight is documented to run on DATABASE_URL_READER, a login granted
+    carr_reader, which is views-only by design (migration 0188). Column grants
+    (`grant select (a, b) on ...`) do not match and are not counted.
+    """
+    granted: set[str] = set()
+    for path in sorted((REPO / "migrations").glob("*.sql")):
+        sql = re.sub(r"--[^\n]*", "", path.read_text())
+        events = [(m.start(), True, m) for m in _GRANT.finditer(sql)]
+        events += [(m.start(), False, m) for m in _REVOKE.finditer(sql)]
+        for _, grant, match in sorted(events, key=lambda e: e[0]):
+            roles = {r.strip().lower() for r in match.group(2).split(",")}
+            if "carr_reader" not in roles:
+                continue
+            for relation in match.group(1).split(","):
+                (granted.add if grant else granted.discard)(qualified(relation))
+    return granted
+
+
+def relations_read(sql: str) -> set[str]:
+    return {qualified(name) for name in _RELATION.findall(sql)}
 
 
 def load(name: str, filename: str):
@@ -80,22 +118,41 @@ def main() -> int:
     delivery = {"load_layer": "layer0", "packs": [], "why": "always"}
 
     class PreflightCursor:
-        def __init__(self, definition=installed, admission=None):
+        """Answers the preflight's two reads. `rule_status=None` is a rule id
+        the store does not hold; `admission=None` is a rule with no admission."""
+        def __init__(self, definition=installed, admission=None, rule_status="proposed"):
             self.definition, self.admission = definition, admission
+            self.rule_status, self.statements = rule_status, []
 
         def execute(self, sql, params=()):
             self.sql = sql
+            self.statements.append(sql)
             if not sql.lstrip().lower().startswith("select"):
                 raise AssertionError("preflight attempted a write")
 
         def fetchone(self):
             if "pg_get_functiondef" in self.sql:
                 return (self.definition,)
-            return None if self.admission is None else (self.admission,)
+            if self.rule_status is None:
+                return None
+            return ({"rule_status": self.rule_status, "admission": self.admission},)
 
     def admission(delivery):
-        return {"rule_id": rule_id, "state": "admitted", "rule_status": "proposed",
+        return {"rule_id": rule_id, "state": "admitted",
                 "projection": {"delivery": delivery}}
+
+    # WR-000222: the preflight is documented to run on the read credential, and
+    # carr_reader cannot read the base table `rule` (views only, migration
+    # 0188). Every relation the preflight reads must be one carr_reader holds.
+    readable = reader_relations()
+    check("carr_reader still cannot read the base rule table (the boundary holds)",
+          "public.rule" not in readable and "ops.rule_admission" in readable)
+    probe = PreflightCursor(admission=admission(delivery))
+    audit.preflight(probe, rule_id)
+    read = set().union(*(relations_read(sql) for sql in probe.statements))
+    check("every relation the preflight reads is granted to carr_reader "
+          f"(reads {sorted(read)}, ungranted {sorted(read - readable)})",
+          bool(read) and read <= readable)
 
     ready = audit.preflight(PreflightCursor(admission=admission(delivery)), rule_id)
     check("a prepared admission carrying every key the installed writer reads is ready",
@@ -110,8 +167,14 @@ def main() -> int:
     check("a writer body that never reads projection.delivery is a failed readback",
           audit.preflight(PreflightCursor(definition="begin return null; end"))["status"]
           == "delivery_contract_unrecognised")
-    check("a rule with no prepared admission is a failed readback",
-          audit.preflight(PreflightCursor(), rule_id)["status"] == "admission_missing")
+    unprepared = audit.preflight(PreflightCursor(), rule_id)
+    check("a rule with no prepared admission is a failed readback that still names its status",
+          unprepared["status"] == "admission_missing"
+          and unprepared.get("rule_status") == "proposed")
+    check("a rule id the store does not hold is its own failed readback",
+          audit.preflight(PreflightCursor(rule_status=None), rule_id)["status"]
+          == "rule_missing"
+          and "rule_missing" in audit.FAILED_READBACKS)
     short = audit.preflight(PreflightCursor(
         admission=admission({"load_layer": "layer0", "packs": []})), rule_id)
     check("an admission missing a key the writer reads is named, not inferred ready",
@@ -126,11 +189,18 @@ def main() -> int:
         def execute(self, sql): self.statements.append(sql)
         def cursor(self): return contextlib.nullcontext(self.cur)
 
-    def run_main(argv, cursor):
+    def run_main(argv, cursor, env=None):
         conn = Conn(cursor)
+        conn.dsn = None
+        def connect(dsn):
+            conn.dsn = dsn
+            return conn
         saved = (sys.argv, audit.psycopg.connect)
-        sys.argv, audit.psycopg.connect = ["rule-admission-audit.py", *argv], lambda dsn: conn
-        os.environ["DATABASE_URL"] = "postgresql://reader@example/db"
+        sys.argv, audit.psycopg.connect = ["rule-admission-audit.py", *argv], connect
+        env = {"DATABASE_URL": "postgresql://reader@example/db"} if env is None else env
+        for name in ("DATABASE_URL", "DATABASE_URL_READER"):
+            os.environ.pop(name, None)
+        os.environ.update(env)
         try:
             with contextlib.redirect_stdout(io.StringIO()), \
                  contextlib.redirect_stderr(io.StringIO()):
@@ -139,18 +209,37 @@ def main() -> int:
             code = exc.code
         finally:
             sys.argv, audit.psycopg.connect = saved[0], saved[1]
-            os.environ.pop("DATABASE_URL", None)
-        return code, conn.statements
+            for name in ("DATABASE_URL", "DATABASE_URL_READER"):
+                os.environ.pop(name, None)
+        return code, conn.statements, conn.dsn
 
-    code, statements = run_main(["--preflight", "--rule-id", rule_id], PreflightCursor())
+    code, statements, _ = run_main(["--preflight", "--rule-id", rule_id], PreflightCursor())
     check("a failed readback exits nonzero from the command line", code == 1)
     check("the preflight runs inside a read-only transaction",
           statements[:1] == ["set transaction read only"])
-    code, _ = run_main(["--preflight", "--rule-id", rule_id],
-                       PreflightCursor(admission=admission(delivery)))
+    code, _, _ = run_main(["--preflight", "--rule-id", rule_id],
+                          PreflightCursor(admission=admission(delivery)))
     check("a ready readback exits zero", code == 0)
-    code, _ = run_main(["--rule-id", rule_id], PreflightCursor())
+    code, _, _ = run_main(["--rule-id", rule_id], PreflightCursor())
     check("--rule-id without --preflight is refused", code == 2)
+
+    # The documented command needs no hand-exported DSN: the preflight connects
+    # as the read credential by name (environment first, then db.env).
+    reader = "postgresql://app_reader@example/db"
+    code, _, dsn = run_main(["--preflight", "--rule-id", rule_id],
+                            PreflightCursor(admission=admission(delivery)),
+                            env={"DATABASE_URL_READER": reader})
+    check("the preflight connects as DATABASE_URL_READER when no DSN is exported",
+          code == 0 and dsn == reader)
+    saved_home = os.environ.get("HOME")
+    with tempfile.TemporaryDirectory() as empty_home:
+        os.environ["HOME"] = empty_home
+        try:
+            code, _, dsn = run_main(["--preflight"], PreflightCursor(), env={})
+        finally:
+            os.environ["HOME"] = saved_home or ""
+    check("no credential anywhere is a configuration error, not a connection",
+          code == 2 and dsn is None)
 
     print(f"\nrule-admission-drift-selftest: {len(ran)-len(failures)}/{len(ran)} passed")
     return 1 if failures else 0

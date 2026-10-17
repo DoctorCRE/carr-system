@@ -1,0 +1,3 @@
+set -eu
+root="$(git rev-parse --show-toplevel)"
+exec python3 "$root/security/leak_guard.py" --root "$root" --pre-push --remote "${2:-${1:-origin}}"

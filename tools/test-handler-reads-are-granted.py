@@ -52,7 +52,17 @@ GRANT_FULL = re.compile(
 # references is reader-selectable except the four this check was written for.
 # An entry here is a claim that a table is only ever read on the writer or
 # authority connection — write it with the verb that does it, or fix the grant.
-READER_EXEMPT: dict[str, str] = {}
+READER_EXEMPT: dict[str, str] = {
+    # 0872 revokes carr_reader on the base table on purpose; a read session sees
+    # the log through public.v_defect. Both handlers that name it are write:true
+    # verbs, which mcp.js routes to the carr_writer connection, and carr_writer
+    # holds select: close-defect (defect-resolution.js, its insert and the
+    # conflict re-read) and close-incident's evidence route (incident.js
+    # evidenceSnapshot, reached only through closeOnEvidence inside close-incident).
+    "public.defect_resolution":
+        "read only on the writer connection by close-defect and close-incident; "
+        "readers use public.v_defect",
+}
 DECLARED = re.compile(r"^CREATE TABLE (?:ONLY )?([a-z_]+\.[a-z_]+)", re.M)
 READ = re.compile(r"\b(?:from|join)\s+(ops|public)\.([a-z_]+)\b", re.I)
 

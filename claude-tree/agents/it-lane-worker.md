@@ -105,7 +105,7 @@ remedy is a human ruling, not a repair.
 ### 5. Absence in a partial search is not absence.
 
 Four independent readers made this error in one day, in both directions: a `find` reported 17
-duplicate Henry Schein orgs when 1 was live (tombstones counted as live), and a `-maxdepth 2` scan
+duplicate Example Organization 25 orgs when 1 was live (tombstones counted as live), and a `-maxdepth 2` scan
 "proved" six files gone that sat at depth 3. **Check the full collection and state the search's
 boundary alongside the result.** "Not found in `<collection>`, searched with `<command>`" is legal.
 "Does not exist" needs the whole collection.

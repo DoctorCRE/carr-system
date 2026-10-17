@@ -580,10 +580,6 @@ def _compile(value: Any, *, compiler_version: str) -> dict[str, Any]:
     try:
         plan = engineering_passport.validate_engineering_slice_plan(copy.deepcopy(row["engineering_slice_plan"]))
     except engineering_passport.EngineeringContractError as exc:
-        # The compiler CONSUMES a registered plan; it produces none.  It accepts
-        # whatever engineering_passport accepts on the read path: a stored v1
-        # plan and a v2 plan.  New registrations are v2-only since migration
-        # 0616, so v2 is the plan version a fresh compile normally binds.
         _refuse("ENGINEERING_SLICE_PLAN_INVALID", "engineering_slice_plan", "valid engineering-slice-plan.v2 (or a stored engineering-slice-plan.v1)", str(exc))
     contract = _validate_contract(row["assurance_slice"])
     rules = _validate_rules(row["applicable_rules"])
@@ -649,7 +645,7 @@ def compile_assurance_slice(value: Any, *, compiler_version: str = COMPILER_VERS
         return {"ok": True, "manifest": _compile(copy.deepcopy(value), compiler_version=compiler_version)}
     except _Refusal as exc:
         return {"ok": False, "refusal": exc.fact}
-    except Exception as exc:  # fail closed without exposing an exception to callers
+    except Exception as exc:
         return {"ok": False, "refusal": {"code": "COMPILER_INTERNAL_ERROR", "causal_object": "compiler", "expected": "deterministic validated input", "actual": type(exc).__name__}}
 
 

@@ -16,7 +16,11 @@ ops/config/rule-jit-triggers.v1.json.
 
 INPUTS, all read-only and already reviewed elsewhere:
   ops/config/rule-triage.v1.json       — jit-home rows carry an optional
-                                          `detector` field (kind, pattern),
+                                          `detector` field (kind, pattern), or
+                                          a `detectors` list of them when one
+                                          rule binds at several shapes (each
+                                          entry is its own row; a shared
+                                          (kind, pattern) merges rule ids),
                                           seeded for ~49 of the 126 JIT rules
                                           across five priority lanes (deal/LOI,
                                           vendor intros, council procedure,
@@ -25,7 +29,7 @@ INPUTS, all read-only and already reviewed elsewhere:
                                           jit_trigger_hint content. An optional
                                           top-level `fallback_narrowing` object
                                           (written only by
-                                          ops/rule-delivery-adjudication-apply.py)
+                                          reviewed triage input)
                                           strips proven false-positive keywords
                                           out of a pack's fallback pattern.
   ops/config/rule-enforcement-map.json — read-only for two things: `rule_packs`
@@ -67,7 +71,8 @@ OUTPUT SHAPE (ops/config/rule-jit-triggers.v1.json), one row per trigger:
     "rule_ids":    sorted short rule ids, capped at `max_rules_per_trigger`
                    (5) — the over-delivery bias lives in MATCHING liberally,
                    not in raising this cap; context stays lean by design.
-    "source":      "seeded_detector"   — from a rule-triage detector field
+    "source":      "seeded_detector"   — from a rule-triage detector or
+                                         detectors entry
                    "pack_fallback"     — the remaining un-seeded JIT rules
                                          of one pack, bucketed under that
                                          pack's own keyword list (narrowed
@@ -228,14 +233,7 @@ def trigger_id(kind: str, pattern: str) -> str:
 
 
 def pack_keyword_pattern(pack: dict, exclude_terms: set[str]) -> str | None:
-    """Rebuild the exact regex hooks/rule-pack-drift-gate.py's load_packs()
-    would compile for this pack, minus any proven false-positive terms.
-
-    Reusing the identical word-boundary construction keeps the fallback
-    trigger's semantics recognizable as "the same pack, minus what
-    adjudication narrowed" rather than a second, subtly different keyword
-    matcher living beside the drift gate's.
-    """
+    """Compile pack keywords minus the reviewed false-positive terms."""
     words = [t for t in pack.get("triggers", []) if str(t).strip()
              and str(t).strip().lower() not in exclude_terms]
     if not words:
@@ -247,6 +245,15 @@ def pack_keyword_pattern(pack: dict, exclude_terms: set[str]) -> str | None:
         right = r"\b" if re.match(r"\w", word[-1]) else ""
         parts.append(f"{left}{escaped}{right}")
     return "|".join(parts)
+
+
+def rule_detectors(rule: dict) -> list[dict]:
+    """A rule's declared detectors: its `detectors` list, else its one `detector`."""
+    detectors = rule.get("detectors")
+    if isinstance(detectors, list):
+        return [d for d in detectors if isinstance(d, dict)]
+    detector = rule.get("detector")
+    return [detector] if isinstance(detector, dict) else []
 
 
 def compile_triggers(triage: dict, enforcement_map: dict,
@@ -266,16 +273,14 @@ def compile_triggers(triage: dict, enforcement_map: dict,
     groups: dict[tuple[str, str], set[str]] = {}
     seeded_ids: set[str] = set()
     for rule in jit_rules:
-        detector = rule.get("detector")
-        if not isinstance(detector, dict):
-            continue
-        kind = detector.get("kind")
-        pattern = detector.get("pattern")
-        if kind not in {"verb", "bash_family", "path_pattern", "content_regex"} \
-                or not isinstance(pattern, str) or not pattern.strip():
-            continue
-        groups.setdefault((kind, pattern), set()).add(rule["id"])
-        seeded_ids.add(rule["id"])
+        for detector in rule_detectors(rule):
+            kind = detector.get("kind")
+            pattern = detector.get("pattern")
+            if kind not in {"verb", "bash_family", "path_pattern", "content_regex"} \
+                    or not isinstance(pattern, str) or not pattern.strip():
+                continue
+            groups.setdefault((kind, pattern), set()).add(rule["id"])
+            seeded_ids.add(rule["id"])
 
     rows: list[dict[str, Any]] = []
     for (kind, pattern), ids in groups.items():
@@ -402,7 +407,8 @@ def build_document(triage: dict, enforcement_map: dict,
     fallback = sum(1 for r in triggers if r["source"] == "pack_fallback")
     extra = sum(1 for r in triggers if r["source"] == "structural_extra")
     jev_compiled = sum(1 for r in triggers if r["source"] == "jev_compiled")
-    seeded_rule_count = sum(len(r["rule_ids"]) for r in triggers if r["source"] == "seeded_detector")
+    seeded_rule_count = len({rid for r in triggers if r["source"] == "seeded_detector"
+                             for rid in r["rule_ids"]})
     return {
         "schema": SCHEMA,
         "work_request": "WR-000019",

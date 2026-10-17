@@ -1,0 +1,631 @@
+{
+  "version": "retrieval-real-misses/v1",
+  "requires_private_fixture": true,
+  "sources": [
+    {
+      "case": 1,
+      "cause": "never-asked",
+      "evidence": [
+        "migrations/0056_ref_index_party_branch.sql:3-18"
+      ],
+      "derivation": "Name lookup and referral lookup omitted bare organizations."
+    },
+    {
+      "case": 2,
+      "cause": "never-asked",
+      "evidence": [
+        "migrations/0102_lead_client_link.sql:4-17",
+        "loop:4a5df6fe-2391-4c4b-8afd-d30aefdfd2fc"
+      ],
+      "derivation": "Doctor-name lookup omitted linked client deals. The original L-004 example remains separate from the repaired conversion examples."
+    },
+    {
+      "case": 3,
+      "cause": "never-asked",
+      "evidence": [
+        "migrations/0106_precedent_and_point_in_time.sql:7-16",
+        "loop:53ee29ae-5957-484b-9074-701162393732"
+      ],
+      "derivation": "find did not search decisions. Compare the original door with the current dedicated precedent read."
+    },
+    {
+      "case": 4,
+      "cause": "never-asked",
+      "evidence": [
+        "loop:74965a6f-6847-4919-a505-6ec1babe82cc",
+        "ops/config/rule-routes.v1.json",
+        "ops/config/rule-jit-triggers.v1.json"
+      ],
+      "derivation": "Rules without detector routes could not reach sessions. Probe current deterministic prompt/tool routes and read their delivered rule text."
+    },
+    {
+      "case": 5,
+      "cause": "never-asked/drift",
+      "evidence": [
+        "mcp-server/src/tools.js:2423-2498",
+        "loop:b8bdc078-8e5a-4bb8-b1fb-48adee0b19e7"
+      ],
+      "derivation": "Live organization count blended merge tombstones. Use verified survivor refs and retired aliases."
+    },
+    {
+      "case": 6,
+      "cause": "search-quality",
+      "evidence": [
+        "migrations/0282_zero_hit_fallback_for_doctrine_search.sql:4-26",
+        "loop:11c62332-a420-4bcb-a64a-40704c660a64"
+      ],
+      "derivation": "Natural query returned zero while retrieval returned eight. Target the current fallback doctrine, independently read by slug."
+    },
+    {
+      "case": 7,
+      "cause": "search-quality",
+      "evidence": [
+        "git:72bac3e9abc09a5a8e908cefeae0e692c9ec73a5:evals/retrieval/fixtures/bounded-record-questions.v1.json",
+        "git:72bac3e9abc09a5a8e908cefeae0e692c9ec73a5:evals/retrieval/baselines/bounded-record-strict-fts.v1.json",
+        "https://github.com/jbookout/carr-system/pull/1546"
+      ],
+      "derivation": "Historical strict-FTS synthetic reference was 12/23 positive questions. Rebind q07 application-placement theme to current production doctrine; no synthetic UUIDs are reused."
+    },
+    {
+      "case": 8,
+      "cause": "search-quality",
+      "evidence": [
+        "CLAUDE.md:11-17"
+      ],
+      "derivation": "Doc nickname retrieved audio noise. Bind naming questions to the independently read Dr. CRE naming section."
+    },
+    {
+      "case": 9,
+      "cause": "not-linked",
+      "evidence": [
+        "rule:d5dcfe26",
+        "decision:541afe49-ecf0-489c-8999-f825b48fe6a8",
+        "decision:bd8ce310-55d5-5d85-b017-cfc36079c568"
+      ],
+      "derivation": "Dated memo led to a void re-ruling. Target the later record-work session-marker retirement ruling, not the void decision."
+    },
+    {
+      "case": 10,
+      "cause": "not-captured",
+      "evidence": [
+        "CLAUDE.md:15-17",
+        "loop:c5da1212-a037-4452-acbd-df5c6b8d9f30"
+      ],
+      "derivation": "Original orb conversation predates capture. Current loop documents later work, not a recovered original conversation. Expected ref is only the gap/work locator, never the absent conversation."
+    }
+  ],
+  "cases": [
+    {
+      "id": "m01-01",
+      "source_case": 1,
+      "cause": "never-asked",
+      "question": "Find Example Organization d21c02ee.",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "Example Organization d21c02ee"
+        }
+      },
+      "lane": "organizations",
+      "expected_refs": [
+        "P-0055"
+      ]
+    },
+    {
+      "id": "m01-02",
+      "source_case": 1,
+      "cause": "never-asked",
+      "question": "Who do we know at Example Organization d21c02ee?",
+      "request": {
+        "verb": "who-do-we-know",
+        "args": {
+          "target": "Example Organization d21c02ee",
+          "limit": 5
+        }
+      },
+      "lane": "resolved",
+      "expected_refs": [
+        "P-0055"
+      ]
+    },
+    {
+      "id": "m01-03",
+      "source_case": 1,
+      "cause": "never-asked",
+      "question": "Find Example Organization d21c02ee and catch me up.",
+      "request": {
+        "verb": "find-and-catch-up",
+        "args": {
+          "query": "Example Organization d21c02ee",
+          "limit": 5
+        }
+      },
+      "lane": "candidates",
+      "expected_refs": [
+        "P-0055"
+      ]
+    },
+    {
+      "id": "m02-01",
+      "source_case": 2,
+      "cause": "never-asked",
+      "question": "Which deal belongs to the doctor resolved from L-004, through client C-112?",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "{name}"
+        }
+      },
+      "lane": "deals_via_link",
+      "expected_refs": [
+        "deal:f705d193-1c43-45a4-a1ad-9a7a3bcf2c86"
+      ],
+      "name_from_ref": "L-004"
+    },
+    {
+      "id": "m02-02",
+      "source_case": 2,
+      "cause": "never-asked",
+      "question": "Find the active deal for the doctor identified by C-182, including their linked client record.",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "{name}"
+        }
+      },
+      "lane": "deals_via_link",
+      "expected_refs": [
+        "deal:8825a116-9bbf-4153-95b3-f5adf722f4d3"
+      ],
+      "name_from_ref": "C-182"
+    },
+    {
+      "id": "m02-03",
+      "source_case": 2,
+      "cause": "never-asked",
+      "question": "Does the doctor identified by C-166 have a deal filed under their practice?",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "{name}"
+        }
+      },
+      "lane": "deals_via_link",
+      "expected_refs": [
+        "deal:9bee85b9-d005-47ee-80a3-08fc44357ce2"
+      ],
+      "name_from_ref": "C-166"
+    },
+    {
+      "id": "m03-01",
+      "source_case": 3,
+      "cause": "never-asked",
+      "question": "Find the ruling on national accounts.",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "national account"
+        }
+      },
+      "lane": "parties",
+      "expected_refs": [
+        "decision:6052e3f6-fb8e-403a-a432-af6cd018a0f2"
+      ]
+    },
+    {
+      "id": "m03-02",
+      "source_case": 3,
+      "cause": "never-asked",
+      "question": "What have we ruled on national accounts?",
+      "request": {
+        "verb": "find-precedent",
+        "args": {
+          "query": "national account",
+          "limit": 5
+        }
+      },
+      "lane": "rulings",
+      "expected_refs": [
+        "decision:6052e3f6-fb8e-403a-a432-af6cd018a0f2"
+      ]
+    },
+    {
+      "id": "m03-03",
+      "source_case": 3,
+      "cause": "never-asked",
+      "question": "Are national accounts partner-owned portfolios?",
+      "request": {
+        "verb": "find-precedent",
+        "args": {
+          "query": "partner-owned portfolios",
+          "limit": 5
+        }
+      },
+      "lane": "rulings",
+      "expected_refs": [
+        "decision:6052e3f6-fb8e-403a-a432-af6cd018a0f2"
+      ]
+    },
+    {
+      "id": "m04-01",
+      "source_case": 4,
+      "cause": "never-asked",
+      "question": "Before drafting from older notes, must I check whether they are still current?",
+      "request": {
+        "verb": "rule-routing",
+        "args": {
+          "prompt": "Before drafting from older notes, must I check whether they are still current?"
+        }
+      },
+      "lane": "routed_rules",
+      "expected_refs": [
+        "rule:3fa17fa0"
+      ],
+      "measurement": "rule_delivery"
+    },
+    {
+      "id": "m04-02",
+      "source_case": 4,
+      "cause": "never-asked",
+      "question": "Run the git push command yourself instead of handing me a command to paste.",
+      "request": {
+        "verb": "rule-routing",
+        "args": {
+          "prompt": "Run the git push command yourself instead of handing me a command to paste.",
+          "tool_name": "Bash",
+          "tool_input": {
+            "command": "git push origin HEAD:refs/heads/example"
+          }
+        }
+      },
+      "lane": "routed_rules",
+      "expected_refs": [
+        "rule:e313a3ca"
+      ],
+      "measurement": "rule_delivery"
+    },
+    {
+      "id": "m04-03",
+      "source_case": 4,
+      "cause": "never-asked",
+      "question": "Ask me one question at a time in an interview box.",
+      "request": {
+        "verb": "rule-routing",
+        "args": {
+          "prompt": "Ask me one question at a time in an interview box."
+        }
+      },
+      "lane": "routed_rules",
+      "expected_refs": [
+        "rule:c864b8cb"
+      ],
+      "measurement": "rule_delivery"
+    },
+    {
+      "id": "m05-01",
+      "source_case": 5,
+      "cause": "never-asked/drift",
+      "question": "How many live Example Organization d21c02ee records remain after consolidation? Example Organization d21c02ee",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "Example Organization d21c02ee"
+        }
+      },
+      "lane": "organizations",
+      "expected_refs": [
+        "P-0055"
+      ],
+      "expected_live_rows": 1,
+      "forbidden_live_refs": [
+        "P-0099",
+        "P-0117",
+        "P-0118"
+      ]
+    },
+    {
+      "id": "m05-02",
+      "source_case": 5,
+      "cause": "never-asked/drift",
+      "question": "How many live Example Organization d21c02ee records remain after consolidation? Example Organization d21c02ee company",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "Example Organization d21c02ee company"
+        }
+      },
+      "lane": "organizations",
+      "expected_refs": [
+        "P-0055"
+      ],
+      "expected_live_rows": 1,
+      "forbidden_live_refs": [
+        "P-0099",
+        "P-0117",
+        "P-0118"
+      ]
+    },
+    {
+      "id": "m05-03",
+      "source_case": 5,
+      "cause": "never-asked/drift",
+      "question": "Find the surviving Schein organization rather than its retired aliases.",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "Schein"
+        }
+      },
+      "lane": "organizations",
+      "expected_refs": [
+        "P-0055"
+      ],
+      "expected_live_rows": 1,
+      "forbidden_live_refs": [
+        "P-0099",
+        "P-0117",
+        "P-0118"
+      ]
+    },
+    {
+      "id": "m06-01",
+      "source_case": 6,
+      "cause": "search-quality",
+      "question": "retrieval curation concepts phrases ranking",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "retrieval curation concepts phrases ranking",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:13470051-d572-48fb-aeac-1b5f818f283a"
+      ]
+    },
+    {
+      "id": "m06-02",
+      "source_case": 6,
+      "cause": "search-quality",
+      "question": "retrieval",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "retrieval",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:13470051-d572-48fb-aeac-1b5f818f283a"
+      ]
+    },
+    {
+      "id": "m06-03",
+      "source_case": 6,
+      "cause": "search-quality",
+      "question": "How does doctrine search recover a zero-hit retrieval query?",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "How does doctrine search recover a zero-hit retrieval query?",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:13470051-d572-48fb-aeac-1b5f818f283a"
+      ]
+    },
+    {
+      "id": "m07-01",
+      "source_case": 7,
+      "cause": "search-quality",
+      "question": "Where does the human application live?",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "Where does the human application live?",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:3bb51d3e-2661-4ea2-a585-053540545b5d"
+      ]
+    },
+    {
+      "id": "m07-02",
+      "source_case": 7,
+      "cause": "search-quality",
+      "question": "Which repository owns DoctorCRE application UI and app-only state?",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "Which repository owns DoctorCRE application UI and app-only state?",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:3bb51d3e-2661-4ea2-a585-053540545b5d"
+      ]
+    },
+    {
+      "id": "m07-03",
+      "source_case": 7,
+      "cause": "search-quality",
+      "question": "Where do we keep DoctorCRE app code separately from CARR runtime?",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "Where do we keep DoctorCRE app code separately from CARR runtime?",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:3bb51d3e-2661-4ea2-a585-053540545b5d"
+      ]
+    },
+    {
+      "id": "m08-01",
+      "source_case": 8,
+      "cause": "search-quality",
+      "question": "Doc name",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "Doc name",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:2034440f-3373-4f1c-9f31-852b91f679c3"
+      ]
+    },
+    {
+      "id": "m08-02",
+      "source_case": 8,
+      "cause": "search-quality",
+      "question": "Dr. CRE name",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "Dr. CRE name",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:2034440f-3373-4f1c-9f31-852b91f679c3"
+      ]
+    },
+    {
+      "id": "m08-03",
+      "source_case": 8,
+      "cause": "search-quality",
+      "question": "What is Dr. CRE called, and is Doc only a nickname?",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "What is Dr. CRE called, and is Doc only a nickname?",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "section:2034440f-3373-4f1c-9f31-852b91f679c3"
+      ]
+    },
+    {
+      "id": "m09-01",
+      "source_case": 9,
+      "cause": "not-linked",
+      "question": "Find the later retirement ruling before following the dated memo: two-writer-endgame session marker",
+      "request": {
+        "verb": "find-precedent",
+        "args": {
+          "query": "two-writer-endgame session marker",
+          "limit": 5
+        }
+      },
+      "lane": "rulings",
+      "expected_refs": [
+        "decision:bd8ce310-55d5-5d85-b017-cfc36079c568"
+      ]
+    },
+    {
+      "id": "m09-02",
+      "source_case": 9,
+      "cause": "not-linked",
+      "question": "Find the later retirement ruling before following the dated memo: claim-session",
+      "request": {
+        "verb": "find-precedent",
+        "args": {
+          "query": "claim-session",
+          "limit": 5
+        }
+      },
+      "lane": "rulings",
+      "expected_refs": [
+        "decision:bd8ce310-55d5-5d85-b017-cfc36079c568"
+      ]
+    },
+    {
+      "id": "m09-03",
+      "source_case": 9,
+      "cause": "not-linked",
+      "question": "Find the later retirement ruling before following the dated memo: session marker retires",
+      "request": {
+        "verb": "find-precedent",
+        "args": {
+          "query": "session marker retires",
+          "limit": 5
+        }
+      },
+      "lane": "rulings",
+      "expected_refs": [
+        "decision:bd8ce310-55d5-5d85-b017-cfc36079c568"
+      ]
+    },
+    {
+      "id": "m10-01",
+      "source_case": 10,
+      "cause": "not-captured",
+      "question": "Dr. CRE orb conversation",
+      "request": {
+        "verb": "find",
+        "args": {
+          "query": "Dr. CRE orb conversation"
+        }
+      },
+      "lane": "parties",
+      "expected_refs": [
+        "loop:c5da1212-a037-4452-acbd-df5c6b8d9f30"
+      ],
+      "target_kind": "gap_locator",
+      "original_capture": "not_available"
+    },
+    {
+      "id": "m10-02",
+      "source_case": 10,
+      "cause": "not-captured",
+      "question": "Doc living orb origination",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "Doc living orb origination",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "loop:c5da1212-a037-4452-acbd-df5c6b8d9f30"
+      ],
+      "target_kind": "gap_locator",
+      "original_capture": "not_available"
+    },
+    {
+      "id": "m10-03",
+      "source_case": 10,
+      "cause": "not-captured",
+      "question": "original Dr. CRE orb conversation capture gap",
+      "request": {
+        "verb": "search-doctrine",
+        "args": {
+          "q": "original Dr. CRE orb conversation capture gap",
+          "limit": 20
+        }
+      },
+      "lane": "hits",
+      "expected_refs": [
+        "loop:c5da1212-a037-4452-acbd-df5c6b8d9f30"
+      ],
+      "target_kind": "gap_locator",
+      "original_capture": "not_available"
+    }
+  ]
+}

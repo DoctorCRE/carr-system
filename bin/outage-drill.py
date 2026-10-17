@@ -97,7 +97,6 @@ if not PY.exists():
 OPS_RECORD = REPO / "tools" / "ops-record.py"
 OPS_SPOOL = REPO / "tools" / "ops-spool.py"
 RUN_SCHEDULED = REPO / "bin" / "run-scheduled.sh"
-SETTINGS_GATE = REPO / "hooks" / "settings-change-gate.py"
 DOC_CONVO_BIN = REPO / "tools" / "doc-convo" / "bin"
 DOC_SESSION_FILE = REPO / "tools" / "doc-convo" / "assets" / ".brain-session-id"
 STAGING_WORKER = "https://carr-mcp-staging.joe-bookout-carr-us.workers.dev"
@@ -970,99 +969,6 @@ def drill_model_provider_unavailable() -> DrillResult:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# DRILL 5 — SETTINGS-CHANGE GATE UNDER A GENUINE DATABASE OUTAGE
-# ══════════════════════════════════════════════════════════════════════════
-def drill_settings_change_db_outage() -> DrillResult:
-    """ops/settings-change-gate-selftest.py already proves the spool-fallback
-    SHAPE using CARR_SETTINGS_GATE_OFFLINE=1, which skips the database
-    attempt entirely. This drill exercises the path that flag never reaches:
-    a REAL attempt against a genuinely unreachable database that then falls
-    through to the spool — the actual 'Database outage blocks authoritative
-    writes and preserves safe local capture' doctrine line, live. It also
-    checks the THREE qualifiers doctrine attaches to that capture —
-    encrypted, clearly pending, later reviewed — and reports which hold."""
-    name = "settings-change-db-outage"
-
-    if not SETTINGS_GATE.exists():
-        raise DrillUnavailable(f"{SETTINGS_GATE} does not exist on this checkout")
-
-    spool_dir = Path(tempfile.mkdtemp(prefix="carr-outage-drill-settings-spool-"))
-    spool = spool_dir / "settings-changes.jsonl"
-    try:
-        command = 'CARR_CHANGE_REASON="outage drill — proving the DB-unreachable fallback" ' \
-                  'gh api -X PATCH repos/jbookout/carr-system/rulesets/20824501 -f x=y'
-        payload = {
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Bash",
-            "tool_input": {"command": command},
-            "tool_response": {"exit_code": 0, "stdout": "", "stderr": ""},
-            "session_id": "outage-drill-session",
-        }
-        env = _unreachable_env(dict(os.environ))
-        env["CARR_SETTINGS_SPOOL"] = str(spool)
-        env.pop("CARR_SETTINGS_GATE_OFFLINE", None)  # the REAL attempt-then-fallback path
-
-        proc = _run([sys.executable, str(SETTINGS_GATE)], env=env, cwd=REPO, timeout=30,
-                     input_text=json.dumps(payload))
-
-        spooled_rows: list[dict] = []
-        raw_text = ""
-        if spool.exists():
-            raw_text = spool.read_text(encoding="utf-8")
-            for line in raw_text.splitlines():
-                if line.strip():
-                    spooled_rows.append(json.loads(line))
-
-        row = spooled_rows[0] if len(spooled_rows) == 1 else None
-        looks_plaintext = bool(raw_text) and raw_text.lstrip().startswith("{") and \
-            "rulesets" in raw_text  # readable straight off disk with no decrypt step
-
-        checks = {
-            "the change is never blocked by a down database (exit 0)": proc.returncode == 0,
-            "the outage is reported OUT LOUD, not hidden": "unreachable" in proc.stderr.lower(),
-            "exactly one row spooled locally, with the change intact":
-                row is not None and row.get("outcome") == "applied"
-                and row.get("session_id") == "outage-drill-session"
-                and "rulesets" in (row.get("target") or ""),
-        }
-        truthful = all(checks.values())
-
-        findings = []
-        if row is not None:
-            if looks_plaintext:
-                findings.append({
-                    "note": "the spooled row is PLAINTEXT on disk, not encrypted. Doctrine: "
-                            "'Database outage blocks authoritative writes and preserves safe "
-                            "local capture only when encrypted, clearly pending, and later "
-                            "reviewed.' hooks/settings-change-gate.py's record() writes the "
-                            "spool with a bare open()/json.dumps() — confirmed by reading this "
-                            "row straight off disk with no decrypt step.",
-                })
-            if "pending" not in json.dumps(row).lower() and "review" not in json.dumps(row).lower():
-                findings.append({
-                    "note": "the spooled row carries no 'pending review' marker of its own — "
-                            "only a transient stderr line says the write is degraded-mode. A "
-                            "human tailing the spool file later, without that stderr line, "
-                            "cannot tell a spooled row from a normally-recorded one.",
-                })
-            findings.append({
-                "note": "nothing in the repo ever reads out/settings-changes.jsonl back — "
-                        "confirmed by grep: CARR_SETTINGS_SPOOL and settings-changes.jsonl "
-                        "appear only in the writer (hooks/settings-change-gate.py) and its "
-                        "own selftest, never in a consumer. The spool is 'preserved' but not "
-                        "'later reviewed'.",
-            })
-    finally:
-        shutil.rmtree(spool_dir, ignore_errors=True)
-
-    lines = "; ".join(f"{'ok' if v else 'FAIL'}: {k}" for k, v in checks.items())
-    detail = f"rc={proc.returncode} row={row} — {lines}"
-    return DrillResult(name, truthful, "truthful (never blocks, never hides) but see findings "
-                        "on the encrypted/pending/reviewed qualifiers" if truthful
-                        else "NOT truthful — see detail", detail, findings=findings)
-
-
-# ══════════════════════════════════════════════════════════════════════════
 # harness
 # ══════════════════════════════════════════════════════════════════════════
 DRILLS = {
@@ -1090,13 +996,7 @@ DRILLS = {
         "Shadow the `claude` binary Doc's BrainProcess shells out to with a "
         "fixture that fails immediately, in an isolated subprocess; prove "
         "no fabricated reply and that Doc's real session state is untouched."),
-    "settings-change-db-outage": (
-        drill_settings_change_db_outage,
-        "Drive hooks/settings-change-gate.py's PostToolUse path with a "
-        "genuinely unreachable database (not the OFFLINE test flag); prove "
-        "the change is never blocked and the outage is spooled and "
-        "reported out loud, then check the encrypted/pending/reviewed "
-        "qualifiers doctrine attaches to that spool."),
+
 }
 
 

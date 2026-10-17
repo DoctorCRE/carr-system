@@ -1,13 +1,3 @@
-// action-class-successor-registry-mutants.test.mjs — planted-bug mutants for
-// the two JS-side guards action-class-successor-registry.test.mjs's own
-// fake-client assertions cannot, by construction, prove are load-bearing:
-// that the duplicate-registration refusal actually stops a second insert, and
-// that the action_class format check actually runs before any write. Same
-// technique as amend-closed-loop-mutants.test.mjs: mutate a COPY of the
-// source, load the copy, and assert the same probe that passes on the real
-// source FAILS against the mutant.
-//
-// Run with: node --test mcp-server/test/action-class-successor-registry-mutants.test.mjs
 
 import test from "node:test";
 import assert from "node:assert/strict";

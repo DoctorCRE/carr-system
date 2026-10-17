@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Offline lifecycle fixtures. No launchd command or model request can escape these tests."""
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import plistlib
@@ -46,6 +48,29 @@ class LifecycleTests(unittest.TestCase):
     def test_warm_ensure_does_not_launch(self):
         launch = Mock(side_effect=AssertionError("warm server must not be launched"))
         self.assertTrue(flashlib.ensure(ready=lambda **_: True, launch=launch))
+
+    def test_off_switch_path_defaults_to_config_and_uses_state_dir_override(self):
+        self.assertEqual(flashlib.off_switch_path(), self.directory / "flash.off")
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(flashlib.Path, "home", return_value=Path("/Users/tester")):
+            self.assertEqual(flashlib.off_switch_path(), Path("/Users/tester/.config/carr/flash.off"))
+
+    def test_off_switch_refuses_lifecycle_entry_points_with_a_clear_reason(self):
+        (self.directory / "flash.off").touch()
+        launch = Mock(side_effect=AssertionError("switched-off Flash must not launch"))
+        error = io.StringIO()
+        with contextlib.redirect_stderr(error):
+            self.assertFalse(flashlib.ensure(ready=lambda **_: True, launch=launch))
+        self.assertIn("flash is switched off", error.getvalue())
+        with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
+            flashlib.ensure_server()
+        with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
+            flashlib.ensure_desk(lambda: True, launch=launch)
+        for scope in (flashlib.activity_scope, flashlib.request_scope):
+            with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
+                with scope():
+                    pass
+        launch.assert_not_called()
 
     def test_cold_ensure_bootstraps_once(self):
         ready = Mock(side_effect=[False, False, False, True])
@@ -100,6 +125,29 @@ class LifecycleTests(unittest.TestCase):
         for text in ("owner Platform Engineer", "bin/flash-idle-stop", "verify launchctl", "auto-clear", "flash_residency"):
             self.assertIn(text, row)
         self.assertTrue(flashlib.health_row(now=1802, started=lambda: None).startswith("OK"))
+
+    def test_health_accepts_the_named_off_switch_without_reading_process_state(self):
+        (self.directory / "flash.off").touch()
+        started = Mock(side_effect=AssertionError("switched-off health must not inspect launchd"))
+        row = flashlib.health_row(started=started)
+        self.assertTrue(row.startswith("OK"), row)
+        self.assertIn("switched off (by choice)", row)
+        self.assertIn("flash.off", row)
+        started.assert_not_called()
+
+    def test_flash_script_logs_the_switched_off_handoff_without_reading_inputs(self):
+        (self.directory / "flash.off").touch()
+        missing = self.directory / "must-not-be-read"
+        script = load(HERE / "flash-script.py", "flash_script_off_test")
+        script.RUNS_LOG = str(self.directory / "script-runs.jsonl")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = script.main(["fixture", str(missing), "--json"])
+        row = json.loads(Path(script.RUNS_LOG).read_text())
+        self.assertEqual(result, 4)
+        self.assertEqual(row["handoff"], "flash is switched off")
+        self.assertEqual(row["turns"], 0)
+        self.assertEqual(json.loads(output.getvalue())["detail"], "flash is switched off")
 
     def test_log_tracks_detached_desk_inference_without_counting_shutdown_or_probes(self):
         now = datetime(2026, 10, 5, 23, 0, 0).timestamp()

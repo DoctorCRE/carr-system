@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
@@ -13,14 +15,16 @@ const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" +
 function expression(value, github, success = true, inputs = { shard_trial: false }) {
   if (value === undefined) return success;
   const raw = String(value).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  assert.match(raw, /^(?:github\.(?:workflow|ref|run_id|event_name|event\.action|event\.pull_request\.number)|inputs\.shard_trial|always\(\)|'[^']*'|[\s()=!&|]|true|false)+$/, `unsupported expression: ${raw}`);
-  const result = runInNewContext(raw, { github, inputs, always: () => true }, { timeout: 1000 });
+  assert.match(raw, /^(?:github\.(?:workflow|ref|run_id|event_name|event\.action|event\.pull_request\.number|event\.pull_request\.base\.ref|event\.changes\.base\.ref)|inputs\.shard_trial|always\(\)|'[^']*'|[\s()=!&|]|true|false)+$/, `unsupported expression: ${raw}`);
+  const safe = raw.replace(/github(?:\.[a-zA-Z_]+)+/g, path =>
+    JSON.stringify(path.split(".").slice(1).reduce((value, key) => value?.[key], github) ?? ""));
+  const result = runInNewContext(safe, { inputs, always: () => true }, { timeout: 1000 });
   // Actions implicitly adds success() unless a status function is present.
   return raw.includes("always()") || success ? result : false;
 }
 function context(event_name = "pull_request", action = "synchronize", number = 9, run_id = 1) {
   return { event_name, run_id, ref: event_name === "pull_request" ? `refs/pull/${number}/merge` : "refs/heads/main",
-    event: { action, pull_request: event_name === "pull_request" ? { number } : {} } };
+    event: { action, changes: {}, pull_request: event_name === "pull_request" ? { number, base: { ref: "main" } } : {} } };
 }
 // Subscription only: DB path filters are intentionally outside this test's scope.
 function subscribed(workflow, event) {
@@ -87,25 +91,39 @@ test("DB shard aggregate is default-off, collects failed-trial diagnostics, and 
   assert.throws(() => expression("inputs.unknown", context()), /unsupported expression/);
 });
 
-test("DB acceptance ignores metadata edits; CI retains its existing metadata gate", () => {
-  assert.equal(policy(read("db-acceptance.yml"), context("pull_request", "edited")).triggers, false);
-  const ci = read("ci.yml"), edited = policy(ci, context("pull_request", "edited"));
-  assert.equal(edited.triggers, true);
-  assert.deepEqual(edited.runnable, edited.jobs);
-  assert.ok(ci.jobs.classes.strategy.matrix.classes.includes("gates"));
+test("metadata edits start neither workflow, so no skipped suite replaces the required verdict", () => {
+  for (const file of files) {
+    const edited = policy(read(file), context("pull_request", "edited"));
+    assert.equal(edited.triggers, false, `${file}: an edit must start no workflow`);
+    assert.deepEqual(edited.runnable, []);
+  }
+  assert.ok(read("ci.yml").jobs.classes.strategy.matrix.classes.includes("gates"));
 });
 
 test("strict aggregate runs after failed classes and accepts only success", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
-  assert.equal(gate.name, "ops/ci.sh --strict");
+  assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
   assert.equal(gate.needs, "classes");
   assert.ok(policy(ci, context(), false).runnable.includes("checks"), "always() must override implicit success()");
-  for (const result of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
-    const output = spawnSync("bash", ["-e", "-c", gate.steps[0].run], {
-      env: { ...process.env, CLASSES_RESULT: result }, encoding: "utf8", timeout: 5000 });
-    assert.ifError(output.error);
-    assert.equal(output.status === 0, result === "success");
-  }
+  const step = gate.steps.find(step => step.name === "Fail unless every class group succeeded");
+  assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
+  const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
+  try {
+    const jobs = ci.jobs.classes.strategy.matrix.classes.map(group => ({
+      name: "ops/ci.sh --strict --only " + group, status: "completed", conclusion: "success" }));
+    const gh = join(fixture, "gh");
+    writeFileSync(gh, "#!/usr/bin/env node\nconsole.log(" + JSON.stringify(JSON.stringify([{ jobs }])) + ");\n");
+    chmodSync(gh, 0o755);
+    for (const result of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+      const output = spawnSync("bash", ["-e", "-c", step.run], {
+        cwd: new URL("../../", import.meta.url),
+        env: { PATH: fixture + ":" + process.env.PATH, CLASSES_RESULT: result,
+          GITHUB_REPOSITORY: "jbookout/carr-system", GITHUB_RUN_ID: "1", GITHUB_STEP_SUMMARY: join(fixture,"summary") },
+        encoding: "utf8", timeout: 5000 });
+      assert.ifError(output.error);
+      assert.equal(output.status === 0, result === "success", output.stderr);
+    }
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test("running Worker canary remains independent from subscribed validation events", () => {

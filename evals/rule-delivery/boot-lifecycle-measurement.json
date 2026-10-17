@@ -1,0 +1,122 @@
+{
+  "arms": {
+    "baseline": {
+      "approx_tokens": 75947,
+      "digest": "sha256:76e4f99f2a0f2e00302ca955a774c0337eb58a3dcea0727187908fd56615954d",
+      "discoverable_hits": 717,
+      "full_text_availability": 1.0,
+      "full_text_hits": 717,
+      "full_text_rules": 197,
+      "in_scope_rules": 197,
+      "lifecycles": [
+        {
+          "allowed_after": true,
+          "delivered_ids_sha256": "ad26a7dac5c96c140794329ccb80677607a7f540d3d73ba080dae2440ff88f5d",
+          "delivered_rules": 197,
+          "digest_only_held": true,
+          "held_before": true,
+          "incomplete_held": true,
+          "source": "startup"
+        },
+        {
+          "allowed_after": true,
+          "delivered_ids_sha256": "ad26a7dac5c96c140794329ccb80677607a7f540d3d73ba080dae2440ff88f5d",
+          "delivered_rules": 197,
+          "digest_only_held": true,
+          "held_before": true,
+          "incomplete_held": true,
+          "source": "compact"
+        }
+      ],
+      "max_json_page_chars": 20515,
+      "missing_ids": [],
+      "pages": 15,
+      "required_occurrences": 717,
+      "total_chars": 273409
+    },
+    "candidate": {
+      "approx_tokens": 36629,
+      "digest": "sha256:f9f0250412c1ea61ebac56b2170b855673f9340c7121368dcdfe82f63065dc8d",
+      "discoverable_hits": 266,
+      "full_text_availability": 0.6290097629009763,
+      "full_text_hits": 451,
+      "full_text_rules": 88,
+      "in_scope_rules": 197,
+      "lifecycles": [
+        {
+          "allowed_after": true,
+          "delivered_ids_sha256": "95c301f964c5841b227dff4fdab928f9bb3fad7c492db0b4fdaadf3d7dd5768f",
+          "delivered_rules": 88,
+          "digest_only_held": true,
+          "held_before": true,
+          "incomplete_held": true,
+          "source": "startup"
+        },
+        {
+          "allowed_after": true,
+          "delivered_ids_sha256": "95c301f964c5841b227dff4fdab928f9bb3fad7c492db0b4fdaadf3d7dd5768f",
+          "delivered_rules": 88,
+          "digest_only_held": true,
+          "held_before": true,
+          "incomplete_held": true,
+          "source": "compact"
+        }
+      ],
+      "max_json_page_chars": 25578,
+      "missing_ids": [
+        "0f38532e",
+        "1d50a3bb",
+        "2271e684",
+        "388cc81e",
+        "3a9dbafd",
+        "43e2ef76",
+        "4a53ff82",
+        "4c21d86b",
+        "5409731b",
+        "5be2f462",
+        "647f843d",
+        "6a4e6283",
+        "767f9b41",
+        "847f9995",
+        "8c1e6057",
+        "97326357",
+        "a6e6ab4e",
+        "a9ecd5b4",
+        "ab814a26",
+        "b42e217e",
+        "bc9188b4",
+        "c53beeaa",
+        "ca841807",
+        "df55c398",
+        "e313a3ca",
+        "e8868cbe",
+        "eaa31ac5",
+        "f04a05aa",
+        "f47a8fe9",
+        "f92dfab2",
+        "fa217e48",
+        "fb2b263d"
+      ],
+      "pages": 6,
+      "required_occurrences": 717,
+      "total_chars": 131863
+    }
+  },
+  "baseline_ref": "2106816ed392fe7bcac30d171d8c115cba10735f",
+  "corpus_rules": 197,
+  "corpus_sha256": "c21d05d993f6b3aa8265653f4f2e62f3a242803b3302059711cdc6a317cbf491",
+  "frozen_cases_sha256": "20d0a652e02559241e25a8b40ebb2f700a939c7ef7dc38114d5d7978a559e0f7",
+  "model": "deterministic-no-model",
+  "schema": "rule-boot-lifecycle-measurement/v1",
+  "source_sha256": {
+    "evals/rule-delivery/boot_lifecycle.py": "79373e676215175e3ce87f3d339335fb46a81b2c9457b14a7f6864e5f0b375d8",
+    "hooks/rule-boot-gate.py": "84d32a38ad62e4e24185267b5de2ef9a4f5da34b661cd89bdc5aa2e19ef603b3",
+    "lib/rule_boot_gate.py": "2ba106fb66108075a063b08ce08fc3f4c2a6512da8e9370f7919720f465f7e0b",
+    "mcp-server/src/rule-boot-classes.js": "356e5844cb4ece79eed0376dc5e288e4087808b9e3b713b0651f9786f07b8715",
+    "mcp-server/src/rule-boot.js": "6012d7bbfead3f584d060b384983d417908a60302b6b7c6b75fae435e6950ca1",
+    "ops/config/rule-classes.v1.json": "c419bb0cfda3fd1a614eab166fec1744c0234b92dd2d912c8caf7285332ed384"
+  },
+  "sponsor": "joe",
+  "test_cases": 72,
+  "token_measure": "rendered UTF-16 chars / 3.6; not deployed consumption"
+}

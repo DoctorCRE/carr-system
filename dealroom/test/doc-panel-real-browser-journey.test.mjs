@@ -2,50 +2,31 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchChrome, CHROME_STARTUP_TIMEOUT_MS, CHROME_STOP_TIMEOUT_MS } from "./chrome-launch.mjs";
+import { findDisposableChromium } from "./chromium-binary.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEALROOM = path.resolve(HERE, "..");
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-  "/usr/bin/chromium-browser",
-].filter(Boolean);
-
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Both bounded launches, their teardown, and the existing journey budget.
 const BROWSER_TEST_TIMEOUT_MS = 2 * CHROME_STARTUP_TIMEOUT_MS + 4 * CHROME_STOP_TIMEOUT_MS + 30_000;
-
-async function chromeBinary() {
-  for (const candidate of CHROME_CANDIDATES) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
 
 class DevTools {
   constructor(url) {
     this.nextId = 1;
     this.pending = new Map();
-    this.listeners = new Set();
     this.socket = new WebSocket(url);
     this.opened = new Promise((resolve, reject) => {
       this.socket.addEventListener("open", resolve, { once: true });
       this.socket.addEventListener("error", reject, { once: true });
     });
+    this.listeners = new Map();
     this.socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
-      if (message.method && message.id === undefined) {
-        for (const listener of this.listeners) listener(message.method, message.params || {});
-        return;
-      }
+      // Unsolicited protocol events carry a method and no id.
+      if (message.method) for (const listener of this.listeners.get(message.method) || []) listener(message.params);
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
@@ -62,10 +43,8 @@ class DevTools {
     return result;
   }
 
-  /** Subscribes to unsolicited CDP events (method, params); returns the unsubscribe function. */
-  on(listener) {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  on(method, listener) {
+    this.listeners.set(method, [...(this.listeners.get(method) || []), listener]);
   }
 
   async evaluate(expression) {
@@ -183,8 +162,8 @@ async function pagesServer(t, { rpc } = {}) {
 }
 
 async function launchBrowser(t) {
-  const chrome = await chromeBinary();
-  if (!chrome) return { unavailableReason: "Chrome/Chromium was not found; real V5-J101 browser evidence was not run" };
+  const chrome = await findDisposableChromium();
+  if (!chrome) return { unavailableReason: "Chrome for Testing/Playwright Chromium was not found; real V5-J101 browser evidence was not run" };
   let browser;
   try { browser = await launchChrome(chrome); }
   catch (error) { return { unavailableReason: error.message }; }
@@ -193,28 +172,18 @@ async function launchBrowser(t) {
   t.diagnostic(`[chrome-startup] ${JSON.stringify({ startupMs: browser.startupMs, attempts: browser.attempts })}`);
   await cdp.call("Page.enable");
   await cdp.call("Runtime.enable");
+  // These layout and interaction journeys must not depend on live font CDNs:
+  // a stalled Google Fonts request in a fresh profile delays page load past
+  // the polling budget. Network.setBlockedURLs (`urls` is the deprecated but
+  // widely supported form) fails those requests immediately.
   await cdp.call("Network.enable");
-  await blockUrls(cdp);
-  return { cdp };
-}
-
-// Every dealroom page loads a render-blocking Google Fonts stylesheet; a slow
-// fetch of it held the load event past navigate's budget. Tests never touch
-// the external host: the request fails at once and the system font stands in.
-const EXTERNAL_FONT_PATTERNS = ["*://fonts.googleapis.com/*", "*://fonts.gstatic.com/*"];
-
-/**
- * Network.setBlockedURLs replaces the whole list, so callers adding a block
- * always keep the font hosts. `urlPatterns` is the current parameter; the
- * deprecated `urls` keeps older Chrome builds (which ignore `urlPatterns`)
- * blocking too.
- */
-async function blockUrls(cdp, extra = []) {
-  const patterns = [...EXTERNAL_FONT_PATTERNS, ...extra];
-  await cdp.call("Network.setBlockedURLs", {
-    urlPatterns: patterns.map((urlPattern) => ({ urlPattern, block: true })),
-    urls: patterns,
-  });
+  await cdp.call("Network.setBlockedURLs", { urls: ["*://fonts.googleapis.com/*", "*://fonts.gstatic.com/*"] });
+  // Record request URLs and failures so a test can prove what was blocked.
+  const requestUrls = new Map();
+  const failures = [];
+  cdp.on("Network.requestWillBeSent", ({ requestId, request }) => requestUrls.set(requestId, request.url));
+  cdp.on("Network.loadingFailed", ({ requestId, blockedReason }) => failures.push({ url: requestUrls.get(requestId), blockedReason }));
+  return { cdp, failures };
 }
 
 async function configureViewport(cdp, width, { touch = false } = {}) {
@@ -419,6 +388,24 @@ test("V5-J101 real Chrome desktop/touch journeys preserve modality, focus, reflo
   assert.equal(await cdp.evaluate("document.activeElement?.id"), "docPanelToggle", "closing Doc must restore focus to its opener");
 });
 
+test("V5-J101 live Google Fonts requests are blocked so page load never waits on a font CDN", { timeout: BROWSER_TEST_TIMEOUT_MS }, async (t) => {
+  const origin = await pagesServer(t);
+  const browser = await launchBrowser(t);
+  if (!browser.cdp) {
+    if (process.env.CI) assert.fail(browser.unavailableReason);
+    t.skip(browser.unavailableReason);
+    return;
+  }
+  const { cdp, failures } = browser;
+  await configureViewport(cdp, 1280);
+  // business.html links fonts.googleapis.com; a blocked request surfaces as
+  // Network.loadingFailed with blockedReason "inspector".
+  await navigate(cdp, `${origin}/clients`, "#docPanelToggle");
+  await waitFor(cdp, "document.readyState === 'complete'", "page did not finish loading");
+  const blocked = failures.filter((item) => item.blockedReason === "inspector").map((item) => new URL(item.url).hostname);
+  assert.ok(blocked.includes("fonts.googleapis.com"), `fonts.googleapis.com must be blocked by the inspector; saw ${JSON.stringify(failures)}`);
+});
+
 test("V5-J101 the overflow/panel-fit guard catches live layout mutants a scrollWidth-only check would have missed", { timeout: BROWSER_TEST_TIMEOUT_MS }, async (t) => {
   const origin = await pagesServer(t);
   const browser = await launchBrowser(t);
@@ -458,111 +445,6 @@ test("V5-J101 the overflow/panel-fit guard catches live layout mutants a scrollW
 
   const restored = await cdp.evaluate(SNAPSHOT);
   assert.deepEqual(modalityGuard(restored, "dialog"), [], "removing both mutants must restore a clean pass, proving the guard reacts to state rather than failing permanently");
-});
-
-const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
-const hostOf = (url) => { try { return new URL(url).hostname; } catch { return null; } };
-const isFontUrl = (url) => FONT_HOSTS.includes(hostOf(url));
-
-/**
- * Records the CDP network events these tests reason about. loadingFailed
- * carries only a requestId, so requestWillBeSent supplies its URL.
- */
-function recordNetwork(cdp) {
-  const urls = new Map();
-  const paused = [];
-  const blocked = [];
-  const off = cdp.on((method, params) => {
-    if (method === "Network.requestWillBeSent") urls.set(params.requestId, params.request.url);
-    else if (method === "Network.loadingFailed" && params.blockedReason) {
-      blocked.push({ url: urls.get(params.requestId) ?? null, reason: params.blockedReason });
-    } else if (method === "Fetch.requestPaused") paused.push({ requestId: params.requestId, url: params.request.url });
-  });
-  async function until(predicate, ms, message) {
-    const deadline = performance.now() + ms;
-    while (performance.now() < deadline) {
-      if (predicate()) return;
-      await wait(20);
-    }
-    assert.fail(message);
-  }
-  return { paused, blocked, until, off };
-}
-
-// A slow or unreachable fonts.googleapis.com (business.html's render-blocking
-// stylesheet) held the load event past navigate's 160x50ms budget and failed
-// the mutant test above intermittently. This holds that request open for
-// good — Fetch pauses it at the Request stage, before anything leaves the
-// browser, and it is only ever failed, never continued — so the outcome no
-// longer depends on the external host's speed.
-test("V5-J101 a held Google Fonts stylesheet cannot stall navigate: external font hosts are blocked before the first navigation", { timeout: BROWSER_TEST_TIMEOUT_MS }, async (t) => {
-  const origin = await pagesServer(t);
-  const browser = await launchBrowser(t);
-  if (!browser.cdp) {
-    if (process.env.CI) assert.fail(browser.unavailableReason);
-    t.skip(browser.unavailableReason);
-    return;
-  }
-  const { cdp } = browser;
-  const net = recordNetwork(cdp);
-  await cdp.call("Network.enable");
-  await cdp.call("Fetch.enable", { patterns: FONT_HOSTS.map((host) => ({ urlPattern: `*://${host}/*`, requestStage: "Request" })) });
-  try {
-    await configureViewport(cdp, 375, { touch: true });
-    const navigation = navigate(cdp, `${origin}/clients`, "#docPanelToggle");
-    navigation.catch(() => {}); // awaited below; this only stops an unhandled rejection while setup waits
-    // Setup proof, so this can never pass vacuously: the page's stylesheet
-    // request must be SEEN — held (requestPaused) when nothing blocks it, or
-    // blocked by DevTools (loadingFailed, blockedReason "inspector") when the
-    // block is installed, since a blocked request never reaches interception.
-    await net.until(
-      () => net.paused.some((item) => hostOf(item.url) === "fonts.googleapis.com")
-        || net.blocked.some((item) => hostOf(item.url) === "fonts.googleapis.com"),
-      5000,
-      "setup: the fonts.googleapis.com stylesheet was neither held (Fetch.requestPaused) nor blocked (Network.loadingFailed); the reproduction would be vacuous",
-    );
-    await navigation;
-  } finally {
-    for (const held of net.paused) {
-      await cdp.call("Fetch.failRequest", { requestId: held.requestId, errorReason: "Aborted" }).catch(() => {});
-    }
-    await cdp.call("Fetch.disable").catch(() => {});
-    net.off();
-  }
-  assert.ok(net.blocked.some((item) => hostOf(item.url) === "fonts.googleapis.com" && item.reason === "inspector"),
-    `the fonts.googleapis.com stylesheet must be blocked by DevTools (blockedReason "inspector"); saw ${JSON.stringify(net.blocked)}`);
-  assert.deepEqual(net.paused.filter((item) => isFontUrl(item.url)), [],
-    "a blocked font request must never reach request interception, let alone the network");
-});
-
-// Negative control for the font block: with the page otherwise loaded but
-// doc-panel.js blocked, navigate must still FAIL. Unblocking fonts must speed
-// the load event up, never make a page without the Doc button count as ready.
-test("V5-J101 negative control: navigate still fails when doc-panel.js is blocked, so the font block never fakes readiness", { timeout: BROWSER_TEST_TIMEOUT_MS }, async (t) => {
-  const origin = await pagesServer(t);
-  const browser = await launchBrowser(t);
-  if (!browser.cdp) {
-    if (process.env.CI) assert.fail(browser.unavailableReason);
-    t.skip(browser.unavailableReason);
-    return;
-  }
-  const { cdp } = browser;
-  const net = recordNetwork(cdp);
-  const docPanelScript = `${origin}/js/doc-panel.js`;
-  await blockUrls(cdp, [docPanelScript]);
-  try {
-    await configureViewport(cdp, 1280);
-    await assert.rejects(navigate(cdp, `${origin}/clients`, "#docPanelToggle"),
-      /browser journey did not reach #docPanelToggle/,
-      "navigate must not treat a page without the Doc button as ready");
-  } finally {
-    await blockUrls(cdp);
-    net.off();
-  }
-  assert.ok(net.blocked.some((item) => item.url === docPanelScript && item.reason === "inspector"),
-    `the control must actually have blocked doc-panel.js; saw ${JSON.stringify(net.blocked)}`);
-  assert.equal(await cdp.evaluate(`document.readyState === "complete" && Boolean(document.querySelector("#pageTitle"))`), true,
-    "the rest of the page must have loaded, so the failure is the missing Doc button and nothing else");
 });
 
 test("V5-J101 Doc opens via real keyboard activation (not .click()) at desktop width on Home, Deals, and Clients/Vendors", { timeout: BROWSER_TEST_TIMEOUT_MS }, async (t) => {

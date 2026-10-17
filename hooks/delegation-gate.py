@@ -33,7 +33,7 @@ AT STOP, this hook does the other half of the redesign: it reads back this
 session's accumulated telemetry bucket, appends EXACTLY ONE summary row to
 out/delegation-gate-ledger.jsonl (never one row per call -- ops/delegation-
 telemetry-report.py is the queryable per-session view over that ledger), and
-speaks an ANNOUNCE-level message (hooks/stop_latch.announce -- the same
+speaks an ANNOUNCE-level message (lib.hook_runtime.announce -- the same
 non-reopening register five other Stop gates were demoted onto on 2026-08-23)
 only when the session materially under-delegated: DELEGATION_GATE_MATERIAL_
 THRESHOLD (default 3) or more moments in the session where the old rule's
@@ -67,8 +67,8 @@ import tempfile
 # observes: its latch and telemetry need nothing but repository files and a
 # writable out/ beside them, and every path already fails open.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from stop_latch import announce  # noqa: E402
+sys.path.insert(0, REPO)
+from lib.hook_runtime import announce  # noqa: E402
 
 VAULT_MARKERS = ("/CARR AI", "/My Drive/CARR AI")
 STATE = os.environ.get(

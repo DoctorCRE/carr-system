@@ -1,6 +1,6 @@
 {
-  "exported_at": "2026-09-23T12:44:33Z",
-  "rule_count": 209,
+  "exported_at": "2026-10-13T22:31:01Z",
+  "rule_count": 222,
   "rules": {
     "015183f5": {
       "enforcement_class": "machine_enforceable",
@@ -12,6 +12,14 @@
     },
     "018ce972": {
       "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "07dde434": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
+    "08c4eda2": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "0c1bac27": {
@@ -64,6 +72,10 @@
     },
     "19304882": {
       "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "19ebbeb3": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "1b8e7f43": {
@@ -230,6 +242,10 @@
       "enforcement_class": "judgment_advisory",
       "state": "admitted"
     },
+    "486584d6": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
     "49533583": {
       "enforcement_class": "machine_enforceable",
       "state": "admitted"
@@ -240,6 +256,10 @@
     },
     "4a53ff82": {
       "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "4a77c35d": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "4a9188f3": {
@@ -282,8 +302,8 @@
       "enforcement_class": "machine_enforceable",
       "state": "admitted"
     },
-    "5697071b": {
-      "enforcement_class": "judgment_advisory",
+    "578fdd91": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "57d13061": {
@@ -358,8 +378,16 @@
       "enforcement_class": "machine_enforceable",
       "state": "admitted"
     },
+    "661d7757": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
     "67580c28": {
       "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "67e48aaf": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "6901cc3b": {
@@ -416,6 +444,10 @@
     },
     "76a53dfe": {
       "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "76fcbed6": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "7b4ba3aa": {
@@ -514,10 +546,6 @@
       "enforcement_class": "machine_enforceable",
       "state": "admitted"
     },
-    "9b081605": {
-      "enforcement_class": "machine_enforceable",
-      "state": "admitted"
-    },
     "9d80fd2d": {
       "enforcement_class": "judgment_advisory",
       "state": "admitted"
@@ -535,6 +563,10 @@
       "state": "admitted"
     },
     "a2e78f48": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
+    "a3da3d39": {
       "enforcement_class": "human_only",
       "state": "admitted"
     },
@@ -562,8 +594,16 @@
       "enforcement_class": "machine_enforceable",
       "state": "admitted"
     },
+    "a9fc3f0e": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
     "ab814a26": {
       "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "ac0a6579": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "af7de070": {
@@ -642,6 +682,10 @@
       "enforcement_class": "machine_enforceable",
       "state": "admitted"
     },
+    "c363bd8b": {
+      "enforcement_class": "human_only",
+      "state": "admitted"
+    },
     "c4a284b2": {
       "enforcement_class": "judgment_advisory",
       "state": "admitted"
@@ -680,6 +724,10 @@
     },
     "cf1c13a6": {
       "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "cfe6b5c6": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "cff429f5": {
@@ -804,6 +852,10 @@
     },
     "f5d97b4a": {
       "enforcement_class": "machine_enforceable",
+      "state": "admitted"
+    },
+    "f673326b": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "f92dfab2": {

@@ -4,7 +4,7 @@
 Codex lane and the Grok lane added the same day as a verified scope
 extension.
 
-Six groups, per the build spec, in order:
+Seven groups, in order:
   1. request schema validation (good + bad requests)
   2. the contract prompt renders (pure function, no subprocess) — and is
      IDENTICAL regardless of which reviewer will receive it
@@ -26,6 +26,7 @@ Six groups, per the build spec, in order:
      approval-bypass flag), output parsing against a captured real envelope
      shape, per-backend token isolation, and per-reviewer independence (one
      backend forced to fail never blocks another's own outcome)
+  7. security lens triggering with Git failures and known paths, offline
 
 NO LIVE CALL TO THE WORKER OR TO ANY REVIEWER CLI ANYWHERE IN THIS FILE.
 Nothing here deploys, installs, commits, or reaches the Worker or an LLM
@@ -658,6 +659,40 @@ def test_grok_lane():
           outcomes["healthy"]["status"] == "ok")
 
 
+def test_security_lens_trigger():
+    print("\n[7] security lens trigger")
+    commit_sha = "abc1234"
+    failures = [
+        ("git nonzero", subprocess.CompletedProcess([], 1, "", "unknown commit")),
+        ("git timeout", subprocess.TimeoutExpired(cmd="git", timeout=30)),
+        ("git exception", OSError("git unavailable")),
+    ]
+    for label, outcome in failures:
+        kwargs = {"side_effect": outcome} if isinstance(outcome, Exception) else {"return_value": outcome}
+        with mock.patch.object(rcr.subprocess, "run", **kwargs), mock.patch.object(rcr, "log") as logger:
+            lens = rcr.security_lens_if_triggered(commit_sha)
+        check(f"security lens armed: {label}", lens == rcr.SECURITY_LENS)
+        check(f"security lens failure logged honestly: {label}",
+              logger.call_count == 1 and "ARMED conservatively" in logger.call_args.args[0])
+
+    known_paths = [
+        ("no paths", "\n", None),
+        ("known low tier", "docs/example.md\n", None),
+        ("known high tier", "mcp-server/src/auth.js\n", rcr.SECURITY_LENS),
+    ]
+    for label, stdout, expected in known_paths:
+        with mock.patch.object(rcr.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout, "")):
+            check(f"security lens: {label}", rcr.security_lens_if_triggered(commit_sha) == expected)
+
+    with mock.patch.object(rcr.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "docs/example.md\n", "")), \
+            mock.patch.object(rcr, "_review_tiers", side_effect=OSError("map unreadable")), \
+            mock.patch.object(rcr, "log") as logger:
+        lens = rcr.security_lens_if_triggered(commit_sha)
+    check("security lens armed: unreadable map", lens == rcr.SECURITY_LENS)
+    check("security lens unreadable map logged honestly",
+          logger.call_count == 1 and "ARMED conservatively" in logger.call_args.args[0])
+
+
 def main():
     print("test-review-council.py — offline suite (no live calls, no deploys, no installs)")
     test_schema_validation()
@@ -666,6 +701,7 @@ def main():
     test_curl_payload_stub()
     test_failure_path_lands_in_failed()
     test_grok_lane()
+    test_security_lens_trigger()
 
     failed = [r for r in results if not r[1]]
     print(f"\npassed {len(results) - len(failed)} · failed {len(failed)} · total {len(results)}")

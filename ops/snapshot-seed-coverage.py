@@ -61,6 +61,7 @@ import json
 import os
 import re
 import sys
+from typing import NamedTuple
 
 DOLLAR = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*|)\$")
 
@@ -103,9 +104,6 @@ COPY_BLOCK = re.compile(r"^COPY\s+" + TABLE + r"\s*(?:\([^)]*\)\s*)?FROM\s+stdin
 # recovered by anyone and is not pretended to be, but a literal table name in the
 # format string is read exactly like any other. Variables, concatenated fragments,
 # and escape-prefixed EXECUTE literals are not decoded as dynamic SQL.
-EXECUTE_ARGUMENT = re.compile(
-    r"(?:^|[^A-Za-z0-9_])execute\s*(?:format\s*\(\s*)?$", re.I)
-
 CREATE_ROUTINE = re.compile(
     r"create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+"
     r"([a-z_][a-z0-9_]*(?:\s*\.\s*[a-z_][a-z0-9_]*)?)\s*\(", re.I)
@@ -201,6 +199,12 @@ HEAD_TAIL = 4096
 ROUTINE_TAIL = 65536
 
 
+class SeedAnalysis(NamedTuple):
+    applied: set
+    seeds: dict
+    missing: list
+
+
 def _tail(parts, count):
     """The last `count` characters of an accumulated buffer, without joining it.
 
@@ -291,23 +295,17 @@ def scan_sql(sql):
     # whitespace to output, but never make the next query revisit old chunks.
     # Update once per appended run, including whitespace across chunk joins.
     prefix_tail = ""
-    execute_distance = HEAD_TAIL + 1
-    execute_carry = ""
 
     def append_top(value):
-        nonlocal pending_size, prefix_tail, execute_distance, execute_carry
+        nonlocal pending_size, prefix_tail
         if value:
-            compact = re.sub(r"\s+", " ", value)
-            if prefix_tail.endswith(" ") and compact.startswith(" "):
-                compact = compact[1:]
+            if value == " ":
+                compact = "" if prefix_tail.endswith(" ") else " "
+            else:
+                compact = re.sub(r"\s+", " ", value)
+                if prefix_tail.endswith(" ") and compact.startswith(" "):
+                    compact = compact[1:]
             if compact:
-                # Measure the EXECUTE prefilter in the same normalized text as
-                # the prefix checks; raw padding must not disqualify a literal.
-                combined = execute_carry + compact
-                found = combined.lower().rfind("execute")
-                execute_distance = (execute_distance + len(compact) if found == -1
-                                    else len(combined) - found - len("execute"))
-                execute_carry = combined[-6:]
                 prefix_tail = (prefix_tail + compact)[-HEAD_TAIL:]
             pending_top.append(value)
             pending_size += len(value)
@@ -317,7 +315,26 @@ def scan_sql(sql):
                 pending_size = 0
 
     def execute_argument():
-        return execute_distance <= HEAD_TAIL and bool(EXECUTE_ARGUMENT.search(prefix_tail))
+        end = len(prefix_tail)
+        while end and prefix_tail[end - 1] == " ":
+            end -= 1
+
+        def ends_execute(position):
+            start = position - len("execute")
+            return (start >= 0 and prefix_tail[start:position].lower() == "execute"
+                    and (start == 0 or prefix_tail[start - 1] not in
+                         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"))
+
+        if ends_execute(end):
+            return True
+        for suffix in ("format(", "format ("):
+            start = end - len(suffix)
+            if start >= 0 and prefix_tail[start:end].lower() == suffix:
+                while start and prefix_tail[start - 1] == " ":
+                    start -= 1
+                if ends_execute(start):
+                    return True
+        return False
 
     def flush_top():
         nonlocal pending_size
@@ -353,7 +370,9 @@ def scan_sql(sql):
             # the rest of the migration was read inside-out and a plainly top-level
             # INSERT went unreported. That is the apostrophe class of R4 one escape
             # form over, and it swallowed real DML rather than only a call.
-            escaped = bool(re.search(r"(?:^|[^A-Za-z0-9_])[Ee]$", tail(4)))
+            escaped = (i > 0 and sql[i - 1] in "Ee"
+                       and (i < 2 or sql[i - 2] not in
+                            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"))
             # IS THIS LITERAL AN ARGUMENT TO EXECUTE? If so its text is not inert
             # -- it is SQL that runs. Decided BEFORE the literal is consumed,
             # because `top` still ends at the character before the quote here.
@@ -494,6 +513,12 @@ def seeded_tables(repo, applied):
             for table in written_tables(handle.read()):
                 seeds.setdefault(table, set()).add(name)
     return {t: sorted(m) for t, m in seeds.items()}, sorted(missing)
+
+
+def analyze_seeds(repo, artifact):
+    applied = applied_migrations(artifact)
+    seeds, missing = seeded_tables(repo, applied)
+    return SeedAnalysis(applied, seeds, missing)
 
 
 def data_region(artifact):
@@ -688,12 +713,13 @@ def load_classification(repo):
     return carried, after_apply, subset, excluded, forbidden, path
 
 
-def check(repo, artifact_text):
-    """Return a list of human-readable failures; empty means the snapshot is sound."""
+def check(repo, artifact_text, seed_analysis=None):
+    """Return findings; supplied seed analysis must match this repo and artifact."""
     carried, after_apply, subset, excluded, forbidden, config_path = load_classification(repo)
     rel_config = os.path.relpath(config_path, repo)
-    applied = applied_migrations(artifact_text)
-    seeds, missing = seeded_tables(repo, applied)
+    if seed_analysis is None:
+        seed_analysis = analyze_seeds(repo, artifact_text)
+    applied, seeds, missing = seed_analysis
     migration_dir = os.path.join(repo, "migrations")
     pending = {
         name for name in os.listdir(migration_dir)

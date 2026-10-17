@@ -31,8 +31,13 @@ def load(name: str, path: Path):
 
 
 rail = load("rule_pack_preuse_reselection", REPO / "hooks/rule-pack-preuse-reselection.py")
+# The route rail's dedupe store and the boot gate's arm state must never be the
+# developer's own: an earlier real session named like a fixture would make a
+# first delivery look like a repeat.
+_ISOLATED = tempfile.mkdtemp(prefix="preuse-selftest-")
+os.environ.setdefault("CARR_RULE_ROUTE_DEDUPE_DIR", os.path.join(_ISOLATED, "route-dedupe"))
+os.environ.setdefault("CARR_RULE_BOOT_STATE_DIR", os.path.join(_ISOLATED, "boot-state"))
 contract = load("rule_delivery_preuse_test", REPO / "lib/rule_delivery_preuse.py")
-drift = load("rule_pack_drift_preuse_test", REPO / "hooks/rule-pack-drift-gate.py")
 
 # The route rail (ROUTE TRIGGERS) has its own section at the end of this file.
 # Every earlier section pins behaviour that existed before the route file, so
@@ -192,16 +197,45 @@ check("receipt carries every dynamic member and full binding text",
 # sees the preview, while Stop telemetry may credit every scheduled rule.
 oversize_response = selector_result()
 oversize_response["shared_rules"][0]["statement"] = "binding scheduled rule " + "x" * 12_000
-oversize_output = rail.process(payload(), runner=Runner(oversize_response))
+big_id = oversize_response["shared_rules"][0]["id"]
+
+
+class SeqRunner(Runner):
+    """Answers each call with the next prepared result (scheduled, then fitted)."""
+
+    def __init__(self, results: list[dict]):
+        super().__init__(results[0])
+        self.results = list(results)
+
+    def __call__(self, *args, **kwargs):
+        self.result = self.results.pop(0) if len(self.results) > 1 else self.results[0]
+        return super().__call__(*args, **kwargs)
+
+
+# The fitted fallback is a route-rail door call, which declares the packs the
+# live map assigns these ids (route_result, defined further down, does the same).
+fitted_response = selector_result(declared=rail._route_packs(EXPECTED_IDS))
+fitted_response["shared_rules"][0]["statement"] = oversize_response["shared_rules"][0]["statement"]
+oversize_runner = SeqRunner([oversize_response, fitted_response])
+oversize_output = rail.process(payload(), runner=oversize_runner)
 oversize_text = context(oversize_output)
 check("oversize scheduled rail stays within the visible context budget",
       rail.rule_routes.within_cap(oversize_text), len(oversize_text))
-check("oversize scheduled rail names every undelivered rule without a receipt",
-      oversize_text.startswith("RULE PACK PREUSE DELIVERY TOO LARGE")
-      and "NOT delivered" in oversize_text
-      and all(short in oversize_text for short in EXPECTED_IDS)
-      and "rule-delivery-preuse-reselection/v1" not in oversize_text,
-      oversize_text[:160])
+try:
+    oversize_row = json.loads(oversize_text)
+except ValueError:
+    oversize_row = {}
+oversize_full = [r["id"] for r in oversize_row.get("rules") or []]
+oversize_over = [r["id"] for r in oversize_row.get("overflow") or []]
+check("an oversized scheduled pack is FITTED, not bounced: every rule arrives in full "
+      "or as a one-line entry, the giant one in overflow, and no second fetch is demanded",
+      oversize_row.get("schema") == rail.rule_routes.ROUTE_RECEIPT_SCHEMA
+      and sorted(oversize_full + oversize_over) == EXPECTED_IDS
+      and big_id in oversize_over and big_id not in oversize_full
+      and "TOO LARGE" not in oversize_text and "NOT delivered" not in oversize_text,
+      (oversize_row.get("schema"), oversize_full, oversize_over, oversize_text[:120]))
+check("the fitted fallback made exactly one more door call", len(oversize_runner.calls) == 2,
+      len(oversize_runner.calls))
 
 dell_output = rail.process(
     payload(), runner=Runner(selector_result(agent="dell-local", sponsor="dell")))
@@ -338,164 +372,7 @@ def check_failure_cases(label: str, call: dict, response: dict, missing_cause: s
 check_failure_cases("scheduled rail", payload(), selector_result(),
                     "selector did not return every scheduled rule", rail.FAILURE_CONTEXT)
 
-# Stop telemetry credits only a platform-proven receipt bound to the exact tool call.
-def claude_tool_call() -> dict:
-    return {"type": "assistant", "message": {"role": "assistant", "content": [{
-        "type": "tool_use", "id": "tool-exact", "name": "Bash",
-        "input": before["tool_input"],
-    }]}, "sessionId": "session-exact"}
-
-
-def claude_attachment(text: str) -> dict:
-    return {
-        "type": "attachment", "sessionId": "session-exact",
-        "attachment": {
-            "type": "hook_additional_context", "hookEvent": "PreToolUse",
-            "hookName": "PreToolUse:Bash", "toolUseID": "tool-exact",
-            "content": [text],
-        },
-    }
-
-
-def codex_tool_call(tool: str = "functions.exec") -> dict:
-    return {"type": "response_item", "payload": {
-        "type": "function_call", "call_id": "tool-exact", "name": tool,
-        "arguments": json.dumps(before["tool_input"], sort_keys=True,
-                                separators=(",", ":")),
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-def codex_custom_tool_call(*, name: str = "exec", wrapper: str = "response_item",
-                           raw: object | None = None) -> dict:
-    tool_input = before["tool_input"] if raw is None else raw
-    if wrapper == "event_msg":
-        return {"type": "event_msg", "payload": {
-            "type": "custom_tool_call", "name": name,
-            "arguments": tool_input,
-        }}
-    return {"type": "response_item", "payload": {
-        "type": "custom_tool_call", "id": "ctc-exact", "status": "completed",
-        "call_id": "tool-exact", "name": name,
-        "input": (json.dumps(tool_input, sort_keys=True, separators=(",", ":"))
-                  if not isinstance(tool_input, str) else tool_input),
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-def codex_context(text: str) -> dict:
-    return {"type": "response_item", "payload": {
-        "type": "message", "role": "developer",
-        "content": [{"type": "input_text", "text": text}],
-        "internal_chat_message_metadata_passthrough": {"turn_id": "turn-exact"},
-    }}
-
-
-claude_records = [claude_tool_call(), claude_attachment(context(output))]
-mode, loaded, _ = drift.delivery_state(claude_records)
-check("Claude exact hook envelope credits scheduled automation",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-
-codex_output = rail.process(payload(tool="functions.exec", client="codex"), runner=Runner())
-codex_records = [codex_tool_call(), codex_context(context(codex_output))]
-mode, loaded, _ = drift.delivery_state(codex_records)
-check("Codex exact developer context credits scheduled automation",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-codex_bash_output = rail.process(payload(tool="Bash", client="codex"), runner=Runner())
-mode, loaded, _ = drift.delivery_state([
-    codex_tool_call("Bash"), codex_context(context(codex_bash_output)),
-])
-check("Codex Bash alias receives and proves the same receipt",
-      mode == "shadow" and loaded == ["scheduled-automation"], (mode, loaded))
-
-TRIGGERS, MEMBERS, _ = drift.load_packs()
-for label, records in [
-    ("Claude success", claude_records),
-    ("Codex function success", codex_records),
-    ("Codex response-item custom exec success",
-     [codex_custom_tool_call(), codex_context(context(codex_output))]),
-]:
-    evaluated = drift.evaluate(records, TRIGGERS, MEMBERS)
-    check(f"{label} structurally requires and loads scheduled automation",
-          evaluated["needed"] == ["scheduled-automation"]
-          and evaluated["loaded"] == ["scheduled-automation"]
-          and evaluated["missing"] == [], evaluated)
-
-custom_needed = drift.evaluate([codex_custom_tool_call()], TRIGGERS, MEMBERS)
-check("Codex custom-tool background call structurally requires scheduled automation",
-      custom_needed["needed"] == ["scheduled-automation"]
-      and custom_needed["loaded"] == []
-      and custom_needed["missing"] == ["scheduled-automation"], custom_needed)
-
-for label, records in [
-    ("Claude no receipt", [claude_tool_call()]),
-    ("Claude selector failure", [claude_tool_call(), {
-        "type": "attachment", "sessionId": "session-exact",
-        "attachment": {
-            "type": "hook_additional_context", "hookEvent": "PreToolUse",
-            "hookName": "PreToolUse:Bash", "toolUseID": "tool-exact",
-            "content": [rail.FAILURE_CONTEXT],
-        },
-    }]),
-    ("Codex function no receipt", [codex_tool_call()]),
-    ("Codex response-item custom exec no receipt", [codex_custom_tool_call()]),
-    ("Codex event custom exec_command cannot claim an uncorrelated receipt",
-     [codex_custom_tool_call(name="exec_command", wrapper="event_msg"),
-      codex_context(context(codex_output))]),
-]:
-    evaluated = drift.evaluate(records, TRIGGERS, MEMBERS)
-    check(f"{label} stays needed and missing",
-          evaluated["needed"] == ["scheduled-automation"]
-          and evaluated["loaded"] == []
-          and evaluated["missing"] == ["scheduled-automation"], evaluated)
-
-for label, record in [
-    ("unknown custom alias", codex_custom_tool_call(name="other")),
-    ("unstructured custom wrapper prose", codex_custom_tool_call(
-        raw="tools.exec_command({run_in_background: true})")),
-]:
-    evaluated = drift.evaluate([record], TRIGGERS, MEMBERS)
-    check(f"{label} does not create a structured background requirement",
-          evaluated["needed"] == [] and evaluated["missing"] == [], evaluated)
-
-for label, records in [
-    ("copied user context", [claude_tool_call(), {
-        "type": "user", "message": {"role": "user", "content": context(output)}}]),
-    ("wrong Claude hook name", [claude_tool_call(), {
-        **claude_attachment(context(output)),
-        "attachment": {**claude_attachment(context(output))["attachment"],
-                       "hookName": "PreToolUse:Read"}}]),
-    ("wrong tool id", [claude_tool_call(), {
-        **claude_attachment(context(output)),
-        "attachment": {**claude_attachment(context(output))["attachment"],
-                       "toolUseID": "tool-other"}}]),
-    ("tampered receipt", [claude_tool_call(), claude_attachment(
-        context(output).replace("scheduled-automation", "engineering-git", 1))]),
-    ("Codex user role", [codex_tool_call(), {
-        **codex_context(context(codex_output)),
-        "payload": {**codex_context(context(codex_output))["payload"], "role": "user"}}]),
-]:
-    found = drift.delivery_state(records)
-    check(f"{label} does not count as loaded", found[1] == [], found)
-
-malformed = receipt(output)
-malformed["unexpected"] = True
-found = drift.delivery_state([
-    claude_tool_call(),
-    claude_attachment(json.dumps(malformed, sort_keys=True, separators=(",", ":"))),
-])
-check("extra-key additionalContext does not count as loaded",
-      found[1] == [], found)
-for record_type, message_role in (("user", "user"), ("assistant", "user"),
-                                  ("user", "assistant")):
-    forged = claude_tool_call()
-    forged["type"] = record_type
-    forged["message"]["role"] = message_role
-    found = drift.delivery_state([forged, claude_attachment(context(output))])
-    check(f"Claude {record_type}/{message_role} tool-call provenance refuses",
-          found[1] == [], found)
-
-# Config parity and shadow-window source identity travel with the rail.
+# Config parity and delivery source identity travel with the rail.
 claude = json.loads((REPO / "ops/config/hooks.json").read_text())
 codex = json.loads((REPO / "ops/config/codex-hooks.json").read_text())["hooks"]
 command = "hooks/rule-pack-preuse-reselection.py"
@@ -503,7 +380,7 @@ claude_rows = [group for group in claude["PreToolUse"]
                if any(command in hook.get("command", "") for hook in group.get("hooks", []))]
 codex_rows = [group for group in codex["PreToolUse"]
               if any(command in hook.get("command", "") for hook in group.get("hooks", []))]
-CLAUDE_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|mcp__.*"
+CLAUDE_MATCHER = "Bash|Write|Edit|MultiEdit|NotebookEdit|Agent|WebFetch|WebSearch|Artifact|AskUserQuestion|EnterPlanMode|UpdatePlan|update_plan|functions\\.update_plan|mcp__.*"
 CODEX_MATCHER = ".*"  # Codex local tools use canonical names, including apply_patch.
 check("Claude wiring is exact and unique, widened for the generalized rail (S9)",
       len(claude_rows) == 1 and claude_rows[0]["matcher"] == CLAUDE_MATCHER)
@@ -520,10 +397,10 @@ check("Claude wires the same rule-delivery module once at the partner-message se
 check("Codex wires the same rule-delivery module once at the partner-message seam",
       len(codex_prompt_rows) == 1)
 check("new rail participates in the epoch source digest",
-      "hooks/rule-pack-preuse-reselection.py" in rail.WINDOW_SOURCE_PATHS)
+      "hooks/rule-pack-preuse-reselection.py" in rail.DELIVERY_SOURCE_PATHS)
 check("the compiled trigger table participates in the epoch source digest too",
-      "ops/config/rule-jit-triggers.v1.json" in rail.WINDOW_SOURCE_PATHS
-      and "ops/rule-jit-compile.py" in rail.WINDOW_SOURCE_PATHS)
+      "ops/config/rule-jit-triggers.v1.json" in rail.DELIVERY_SOURCE_PATHS
+      and "ops/rule-jit-compile.py" in rail.DELIVERY_SOURCE_PATHS)
 
 # Claude-only compaction-scoped dedupe. Codex and disabled Claude retain the
 # exact historical output path; active dedupe requires the continuity config
@@ -868,18 +745,19 @@ check("process() returns None (no injection, no selector call) for a non-match",
 
 # Verb match injects: the Agent tool exactly matches the council trigger.
 agent_call = gen_payload(tool="Agent", tool_input={"description": "spawn helper", "prompt": "zzz"})
-# Rule ede4b241 (cloud model choice) adds a second verb trigger on the same
-# dispatch moment, so an Agent call hits the council trigger AND the model-choice
-# trigger; the council trigger alone still carries its own five rules.
-model_choice_row = next(row for row in TRIGGER_ROWS.values()
-                        if row["kind"] == "verb" and "ede4b241" in row["rule_ids"])
-check("model-choice trigger delivers only rule ede4b241 via delegation-council",
-      model_choice_row["rule_ids"] == ["ede4b241"]
-      and model_choice_row["packs"] == ["delegation-council"])
-check("matched_triggers finds the council and model-choice verb triggers for an Agent call",
-      sorted(r["trigger_id"] for r in rail.matched_triggers(agent_call))
-      == sorted([council_row["trigger_id"], model_choice_row["trigger_id"]]))
-agent_rows = [council_row, model_choice_row]
+# Rules ede4b241 (cloud model choice) and 8400cd3d (new-work sizing) are
+# still PROPOSED, and a proposed rule binds nobody (rule a3da3d39). Since
+# 2026-10-13 (loop 1304) they are in neither the map nor rule-triage.v1.json,
+# so the compiled table carries no trigger for either and an Agent call hits
+# the council trigger alone. Their detector patterns stay tested in
+# ops/rule-jit-compile-selftest.py; on approval their triage rows return and
+# these checks flip back.
+PROPOSED_IDS = {"ede4b241", "8400cd3d"}
+check("the compiled table delivers neither proposed rule (ede4b241, 8400cd3d)",
+      not any(PROPOSED_IDS & set(row["rule_ids"]) for row in TRIGGER_ROWS.values()))
+check("matched_triggers finds exactly the council verb trigger for an Agent call",
+      [r["trigger_id"] for r in rail.matched_triggers(agent_call)] == [council_row["trigger_id"]])
+agent_rows = [council_row]
 agent_packs = sorted({p for r in agent_rows for p in r["packs"]})
 agent_ids = sorted({i for r in agent_rows for i in r["rule_ids"]})
 agent_trigger_ids = sorted(r["trigger_id"] for r in agent_rows)
@@ -901,8 +779,8 @@ check("generalized receipt binds exactly the matched triggers, packs, and rule_i
       and agent_row["packs"] == agent_packs
       and agent_row["rule_ids"] == agent_ids)
 # The cap lives per trigger in the compiler (lib/rule_delivery_preuse.py,
-# merge_trigger_delivery): an Agent call hits two triggers, so the merged set
-# may exceed one trigger's cap, and each matched trigger must stay inside it.
+# merge_trigger_delivery): each matched trigger must stay inside it. The
+# multi-trigger union is exercised by the git push case below.
 check("over-delivery stays inside the compiler's per-trigger cap",
       all(len(r["rule_ids"]) <= MAX_PER_TRIGGER for r in agent_rows)
       and set(agent_row["rule_ids"]) == set(agent_ids))
@@ -919,36 +797,32 @@ write_output = rail.process(
 write_row = json.loads(context(write_output))
 check("path_pattern match delivers exactly the structural extra rule",
       write_row["rule_ids"] == path_row["rule_ids"] and write_row["packs"] == path_row["packs"])
-# Cloud model choice fires on a cloud-session dispatch and stays silent on
-# routine reads, including the read-only calls of the same remote server.
-for dispatch_tool in ("mcp__Claude_Code_Remote__create_session",
-                      "mcp__Claude_Code_Remote__create_trigger"):
-    dispatch_call = gen_payload(tool=dispatch_tool, tool_input={"prompt": "fix the bug", "model": "sonnet"})
-    check(f"{dispatch_tool} hits the model-choice trigger",
-          model_choice_row["trigger_id"]
-          in [r["trigger_id"] for r in rail.matched_triggers(dispatch_call)])
-model_runner = Runner(gen_selector_result(packs=model_choice_row["packs"], ids=model_choice_row["rule_ids"]))
-model_output = rail.process(
-    gen_payload(tool="mcp__Claude_Code_Remote__create_session",
-                tool_input={"prompt": "fix the bug", "model": "sonnet"}), runner=model_runner)
-model_receipt = json.loads(context(model_output))
-check("a cloud-session dispatch delivers rule ede4b241 in one selector call",
-      len(model_runner.calls) == 1 and "ede4b241" in model_receipt["rule_ids"]
-      and model_receipt["trigger_ids"] == [model_choice_row["trigger_id"]], model_receipt)
-for routine_tool, routine_input in (
-        ("Read", {"file_path": "README.md"}), ("Grep", {"pattern": "model"}),
-        ("Glob", {"pattern": "*.py"}), ("Bash", {"command": "git status"}),
-        ("mcp__Claude_Code_Remote__list_sessions", {}),
-        ("mcp__Claude_Code_Remote__get_session", {"session_id": "x"}),
-        ("mcp__Claude_Code_Remote__list_repos", {})):
-    routine_hits = [r["trigger_id"] for r in
-                    rail.matched_triggers(gen_payload(tool=routine_tool, tool_input=routine_input))]
-    check(f"{routine_tool} stays silent for the model-choice trigger",
-          model_choice_row["trigger_id"] not in routine_hits, routine_hits)
+# While ede4b241 and 8400cd3d are proposed, no dispatch, planning or intake
+# shape delivers either through the compiled table (see above).
+for proposed_tool, proposed_input in (
+        ("mcp__Claude_Code_Remote__create_session", {"prompt": "fix the bug", "model": "sonnet"}),
+        ("mcp__Claude_Code_Remote__create_trigger", {"prompt": "fix the bug", "model": "sonnet"}),
+        ("EnterPlanMode", {}),
+        ("Agent", {"description": "build the importer",
+                   "prompt": "Implement the CSV importer and open a PR."}),
+        ("RemoteTrigger", {"action": "create", "name": "builder",
+                           "prompt": "BUILDER job: add the export verb."}),
+        ("Workflow", {"script": "export const meta = {name: 'review'}"}),
+        ("Bash", {"command": 'python3 tools/room-bridge/dispatch.py send codex-desk '
+                             '--writes ops/x.py "fix the review"'}),
+        ("mcp__carr__write-work-shape", {"title": "new capability"}),
+        ("mcp__carr__report-problem", {"summary": "the export is missing"}),
+        ("mcp__CARR_Record_Layer__propose-ready-plan", {"scope_summary": "new capability"})):
+    proposed_hits = sorted({rid for row in rail.matched_triggers(
+        gen_payload(tool=proposed_tool, tool_input=proposed_input)) for rid in row["rule_ids"]})
+    check(f"{proposed_tool} delivers no proposed rule through the compiled table",
+          not PROPOSED_IDS & set(proposed_hits), proposed_hits)
+
 silent_runner = Runner()
 check("a routine Read delivers nothing and makes no selector call",
       rail.process(gen_payload(tool="Read", tool_input={"file_path": "README.md"}),
                    runner=silent_runner) is None and silent_runner.calls == [])
+
 missing_session = gen_payload(tool="Agent", tool_input={"description": "spawn helper", "prompt": "zzz"})
 missing_session["session_id"] = ""
 missing_session_runner = Runner()
@@ -1060,52 +934,6 @@ check("semantic receipt uses authoritative text and keeps the Jev probability",
 check("semantic receipt validates through the shared rule-delivery interface",
       contract.validate_semantic_receipt(semantic_row, repo=REPO))
 
-semantic_claude_attachment = {
-    "type": "attachment", "sessionId": "session-prompt",
-    "attachment": {
-        "type": "hook_additional_context", "hookEvent": "UserPromptSubmit",
-        "hookName": "UserPromptSubmit", "content": [context(semantic_output)],
-    },
-}
-semantic_claude_prompt = {
-    "type": "user", "sessionId": "session-prompt",
-    "message": {"role": "user", "content": "we need to improve this source"},
-}
-mode, loaded, _ = drift.delivery_state([
-    semantic_claude_prompt, semantic_claude_attachment])
-check("Claude Stop telemetry credits only the validated semantic hook envelope",
-      mode == "shadow" and loaded == semantic_packs, (mode, loaded))
-
-replayed_prompt = copy.deepcopy(semantic_claude_prompt)
-cast(dict[str, object], replayed_prompt["message"])["content"] = (
-    "a different later request")
-mode, loaded, _ = drift.delivery_state([replayed_prompt, semantic_claude_attachment])
-check("Claude cannot replay a valid semantic receipt onto a different prompt",
-      mode is None and loaded == [], (mode, loaded))
-
-codex_semantic = rail.process(
-    prompt_payload(client="codex"),
-    runner=Runner(gen_selector_result(packs=semantic_packs, ids=[semantic_id])),
-    adviser=fake_adviser)
-check("Codex semantic receipt binds the native turn",
-      json.loads(context(codex_semantic))["turn_id"] == "turn-prompt")
-codex_semantic_context = codex_context(context(codex_semantic))
-codex_semantic_context["payload"]["internal_chat_message_metadata_passthrough"] = {
-    "turn_id": "turn-prompt"}
-mode, loaded, _ = drift.delivery_state([codex_semantic_context])
-check("Codex Stop telemetry credits the validated semantic developer context",
-      mode == "shadow" and loaded == semantic_packs, (mode, loaded))
-
-forged_semantic = copy.deepcopy(semantic_row)
-forged_semantic["probabilities"][semantic_id] = 0.01
-forged_attachment = copy.deepcopy(semantic_claude_attachment)
-cast(dict[str, object], forged_attachment["attachment"])["content"] = [
-    json.dumps(forged_semantic)]
-mode, loaded, _ = drift.delivery_state([
-    semantic_claude_prompt, forged_attachment])
-check("tampered semantic context cannot claim a loaded pack",
-      mode is None and loaded == [], (mode, loaded))
-
 no_bind_runner = Runner()
 no_bind_output = rail.process(
     prompt_payload(prompt="hello"), runner=no_bind_runner,
@@ -1202,7 +1030,7 @@ check("the original exact background shape still takes the original rail, not th
 
 check_failure_cases(
     "generalized rail", agent_call,
-    gen_selector_result(packs=council_row["packs"], ids=council_row["rule_ids"]),
+    gen_selector_result(packs=agent_packs, ids=agent_ids),
     "selector did not return every triggered rule", rail.GENERALIZED_FAILURE_CONTEXT)
 
 # Tampering with a generalized receipt's content fails validate_generalized_receipt.
@@ -1291,10 +1119,241 @@ def rules_routed_by(predicate) -> set[str]:
             if any(predicate(route) for route in entry["routes"])}
 
 
-# The Bash route (production route rail) fires on every supported cloud launch
-# form, wherever the flag sits among the options, and not on a local session.
+# Rule 8400cd3d is delivered when planning begins, before the session chooses a
+# build protocol. These calls use the production deterministic route rail.
+for planning_tool, planning_input in (
+        ("EnterPlanMode", {}),
+        ("UpdatePlan", {"plan": [{"step": "size the work"}]}),
+        ("update_plan", {"plan": [{"step": "size the work"}]}),
+        ("functions.update_plan", {"plan": [{"step": "size the work"}]}),
+        ("mcp__carr__propose-ready-plan", {"scope_summary": "new capability"})):
+    hits = routed_for(planning_tool, planning_input)
+    check(f"{planning_tool} delivers the new-work sizing rule",
+          "8400cd3d" in hits, hits)
+for routine_tool, routine_input in (
+        ("Read", {"file_path": "README.md"}),
+        ("Bash", {"command": "git status"}),
+        ("Write", {"file_path": "notes.txt", "content": "review the finished plan"})):
+    hits = routed_for(routine_tool, routine_input)
+    check(f"{routine_tool} routine work does not deliver the sizing rule",
+          "8400cd3d" not in hits, hits)
+
+DISPATCH_COMMANDS = (
+    './dispatch.py send report',
+    'dispatch.py send report',
+    'python3 tools/room-bridge/dispatch.py send codex-desk "fix the review"',
+    'python3 ./tools/room-bridge/dispatch.py send codex-desk "fix the review"',
+    '/Users/booko/carr-system/tools/room-bridge/dispatch.py send codex-desk "fix the review"',
+    './tools/room-bridge/dispatch.py send codex-desk "fix the review"',
+    'python3 /Users/booko/carr-system/tools/room-bridge/dispatch.py send codex-desk "fix the review"',
+    'python3 tools/room-bridge/dispatch.py --registry X send codex-desk "fix the review"',
+    'python3 tools/room-bridge/dispatch.py --registry=X send codex-desk "fix the review"',
+    'python3 tools/room-bridge/dispatch.py --results X send codex-desk "fix the review"',
+    'python3 tools/room-bridge/dispatch.py --results=X --registry="desk registry.json" send codex-desk "fix the review"',
+    'python3 "tools/room-bridge/dispatch.py" --registry "desk registry.json" --results out.jsonl send codex-desk "fix the review"',
+    'bin/dot-relay send-job /tmp/dot-brief.txt',
+    './bin/dot-relay send-job /tmp/dot-brief.txt',
+    '/Users/booko/carr-system/bin/dot-relay send-job /tmp/dot-brief.txt',
+    'python3 bin/dot-relay send-job /tmp/dot-brief.txt',
+    'python3 "bin/dot-relay" --state-dir "job state" send-job /tmp/dot-brief.txt',
+    './bin/dot-relay --credentials=x --state-dir=y send-job /tmp/dot-brief.txt',
+    'bin/dot-relay --state-dir x --credentials y send-job /tmp/dot-brief.txt',
+    'cd /Users/booko/carr-system && python3 tools/room-bridge/dispatch.py --registry X send codex-desk x',
+    'true; /Users/booko/carr-system/bin/dot-relay send-job /tmp/dot-brief.txt',
+    'true | ./bin/dot-relay send-job /tmp/dot-brief.txt',
+    '(python3 tools/room-bridge/dispatch.py send codex-desk x)',
+    '\n  bin/dot-relay send-job /tmp/dot-brief.txt',
+    "'tools/room-bridge/dispatch.py' --registry 'desk registry.json' send codex-desk x",
+    '"/Users/booko/carr-system/bin/dot-relay" --credentials=x send-job brief.txt',
+) + tuple(
+    f'python3 {executable}{options} send report'
+    for executable in ('dispatch.py', './dispatch.py',
+                       'tools/room-bridge/dispatch.py',
+                       '/opt/checkouts/carr-system/tools/room-bridge/dispatch.py')
+    for options in ('', ' --registry X')
+) + tuple(
+    f'{interpreter} {executable} {subcommand} report'
+    for interpreter in ('/usr/bin/python3', '/usr/local/bin/python3',
+                        '/opt/homebrew/bin/python3', '.venv/bin/python3', './.venv/bin/python3',
+                        '"python3"')
+    for executable, subcommand in (('tools/room-bridge/dispatch.py', 'send'),
+                                  ('bin/dot-relay', 'send-job'))
+)
+NON_DISPATCH_COMMANDS = (
+    'python3 /tmp/unrelated/dispatch.py send report',
+    'python3 /tmp/unrelated/tools/room-bridge/dispatch.py send report',
+    'rg dispatch.py send docs.txt',
+    'rg tools/room-bridge/dispatch.py send docs.txt',
+    'echo dot-relay send-job',
+    'echo bin/dot-relay send-job',
+    'echo /Users/booko/carr-system/bin/dot-relay send-job',
+    'echo python3 tools/room-bridge/dispatch.py send report',
+    'echo "bin/dot-relay send-job"',
+    'echo "example; bin/dot-relay send-job report"',
+    "echo 'example && python3 tools/room-bridge/dispatch.py send report'",
+    r'echo example\; bin/dot-relay send-job report',
+    'python3 /tmp/unrelated/bin/dot-relay send-job report',
+    '/tmp/unrelated/bin/dot-relay send-job report',
+    './dot-relay send-job report',
+    'dot-relay send-job report',
+    'python3 tools/room-bridge/dispatch.py desks',
+    'python3 tools/room-bridge/dispatch.py --registry X desks',
+    'python3 tools/room-bridge/dispatch.py --registry send desks',
+    'python3 tools/room-bridge/dispatch.py --results="send" desks',
+    'python3 tools/room-bridge/dispatch.py send-other codex-desk "fix the review"',
+    'python3 tools/room-bridge/dispatch.py desks; echo send',
+    'bin/dot-relay watch 123.456',
+    '/Users/booko/carr-system/bin/dot-relay --state-dir x watch 123.456',
+    'bin/dot-relay --state-dir send-job watch 123.456',
+    'bin/dot-relay send-job-other /tmp/dot-brief.txt',
+    'bin/dot-relay watch 123.456; echo send-job',
+)
+for dispatch_command in DISPATCH_COMMANDS:
+    hits = routed_for("Bash", {"command": dispatch_command})
+    check(f"dispatch spelling routes the sizing rule: {dispatch_command}",
+          "8400cd3d" in hits, hits)
+for non_dispatch_command in NON_DISPATCH_COMMANDS:
+    hits = routed_for("Bash", {"command": non_dispatch_command})
+    check(f"non-dispatch command excludes sizing: {non_dispatch_command}",
+          "8400cd3d" not in hits, hits)
+
+DELEGATION_RULE_IDS = {"2b66211d", "5e89c211", "6cfb67f5", "d7f74c93", "fb110a39"}
+for command in DISPATCH_COMMANDS:
+    if "dispatch.py" not in command:
+        continue
+    delegation_hits = set(routed_for("Bash", {"command": command}))
+    check(f"dispatcher command delivers delegation rules: {command}",
+          DELEGATION_RULE_IDS <= delegation_hits, sorted(delegation_hits))
+for command in NON_DISPATCH_COMMANDS + (
+        "grep dispatch.py send docs.txt",
+        "cat dispatch.py send docs.txt",
+        "echo dispatch.py send report",
+        "echo ./dispatch.py send report",
+        "echo '/Users/booko/carr-system/tools/room-bridge/dispatch.py send report'",
+        "grep 'dispatch.py send' docs.txt",
+        "cat docs.txt; echo 'dispatch.py send report'"):
+    delegation_hits = set(routed_for("Bash", {"command": command}))
+    check(f"non-dispatch command excludes delegation rules: {command}",
+          not (DELEGATION_RULE_IDS & delegation_hits), sorted(delegation_hits))
+
+with tempfile.TemporaryDirectory() as dispatch_tmp:
+    saved_env = dict(os.environ)
+    os.environ["CARR_RULE_ROUTE_DEDUPE_DIR"] = str(Path(dispatch_tmp) / "dedupe")
+    os.environ["CARR_RULES_ALWAYS_ON_FILE"] = str(Path(dispatch_tmp) / "always-on.md")
+    try:
+        for index, command in enumerate(DISPATCH_COMMANDS):
+            for client, tool in (("claude", "Bash"), ("codex", "functions.exec")):
+                for background in (False, True):
+                    call = gen_payload(tool=tool, client=client,
+                                       session=f"dispatch-{index}-{client}-{background}",
+                                       tool_input={"command": command,
+                                                   "run_in_background": background})
+                    calls: list[object] = []
+
+                    def selector_runner(argv, **kwargs):
+                        args = json.loads(argv[-1])
+                        calls.append(args)
+                        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(
+                            gen_selector_result(packs=args["packs"], ids=args["rule_ids"])))
+
+                    real_process, saved_stdin = rail.process, sys.stdin
+                    stdout = io.StringIO()
+                    sys.stdin = io.StringIO(json.dumps(call))
+                    rail.process = lambda p: real_process(p, runner=selector_runner)
+                    try:
+                        with contextlib.redirect_stdout(stdout):
+                            rc = rail.main()
+                    finally:
+                        rail.process, sys.stdin = real_process, saved_stdin
+                    output = json.loads(stdout.getvalue() or "{}")
+                    row = json.loads(context(output) or "{}")
+                    delivered = {r["id"]: r["statement"] for r in row.get("rules", [])}
+                    check(f"hook entry point delivers sizing: {index} {client} background={background}",
+                          rc == 0 and delivered.get("8400cd3d") == "binding jit rule 8400cd3d"
+                          and len(calls) == 1
+                          and routes_lib.validate_route_receipt(row, repo=REPO), row.get("rule_ids"))
+                    if background:
+                        check(f"background dispatch preserves scheduled rules: {index} {client}",
+                              set(EXPECTED_IDS) <= set(delivered), sorted(delivered))
+                        if client == "claude":
+                            prior = {"type": "assistant", "sessionId": call["session_id"],
+                                     "message": {"role": "assistant", "content": [{
+                                         "type": "tool_use", "id": call["tool_use_id"],
+                                         "name": tool, "input": call["tool_input"]}]}}
+                            envelope = {"type": "attachment", "sessionId": call["session_id"],
+                                        "attachment": {"type": "hook_additional_context",
+                                                       "hookEvent": "PreToolUse",
+                                                       "hookName": f"PreToolUse:{tool}",
+                                                       "toolUseID": call["tool_use_id"],
+                                                       "content": [context(output)]}}
+                        else:
+                            prior = {"type": "response_item", "payload": {
+                                "type": "function_call", "call_id": call["tool_use_id"],
+                                "name": tool, "arguments": json.dumps(call["tool_input"]),
+                                "internal_chat_message_metadata_passthrough": {"turn_id": call["turn_id"]}}}
+                            envelope = {"type": "response_item", "payload": {
+                                "type": "message", "role": "developer",
+                                "content": [{"type": "input_text", "text": context(output)}],
+                                "internal_chat_message_metadata_passthrough": {"turn_id": call["turn_id"]}}}
+                        check(f"background route receipt credits scheduled pack: {index} {client}",
+                              contract.preuse_delivery(envelope, [prior], repo=REPO)
+                              == ("shadow", ["scheduled-automation"], []))
+                        for label in ("overflow", "not_found", "tampered", "wrong-call"):
+                            rejected = copy.deepcopy(row)
+                            previous = copy.deepcopy(prior)
+                            if label in {"overflow", "not_found"}:
+                                removed = next(r for r in rejected["rules"] if r["id"] == EXPECTED_IDS[0])
+                                rejected["rules"].remove(removed)
+                                if label == "overflow":
+                                    rejected["overflow"].append({"id": removed["id"], "summary": "fetch rule"})
+                                else:
+                                    rejected["not_found"].append(removed["id"])
+                                rejected["receipt_id"] = contract.receipt_id(rejected)
+                            elif label == "tampered":
+                                rejected["source_digest"] = "0" * 64
+                                rejected["receipt_id"] = contract.receipt_id(rejected)
+                            elif client == "claude":
+                                previous["message"]["content"][0]["input"]["command"] = "sleep 1"
+                            else:
+                                previous["payload"]["arguments"] = json.dumps({
+                                    "command": "sleep 1", "run_in_background": True})
+                            rejected_envelope = copy.deepcopy(envelope)
+                            if client == "claude":
+                                rejected_envelope["attachment"]["content"] = [json.dumps(rejected)]
+                            else:
+                                rejected_envelope["payload"]["content"][0]["text"] = json.dumps(rejected)
+                            check(f"scheduled route credit rejects {label}: {index} {client}",
+                                  contract.preuse_delivery(rejected_envelope, [previous], repo=REPO) is None)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_env)
+
+
+# Rule ede4b241 (cloud model choice) is still PROPOSED, so since 2026-10-15
+# (loop 1304, 2aca9c7) rule-routes.v1.json carries no route for it and the
+# production route rail delivers it nowhere. Its reviewed cloud-launch route is
+# kept here verbatim from the row that left, so the launch-form coverage below
+# still runs against the real matcher. On approval the row returns to
+# rule-routes.v1.json and these checks go back to the production rail.
+PROPOSED_CLOUD_ROUTE = {
+    "kind": "trigger",
+    "tools": ["Agent", "mcp__*__create_session", "mcp__*__create_trigger"],
+    "verbs": [],
+    "bash_patterns": [
+        "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*"
+        "--(?:remote|cloud)(?=[\\s=;&|)<>]|$)",
+        "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*"
+        "--environment(?:[ \\t]+|=)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)",
+    ],
+}
+check("the production route file carries no route for proposed ede4b241",
+      "ede4b241" not in ROUTES["rules"])
+
+
+# The proposed route fires on every supported cloud launch form, wherever the
+# flag sits among the options, and not on a local session.
 def _cli_routed(command):
-    return "ede4b241" in routed_for("Bash", {"command": command})
+    return routes_lib.route_matches(PROPOSED_CLOUD_ROUTE, "Bash", {"command": command})
 
 
 for cloud_command in (
@@ -1370,8 +1429,10 @@ with tempfile.TemporaryDirectory() as route_tmp:
         check("a neutral Bash command routes nothing",
               routed_for("Bash", {"command": "ls -la"}) == [])
 
-        # Model-choice advice follows cloud CLI arguments through the production
-        # route rail, including options before the dispatch flag.
+        # Model-choice advice follows cloud CLI arguments, including options
+        # before the dispatch flag. While ede4b241 is proposed the route is the
+        # in-test PROPOSED_CLOUD_ROUTE and the production rail must not deliver
+        # it; on approval this goes back to one validated receipt naming it.
         for command in (
                 'claude --remote "fix the bug"',
                 'claude --model sonnet --remote "fix the bug"',
@@ -1386,17 +1447,10 @@ with tempfile.TemporaryDirectory() as route_tmp:
             cloud_call = gen_payload(tool="Bash", tool_input={"command": command},
                                      session="cloud-cli-" + command, tool_use_id="cloud-cli")
             cloud_ids = rail.routed_rule_ids(cloud_call)
-            check("cloud CLI routes model-choice advice: " + command,
-                  "ede4b241" in cloud_ids, cloud_ids)
-            cloud_union = sorted(set(cloud_ids) | set(
-                contract.merge_trigger_delivery(rail.matched_triggers(cloud_call))[2]))
-            cloud_runner = Runner(route_result(cloud_union))
-            cloud_output = rail.process(cloud_call, runner=cloud_runner)
-            cloud_receipt = json.loads(context(cloud_output)) if cloud_output else {}
-            check("cloud CLI delivers model-choice advice in one validated receipt: " + command,
-                  len(cloud_runner.calls) == 1
-                  and "ede4b241" in cloud_receipt.get("rule_ids", [])
-                  and routes_lib.validate_route_receipt(cloud_receipt, repo=REPO))
+            check("cloud CLI matches the proposed model-choice route: " + command,
+                  _cli_routed(command))
+            check("cloud CLI delivers no proposed rule through the production rail: " + command,
+                  "ede4b241" not in cloud_ids, cloud_ids)
         for command in (
                 'claude --remote-control',
                 'claude --model sonnet --remote-control "local session"',
@@ -1410,7 +1464,7 @@ with tempfile.TemporaryDirectory() as route_tmp:
                 'claude --model sonnet && echo --remote',
                 'my-claude --cloud "fix the bug"'):
             check("local CLI or flag prefix stays silent for model choice: " + command,
-                  "ede4b241" not in routed_for("Bash", {"command": command}))
+                  not _cli_routed(command))
 
         # Path globs, and the path_rule kind carries them.
         hook_ids = set(routed_for("Write", {"file_path": str(REPO / "hooks/x-gate.py"),
@@ -1484,19 +1538,24 @@ with tempfile.TemporaryDirectory() as route_tmp:
         check("the same rules are not re-injected for the same tool within the window",
               rail.process(repeat, runner=repeat_runner) is None
               and repeat_runner.calls == [])
-        # A different tool re-delivers the rules both tools route.
+        # A different tool does NOT re-deliver what this context already holds
+        # (2026-10-12): the text arrived with the Agent call and sits in the same
+        # context whichever tool asks next. Only the ids new to the context go.
         other = gen_payload(tool="Bash",
-                            tool_input={"command": "python3 ops/dispatch.py send claude-desk x"},
+                            tool_input={"command": "python3 tools/room-bridge/dispatch.py send claude-desk x"},
                             session="route-session", tool_use_id="route-3")
         other_ids = rail.routed_rule_ids(other)
         shared = sorted(set(other_ids) & set(agent_ids))
         other_table = contract.merge_trigger_delivery(rail.matched_triggers(other))[2]
         other_union = sorted(set(other_ids) | set(other_table))
-        other_out = rail.process(other, runner=Runner(route_result(other_union)))
-        other_row = json.loads(context(other_out))
-        check("a different tool re-delivers rules already delivered to another tool",
-              bool(shared and set(shared) <= {r["id"] for r in other_row["rules"]}),
-              (shared, other_row.get("rule_ids")))
+        other_new = sorted(set(other_union) - set(union))
+        other_out = rail.process(other, runner=Runner(route_result(other_new or other_union)))
+        other_full = ({r["id"] for r in json.loads(context(other_out))["rules"]}
+                      if other_out is not None else set())
+        check("a different tool does not re-deliver rules this context already holds",
+              bool(shared) and not (set(shared) & other_full)
+              and (other_out is None) == (not other_new),
+              (shared, sorted(other_full), other_new))
         # A different session starts clean.
         fresh = copy.deepcopy(call)
         fresh["session_id"] = "route-session-2"
@@ -1506,6 +1565,49 @@ with tempfile.TemporaryDirectory() as route_tmp:
         later = routes_lib.fresh_ids("route-session", "Agent", union,
                                      now=_time.time() + routes_lib.DEDUPE_SECONDS + 1)
         check("after 30 minutes the same tool delivers the rules again", later == union)
+
+        # With a boot-gate arm (the normal case on a plumbed machine) the dedupe
+        # is scoped to the CONTEXT, not to a clock: nothing repeats inside one
+        # epoch however long it runs or which tool asks, and a SessionStart
+        # re-arm (compaction, resume, clear) rotates the epoch so a context that
+        # no longer holds the text gets it again.
+        boot_gate = load("rule_boot_gate_for_dedupe", REPO / "lib/rule_boot_gate.py")
+        epoch_session = "route-session-epoch"
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e1", "digest": "sha256:x"})
+        routes_lib.record_delivered(epoch_session, "Agent", union)
+        check("inside one context epoch a rule delivered to one tool is held for every tool",
+              routes_lib.fresh_ids(epoch_session, "Bash", union) == [])
+        check("inside one context epoch the clock does not re-deliver",
+              routes_lib.fresh_ids(epoch_session, "Agent", union,
+                                   now=_time.time() + routes_lib.DEDUPE_SECONDS + 1) == [])
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e2", "digest": "sha256:x"})
+        check("a re-armed context (new epoch) is given the rules again",
+              routes_lib.fresh_ids(epoch_session, "Agent", union) == union)
+        routes_lib.record_delivered(epoch_session, "Agent", union[:1])
+        check("recording under a new epoch forgets the old context's deliveries",
+              routes_lib.fresh_ids(epoch_session, "Bash", union) == union[1:])
+
+        # A subagent is its own context (reviewer finding on PR 1708): what the
+        # main conversation holds is not in the child's window and vice versa,
+        # siblings are separate, and the child's OWN epoch (rotated by its own
+        # compaction) scopes it, untouched by the main arm's rotations.
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e3", "digest": "sha256:x"})
+        boot_gate._write_agent_epoch(epoch_session, "child-1")
+        routes_lib.record_delivered(epoch_session, "Bash", union[:1], agent_id="child-1")
+        check("a child's delivery does not mark the main context",
+              routes_lib.fresh_ids(epoch_session, "Bash", union) == union)
+        routes_lib.record_delivered(epoch_session, "Bash", union)
+        check("the main context's delivery does not mark the child; the child's own does",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union[1:])
+        boot_gate._write_agent_epoch(epoch_session, "child-2")
+        check("sibling children are separate contexts",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-2") == union)
+        boot_gate.write_arm(epoch_session, {"status": "armed", "epoch": "e4", "digest": "sha256:x"})
+        check("the main arm's rotation does not forget a child's deliveries",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union[1:])
+        boot_gate._write_agent_epoch(epoch_session, "child-1")
+        check("a child's own re-arm (its compaction) gives that child the rules again",
+              routes_lib.fresh_ids(epoch_session, "Write", union, agent_id="child-1") == union)
 
         # Overflow: more text than the cap. Rules not in the always-on file
         # come first; every rule that does not fit is listed with a summary.
@@ -1519,20 +1621,20 @@ with tempfile.TemporaryDirectory() as route_tmp:
         big_out = rail.process(big, runner=Runner(route_result(union, statement=long_text)))
         big_text = context(big_out)
         big_row = json.loads(big_text)
-        delivered = [r["id"] for r in big_row["rules"]]
+        delivered_ids = [r["id"] for r in big_row["rules"]]
         overflowed = [o["id"] for o in big_row["overflow"]]
         check("overflow: the injected context still fits under the 10,000-character cap",
               routes_lib.context_chars(big_text) <= routes_lib.CONTEXT_CAP_CHARS,
               routes_lib.context_chars(big_text))
         check("overflow: no routed rule is dropped — each is full text or listed",
-              sorted(delivered + overflowed) == union, (delivered, overflowed))
+              sorted(delivered_ids + overflowed) == union, (delivered_ids, overflowed))
         check("overflow: some rules overflowed and each carries a one-line summary",
               bool(overflowed and all(o["summary"].startswith("RULE ")
                                       for o in big_row["overflow"])),
               big_row["overflow"][:2])
         check("overflow: rules not in the always-on file are delivered before those that are",
-              bool(delivered and (not set(delivered) & set(always_on)
-                                  or set(union) - set(always_on) <= set(delivered))), delivered)
+              bool(delivered_ids and (not set(delivered_ids) & set(always_on)
+                                  or set(union) - set(always_on) <= set(delivered_ids))), delivered_ids)
         check("overflow: the receipt still validates",
               routes_lib.validate_route_receipt(big_row, repo=REPO))
         check("overflow: only fully delivered rules are recorded for dedupe",

@@ -48,7 +48,6 @@ test("Codex continuity stdio proxy keeps the bearer out of config and exposes tw
   const storageCliffState = { objective: "", next_action: "verify", progress: [{ text: "done" }] };
   storageCliffState.objective = "a".repeat(23998 - Buffer.byteLength(JSON.stringify(storageCliffState)));
   assert.equal(Buffer.byteLength(JSON.stringify(storageCliffState)), 23998);
-  // Four colons and two commas add six storage bytes; this copy is exactly 24KB.
   const storageLimitState = { ...storageCliffState, objective: storageCliffState.objective.slice(4) };
   const referenceCapacityState = {
     objective: "retain full logical refs", next_action: "verify physical budget",

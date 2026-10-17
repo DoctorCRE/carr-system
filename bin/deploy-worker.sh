@@ -574,7 +574,7 @@ if [ "$TARGET_ENV" != "production" ]; then
   fi
 fi
 
-# ---------- preflight 3: verb count did not shrink ----------
+# ---------- preflight 3: no unlisted verb retirement ----------
 
 # The count moved to ops/verb-count.sh on 2026-08-13 so that CI can run this same
 # guard at MERGE time, not only here at DEPLOY time. Same code, two callers
@@ -605,35 +605,35 @@ LEDGER_RC=0
 # /dev/null, so ops/last-deployed-verb-count.py could tell us the baseline was
 # stale and nobody would ever see it — the same "printed into a log nobody
 # opens" shape as the nightly steps that reported skipped for five days
-# (defect 3b21767e). stdout is still the number and nothing else.
+# (defect 3b21767e). stdout carries the source-bound registry JSON.
 BASELINE_STDERR="$(mktemp)"
-PREVIOUS="$("$PY" "$REPO/ops/last-deployed-verb-count.py" carr-mcp "$TARGET_ENV" 2>"$BASELINE_STDERR")" \
+PREVIOUS_REGISTRY="$("$PY" "$REPO/ops/last-deployed-verb-count.py" carr-mcp "$TARGET_ENV" --registry 2>"$BASELINE_STDERR")" \
   || LEDGER_RC=$?
 case "$LEDGER_RC" in
   0)
-    if [ -n "$PREVIOUS" ] && [ "$SHIPPING" -lt "$PREVIOUS" ]; then
+    PREVIOUS="$(printf '%s' "$PREVIOUS_REGISTRY" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["verb_count"])')"
+    if ! sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS_REGISTRY" >/dev/null; then
       LOST=$((PREVIOUS - SHIPPING))
-      if [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]; then
-        fail "this deploy would REMOVE $LOST verb(s) from $TARGET_ENV.
+      if [ "$LOST" -le 0 ] || [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]; then
+        fail "this deploy fails the committed verb-retirement guard for $TARGET_ENV.
   last deployed: $PREVIOUS
   about to ship: $SHIPPING
 
-  Source and standalone deploys cannot waive the verb-loss guard. Only an
+  Every missing deployed name must be listed in ops/config/retired-verbs.v1.json. Only an
   exact prepared typed staging recovery step may temporarily shrink."
       fi
       prepare_typed_recovery_shrink
     else
-      echo "  OK  no verb loss (last deployed to $TARGET_ENV: $PREVIOUS)"
-    fi
-    if grep -q 'STALE BASELINE' "$BASELINE_STDERR" 2>/dev/null; then
-      echo "  !!  the number above is STALE and the guard above is weaker than it looks:" >&2
-      sed 's/^/      /' "$BASELINE_STDERR" >&2
+      echo "  OK  verb loss checked by name against deployed source and committed retirements ($TARGET_ENV: $PREVIOUS)"
     fi
     ;;
   3)
+    sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements 0 >/dev/null \
+      || fail "registry import or retirement validation failed."
     echo "  --  no previous deployment recorded for $TARGET_ENV; this run establishes the baseline"
     ;;
   *)
+    cat "$BASELINE_STDERR" >&2
     # FAIL CLOSED, and no escape flag. Not caution: the Worker being deployed
     # needs Postgres for every verb it serves, so a deploy attempted while the
     # ledger is unreachable ships something that cannot work anyway. Refusing

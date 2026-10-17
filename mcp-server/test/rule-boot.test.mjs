@@ -12,7 +12,7 @@ const JOE = { id: "11111111-1111-4111-8111-111111111111", slug: "joe", human: tr
 
 const classified = Object.keys(RULE_BOOT_CLASSES).sort();
 const alwaysOnId = classified.find(id => RULE_BOOT_CLASSES[id].on && !RULE_BOOT_CLASSES[id].personal_to);
-const actionId = classified.find(id => RULE_BOOT_CLASSES[id].cls === "b" && !RULE_BOOT_CLASSES[id].personal_to);
+const actionId = classified.find(id => RULE_BOOT_CLASSES[id].cls === "b" && !RULE_BOOT_CLASSES[id].on && !RULE_BOOT_CLASSES[id].personal_to);
 const joePersonalId = classified.find(id => RULE_BOOT_CLASSES[id].personal_to === "joe");
 
 function row(short, statement, personalTo = null) {
@@ -52,29 +52,57 @@ test("pages: every page fits the cap and the pages concatenate to the whole boot
   assert.equal(beyond.error, "page_out_of_range");
 });
 
-test("index: every active rule in scope has exactly one index line", () => {
+test("every active rule in scope appears exactly once: full text in Part 1 or one index line", () => {
   const rows = corpus();
-  const { text, index_ids: ids } = renderRuleBoot(rows, "joe");
-  const index = text.split("## PART 2")[1];
+  const { text, index_ids: ids, always_on_ids: on } = renderRuleBoot(rows, "joe");
+  const [part1, index] = text.split("## PART 2");
   const expected = [...new Set(rows.filter(r => r.personal_to !== "dell")
     .map(r => r.id.slice(0, 8)))].sort();
-  assert.deepEqual(ids, expected);
+  assert.deepEqual([...ids, ...on].sort(), expected, "index and full text together cover every rule");
+  assert.equal(ids.filter(id => on.includes(id)).length, 0, "no rule is both indexed and in full");
   for (const id of expected) {
     const lines = index.split("\n").filter(l => l.startsWith(`${id} | `));
-    assert.equal(lines.length, 1, `${id} must have exactly one index line`);
+    const headings = part1.split("\n").filter(l => l.startsWith(`### ${id}`));
+    assert.equal(lines.length + headings.length, 1, `${id} must appear exactly once`);
   }
   assert.match(index, new RegExp(`^${actionId} \\| ${RULE_BOOT_CLASSES[actionId].cls.toUpperCase()} \\| `, "m"));
-  assert.match(index, /^ffff0001 \| U \| /m, "an unclassified rule is indexed as U");
+  assert.match(part1, /^### ffff0001$/m, "an unclassified rule carries its full text");
 });
 
-test("boot retains action rules until a replacement is proven, including newly taught rules", () => {
+test("full text for class A, retained B/C route gaps and unclassified rules", () => {
+  // Missed B/C route rules stay in full until their route is fixed.
   const rows = corpus();
-  const { text, always_on_ids: on } = renderRuleBoot(rows, "joe");
-  const part1 = text.split("## PART 2")[0];
-  assert.ok(on.includes(alwaysOnId));
+  const { text, always_on_ids: on, counts } = renderRuleBoot(rows, "joe");
+  const [part1, index] = text.split("## PART 2");
+  const shared = rows.filter(r => !r.personal_to).map(r => r.id.slice(0, 8));
+  for (const id of shared) {
+    const cls = RULE_BOOT_CLASSES[id]?.cls;
+    const full = part1.includes(`END-${id}`);
+    if (!cls || RULE_BOOT_CLASSES[id].on) {
+      assert.ok(full, `${id} (${cls || "U"}) must carry its full text`);
+      assert.ok(on.includes(id), `${id} is always on`);
+    } else {
+      assert.ok(!full, `${id} (class ${cls}) must not carry full text at boot`);
+      assert.ok(!on.includes(id), `${id} (class ${cls}) is not always on`);
+      assert.match(index, new RegExp(`^${id} \\| ${cls.toUpperCase()} \\| `, "m"), `${id} stays indexed`);
+      assert.ok(index.includes(RULE_BOOT_CLASSES[id].summary), `${id} keeps its index summary`);
+    }
+  }
+  for (const cls of ["b", "c", "d", "e"]) {
+    assert.ok(shared.some(id => RULE_BOOT_CLASSES[id]?.cls === cls), `fixture covers class ${cls}`);
+  }
   assert.ok(part1.includes(rows.find(r => r.id.startsWith(alwaysOnId)).statement), "full text, not a summary");
   assert.ok(part1.includes("END-ffff0001"), "unclassified rules are recall-safe: full text");
-  assert.ok(part1.includes(`END-${actionId}`), "an action route is not proof of delivery");
+  assert.ok(!part1.includes(`END-${actionId}`), "an action rule is delivered at its action, not at boot");
+  assert.equal(counts.always_on, on.length);
+  assert.match(text, /standing-context with rule_ids/, "the boot names the door to any rule's full text");
+});
+
+test("full text selection follows class A plus the declared route-gap list", () => {
+  const keep = JSON.parse(readFileSync(new URL("../../ops/config/rule-classes.v1.json", import.meta.url))).keep_full_text;
+  for (const [id, c] of Object.entries(RULE_BOOT_CLASSES)) {
+    assert.equal(c.on, c.cls === "a" || Object.hasOwn(keep, id), `${id}: on must follow class A or keep_full_text (class ${c.cls})`);
+  }
 });
 
 test("standing team ownership reaches Joe, Dell and unsponsored boots without task keywords", async () => {
@@ -89,7 +117,7 @@ test("standing team ownership reaches Joe, Dell and unsponsored boots without ta
     const { text, always_on_ids: on } = renderRuleBoot(rows, sponsor);
     assert.ok(on.includes(fixture.id), `${sponsor || "unsponsored"}: ownership is always on`);
     assert.ok(text.split("## PART 2")[0].includes(fixture.statement), "Part 1 contains every byte of the fact");
-    assert.match(text.split("## PART 2")[1], /^725dff46 \| A \| /m);
+    assert.doesNotMatch(text.split("## PART 2")[1], /^725dff46 \|/m, "a class-A rule is not repeated in the index");
     const page = await ruleBootPage(rows, sponsor, 1);
     const amended = await ruleBootPage([row(fixture.id, fixture.statement + " amended")], sponsor, 1);
     assert.notEqual(page.digest, amended.digest, "standing text participates in the boot digest");
@@ -154,6 +182,6 @@ test("the retained classification fits its explicit token budget with every shar
   // --check guards the corpus-sized budget in CI.
   const rows = classified.filter(id => !RULE_BOOT_CLASSES[id].personal_to).map(id => row(id, "s"));
   const page = await ruleBootPage(rows, null, 1);
-  assert.equal(page.counts.index, rows.length);
+  assert.equal(page.counts.index + page.counts.always_on, rows.length);
   assert.equal(page.over_budget, false);
 });

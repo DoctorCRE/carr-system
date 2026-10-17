@@ -2,11 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js";
 
-// The DoctorCRE app Worker serves its own HTML but first forwards every page
-// route here, unchanged, as its sign-in gate and requires a 200. This suite
-// pins that each app page path is admitted, shares the workspace flag, and
-// answers exactly like Home: redirect when signed out, 404 with the flag off,
-// 200 with a session. Session bootstrap copied from work-inventory-census-web.
 const HOST = "dealroom.doctorcre.com";
 const APP_PAGES = ["/work-inventory", "/tasks", "/business", "/pipeline", "/control-room", "/incidents", "/notifications", "/conversations"];
 
@@ -48,8 +43,6 @@ test("every DoctorCRE app page route is a Deal Room request; an unlisted page is
     assert.equal(isDealroomRequest(new Request(`https://${HOST}${path}`), { DEALROOM_HOST: HOST }), true, `${path} must be admitted`);
   }
   assert.equal(isDealroomRequest(new Request(`https://${HOST}/not-an-app-page`), { DEALROOM_HOST: HOST }), false);
-  // The typed shared Meeting page was removed from the app (decision
-  // 7dc47eea): the pipeline conversation is recorded by Deal Room Call Mode.
   assert.equal(isDealroomRequest(new Request(`https://${HOST}/meeting`), { DEALROOM_HOST: HOST }), false,
     "/meeting is retired and must not be admitted by the gate");
 });

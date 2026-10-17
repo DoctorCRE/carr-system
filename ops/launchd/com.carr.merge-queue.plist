@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- doctrine: tested-merge-queue -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.carr.merge-queue</string>
+  <key>ProgramArguments</key><array>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/tools/merge_queue/main.py</string>
+    <string>run</string>
+    <string>--legacy</string><string>{{REPO}}/out/orch</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>60</integer>
+  <key>StandardOutPath</key><string>{{REPO}}/out/merge-queue-launchd.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/merge-queue-launchd.log</string>
+</dict></plist>

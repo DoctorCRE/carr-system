@@ -183,9 +183,11 @@ def _overlap_rank(text, pool, limit, keywords):
 
 
 def _default_bind(subject, questions, client, timeout=None, deadline=None):
-    return _sibling("jev_semantic").ask(subject, questions, client=client,
-        caller="rule_trigger_delivery", version="vendor-v1", timeout=timeout or DEADLINE_SECONDS,
-        deadline=deadline, retries=0)
+    semantic = _sibling("jev_semantic")
+    return semantic.evaluate(semantic.JudgmentRequest(
+        subject, questions, caller="rule_trigger_delivery", version="vendor-v1",
+        timeout=timeout or DEADLINE_SECONDS, deadline=deadline, retries=0),
+        adapter=semantic.LiveAdapter(client=client)).unwrap()
 
 
 def _rule_titles():

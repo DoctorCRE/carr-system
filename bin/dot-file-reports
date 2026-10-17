@@ -117,8 +117,10 @@ def completed_snapshot(path):
         raise FilingError("empty report")
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     marker = re.compile(r"(^|\s)DOT-REPORT-END(\s+[A-Za-z0-9._-]{1,48})?\s*$")
+    heading = re.compile(r"\bpart\s+(\d+)\s+of\s+(\d+)\b", re.I)
     fence = None
     markers = []
+    parts = []
     for i, line in enumerate(lines):
         if fence:
             if re.fullmatch(re.escape(fence[0]) + "{" + str(len(fence)) + ",}", line):
@@ -127,16 +129,25 @@ def completed_snapshot(path):
         opening = re.match(r"(`{3,}|~{3,})", line)
         if opening:
             fence = opening.group(1)
-        elif marker.search(line):
-            markers.append(i)
+        else:
+            parts.extend((i, int(match.group(1)), int(match.group(2)))
+                         for match in heading.finditer(line))
+            if marker.search(line):
+                markers.append(i)
     if not markers or markers[-1] != len(lines) - 1:
         raise FilingError("report publication incomplete; terminal DOT-REPORT-END required")
     # The producer may have included a marker on an intermediate reply. Inspect
     # the latest part's heading, rather than accepting that reply as the whole job.
     start = markers[-2] + 1 if len(markers) > 1 else 0
-    part = re.search(r"\bpart\s+(\d+)\s+of\s+(\d+)\b", " ".join(lines[start:start + 2]), re.I)
-    if part and (int(part.group(1)) < 1 or int(part.group(1)) != int(part.group(2))):
-        raise FilingError("report publication incomplete; final part required")
+    final_parts = [(number, total) for i, number, total in parts
+                   if start <= i <= markers[-1]]
+    if final_parts:
+        number, total = final_parts[-1]
+        observed = {part_number for _, part_number, part_total in parts
+                    if part_total == total and 1 <= part_number <= total}
+        if (number < 1 or number != total
+                or observed != set(range(1, total + 1))):
+            raise FilingError("report publication incomplete; final part required")
     return text, after
 
 

@@ -452,63 +452,13 @@ process.env.REVIEW_TOKENS = JSON.stringify(Object.fromEntries(
 const duplicatedSeat = await import("../src/identity.js?duplicated-review-credential");
 process.env.REVIEW_TOKENS = partialReviewTokens;
 
-/**
- * WHAT A BEARER ESTABLISHES, asked the way a route asks.
- *
- * THERE IS NO LONGER A WAY TO ASK IT WITH AN ACTOR (amendment 9, fifth round):
- * `dispatchFor(actor)` was an exported factory returning a callable that ENTERED
- * A CONTEXT, and a probe composed it with the equally public review door.
- *
- * AND SINCE THE SIXTH ROUND THERE IS NO WAY TO ASK IT WITH CODE EITHER. The one
- * entry left standing took a CONTINUATION — `(header, correlationId, run)` — and
- * ran it inside the context, so a probe holding the configured bearer ran its
- * own code as `review_agent` without composing anything. The entry now takes the
- * NAME of one of the server's own entries, resolved in a frozen map identity.js
- * holds itself, and refuses a function in that slot rather than running it.
- *
- * So this helper asks what a bearer plus a NAME establishes. The named entry is
- * the Gate Zero gate, which answers its own refusal object in a process with no
- * stores — enough to tell "served" from "not served", which is all these cases
- * ask. What the identity INSIDE that context is, is asserted end to end in
- * gate-zero-producer.v5.test.mjs, against the receipt the producer mints.
- */
 const GATE_ZERO_ENTRY = "seam:gate-zero-read-only-outcome-producer";
-const servedForBearer = bearer => booted.serveAuthenticatedCall(
-  bearer, A_CORRELATION_ID, GATE_ZERO_ENTRY);
 
-test("the one request entry serves the server's own bearer, and nobody else, and runs no caller code",
-  async () => {
-    // THE SERVER'S BEARER: served, and what runs inside the context is the
-    // server's own entry — the name resolves to code this repository ships.
-    const served = await servedForBearer(`Bearer ${REVIEW_SECRET}`);
-    assert.notEqual(served, null, "the server's own bearer was not served");
-    assert.equal(typeof served, "object");
-
-    // EVERY OTHER BEARER: not served at all.
-    for (const bearer of ["Bearer a-bearer-the-caller-chose", "Bearer wrong", "", null,
-      `Bearer ${REVIEW_SECRET} `, `bearer ${REVIEW_SECRET}x`])
-      assert.equal(await servedForBearer(bearer), null, String(bearer));
-
-    // AND A NAME THE SERVER DOES NOT HOLD RUNS NOTHING, whatever the bearer is —
-    // which is the whole difference between a name and a callback. A function is
-    // a name the server does not hold, and it is refused rather than called.
-    let ran = 0;
-    const probe = () => { ran += 1; return "served"; };
-    for (const entryName of ["seam:something-else", "", null, undefined, 7,
-      "SEAM:GATE-ZERO-READ-ONLY-OUTCOME-PRODUCER", "toString", "constructor",
-      "__proto__", probe])
-      assert.equal(await booted.serveAuthenticatedCall(`Bearer ${REVIEW_SECRET}`,
-        A_CORRELATION_ID, entryName), null, String(entryName));
-    assert.equal(ran, 0, "the configured bearer ran caller code inside the context");
-
-    // AND A CORRELATION THE SERVER DID NOT WRITE IS STILL SERVED, with the
-    // context CLEARED: the request is answered and it obtains no identity. The
-    // gate answers its refusal either way, so what proves the clearing is the
-    // producer's own receipt, which is asserted in the producer suite.
-    for (const correlationId of [null, "", "not-a-correlation-id", "0000"])
-      assert.notEqual(await booted.serveAuthenticatedCall(`Bearer ${REVIEW_SECRET}`,
-        correlationId, GATE_ZERO_ENTRY), null, String(correlationId));
-  });
+test("the retired producer entry refuses every bearer and never runs caller code", async () => {
+  assert.equal(Object.hasOwn(booted, "serveAuthenticatedCall"), false);
+  assert.equal(Object.hasOwn(booted, "SERVER_ENTRY_NAMES"), false);
+  assert.equal(authenticatedIdentity.receiptIdentity(), null);
+});
 
 test("the router door serves a review-council request and enters no context", async () => {
   // WHAT IT TAKES IS THE REQUEST, not an actor and not a callback. index.js has
@@ -608,8 +558,6 @@ test("a boot with no credentials in its environment authenticates nobody", async
   // evaluated before the fixture secrets were written into the environment. It
   // is the same source; what it lacks is the server's credentials, and that is
   // the whole of what authenticating means now.
-  assert.equal(await identityModule.serveAuthenticatedCall(`Bearer ${REVIEW_SECRET}`,
-    A_CORRELATION_ID, GATE_ZERO_ENTRY), null);
   const unbranded = agentActorForToken("Bearer grok-secret-fixture", AGENT_TOKENS);
   assert.notEqual(unbranded, null, "the door stopped returning its actor");
   assert.equal(authenticatedIdentity.receiptIdentity(), null);

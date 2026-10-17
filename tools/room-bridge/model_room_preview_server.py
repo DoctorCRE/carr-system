@@ -19,9 +19,6 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 
-import execution_contract as contract  # noqa: E402
-import bridge  # noqa: E402
-import spatial_surface  # noqa: E402
 
 
 class PreviewHandler(SimpleHTTPRequestHandler):
@@ -32,28 +29,12 @@ class PreviewHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(self.assets), **kwargs)
 
     def _turns(self) -> dict:
-        envelope = json.loads((self.fixtures / "codex_desktop.execution-envelope.v1.json").read_text())
-        receipt = json.loads((self.fixtures / "codex_desktop.attempt-receipt.v1.json").read_text())
-        event = {"schema_version": "progress-event.v1", "attempt_id": "attempt-synthetic-codex", "sequence": 1,
-                 "occurred_at": "2026-08-24T12:00:01Z", "event_type": "observed_tool", "declared_step_ref": "step:synthetic-read",
-                 "observed_resource_ref": "resource:worktree-a", "observed_component_ref": "component:execution-fabric",
-                 "tool_class": "tool:codex-event", "state": "active", "correlation_id": "corr:synthetic-1",
-                 "causation_id": "cause:dispatch-1", "redaction_class": "metadata_only", "evidence_refs": ["evidence:synthetic-check"], "retention": "ephemeral"}
-        posted = []
-        portfolio = json.loads((self.fixtures / "carr-evaluation-kernel.synthetic.v1.json").read_text())
-        projection = contract.project_observatory_attempt(envelope, receipt, [event], {"profile_id": "profile:doc", "display_label": "Doc"})
-        def record_preview_turn(**row):
-            posted.append(row)
-            return {"preview": True}
-
-        rehearsal = bridge.rehearse_job_passport(envelope, receipt, [event], {"profile_id": "profile:doc", "display_label": "Doc"},
-                                                  evaluation_kernel=portfolio, spatial_surface=spatial_surface.project_job_passport_surface(projection),
-                                                  add_room_turn=record_preview_turn)
-        turns = [{"seq": str(index), "msg_id": f"preview-job-passport-{index}", "at": "2026-08-24T12:00:06Z",
-                  "sponsor": "joe", "seat": row["seat"], "kind": row["kind"], "body": row["body"]}
-                 for index, row in enumerate(posted, start=1)]
-        return {"actor": {"slug": "joe"}, "csrf_token": "preview-only", "latest_seq": str(len(turns)), "turns": turns,
-                "rehearsal": {"mode": rehearsal["mode"], "projection_digest": rehearsal["projection"]["projection_digest"]}}
+        projection = json.loads((self.fixtures / "codex_desktop.observatory-projection.v1.json").read_text())
+        turn = {"seq": "1", "msg_id": "preview-observatory", "at": projection["generated_at"],
+                "sponsor": "joe", "seat": "hermes", "kind": "receipt",
+                "body": json.dumps({"job_passport": {"schema_version": "job-passport-wire.v1",
+                    "kind": "observatory_projection", "payload": projection}})}
+        return {"actor": {"slug": "joe"}, "csrf_token": "preview-only", "latest_seq": "1", "turns": [turn]}
 
     def do_GET(self):  # noqa: N802 - stdlib callback
         path = urlparse(self.path).path

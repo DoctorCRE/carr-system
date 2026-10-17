@@ -89,7 +89,7 @@ def reconcile_off(home, apply, launchctl="launchctl", domain=None, definition_la
     return labels
 
 
-def activate(label, argv, *, home=None, launchctl="launchctl", domain=None):
+def activate(label, argv, *, home=None, launchctl="launchctl", domain=None, timeout=15):
     """The sole guard before load, bootstrap, or kickstart."""
     reason = off_reason(label, home)
     if reason:
@@ -98,7 +98,7 @@ def activate(label, argv, *, home=None, launchctl="launchctl", domain=None):
         result = subprocess.CompletedProcess(argv, 0, "", "")
         result.held = True
         return result
-    result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    result = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=timeout)
     result.held = False
     return result
 

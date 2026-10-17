@@ -88,7 +88,9 @@ MAX_SUMMARY = 480
 
 
 def is_up(url: str = FLASH_URL, timeout: float = HEALTH_TIMEOUT_S) -> bool:
-    """True when the Flash server answers its model list. Local only: 127.0.0.1."""
+    """True when Flash is enabled and its local server answers the model list."""
+    if flashlib.is_switched_off():
+        return False
     try:
         with urllib.request.urlopen(f"{url}/v1/models", timeout=timeout) as r:
             return r.status == 200
@@ -109,6 +111,8 @@ def run_turn(task: str, *, url: str = FLASH_URL, model: str = FLASH_MODEL, max_t
     try:
         with flashlib.request_scope(url, opener=opener), opener(req, timeout=timeout) as r:
             reply = json.load(r)
+    except flashlib.FlashSwitchedOff as exc:
+        return {"status": "failed", "detail": str(exc)}
     except TimeoutError:
         return {"status": "timed_out", "detail": f"no answer in {timeout:.0f}s"}
     except (urllib.error.URLError, OSError, ValueError) as exc:
@@ -631,6 +635,8 @@ def run_task(prompt: str, *, roots: list[str] | None = None, runner=None, code_r
     (code), one whose body names data runs the script protocol, anything else one direct reply (run_turn). Project
     and data lines count in the body only, as route_auto reads them, and are checked again here, whatever routed the
     task. A code task always ends in this desk's own result line: success only when the test passes on the patch."""
+    if flashlib.is_switched_off():
+        return {"status": "failed", "detail": flashlib.OFF_REASON}
     task_id, title, body = task_parts(prompt)
     spec, code_question, code_refusal = code_inputs(body, roots=code_roots)
     if spec or code_refusal:

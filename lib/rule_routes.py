@@ -26,14 +26,14 @@ from __future__ import annotations
 
 import csv
 import fcntl
-import fnmatch
 import hashlib
 import json
 import os
 import re
 import time
-import unicodedata
 from pathlib import Path
+
+from lib.rule_operations import BASH_TOOLS, READ_ONLY_TOOLS, call_paths, call_verbs, structural_matches
 
 ROUTES_RELATIVE = "ops/config/rule-routes.v1.json"
 ROUTES_SCHEMA = "rule-routes/v1"
@@ -47,21 +47,14 @@ DELIVERING_HOOK = "hooks/rule-pack-preuse-reselection.py"
 ROUTE_KINDS = frozenset({"boot", "trigger", "path_rule", "gate", "duplicate"})
 TRIGGER_KEYS = ("tools", "verbs", "bash_patterns")
 ENTRY_KEYS = frozenset({"moment", "routes", "no_trigger_reason", "note"})
-PATH_INPUT_KEYS = ("file_path", "path", "notebook_path")
-# Built-in tools that only look. A path_rule route is a write-moment route (the
-# moments name building, editing and committing), so a call that merely reads a
-# matching path is not that moment. evals/rule-delivery measured routine reads
-# receiving rules through these globs. Every other tool keeps matching.
-READ_ONLY_TOOLS = frozenset({"Read", "Grep", "Glob", "LS", "NotebookRead"})
-BASH_TOOLS = frozenset({"Bash", "functions.exec"})
-
 # Tool names a route may name. Built-ins are Claude Code's own tools; the
 # connector entries are the bare tool names a connector publishes, matched as
 # mcp__<any server>__<name> because the server segment is an install-specific id.
 KNOWN_BUILTIN_TOOLS = frozenset({
     "Bash", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Agent", "Task",
     "WebFetch", "WebSearch", "Skill", "Artifact", "AskUserQuestion", "SendMessage",
-    "PushNotification", "Grep", "Glob", "functions.exec",
+    "PushNotification", "Grep", "Glob", "functions.exec", "EnterPlanMode", "UpdatePlan",
+    "update_plan", "functions.update_plan",
 })
 KNOWN_CONNECTOR_TOOLS = frozenset({
     # mail connector
@@ -77,8 +70,6 @@ KNOWN_CONNECTOR_TOOLS = frozenset({
 })
 CONNECTOR_GLOB = re.compile(r"^mcp__(\*|[A-Za-z0-9_-]+)__([A-Za-z0-9_-]+)$")
 
-RUN_SH_CALL = re.compile(r"\brun\.sh\s+call\s+['\"]?([a-z0-9][a-z0-9-]*)", re.I)
-CALL_VERB_PY = re.compile(r"\bcall-verb\.py\s+['\"]?([a-z0-9][a-z0-9-]*)", re.I)
 REGISTRY_IMPORT = re.compile(r'from\s+"\./(scac-mutation-registry\.(?:v\d+|current)\.generated\.js)"')
 REGISTRY_VERB = re.compile(r'"ingress_key":\s*"mcp-tool:([a-z0-9][a-z0-9-]*)"')
 SHORT_ID = re.compile(r"\b[0-9a-f]{8}\b")
@@ -225,64 +216,6 @@ def tool_known(tool: str) -> bool:
 
 # ------------------------------------------------------------------ matching
 
-def call_verbs(tool_name: str, tool_input: object) -> set[str]:
-    """Every record verb this call reaches: the MCP tool itself, the call-verb
-    passthrough's inner verb, or the Bash door (`run.sh call <verb>`)."""
-    verbs: set[str] = set()
-    if tool_name.startswith("mcp__") and "__" in tool_name[5:]:
-        verb = tool_name.rsplit("__", 1)[1]
-        verbs.add(verb)
-        if tool_name.startswith(("mcp__carr__", "mcp__carr_records__")):
-            verbs.add(verb.replace("_", "-"))
-        if verb.replace("_", "-") == "call-verb" and isinstance(tool_input, dict):
-            inner = tool_input.get("verb")
-            if isinstance(inner, str) and inner.strip():
-                verbs.add(inner.strip())
-    if tool_name in BASH_TOOLS and isinstance(tool_input, dict):
-        command = tool_input.get("command")
-        if isinstance(command, str):
-            verbs.update(m.group(1).lower() for m in RUN_SH_CALL.finditer(command))
-            verbs.update(m.group(1).lower() for m in CALL_VERB_PY.finditer(command))
-    return verbs
-
-
-def _trim_patch_space(value: str) -> str:
-    """Match the patch tool's Unicode White_Space trim, excluding Python's FS–US."""
-    def is_space(char: str) -> bool:
-        return char in "\t\n\v\f\r\x85" or unicodedata.category(char) in {"Zs", "Zl", "Zp"}
-
-    start, end = 0, len(value)
-    while start < end and is_space(value[start]):
-        start += 1
-    while end > start and is_space(value[end - 1]):
-        end -= 1
-    return value[start:end]
-
-
-def call_paths(tool_input: object) -> list[str]:
-    if not isinstance(tool_input, dict):
-        return []
-    paths = [tool_input[key] for key in PATH_INPUT_KEYS
-             if isinstance(tool_input.get(key), str) and tool_input[key].strip()]
-    # Codex's canonical apply_patch input has one command string rather than
-    # Claude's file_path. The patch headers are the paths the tool will touch.
-    command = tool_input.get("command")
-    if not isinstance(command, str):
-        return paths
-    # apply_patch accepts surrounding blank space and CRLF envelopes. Parse
-    # the same normalized boundary rather than rejecting a valid patch.
-    command = _trim_patch_space(command.replace("\r\n", "\n"))
-    # The patch tool trims Unicode whitespace on each marker line. Inspect only
-    # the first line so a prose or heredoc wrapper cannot expose inner headers.
-    marker = _trim_patch_space(command.partition("\n")[0])
-    if marker == "*** Begin Patch" and "\n" in command:
-        paths.extend(match.group(1).strip() for match in re.finditer(
-            r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", command, re.M))
-        paths.extend(match.group(1).strip() for match in re.finditer(
-            r"^\*\*\* Move to: (.+)$", command, re.M))
-    return paths
-
-
 class RouteShapeError(ValueError):
     """One route cannot be evaluated (a non-string tool, verb, pattern or glob,
     or an empty glob). The coverage gate refuses these in CI; at run time the
@@ -311,34 +244,14 @@ def route_matches(route: dict, tool_name: str, tool_input: object,
         read_only = route.get("read_only", False)
         if not isinstance(read_only, bool):
             raise RouteShapeError("read_only")
-        if tool_name in READ_ONLY_TOOLS and not read_only:
-            return False
-        paths = call_paths(tool_input)
-        return any(fnmatch.fnmatch(path, pattern) for pattern in globs for path in paths)
+        return structural_matches({"path_globs": globs, "read_only": read_only}, tool_name, tool_input, verbs)
     if kind != "trigger":
         return False
-    tools = _strings(route, "tools")
-    route_verbs = _strings(route, "verbs")
-    patterns = _strings(route, "bash_patterns")
-    names = {tool_name}
-    if tool_name == "apply_patch":
-        names.update(("Write", "Edit", "MultiEdit"))
-    for tool in tools:
-        if any(fnmatch.fnmatchcase(name, tool) for name in names):
-            return True
-    verbs = call_verbs(tool_name, tool_input) if verbs is None else verbs
-    if verbs & set(route_verbs):
-        return True
-    if tool_name in BASH_TOOLS and isinstance(tool_input, dict):
-        command = tool_input.get("command")
-        if isinstance(command, str):
-            for pattern in patterns:
-                try:
-                    if re.search(pattern, command, re.I):
-                        return True
-                except re.error:
-                    raise RouteShapeError("bash_patterns") from None
-    return False
+    condition = {key: _strings(route, key) for key in TRIGGER_KEYS}
+    try:
+        return structural_matches(condition, tool_name, tool_input, verbs)
+    except re.error:
+        raise RouteShapeError("bash_patterns") from None
 
 
 def matched_rule_ids(doc: dict, tool_name: str, tool_input: object) -> list[str]:
@@ -370,8 +283,12 @@ def _dedupe_root() -> Path:
         Path.home() / ".config/carr/claude-rule-delivery/routes"))
 
 
-def _dedupe_path(session_id: str) -> Path:
-    token = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+def _dedupe_path(session_id: str, agent_id: str | None = None) -> Path:
+    """One state file per CONTEXT: the main conversation keeps its historical
+    name; a subagent (agent_id) gets its own, because a rule the main context
+    holds is not in the child's window and vice versa."""
+    key = session_id if not agent_id else f"{session_id}\x00agent:{agent_id}"
+    token = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return _dedupe_root() / f"{token}.json"
 
 
@@ -383,43 +300,98 @@ def _read_state(path: Path) -> dict:
         return {}
 
 
+def _context_epoch(session_id: str, agent_id: str | None = None) -> str | None:
+    """The rule-boot gate's epoch for this CONTEXT, or None when unknown.
+
+    The boot gate rotates the main arm epoch at every SessionStart (compaction,
+    resume, clear): exactly the moments a context stops holding what it was
+    given. A subagent context has its own epoch, written when that child
+    booted, which the main arm's rotations do not touch and which the child's
+    own compaction rotates. Dedupe scoped to the context epoch therefore means
+    "delivered to THIS context", never "delivered somewhere in this session".
+    """
+    try:
+        from lib import rule_boot_gate
+        if agent_id:
+            epoch = rule_boot_gate._read_agent_epoch(session_id, agent_id)
+            return str(epoch) if epoch else None
+        arm = rule_boot_gate.read_arm(session_id) or {}
+        epoch = arm.get("epoch")
+        return str(epoch) if epoch else None
+    except Exception:
+        return None
+
+
+def _seen_in_context(state: dict, rid: str, epoch: str | None, now: float) -> bool:
+    """Whether rid's full text already reached this context.
+
+    With an epoch: any tool's delivery in this epoch counts (the text sits in
+    the same context whichever tool it arrived with). Without one: the older
+    per-tool-agnostic time window, so a machine with no boot state still
+    stops repeating a rule every few minutes.
+    """
+    tools = state.get(rid) or {}
+    if not isinstance(tools, dict):
+        return False
+    if epoch is not None and state.get("_epoch") == epoch:
+        return any(isinstance(ts, (int, float)) for ts in tools.values())
+    if epoch is not None:
+        return False  # a different context: nothing it holds is this one's
+    return any(isinstance(ts, (int, float)) and now - ts < DEDUPE_SECONDS
+               for ts in tools.values())
+
+
 def fresh_ids(session_id: str, tool_name: str, ids: list[str],
-              now: float | None = None) -> list[str]:
-    """The ids not delivered to this session for this same tool in the window.
+              now: float | None = None, *, agent_id: str | None = None) -> list[str]:
+    """The ids whose full text this context has not already been given.
+
+    2026-10-12: scoped to the context (the boot gate's arm epoch) and across
+    tools. The 30-minute per-tool window re-sent the same rule to one session
+    five times in two hours (57K of 137K rule characters were repeats); a rule
+    delivered for a Bash call is in context for the Write call that follows.
+
+    agent_id names a subagent context; its deliveries and epoch are its own
+    (reviewer finding on PR 1708: keyed by the main epoch alone, a rule the
+    main context held was withheld from every child, and a child's from main).
 
     FAILS OPEN: any error reading the state delivers everything, because a
     duplicate injection costs context while a dropped one costs the rule."""
     now = time.time() if now is None else now
     try:
-        state = _read_state(_dedupe_path(session_id))
+        state = _read_state(_dedupe_path(session_id, agent_id))
+        epoch = _context_epoch(session_id, agent_id)
     except Exception:
         return sorted(ids)
-    out = []
-    for rid in ids:
-        seen = (state.get(rid) or {}).get(tool_name)
-        if isinstance(seen, (int, float)) and now - seen < DEDUPE_SECONDS:
-            continue
-        out.append(rid)
-    return sorted(out)
+    return sorted(rid for rid in ids if not _seen_in_context(state, rid, epoch, now))
 
 
 def record_delivered(session_id: str, tool_name: str, ids: list[str],
-                     now: float | None = None) -> None:
-    """Remember full-text deliveries. Best effort; never raises."""
+                     now: float | None = None, *, agent_id: str | None = None) -> None:
+    """Remember full-text deliveries for one context. Best effort; never raises."""
     now = time.time() if now is None else now
     try:
-        path = _dedupe_path(session_id)
+        path = _dedupe_path(session_id, agent_id)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         lock = path.with_suffix(".lock")
         with open(lock, "a", encoding="utf-8") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             state = _read_state(path)
+            epoch = _context_epoch(session_id, agent_id)
+            if epoch is not None and state.get("_epoch") != epoch:
+                state = {"_epoch": epoch}  # a new context holds none of the old deliveries
             for rid in ids:
                 state.setdefault(rid, {})[tool_name] = now
-            # Forget anything older than the window so the file stays small.
+            # Forget anything older than the window so the file stays small
+            # (an epoch-scoped context keeps everything it was given).
             for rid in list(state):
+                if rid == "_epoch":
+                    continue
+                if not isinstance(state[rid], dict):
+                    del state[rid]
+                    continue
                 tools = {t: ts for t, ts in state[rid].items()
-                         if isinstance(ts, (int, float)) and now - ts < DEDUPE_SECONDS}
+                         if isinstance(ts, (int, float))
+                         and (epoch is not None or now - ts < DEDUPE_SECONDS)}
                 if tools:
                     state[rid] = tools
                 else:
@@ -567,7 +539,7 @@ def validate_route_receipt(row: object, *, repo: Path) -> bool:
     from lib.rule_delivery_preuse import (  # local: keeps this module import-light
         DELIVERY_KEYS, IDENTITY_KEYS, RULE_KEYS, TRIGGER_TABLE_RELATIVE, receipt_id,
         valid_local_identity)
-    from lib.rule_delivery_shadow import file_sha256, source_sha256
+    from lib.rule_delivery_preuse import file_sha256, source_sha256
     if not isinstance(row, dict) or set(row) != ROUTE_RECEIPT_KEYS:
         return False
     if row.get("schema") != ROUTE_RECEIPT_SCHEMA or row.get("client") not in {"claude", "codex"}:

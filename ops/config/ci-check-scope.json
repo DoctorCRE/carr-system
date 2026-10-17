@@ -3,6 +3,11 @@
   "_quarantine_history": "vault-drift-watch-selftest.py was quarantined 2026-08-13 as FLAKY ('4 of 5 runs pass and the failing case DIFFERS between runs'), diagnosed as probable same-second mtime resolution. That diagnosis was wrong and the entry is removed. The real cause was a hardcoded, process-shared scratch path: every run rmtree'd the same fixture tree, so concurrent runs deleted each other's fixtures mid-test and the losing case varied with the interleaving. Fixed by giving each process its own mkdtemp base. Evidence: 3 concurrent runs failed every time before, 5 concurrent runs pass 24/24 after, and a single run passed 6 for 6 both before and after \u2014 which is why a sequential re-run could not reproduce it and mtime looked plausible.",
   "local_only": [
     {
+      "check": "migration-production-proof.py",
+      "reason": "Production ledger SELECT and schema-only catalog dump use the existing local release status credential. Orchestrator ruling 2026-10-16 forbids production access on hosted CI. Offline selftests run in gates; the migration lane also restores and compares a database fixture. Release preflight may call this script directly before an apply.",
+      "added": "2026-10-16"
+    },
+    {
       "check": "config-as-code-selftest.py",
       "reason": "Compares the LIVE ~/.claude/settings.json hooks block against the repo's declared baseline. A GitHub runner has no installed Claude Code, so there is nothing to compare \u2014 it would be asserting the absence of a thing that is absent by construction. Evidence: failed on the ubuntu runner 2026-08-13, run 31750582043.",
       "added": "2026-08-13"
@@ -14,7 +19,5 @@
     }
   ],
   "quarantined": [],
-  "_evidence_note": "Every local_only entry here was proven by a real CI failure, not predicted. Two others that failed the same run were FIXED rather than excluded: test-review-council.py needed zsh installed and its own out/ dirs created, and test-record-home-gate.py had a hardcoded $HOME path. Excluding a check is the last resort, not the first.",
-  "known_gaps": [],
-  "_known_gap_history": "2026-08-13: the migration class carried a known gap for ~40 minutes while replay-from-zero was blocked on a design decision. Resolved by the schema-snapshot approach (bin/schema-snapshot.sh + db/schema.sql), so the class passes on its own merit and the gap was removed the same day. Kept here as evidence the expiry mechanism was exercised and released rather than quietly extended."
+  "_evidence_note": "Each local_only entry names an observed platform limit or an explicit production-access policy. Portable failures are fixed rather than excluded: test-review-council.py needed zsh installed and its own out/ dirs created, and test-record-home-gate.py had a hardcoded $HOME path. Excluding a check is the last resort, not the first."
 }

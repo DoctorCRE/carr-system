@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+import migration_0882
+
 from migration_number_contract import (
     LEGACY_APPLIED_ALIASES,
     MigrationNumberError,
@@ -99,13 +101,142 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
 # SQL bodies and both immutable ledger rows commit together, and the deferred
 # trigger observes only the final v11 state. A caller may not cut this group in
 # half with --through.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
-from registry_chain import registry_chain
-
-REGISTRY_CHAIN = registry_chain()
-ATOMIC_MIGRATION_GROUPS = tuple(tuple(group) for group in REGISTRY_CHAIN["atomic_groups"])
-STRICT_ATOMIC_MIGRATION_GROUPS = tuple(tuple(group) for group in REGISTRY_CHAIN["strict_atomic_groups"])
-
+ATOMIC_MIGRATION_GROUPS = (('0480_codex_continuity.sql', '0481_codex_continuity_registry_activation.sql'),
+ ('0485_claude_continuity.sql', '0486_claude_continuity_registry_activation.sql'),
+ ('0502_gate_zero_read_only_outcome.sql', '0503_gate_zero_outcome_and_scac_successor.sql'),
+ ('0508_foundation_assurance_minimum_receipt.sql',
+  '0509_journey_one_clock_store.sql',
+  '0510_journey_one_clock_input_store.sql',
+  '0511_foundation_assurance_minimum_outcome.sql',
+  '0512_foundation_assurance_scac_successor.sql'),
+ ('0517_program_controller_seams.sql', '0518_program_controller_seams_scac_successor.sql'),
+ ('0519_producer_cost_ledger.sql',
+  '0520_doc_conversation_store.sql',
+  '0521_r03_notifications.sql',
+  '0522_producer_trio_scac_successor.sql'),
+ ('0523_doc_conversation_write_doors.sql', '0524_doc_conversation_write_doors_scac_successor.sql'),
+ ('0525_doc_conversation_list.sql', '0526_doc_conversation_list_scac_successor.sql'),
+ ('0527_notification_preferences.sql', '0528_notification_preferences_scac_successor.sql'),
+ ('0529_session_identity_reads.sql', '0530_session_identity_scac_successor.sql'),
+ ('0531_room_dispatch_spine.sql', '0532_room_dispatch_spine_scac_successor.sql'),
+ ('0532a_canonical_ownership_lease_activation.sql',
+  '0532b_ready_plan_amendment_scac_successor.sql'),
+ ('0538_canonical_ownership_assurance_binding.sql',
+  '0539_canonical_ownership_assurance_scac_successor.sql'),
+ ('0540_release_readiness_without_repeat_approval.sql',
+  '0541_release_readiness_scac_successor.sql'),
+ ('0542_model_role_store.sql', '0543_model_role_store_scac_successor.sql'),
+ ('0546_read_doc_outcome_cards_successor.sql', '0547_read_doc_outcome_cards_scac_successor.sql'),
+ ('0556_meeting_mode_store.sql', '0557_meeting_mode_scac_successor.sql'),
+ ('0565_tour_property_registration.sql', '0566_tour_property_registration_scac_successor.sql'),
+ ('0575_answer_needs_joe_work_request.sql',
+  '0576_answer_needs_joe_work_request_scac_successor.sql'),
+ ('0580_resource_observation.sql', '0581_resource_observation_scac_successor.sql'),
+ ('0587_jev_call_receipt.sql', '0588_jev_call_receipt_scac_successor.sql'),
+ ('0602_doctorcre_r02_workflow_cutover_and_caller_inventory.sql',
+  '0603_doctorcre_r02_scac_successor.sql'),
+ ('0617_delivery_cadence_a05.sql', '0618_delivery_cadence_a05_scac_successor.sql'),
+ ('0626_f01_record_source_authority.sql', '0627_f01_record_source_authority_scac_successor.sql'),
+ ('0628_doctorcre_slice_done_marker.sql', '0629_doctorcre_slice_done_marker_scac_successor.sql'),
+ ('0700_governed_correspondence_store.sql', '0701_governed_correspondence_scac_successor.sql'),
+ ('0704_cre_lifecycle.sql', '0705_cre_lifecycle_scac_successor.sql'),
+ ('0706_amend_closed_loop.sql', '0707_amend_closed_loop_scac_successor.sql'),
+ ('0708_action_class_successor_registry.sql',
+  '0709_action_class_successor_registry_scac_successor.sql'),
+ ('0717_assurance_health_evidence_store.sql',
+  '0718_assurance_health_evidence_store_scac_successor.sql'),
+ ('0719_doctorcre_a03_review_store.sql', '0720_doctorcre_a03_review_scac_successor.sql'),
+ ('0721_a02_rule_enforcement_coverage.sql',
+  '0722_a02_rule_enforcement_coverage_scac_successor.sql'),
+ ('0724_f05_live_rule_context.sql', '0725_f05_live_rule_context_scac_successor.sql'),
+ ('0726_salesforce_reconciliation_rw02_store.sql',
+  '0727_salesforce_reconciliation_rw02_scac_successor.sql'),
+ ('0733_salesforce_rw02_safe_stop_run_store.sql',
+  '0734_salesforce_rw02_safe_stop_scac_successor.sql'),
+ ('0738_industry_events.sql', '0739_industry_events_scac_successor.sql'),
+ ('0740_board_answers.sql', '0741_board_answers_scac_successor.sql'),
+ ('0744_doc_suggestions.sql', '0745_doc_suggestions_scac_successor.sql'),
+ ('0749_tour_client_feedback.sql', '0750_tour_client_feedback_scac_successor.sql'),
+ ('0754_tour_property_evidence.sql', '0755_property_evidence_scac_successor.sql'),
+ ('0757_progress_directory_scac_successor.sql',),
+ ('0765_doc_whats_new.sql',
+  '0766_doc_whats_new_repair.sql',
+  '0767_doc_whats_new_scac_successor.sql'),
+ ('0785_rule_teach_supersession.sql', '0786_find_rule_scac_successor.sql'),
+ ('0811_lead_stage_automation.sql', '0812_lead_automation_scac_successor.sql'),
+ ('0826_system_work_census_read_scope.sql', '0827_system_work_scac_successor.sql'),
+ ('0839_relationship_deal_links.sql', '0840_relationship_scac_successor.sql'),
+ ('0841_invoice_tracker.sql', '0842_invoice_tracker_scac_successor.sql'),
+ ('0843_automation_reason_undo_archive_invoice.sql', '0844_automation_undo_scac_successor.sql'),
+ ('0845_lead_archived_stage.sql', '0846_leads_scac_successor.sql'),
+ ('0847_lead_score_owner_reader_repair.sql', '0848_lead_score_owner_scac_successor.sql'),
+ ('0849_research_site.sql', '0850_research_site_scac_successor.sql'),
+ ('0852_party_identity_correction_view.sql', '0853_party_identity_scac_successor.sql'),
+ ('0854_dot_security_definer_hardening.sql',
+  '0855_completion_tenant_security_barriers.sql',
+  '0856_qualify_security_definer_dependencies.sql',
+  '0857_dot_hardening_scac_successor.sql'),
+ ('0868_loop_blocker_residue_comment.sql', '0869_loop_residue_scac_successor.sql'),
+ ('0872_self_closing_records.sql', '0873_self_closing_records_scac_successor.sql'))
+STRICT_ATOMIC_MIGRATION_GROUPS = (('0532a_canonical_ownership_lease_activation.sql',
+  '0532b_ready_plan_amendment_scac_successor.sql'),
+ ('0538_canonical_ownership_assurance_binding.sql',
+  '0539_canonical_ownership_assurance_scac_successor.sql'),
+ ('0540_release_readiness_without_repeat_approval.sql',
+  '0541_release_readiness_scac_successor.sql'),
+ ('0542_model_role_store.sql', '0543_model_role_store_scac_successor.sql'),
+ ('0546_read_doc_outcome_cards_successor.sql', '0547_read_doc_outcome_cards_scac_successor.sql'),
+ ('0556_meeting_mode_store.sql', '0557_meeting_mode_scac_successor.sql'),
+ ('0565_tour_property_registration.sql', '0566_tour_property_registration_scac_successor.sql'),
+ ('0575_answer_needs_joe_work_request.sql',
+  '0576_answer_needs_joe_work_request_scac_successor.sql'),
+ ('0580_resource_observation.sql', '0581_resource_observation_scac_successor.sql'),
+ ('0587_jev_call_receipt.sql', '0588_jev_call_receipt_scac_successor.sql'),
+ ('0602_doctorcre_r02_workflow_cutover_and_caller_inventory.sql',
+  '0603_doctorcre_r02_scac_successor.sql'),
+ ('0617_delivery_cadence_a05.sql', '0618_delivery_cadence_a05_scac_successor.sql'),
+ ('0626_f01_record_source_authority.sql', '0627_f01_record_source_authority_scac_successor.sql'),
+ ('0628_doctorcre_slice_done_marker.sql', '0629_doctorcre_slice_done_marker_scac_successor.sql'),
+ ('0700_governed_correspondence_store.sql', '0701_governed_correspondence_scac_successor.sql'),
+ ('0704_cre_lifecycle.sql', '0705_cre_lifecycle_scac_successor.sql'),
+ ('0706_amend_closed_loop.sql', '0707_amend_closed_loop_scac_successor.sql'),
+ ('0708_action_class_successor_registry.sql',
+  '0709_action_class_successor_registry_scac_successor.sql'),
+ ('0717_assurance_health_evidence_store.sql',
+  '0718_assurance_health_evidence_store_scac_successor.sql'),
+ ('0719_doctorcre_a03_review_store.sql', '0720_doctorcre_a03_review_scac_successor.sql'),
+ ('0721_a02_rule_enforcement_coverage.sql',
+  '0722_a02_rule_enforcement_coverage_scac_successor.sql'),
+ ('0724_f05_live_rule_context.sql', '0725_f05_live_rule_context_scac_successor.sql'),
+ ('0726_salesforce_reconciliation_rw02_store.sql',
+  '0727_salesforce_reconciliation_rw02_scac_successor.sql'),
+ ('0733_salesforce_rw02_safe_stop_run_store.sql',
+  '0734_salesforce_rw02_safe_stop_scac_successor.sql'),
+ ('0738_industry_events.sql', '0739_industry_events_scac_successor.sql'),
+ ('0740_board_answers.sql', '0741_board_answers_scac_successor.sql'),
+ ('0744_doc_suggestions.sql', '0745_doc_suggestions_scac_successor.sql'),
+ ('0749_tour_client_feedback.sql', '0750_tour_client_feedback_scac_successor.sql'),
+ ('0754_tour_property_evidence.sql', '0755_property_evidence_scac_successor.sql'),
+ ('0757_progress_directory_scac_successor.sql',),
+ ('0765_doc_whats_new.sql',
+  '0766_doc_whats_new_repair.sql',
+  '0767_doc_whats_new_scac_successor.sql'),
+ ('0785_rule_teach_supersession.sql', '0786_find_rule_scac_successor.sql'),
+ ('0811_lead_stage_automation.sql', '0812_lead_automation_scac_successor.sql'),
+ ('0826_system_work_census_read_scope.sql', '0827_system_work_scac_successor.sql'),
+ ('0839_relationship_deal_links.sql', '0840_relationship_scac_successor.sql'),
+ ('0841_invoice_tracker.sql', '0842_invoice_tracker_scac_successor.sql'),
+ ('0843_automation_reason_undo_archive_invoice.sql', '0844_automation_undo_scac_successor.sql'),
+ ('0845_lead_archived_stage.sql', '0846_leads_scac_successor.sql'),
+ ('0847_lead_score_owner_reader_repair.sql', '0848_lead_score_owner_scac_successor.sql'),
+ ('0849_research_site.sql', '0850_research_site_scac_successor.sql'),
+ ('0852_party_identity_correction_view.sql', '0853_party_identity_scac_successor.sql'),
+ ('0854_dot_security_definer_hardening.sql',
+  '0855_completion_tenant_security_barriers.sql',
+  '0856_qualify_security_definer_dependencies.sql',
+  '0857_dot_hardening_scac_successor.sql'),
+ ('0868_loop_blocker_residue_comment.sql', '0869_loop_residue_scac_successor.sql'),
+ ('0872_self_closing_records.sql', '0873_self_closing_records_scac_successor.sql'))
 
 FORBIDDEN_MIGRATION_FILENAMES = frozenset({
     "0535_ready_plan_amendment.sql",
@@ -594,7 +725,15 @@ def main() -> None:
                     cur.execute(f"set local lock_timeout = '{LOCK_TIMEOUT}'")
                     cur.execute(f"set local statement_timeout = '{STATEMENT_TIMEOUT}'")
                     try:
-                        cur.execute(sql)
+                        execution_sql = sql
+                        if name == migration_0882.FILENAME:
+                            execution_sql = migration_0882.retirement_sql(cur, sql, digest)
+                            if execution_sql != sql:
+                                print('retained retired-v3 historical controls; '
+                                      f'source sha256={digest}; execution sha256='
+                                      + hashlib.sha256(execution_sql.encode()).hexdigest(),
+                                      end=' ... ', flush=True)
+                        cur.execute(execution_sql)
                     except psycopg.errors.LockNotAvailable:
                         conn.rollback()
                         fail(f"{name} could not acquire its lock within {LOCK_TIMEOUT} and was "

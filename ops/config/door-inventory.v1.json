@@ -1,0 +1,258 @@
+{
+  "schema": "door-inventory/v1",
+  "work_request": "WR-000284",
+  "declared": [
+    {
+      "path": "bin/cutoff-doctrine.sh",
+      "class": "one_shot",
+      "reason": "Ended the vault's markdown era at the 2026-08-19 cutoff; the exporter flag it flips stays flipped, so it has no second run.",
+      "evidence": "a93eea45 (The cutoff fired, 2026-08-19)"
+    },
+    {
+      "path": "bin/pg-orphan-reap.sh",
+      "class": "hand_tool",
+      "reason": "Thin wrapper a person runs to reap disposable PostgreSQL clusters left behind by a killed test; lib/pg_orphan_reap.py is what the selftests call.",
+      "evidence": "979321f4; the wrapper's own exec line names lib/pg_orphan_reap.py"
+    },
+    {
+      "path": "bin/r2-forget.py",
+      "class": "hand_tool",
+      "reason": "Remedy a person runs by name to remove a bad object from the R2 archive and its ledger after a failed nightly dump.",
+      "evidence": "bin/r2-forget.py docstring (added b621455d after the 2026-08-07 empty-backup night)"
+    },
+    {
+      "path": "evals/rule-delivery/boot_lifecycle.py",
+      "class": "one_shot",
+      "reason": "Measured rendered rule text and the real boot hook across context epochs for the class-A rule boot slimming.",
+      "evidence": "3368054b (#1635)"
+    },
+    {
+      "path": "evals/rule-delivery/freeze_split.py",
+      "class": "one_shot",
+      "reason": "Wrote the frozen train/test split once at baseline; rerunning it would defeat the freeze it exists to create.",
+      "evidence": "3f7132ce (#1414); evals/rule-delivery/split.json is its output"
+    },
+    {
+      "path": "ops/accept-doctorcre-bundle.sh",
+      "class": "hand_tool",
+      "reason": "The controller runs it on a DoctorCRE build bundle before acceptance so the citation trace check actually executes.",
+      "evidence": "ops/accept-doctorcre-bundle.sh header (added 7c75c878, #853)"
+    },
+    {
+      "path": "ops/atomic-rule-approval-authority-probe.py",
+      "class": "one_shot",
+      "reason": "Disposable-local rollback proof that enforced-only human rule approval is atomic, run once when that approval path landed.",
+      "evidence": "905dd380 (Make rule approval atomically enforced)"
+    },
+    {
+      "path": "ops/check-pdf.py",
+      "class": "hand_tool",
+      "reason": "A session runs it on a finished PDF before handing it to a partner, per Dell's 2026-08-27 instruction to check every document.",
+      "evidence": "ops/check-pdf.py docstring (added 30eff6fe)"
+    },
+    {
+      "path": "ops/delivery-cadence-a05-live-acceptance-check.py",
+      "class": "one_shot",
+      "reason": "Read-only acceptance check of the V5-A05 delivery cadence clauses against production, run once after that PR deployed.",
+      "evidence": "f59d9713 (#1236)"
+    },
+    {
+      "path": "ops/doctorcre-sibling-manifest.py",
+      "class": "hand_tool",
+      "reason": "The controller runs it to list the exact sibling paths a DoctorCRE build seat may read, for that seat's brief.",
+      "evidence": "ops/doctorcre-sibling-manifest.py docstring (added 7c75c878, #853, defect b7936d5d)"
+    },
+    {
+      "path": "ops/guidance-registry-check.py",
+      "class": "inert",
+      "reason": "Validator for the typed Guidance Registry proposal; nothing runs it because the registry has never been activated.",
+      "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
+    },
+    {
+      "path": "ops/incident-fingerprint-shadow.py",
+      "class": "one_shot",
+      "reason": "The process-audit council's confirm-or-kill shadow test of incident fingerprinting, run once against the August 15-23 ledger.",
+      "evidence": "8a0d4aaf (#568)"
+    },
+    {
+      "path": "ops/propose-guidance-situation-curation.py",
+      "class": "inert",
+      "reason": "Proposes the situation curation the Guidance Registry waits on; no door runs it while the registry stays unactivated.",
+      "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
+    },
+    {
+      "path": "pipelines/backfill_lease_event.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 19(d) repair of structured lease dates from the preserved raw date shim; it is invoked directly rather than by a runtime job.",
+      "evidence": "pipelines/backfill_lease_event.py module docstring and CLI usage"
+    },
+    {
+      "path": "pipelines/build-pretour-packet.py",
+      "class": "hand_tool",
+      "reason": "A session runs it by name to render a CARR pre-tour packet in the Ferris format for a space search.",
+      "evidence": "pipelines/build-pretour-packet.py docstring (added c595dc36, #396)"
+    },
+    {
+      "path": "pipelines/check-brand.py",
+      "class": "hand_tool",
+      "reason": "A session runs it on a finished tour packet PDF to check every page against CARR brand before delivery.",
+      "evidence": "pipelines/check-brand.py docstring (added c595dc36, #396)"
+    },
+    {
+      "path": "pipelines/extract_contact_events.py",
+      "class": "one_shot",
+      "reason": "Lifted dated contact events out of existing narrative rows once, the Option B capture fix of 2026-08-01.",
+      "evidence": "d3a9f6bb"
+    },
+    {
+      "path": "pipelines/import_brokers.py",
+      "class": "hand_tool",
+      "reason": "Manual ORDER 27(b) import of the brokers workbook into existing party records; it is not a scheduled runtime importer.",
+      "evidence": "pipelines/import_brokers.py module docstring and main entry point"
+    },
+    {
+      "path": "pipelines/import_clients_active.py",
+      "class": "one_shot",
+      "reason": "Imported the curated Next Step texts and Last Touch dates from clients-active.md at the freeze; that markdown source is retired.",
+      "evidence": "2f0d2cc1 (Freeze: curated-content import)"
+    },
+    {
+      "path": "pipelines/import_decision_history.py",
+      "class": "one_shot",
+      "reason": "ORDER 40 importer of decision-history.md into event rows; its markdown source was retired at the 2026-08-19 cutoff.",
+      "evidence": "f163962f (ORDER 40, rehearsed)"
+    },
+    {
+      "path": "pipelines/import_idea_bank.py",
+      "class": "one_shot",
+      "reason": "ORDER 40 importer of idea-bank.md into loop_item rows; its markdown source was retired at the 2026-08-19 cutoff.",
+      "evidence": "f163962f (ORDER 40, rehearsed)"
+    },
+    {
+      "path": "pipelines/import_loops.py",
+      "class": "one_shot",
+      "reason": "ORDER 31 Phase A import of the markdown loop accumulators into loop_block and loop_item rows, run once.",
+      "evidence": "13ae338b (ORDER 31 Phase A)"
+    },
+    {
+      "path": "pipelines/import_md_ledgers.py",
+      "class": "one_shot",
+      "reason": "ORDER 39 import of the hunt ledger and reciprocity entries into activity rows; both markdown ledgers are retired.",
+      "evidence": "63a9be13 (ORDER 39, rehearsed)"
+    },
+    {
+      "path": "pipelines/import_source_captures.py",
+      "class": "one_shot",
+      "reason": "One-time flip importer of the Source Material capture index into source_capture rows for migration 0070.",
+      "evidence": "196659d6"
+    },
+    {
+      "path": "pipelines/radar/build-license-pool-from-raw.py",
+      "class": "hand_tool",
+      "reason": "A person runs it on downloaded FL DOH licensure files to rebuild the radar's license pool before a sweep.",
+      "evidence": "pipelines/radar/build-license-pool-from-raw.py docstring (lookback fixed aa241723, #1206)"
+    },
+    {
+      "path": "security/install_hook.py",
+      "class": "hand_tool",
+      "reason": "Part of the pinned leak-guard bundle (security/bundle.json); a person runs it once per worktree to point core.hooksPath at the repo pre-push hook, which then runs the guard.",
+      "evidence": "39778c41 (#1590); security/bundle.json pins its bytes"
+    },
+    {
+      "path": "tools/apply-graph-colors.py",
+      "class": "hand_tool",
+      "reason": "A person runs it with Obsidian closed to add Graph-System area colours to the vault's graph settings.",
+      "evidence": "tools/apply-graph-colors.py docstring Usage line (added 5a5e9181)"
+    },
+    {
+      "path": "tools/dictation-rig/bin/install-capture-bridge.sh",
+      "class": "hand_tool",
+      "reason": "The orchestrator runs it under supervision to install the WO-4 capture-bridge LaunchAgents on the dictation rig.",
+      "evidence": "tools/dictation-rig/bin/install-capture-bridge.sh header (added 21442140)"
+    },
+    {
+      "path": "tools/doc-voice/master-bracket.py",
+      "class": "hand_tool",
+      "reason": "Joe runs it to A/B the mastering chain by ear against a new TTS engine, one stage at a time.",
+      "evidence": "tools/doc-voice/master-bracket.py docstring (added 09ff7d27)"
+    },
+    {
+      "path": "tools/doc-voice/render-doc.py",
+      "class": "hand_tool",
+      "reason": "Joe runs it to render a line in Doc's voice, roll several takes and keep the one that lands.",
+      "evidence": "tools/doc-voice/render-doc.py docstring (added cb72e9d4)"
+    },
+    {
+      "path": "tools/prove-order40-windowing.py",
+      "class": "one_shot",
+      "reason": "Proved ORDER 40's two decision-history done-tests on the rehearsal branch before the personal set went to records.",
+      "evidence": "f163962f (ORDER 40, rehearsed)"
+    },
+    {
+      "path": "tools/reconcile.py",
+      "class": "one_shot",
+      "reason": "Cell-level reconciliation of staged exports against the vault, signed at freeze with zero cell diffs.",
+      "evidence": "f438006c (Wave 1 import: ZERO cell diffs)"
+    },
+    {
+      "path": "tools/rehearse-dossier-render.py",
+      "class": "one_shot",
+      "reason": "ORDER 36 rehearsal driver that ran the dossier exporters against a Neon branch, draft-only.",
+      "evidence": "70cdfc02 (ORDER 36 Phase B)"
+    },
+    {
+      "path": "tools/rehearse-order40-renders.py",
+      "class": "one_shot",
+      "reason": "Rehearsed ORDER 40's three renders on a Neon branch before the decision history moved to records.",
+      "evidence": "f163962f (ORDER 40, rehearsed)"
+    },
+    {
+      "path": "tools/staging-heavy-build-parity.py",
+      "class": "one_shot",
+      "reason": "Applied the two heavy-build migrations to the isolated staging project once, matching what production already ran.",
+      "evidence": "7f870537 (merged d59a32fa, #667)"
+    },
+    {
+      "path": "tools/staging-ledger-repair-0315.py",
+      "class": "one_shot",
+      "reason": "Replayed the skipped 0315 migration on staging once and recorded its truthful ledger row.",
+      "evidence": "24509804 (merged 5477e842, #666)"
+    },
+    {
+      "path": "tools/staging-siep-0324-replay.py",
+      "class": "one_shot",
+      "reason": "Replayed the skipped SIEP migration 0324 on staging once and recorded its truthful ledger row.",
+      "evidence": "54d1372c (merged 513d159a, #693)"
+    },
+    {
+      "path": "tools/stamp-doctrine-ownership.py",
+      "class": "one_shot",
+      "reason": "Applied ORDER 38's doctrine-ownership stamp to ORDER 30 phase 2's file set; the stamped markdown is retired.",
+      "evidence": "f163962f (ORDER 40); gated behind recovery in e2b6f3ff (#519)"
+    },
+    {
+      "path": "pipelines/radar/build-license-pool.py",
+      "class": "hand_tool",
+      "reason": "A person runs it on the browser-filtered DOH transport TSV to build the radar license pool.",
+      "evidence": "pipelines/radar/build-license-pool.py module docstring and CLI usage"
+    },
+    {
+      "path": "pipelines/radar/build-pecos-pool.py",
+      "class": "hand_tool",
+      "reason": "A person runs it on a downloaded quarterly CMS enrollment extract to build the radar PECOS pool.",
+      "evidence": "pipelines/radar/build-pecos-pool.py module docstring and CLI usage"
+    },
+    {
+      "path": "pipelines/radar/enrich-pecos-nppes.py",
+      "class": "hand_tool",
+      "reason": "A person runs it to fill practice geography in the PECOS pool using NPPES.",
+      "evidence": "pipelines/radar/enrich-pecos-nppes.py module docstring and CLI usage"
+    },
+    {
+      "path": "ops/build-duration-check.py",
+      "class": "hand_tool",
+      "reason": "A person requests one report of unusually slow completed GitHub runs; workflow timeouts bound running jobs.",
+      "evidence": "ops/build-duration-check.py module docstring and main CLI"
+    }
+  ]
+}

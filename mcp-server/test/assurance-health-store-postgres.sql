@@ -1,12 +1,5 @@
 \set ON_ERROR_STOP on
 
--- V5-A01 database acceptance. Every fixture row is rolled back.
---
--- The public read passes NO workflow truth (V5-F09's census store is PR #1244,
--- not on main), so it must never read green. The label predicate itself is
--- exercised as the owner through ops.assurance_health_label with an explicit
--- F09-shaped row: that function is granted to no runtime role, so this is the
--- only place such a row can be supplied.
 
 begin;
 select set_config('carr.acting_actor_slug', 'joe', true);
@@ -55,7 +48,6 @@ begin
     'recovery_refs', jsonb_build_array('runbook:a01'));
 end $$;
 
--- Record one passing receipt per layer for a scope, except the layers skipped.
 create or replace function pg_temp.a01_six(p_scope jsonb, p_token text,
   p_skip text[] default array[]::text[], p_observed interval default interval '-1 minute')
 returns void language plpgsql as $$
@@ -68,7 +60,6 @@ begin
   end loop;
 end $$;
 
--- One F09-projected workflow-truth row.
 create or replace function pg_temp.a01_truth(p_key text, p_version integer, p_state text)
 returns jsonb language sql as $$
   select jsonb_build_object('workflow_key', p_key, 'workflow_version', p_version, 'state', p_state,
@@ -81,7 +72,6 @@ create or replace function pg_temp.a01_label(p_key text, p_version integer, p_wr
 returns jsonb language sql as $$
   select ops.assurance_health_label(p_key, p_version, p_wr, pg_temp.a01_truth(p_key, p_version, p_state)) $$;
 
--- Assert a statement is refused with exactly this SQLSTATE (and message, if given).
 create or replace function pg_temp.a01_refused(p_label text, p_sql text, p_state text, p_message text default null)
 returns void language plpgsql as $$
 begin
@@ -108,7 +98,6 @@ declare
   scope_b jsonb := '{"workflow_key":"doctorcre.release","workflow_version":8,"work_request_id":"WR-800"}';
   p jsonb; q jsonb; receipt jsonb; ev jsonb; key uuid; n bigint;
 begin
-  -- ---- attribution ---------------------------------------------------------
   receipt := ops.record_assurance_health_evidence(scope_a,
     pg_temp.a01_evidence('artifact_assessment', 'pass', 'a:artifact_assessment'), gen_random_uuid());
   perform pg_temp.a01_expect('writer derives the evaluator and a first write is not a replay',
@@ -116,7 +105,6 @@ begin
   perform pg_temp.a01_six(scope_a, 'a', array['artifact_assessment']);
   perform pg_temp.a01_six(scope_b, 'b');
 
-  -- ---- B1: no workflow truth, no green --------------------------------------
   p := ops.read_assurance_health('doctorcre.release', 7, 'WR-700');
   perform pg_temp.a01_expect('B1 six passing layers without workflow truth read unknown, unavailable, not green',
     p->>'state' = 'unknown' and p->>'capability_stage' = 'unavailable' and (p->>'green')::boolean is false
@@ -146,7 +134,6 @@ begin
     format('select ops.assurance_health_label(%L,%s,%L,%L::jsonb)', 'doctorcre.release', 7, 'WR-700',
       pg_temp.a01_truth('doctorcre.release', 8, 'operational')), '22023', 'assurance_health_workflow_truth_invalid');
 
-  -- ---- scoped failure injection -----------------------------------------------
   q := pg_temp.a01_label('doctorcre.release', 8, 'WR-800', 'operational');
   perform ops.record_assurance_health_evidence(scope_a,
     pg_temp.a01_evidence('actual_business_outcome', 'fail', 'a:outcome-failure', interval '-30 seconds'), gen_random_uuid());
@@ -157,7 +144,6 @@ begin
   perform pg_temp.a01_expect('the failure does not escape its exact scope',
     pg_temp.a01_label('doctorcre.release', 8, 'WR-800', 'operational') = q and q->>'state' = 'healthy', q);
 
-  -- ---- missing layer --------------------------------------------------------------
   perform pg_temp.a01_six('{"workflow_key":"doctorcre.release","workflow_version":9,"work_request_id":"WR-900"}',
     'm', array['activation_readback']);
   p := pg_temp.a01_label('doctorcre.release', 9, 'WR-900', 'operational');
@@ -166,7 +152,6 @@ begin
     and p#>>'{evidence,activation_readback,state}' = 'missing'
     and p#>>'{evidence,actual_business_outcome,state}' = 'conflicting', p);
 
-  -- ---- S2: expired evidence is stale, never passing -----------------------------------
   perform pg_temp.a01_six('{"workflow_key":"a01.s2","workflow_version":1,"work_request_id":"WR-2"}', 's2',
     array['artifact_assessment']);
   perform ops.record_assurance_health_evidence('{"workflow_key":"a01.s2","workflow_version":1,"work_request_id":"WR-2"}',
@@ -176,7 +161,6 @@ begin
     p#>>'{evidence,artifact_assessment,state}' = 'stale' and p->>'state' = 'failed'
     and (p->>'green')::boolean is false and p->>'capability_stage' = 'unavailable', p);
 
-  -- ---- S3: one receipt can never fill two layers ----------------------------------------
   perform pg_temp.a01_six('{"workflow_key":"a01.s3","workflow_version":1,"work_request_id":"WR-3"}', 's3',
     array['execution_assessment']);
   ev := jsonb_set(pg_temp.a01_evidence('execution_assessment', 'pass', 's3:reuse'), '{evidence_digest}',
@@ -199,8 +183,6 @@ begin
       '{"workflow_key":"a01.s3","workflow_version":2}', jsonb_set(ev, '{status}', '"fail"'), key),
     '23505', 'assurance_health_idempotency_conflict');
 
-  -- ---- S4 / P14: instants after the read clock are conflicting ---------------------------
-  -- artifact_assessment carries no readback_at, so only observed_at can make it conflicting.
   perform pg_temp.a01_six('{"workflow_key":"a01.s4","workflow_version":1,"work_request_id":"WR-4"}', 's4',
     array['artifact_assessment']);
   perform ops.record_assurance_health_evidence('{"workflow_key":"a01.s4","workflow_version":1,"work_request_id":"WR-4"}',
@@ -228,7 +210,6 @@ begin
       gen_random_uuid()),
     '22023', 'assurance_health_instant_invalid');
 
-  -- ---- S5 / S6: the Work Request is part of the exact scope, both ways ---------------------
   perform pg_temp.a01_six('{"workflow_key":"a01.s5","workflow_version":1,"work_request_id":"WR-501"}', 's5a');
   perform ops.record_assurance_health_evidence('{"workflow_key":"a01.s5","workflow_version":1,"work_request_id":"WR-502"}',
     pg_temp.a01_evidence('artifact_assessment', 'fail', 's5b:artifact', interval '-10 seconds'), gen_random_uuid());
@@ -263,7 +244,6 @@ begin
       pg_temp.a01_evidence('actual_business_outcome', 'pass', 's6:no-wr'), gen_random_uuid()),
     '22023', 'assurance_health_outcome_requires_work_request');
 
-  -- ---- S8 / P4: an outcome without activation is conflicting ----------------------------------
   perform pg_temp.a01_six('{"workflow_key":"a01.s8","workflow_version":1,"work_request_id":"WR-8"}', 's8',
     array['activation_readback']);
   perform ops.record_assurance_health_evidence('{"workflow_key":"a01.s8","workflow_version":1,"work_request_id":"WR-8"}',
@@ -274,7 +254,6 @@ begin
     and p#>>'{evidence,activation_readback,state}' = 'failed'
     and p->>'state' = 'degraded' and p->>'capability_stage' = 'draft', p);
 
-  -- ---- P13: capability lost only to an unreadable layer is not attributed to the failure -----
   perform ops.record_assurance_health_evidence('{"workflow_key":"a01.p13","workflow_version":1,"work_request_id":"WR-13"}',
     pg_temp.a01_evidence('artifact_assessment', 'conflicting', 'p13:artifact'), gen_random_uuid());
   perform ops.record_assurance_health_evidence('{"workflow_key":"a01.p13","workflow_version":1,"work_request_id":"WR-13"}',
@@ -289,7 +268,6 @@ begin
   perform pg_temp.a01_expect('a missing artifact (read, and absent) plus a failed execution is failed, as the contract says',
     p->>'state' = 'failed' and p->>'capability_stage_attributable_to_findings' = 'unavailable', p);
 
-  -- ---- privileges -------------------------------------------------------------------------------
   perform pg_temp.a01_expect('no runtime role holds DML on the evidence relation',
     not has_table_privilege('carr_writer', 'ops.assurance_health_evidence', 'insert')
     and not has_table_privilege('carr_authority', 'ops.assurance_health_evidence', 'insert'), '{}');
@@ -302,7 +280,6 @@ begin
     and not has_function_privilege('carr_reader', 'ops.assurance_health_label(text,integer,text,jsonb)', 'execute')
     and not has_function_privilege('carr_jobs', 'ops.assurance_health_label(text,integer,text,jsonb)', 'execute'), '{}');
 
-  -- ---- S12: append-only for every role, the owner included ---------------------------------------
   perform pg_temp.a01_refused('S12 owner UPDATE is refused',
     'update ops.assurance_health_evidence set status = ''pass''', '55000');
   perform pg_temp.a01_refused('S12 owner DELETE is refused',
@@ -310,7 +287,6 @@ begin
   perform pg_temp.a01_refused('S12 owner TRUNCATE is refused',
     'truncate ops.assurance_health_evidence', '55000');
 
-  -- ---- S10: an evaluator can never attest its own subject -----------------------------------------
   perform pg_temp.a01_refused('S10 the door refuses a receipt whose subject is the acting evaluator',
     format('select ops.record_assurance_health_evidence(%L::jsonb,%L::jsonb,%L::uuid)',
       '{"workflow_key":"a01.s10","workflow_version":1,"work_request_id":"WR-10"}',
@@ -325,8 +301,6 @@ begin
       'joe',a.id,'joe','evidence:s10:direct','sha256:'||repeat('1',64),now()-interval '1 minute',now()+interval '1 day',
       '{}'::jsonb,'{}','{}','sha256:'||repeat('2',64),gen_random_uuid() from public.actor a where a.slug='joe'$sql$,
     '23514');
-  -- The read's own self-attestation check, proven with the relation guard
-  -- lifted inside this rolled-back transaction.
   alter table ops.assurance_health_evidence drop constraint assurance_health_evidence_subject;
   perform pg_temp.a01_six('{"workflow_key":"a01.s10","workflow_version":1,"work_request_id":"WR-10"}', 's10',
     array['artifact_assessment']);

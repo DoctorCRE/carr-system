@@ -17,22 +17,21 @@ from pathlib import Path
 import psycopg
 from psycopg.types.json import Jsonb
 
+from rule_projection_fixture import seed_reviewed_rule_projection as seed_rule_projection
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
+from scac_mutation_db_inventory import validate_current_catalog
+
 
 REPO = Path(__file__).resolve().parents[1]
 
-from registry_chain import registry_chain
-
-_CHAIN = registry_chain()
-_CURRENT, _PREDECESSOR = _CHAIN["versions"][-1], _CHAIN["versions"][-2]
-LIVE_REGISTRY_VERSION = _CURRENT["version"]
-LIVE_REGISTRY_ORDINAL = _CURRENT["number"]
-SEALED_PREDECESSOR_VERSION = _PREDECESSOR["version"]
-SEALED_PREDECESSOR_ORDINAL = _PREDECESSOR["number"]
-SEALED_PREDECESSOR_DIGEST = _PREDECESSOR["digest"]
-SEALED_PREDECESSOR_ENTRY_COUNTS = (_PREDECESSOR["entry_count"], _PREDECESSOR["source_count"])
-SEALED_PREDECESSOR_MIGRATION = _PREDECESSOR["migration"]
-LIVE_REGISTRY_MIGRATION = _CURRENT["migration"]
+LIVE_REGISTRY_VERSION = 'scac-mutation-registry.v118'
+LIVE_REGISTRY_ORDINAL = 118
+SEALED_PREDECESSOR_VERSION = 'scac-mutation-registry.v117'
+SEALED_PREDECESSOR_ORDINAL = 117
+SEALED_PREDECESSOR_DIGEST = 'sha256:bba3689ccfaad427b77c3d8295406d5e56c2ac506c5d5ddb1232fa0461315838'
+SEALED_PREDECESSOR_ENTRY_COUNTS = (2801, 1207)
+SEALED_PREDECESSOR_MIGRATION = 'migrations/0869_loop_residue_scac_successor.sql'
+LIVE_REGISTRY_MIGRATION = 'migrations/0886_active_rule_scope_backfill.sql'
 
 LIVE_CATALOG_CURRENT_FN = f"ops.scac_mutation_catalog_v{LIVE_REGISTRY_ORDINAL}_current()"
 LIVE_REGISTRATION_FN = f"ops.scac_mutation_registration_v{LIVE_REGISTRY_ORDINAL}"
@@ -68,8 +67,7 @@ PREDECESSOR_LIVE_AT_SEAL_NAME = (
 
 # WR-000048 mutation test fixtures. NARROWED_ROLE_AUTHORITY_SCOPE is the
 # portable census scope this repair cascade installs (verbatim from the
-# templates: ops/scac-policy-epoch-sql.mjs and renderSIEP13RegistrySql in
-# ops/scac-mutation-inventory.mjs, which this session edited). It must appear
+# installed catalog functions). It must appear
 # exactly once inside the live ops.scac_mutation_catalog_v18_current()
 # definition in migrations/0492_sourced_shape_forward_correction_and_scac_successor.sql --
 # if it does not, the migration no longer carries the fix this test exists to
@@ -120,90 +118,9 @@ def fail(message: str) -> int:
     return 1
 
 
-def uuid_for(short: str) -> str:
-    return f"{short}-0000-4000-8000-000000000018"
-
-
 def seed_reviewed_rule_projection(cur) -> None:
-    """Install the reviewed rule map so the real deferred epoch trigger can bootstrap."""
-    raw = (REPO / "ops/config/rule-enforcement-map.json").read_bytes()
-    reviewed = json.loads(raw)
-    map_digest = hashlib.sha256(raw).hexdigest()
-    scope_by_short = {
-        short: scope
-        for scope, short_ids in reviewed["active_rule_ids"].items()
-        for short in short_ids
-    }
-    joe = cur.execute(
-        """insert into public.actor(slug,kind,display_name) values ('joe','human','Joe')
-             on conflict(slug) do update set display_name=excluded.display_name
-             returning id"""
-    ).fetchone()[0]
-    document_id = cur.execute(
-        """insert into public.doctrine_document(slug,title,content_class,created_by)
-             values ('siep18-monitor-fixture','SIEP-18 monitor fixture','reference',%s)
-             returning id""",
-        (joe,),
-    ).fetchone()[0]
-    generation = cur.execute(
-        "select generation from public.doctrine_meta where id=1"
-    ).fetchone()[0]
-    cur.execute(
-        """insert into public.doctrine_snapshot(document_id,generation,snapshot_json,content_hash)
-             values (%s,%s,%s::jsonb,%s)""",
-        (
-            document_id,
-            generation,
-            json.dumps({"document": {"slug": "siep18-monitor-fixture"}, "sections": []}),
-            hashlib.sha256(b"siep18-monitor-fixture").hexdigest(),
-        ),
-    )
-    cur.execute("alter table public.rule disable trigger user")
-    try:
-        for short, scope in sorted(scope_by_short.items()):
-            cur.execute(
-                """insert into public.rule(id,statement,taught_by,status,activated_by,personal_to)
-                     values (%s,%s,%s,'active',%s,%s)""",
-                (
-                    uuid_for(short),
-                    f"SIEP-18 reviewed projection fixture {short}",
-                    joe,
-                    joe,
-                    joe if scope == "joe" else None,
-                ),
-            )
-    finally:
-        cur.execute("alter table public.rule enable trigger user")
-    for pack, contract in sorted(reviewed["rule_packs"].items()):
-        cur.execute(
-            """insert into ops.rule_pack(pack,title,description,triggers,source)
-                 values (%s,%s,%s,%s,%s)""",
-            (
-                pack,
-                contract["title"],
-                contract["description"],
-                contract["triggers"],
-                "ops/config/rule-enforcement-map.json",
-            ),
-        )
-    for short, contract in sorted(reviewed["rule_load_layers"].items()):
-        cur.execute(
-            """insert into ops.rule_load_layer
-                 (rule_id,short_id,load_layer,packs,scope,why,source,map_digest)
-                 values (%s,%s,%s,%s,%s,%s,%s,%s)""",
-            (
-                uuid_for(short),
-                short,
-                contract["load_layer"],
-                contract.get("packs", []),
-                scope_by_short[short],
-                contract.get("why"),
-                "ops/config/rule-enforcement-map.json",
-                map_digest,
-            ),
-        )
-    cur.execute("set constraints all immediate")
-    cur.execute("set constraints all deferred")
+    seed_rule_projection(cur, slug="siep18-monitor-fixture", title="SIEP-18 monitor fixture",
+                         rule_label="SIEP-18 reviewed projection fixture", uuid_tail="000000000018")
 
 
 # ── WR-000068: sourced shape forward correction (migration 0492) ─────────────
@@ -1038,6 +955,7 @@ def main() -> int:
                 raise RuntimeError(
                     f"{LIVE_REGISTRY_VERSION} registry is absent or authority-expanding: {registry!r}"
                 )
+            validate_current_catalog(cur)
             expected_grant_snapshot = registry[3].get("runtime_dml_grants")
             if not isinstance(expected_grant_snapshot, dict) or \
                set(expected_grant_snapshot) != {"count", "digest"} or \

@@ -861,6 +861,23 @@ def main() -> int:
                 (ref, proposal[2], receipt["envelope_digest"], binding_pk, Jsonb(forged_receipt), uuid.uuid4()),
                 "raw attempt receipt",
             )
+            raw_sentence_slots = {
+                "interventions": [{"kind": "human", "occurred_at": "2026-08-24T12:00:00Z",
+                                   "summary": "raw operator sentence is forbidden"}],
+                "handoff_proposal": {"proposed": True, "reason": "raw operator sentence is forbidden",
+                                     "replacement_session_ref": "session:replacement",
+                                     "checkpoint_ref": "checkpoint:one", "requires_independent_verification": True},
+                "result": {**receipt["result"], "evidence_refs": ["raw operator sentence is forbidden"]},
+            }
+            for field, value in raw_sentence_slots.items():
+                raw_sentence = {**receipt, field: value,
+                                "attempt_id": f"attempt:evidence-activation-raw-{field}"}
+                refusal(
+                    cur,
+                    "select * from ops.record_attempt_receipt(%s,%s,%s,%s,%s,%s)",
+                    (ref, proposal[2], receipt["envelope_digest"], binding_pk, Jsonb(raw_sentence), uuid.uuid4()),
+                    f"raw receipt sentence in {field}",
+                )
             heldout_leak = json.loads(json.dumps(receipt))
             heldout_leak["attempt_id"] = "attempt:evidence-activation-heldout-leak"
             heldout_leak["reliability"]["evaluator_results"][0]["expected_answer"] = "never-expose-to-executor-or-ui"
