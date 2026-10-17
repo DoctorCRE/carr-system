@@ -622,7 +622,7 @@ class LivenessTests(unittest.TestCase):
                         with f.q.db: f.q.db.execute("UPDATE entries SET phase='merging',tested=? WHERE id=?",(f.approved,entry))
                     else:
                         p['head']['sha']=f.updated
-                        entry=f.q.enqueue(mq.REPOS[0],1,f.updated)
+                        with f.q.db: f.q.db.execute('UPDATE entries SET approved=? WHERE id=?', (f.updated,entry))
                     if route in ('git_init','git_remote'):
                         shutil.rmtree(f.state/'repos/carr-system.git')
                     original=subprocess.run; faults=[]
