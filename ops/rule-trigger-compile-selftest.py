@@ -167,6 +167,24 @@ def prop_dedupe(rtc_m, rtd_m):
         later = run(rtd_m, "a vendor intro", tmp, now=1000.0 + rtd_m.DEDUPE_TTL_SECONDS + 1)
     return ids(first) == ["aaaa0002"] and second == [] and ids(later) == ["aaaa0002"]
 
+def prop_delivery_acknowledgement(rtc_m, rtd_m):
+    with tempfile.TemporaryDirectory() as tmp:
+        common = dict(session_id="hook-session", now=1000.0,
+                      triggers_path=table_for(compiled_doc(), tmp), compiled=compiled_doc(),
+                      rules=ROSTER, ask=Asker(fail=True), client=Client,
+                      delivered_cache=os.path.join(tmp, "d.json"),
+                      log_path=os.path.join(tmp, "log.jsonl"), defer_delivery=True)
+        first = rtd_m.advise("a vendor intro", **common)
+        retry = rtd_m.advise("a vendor intro", **common)
+        with open(common["log_path"], encoding="utf-8") as handle:
+            records = [json.loads(line) for line in handle]
+        rtd_m.record_delivered("hook-session", ["aaaa0002"], now=1000.0,
+                              delivered_cache=common["delivered_cache"])
+        acknowledged = rtd_m.advise("a vendor intro", **common)
+    return (ids(first) == ["aaaa0002"] and ids(retry) == ["aaaa0002"] and acknowledged == []
+            and all(record["selected"] == ["aaaa0002"] and record["delivered"] == []
+                    and record["delivery_deferred"] for record in records))
+
 def prop_no_session_no_pooling(rtc_m, rtd_m):
     """No session id: nothing to dedupe against, so every message delivers
     afresh and no shared default key is ever written."""
@@ -246,7 +264,7 @@ def prop_no_house_word_candidate(rtc_m, rtd_m):
     return "carr" not in values and "claude" not in values and "carr surface" in values
 
 
-PROPERTIES = {name: globals()[name] for name in ['prop_negative_masks', 'prop_dedupe', 'prop_no_session_no_pooling', 'prop_coverage_flags_empty_trigger', 'prop_stale_detected', 'prop_surface_floor', 'prop_envelope_no_compiled_rules', 'prop_prompt_floor', 'prop_required_cues_degraded', 'prop_no_house_word_candidate']}
+PROPERTIES = {name: globals()[name] for name in ['prop_negative_masks', 'prop_dedupe', 'prop_delivery_acknowledgement', 'prop_no_session_no_pooling', 'prop_coverage_flags_empty_trigger', 'prop_stale_detected', 'prop_surface_floor', 'prop_envelope_no_compiled_rules', 'prop_prompt_floor', 'prop_required_cues_degraded', 'prop_no_house_word_candidate']}
 for name, prop in PROPERTIES.items():
     check(name, prop(rtc, rtd))
 check("one semantic batch per human boundary", rtd.MAX_JEV_CALLS == 1)

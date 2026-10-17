@@ -954,7 +954,6 @@ failed = rail.process(prompt_payload(client="codex"), runner=Runner(returncode=1
 check("rule failure stays visible and redacts provider output",
       "RULE DELIVERY FAILED: selector_call (nonzero)" in context(failed) and "SUPER-SECRET" not in context(failed))
 
-# Replay the 2026-10-17 selections with obsolete 1fcaa63a absent at the door.
 recorded_ids = ["49533583", "c66dc739", "1fcaa63a", "df55c398", "b42f11a0"]
 recorded_ids, recorded_packs = rail.semantic_delivery(REPO, recorded_ids)
 recorded_advice = [{"id": rid, "probability": 1.0,
@@ -994,6 +993,34 @@ check("partial prompt delivery fits the visible cap and names every match",
       and all(rid in large_partial_text for rid in recorded_ids)
       and "binding jit rule" in large_partial_text
       and "overflow" in large_partial_text, large_partial_text[:200])
+
+_real_prompt_module = rail._prompt_selector_module
+acknowledged_ids = []
+selector_options = []
+fake_module = SimpleNamespace(
+    DEADLINE_SECONDS=12.0,
+    advise=lambda _, **kwargs: selector_options.append(kwargs) or recorded_advice,
+    record_delivered=lambda session, ids: acknowledged_ids.append((session, ids)))
+rail._prompt_selector_module = lambda: fake_module
+try:
+    rail.process(prompt_payload(), runner=Runner(returncode=1))
+    rail.process(prompt_payload(), runner=Runner(partial_response))
+finally:
+    rail._prompt_selector_module = _real_prompt_module
+check("the hook defers dedupe and acknowledges only full authenticated statements",
+      all(options.get("defer_delivery") is True for options in selector_options)
+      and [entry for entry in acknowledged_ids if entry[1]] == [
+          ("session-prompt", [rid for rid in recorded_ids if rid != "1fcaa63a"])],
+      acknowledged_ids)
+
+healthy_large = gen_selector_result(packs=semantic_packs, ids=[semantic_id])
+healthy_large["shared_rules"][0]["statement"] = "x" * 12000
+healthy_large_text = context(rail.process(
+    prompt_payload(), runner=Runner(healthy_large), adviser=fake_adviser))
+check("a complete oversized prompt receipt becomes a fitted visible fallback",
+      rail.rule_routes.within_cap(healthy_large_text)
+      and "context_limit" in healthy_large_text
+      and semantic_id in healthy_large_text and "overflow" in healthy_large_text)
 
 # The verdict cache is keyed on the hook payload's OWN session id — never the
 # environment, never a shared default — so the default adviser must carry it.
