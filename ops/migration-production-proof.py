@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 import migrate
+from migration_baseline import MigrationBaseline, repository_ledger
 from schema_snapshot_grants import role_acl_facts_sql
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 from lib.secret_redaction import redact_text, sensitive_env_values
@@ -39,16 +40,17 @@ def load(name, path):
     return module
 
 
-def ledger_proof(repository, applied):
-    migrations = [(name, '', digest) for name, digest in sorted(repository.items())]
+def ledger_proof(repository, applied, baseline=None):
     try:
         if not applied:
             raise ValueError('production migration ledger is empty')
-        migrate.validate_applied_ledger(migrations, applied)
+        if baseline is not None:
+            baseline.validate_coverage(applied)
+        migrate.validate_ledger_identities(repository, applied)
     except ValueError as exc:
         return dict(ok=False, error=str(exc))
     return dict(ok=True, applied=len(applied),
-                pending=[name for name, sql, digest in migrate.pending_migrations(migrations, applied)])
+                pending=sorted(set(repository) - set(applied)))
 
 
 comparison = load('production_proof_comparison', ROOT / 'ops/migration-shadow.py')
@@ -247,18 +249,24 @@ def read_source(dsn, bins=None, include_acl=False):
 
 def live_proof(ledger_only=True):
     import psycopg
-    migrations = migrate.load_migrations()
-    validate_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_problems']
-    problems = validate_snapshot({name: sql for name, sql, digest in migrations},
-                                (ROOT / 'db/schema.sql').read_text())
+    baseline = MigrationBaseline.load(ROOT)
+    repository = repository_ledger(ROOT, baseline)
+    parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+    snapshot_ledger = parse_snapshot((ROOT / 'db/schema.sql').read_text())
+    problems = []
+    if snapshot_ledger is None:
+        problems.append('db/schema.sql has no complete schema_migrations ledger section')
+    else:
+        for name in sorted(repository.keys() | snapshot_ledger.keys()):
+            if repository.get(name) != snapshot_ledger.get(name):
+                problems.append(f'{name} differs between repository and snapshot ledger')
     if problems:
         raise RuntimeError('; '.join(problems))
-    repository = {name: digest for name, sql, digest in migrations}
     bins = comparison.find_pg18(None) if not ledger_only else None
     if not ledger_only and bins is None:
         raise RuntimeError('PostgreSQL 18 binaries required for schema equivalence')
     applied, production, grants = read_source(production_dsn(), bins, include_acl=True)
-    result = dict(ledger=ledger_proof(repository, applied))
+    result = dict(ledger=ledger_proof(repository, applied, baseline))
     if ledger_only or not result['ledger']['ok']:
         return result
     result['equivalence'] = dict(ok=False,

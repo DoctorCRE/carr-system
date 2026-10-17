@@ -24,8 +24,13 @@ testing for.
 
 from __future__ import annotations
 
-import re
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
+import re
 
 REPO = Path(__file__).resolve().parent.parent
 MIGRATION = REPO / "migrations" / "0225_ops_run_fixture_row_guard.sql"
@@ -76,7 +81,7 @@ def matches(pattern: str, detail: str) -> bool:
 
 
 def main() -> int:
-    sql = MIGRATION.read_text(encoding="utf-8")
+    sql = read_migration(MIGRATION.parent.parent, MIGRATION.name)
 
     for source in GUARDED_SOURCES:
         assert source in sql, f"the guard must be scoped to {source}"

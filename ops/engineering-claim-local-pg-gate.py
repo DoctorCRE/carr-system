@@ -11,13 +11,17 @@ visible when PostgreSQL executes the claim CTE.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import hashlib
 from itertools import count
 import json
 import os
-from pathlib import Path
 import re
-import sys
 import uuid
 
 import psycopg
@@ -415,8 +419,8 @@ def successor_fixture(cur, prior_job_id, prior_envelope_id):
 def assert_static_lock_contract():
     """Pin the two production lock paths to the same lineage/session contract."""
     repo = Path(__file__).resolve().parents[1]
-    currentness = (repo / "migrations/0335_engineering_controller_currentness.sql").read_text()
-    successor = (repo / "migrations/0319_engineering_envelope_writer_successor.sql").read_text()
+    currentness = read_migration(repo, "0335_engineering_controller_currentness.sql")
+    successor = read_migration(repo, "0319_engineering_envelope_writer_successor.sql")
     runtime = (repo / "mcp-server/src/engineering-runtime.js").read_text()
     compact_currentness = re.sub(r"\s+", " ", currentness)
     compact_successor = re.sub(r"\s+", " ", successor)

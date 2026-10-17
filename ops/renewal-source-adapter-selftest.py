@@ -2,16 +2,20 @@
 """Hermetic contract tests for the signed renewal-source ingress adapter."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import base64
 import hashlib
 import importlib.util
 import json
 import os
 import subprocess
-import sys
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.machine_prerequisites import openssl_executable  # noqa: E402
 
@@ -150,7 +154,7 @@ def main() -> int:
     assert "--snapshot" not in source and "CARR_VAULT" not in source and "HMAC" not in source
     assert "CARR_RENEWAL_SOURCE_PROFILE" in source and "sys.stdin.buffer.read" in source
     assert "ops.ingest_renewal_signed_snapshot" in source
-    migration = (ROOT / "migrations" / "0249_renewal_signed_source_ingress.sql").read_text(encoding="utf-8")
+    migration = read_migration(ROOT, "0249_renewal_signed_source_ingress.sql")
     assert "source_snapshot_id" in migration and "v_snapshot.row_count" in migration
     assert "sealed_member_count<>(select count(*) from candidate_pool" not in migration
     assert "octet_length(p_rows::text)>8388608" in migration

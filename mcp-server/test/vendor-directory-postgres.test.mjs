@@ -1,9 +1,10 @@
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import pg from 'pg';
 import { randomUUID } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
+
 import { TOOLS } from '../src/tools.js';
 import { parseBusinessQuery, readBusinessList, readBusinessRecord } from '../src/workspace-business-read.js';
 function disposableClient(dsn) {
@@ -40,8 +41,8 @@ test('W5 database proof accepts both loopback names and refuses external hosts',
 
 test('vendor contract migration set has no duplicate constraint installations', async () => {
  const folder=new URL('../../migrations/',import.meta.url),owners=new Map();
- for(const name of (await readdir(folder)).filter(name=>name.endsWith('_vendor_relationship_contract.sql')).sort()) {
-  for(const [,constraint] of (await readFile(new URL(name,folder),'utf8')).matchAll(/alter table public\.vendor add constraint ([a-z_]+)/g)) {
+ for(const name of listMigrationNames().filter(name=>name.endsWith('_vendor_relationship_contract.sql')).sort()) {
+  for(const [,constraint] of (readMigration(name)).matchAll(/alter table public\.vendor add constraint ([a-z_]+)/g)) {
    assert.ok(!owners.has(constraint),`${constraint} is installed by both ${owners.get(constraint)} and ${name}`);
    owners.set(constraint,name);
   }
@@ -58,10 +59,11 @@ test('W5 PostgreSQL: vendor contract migrations install together on an empty sch
   await db.query('begin');await db.query(`create schema ${schema}`);
   await db.query(`create table ${schema}.vendor(id uuid);create table ${schema}.activity(id uuid,vendor_id uuid,occurred_at timestamptz);create table ${schema}.party_link(id uuid);create table ${schema}.deal(id uuid)`);
   const folder=new URL('../../migrations/',import.meta.url);
-  const migrations=(await readdir(folder)).filter(name=>name.endsWith('_vendor_relationship_contract.sql')).sort();
+  const migrations=listMigrationNames().filter(name=>name.endsWith('_vendor_relationship_contract.sql')).sort();
   assert.ok(migrations.length,'vendor schema installation must be present');
-  for(const name of migrations)await db.query((await readFile(new URL(name,folder),'utf8')).replaceAll('public.',schema+'.'));
-  assert.deepEqual((await db.query('select conname from pg_constraint where connamespace=$1::regnamespace order by conname',[schema])).rows.map(row=>row.conname),['vendor_deal_evidence_array','vendor_trust_override_shape']);
+  for(const name of migrations)await db.query((readMigration(name)).replaceAll('public.',schema+'.'));
+  assert.deepEqual((await db.query("select conname from pg_constraint where connamespace=$1::regnamespace and contype <> 'n' order by conname",[schema])).rows.map(row=>row.conname),['vendor_deal_evidence_array','vendor_trust_override_shape']);
+  assert.deepEqual((await db.query("select attnotnull from pg_attribute where attrelid=$1::regclass and attname='deal_evidence'",[`${schema}.vendor`])).rows,[{attnotnull:true}]);
  } finally {await db.query('rollback');await db.end();}
 });
 

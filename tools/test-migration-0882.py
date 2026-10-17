@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """Exercise the 0882 recovery through the migration runner on PostgreSQL."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
 import importlib.util
 import hashlib
 import os
-from pathlib import Path
 import re
 import shutil
 import socket
 import subprocess
-import sys
 import unittest
 
 import psycopg
@@ -68,7 +72,9 @@ class Recovery(unittest.TestCase):
         cls.base_dsn = f'postgresql://carr_ci@127.0.0.1:{cls.port}/postgres'
         with psycopg.connect(cls.base_dsn, autocommit=True) as conn:
             conn.execute('create role carr_authority')
-        cls.migrations = migrate.load_migrations()
+        cls.migrations = [(name, read_migration(ROOT, name),
+                           hashlib.sha256(read_migration(ROOT, name).encode()).hexdigest())
+                          for name in sorted(migration_names(ROOT))]
 
     def setUp(self):
         name = self.id().split('.')[-1]
@@ -123,7 +129,7 @@ class Recovery(unittest.TestCase):
                                'command:python3 hooks/gate-integrity.py --selftest',
                                'hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py',
                                'ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py', OLD_MAP))
-        keys = re.findall(r"^    '([a-z_]+)',?$", (ROOT / 'migrations' / TARGET).read_text(), re.M)
+        keys = re.findall(r"^    '([a-z_]+)',?$", read_migration(ROOT, TARGET), re.M)
         for key in keys + ['context_rail', 'pack_delivery']:
             self.conn.execute('insert into ops.enforcement_control_catalog '
                               '(control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at) '
@@ -240,13 +246,13 @@ class Recovery(unittest.TestCase):
         self.assertIn('unexpected binding or rule state',result.stderr)
 
     def test_source_drift_refuses(self):
-        original = (ROOT / 'migrations' / TARGET).read_text()
+        original = read_migration(ROOT, TARGET)
         changed = original + '\n'
         with self.assertRaisesRegex(ValueError,'source checksum changed'):
             migration_0882.retirement_sql(None,changed,hashlib.sha256(changed.encode()).hexdigest())
 
     def test_absent_bindings_preserve_original_execution(self):
-        original = (ROOT / 'migrations' / TARGET).read_text()
+        original = read_migration(ROOT, TARGET)
         with self.conn.cursor() as cur:
             self.assertEqual(migration_0882.retirement_sql(cur,original,hashlib.sha256(original.encode()).hexdigest()), original)
 
